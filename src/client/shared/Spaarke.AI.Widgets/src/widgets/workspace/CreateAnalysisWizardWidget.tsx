@@ -18,7 +18,8 @@
  *
  * On Finish:
  *   1. Resolves the Step-1 document — either the shared `EntityCreationService`
- *      upload path (`uploadFilesToSpe` → `PUT /api/obo/containers/{id}/files/{path}`
+ *      upload path (here `uploadFilesWithoutRecord` → `PUT /api/obo/me/files/{path}`,
+ *      because the `sprk_analysis` row does not exist yet when the bytes move
  *      → `createDocumentRecords` → durable `sprk_document` + Document Profile), the
  *      SAME proven path every Create*Wizard uses (WORKSPACE-ENTITY-CREATION-GUIDE.md),
  *      OR the Step-1 existing-record pick.

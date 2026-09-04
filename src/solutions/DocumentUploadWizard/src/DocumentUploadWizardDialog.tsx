@@ -55,7 +55,7 @@ import type {
 } from "./types";
 
 import { AddFilesStep } from "./components/AddFilesStep";
-import { AssociateToStep, resolveXrm, resolveBusinessUnitContainerId } from "./components/AssociateToStep";
+import { AssociateToStep } from "./components/AssociateToStep";
 import { SummaryStep } from "./components/SummaryStep";
 import type { UploadedDocumentInfo } from "./components/SummaryStep";
 import { NextStepsStep } from "./components/NextStepsStep";
@@ -231,7 +231,6 @@ export function DocumentUploadWizardDialog({
     parentEntityType,
     parentEntityId,
     parentEntityName,
-    containerId,
     onClose,
 }: IDocumentUploadWizardDialogProps): JSX.Element {
     const styles = useStyles();
@@ -260,24 +259,18 @@ export function DocumentUploadWizardDialog({
     const resolvedParentRef = useRef(resolvedParent);
     resolvedParentRef.current = resolvedParent;
 
-    // Eagerly resolve BU container ID so it's ready if user clicks Skip on AssociateToStep.
-    const buContainerIdRef = useRef<string>("");
-    useEffect(() => {
-        if (!isStandaloneMode) return;
-        const xrm = resolveXrm();
-        if (!xrm) return;
-        resolveBusinessUnitContainerId(xrm)
-            .then((id) => { buContainerIdRef.current = id; })
-            .catch((err) => console.warn("[DocumentUploadWizard] BU container pre-resolve failed:", err));
-    }, [isStandaloneMode]);
+    // 🔴 The eager business-unit container pre-resolve that stood here was DELETED 2026-09-03
+    // (task 076). It existed so a container was ready the moment the user clicked Skip; under the
+    // record-keyed contract the client never names a container at all, and "skip associate" goes to
+    // `PUT /api/obo/me/files/{path}`, where the SERVER derives the acting user's BU container. The
+    // client was reading Dataverse on mount to compute an answer it is no longer asked for.
 
     // ── Effective values (bridge raw props vs AssociateToStep resolution) ────
-    // When standalone and user Skipped associate-to, resolvedParent is null.
-    // Fall back to BU container (pre-resolved at mount) for unassociated uploads.
+    // When standalone and the user skipped associate-to, resolvedParent is null and both identifiers
+    // stay empty — which is exactly what `resolveUploadTarget` reads as "no owning record".
     const effectiveParentEntityType = isStandaloneMode ? (resolvedParent?.parentEntityType ?? "") : parentEntityType;
     const effectiveParentEntityId = isStandaloneMode ? (resolvedParent?.parentEntityId ?? "") : parentEntityId;
     const effectiveParentEntityName = isStandaloneMode ? (resolvedParent?.parentEntityName ?? "") : parentEntityName;
-    const effectiveContainerId = isStandaloneMode ? (resolvedParent?.containerId || buContainerIdRef.current || "") : containerId;
     const effectiveIsUnassociated = isStandaloneMode && (resolvedParent === null || resolvedParent?.isUnassociated === true);
 
     // ── File state (useReducer) ─────────────────────────────────────────────
@@ -426,7 +419,6 @@ export function DocumentUploadWizardDialog({
                     parentContext: {
                         parentEntityName: effectiveParentEntityType,
                         parentRecordId: effectiveParentEntityId,
-                        containerId: effectiveContainerId,
                         parentDisplayName: effectiveParentEntityName,
                     },
                     tenantId,
@@ -459,7 +451,12 @@ export function DocumentUploadWizardDialog({
                     if (matchingFile) {
                         uploadedDocumentMap.set(matchingFile.id, {
                             documentId: fileResult.createResult.recordId,
-                            driveId: fileResult.speMetadata.parentId ?? effectiveContainerId,
+                            // The SERVER's drive for this file. `parentId` is the parent FOLDER,
+                            // not the drive — it was only ever a stand-in because the two happened
+                            // to coincide at the container root. The `?? effectiveContainerId`
+                            // fallback behind it named the client-resolved container and is gone
+                            // with the rest of that plumbing (task 076).
+                            driveId: fileResult.speMetadata.driveId ?? "",
                             itemId: fileResult.speMetadata.id,
                         });
                     }
@@ -478,7 +475,7 @@ export function DocumentUploadWizardDialog({
         } finally {
             setIsUploading(false);
         }
-    }, [effectiveParentEntityType, effectiveParentEntityId, effectiveParentEntityName, effectiveContainerId, handleOrchestratorProgress, uploadedDocumentMap]);
+    }, [effectiveParentEntityType, effectiveParentEntityId, effectiveParentEntityName, handleOrchestratorProgress, uploadedDocumentMap]);
 
     // ── Name-collision resolution ───────────────────────────────────────────
     /**
@@ -530,7 +527,14 @@ export function DocumentUploadWizardDialog({
                 steps.push({
                     id: "associate-to",
                     label: "Associate To",
-                    canAdvance: () => resolvedParentRef.current !== null && !resolvedParentRef.current.isUnassociated && resolvedParentRef.current.containerId !== "",
+                    // The `&& resolvedParentRef.current.containerId !== ""` clause was DELETED
+                    // 2026-09-03 (task 076). It blocked Next whenever the CLIENT could not resolve
+                    // a container for the selected record — a lookup the upload no longer performs
+                    // or consults. Keeping it would have gated the wizard on a question the client
+                    // is no longer in a position to answer, and refused records the server can
+                    // resolve perfectly well. A record that genuinely has no resolvable container
+                    // now fails per file, with the SERVER's reason, on the Processing step.
+                    canAdvance: () => resolvedParentRef.current !== null && !resolvedParentRef.current.isUnassociated,
                     isSkippable: true,
                     renderContent: (handle: IWizardShellHandle) => (
                         <AssociateToStep
@@ -628,7 +632,6 @@ export function DocumentUploadWizardDialog({
                         emailStepProps={emailStepProps}
                         uploadedDocumentMap={uploadedDocumentMapRef.current}
                         uploadedFiles={fileStateRef.current.selectedFiles}
-                        containerId={effectiveContainerId}
                         bffBaseUrl={bffBaseUrl}
                         bffTokenProvider={bffTokenProvider}
                         onEmailControllerChange={(c) => { emailControllerRef.current = c; }}

@@ -96,8 +96,8 @@ export interface INextStepsStepProps {
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
     /** Uploaded files for building document picker options. */
     uploadedFiles?: IUploadedFile[];
-    /** SPE container ID for file operations. */
-    containerId: string;
+    // `containerId: string` DELETED 2026-09-03 (task 076) — the wizard no longer resolves a
+    // container at all, and neither consumer of this prop needed a session-wide one.
     /** BFF API base URL. */
     bffBaseUrl: string;
     /** Token provider for BFF API authentication. */
@@ -417,8 +417,9 @@ const CheckboxCard: React.FC<ICheckboxCardProps> = ({ def, selected, onToggle })
 interface IWorkOnAnalysisStepContentProps {
     /** Successfully uploaded file results for document picker. */
     successfulFiles: OrchestratorFileResult[];
-    /** SPE container ID for file operations. */
-    containerId: string;
+    // `containerId: string` was DELETED 2026-09-03 (task 076). It was declared, threaded through
+    // three components, destructured here — and NEVER READ by this component's body. Removed with
+    // the rest of the wizard's container plumbing rather than left as an unread prop.
     /** BFF API base URL. */
     bffBaseUrl: string;
     /** Called when analysis is created (signals canAdvance=true). */
@@ -427,7 +428,6 @@ interface IWorkOnAnalysisStepContentProps {
 
 const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
     successfulFiles,
-    containerId,
     bffBaseUrl,
     onAnalysisCreated,
 }) => {
@@ -618,7 +618,11 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
 
 interface IFindSimilarStepContentProps {
     successfulFiles: OrchestratorFileResult[];
-    containerId: string;
+    // `containerId: string` was DELETED 2026-09-03 (task 076). It carried the container the WIZARD
+    // resolved when it opened — one value for the whole session — onto a viewer URL that is about
+    // ONE document. The per-document drive the server actually wrote to is already on
+    // `createResult.driveId`, so the viewer now gets that instead: a fact rather than a guess, and
+    // correct even when two selected documents live in different containers.
     /** Map of local file ID -> uploaded document info (for driveId/itemId). */
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
     /** BFF API base URL for indexing trigger. */
@@ -629,7 +633,6 @@ interface IFindSimilarStepContentProps {
 
 const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
     successfulFiles,
-    containerId,
     uploadedDocumentMap,
     bffBaseUrl,
     bffTokenProvider,
@@ -662,12 +665,19 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
         if (!selectedDocumentId || !tenantId) return null;
         const clientUrl = getClientUrl();
         if (!clientUrl) return null;
+        // The SELECTED document's own drive, as reported by the server on upload — not a
+        // session-wide container the client guessed. Omitted when absent rather than back-filled
+        // from anything else: the viewer resolves it from the document record in that case, which
+        // is strictly better than being handed the wrong one.
+        const documentDriveId = successfulFiles.find(
+            (f) => f.createResult?.documentId === selectedDocumentId,
+        )?.createResult?.driveId;
         const params = new URLSearchParams();
         params.set("documentId", selectedDocumentId);
         params.set("tenantId", tenantId);
-        if (containerId) params.set("containerId", containerId);
+        if (documentDriveId) params.set("containerId", documentDriveId);
         return `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(params.toString())}`;
-    }, [selectedDocumentId, containerId, tenantId]);
+    }, [selectedDocumentId, successfulFiles, tenantId]);
 
     // Ensure file is indexed, then open dialog
     const handleOpenFindSimilar = React.useCallback(async () => {
@@ -771,7 +781,7 @@ interface IDynamicStepBuildOptions {
     /** Registers the Send-Email composer controller (Finish guard). */
     onEmailControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
     successfulFiles?: OrchestratorFileResult[];
-    containerId: string;
+    // `containerId` DELETED 2026-09-03 (task 076) — see the two step-content prop blocks above.
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
     bffBaseUrl: string;
     bffTokenProvider: () => Promise<string>;
@@ -815,7 +825,6 @@ function buildDynamicStepConfig(
             renderContent: () => (
                 <WorkOnAnalysisStepContent
                     successfulFiles={options.successfulFiles ?? []}
-                    containerId={options.containerId}
                     bffBaseUrl={options.bffBaseUrl}
                     onAnalysisCreated={() => {
                         options.analysisCreatedRef.current = true;
@@ -835,7 +844,6 @@ function buildDynamicStepConfig(
         renderContent: () => (
             <FindSimilarStepContent
                 successfulFiles={options.successfulFiles ?? []}
-                containerId={options.containerId}
                 uploadedDocumentMap={options.uploadedDocumentMap}
                 bffBaseUrl={options.bffBaseUrl}
                 bffTokenProvider={options.bffTokenProvider}
@@ -855,7 +863,6 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     emailStepProps,
     uploadedDocumentMap,
     uploadedFiles,
-    containerId,
     bffBaseUrl,
     bffTokenProvider,
     onEmailControllerChange,
@@ -936,7 +943,6 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                         wizardUploadedFiles,
                         onEmailControllerChange,
                         successfulFiles,
-                        containerId,
                         uploadedDocumentMap,
                         bffBaseUrl,
                         bffTokenProvider,
@@ -955,7 +961,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, onEmailControllerChange, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, onEmailControllerChange, successfulFiles, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
 
     return (
         <div className={styles.root}>

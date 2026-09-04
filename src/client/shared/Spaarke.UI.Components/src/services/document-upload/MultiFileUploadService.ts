@@ -42,16 +42,23 @@ export class MultiFileUploadService {
     request: UploadFilesRequest,
     onProgress?: (progress: UploadProgress) => void
   ): Promise<UploadFilesResult> {
-    const { files, containerId, conflictBehavior } = request;
+    const { files, target, conflictBehavior } = request;
 
-    this.logger.info('MultiFileUploadService', `Starting upload of ${files.length} files to container: ${containerId}`);
+    // The destination is NOT logged, because there is no longer a client-side destination to log:
+    // the server resolves the container from `target`. What identifies the batch is the target.
+    this.logger.info(
+      'MultiFileUploadService',
+      target.kind === 'record'
+        ? `Starting upload of ${files.length} files against ${target.entityLogicalName} ${target.recordId}`
+        : `Starting upload of ${files.length} files with no owning record`
+    );
 
     const errors: UploadFilesResult['errors'] = [];
     const uploadedFiles: SpeFileMetadata[] = [];
 
     // Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      files.map(file => this.fileUploadService.uploadFile({ file, driveId: containerId, conflictBehavior }))
+      files.map(file => this.fileUploadService.uploadFile({ file, target, conflictBehavior }))
     );
 
     // Process results

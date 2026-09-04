@@ -86,6 +86,22 @@ export interface SpeFileMetadata {
   /** Parent folder ID (optional) */
   parentId?: string;
 
+  /**
+   * The SPE drive the bytes ACTUALLY landed in, per the server.
+   *
+   * Added 2026-09-03 (task 076). Under the record-keyed contract the client no longer chooses the
+   * destination, so this is the ONLY trustworthy source for `sprk_document.sprk_graphdriveid` — any
+   * client-side container is at best a guess and, for a secure record, provably wrong (the bytes go
+   * to the record's own container while the column would point at the shared BU one, 404-ing every
+   * later download on exactly the records that matter most).
+   *
+   * The server always populates it: `UploadSessionManager` maps
+   * `uploadedItem.ParentReference?.DriveId ?? containerId`, so it is non-null on every successful
+   * upload. Declared optional because `SpeFileMetadata` is also constructed by callers describing
+   * files they did not upload through this service.
+   */
+  driveId?: string;
+
   /** File size in bytes */
   size: number;
 
@@ -155,14 +171,43 @@ export interface ServiceResult<T = void> {
 // ---------------------------------------------------------------------------
 
 /**
+ * WHERE an upload is filed — and deliberately NOT a container id.
+ *
+ * Task 076: the client names the OWNING RECORD (or states that there is none) and the SERVER
+ * resolves the container from it. The authorization key and the storage destination are then the
+ * same value by construction and cannot disagree. Before this, the caller passed a `driveId`
+ * resolved at wizard-OPEN time from the acting user's business unit — so files attached to a
+ * SECURE record landed in the shared BU container, and SPE permissions are additive-only, so
+ * nothing retracts that afterwards.
+ *
+ * A discriminated union rather than an optional pair: `{ entityLogicalName?, recordId? }` would let
+ * a caller supply neither and silently get the record-less contract, which for a record-bearing
+ * flow is the wrong container. Here the caller must SAY which contract it is on.
+ */
+export type UploadTarget =
+  /** The content has an owning record that already exists. `PUT /api/obo/records/{entity}/{id}/files/{path}` */
+  | { kind: 'record'; entityLogicalName: string; recordId: string }
+  /**
+   * The content genuinely has NO owning record yet — the server files it in the ACTING USER's
+   * business-unit container. `PUT /api/obo/me/files/{path}`
+   *
+   * ⚠️ Not an escape hatch. If a record exists, use `kind: 'record'`.
+   */
+  | { kind: 'no-record' };
+
+/**
  * Request for uploading a single file via FileUploadService.
  */
 export interface FileUploadRequest {
   /** File to upload */
   file: File;
 
-  /** SPE Container / Drive ID */
-  driveId: string;
+  /**
+   * Where the file is filed. Replaced `driveId: string` on 2026-09-03 (task 076) — see
+   * {@link UploadTarget}. The shape change is deliberate: it makes every un-migrated call site a
+   * COMPILE ERROR rather than a container string that silently still fits.
+   */
+  target: UploadTarget;
 
   // `fileName?: string` ("optional override for file name") was REMOVED 2026-09-03 with the move to
   // `@spaarke/sdap-client`, which names the stored file from `file.name`. No caller ever passed it.
@@ -189,8 +234,12 @@ export interface UploadFilesRequest {
   /** Files to upload */
   files: File[];
 
-  /** SharePoint Embedded Container ID (from parent record) */
-  containerId: string;
+  /**
+   * Where the batch is filed — see {@link UploadTarget}. Replaced `containerId: string` on
+   * 2026-09-03 (task 076). One target for the whole batch, because a batch is one wizard step
+   * against one parent.
+   */
+  target: UploadTarget;
 
   /**
    * Name-collision behaviour applied to EVERY file in this batch. Omit on a first attempt.
@@ -276,8 +325,19 @@ export interface ParentContext {
   /** Parent record GUID */
   parentRecordId: string;
 
-  /** SharePoint Embedded Container ID */
-  containerId: string;
+  // `containerId: string` was DELETED here 2026-09-03 (task 076).
+  //
+  // It fed `sprk_document.sprk_graphdriveid` — the pointer used by every later download and by RAG
+  // indexing — from a container the CLIENT resolved at wizard-OPEN time. That was survivable only
+  // while the client also NAMED the upload destination, so the two agreed by construction. Under
+  // the record-keyed contract the server picks the container, so for a secure record they provably
+  // disagree: the bytes land in the record's own container while the column points at the shared
+  // business-unit one. `sprk_graphdriveid` now comes from `SpeFileMetadata.driveId`, which is where
+  // the server says the bytes went.
+  //
+  // Removed rather than left unread: a field that is still populated but no longer consulted is the
+  // failure class this project keeps paying for (FAILURE-MODES AP-12). Deleting it turns every
+  // remaining supplier into a compile error.
 
   /** Parent record display name (e.g., "MAT-2024-001") */
   parentDisplayName: string;

@@ -146,75 +146,19 @@ export class UploadOperation {
   }
 
   /**
-   * Upload a file in a single request (Graph simple PUT — up to 250 MB).
+   * 🔴 `uploadSmall(containerId, file, options)` was DELETED here 2026-09-03
+   * (unified-access-control-r2 task 076), together with `SdapApiClient.uploadFile` and the BFF route
+   * it called, `PUT /api/obo/containers/{id}/files/{*path}`.
    *
-   * @deprecated Task 076: the caller names a CONTAINER, which is the shape this project exists to
-   * remove — the server obeys a destination the client chose, with no per-resource decision behind
-   * it. Use {@link uploadSmallForRecord} when the content has an owning record, or
-   * {@link uploadSmallWithoutRecord} when it genuinely does not. This method and the route it calls
-   * (`PUT /api/obo/containers/{id}/files/{*path}`) are deleted together once every caller has moved;
-   * that deletion is the ship-together moment.
+   * The caller named the CONTAINER and the server wrote there, with no per-resource authorization
+   * decision behind the destination. Use {@link uploadSmallForRecord} when the content has an owning
+   * record, or {@link uploadSmallWithoutRecord} when it genuinely does not. Both are above, both
+   * share {@link put}, and NEITHER takes a container — deliberately.
+   *
+   * Note the `Content-Length` gotcha this method carried, because {@link put} inherits it: the
+   * header is deliberately NOT set. It is a forbidden header name, so the browser ignores any value
+   * and computes the real one from the body.
    */
-  public async uploadSmall(
-    containerId: string,
-    file: File,
-    options?: {
-      onProgress?: (percent: number) => void;
-      signal?: AbortSignal;
-      /**
-       * Name-collision behaviour. Omitted ⇒ the BFF defaults to `fail`, which returns 409 and
-       * leaves the existing file untouched. Pass `rename` or `replace` only after the USER has
-       * chosen — see UploadNameConflictError.
-       */
-      conflictBehavior?: ConflictBehaviorOption;
-    }
-  ): Promise<DriveItem> {
-    // Auth comes from `authenticatedFetch` (@spaarke/auth, ADR-028) — the same contract indexFile
-    // uses. It replaced a `TokenProvider` shim that returned '' and made this request omit the
-    // Authorization header entirely: an unauthenticated call to a RequireAuthorization BFF, which
-    // could only ever 401. It went unnoticed because this method has no production callers yet.
-    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'uploadFile');
-
-    // Report initial progress
-    options?.onProgress?.(0);
-
-    const query = options?.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(options.conflictBehavior)}` : '';
-
-    // `requestOrThrow` rather than a bare `authFetch` + `response.ok` check: the canonical injected
-    // fetch (`@spaarke/auth`) THROWS on non-2xx and never returns the response, so an inline
-    // `response.status === 409` test never runs under it. See requestOrThrow's own note.
-    const response = await requestOrThrow(
-      authFetch,
-      `${this.baseUrl}/api/obo/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(file.name)}${query}`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          // Content-Length is deliberately NOT set: it is a forbidden header name, so the browser
-          // ignores it and computes the real value from the body.
-        },
-        body: file,
-        signal: options?.signal ?? AbortSignal.timeout(this.timeout),
-      },
-      'Upload failed',
-      status => {
-        // A name collision is a DISTINCT, RECOVERABLE outcome, not a generic failure. It must be
-        // distinguishable by type rather than by string-matching a message, so the UI can offer the
-        // rename / new-version choice. Nothing was overwritten to get here — the BFF sends
-        // conflictBehavior=fail unless the caller says otherwise.
-        if (status === 409) {
-          throw new UploadNameConflictError(file.name);
-        }
-      }
-    );
-
-    const result = await response.json();
-
-    // Report completion
-    options?.onProgress?.(100);
-
-    return result;
-  }
 
   /**
    * DELETED 2026-08-27 (unified-access-control-r2 task 076): `uploadChunked`,

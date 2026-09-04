@@ -59,6 +59,14 @@ function clientWith(authenticatedFetch: (url: string, init?: RequestInit) => Pro
 
 const file = () => new File(['contents'], 'brief.docx');
 
+// Re-pointed 2026-09-03 (task 076): these tests used to drive `client.uploadFile('container-1', …)`,
+// which is DELETED along with `PUT /api/obo/containers/{id}/files/{*path}`. They now drive the
+// record-keyed contract. Nothing about their VALUE changes — failure translation lives in
+// `UploadOperation.put`, which both surviving contracts share — but the route they exercise is now
+// one that actually exists.
+const ENTITY = 'sprk_matter';
+const RECORD_ID = '11111111-1111-1111-1111-111111111111';
+
 describe.each([
   ['throwing (@spaarke/auth)', throwingFetch],
   ['returning (external-spa)', returningFetch],
@@ -66,7 +74,7 @@ describe.each([
   it('translates 409 into UploadNameConflictError carrying the file name', async () => {
     const client = clientWith(makeFetch(409, 'nameAlreadyExists'));
 
-    const error = await client.uploadFile('container-1', file()).catch((e: unknown) => e);
+    const error = await client.uploadFileForRecord(ENTITY, RECORD_ID, file()).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(UploadNameConflictError);
     expect((error as UploadNameConflictError).fileName).toBe('brief.docx');
@@ -77,7 +85,7 @@ describe.each([
     // caller can only recover it by matching message text — the failure this typing exists to end.
     const client = clientWith(makeFetch(409, 'nameAlreadyExists'));
 
-    const error = await client.uploadFile('container-1', file()).catch((e: unknown) => e);
+    const error = await client.uploadFileForRecord(ENTITY, RECORD_ID, file()).catch((e: unknown) => e);
 
     expect(error).not.toBeInstanceOf(SdapHttpError);
   });
@@ -85,7 +93,7 @@ describe.each([
   it('translates a non-409 failure into SdapHttpError with the status and user-facing copy', async () => {
     const client = clientWith(makeFetch(403, 'forbidden'));
 
-    const error = await client.uploadFile('container-1', file()).catch((e: unknown) => e);
+    const error = await client.uploadFileForRecord(ENTITY, RECORD_ID, file()).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(SdapHttpError);
     expect((error as SdapHttpError).status).toBe(403);
@@ -97,7 +105,7 @@ describe.each([
     // than be replaced by a vaguer sentence.
     const client = clientWith(makeFetch(422, 'Container could not be resolved for this record.'));
 
-    const error = await client.uploadFile('container-1', file()).catch((e: unknown) => e);
+    const error = await client.uploadFileForRecord(ENTITY, RECORD_ID, file()).catch((e: unknown) => e);
 
     expect((error as SdapHttpError).message).toContain('Container could not be resolved');
   });
@@ -126,7 +134,7 @@ describe('upload failure translation — errors that are not HTTP outcomes', () 
       })
     );
 
-    const error = await client.uploadFile('container-1', file()).catch((e: unknown) => e);
+    const error = await client.uploadFileForRecord(ENTITY, RECORD_ID, file()).catch((e: unknown) => e);
 
     expect(error).toBe(authError);
     expect(error).not.toBeInstanceOf(SdapHttpError);
@@ -151,7 +159,7 @@ describe('upload success path', () => {
     );
     const client = clientWith(authFetch);
 
-    const first = await client.uploadFile('container-1', file());
+    const first = await client.uploadFileForRecord(ENTITY, RECORD_ID, file());
     expect(first.webUrl).toBe('https://sharepoint.example.com/brief.docx');
     // `parentId` is the wire field (FileHandleDto.ParentId). It was typed `parentReferenceId` until
     // 2026-09-03, which made it undefined on every response.
@@ -159,7 +167,7 @@ describe('upload success path', () => {
     // Omitted on a first attempt so the BFF's non-destructive `fail` default applies.
     expect(authFetch.mock.calls[0][0]).not.toContain('conflictBehavior');
 
-    await client.uploadFile('container-1', file(), { conflictBehavior: 'rename' });
+    await client.uploadFileForRecord(ENTITY, RECORD_ID, file(), { conflictBehavior: 'rename' });
     expect(authFetch.mock.calls[1][0]).toContain('conflictBehavior=rename');
   });
 });

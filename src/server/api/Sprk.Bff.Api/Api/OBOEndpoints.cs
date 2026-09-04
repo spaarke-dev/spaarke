@@ -29,121 +29,68 @@ namespace Sprk.Bff.Api.Api;
 /// decision no user is ever granted one. They were a BYPASS BY CONSTRUCTION of the per-document gate,
 /// not a live hole. Do NOT re-add them: the id-keyed routes above are the supported surface.
 ///
-/// THE UPLOAD SURFACE AS OF TASK 076 (option C) — three routes, two contracts.
+/// THE UPLOAD SURFACE AS OF TASK 076 (option C) — three routes, two contracts, NO container parameter.
 ///
-///   PUT  /api/obo/containers/{id}/files/{*path}                          LEGACY, container-keyed, UNGATED
-///   PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}   TARGET, record-keyed, GATED
-///   POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session  TARGET, record-keyed, GATED
+///   PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}   record-keyed, GATED
+///   POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session  record-keyed, GATED
+///   PUT  /api/obo/me/files/{*path}                                       record-LESS, acting-user's BU
 ///
-/// The record-keyed pair is the contract every client should move to: the caller names the OWNING
-/// RECORD, the server authorizes the caller against it via
-/// <see cref="Api.Filters.RecordRouteAccessAuthorizationFilter"/>, and only then resolves the container
-/// from that same record through task 075's `RecordContainerResolver`. The authorization key and the
-/// container are the same value by construction. A secure record resolves to its OWN container or FAILS
-/// CLOSED; everything else resolves to the RECORD's own `owningbusinessunit` container. No caller-supplied
-/// container is accepted, and there is no parameter through which one could be.
+/// The record-keyed pair is the contract: the caller names the OWNING RECORD, the server authorizes the
+/// caller against it via <see cref="Api.Filters.RecordRouteAccessAuthorizationFilter"/>, and only then
+/// resolves the container from that same record through task 075's `RecordContainerResolver`. The
+/// authorization key and the container are the same value by construction. A secure record resolves to its
+/// OWN container or FAILS CLOSED; everything else resolves to the RECORD's own `owningbusinessunit`
+/// container. The record-LESS route serves content that genuinely has no owning record when the bytes
+/// move; it derives the ACTING USER's business-unit container server-side, and secure content can never
+/// reach it.
 ///
-/// WHY THE LEGACY ROUTE SURVIVES (escalated, NOT an oversight — and not "unfinished").
-/// It CREATES content, so at authorization time no `sprk_document` row exists to authorize against —
-/// attaching <see cref="Api.Filters.DocumentAuthorizationFilter"/> would resolve `{id}` to a container id,
-/// return None, and deny 100% of uploads. Task 076 built the record-keyed replacement for exactly that
-/// reason. It could not DELETE this route, because three live client upload paths have no owning record at
-/// the moment the bytes move:
+/// 🔴 DELETED 2026-09-03 — `PUT /api/obo/containers/{id}/files/{*path}`.
 ///
-///   · EmailComposer's local-attachment upload — the email may have no persisted regarding yet, and the
-///     `sprk_document` is created afterwards, deliberately unassociated.
-///   · The Analysis wizard's standalone document — uploaded, then linked to an `sprk_analysis` created later.
-///   · DocumentUploadWizard's "skip associate" mode — the user explicitly declines a parent.
+/// It wrote bytes into a CALLER-NAMED container with no per-resource authorization decision behind it.
+/// It could not be gated in place: it CREATES content, so at authorization time no `sprk_document` row
+/// exists to authorize against — attaching <see cref="Api.Filters.DocumentAuthorizationFilter"/> would
+/// resolve `{id}` to a container id, return None, and deny 100% of uploads. So it was REPLACED rather than
+/// guarded, and the replacement is the three routes above.
 ///
-/// Each is a MODELLING gap (bytes before record), not a routing gap. Adding a container parameter to the
-/// record-keyed routes "just for those three" is option (B), which the owner rejected. Resolving it means
-/// either creating the owning record before the bytes, or a server-issued upload ticket — an owner
-/// decision. Until then this route keeps its Pending waiver in `RouteAuthorizationGuardTests`, and that
-/// waiver MUST NOT be converted to Permanent: it is a work item, not an exemption.
+/// It survived past the record-keyed routes' arrival because three client upload paths had no owning
+/// record when the bytes moved (EmailComposer's local attachment, the Analysis wizard's standalone
+/// document, DocumentUploadWizard's "skip associate"). `PUT /api/obo/me/files/{*path}` closed that gap
+/// WITHOUT reintroducing a container parameter — the owner's 2026-08-28 resolution — and the last client
+/// (DocumentUploadWizard) moved off the container-keyed route in the same change that deletes it here.
+///
+/// ⚠️ DO NOT RE-ADD IT, and do not add a container parameter to any route above "just for one caller".
+/// That is option (B), which the owner rejected: a client that names its own storage destination is the
+/// exact shape this project exists to remove. Content that has an owning record uses the record-keyed
+/// routes; content that genuinely does not uses `/api/obo/me/files`.
 ///
 /// Full reasoning + the classified caller inventory:
-/// `projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md`.
+/// `projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md` and
+/// `notes/task-076-client-cutover-and-supplier-classification.md`.
 /// Prior retirement inventory: `projects/unified-access-control-r2/notes/task-071-obo-route-retirement.md`.
 /// </summary>
 public static class OBOEndpoints
 {
     public static IEndpointRouteBuilder MapOBOEndpoints(this IEndpointRouteBuilder app)
     {
-        // PUT: small upload (as user). Post-upload RAG indexing is triggered by the
-        // wizard client via `@spaarke/sdap-client.SdapApiClient.indexFile()` after a
-        // successful PUT — see project `sdap-client-shared-library-fix-r1` and the
-        // canonical pattern used by DocumentUploadWizard's `triggerRagIndexing`.
-        app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
-            string id, string path, HttpRequest req, HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            [FromServices] ILogger<Program> logger,
-            CancellationToken ct) =>
-        {
-            var (ok, err) = ValidatePathForOBO(path);
-            if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
-
-            try
-            {
-                logger.LogInformation("OBO upload starting - Container: {ContainerId}, Path: {Path}", id, path);
-
-                // Resolve container ID to drive ID (SPE container IDs != drive IDs)
-                var driveId = await GraphCallScope.Run(
-                    () => speFileStore.ResolveDriveIdAsync(id, ct),
-                    "obo.driveid.resolve");
-                logger.LogDebug("Resolved container {ContainerId} to drive {DriveId}", id, driveId);
-
-                // Stream directly to Graph SDK (no memory buffering)
-                var item = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsUserAsync(
-                        ctx, driveId, path, req.Body, ResolveConflictBehavior(req), ct),
-                    "obo.upload.small");
-
-                logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
-
-                return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                logger.LogError(ex, "OBO upload unauthorized");
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                logger.LogError(ex, "OBO upload failed - Graph API error: {Message}", ex.Message);
-                return ex.ToProblemDetails();
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "OBO upload failed - Unexpected error: {Message}", ex.Message);
-                return TypedResults.Problem(
-                    title: "Upload failed",
-                    detail: $"An unexpected error occurred: {ex.Message}",
-                    statusCode: 500
-                );
-            }
-        }).RequireRateLimiting("graph-write").RequireAuthorization();
-
         // ═════════════════════════════════════════════════════════════════════════════════════════
         // RECORD-KEYED UPLOAD (unified-access-control-r2 task 076, option C) — the TARGET contract.
         //
         // The caller names the OWNING RECORD; the server resolves the container from that same
         // record, through task 075's RecordContainerResolver, AFTER authorizing the caller against
         // it. The authorization key and the container are therefore the same value by construction,
-        // and no code path lets them disagree — which is the entire point. Compare the route above,
-        // which takes a caller-NAMED container and writes bytes into it with no per-resource decision.
+        // and no code path lets them disagree — which is the entire point.
         //
-        // ⚠️ THE CONTAINER-KEYED ROUTE ABOVE IS STILL PRESENT, AND THAT IS DELIBERATE, NOT UNFINISHED.
-        // Three live client upload paths have NO owning record at the moment the bytes move
-        // (EmailComposer's local-attachment upload, the Analysis wizard's standalone document, and
-        // DocumentUploadWizard's "skip associate" mode), so deleting the old route would break them
-        // rather than migrate them. Giving the new route a container parameter "just for those" is
-        // option (B), which was rejected. That modelling gap is an OWNER decision — see
-        // projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md
-        // "ESCALATION". Until it is resolved the old route keeps its Pending waiver in
-        // RouteAuthorizationGuardTests; it is NOT converted to Permanent.
+        // The container-keyed route this replaced (`PUT /api/obo/containers/{id}/files/{*path}`) was
+        // DELETED 2026-09-03 once its last client moved. See the class summary above for why it
+        // could not simply be gated, and why no route here takes a container parameter.
+        //
+        // 🔴 CLIENT + BFF SHIP TOGETHER. Both halves live in this repo and MUST deploy together:
+        // deploying the BFF first 404s every upload from a client still on the old route, and
+        // deploying the client first 404s every upload against a BFF that lacks these routes. There
+        // is no compatibility window and no feature flag.
         // ═════════════════════════════════════════════════════════════════════════════════════════
 
-        // PUT: small upload (< 4 MiB) against the owning record.
+        // PUT: small upload against the owning record.
         app.MapPut("/api/obo/records/{entityLogicalName}/{recordId:guid}/files/{*path}", async (
             string entityLogicalName, Guid recordId, string path, HttpRequest req, HttpContext ctx,
             [FromServices] SpeFileStore speFileStore,

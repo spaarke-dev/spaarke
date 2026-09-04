@@ -521,28 +521,13 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       return;
     }
 
-    // Resolve container ID from business unit
-    let containerId = "";
-    try {
-      const userSettings = xrm.Utility.getGlobalContext().userSettings;
-      const uid = userSettings.userId.replace(/[{}]/g, "");
-      const user = await xrm.WebApi.retrieveRecord(
-        "systemuser", uid, "?$select=_businessunitid_value"
-      );
-      const buId = user["_businessunitid_value"] as string;
-      if (buId) {
-        const bu = await xrm.WebApi.retrieveRecord(
-          "businessunit", buId, "?$select=sprk_containerid"
-        );
-        containerId = (bu["sprk_containerid"] as string) ?? "";
-      }
-    } catch (err) {
-      console.warn("[WorkspaceGrid] Failed to resolve container ID:", err);
-    }
-    if (!containerId) {
-      console.error("[WorkspaceGrid] No container ID available");
-      return;
-    }
+    // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
+    // business-unit container lookup and its `if (!containerId) return;` guard.
+    //
+    // This launch is the standalone (no parent) entry, so the wizard's "skip associate" branch
+    // applies and the SERVER derives the acting user's BU container — the same value this code was
+    // reading, now read where it can be trusted. The guard additionally made the button silently do
+    // NOTHING for any user whose BU had no container, with only a console line to show for it.
 
     // Detect theme
     let theme = "light";
@@ -562,7 +547,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "parentEntityType=sprk_document" +
       "&parentEntityId=" +
       "&parentEntityName=" +
-      "&containerId=" + containerId +
+      // `&containerId=` REMOVED 2026-09-03 (task 076) — the wizard does not read it.
       "&theme=" + theme +
       "&bffBaseUrl=" + encodeURIComponent(getBffBaseUrl());
 

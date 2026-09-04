@@ -1,10 +1,13 @@
 # Task 076 — client cutover + the container-supplier classification
 
-> **Scope of THIS document**: the CLIENT half of 076 (POML steps 4–7). The server half shipped
-> earlier. **POML steps 2/3/8 — deleting the legacy container-keyed route, its Pending waiver, and
-> `uploadFile()` — are deliberately NOT done here.** See §6.
+> **Scope of THIS document**: the CLIENT half of 076 (POML steps 4–7), plus — added in a second pass
+> the same day — the DocumentUploadWizard cutover and **the completed deletion of the legacy route**.
 >
-> **Date**: 2026-09-03.
+> **Date**: 2026-09-03 (two passes; §8 is the second).
+>
+> ⚠️ **§6 below is SUPERSEDED.** It says steps 2/3/8 are "not correct **yet**". They were executed in
+> the second pass, because their one blocker — DocumentUploadWizard still calling the legacy route —
+> was removed first. §8 is the record; §6 is kept only for its reasoning.
 
 ---
 
@@ -156,9 +159,9 @@ No compatibility window, no feature flag. State it in that PR's description.
 
 ---
 
-## 5 — Remaining work, in order
+## 5 — ~~Remaining work~~ → items 1–3 DONE 2026-09-03 (second pass). See §8.
 
-1. **DocumentUploadWizard cutover** — the last upload client on the legacy route, and the one that
+1. ✅ **DONE — DocumentUploadWizard cutover** — the last upload client on the legacy route, and the one that
    retires all of §3.D. It needs BOTH contracts, because the wizard has two branches:
    - **associate branch** (`resolvedParent` has `entityType` + `id`) → `uploadFileForRecord`. This
      is a *record-bearing* path, so converting it **deletes the fail-OPEN resolver** rather than
@@ -169,9 +172,13 @@ No compatibility window, no feature flag. State it in that PR's description.
    `MultiFileUploadService.ts` (:54) + `FileUploadService.ts` (:46-66) + its `FileUploadRequest`
    type, and `AssociateToStep.tsx`. Then the three launch envelopes in §3.B row 1–3 lose their
    `&containerId=` and the §3.D prop chains can be deleted.
-2. **Delete the vestigial `speContainerId` prop chains** (§3.D row 4) once (1) lands.
-3. **THEN, and only then, POML steps 2/3/8** — delete the legacy route, its Pending waiver, and
-   `SdapApiClient.uploadFile()` / `UploadOperation.uploadSmall()`. **Reserved for human review.**
+2. ⚠️ **PARTIAL — the vestigial `speContainerId` prop chains** (§3.D row 4). DocumentUploadWizard's own
+   chain is fully deleted (prop, URL param, three launch envelopes, `NextStepsStep` plumbing). The five
+   OTHER wizard-host `main.tsx` chains + `useWizardPageBootstrap.ts:176-186` + `WorkspacePane.tsx:454`
+   + `SmartTodo/xrmProvider.ts:97` are NOT — they feed non-upload consumers. Vestigial, not harmful;
+   a separate cleanup. §8.3 has the exact after-grep.
+3. ✅ **DONE — POML steps 2/3/8** — legacy route, its Pending waiver, `SdapApiClient.uploadFile()` and
+   `UploadOperation.uploadSmall()` deleted in ONE commit. See §8.4.
 4. Filed, not fixed: the outbound-attachment path records a **wrong `(driveId, itemId)` pair** —
    `CommunicationService.cs:1259` / `:1573` pass `_options.ArchiveContainerId` as the drive for
    documents whose bytes are at `docRecord.GraphDriveId`, and `ArchiveOutboundAttachmentsAsync:2308`
@@ -207,3 +214,143 @@ the extension, sharing `_uploadEach` with its sibling rather than duplicating th
 *cost-of-doing-nothing* — the three parentless flows have no callable upload path once
 `uploadFilesToSpe` requires a record, and giving the record-keyed route a container parameter for
 their benefit is option (B), which was rejected.
+
+---
+
+## 8 — Second pass, 2026-09-03: the wizard cutover and the deletion
+
+### 8.1 — What DocumentUploadWizard now does
+
+The chokepoint changed SHAPE rather than moving. `FileUploadRequest.driveId: string` became
+`FileUploadRequest.target: UploadTarget`, a **discriminated union**:
+
+```ts
+type UploadTarget =
+  | { kind: 'record'; entityLogicalName: string; recordId: string }  // PUT /api/obo/records/{e}/{id}/files/{path}
+  | { kind: 'no-record' };                                           // PUT /api/obo/me/files/{path}
+```
+
+A union rather than an optional pair, deliberately: `{ entityLogicalName?, recordId? }` would let a
+caller supply neither and silently get the record-less contract — which for a record-bearing flow
+files a secure record's documents in the CALLER's business-unit container. The caller must state
+which contract it is on. `FileUploadService` branches on `kind`; `MultiFileUploadService` forwards it
+unchanged; `uploadOrchestrator.resolveUploadTarget` maps the wizard's two branches onto it using the
+SAME condition `DocumentRecordService` already uses to decide whether to bind a parent lookup, so a
+file cannot be uploaded against one record and filed under another.
+
+`AssociateToStep`'s fail-OPEN `resolveContainerIdForRecord` is **deleted**, along with
+`resolveBusinessUnitContainerId`, the `isResolving` state and the "Resolving container..." spinner.
+`IResolvedParentContext.containerId` and `ParentContext.containerId` are deleted too, so no remaining
+supplier compiles.
+
+The name-collision path is intact: `UploadNameConflictError` -> `ServiceResult.nameConflict` -> the
+two-option dialog. Its existing tests pass. Four NEW tests pin what was previously unpinned — **which
+ROUTE each contract hits**, asserted on the URL, including that a record target missing either half
+fails CLOSED rather than downgrading to `/api/obo/me/files`.
+
+### 8.2 — Four things this pass found that sections 1-4 did not say
+
+| # | Finding |
+|---|---|
+| 1 | **`DocumentRecordService` had the section-1-row-5 bug too, unfixed.** Row 5 recorded that `EntityCreationService.createDocumentRecords` wrote `sprk_graphdriveid` from the client's container, and fixed it THERE. The DocumentUploadWizard path uses a DIFFERENT service — `DocumentRecordService` — which wrote `sprk_graphdriveid: parentContext.containerId` at **three** sites. Same latent dangling-pointer bug, same activation condition, not mentioned anywhere. Now sourced from `SpeFileMetadata.driveId` (new field, mapped from `DriveItem.driveId`), and `ParentContext.containerId` is DELETED so a third copy cannot appear. |
+| 2 | **Two launch envelopes did not merely APPEND a container — they REFUSED TO OPEN without one.** `NavigationService.openAddDocument` and `WorkspaceGrid.handleAddDocument` both had `if (!containerId) { console.error(...); return; }`, and `sprk_wizard_commands.js` showed the user *"Cannot upload: no SPE container is configured for your business unit"*. So a user whose BU had no container could not open the wizard **at all** — including for a secure matter with a perfectly good container of its own. Section 3.B classified all three as "head of an upload chain, dies with the cutover": true, but it undersells them. They were also a live availability bug. All three guards deleted. |
+| 3 | **`NextStepsStep` threaded `containerId` through three components to reach two consumers, one of which never read it.** `WorkOnAnalysisStepContent` declared, received and destructured it and never used it. The real consumer, `FindSimilarStepContent`, put it on a DocumentRelationshipViewer URL that is about ONE document — while the value was one session-wide container. Now sourced per-document from that document's own `createResult.driveId`. |
+| 4 | **The `?? containerId` fallback in the wizard's RAG-indexing call was load-bearing and wrong.** `triggerRagIndexing(record.driveId ?? config.parentContext.containerId, ...)` would, post-cutover, index the WRONG drive whenever `driveId` was absent. Replaced with an explicit skip plus warning: a file with no server-reported drive is not indexed at a guess. |
+
+### 8.3 — The absence-grep (step B acceptance evidence)
+
+**Question**: does any CLIENT code supply a container to an upload route, and does any client
+`sprk_containerid` WRITE survive?
+
+**BEFORE** — `src`, `.ts/.tsx/.js`, excluding built bundles:
+
+| Probe | Result |
+|---|---|
+| `obo/containers/*/files` or `uploadSmall(` or `.uploadFile(` | **1 live production supplier**: `FileUploadService.ts:64` `this.apiClient.uploadFile(request.driveId, ...)`, reached from `MultiFileUploadService:54` <- `uploadOrchestrator:223` (`containerId: config.parentContext.containerId`) <- DocumentUploadWizard. Plus the `SdapApiClient.uploadFile` / `UploadOperation.uploadSmall` definitions and their tests. |
+| `sprk_containerid` write shapes | Comments only (W1/W2 were already deleted in pass one). |
+
+**AFTER**:
+
+| Probe | Result |
+|---|---|
+| payload key `sprk_containerid:` | **0** |
+| `['sprk_containerid'] =` / `.sprk_containerid =` | **0 live** — 2 hits, both COMMENTS describing the deletions |
+| `getAttribute("sprk_containerid").setValue(` | **0** |
+| `obo/containers/*/files` in client source | **0** — the definitions that held it are deleted |
+| **a container supplied to an upload route** | **0 in source** |
+
+**Two things the grep surfaced, stated plainly rather than classified away:**
+
+- **`src/dataverse/webresources/spaarke_documents/DocumentOperations.js:262-310`** DOES read
+  `sprk_containerid` off a form and PUT to an upload route — but `/api/drives/{driveId}/upload`, the
+  **MI/app-only** route (task 083's territory), not the OBO one. **It is already dead**: its step-2 hop
+  calls `GET /api/containers/{containerId}/drive`, and there are **ZERO `/api/containers/...` routes
+  mapped on the BFF** — they were deleted 2026-08-25 (`DocumentsEndpoints.cs:15-31`). It throws
+  *"Failed to get container drive information."* before reaching any upload. Same shape as the chunked
+  path 076 deleted earlier: a client whose first hop hits a route mapped nowhere. Does not block the
+  OBO deletion; NOT fixed here.
+- **Seven checked-in PCF `bundle.js` artifacts** (`src/client/pcf/Communication*/Solution/...` and
+  `TrackingFieldTrio`) still contain an inlined `fetch(".../api/obo/containers/{id}/files/...")` — the
+  OLD `EntityCreationService` raw-fetch implementation. They are **build outputs dated 2026-07-29**,
+  five weeks before the cutover, regenerated by `npm run build:prod`. Not source, not a supplier — but
+  a **deploy obligation**: rebuild and redeploy them, or verify they never reach that code.
+
+### 8.4 — Step 6 EXECUTED, and what it cost beyond the five listed items
+
+Deleted together in ONE commit: the route (`OBOEndpoints.cs`, 54 lines), its **Pending** waiver
+(deleted, **not** converted to Permanent — converting inverts the forcing function), the deprecated
+`SdapApiClient.uploadFile` and `UploadOperation.uploadSmall`, the legacy sink entry, and the
+OBOEndpoints route-count assertion `4 -> 3`.
+
+**Five further changes the deletion FORCED, none optional:**
+
+1. **`SpeWriteSinkContainerProvenanceGuardTests` ordinals RENUMBER.** Ordinals are assigned per
+   `(file, sink)` in FILE order. The deleted route held the FIRST `UploadSmallAsUserAsync` in
+   `OBOEndpoints.cs`, so `#2 -> #1` (record-keyed) and `#3 -> #2` (record-less). Deleting only the
+   ordinal-1 entry fails Rule A **in both directions in one run** — two undeclared sites AND two stale
+   declarations. The ClientSupplied census header also moves 7 -> 6.
+2. **Three positive controls asserted the route was STILL MAPPED** and would have failed:
+   `MiContainerKeyedWriteRouteRetirementTests` (x2) and `OboDriveKeyedRouteRetirementTests` (x1). They
+   are the ONLY positive controls in those files — deleting them would make every absence assertion in
+   both files vacuous, which the files say about themselves. Re-pointed at `PUT /api/obo/me/files/{*path}`.
+   `OboDriveKeyed` additionally gained a NEW absence assertion for the deleted route; its own doc block
+   had pre-authorised exactly this flip ("If the route is ever retired instead, flip this to NotFound
+   and say so here").
+3. `CorsAndAuthTests.Obo_Endpoints_RequireBearer` re-pointed. It is `Skip`'d, so it would NOT have gone
+   red — it would have silently become a dead test probing a nonexistent route.
+4. Client tests re-pointed at `uploadFileForRecord`; `SdapApiClient.test.ts`'s
+   `expect(client.uploadFile).toBeDefined()` INVERTED into an assertion that it is gone.
+5. Six stale comment sites corrected (`SpeUploadPath.cs`, `EndpointMappingExtensions.cs`,
+   `SpeFlatUploadPathTests.cs`, sdap-client `types/index.ts` and `IndexFileOperation.ts`,
+   `CreateAnalysisWizardWidget.tsx`) — each named the deleted route as the live upload surface.
+
+### 8.5 — Ship-together: CLIENT + BFF, same deploy
+
+Both halves are in THIS repo and MUST deploy together. No compatibility window, no feature flag:
+
+- **BFF first** -> a client still on `PUT /api/obo/containers/{id}/files/{*path}` -> **404 on every upload**.
+- **Client first** -> a client calling the record-keyed / `/me` routes against a BFF that lacks them ->
+  **404 on every upload**.
+
+Surfaces in scope: the BFF, the `sprk_documentuploadwizard` code page, `SemanticSearchControl` (PCF),
+`LegalWorkspace`, and the `sprk_wizard_commands.js` web resource — plus the section-8.3 bundle obligation.
+
+### 8.6 — Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | Build succeeded, 0 warnings, 0 errors |
+| `dotnet test tests/Spaarke.ArchTests/` | **182 / 182 passed** |
+| `Spaarke.UI.Components` jest (full) | **8 failed suites / 13 failed tests** — the stated pre-existing baseline, NOT exceeded |
+| `Spaarke.UI.Components` document-upload jest | 3 suites / 32 tests passed |
+| `Spaarke.SdapClient` jest | 2 suites / 27 tests passed |
+| `Spaarke.UI.Components` / `SemanticSearchControl` `npx tsc --noEmit` | clean |
+| DocumentUploadWizard `npx vite build` | built |
+
+**`dotnet build Spaarke.sln` could NOT be run green**, for a reason outside this task: the concurrent
+task-052 agent has uncommitted in-flight edits adding an `ILogger` constructor parameter to
+`CoreAncestorResolver` / `ActionSeam` / `CreateTaskNodeExecutor` / `TodoRegardingBuilder`, and later an
+unused `_coreAncestors` field in `EmailDraftToolHandler.cs`. These produce 11 test-project errors and
+2 BFF errors, all in files this task is fenced OUT of. Zero diagnostics were reported in any file this
+task touched. The ArchTests run above (182/182) executed in the window before the `EmailDraftToolHandler`
+edit landed and covers every ArchTest-relevant change in this commit.
