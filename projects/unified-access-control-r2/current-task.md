@@ -12,9 +12,9 @@
 | Field | Value |
 |---|---|
 | **State** | Branch **clean**, 0 unpushed, **0 behind master**. **PR #939 is MERGED.** |
-| **Just completed** | **PR #939 merged** (task 076 container contract + 050/052 + 034 canary) · **ALL THREE ADR AMENDMENTS**: **030** (ADR-003 A1), **031** (ADR-028 **A5**), **040** (ADR-034 A1) |
-| **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ after merging 73 commits of master · ArchTests **191/191** · full CI rollup **CLEAN** (32 pass / 1 skip) before merge |
-| **Next Action** | **Task 032 — IMPLEMENT.** Status `in-progress`: investigation **done**, `src/` **untouched**. ⚠️ **Read [`notes/task-032-evaluator-spine.md`](notes/task-032-evaluator-spine.md) FIRST** — it carries five findings, three of which are invisible from the POML's step list and one of which needed live Dataverse data. Implementing without it reproduces a silent cache bug and possibly a revocation. |
+| **Just completed** | **PR #939 merged** · **ALL THREE ADR AMENDMENTS** (030 / 031-as-**A5** / 040) · 🔑 **TASK 032 — THE EVALUATOR SPINE**, the deliverable this project is named for |
+| **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ · BFF unit **12,062 passed / 0 failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed** (ceiling 60) · 032's rights assertions **perturbation-verified** |
+| **Next Action** | **Task 033** — propagate the new shape to consumers + delete the blanket Collaborate stamp (`CallerPrincipalResolver`), which 032 deliberately left alone. Then **037** (Secure/Restricted) and **038/039** (deny list) fill the ordered veto seam 032 wired as a no-op. **041** is also open and is `parallel-safe: TRUE`. |
 
 ### 🔴 The traps that still apply
 
@@ -33,32 +33,20 @@
 
 ## ▶ NEXT SESSION — ORDERED WORK ITEMS
 
-### 1. 🔑 Task 032 — the evaluator spine (THE deliverable) — **investigation done, code not started**
+### 1. Task 033 — consumer propagation + delete the blanket Collaborate stamp
 
-⚠️ **Start by reading [`notes/task-032-evaluator-spine.md`](notes/task-032-evaluator-spine.md).** Five
-findings, each of which changes what the implementation must do:
+032 deliberately did NOT touch `CallerPrincipalResolver.cs` (task 033 owns it). That file still
+blanket-stamps Collaborate over every accessible record (register A-8) — 032 relocated that stamp INTO
+the evaluator as an explicit **term level**, so the two now coexist. 033 deletes the downstream stamp
+so per-record rights actually reach consumers.
 
-| # | Finding | Consequence |
-|---|---|---|
-| 1 | **Escalation trigger #2 does NOT fire** — verified against **live** Dataverse: every active grant row carries a non-null `sprk_accesslevel` on all three root types | Carry the real level; invent no default; no escalation needed |
-| 2 | 🔴 The project partition drops level-less rows; matter/WA does not. Making them "symmetrical" **silently revokes** access | Carry the level **without** adding the `HasValue` filter |
-| 3 | Live duplicate rows exist (one contact, **5 grant rows on one matter**) | Highest-wins dedupe must generalize to matters + WAs, or the answer depends on **row order** |
-| 4 | The level→rights mapping **already exists** (`ExternalCallerContext.GetEffectiveRights`) | **Extract** it to one internal static (§11) — the step's "add the mapping" wording invites a duplicate |
-| 5 | 🔴 The Redis cache persists project levels but **matter/WA ids only** | Fixing only the query path is correct on a cache **miss** and `None` on a cache **hit** (60 s TTL) while unit tests stay green. Extend `CachedGrantSet` **and bump `CacheVersion`** |
+### 1b. Tasks 037 / 038 / 039 — fill the veto seam 032 wired
 
-`(recordId → rights)` with additive terms composed by highest-wins `max()`, then ordered vetoes.
-**ADR-003 Amendment A1 sanctions exactly this shape**, so it lands compliant rather than in violation.
-The binding contract is now written in `.claude/adr/ADR-003-authorization-seams.md`:
-
-```
-max(dataverse-answer, explicit-grant, derived-member, org-expansion, inheritance)
-  -> deny list -> Restricted            (vetoes, AFTER the max, in this order)
-Secure suppresses derived-member + org-expansion BEFORE the max, every principal kind
-"No Access" is a VETO, never a level
-```
-
-Then the chain it unblocks: **033 / 037 / 042**, then **036 / 039 / 043 / 044**.
-`opus` @ `xhigh`, `parallel-safe: false`.
+`ApplyVetoPipeline` in `AccessibleRecordSetService.cs` is an **ordered no-op** with two named slots.
+The order is already correct and load-bearing — pre-max Secure suppression, then deny list, then
+Restricted. Filling a slot is an additive change at a named point.
+⚠️ A veto **removes a key**. It must never write a low rights value: under `max()` a low value is
+ignored, so an ethical wall modelled as a level fails silently in exactly the case it exists for.
 
 ### 2. Task 041 — the access-conferring column registry (contact **+ org**)
 
