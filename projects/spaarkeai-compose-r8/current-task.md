@@ -1,7 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
 > **Last Updated**: 2026-09-03 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
-> **Recovery**: read Quick Recovery, then **§GAPS (the highest-priority open work)**, then §UX, then §U8-BUILD.
+> **Recovery**: read Quick Recovery, then **§UAT (owner is UATing item 8 in parallel)**, then **§GAPS (highest-priority open work)**, then §UX, then §U8-BUILD.
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -13,7 +13,7 @@
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`cd6f54c84`** — **pushed, 0 unpushed, tree clean.** **PR #924 is MERGED** (master @ `d7fd88366`); the 4 commits after it have **NO open PR** and need a new one to reach master. |
 | **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
-| **Next Action** | **0) §GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
+| **Next Action** | **0) Owner is UATing item 8 in parallel (2026-09-03) — expect findings; see §UAT for what was exercised and the known limits that are NOT defects.** Then: **§GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
 | **Suite** | Compose client **1,443/1,443** (110 suites) · Compose server **2,009/2,009** · ArchTests **191/191** · BFF build 0 errors — re-run after the 17-commit master merge, not carried over |
 | **Deployed (current)** | ✅ **2026-09-03 late** from **`91123fa23`** — BFF + `sprk_spaarkeai` together (NFR-05). BFF `/healthz` passed; code page `sprk_spaarkeai` 5,756 KB published to `spaarkedev1`. **Artifact verified by STRING LITERAL before upload**: `Summarise changes` ×2, `Include revision report` ×1, `Open in preview` ×1, `Auto Save On` **0**. Item 8 is now exercisable end-to-end. |
 | **PR** | **#938** open against master (5 commits). #924 already merged (master @ `d7fd88366` → now includes email-intelligence #936/#937). |
@@ -60,6 +60,52 @@
 3. 🔲 **Editable spacing** — model + renderer. **The risk that keeps it out of a UX task**: the moment the
    model owns spacing, `InheritProperties` must change, and getting it wrong flattens spacing on every
    edited paragraph — the `paragraph-style-flattened` defect replayed.
+
+---
+
+## UAT. Item 8 — what to exercise, and what is NOT a defect (added 2026-09-03 for parallel UAT)
+
+**Deployed build**: `91123fa23` → `spaarkedev1`. **Hard-refresh first** (the web resource caches).
+
+### 1. Toolbar restructure (UX item 5) — first time this has actually been visible
+
+It was committed 2026-09-02 but the environment ran a stale bundle until today. Expect: Undo/Redo **far
+left**; format menus Body · Paragraph · Font · Table; tool icons right-aligned; a **warning triangle on the
+Save icon** while unsaved (the old "Unsaved · Auto Save On" TEXT is gone); chevrons on Word and Save.
+Word menu = Open in web / Open in desktop / Open in preview / Apply template / **Summarise changes**.
+
+### 2. "Summarise changes" (Word menu) — four outcomes, all deliberate
+
+| Do this | Expect |
+|---|---|
+| Click it with **unsaved edits** | A modal: *"There are unsaved changes… Save before generating the summary?"* → **Save and summarise** saves AND then summarises. It must do both — if it only saves, that is a defect. |
+| Click it on a document with **no tracked changes** | An honest banner: *"This document has no tracked changes or comments to summarise."* **A generated summary here WOULD be the defect** — the action was pulled from the selection toolbar precisely because, dispatched empty, the model invents a phantom "[Insertion]". |
+| Click it on a doc **with** Word tracked changes/comments | A plain-language summary in the Assistant pane. |
+| A failure | A user-safe banner, no server detail, no document content. |
+
+### 3. "Include revision report" (SAVE menu) — appears only AFTER a summary
+
+Not visible until a summary has been generated — deliberate; there is no report to append before one
+exists. Tick it, save, reopen: a **Document Revision Report** appendix at the END of the document, with a
+scope line naming the document, version and date, and an "has not been verified" disclaimer.
+
+### ⚠️ Most likely UAT blocker — environmental, not code
+
+The action dispatches through a **deployed catalog Binding**. `useComposeToolbarActivation` fills its
+`bindingId` from `GET /api/ai/capabilities?surface=compose`; if `compose-summarize-word-changes` is not
+seeded in THIS environment's catalog, the dispatch reports a failure banner. That is a **catalog/seed
+issue**, not the wiring. Check before filing: the action was restored to the toolbar registry this session
+with `surfaces: []`, which is what lets its binding land at all.
+
+### Known limits — please do NOT file these
+
+- **A new list item added INSIDE a loaded (projected) list shows no number.** Documented deliberate limit
+  (`ComposeEditor.tsx`); a browser count there would contradict the document's own numbering. This is
+  numbering item 3, still open — see the Next Action.
+- **The report is an APPENDIX (end of document), not a cover sheet.** Front-insertion is a separate piece
+  of work (it needs a leading section break, which collides with `section-break-flattened`).
+- **The NDA "Summary Page" appendix still does nothing** — that is §GAPS's open `summaryPage` instance, a
+  different feature, not this one.
 
 ---
 
