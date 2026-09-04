@@ -203,6 +203,7 @@ npm run typecheck          # NOTE: ~397 PRE-EXISTING exactOptional errors — fi
 - [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — auth architecture (+ the Office NAA exception)
 - [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) — Fluent UI v9 / dark mode
 - [`communication-intelligence-architecture.md`](communication-intelligence-architecture.md) — the email capture + association + triage substrate the Save flow feeds
+- [`content-identity-and-deduplication-architecture.md`](content-identity-and-deduplication-architecture.md) — the dedup layers the Save / save-back path rides (item identity, content hash, message id; graduate-on-divergence for editable docs)
 - [`spaarke-todo-architecture.md`](spaarke-todo-architecture.md) — the `sprk_todo` entity the Create To Do flow writes
 - [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.3 — per-env Entra redirect-URI registration
 - [`docs/guides/office-addins-admin-guide.md`](../guides/office-addins-admin-guide.md) · [`docs/guides/office-addins-deployment-checklist.md`](../guides/office-addins-deployment-checklist.md) — operator guides (verify against this doc; may lag)
