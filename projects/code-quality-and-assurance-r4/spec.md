@@ -1,7 +1,7 @@
 # Code Quality & Assurance R4 — AI Implementation Specification
 
-> **Status**: Ready for review (pre `/project-pipeline`)
-> **Created**: 2026-09-03
+> **Status**: Executing — `/project-pipeline` ran 2026-09-04; 33 tasks generated (P2b deliberately deferred to task 020's sizing)
+> **Created**: 2026-09-03 · **Amended**: 2026-09-04 — **FR-10 rewritten** (revision-header standard, owner direction), Owner Clarifications gained 3 rows, Unresolved Questions 1 + 3 resolved
 > **Source**: [`design.md`](design.md) (620 lines, 13 findings, 5 phases)
 > **Binding owner constraint**: this must NOT be a massive change to how we work. Every phase is a small, independently shippable capability, and **r4 may stop cleanly after any phase**.
 
@@ -102,8 +102,42 @@ Amend ADR-012: 2+ consumers stays a trigger **to evaluate**, not a mandate to pr
 
 ### P3 — The governance surface maintains itself
 
-**FR-10 — Stamps exist and are assertable.**
-*Acceptance*: a census test asserts a parseable `last-reviewed` on every `.claude/skills/*/SKILL.md`, `constraints/*.md`, and `patterns/**/*.md`; **a new unstamped file fails the build**; ~110 files gain a first stamp (0/16 constraints, 0/94 patterns, 8 unstamped skills, 1 `YYYY-MM` placeholder).
+**FR-10 — One revision-header standard, applied by script, assertable by census.**
+
+> **AMENDED 2026-09-04** (owner direction, recorded as a spec-level path-B amendment per CLAUDE.md §6.5). The original text asked for "a parseable `last-reviewed`; ~110 files gain a **first** stamp (0/16 constraints, 0/94 patterns)". **That count is an artifact of measuring only YAML frontmatter.** Re-measured 2026-09-04:
+>
+> | Surface | frontmatter `last-reviewed:` | blockquote `> **Last Reviewed**:` |
+> |---|---|---|
+> | skills (71) | 63 | — |
+> | constraints (16) | **0** | **15** |
+> | patterns (94) | **0** | **87** |
+>
+> The files are **not undated** — the repo carries two competing conventions, and only ~9 files genuinely lack a date. The work is a **format standardisation**, not a 110-file authoring job. The requirement is restated accordingly, and widened per owner direction: a date alone is insufficient — the header must also carry a version and the *kind* of the last change.
+
+*Requirement*: adopt **one** repo-wide file revision header — top-of-file, human readable, machine parseable — and backfill it across the 230 `.claude/` governance primitives **by script, not by LLM**.
+
+*The header* (`docs/standards/FILE-REVISION-HEADER.md`):
+
+```yaml
+---
+version: 1.0
+status: active
+revision-type: baseline
+last-updated: 2026-08-14
+last-reviewed: 2026-05-17
+reviewed-by: ai-procedure-quality-r1
+---
+```
+
+Only `version` and `revision-type` are new; the other four already exist somewhere in the tree. `revision-type` describes the **last** change: `major` = a MUST/MUST NOT or the rule's meaning changed · `minor` = content added or clarified · `editorial` = typo/link/formatting, no version bump · `baseline` = standard applied retroactively, history predates versioning · `initial` = first authored under the standard.
+
+**`last-updated` and `last-reviewed` MUST stay distinct** — FR-13's auto-bump moves only `last-reviewed`, so the stamp honestly means *verified nothing changed*. Collapsing them breaks the three-tier model.
+
+*Why frontmatter and not the blockquote*: skills **cannot** drop frontmatter — Claude Code parses `description`/`tags`/`appliesTo` from it. Choosing the blockquote as the standard would leave all 71 skills carrying two headers.
+
+*Acceptance (closed set)*: (a) the standard is published at `docs/standards/FILE-REVISION-HEADER.md`; (b) `scripts/quality/Update-DocHeader.ps1` applies it — **preserving existing dates** (inventing none), deriving `last-updated` from `git log -1 --format=%as` where absent, seeding `version: 1.0`/`revision-type: baseline`, removing the migrated blockquote lines so there is one source of truth, **adding keys only** for skills (never touching `description`/`tags`/`techStack`/`appliesTo`/`alwaysApply`/`exemplar`), idempotent, with `-Path` and a `-Check` mode that exits non-zero; (c) the backfill has run across `.claude/{skills,constraints,patterns,adr}`; (d) a census test asserts the header on every such file with the positive **and** negative controls ADR-038 requires, and **a new unstamped file fails the build**.
+
+*Scope*: `.claude/**` (230 primitives) in r4 — these are what FR-12's staleness ranking consumes. `docs/**` (324 files) is the **same script with a different `-Path`**, deliberately deferred: a 554-file diff across both trees while ~17 worktrees are active is precisely the collision NFR-06 warns about.
 
 **FR-11 — Usage is measured.**
 *Acceptance*: a `PostToolUse` hook appends `timestamp, name` to a usage log — matching the **Skill** tool for skills, and **Read** on `.claude/{adr,patterns,constraints}/**` for the rest. Registered in `.claude/settings.json` alongside the two hooks live since March. Retroactive ADR citation counts (FR-04) mean ranking works from day one rather than after months of accumulation.
@@ -226,7 +260,7 @@ Amend ADR-012: 2+ consumers stays a trigger **to evaluate**, not a mandate to pr
 | New component | Existing overlap | Can extend? | Cost-of-doing-nothing |
 |---|---|---|---|
 | `SharedPackageCensusTests` | `CredentialCensusTests`, `Adr038TestBanGuardTests` | No — a census asserts one enumerated set; folding a second subject in breaks per-file locality. Reuses `SourceScan`. | Package #16 lands silently; ADR-012's amendment rule stays unenforceable |
-| Stamp census (FR-10) | `CredentialCensusTests`, `SharedPackageCensusTests` | No — those assert a *package list*; this asserts *frontmatter presence across 181 files*. Different failure message. | FR-12 has nothing to measure for ~110 of 181 files |
+| Revision-header standard + census (FR-10) | `CredentialCensusTests`, `SharedPackageCensusTests`; the two incumbent header conventions | No — those assert a *package list*; this asserts *header presence and shape across 230 files*. Different failure message. **The two incumbent conventions are not extensible into each other**: skills cannot drop frontmatter (Claude Code parses it), so the blockquote cannot be the standard. | FR-12's ranking cannot parse two conventions, so it reads 181 of 230 files as undated when only ~9 truly are — and ranks them all as maximally stale |
 | Nightly workflow (FR-12) | `nightly-health.yml`, `adr-audit.yml` | **Considered, rejected** — folding a governance report into `nightly-health`'s issue mixes audiences and dilutes a channel that gets read | Four specified cadences have already failed to fire. A fifth is the predictable outcome. |
 | Usage hook (FR-11) | `post-edit-lint.sh`, `task-quality-gate.sh` | **Yes — same mechanism, new matcher.** No new capability. | FR-12's ranking degenerates to a calendar, which produced the 55-file wall |
 | Export index (FR-16) | `spaarke-components-inventory.json` | No — that indexes Dataverse components from a live environment; this indexes TS exports from barrels | FR-17 and FR-18 both cite a rung that does not exist |
@@ -291,6 +325,9 @@ Amend ADR-012: 2+ consumers stays a trigger **to evaluate**, not a mandate to pr
 | Project structure | One project or split? | **One project, two workstreams** — the r3 precedent. | Single worktree |
 | Staleness threshold | 120 days? | **Replaced** by `drift × usage` ranking. | FR-12a |
 | Tests | How do we manage the suite? | Make growth and silencing **visible**, never gated; leave the 68 skips to #794. | FR-25, FR-26 |
+| **Revision tracking** (2026-09-04) | Is "a parseable `last-reviewed`" enough? | **No.** We need **one standard way to date and revision-track our files** — at the top, human readable, carrying more than a date (revision type, version number). It is a large number of files, but it should run **through a script with regex or other matching**, so it is not really a lot of LLM work. | **FR-10 rewritten** (§P3): a published standard + `Update-DocHeader.ps1` + a scripted backfill + census. Tasks 030–033. |
+| **Execution posture** (2026-09-04) | Operator-gate every wave? | **No.** Run **autonomous** as long as it is safe and accurate; stop only for a true decision or a significant issue that genuinely needs operator direction. | plan.md §3.5; the `<escalation><trigger>` blocks already in each POML are the stop conditions |
+| **Scope trim** (2026-09-04) | Full P1–P5, or defer P4/P5 to r5? | **Full P1–P5, with P2 split** — P2a classifies; P2b's arch tests are sized by task 020, then decomposed by re-running `/task-create`. | Resolves Unresolved Questions 1 and 3 below |
 
 ---
 
@@ -306,9 +343,9 @@ Amend ADR-012: 2+ consumers stays a trigger **to evaluate**, not a mandate to pr
 
 ## Unresolved Questions
 
-- [ ] **Scope trim** — see the estimate below. r4 at full P1–P5 is comparable in size to r3 (35 tasks) and ci-cd-r1 (45). Is that acceptable given "not a massive change," or should P4/P5 defer to r5? — **Blocks**: `/project-pipeline` task decomposition only, not P1.
-- [ ] **FR-23 runner** — Claude Code headless in GitHub Actions is assumed available; the auth/runner mechanics are unverified. — **Blocks**: P5 only.
-- [ ] **FR-07 set size** — genuinely unknown until FR-05 completes. The estimate below carries a range, honestly. — **Blocks**: P2 task count only.
+- [x] **Scope trim** — ~~should P4/P5 defer to r5?~~ **RESOLVED 2026-09-04 (owner)**: full P1–P5, no deferral. Each phase remains an independently valid stopping point per NFR-01.
+- [ ] **FR-23 runner** — Claude Code headless in GitHub Actions is assumed available; the auth/runner mechanics are unverified. — **Blocks**: P5 only. **Task 052 is the probe**; if it fails, P5 drops FR-23 and does *not* build an alternative.
+- [x] **FR-07 set size** — ~~unknown until FR-05 completes~~ **RESOLVED 2026-09-04 (owner) by splitting P2**: P2a (tasks 010–013) classifies; task **020** emits the criterion-bounded set and reports its size; P2b is then decomposed by re-running `/task-create`. The 33 tasks generated at pipeline time therefore exclude P2b by design.
 
 ---
 
@@ -320,7 +357,7 @@ Amend ADR-012: 2+ consumers stays a trigger **to evaluate**, not a mandate to pr
 |---|---|---|---|
 | **P1** | ADR-012 amendment; census test; baseline report | **3–4** | Days |
 | **P2** | Classify 49 (fan-out candidate); arch tests for the criterion set; issue-body edit; classification-guard census | **8–14** | The variable phase |
-| **P3** | Stamp census; ~110 stamp backfill; usage hook; nightly workflow + ranking script; auto-bump; point-of-use line | **7–8** | — |
+| **P3** | Revision-header standard + `Update-DocHeader.ps1` + scripted backfill + census; usage hook; nightly workflow + ranking script; auto-bump; point-of-use line | **9** | — |
 | **P4** | Index generator + wiring; escalation ladder; equivalence check; divergence register; `constraints/reuse.md` | **6–7** | — |
 | **P5** | Checklist generator + integration; prompt wiring; prompt refresh; 3 doc fixes; test-health section; KEEP directive; knip | **8–9** | — |
 | | **Total** | **~32–42** | |

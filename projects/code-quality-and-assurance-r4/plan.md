@@ -170,8 +170,9 @@ is mechanical — which is most of them. Dispatch each task through `task-execut
 **What is NOT a stop**: a task failing its own verification. Fix it and re-run, or mark it 🔄 and continue
 with the wave's other tasks. One failure does not abort a wave.
 
-**One prerequisite before P3**: resolve risk **R4** — `spec.md` FR-10 still describes the superseded
-requirement. Amend it (or record the divergence) before task 030 runs.
+~~**One prerequisite before P3**: resolve risk **R4**~~ — ✅ **DISCHARGED 2026-09-04.** `spec.md` FR-10 was
+rewritten to the revision-header standard, with the amendment recorded inline and in Owner Clarifications.
+Spec and tasks now agree; task 030 is unblocked.
 
 ---
 
@@ -327,7 +328,7 @@ Mirrors spec §Success Criteria; each is verified by exercising the mechanism, n
 | R1 | `.claude/` skill-directive collision with `unified-access-control-r2` (PR #939) | High | Med | `/conflict-check` before and before merge; sequence P4/P5 after #939 |
 | R2 | `.github/workflows/` collision with PR #894 | Med | Med | Coordinate before P3 merges; #894 is held for the shadow window anyway |
 | R3 | P2b turns out much larger than estimated | Med | High | Exactly why P2 is split — 020 sizes it before anything is committed |
-| R4 | **FR-10 as specified is superseded** by owner direction (revision-header standard) | — | — | **Path-B amendment to the spec.** Recorded here and in the P3 tasks; `spec.md` FR-10 must be updated to match before P3 executes, or the two disagree |
+| ~~R4~~ | ~~**FR-10 as specified is superseded** by owner direction (revision-header standard)~~ | — | — | ✅ **DISCHARGED 2026-09-04** — `spec.md` FR-10 rewritten to the revision-header standard (published header, `Update-DocHeader.ps1` contract, scoped to `.claude/**`, `docs/**` deferred), amendment recorded inline + in Owner Clarifications. Spec and tasks agree |
 | R5 | FR-23's headless runner does not work in Actions | Med | Med | Proven in task 052 before wiring; P5 is droppable per NFR-01 |
 | R6 | A later task silently re-adopts rejected scope | Med | High | The Out-of-Scope list is reproduced in each task's `<constraints>` |
 | R7 | The header backfill conflicts with in-flight worktree edits | Med | Low | `.claude/**` only; idempotent script; re-run after merge is free |
@@ -336,7 +337,7 @@ Mirrors spec §Success Criteria; each is verified by exercising the mechanism, n
 
 ## 9. Next Steps
 
-1. **Resolve R4** — update `spec.md` FR-10 to the revision-header standard so spec and tasks agree
+1. ~~**Resolve R4**~~ ✅ done 2026-09-04 — `spec.md` FR-10 rewritten
 2. **Run** `/conflict-check` for `.claude/` and `.github/workflows/`
 3. **Execute autonomously from task 001**, wave by wave per §3.5, building between waves
 4. **After P2a**, re-run `/task-create` for P2b, then continue
@@ -345,7 +346,7 @@ Mirrors spec §Success Criteria; each is verified by exercising the mechanism, n
 ---
 
 **Status**: Ready for Tasks — **autonomous execution**
-**Next Action**: resolve R4, then start task 001 and run through
+**Next Action**: `/conflict-check`, then task 001
 
 ---
 
