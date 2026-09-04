@@ -11,11 +11,11 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **033** — FR-19 consumer propagation + delete the blanket Collaborate stamp |
-| **Status** | 🔄 **IN PROGRESS** (2026-09-04). Code complete; suite running. |
-| **Repo state** | master MERGED (was 5 behind, clean merge); LW-build + doc-drift work committed + pushed |
-| **Next Action** | Finish 033: verify suite, run Step 9.5 gates (code-review + adr-check), measure publish size, write `notes/task-033-consumer-propagation.md`, flip TASK-INDEX |
-| **Progress** | **35 completed** · 2 completed-with-escalation · 1 blocked-shipped · **54 pending** (of 92) |
+| **Task** | **037 / 038 / 039** — fill the ordered veto seam (033 ✅ done 2026-09-04) |
+| **Status** | `pending` — not started. 033 shipped the consumer side they need |
+| **Repo state** | Branch **clean**, **0 unpushed**, master merged 2026-09-04 (`eb71df826`) |
+| **Next Action** | `task-execute` on 037 (Secure suppression / Restricted). **Read `notes/task-033-consumer-propagation.md` § For the next task first** — the consumer side is already wired, so a veto only has to REMOVE a key |
+| **Progress** | **36 completed** · 2 completed-with-escalation · 1 blocked-shipped · **53 pending** (of 92) |
 
 ### Completed THIS session (all merged or pushed)
 
@@ -27,6 +27,9 @@
 | **040** | ADR-034 **Amendment A1** — allow-list first-class + per-surface |
 | **032** 🔑 | **The evaluator spine** — `(recordId → rights)`, additive max, ordered veto seam |
 | **dead-code sweep** | Owner-directed. `WorkspaceGrid` → **shared** `CloseProjectDialog`; twin + `ProvisioningProgressStep` deleted. **−859 lines** |
+| **doc drift** | Two guides repointed at the shared wizards. `DATA-ACCESS-DECISION-CRITERIA` was stale **3 ways**, not the 1 filed |
+| **LW build** 🔧 | RED since 2026-07-02 — **fixed + watched**. Alias + 15 TipTap deps; `nightly-health.yml` now builds it. Verified by DELETING the alias (exit 1) and from a clean checkout |
+| **033** 🔑 | The write gates were already there and **could not fire**. Stamp deleted; rights per record on all 3 root types; caught a `HasFlag(None)` fail-open |
 
 ### Files modified this session
 
@@ -67,7 +70,7 @@ failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed*
 
 ## ▶ NEXT SESSION — ORDERED WORK ITEMS
 
-### 1. Task 033 — consumer propagation + delete the blanket Collaborate stamp
+### ~~1. Task 033~~ ✅ **DONE 2026-09-04** — see `notes/task-033-consumer-propagation.md`
 
 ⚠️ **Start FRESH — this changes effective rights on LIVE routes.** Deleting the stamp
 (`CallerPrincipalResolver.cs` `WorkforceProjectAccessLevel` :354-360, applied :429-431) means a
