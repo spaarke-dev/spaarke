@@ -135,16 +135,64 @@ and never traverse the endpoint mapping. They are green precisely while the feat
 | 1 | `paraIdMap` / `importedRevisions` / `importedComments` (compose-r2 task 052) | ✅ **FIXED then.** Guard is `ComposeWorkspace.imports.test.tsx` — client-side, cannot see the server side. |
 | 2 | **`summaryPage`** (nda-r1 task 041) | 🔴 **OPEN — this is the work.** |
 | 3 | `revisionReport` (r8, this session) | ✅ **FIXED in `cd6f54c84`**, caught before it reached a user. |
+| 4 | **`SummarizeSessionRequest.Style`** (found 2026-09-04 by the widened audit) | ✅ **RESOLVED by DELETION.** |
 
 So: **two shipped instances plus one caught in flight — not three shipped.** The pattern is real; the
 number used earlier was not, and a wrong number in a handoff gets acted on.
 
-### The forcing function now exists
+### The widened audit (2026-09-04) — the directive's "investigate more thoroughly" half
 
-`tests/Spaarke.ArchTests/ComposeSaveBodyMappingGuardTests.cs` (191/191 green) asserts every
+Scanned **every** inbound body DTO under `src/server/api/Sprk.Bff.Api/Api/**` — 23 DTOs across both
+dialects (`[property: JsonPropertyName]`-attributed and convention-bound). **One** real hit.
+
+⚠️ **The first scan was corpus-wide and could not see its own defect class.** Searching the whole solution
+for `x.Prop` is satisfied by the **service layer** reading its own request object, which masks exactly the
+missing *body→request* copy. The scan had to be **file-scoped** — the read must appear in the file that
+receives the body. Anyone re-running this must keep that scoping or the result is worthless.
+
+**The hit: `SummarizeSessionRequest.Style`** — declared, documented as *"passed through to the system
+prompt"*, read by nothing at any layer; no client sent it, no test covered it. A caller setting `style` got
+silent no-op behaviour from a field the contract advertised.
+
+**It was DELETED, not implemented — and that is the transferable lesson.** Honouring the doc comment would
+have threaded free caller text into a system prompt, which is precisely what **ADR-039's closed
+structured-operand vocabulary forbids**. The field was not merely dead; it advertised a capability the
+architecture rejects. When this class fires, *"make the documented behaviour real"* is one candidate repair
+and **not** automatically the right one. A summary style, if ever wanted, belongs in the Action/Binding row
+as a bounded enum.
+
+**A different flavour from `summaryPage`, worth telling apart:**
+
+| Flavour | Meaning | Instance |
+|---|---|---|
+| **Server-ready, client-unwired** | Implementation exists; transport does not | `summaryPage` |
+| **Declared, never implemented** | The API surface promises what no layer does | `Style` |
+
+Both present the same lie to a caller. The second is arguably worse: the doc comment actively promises
+behaviour, so a reader has no way to discover the truth short of tracing every layer.
+
+### The forcing function now exists — at BOTH scopes
+
+**Narrow**: `tests/Spaarke.ArchTests/ComposeSaveBodyMappingGuardTests.cs` asserts every
 `SaveComposeDocumentBody` property is READ by the endpoint or listed as a deliberate omission **with a
 written reason**. Carries the ArchTests-required negative + positive controls, and a real-file control was
 run (removing `RevisionReport = body.RevisionReport` makes it fail, naming that property).
+
+**Repo-wide (added 2026-09-04)**: `tests/Spaarke.ArchTests/InboundBodyDtoMappingGuardTests.cs` applies the
+same rule to **every** inbound body DTO in `Api/**`. **195/195 ArchTests green** (191 + 4).
+
+> **Why both, rather than replacing the narrow one**: the narrow guard carries the defect-class history and
+> the executable `summaryPage` open-gap record. Duplicating a *guard* costs little; losing that record costs
+> the gap.
+
+The general guard has **four** tests: the live assertion, a negative control, a positive control, and one
+pinning **both DTO dialects** — the attributed path short-circuits the convention-bound path, so a
+regression in either half would silently halve coverage while the headline assertion stayed green. `Style`
+lived in the convention-bound half, which is exactly the half the narrow guard never looked at.
+
+**A real-file end-to-end control was run**: re-seeding `Style` into the actual
+`SummarizeSessionEndpoint.cs` makes the live assertion FAIL; restoring it makes it pass. The seeded-string
+controls alone would only have proven the matcher works on synthetic input.
 
 ⚠️ **It found a defect in its own parser**: bounding the DTO slice at a literal `");` truncated the parse
 before the last property, so the guard silently under-reported — the exact quiet-omission failure it exists
