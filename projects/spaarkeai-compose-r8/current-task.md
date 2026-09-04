@@ -333,6 +333,66 @@ There are **two half-built paths to one need**, and **neither delivers today**:
 
 ⚠️ Not actioned unilaterally — this spans two other projects' features.
 
+### Owner decisions, 2026-09-04
+
+**D1 — No Notepad/`sprk_memo` output surface. CLOSED, do not re-propose.** I had raised "save the summary
+to the agreement's notepad" as a destination option (newly plausible since `sprk_agreement` joined
+`sprk_memo`'s parents on 2026-08-25). Owner: users do not want a Revision/Review/Agreement Summary living
+as a notepad-style memo. `sprk_memo` stays what it is — a user-authored scratchpad.
+
+**D2 — Rename to "… Summary". The word "Memo" is retired from this feature.** Reserve "Memo" for
+`sprk_memo`. Rename the toolbar label/tooltip and the persisted row's display name.
+
+⚠️ **D2 collides with a latent defect — do them together.** `PersistReviewMemoAsync` sets
+`OutputTypeId = null` **deliberately** (the `sprk_aioutputtype` GUID is environment-specific and would 400
+in other orgs), so the row is categorised by **matching its display name**:
+`GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo")`. **The user-visible display string
+IS the lookup key.** Renaming it silently orphans every previously-written row — the read finds nothing and
+returns the "no memo" negative path, which is indistinguishable from "not generated yet".
+
+Today that costs nothing (§GAPS-5: no rows exist). It will not stay free. The rename should therefore be
+paired with wiring the lookup by `sprk_outputtypecode` (`"REVMEMO"`) — which the code's own comment already
+names as the intended follow-up — so the display name becomes cosmetic and renameable thereafter.
+
+### Q3 (2026-09-04) — "should this be a Dataverse record?" It already IS one
+
+`PersistReviewMemoAsync` creates an **`sprk_analysisoutput`** row: `Name` = display string, `Value` = the
+memo JSON, `AnalysisId` = FK to `sprk_analysis`. So the JSON-in-Dataverse design the question asks for is
+what ships today.
+
+**Keep the table** — a dedicated `sprk_reviewsummary` entity fails §11's extension test: `sprk_analysisoutput`
+already models "an analysis produced this output", the Summary is exactly that, and no concrete behaviour
+fails without a new entity. The real gap is not the table, it is the **`OutputTypeId` categorisation** above.
+
+**SPE file link — not yet, and state the requirement before adding it.** The `.docx` is rendered ON DEMAND
+from the persisted JSON (`GetReviewMemoDocx`) and never stored. JSON-as-truth is deliberate ("render-from-
+persisted: exports ≡ the durable artifact") and it means template improvements apply retroactively. Storing
+a rendered `.docx` in SPE buys ONE thing the JSON cannot: an **immutable, shareable, permissioned artifact**
+— "this is the summary we sent counsel on 3 Sept". That is a legitimate legal need, but it is a *stated
+requirement*, not a default; adding it creates a second source of truth that can drift from the JSON. If it
+is added, the natural container is the **Document's**, which is why Q4 matters first.
+
+### Q4 (2026-09-04) — what the Summary is associated with: the **ANALYSIS**
+
+Verified chain: `session.HostContext.EntityType == Analysis` → `EntityId` = `analysisId` →
+`AnalysisOutputEntity.AnalysisId`. The **Document is reachable only indirectly**, via
+`GetAnalysisAsync(analysisId).DocumentId`.
+
+**That binding has a visible user consequence, already documented in the endpoint**: a session NOT bound to
+an Analysis (the *direct-Compose* door — only the *wizard* door binds durably) cannot persist a summary at
+all. The user gets **"Save The Document First"**, because saving is what creates the Analysis. So a review
+can genuinely complete with nowhere to hang its summary.
+
+**Assessment: Analysis is the correct OWNER; Document is the right DISCOVERY axis.**
+- Owner = Analysis, because the content (`{before, after, why}` per section) is only meaningful relative to
+  one review run. Re-running yields a new Analysis → new Summary, and history falls out for free. Re-parenting
+  to the Document would make "which review is this summarising?" ambiguous the moment a document is reviewed
+  twice.
+- Discovery = Document (and plausibly **Agreement**, the third candidate not named in the question — the
+  review is *about* an agreement; the document is merely its paper, and the record header lives on agreements).
+  Users ask "show me the summary for this agreement", not "for analysis GUID X". That is a **read-model**
+  concern — document/agreement → analyses → latest output — and needs **no storage change**.
+
 ### What this instance teaches that the DTO guard cannot
 
 The guard proves every declared field is *read*. It cannot prove a **route is called**, and this defect lives
