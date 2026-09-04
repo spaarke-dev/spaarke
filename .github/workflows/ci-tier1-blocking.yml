@@ -205,16 +205,36 @@ jobs:
 
   # --------------------------------------------------------------------------
   # Job 1 — compile (Debug only, no -warnaserror)
-  # Budget: <60s warm cache. Scoped to BFF csproj for speed. WarningsAsErrors
-  # policy lives in Directory.Build.props (TreatWarningsAsErrors=true +
-  # WarningsNotAsErrors=CS0109;CS0618;CS1998;CS8601;CS8604), so the CLI does
-  # NOT pass -warnaserror — see
+  # WarningsAsErrors policy lives in Directory.Build.props
+  # (TreatWarningsAsErrors=true + WarningsNotAsErrors=CS0109;CS0618;CS1998;
+  # CS8601;CS8604), so the CLI does NOT pass -warnaserror — see
   # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+  #
+  # SCOPE = THE WHOLE SOLUTION (widened 2026-08-31; was `Sprk.Bff.Api.csproj`
+  # only). This closes the shadow window's ONE false green, and it is the reason
+  # that false green happened:
+  #
+  #   PR #934 added a 4th argument to IOfficeService.QuickCreateAsync without
+  #   updating Phase2EndToEndFixture.cs. `Sprk.Bff.Api.IntegrationTests` stopped
+  #   compiling (CS1503). Legacy `build-test` builds the whole solution, so it
+  #   caught it and blocked. This job built ONLY the BFF csproj, never saw the
+  #   test project, and passed — and Tier 2 (which did catch it) is excluded
+  #   from Router by design. Green Router over a solution that does not build.
+  #
+  # 5 of 8 test projects were reachable by NO blocking Tier 1 job:
+  #   Sprk.Bff.Api.IntegrationTests, Sprk.Provisioning.ControlPlane.LoadTests,
+  #   Sprk.Provisioning.ControlPlane.NightlyTests, Spaarke.Core.Tests,
+  #   Spaarke.Scheduling.Tests.
+  #
+  # Compile only — tests stay ADVISORY in Tier 2. The gate is "the solution
+  # builds", not "the tests pass"; that split is the whole point of the tiering
+  # (a unit-test flake must never block master, but code that does not compile
+  # always should). Measured whole-solution Debug build: ~21s warm.
   # --------------------------------------------------------------------------
   compile:
     name: Compile (Debug)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -234,12 +254,19 @@ jobs:
             ${{ runner.os }}-nuget-tier1-
             ${{ runner.os }}-nuget-
 
-      - name: Restore (BFF project only)
-        run: dotnet restore src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj --verbosity minimal
+      # No .NET Framework targeting pack needed: the ONE net462 project
+      # (Spaarke.Dataverse.CustomApiProxy) is deliberately NOT in Spaarke.sln, so
+      # the solution is net10-only and builds on ubuntu. That plugin is covered
+      # by its own packaging path, not here. If a net4x project is ever ADDED to
+      # the solution, this job will fail on ubuntu — which is the correct signal
+      # to make the runner choice explicitly rather than silently.
+      - name: Restore (whole solution)
+        run: dotnet restore Spaarke.sln --verbosity minimal
 
-      - name: Build (Debug, BFF project only)
+      - name: Build (Debug, whole solution)
         # No -warnaserror — Directory.Build.props centralizes that policy.
-        run: dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Debug --no-restore
+        # Compile ONLY. Test execution stays advisory in Tier 2.
+        run: dotnet build Spaarke.sln -c Debug --no-restore
 
   # --------------------------------------------------------------------------
   # Job 2 — arch-tests (MUST-NOT subset only)
