@@ -15,7 +15,10 @@
 > **🔴 UPDATE (schema confirmed, §11): `sprk_RelatedAgreement` ALREADY EXISTS — nothing to create.**
 > §9.1 row 8 said CREATE and was wrong. The bigger finding: the code declarations know **7 of 16**
 > document links, so Compose create-on-save silently drops nine link types — including Agreement.
-> **§11 supersedes §9.1.**
+> **§13 (MCP-confirmed) is the schema AUTHORITY — it supersedes §9.1 and §11.** Document carries 17
+> link lookups and only 2 of the 5 ADR-024 resolver fields. No production deployments exist, so the
+> careful migration ladder in §11.3 is withdrawn (§13.5) and the `organziation` typo should be fixed
+> now while it is free (§14).
 
 ---
 
@@ -591,3 +594,108 @@ e.g.:
 for that specific role — never a generic `sprk_document` on Agreement, which would just duplicate the
 subgrid. And if several roles emerge at once, that is the §4 intersect-entity signal rather than a column
 per role.
+
+---
+
+## 13. MCP-CONFIRMED schema (2026-09-04) — this supersedes §9.1 and §11 as the authority
+
+`describe('tables/sprk_document')` + `describe('tables/sprk_event')`. The owner's manual list was **exactly
+right**: 12 `related*` + 4 unprefixed. Four things it could not show:
+
+### 13.1 A 17th link the code lists also miss: `sprk_email`
+
+`sprk_email LOOKUP → email` (the OOB activity entity). Add to the map or exclude it explicitly with a
+reason — never by silent omission (§9.4).
+
+### 13.2 `sprk_relatedvendororg` and `sprk_relatedorganization` BOTH target `sprk_organization`
+
+Two lookups, one target, different **roles** (vendor vs general). This is the role-distinction pattern from
+§12 done correctly — legitimate, not a duplicate. But the map must carry both, and any "one link per target
+entity" assumption is wrong.
+
+### 13.3 🔴 Document has only **2 of the 5** ADR-024 resolver fields
+
+Present: `sprk_regardingrecordid`, `sprk_regardingrecordnumber`.
+**Absent: `sprk_regardingrecordtype`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`.**
+
+Compare `sprk_event`, which has the complete set **plus** `sprk_regardingrecordtypelogicalname`.
+
+**This confirms §7.2 with authority**: Document **cannot** host `RegardingResolver` today — the control's
+required bound property is the `sprk_regardingrecordtype` discriminator, which Document does not have. It is
+also why ADR-024 naming Document as a polymorphic entity is only half-true: it has the lookups, not the
+resolver layer.
+
+It also means `docs/data-model/field-mapping-reference.md` §Document is **doubly stale** — it lists neither
+the 16 lookups nor the 2 resolver fields.
+
+### 13.4 `spk_fileviewerid` — wrong publisher prefix AND zero code references
+
+`spk_` (no `r`), unlike every other column. A prefix comes from the publisher, so this implies a **second
+publisher/solution** in the org rather than a typo'd column name. `git grep spk_fileviewerid` across `src/`
+and `infra/` returns **nothing** — no reader, no writer. Orphan schema; worth confirming and dropping while
+pre-deployment.
+
+### 13.5 Owner: no production deployments — so §11.3's careful ladder is OVER-ENGINEERED
+
+*"we have no production deployments only dev data so does not impact customer data."*
+
+**Withdraw §11.3 steps 2–4** (read-both fallback, measure, migrate). Those exist to protect customer rows,
+and there are none. Revised:
+
+1. Point the map at `sprk_related*` only. Stop reading the unprefixed four outright.
+2. *Optional convenience only*: one bulk update in dev copying `sprk_matter → sprk_relatedmatter` (and
+   project/invoice/workassignment) so existing test records keep their filing and UAT is not confused. No
+   correctness requirement — dev data.
+3. Leave the four columns in place (dependencies), unread and unwritten. Mark them deprecated in their
+   schema descriptions.
+
+**The general point: pre-deployment is a window, not a permanent state.** Every schema decision deferred
+past first customer deployment gets materially more expensive — which is the whole argument for §14.
+
+---
+
+## 14. The `organziation` typo — RECOMMEND FIXING, now, and it is two columns not one
+
+**Confirmed live**: `sprk_event.sprk_regardingorganziation` (transposed `z`/`i`). Docs show the denormalised
+partner carries it too: **`sprk_regardingorganziationname`**. So **two columns**.
+
+### Why fix, rather than keep documenting it
+
+1. **Dataverse logical names are immutable.** You cannot rename — only create-new / migrate / delete-old.
+   After first customer deployment that becomes a data migration on live rows. **Today it costs nothing**
+   (§13.5). This is the cheapest it will ever be, and the window closes permanently.
+2. **The codebase already carries BOTH spellings**, and that is the actual hazard —
+   `sprk_document.sprk_relatedorganization` is spelled correctly. Cross-entity code naturally writes the
+   correct spelling and silently misses on Event. Same quiet-failure class as everything else in this file.
+3. **The tax is visible and recurring**: `TaskActionCore.cs` carries *"do not 'fix' it in code"*,
+   `AssociateToStep/types.ts` carries a warning comment, and there is a **test whose entire purpose is to
+   pin the misspelling** (`CreateEventWizard.associateToStep.test.ts`: *"preserves the
+   `sprk_regardingorganziation` typo exactly"*). That test is the tax made executable — every future
+   developer pays attention to it forever.
+
+### Blast radius — small and fully enumerated
+
+| File | What |
+|---|---|
+| `Services/Ai/Nodes/ActionCore/TaskActionCore.cs:53,69` | map entry + the "(SIC)" comment |
+| `Spaarke.UI.Components/src/components/AssociateToStep/types.ts:127,150` | warning comment + `lookupAttribute` |
+| `CreateEventWizard/__tests__/CreateEventWizard.associateToStep.test.ts:67,70` | **test that pins the typo — will fail, by design** |
+| `docs/data-model/entity-relationship-model.md:266` · `sprk_event-related-tables.md:99,100` | docs |
+
+### The work
+
+1. Create `sprk_regardingorganization` (+ `…organizationname`) on `sprk_event` → `sprk_organization`.
+2. Bulk-copy dev data from the typo'd columns.
+3. Update the three code sites; **flip the pinning test** to assert the correct spelling (it failing is the
+   forcing function doing its job, not a regression).
+4. Update the two doc files.
+5. **Check Dataverse dependencies before deleting** — views, forms, business rules, flows, charts, security
+   roles. Dataverse lists them; do not skip this because the code sites looked small.
+6. Delete the typo'd columns; remove the "(SIC)" comments.
+
+### While you are in there
+
+Sweep for siblings rather than fixing one: `spk_fileviewerid` (§13.4) is an orphan with a wrong prefix, and
+a general pass over column names pre-deployment is cheap now and impossible later. **Do the sweep once; do
+not make a habit of drive-by schema renames afterwards** — after first deployment §8 Tier 3's reasoning
+(don't rename for neatness) takes over again.
