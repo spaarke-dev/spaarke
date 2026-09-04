@@ -203,12 +203,12 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             "Enrichment starting | CommunicationId: {CommunicationId}, Direction: {Direction}, ArchivedDocumentId: {ArchivedDocumentId}",
             communicationId, direction, archivedDocumentId);
 
-        // Order is fixed (FR-08): association → categorization → AI analysis → RAG indexing → assessment.
+        // Order is fixed (FR-08): association → AI analysis → RAG indexing → triage → propose → create-task
+        // → attachment-action → regarding-intent → assessment. (The former "categorization" step was a
+        // permanently-empty no-op — content-class + urgency are produced by rung 5 and persisted by
+        // email-triage into sprk_triagecategory/sprk_triagepriority — removed 2026-09-03, ESCALATION E1 closed.)
         await RunStepAsync("association", communicationId,
             () => RunAssociationAsync(communicationId, direction, message, ct));
-
-        await RunStepAsync("categorization", communicationId,
-            () => RunCategorizationAsync(communicationId, direction, message, ct));
 
         await RunStepAsync("ai-analysis", communicationId,
             () => RunAiAnalysisAsync(communicationId, direction, archivedDocumentId, ct));
@@ -285,24 +285,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         return Task.CompletedTask;
     }
 
-    // ── Step 2: Categorization ───────────────────────────────────────────────────
-    /// <summary>
-    /// SEAM (schema gap — see task-010 ESCALATION E1). "Categorization (content-class + urgency)" has
-    /// NO persistence target: FR-01's schema pass adds no content-class/urgency columns to
-    /// <c>sprk_communication</c>. This step logs only; it does NOT write invented fields. The owner must
-    /// decide whether categorization gets dedicated schema (W0 amendment) or is subsumed by the FR-15 AI
-    /// rung (which already outputs category + urgency). Until then this is a documented no-op.
-    /// </summary>
-    private Task RunCategorizationAsync(
-        Guid communicationId, CommunicationDirection direction, NormalizedMessage message, CancellationToken ct)
-    {
-        _logger.LogDebug(
-            "Enrichment[categorization] seam (no schema target — ESCALATION E1) | CommunicationId: {CommunicationId}, Direction: {Direction}.",
-            communicationId, direction);
-        return Task.CompletedTask;
-    }
-
-    // ── Step 3: AI analysis ──────────────────────────────────────────────────────
+    // ── Step 2: AI analysis ──────────────────────────────────────────────────────
     /// <summary>
     /// SEAM (documented no-op for 010). App-only document analysis for the archived <c>.eml</c> is
     /// ALREADY enqueued at the archival site in BOTH paths
@@ -641,15 +624,68 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// </summary>
     private async Task<Guid?> ResolveTriageCategoryIdAsync(string categoryName, CancellationToken ct)
     {
-        var query = new QueryExpression("sprk_triagecategory")
+        // Exact match first (Dataverse string equality is case-insensitive) — the normal path now that the
+        // TRIAGE-EMAIL prompt lists the live taxonomy names (LookupChoicesResolver resolves the
+        // `lookup:sprk_triagecategory.sprk_name` $choices; that lookup was previously blanked by a
+        // pluralization bug, leaving category unresolved — fixed 2026-09-03).
+        var exact = new QueryExpression("sprk_triagecategory")
         {
             ColumnSet = new ColumnSet(false),
             TopCount = 1,
         };
-        query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, categoryName);
+        exact.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, categoryName);
+        var exactResult = await _genericEntityService.RetrieveMultipleAsync(exact, ct).ConfigureAwait(false);
+        if (exactResult.Entities.Count > 0)
+            return exactResult.Entities[0].Id;
 
-        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return result.Entities.Count > 0 ? result.Entities[0].Id : null;
+        // Defense in depth (NFR-04): the model may emit a formatting variant ("Court/Filing" vs
+        // "Court / Filing"). Fall back to a normalized comparison over the (small) taxonomy. Never
+        // fabricate a row (ADR-024) — an unmatched category stays unset.
+        var wanted = NormalizeCategory(categoryName);
+        if (wanted.Length == 0)
+            return null;
+
+        var all = new QueryExpression("sprk_triagecategory")
+        {
+            ColumnSet = new ColumnSet("sprk_name"),
+            TopCount = 200,
+        };
+        var allResult = await _genericEntityService.RetrieveMultipleAsync(all, ct).ConfigureAwait(false);
+        foreach (var row in allResult.Entities)
+        {
+            if (NormalizeCategory(row.GetAttributeValue<string>("sprk_name")) == wanted)
+                return row.Id;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Normalizes a triage-category name for tolerant matching: trimmed, case-folded, internal whitespace
+    /// collapsed, and spacing removed around '/'. So "Court / Filing", "court/filing", and "Court /  Filing"
+    /// all compare equal. Pure/deterministic.
+    /// </summary>
+    private static string NormalizeCategory(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var sb = new System.Text.StringBuilder(name.Length);
+        var lastWasSpace = false;
+        foreach (var ch in name.Trim().ToLowerInvariant())
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!lastWasSpace) { sb.Append(' '); lastWasSpace = true; }
+            }
+            else
+            {
+                sb.Append(ch);
+                lastWasSpace = false;
+            }
+        }
+
+        return sb.ToString().Replace(" /", "/").Replace("/ ", "/");
     }
 
     /// <summary>
