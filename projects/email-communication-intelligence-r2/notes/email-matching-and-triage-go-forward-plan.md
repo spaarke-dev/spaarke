@@ -88,6 +88,16 @@ Live verification overturned Pillar-B UAT finding #5 (like P1's root-cause doc, 
 
 ---
 
+## P1 ROOT-CAUSE CORRECTION (2026-09-04) — the y→ies fix was necessary but insufficient
+
+UAT round-1 (2026-09-04) FALSIFIED the "category fixed" claim: the deployed PR #936 build still left `sprk_triagecategory` = `None` on a fresh substantive capture (`Fw: LITG-119896 Monte Rosa…` — triaged fine on priority/summary/RI-conf/review, category empty). Empirical root-cause (Empirical-Reproduction-FIRST, §F.3) found the deeper gap:
+
+- **Triage runs on the Linear AI Consumer path** (`CommunicationTriageAi` → `IActionResolver`/`IActionRunner`), **not the node path**. `LookupChoicesResolver.ResolveFromJpsAsync` is invoked **only** by `AiAnalysisNodeExecutor` (node path). So the PR #936 `y→ies` fix was on a resolver **the triage path never calls** — correct, but insufficient.
+- The TRIAGE-EMAIL Action declares **`structuredOutput:true`**, so `PromptSchemaRenderer` renders only *"Return valid JSON matching the provided schema"* — the output fields (and any `— one of:` enum) are NOT rendered into the prompt. And the catalog `sprk_outputschemajson` leaves `category` a **free string** (FR-16). So the 7 taxonomy names reached the model through **neither** channel → free-form label → no taxonomy match → category unset (100% miss, since triage shipped).
+- **Real fix (`ceba44928`, ActionRunner, linear-path only):** (1) pre-resolve `$choices` before render (mirror the node path) via `IServiceScopeFactory` (Scoped resolver from the Singleton runner); (2) inject the resolved values as a JSON-Schema **`enum`** on the matching output property so structured-output decoding **enforces** the live taxonomy. Resolved per-run from live Dataverse → **FR-16 dynamism preserved** (catalog schema stays free string; an admin-added category appears next run). Best-effort/non-fatal (NFR-04). Also fixes any other JPS linear Action with `$choices` (prefills), which had the same latent gap.
+- Seam test `tests/integration/seam/Ai/ActionRunnerChoicesResolutionSeamTests.cs` (real ActionRunner+PromptSchemaRenderer+LookupChoicesResolver; positive = enum lands on category, control = free string, Verify pins `sprk_triagecategories`). 80-test ActionRunner/renderer/linear regression green; 26 triage/enrichment green.
+- Deployed to `spaarke-bff-dev` (45.45 MB, hash-verified, healthy). **UAT round-2 PASSED** (2026-09-04): capture `Fw: PAT-942665 Patent Application…` → `sprk_triagecategory` = **Administrative** (populated). Fix confirmed live.
+
 ## Session closeout (2026-09-03)
 
 | Item | Final status |
