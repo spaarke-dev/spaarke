@@ -337,20 +337,32 @@ Surfaces in scope: the BFF, the `sprk_documentuploadwizard` code page, `Semantic
 
 ### 8.6 — Verification
 
+All re-run AFTER the husky hook reformatted the staged files.
+
 | Check | Result |
 |---|---|
 | `dotnet build src/server/api/Sprk.Bff.Api/` | Build succeeded, 0 warnings, 0 errors |
+| `dotnet build tests/unit/Sprk.Bff.Api.Tests/` | Build succeeded, 0 errors |
 | `dotnet test tests/Spaarke.ArchTests/` | **182 / 182 passed** |
+| `dotnet test --filter ~RouteRetirementTests` | **13 / 13 passed** — incl. the NEW assertion that `PUT /api/obo/containers/{id}/files/{*path}` now 404s, and both re-pointed positive controls on `/api/obo/me/files` |
 | `Spaarke.UI.Components` jest (full) | **8 failed suites / 13 failed tests** — the stated pre-existing baseline, NOT exceeded |
 | `Spaarke.UI.Components` document-upload jest | 3 suites / 32 tests passed |
 | `Spaarke.SdapClient` jest | 2 suites / 27 tests passed |
 | `Spaarke.UI.Components` / `SemanticSearchControl` `npx tsc --noEmit` | clean |
+| `LegalWorkspace` `npx tsc --noEmit` (`WorkspaceGrid.tsx`) | 3 diagnostics, all pre-existing unused-variable noise at lines 19/190/192 — unchanged; the edits here are at ~524-565 |
 | DocumentUploadWizard `npx vite build` | built |
 
-**`dotnet build Spaarke.sln` could NOT be run green**, for a reason outside this task: the concurrent
-task-052 agent has uncommitted in-flight edits adding an `ILogger` constructor parameter to
-`CoreAncestorResolver` / `ActionSeam` / `CreateTaskNodeExecutor` / `TodoRegardingBuilder`, and later an
-unused `_coreAncestors` field in `EmailDraftToolHandler.cs`. These produce 11 test-project errors and
-2 BFF errors, all in files this task is fenced OUT of. Zero diagnostics were reported in any file this
-task touched. The ArchTests run above (182/182) executed in the window before the `EmailDraftToolHandler`
-edit landed and covers every ArchTest-relevant change in this commit.
+**`dotnet build Spaarke.sln` was never observed green in this session — but NOT because of a
+compile error in this work.** Two distinct causes, in sequence, both outside this task:
+
+1. Earlier: the concurrent task-052 agent's uncommitted in-flight edits (an `ILogger` ctor param on
+   `CoreAncestorResolver` / `ActionSeam` / `CreateTaskNodeExecutor` / `TodoRegardingBuilder`, then an
+   unused `_coreAncestors` field in `EmailDraftToolHandler.cs`) produced 11 test-project + 2 BFF
+   errors. **Those are now resolved** — that agent finished the change.
+2. Since then: **only `MSB3021` / `MSB3027` file-copy locks**, every one naming
+   `testhost (68788)` — that agent's long-running `dotnet test`. These occur at the copy-to-output
+   step, AFTER compilation, so they are not compile failures.
+
+Both projects the locks obscured were therefore built individually and are clean (rows 1-2 above),
+and every test project touched here was executed. Zero diagnostics were reported in any file this
+task modified, at any point.
