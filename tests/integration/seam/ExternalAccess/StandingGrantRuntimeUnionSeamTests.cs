@@ -26,6 +26,7 @@ using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
+using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
 namespace Sprk.Bff.Api.Tests.Seam.ExternalAccess;
 
 public sealed class StandingGrantRuntimeUnionSeamTests
@@ -188,8 +189,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
                 Projects = projectIds
                     .Select(id => new ExternalParticipation { ProjectId = id, AccessLevel = ExternalAccessLevel.ViewOnly })
                     .ToList(),
-                Matters = new HashSet<Guid>(),
-                WorkAssignments = new HashSet<Guid>(),
+                MatterGrants = NoRootGrants,
+                WorkAssignmentGrants = NoRootGrants,
             };
 
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)

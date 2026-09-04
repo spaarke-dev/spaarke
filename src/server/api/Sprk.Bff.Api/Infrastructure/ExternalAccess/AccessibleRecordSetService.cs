@@ -23,6 +23,7 @@
 // resolved principal (task 020). No caller-token exchange (no OBO), no Graph SDK types, no
 // AI-internal types.
 
+using Spaarke.Dataverse;               // AccessRights — the rights type (root CLAUDE.md §11: reuse, do not fork)
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 
@@ -64,8 +65,40 @@ public sealed class AccessibleRecordSet
     public required WorkforcePrincipalKind PrincipalKind { get; init; }
     public required string EntityType { get; init; }
 
-    /// <summary>The de-duplicated record ids the principal may access for this entity type.</summary>
-    public required IReadOnlySet<Guid> RecordIds { get; init; }
+    /// <summary>
+    /// The evaluator's answer: <c>(recordId → rights)</c> (unified-access-control-r2 task 032 / FR-19).
+    /// <para>
+    /// This replaces a bare <c>HashSet&lt;Guid&gt;</c>, which STRUCTURALLY could not carry a level —
+    /// the reason matters and work assignments had no rights at all (register A-8 / B-8). Terms
+    /// contribute per-record rights and compose by HIGHEST-WINS max; vetoes then REMOVE entries.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>A veto is never a value in this map.</b> "No Access" is not representable as a level: under
+    /// max() a low value is simply ignored, so an ethical wall modelled as a level would fail silently
+    /// in exactly the case it exists for (ADR-003 as amended by task 030). Vetoes delete keys.
+    /// </para>
+    /// </summary>
+    public required IReadOnlyDictionary<Guid, AccessRights> Rights { get; init; }
+
+    private IReadOnlySet<Guid>? _recordIds;
+
+    /// <summary>
+    /// The de-duplicated record ids the principal may access for this entity type.
+    /// <para>
+    /// As of task 032 this is a DERIVED VIEW over <see cref="Rights"/>, not a stored second collection,
+    /// so ids and rights cannot disagree. Kept at this exact shape so <c>Tier2ScopeFilterInjector</c>,
+    /// the module scope predicates and <c>CallerPrincipalResolver</c> are unaffected.
+    /// </para>
+    /// </summary>
+    public IReadOnlySet<Guid> RecordIds => _recordIds ??= Rights.Keys.ToHashSet();
+
+    /// <summary>
+    /// The rights the principal holds on <paramref name="recordId"/>, or
+    /// <see cref="AccessRights.None"/> when the record is not in the set. Fail-closed by construction:
+    /// absence is None, never a default grant.
+    /// </summary>
+    public AccessRights RightsFor(Guid recordId) =>
+        Rights.TryGetValue(recordId, out var rights) ? rights : AccessRights.None;
 
     /// <summary>Which design §5 union terms contributed to this set (audit + test introspection).</summary>
     public required AccessibleRecordSetSources Sources { get; init; }
@@ -89,10 +122,10 @@ public sealed class AccessibleRecordSet
     /// </summary>
     public int CapLimit { get; init; } = MembershipResolveOptions.MaxLimit;
 
-    public int Count => RecordIds.Count;
+    public int Count => Rights.Count;
 
     /// <summary>The enforcement check: <c>true</c> iff the record is in the composed set.</summary>
-    public bool Contains(Guid recordId) => RecordIds.Contains(recordId);
+    public bool Contains(Guid recordId) => Rights.ContainsKey(recordId);
 }
 
 /// <summary>
@@ -127,16 +160,110 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static bool IsGrantSupported(string entityType) =>
         GrantSupportedRootEntities.Contains(entityType);
 
-    /// <summary>The granted record ids of <paramref name="entityType"/> within a grant set.</summary>
-    private static IEnumerable<Guid> GrantedIdsFor(ExternalGrantSet grants, string entityType)
+    /// <summary>
+    /// The granted <c>(recordId → rights)</c> of <paramref name="entityType"/> within a grant set
+    /// (task 032 — was <c>GrantedIdsFor</c>, returning bare ids).
+    /// <para>
+    /// Every root type now contributes its row's OWN level. Matters and work assignments previously
+    /// contributed an id and no level, which is the structural defect FR-19 removes.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
+        ExternalGrantSet grants, string entityType)
     {
         if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
-            return grants.Projects.Select(p => p.ProjectId);
+            return grants.Projects.Select(p => KeyValuePair.Create(
+                p.ProjectId, ExternalAccessLevels.ToAccessRights(p.AccessLevel)));
+
         if (string.Equals(entityType, MatterEntity, StringComparison.OrdinalIgnoreCase))
-            return grants.Matters;
+            return grants.MatterGrants.Select(g => KeyValuePair.Create(
+                g.RecordId, ExternalAccessLevels.ToAccessRights(g.AccessLevel)));
+
         if (string.Equals(entityType, WorkAssignmentEntity, StringComparison.OrdinalIgnoreCase))
-            return grants.WorkAssignments;
-        return Enumerable.Empty<Guid>();
+            return grants.WorkAssignmentGrants.Select(g => KeyValuePair.Create(
+                g.RecordId, ExternalAccessLevels.ToAccessRights(g.AccessLevel)));
+
+        return Enumerable.Empty<KeyValuePair<Guid, AccessRights>>();
+    }
+
+    /// <summary>
+    /// The rights a MEMBERSHIP term contributes (ADR-034 membership; standing-grant membership).
+    /// <para>
+    /// Collaborate-equivalent, which RELOCATES rather than changes today's behaviour: the workforce
+    /// strategy currently blanket-stamps Collaborate over every accessible record downstream
+    /// (<c>CallerPrincipalResolver</c>, register A-8). Task 032 makes that an explicit TERM LEVEL inside
+    /// the evaluator so it composes under max instead of overwriting; the stamp itself is deleted by
+    /// task 033, and on the systemuser plane this term is replaced outright by Dataverse's own answer
+    /// when the FR-20 swap (task 036) lands.
+    /// </para>
+    /// <para>
+    /// It is a constant here ON PURPOSE: membership confers no per-record level, so inventing a
+    /// differentiated one would be fabricating authority the source data does not carry.
+    /// </para>
+    /// </summary>
+    internal const AccessRights MembershipTermRights =
+        AccessRights.Read | AccessRights.Write | AccessRights.Create;
+
+    /// <summary>
+    /// The additive composition: merge a term's contribution into the accumulator, HIGHEST WINS.
+    /// <para>
+    /// Rights are <c>[Flags]</c>, so "highest wins" is a bitwise OR of the contributed sets — a record
+    /// reached by a ViewOnly grant AND an org Collaborate grant ends at the union, exactly as the
+    /// grant-row dedupe does within a single term.
+    /// </para>
+    /// <para>
+    /// ⚠️ A term may only ADD or WIDEN. Nothing here can narrow or remove an entry — that is a veto's
+    /// job, and vetoes run after the max. Keeping the two operations distinct is what stops "No Access"
+    /// from being smuggled in as a low value that max() would silently discard.
+    /// </para>
+    /// </summary>
+    private static void AccumulateTerm(
+        Dictionary<Guid, AccessRights> accumulator,
+        IEnumerable<KeyValuePair<Guid, AccessRights>> term)
+    {
+        foreach (var (recordId, rights) in term)
+        {
+            accumulator[recordId] = accumulator.TryGetValue(recordId, out var existing)
+                ? existing | rights
+                : rights;
+        }
+    }
+
+    /// <summary>
+    /// The ordered veto pipeline seam (ADR-003 as amended by task 030 — design §4.5).
+    /// <para>
+    /// WIRED AS A NO-OP HERE, deliberately. Task 032 establishes the SHAPE and the ORDER; the terms that
+    /// fill these slots arrive later — Secure suppression (task 037), deny list (038/039), Restricted
+    /// (037). Reading flags or deny rows in this task is explicitly outside its envelope.
+    /// </para>
+    /// <para>
+    /// The order is load-bearing and is asserted by the shape of this method rather than by a comment
+    /// elsewhere:
+    /// </para>
+    /// <list type="number">
+    /// <item><b>Pre-max suppression (Secure)</b> — must run BEFORE the max, on the TERMS. After the max
+    /// the suppressed term has already won and the suppression is a no-op on the only inputs that
+    /// mattered.</item>
+    /// <item><b>Deny list</b> — post-max; removes the entry.</item>
+    /// <item><b>Restricted</b> — post-max, after the deny list; removes the entry.</item>
+    /// </list>
+    /// <para>
+    /// A veto REMOVES a key. It never writes a value, and there is no <c>AccessRights</c> value in this
+    /// codebase that means "denied" — absence is the only representation of no access.
+    /// </para>
+    /// </summary>
+    /// <param name="composed">The post-max map, mutated in place.</param>
+    private static void ApplyVetoPipeline(Dictionary<Guid, AccessRights> composed)
+    {
+        // Slot 1 — deny list (ethical wall + per-child revocation). Task 038/039.
+        //   foreach (var id in denyList) composed.Remove(id);
+
+        // Slot 2 — Restricted (sprk_accesspermission). Task 037.
+        //   foreach (var id in restricted) composed.Remove(id);
+
+        // Intentionally empty until those tasks land. The seam exists so that filling it is an
+        // additive change at a named point, rather than a re-derivation of where vetoes belong.
+        _ = composed;
     }
 
     /// <summary>
@@ -386,12 +513,18 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             $"systemuser {systemUserId}",
             ct).ConfigureAwait(false);
 
-        var ids = walk.Ids;
+        // ── ADDITIVE TERMS (design §4.5) ───────────────────────────────────────────────────────────
+        // Each term contributes (recordId -> rights); AccumulateTerm merges them highest-wins.
+        var composed = new Dictionary<Guid, AccessRights>();
 
-        // Contact-grants union — grants now span project / matter / work-assignment root types
-        // (task 028, closing R1 gap #2), so this term applies for any grant-supported entity. Prefer the
-        // derived contact (sprk_primarycontact); fall back to a verified-email match when the systemuser
-        // has no linked contact.
+        // Term — ADR-034 membership. Contributes at the membership term level (see MembershipTermRights).
+        AccumulateTerm(composed, walk.Ids.Select(id => KeyValuePair.Create(id, MembershipTermRights)));
+
+        // Term — contact grants. Grants span project / matter / work-assignment root types (task 028,
+        // closing R1 gap #2), so this applies for any grant-supported entity. Prefer the derived contact
+        // (sprk_primarycontact); fall back to a verified-email match when the systemuser has no linked
+        // contact. Each grant contributes ITS OWN level, so a ViewOnly grant no longer arrives as
+        // Collaborate.
         var contactGrantsApplied = false;
         if (IsGrantSupported(entityType))
         {
@@ -410,25 +543,25 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 var grants = await _participations
                     .GetGrantSetAsync(resolved, ct)
                     .ConfigureAwait(false);
-                foreach (var id in GrantedIdsFor(grants, entityType))
-                {
-                    ids.Add(id);
-                }
+                AccumulateTerm(composed, GrantedRightsFor(grants, entityType));
                 contactGrantsApplied = true;
             }
         }
+
+        // ── VETOES, after the max, in order (no-op seam until 037/038/039) ─────────────────────────
+        ApplyVetoPipeline(composed);
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
             "{Count} records over {Pages} membership page(s) (ADR-034 membership; contact-grants " +
             "union applied: {ContactGrants}; capped: {Capped}).",
-            systemUserId, entityType, ids.Count, walk.Pages, contactGrantsApplied, walk.Capped);
+            systemUserId, entityType, composed.Count, walk.Pages, contactGrantsApplied, walk.Capped);
 
         return new AccessibleRecordSet
         {
             PrincipalKind = WorkforcePrincipalKind.SystemUser,
             EntityType = entityType,
-            RecordIds = ids,
+            Rights = composed,
             Capped = walk.Capped,
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: true, ContactGrants: contactGrantsApplied, StandingGrantMembership: false),
@@ -444,21 +577,18 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             ?? throw new InvalidOperationException(
                 "A ContactOnly principal must carry a ContactId anchor (task 020 invariant).");
 
-        var ids = new HashSet<Guid>();
+        var composed = new Dictionary<Guid, AccessRights>();
 
         // Term 1 — explicit sprk_externalrecordaccess grants (per-record, materialized). Grants now span
         // project / matter / work-assignment root types (task 028, closing R1 gap #2): they contribute
-        // for any grant-supported entity, restricted to that entity's granted-id slice.
+        // for any grant-supported entity, each at ITS OWN level (task 032).
         var grantsApplied = false;
         if (IsGrantSupported(entityType))
         {
             var grants = await _participations
                 .GetGrantSetAsync(contactId, ct)
                 .ConfigureAwait(false);
-            foreach (var id in GrantedIdsFor(grants, entityType))
-            {
-                ids.Add(id);
-            }
+            AccumulateTerm(composed, GrantedRightsFor(grants, entityType));
             grantsApplied = true;
         }
 
@@ -478,25 +608,25 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 $"contact {contactId}",
                 ct).ConfigureAwait(false);
 
-            foreach (var id in walk.Ids)
-            {
-                ids.Add(id);
-            }
+            AccumulateTerm(composed, walk.Ids.Select(id => KeyValuePair.Create(id, MembershipTermRights)));
             capped = walk.Capped;
             membershipPages = walk.Pages;
             standingApplied = true;
         }
 
+        // ── VETOES, after the max, in order (no-op seam until 037/038/039) ─────────────────────────
+        ApplyVetoPipeline(composed);
+
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +
             "(grants: {Grants}, standing-grant membership: {Standing} over {Pages} page(s), capped: {Capped}).",
-            contactId, entityType, ids.Count, grantsApplied, standingApplied, membershipPages, capped);
+            contactId, entityType, composed.Count, grantsApplied, standingApplied, membershipPages, capped);
 
         return new AccessibleRecordSet
         {
             PrincipalKind = WorkforcePrincipalKind.ContactOnly,
             EntityType = entityType,
-            RecordIds = ids,
+            Rights = composed,
             Capped = capped,
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: false,

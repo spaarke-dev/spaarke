@@ -31,7 +31,12 @@ public class ExternalParticipationService
     // cached grant set now ALSO includes records inherited via ORGANIZATION grants (Term 3 — org
     // memberships from sprk_contactorganization). The bump orphans any v2 entry (it expires on its 60s
     // TTL) so no stale pre-org-grant read can occur.
-    public const int CacheVersion = 3;
+    // CacheVersion 4 (unified-access-control-r2 task 032 / FR-19): matter + work-assignment grants are
+    // now cached as (id + LEVEL) instead of bare ids. The bump is LOAD-BEARING, not bookkeeping — a v3
+    // entry deserializes into the v4 shape with no level, so every matter/WA would resolve to
+    // AccessRights.None for one TTL after deploy: rights correct on a cache MISS, absent on a HIT, with
+    // the unit suite green throughout because unit tests bypass the cache.
+    public const int CacheVersion = 4;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Grant-query construction (extracted by task 007 / FR-06, finding A-5)
@@ -165,7 +170,7 @@ public class ExternalParticipationService
                 {
                     _logger.LogDebug(
                         "[EXT-ACCESS] Cache HIT for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment grants",
-                        contactId, cached.Projects.Count, cached.Matters.Count, cached.WorkAssignments.Count);
+                        contactId, cached.Projects.Count, cached.MatterGrants.Count, cached.WorkAssignmentGrants.Count);
                     return cached.ToGrantSet();
                 }
             }
@@ -498,14 +503,32 @@ public class ExternalParticipationService
                     AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
                 })
                 .ToList();
+            // Task 032 (FR-19): matter/WA grants now KEEP the level that was already on the row —
+            // GrantRowSelect has always $select'ed sprk_accesslevel; the partitioning simply discarded
+            // it, which is why these root types had no level anywhere downstream (register A-8 / B-8).
+            //
+            // ⚠️ NOTE THE ASYMMETRY WITH `projects` ABOVE, WHICH IS DELIBERATE. The project filter
+            // requires `sprk_accesslevel.HasValue` and drops rows without one. Copying that here would
+            // read as tidy symmetry and would be a SILENT REVOCATION: a matter/WA row with a null level
+            // grants access today, and would stop granting it. So the level is carried as NULLABLE and
+            // the row is kept — set membership is unchanged, and a null level contributes
+            // AccessRights.None, which the highest-wins max cannot widen.
             var matters = rows
                 .Where(r => r._sprk_matter_value.HasValue)
-                .Select(r => r._sprk_matter_value!.Value)
-                .ToHashSet();
+                .Select(r => new ExternalRootGrant
+                {
+                    RecordId = r._sprk_matter_value!.Value,
+                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                })
+                .ToList();
             var workAssignments = rows
                 .Where(r => r._sprk_workassignment_value.HasValue)
-                .Select(r => r._sprk_workassignment_value!.Value)
-                .ToHashSet();
+                .Select(r => new ExternalRootGrant
+                {
+                    RecordId = r._sprk_workassignment_value!.Value,
+                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                })
+                .ToList();
 
             // Term 3 (task 073 #7): union ORGANIZATION grants — records granted to any organization the
             // contact is an ACTIVE member of (sprk_contactorganization junction). This mirrors the
@@ -523,9 +546,17 @@ public class ExternalParticipationService
                         AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
                     }));
                 foreach (var r in orgRows.Where(r => r._sprk_matter_value.HasValue))
-                    matters.Add(r._sprk_matter_value!.Value);
+                    matters.Add(new ExternalRootGrant
+                    {
+                        RecordId = r._sprk_matter_value!.Value,
+                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                    });
                 foreach (var r in orgRows.Where(r => r._sprk_workassignment_value.HasValue))
-                    workAssignments.Add(r._sprk_workassignment_value!.Value);
+                    workAssignments.Add(new ExternalRootGrant
+                    {
+                        RecordId = r._sprk_workassignment_value!.Value,
+                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                    });
             }
 
             // Dedupe project grants by id, keeping the HIGHEST access level — a contact may hold a direct
@@ -536,6 +567,21 @@ public class ExternalParticipationService
                 .Select(g => new ExternalParticipation { ProjectId = g.Key, AccessLevel = g.Max(x => x.AccessLevel) })
                 .ToList();
 
+            // Task 032: the SAME highest-wins rule now applies to matters + work assignments, for the
+            // same reason — the org-grant union above adds rows from a SECOND source, so one id can
+            // arrive twice at different levels.
+            //
+            // This was invisible before: both were HashSet<Guid>, so duplicates silently collapsed and
+            // no level could disagree. Duplicates are real, not theoretical — one dev contact holds FIVE
+            // active grant rows on a single matter. Without this, once levels are carried the answer for
+            // such an id would depend on ROW ORDER.
+            //
+            // `Max` over `ExternalAccessLevel?` ignores nulls and yields null only when EVERY row for
+            // that id lacks a level, which maps to AccessRights.None — fail-closed, and never a level
+            // invented for a row that had none.
+            matters = DedupeByHighestLevel(matters);
+            workAssignments = DedupeByHighestLevel(workAssignments);
+
             _logger.LogInformation(
                 "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment (incl. {OrgRows} org-grant rows)",
                 contactId, projects.Count, matters.Count, workAssignments.Count, orgRows.Count);
@@ -543,8 +589,8 @@ public class ExternalParticipationService
             return new ExternalGrantSet
             {
                 Projects = projects,
-                Matters = matters,
-                WorkAssignments = workAssignments,
+                MatterGrants = matters,
+                WorkAssignmentGrants = workAssignments,
             };
         }
         catch (Exception ex)
@@ -553,6 +599,21 @@ public class ExternalParticipationService
             return ExternalGrantSet.Empty;
         }
     }
+
+    /// <summary>
+    /// Collapses repeated grants on one record id to a single grant at the HIGHEST level (task 032).
+    /// The non-project generalization of the <c>projects</c> <c>GroupBy(...).Max(...)</c> rule above.
+    /// </summary>
+    private static List<ExternalRootGrant> DedupeByHighestLevel(IEnumerable<ExternalRootGrant> grants) =>
+        grants
+            .GroupBy(g => g.RecordId)
+            .Select(g => new ExternalRootGrant
+            {
+                RecordId = g.Key,
+                // Max over a nullable enum skips nulls; all-null yields null -> AccessRights.None.
+                AccessLevel = g.Max(x => x.AccessLevel)
+            })
+            .ToList();
 
     /// <summary>
     /// Term 3 (task 073 #7) — the ORGANIZATION-grant rows a contact inherits: active org grants (contact
@@ -661,8 +722,14 @@ public class ExternalParticipationService
                 Projects = grantSet.Projects
                     .Select(p => new CachedParticipation { ProjectId = p.ProjectId, AccessLevel = (int)p.AccessLevel })
                     .ToList(),
-                Matters = grantSet.Matters.ToList(),
-                WorkAssignments = grantSet.WorkAssignments.ToList(),
+                // Task 032: persist matter/WA LEVELS, not just ids. Writing ids here (the prior shape)
+                // is what would have made rights correct on a miss and None on a hit.
+                MatterGrants = grantSet.MatterGrants
+                    .Select(g => new CachedRootGrant { RecordId = g.RecordId, AccessLevel = (int?)g.AccessLevel })
+                    .ToList(),
+                WorkAssignmentGrants = grantSet.WorkAssignmentGrants
+                    .Select(g => new CachedRootGrant { RecordId = g.RecordId, AccessLevel = (int?)g.AccessLevel })
+                    .ToList(),
             };
 
             await _cache.SetAsync(
@@ -671,7 +738,7 @@ public class ExternalParticipationService
 
             _logger.LogDebug(
                 "[EXT-ACCESS] Cached grants for Contact {ContactId} (TTL: {Ttl}s): {Projects}p/{Matters}m/{Was}w",
-                idComponent, CacheTtl.TotalSeconds, cached.Projects.Count, cached.Matters.Count, cached.WorkAssignments.Count);
+                idComponent, CacheTtl.TotalSeconds, cached.Projects.Count, cached.MatterGrants.Count, cached.WorkAssignmentGrants.Count);
         }
         catch (Exception ex)
         {
@@ -763,17 +830,49 @@ public class ExternalParticipationService
         };
     }
 
+    /// <summary>
+    /// A cached non-project (matter / work-assignment) grant: id + level (task 032).
+    /// <c>AccessLevel</c> is nullable for the same reason <see cref="ExternalRootGrant"/>'s is.
+    /// </summary>
+    private sealed class CachedRootGrant
+    {
+        public Guid RecordId { get; set; }
+        public int? AccessLevel { get; set; }
+
+        public ExternalRootGrant ToGrant() => new()
+        {
+            RecordId = RecordId,
+            AccessLevel = (ExternalAccessLevel?)AccessLevel
+        };
+    }
+
+    /// <summary>
+    /// The cached grant-set shape.
+    /// <para>
+    /// 🔴 Task 032 fixed a defect that would otherwise have shipped GREEN. This type stored projects as
+    /// (id + level) but matters/WAs as bare <c>List&lt;Guid&gt;</c>. Carrying levels only on the QUERY
+    /// path would therefore have produced correct matter rights on a cache MISS and
+    /// <c>AccessRights.None</c> on a cache HIT — i.e. for most of every 60-second TTL — while the unit
+    /// suite stayed green, because unit tests bypass the cache entirely. Silent, intermittent, and
+    /// invisible to CI.
+    /// </para>
+    /// <para>
+    /// <b><see cref="CacheVersion"/> MUST be bumped whenever this shape changes</b> (3 → 4 here).
+    /// Without the bump, entries written under the old shape deserialize into the new one with levels
+    /// absent, reproducing exactly the bug above for one TTL after every deploy.
+    /// </para>
+    /// </summary>
     private sealed class CachedGrantSet
     {
         public List<CachedParticipation> Projects { get; set; } = new();
-        public List<Guid> Matters { get; set; } = new();
-        public List<Guid> WorkAssignments { get; set; } = new();
+        public List<CachedRootGrant> MatterGrants { get; set; } = new();
+        public List<CachedRootGrant> WorkAssignmentGrants { get; set; } = new();
 
         public ExternalGrantSet ToGrantSet() => new()
         {
             Projects = Projects.Select(p => p.ToParticipation()).ToList(),
-            Matters = Matters.ToHashSet(),
-            WorkAssignments = WorkAssignments.ToHashSet(),
+            MatterGrants = MatterGrants.Select(g => g.ToGrant()).ToList(),
+            WorkAssignmentGrants = WorkAssignmentGrants.Select(g => g.ToGrant()).ToList(),
         };
     }
 }

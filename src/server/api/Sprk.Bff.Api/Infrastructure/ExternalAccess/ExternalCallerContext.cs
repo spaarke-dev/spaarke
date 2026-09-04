@@ -52,17 +52,8 @@ public sealed class ExternalCallerContext
     /// <summary>
     /// Gets the effective AccessRights for the specified project based on access level.
     /// </summary>
-    public AccessRights GetEffectiveRights(Guid projectId)
-    {
-        var level = GetAccessLevel(projectId);
-        return level switch
-        {
-            ExternalAccessLevel.ViewOnly => AccessRights.Read,
-            ExternalAccessLevel.Collaborate => AccessRights.Read | AccessRights.Create | AccessRights.Write,
-            ExternalAccessLevel.FullAccess => AccessRights.Read | AccessRights.Create | AccessRights.Write | AccessRights.Delete,
-            _ => AccessRights.None
-        };
-    }
+    public AccessRights GetEffectiveRights(Guid projectId) =>
+        ExternalAccessLevels.ToAccessRights(GetAccessLevel(projectId));
 
     /// <summary>
     /// Gets all project IDs the Contact can access (for AI search filter construction).
@@ -81,13 +72,70 @@ public sealed class ExternalParticipation
 }
 
 /// <summary>
+/// A single <c>sprk_externalrecordaccess</c> grant against a NON-project root (matter or work
+/// assignment): the granted record id plus the level the grant row carries.
+/// <para>
+/// unified-access-control-r2 task 032 (FR-19). Before this, matter/WA grants were reduced to a bare
+/// <c>Guid</c> at partitioning while the level sat unread on the row — <c>GrantRowSelect</c> has always
+/// requested <c>sprk_accesslevel</c> for every row. That is the structural reason matters and work
+/// assignments had no access level anywhere in the pipeline (register A-8 / B-8).
+/// </para>
+/// <para>
+/// ⚠️ <b>Nullable by design.</b> The PROJECT partition drops rows whose level is null
+/// (<c>&amp;&amp; r.sprk_accesslevel.HasValue</c>); this shape deliberately does NOT, because applying
+/// that filter to matters/WAs would turn a level-less row from "grants access" into "grants nothing" —
+/// a silent REVOCATION on the security boundary. A null level keeps its id (set membership unchanged)
+/// and contributes <see cref="AccessRights.None"/>, which the highest-wins max cannot widen. Verified
+/// 2026-09-04: every active grant row in dev carries a level on all three root types, so this is a
+/// safety property for other tenants rather than a live case.
+/// </para>
+/// </summary>
+public sealed class ExternalRootGrant
+{
+    public required Guid RecordId { get; init; }
+    public required ExternalAccessLevel? AccessLevel { get; init; }
+}
+
+/// <summary>
+/// The ONE <see cref="ExternalAccessLevel"/> → <see cref="AccessRights"/> mapping (task 032; root
+/// CLAUDE.md §11 — reuse, do not fork).
+/// </summary>
+/// <remarks>
+/// Extracted from <c>ExternalCallerContext.GetEffectiveRights</c>, which is now a caller. It was the
+/// only implementation of this table, but it was an INSTANCE method that resolved a level from
+/// project-only <c>Participations</c> before mapping it, so no other root type could reach it. Task
+/// 032's step list says "add the mapping"; adding a second copy would have put a divergence in the one
+/// function where drift silently changes rights.
+/// </remarks>
+public static class ExternalAccessLevels
+{
+    /// <summary>
+    /// Maps a grant level to rights. Fails CLOSED: <c>null</c> and any value outside the enum yield
+    /// <see cref="AccessRights.None"/> (spec NFR-01) — an unrecognised level must never widen access.
+    /// </summary>
+    public static AccessRights ToAccessRights(ExternalAccessLevel? level) => level switch
+    {
+        ExternalAccessLevel.ViewOnly => AccessRights.Read,
+        ExternalAccessLevel.Collaborate => AccessRights.Read | AccessRights.Create | AccessRights.Write,
+        ExternalAccessLevel.FullAccess => AccessRights.Read | AccessRights.Create | AccessRights.Write | AccessRights.Delete,
+        _ => AccessRights.None
+    };
+}
+
+/// <summary>
 /// The FULL set of a Contact's active <c>sprk_externalrecordaccess</c> grants, partitioned by the
 /// grant's typed root lookup (spaarke-SPA-external-access-platform-r2 task 028 — polymorphic Tier-2
 /// scoping). A grant row targets exactly ONE root via its typed lookup (<c>sprk_project</c> /
 /// <c>sprk_matter</c> / <c>sprk_workassignment</c> — verified live), so the row falls into exactly one
-/// bucket here. Projects keep their access level (the CIAM <c>/me</c> per-project level mapping depends
-/// on it); matters and work assignments are id sets (read-scoping needs only the id — access derives
-/// from the root, and within-root rights are not level-differentiated for those types yet).
+/// bucket here.
+/// <para>
+/// <b>All three root types carry their access level</b> as of unified-access-control-r2 task 032
+/// (FR-19). This paragraph previously read "matters and work assignments are id sets … within-root
+/// rights are not level-differentiated for those types yet" — that is no longer true, and leaving it
+/// would have been exactly the failure mode where a stale comment becomes the constraint the next
+/// reader honours (FAILURE-MODES AP-12). <see cref="Matters"/> / <see cref="WorkAssignments"/> remain
+/// available as DERIVED id views for the read-scoping callers that only need ids.
+/// </para>
 /// </summary>
 /// <remarks>
 /// Direct document/invoice-level grants are intentionally OUT OF SCOPE (design §6 — access to a child
@@ -98,18 +146,44 @@ public sealed class ExternalGrantSet
     /// <summary>Project grants (id + level) — level preserved for the CIAM <c>/me</c> mapping.</summary>
     public required IReadOnlyList<ExternalParticipation> Projects { get; init; }
 
-    /// <summary>Matter grants (ids of <c>sprk_matter</c> the contact was granted).</summary>
-    public required IReadOnlySet<Guid> Matters { get; init; }
+    /// <summary>
+    /// Matter grants (id + level), task 032. The SOURCE OF TRUTH for matter access;
+    /// <see cref="Matters"/> is a derived view over it.
+    /// </summary>
+    public required IReadOnlyList<ExternalRootGrant> MatterGrants { get; init; }
 
-    /// <summary>Work-assignment grants (ids of <c>sprk_workassignment</c> the contact was granted).</summary>
-    public required IReadOnlySet<Guid> WorkAssignments { get; init; }
+    /// <summary>
+    /// Work-assignment grants (id + level), task 032. The SOURCE OF TRUTH;
+    /// <see cref="WorkAssignments"/> is a derived view over it.
+    /// </summary>
+    public required IReadOnlyList<ExternalRootGrant> WorkAssignmentGrants { get; init; }
+
+    private IReadOnlySet<Guid>? _matterIds;
+    private IReadOnlySet<Guid>? _workAssignmentIds;
+
+    /// <summary>
+    /// Matter grant ids (<c>sprk_matter</c>). A DERIVED VIEW over <see cref="MatterGrants"/> as of task
+    /// 032 — deliberately not a second stored collection, so ids and levels cannot disagree.
+    /// <para>
+    /// Kept at this exact shape (<c>IReadOnlySet&lt;Guid&gt;</c>) because
+    /// <c>CallerPrincipalResolver</c> assigns it straight into <c>AccessibleMatterIds</c>, and that file
+    /// belongs to task 033 — widening the property type here would have forced an edit outside this
+    /// task's envelope.
+    /// </para>
+    /// </summary>
+    public IReadOnlySet<Guid> Matters =>
+        _matterIds ??= MatterGrants.Select(g => g.RecordId).ToHashSet();
+
+    /// <summary>Work-assignment grant ids. A derived view over <see cref="WorkAssignmentGrants"/> — see <see cref="Matters"/>.</summary>
+    public IReadOnlySet<Guid> WorkAssignments =>
+        _workAssignmentIds ??= WorkAssignmentGrants.Select(g => g.RecordId).ToHashSet();
 
     /// <summary>The empty grant set (no grants of any root type).</summary>
     public static ExternalGrantSet Empty { get; } = new()
     {
         Projects = Array.Empty<ExternalParticipation>(),
-        Matters = new HashSet<Guid>(),
-        WorkAssignments = new HashSet<Guid>(),
+        MatterGrants = Array.Empty<ExternalRootGrant>(),
+        WorkAssignmentGrants = Array.Empty<ExternalRootGrant>(),
     };
 }
 

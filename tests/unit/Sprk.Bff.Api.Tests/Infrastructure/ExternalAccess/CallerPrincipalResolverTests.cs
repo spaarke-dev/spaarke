@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 
+using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
 namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 
 /// <summary>
@@ -131,7 +132,7 @@ public class CallerPrincipalResolverTests
             {
                 PrincipalKind = WorkforcePrincipalKind.SystemUser,
                 EntityType = "sprk_project",
-                RecordIds = new HashSet<Guid> { p1, p2 },
+                Rights = RightsOf(p1, p2),
                 Sources = new AccessibleRecordSetSources(true, false, false)
             });
         // Task 028: the strategy now composes matter + work-assignment roots too — empty here.
@@ -141,7 +142,7 @@ public class CallerPrincipalResolverTests
             {
                 PrincipalKind = WorkforcePrincipalKind.SystemUser,
                 EntityType = entity,
-                RecordIds = new HashSet<Guid>(),
+                Rights = RightsOf(),
                 Sources = new AccessibleRecordSetSources(true, false, false)
             });
 
@@ -180,7 +181,7 @@ public class CallerPrincipalResolverTests
             {
                 PrincipalKind = WorkforcePrincipalKind.ContactOnly,
                 EntityType = "sprk_project",
-                RecordIds = new HashSet<Guid> { grant },
+                Rights = RightsOf(grant),
                 Sources = new AccessibleRecordSetSources(false, true, false)
             });
         // Task 028: the strategy now composes matter + work-assignment roots too — empty here.
@@ -190,7 +191,7 @@ public class CallerPrincipalResolverTests
             {
                 PrincipalKind = WorkforcePrincipalKind.ContactOnly,
                 EntityType = entity,
-                RecordIds = new HashSet<Guid>(),
+                Rights = RightsOf(),
                 Sources = new AccessibleRecordSetSources(false, true, false)
             });
 
@@ -246,8 +247,8 @@ public class CallerPrincipalResolverTests
                     new() { ProjectId = p1, AccessLevel = ExternalAccessLevel.ViewOnly },
                     new() { ProjectId = p2, AccessLevel = ExternalAccessLevel.FullAccess }
                 },
-                Matters = new HashSet<Guid>(),
-                WorkAssignments = new HashSet<Guid>(),
+                MatterGrants = NoRootGrants,
+                WorkAssignmentGrants = NoRootGrants,
             });
 
         var strategy = new CiamContactPrincipalStrategy(

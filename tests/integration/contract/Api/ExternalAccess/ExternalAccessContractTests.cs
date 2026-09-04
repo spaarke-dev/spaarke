@@ -577,8 +577,16 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
         return Task.FromResult(new ExternalGrantSet
         {
             Projects = projects,
-            Matters = matters,
-            WorkAssignments = was,
+            // Task 032: matter/WA grants carry levels. This harness drives ids from test headers, so it
+            // converts at Collaborate — the level a bare id effectively resolved to before levels existed.
+            MatterGrants = matters.Select(id => new ExternalRootGrant
+            {
+                RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
+            }).ToList(),
+            WorkAssignmentGrants = was.Select(id => new ExternalRootGrant
+            {
+                RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
+            }).ToList(),
         });
     }
 

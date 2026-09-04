@@ -22,7 +22,9 @@ using Moq;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Spaarke.Dataverse;   // AccessRights — task 032 rights-fidelity assertions
 using Xunit;
+using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 
@@ -343,6 +345,167 @@ public class AccessibleRecordSetServiceTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────
+    // (6) RIGHTS FIDELITY — task 032 / FR-19. The evaluator answers
+    //     (recordId → rights), composed additively with HIGHEST WINS.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_ContactWithViewOnlyProjectGrant_YieldsReadOnly_NotCollaborate()
+    {
+        // The defect FR-19 removes: a deliberate ViewOnly grant used to arrive as Collaborate, because
+        // the set carried no level and the workforce strategy stamped one over everything (register A-8).
+        var standing = new Mock<IContactStandingGrantReader>();
+        var sut = CreateSut(
+            new Mock<IMembershipResolverService>().Object,
+            new FakeParticipationService(new[]
+            {
+                new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly }
+            }),
+            standing.Object);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        // EXACTLY Read — asserting equality, not a flag test, so a stray Write/Create/Delete bit fails.
+        Assert.Equal(AccessRights.Read, set.RightsFor(GrantedProject));
+    }
+
+    [Fact]
+    public async Task ComposeAsync_MatterAndWorkAssignmentGrants_CarryTheirOwnLevels()
+    {
+        // FR-19 acceptance: levels are carried for matters and work assignments, not projects alone.
+        // Before task 032 these root types were IReadOnlySet<Guid> and STRUCTURALLY could not carry one.
+        var standing = new Mock<IContactStandingGrantReader>();
+        var sut = CreateSut(
+            new Mock<IMembershipResolverService>().Object,
+            new FakeParticipationService(
+                Array.Empty<ExternalParticipation>(),
+                matterGrants: new[]
+                {
+                    new ExternalRootGrant { RecordId = StandingMatter, AccessLevel = ExternalAccessLevel.FullAccess }
+                }),
+            standing.Object);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
+
+        Assert.Equal(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete,
+            set.RightsFor(StandingMatter));
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SameRecordFromTwoTermsAtDifferentLevels_TakesTheMax()
+    {
+        // Highest-wins across TERMS: a ViewOnly grant on a record the caller also reaches through
+        // membership must not drag the membership rights down to Read.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject));
+
+        var standing = new Mock<IContactStandingGrantReader>();
+        var sut = CreateSut(
+            membership.Object,
+            new FakeParticipationService(
+                new[]
+                {
+                    new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly }
+                },
+                resolveContactId: ContactId),
+            standing.Object);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        // Membership term (Read|Write|Create) ∪ ViewOnly grant (Read) = Read|Write|Create.
+        Assert.Equal(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create,
+            set.RightsFor(GrantedProject));
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserMembership_ContributesCollaborateEquivalentRights()
+    {
+        // Status quo preserved: the blanket Collaborate stamp becomes an explicit TERM LEVEL here.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, MemberRecordA));
+
+        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<IContactStandingGrantReader>().Object);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        Assert.Equal(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create,
+            set.RightsFor(MemberRecordA));
+    }
+
+    [Fact]
+    public async Task RightsFor_RecordContributedByNoTerm_IsNone()
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, MemberRecordA));
+
+        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<IContactStandingGrantReader>().Object);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        // Absence is None — never a default grant.
+        Assert.Equal(AccessRights.None, set.RightsFor(UnrelatedRecord));
+        Assert.False(set.Contains(UnrelatedRecord));
+    }
+
+    [Theory]
+    [InlineData(0)]           // not a member of the enum at all
+    [InlineData(99999999)]    // plausible-looking option-set value that is not a level we map
+    [InlineData(100000003)]   // one past FullAccess — the shape a NEW choice value would take
+    public void ToAccessRights_UnrecognisedLevel_IsNone_FailClosed(int rawLevel)
+    {
+        // NFR-01: an unmapped level must never widen access. A new sprk_accesslevel option added in
+        // Dataverse reaches this code as an unmapped int — it must confer nothing until mapped here.
+        Assert.Equal(AccessRights.None, ExternalAccessLevels.ToAccessRights((ExternalAccessLevel)rawLevel));
+    }
+
+    [Fact]
+    public void ToAccessRights_NullLevel_IsNone_FailClosed()
+    {
+        // A grant row with no level keeps its id (set membership preserved — deliberately NOT filtered
+        // out, which would be a silent revocation) but contributes NO rights.
+        Assert.Equal(AccessRights.None, ExternalAccessLevels.ToAccessRights(null));
+    }
+
+    [Fact]
+    public void AccessibleRecordSet_AVetoedRecordIsABSENT_FromBothRightsAndRecordIds()
+    {
+        // The veto invariant (ADR-003 as amended by task 030): a veto REMOVES an entry; it never writes
+        // a low value. "No Access" is not representable as a level anywhere in the type system —
+        // under max() a low value would simply be ignored and an ethical wall would fail silently.
+        //
+        // This asserts the STRUCTURAL guarantee that makes that safe: RecordIds is a DERIVED VIEW over
+        // Rights, so a record removed by a veto cannot linger in the id set and keep granting access.
+        // Standing in for a real veto (037/038/039 fill the seam) by composing the post-veto map.
+        var survives = MemberRecordA;
+        var vetoed = MemberRecordB;
+
+        var set = new AccessibleRecordSet
+        {
+            PrincipalKind = WorkforcePrincipalKind.SystemUser,
+            EntityType = MatterEntity,
+            Rights = RightsOf(survives),   // `vetoed` was removed by the pipeline
+            Sources = new AccessibleRecordSetSources(true, false, false),
+        };
+
+        Assert.False(set.Rights.ContainsKey(vetoed));
+        Assert.DoesNotContain(vetoed, set.RecordIds);   // the derived view followed — cannot disagree
+        Assert.False(set.Contains(vetoed));
+        Assert.Equal(AccessRights.None, set.RightsFor(vetoed));
+
+        Assert.Contains(survives, set.RecordIds);
+        Assert.Equal(1, set.Count);
+    }
+
     private static AccessibleRecordSetService CreateSut(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
@@ -423,17 +586,23 @@ public class AccessibleRecordSetServiceTests
         private readonly ExternalGrantSet _grantSet;
         private readonly Guid? _resolveContactId;
 
+        /// <param name="matters">Matter grant IDS, for tests that predate levels (task 032). Converted at
+        /// Collaborate — the level a bare id effectively resolved to before levels were carried.</param>
+        /// <param name="matterGrants">Matter grants WITH levels — use this for rights-fidelity tests.
+        /// Takes precedence over <paramref name="matters"/>.</param>
         public FakeParticipationService(
             IReadOnlyList<ExternalParticipation> participations, Guid? resolveContactId = null,
-            IReadOnlySet<Guid>? matters = null, IReadOnlySet<Guid>? workAssignments = null)
+            IReadOnlySet<Guid>? matters = null, IReadOnlySet<Guid>? workAssignments = null,
+            IReadOnlyList<ExternalRootGrant>? matterGrants = null,
+            IReadOnlyList<ExternalRootGrant>? workAssignmentGrants = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
                    httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
         {
             _grantSet = new ExternalGrantSet
             {
                 Projects = participations,
-                Matters = matters ?? new HashSet<Guid>(),
-                WorkAssignments = workAssignments ?? new HashSet<Guid>(),
+                MatterGrants = matterGrants ?? RootGrants((matters ?? new HashSet<Guid>()).ToArray()),
+                WorkAssignmentGrants = workAssignmentGrants ?? RootGrants((workAssignments ?? new HashSet<Guid>()).ToArray()),
             };
             _resolveContactId = resolveContactId;
         }

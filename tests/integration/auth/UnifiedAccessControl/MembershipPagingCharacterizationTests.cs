@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Xunit;
 
+using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
@@ -631,8 +632,8 @@ public class MembershipPagingCharacterizationTests
             => Task.FromResult(new ExternalGrantSet
             {
                 Projects = Array.Empty<ExternalParticipation>(),
-                Matters = new HashSet<Guid>(),
-                WorkAssignments = new HashSet<Guid>(),
+                MatterGrants = NoRootGrants,
+                WorkAssignmentGrants = NoRootGrants,
             });
 
         public override Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)

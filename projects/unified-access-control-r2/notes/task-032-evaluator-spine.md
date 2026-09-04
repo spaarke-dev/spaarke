@@ -111,9 +111,40 @@ named files changes.
 
 ---
 
-## STATUS — investigation complete, implementation NOT started
+## STATUS — ✅ COMPLETE (2026-09-04)
 
-Nothing in `src/` has been modified. The four findings above (§2 the revocation trap, §3 the live
-duplicate rows, §4 the existing mapping, §6 the cache trap) each change what the implementation must
-do, and three of them are invisible from the POML's step list. Next session implements against this
-note.
+All five findings were carried into the implementation.
+
+### What shipped
+
+| File | Change |
+|---|---|
+| `ExternalCallerContext.cs` | `ExternalAccessLevels.ToAccessRights` **extracted** (§4) — `GetEffectiveRights` now calls it. New `ExternalRootGrant` (id + **nullable** level, §2). `ExternalGrantSet` gains `MatterGrants`/`WorkAssignmentGrants` as source of truth, with `Matters`/`WorkAssignments` as **derived views** (§7) |
+| `ExternalParticipationService.cs` | Matter/WA partitioning keeps the level; org-grant union keeps it too; `DedupeByHighestLevel` generalizes the project rule (§3); `CachedGrantSet` persists levels + **`CacheVersion` 3 → 4** (§6) |
+| `AccessibleRecordSetService.cs` | `AccessibleRecordSet.Rights` + `RightsFor`; `RecordIds`/`Contains`/`Count` derived from it; `GrantedIdsFor` → `GrantedRightsFor`; both compose paths restructured into explicit terms merged by `AccumulateTerm` (highest-wins); `ApplyVetoPipeline` seam wired as an ordered no-op |
+| tests | New `AccessibleRecordSetTestFactory`; 5 test files migrated off the now-derived setters; **10 new rights-fidelity tests** |
+
+### Verification
+
+- Clean `dotnet build Spaarke.sln --no-incremental` ✅
+- BFF unit **12,062 passed / 0 failed** / 58 skipped
+- ArchTests **191/191**
+- Publish **44.15 MB compressed** incl. PDBs (ceiling 60; flat vs this branch's 44.14)
+- **Perturbation-verified**: making `ViewOnly` grant `Write` turned
+  `ComposeAsync_ContactWithViewOnlyProjectGrant_YieldsReadOnly_NotCollaborate` RED with
+  `Actual: Read | Write`. The rights assertions are not vacuous.
+
+### Two decisions worth re-reading before extending this
+
+1. **`AccumulateTerm` may only add or widen.** Vetoes are a separate, later step that REMOVES keys.
+   Keeping the operations distinct is what stops "No Access" being smuggled in as a low value that
+   `max()` would silently discard.
+2. **`ApplyVetoPipeline` is an ordered no-op on purpose.** Task 032 fixes the SHAPE and the ORDER
+   (pre-max Secure suppression → deny list → Restricted); 037/038/039 fill the slots. The seam exists
+   so filling it is an additive change at a named point rather than a re-derivation of where vetoes go.
+
+### Also fixed while in the file
+
+`ExternalGrantSet`'s class doc still claimed matters/WAs "are id sets … not level-differentiated for
+those types yet" — false the moment this task landed. Corrected in place; leaving it would have been a
+textbook FAILURE-MODES **AP-12** (a stale comment becoming the constraint the next reader honours).

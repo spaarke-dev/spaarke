@@ -4,7 +4,7 @@
     <title>FR-19 spine — AccessibleRecordSet carries (recordId → rights): additive-max composition + veto pipeline seam</title>
     <phase>1 One evaluator</phase>
     <gate>after-030</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation; tags bff-api/auth; the shape change every Phase 1/2 task depends on.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -99,7 +99,26 @@
     <criterion testable="true">All pre-existing AccessibleRecordSetServiceTests behaviors pass unchanged (deny-false family intact); full solution build green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-19; design §4.5; register B-8/B-9/B-10/A-8. Do not touch CallerPrincipalResolver.cs here — task 033 owns consumer propagation and the stamp deletion. The membership-term Collaborate level is itself replaced on the systemuser plane when the FR-20 swap (036) supplies Dataverse's answer.</notes>
+  <notes>COMPLETED 2026-09-04. Evaluator now returns (recordId -> rights); additive terms merged by
+highest-wins; ordered veto seam wired as a no-op for 037/038/039. Verified: clean solution build, BFF
+unit 12,062 passed / 0 failed, ArchTests 191/191, publish 44.15 MB compressed (ceiling 60).
+Perturbation-verified (ViewOnly -> +Write turns the fidelity test RED).
+
+FIVE PRE-IMPLEMENTATION FINDINGS, three invisible from the step list — see
+notes/task-032-evaluator-spine.md:
+ 1. Escalation trigger #2 resolved against LIVE Dataverse: every grant row carries a level on all
+    three root types, so no default was invented and no escalation was needed.
+ 2. TRAP: the project partition drops level-less rows; copying that "symmetry" to matters/WAs would
+    SILENTLY REVOKE access. Level carried as NULLABLE, row kept, null -> AccessRights.None.
+ 3. Live duplicate rows exist (one contact, 5 grant rows on one matter), so the highest-wins dedupe
+    had to generalize or the answer would depend on row order.
+ 4. §11: the level->rights mapping ALREADY EXISTED (ExternalCallerContext.GetEffectiveRights). Step 2
+    said "add the mapping" — it was EXTRACTED instead of duplicated.
+ 5. TRAP THAT WOULD HAVE SHIPPED GREEN: the Redis cache stored matter/WA ids WITHOUT levels. Fixing
+    only the query path yields correct rights on a cache MISS and None on a HIT (60s TTL) while the
+    unit suite stays green, because unit tests bypass the cache. Fixed + CacheVersion 3 -> 4.
+
+Spec FR-19; design §4.5; register B-8/B-9/B-10/A-8. Do not touch CallerPrincipalResolver.cs here — task 033 owns consumer propagation and the stamp deletion. The membership-term Collaborate level is itself replaced on the systemuser plane when the FR-20 swap (036) supplies Dataverse's answer.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
