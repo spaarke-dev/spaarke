@@ -68,7 +68,26 @@ public sealed class ExternalCallerContext
 public sealed class ExternalParticipation
 {
     public required Guid ProjectId { get; init; }
+
+    /// <summary>The effective granted level — the highest across ALL sources (direct + org-inherited).</summary>
     public required ExternalAccessLevel AccessLevel { get; init; }
+
+    /// <summary>
+    /// The highest level from the caller's <b>own</b> grant rows only, excluding anything inherited via an
+    /// organization grant. <c>null</c> when every contributing row was org-inherited (task 037 / FR-22).
+    /// </summary>
+    /// <remarks>
+    /// <b>Additive on purpose.</b> Secure records suppress org-inherited access but keep direct personal
+    /// grants, and that decision needs both numbers for the SAME record — so the dedupe must not be allowed
+    /// to collapse them into one.
+    /// <para>
+    /// The alternative — deduping by <c>(recordId, provenance)</c> and keeping two entries — was rejected:
+    /// duplicate ids would reach <c>CallerPrincipal.ProjectAccess</c>, whose <c>GetEffectiveRights</c> does
+    /// <c>FirstOrDefault</c> and would silently return whichever entry happened to come first. A wrong
+    /// authorization answer that depends on list order is strictly worse than an extra field.
+    /// </para>
+    /// </remarks>
+    public ExternalAccessLevel? DirectAccessLevel { get; init; }
 }
 
 /// <summary>
@@ -93,7 +112,44 @@ public sealed class ExternalParticipation
 public sealed class ExternalRootGrant
 {
     public required Guid RecordId { get; init; }
+
+    /// <summary>The effective granted level — the highest across ALL sources (direct + org-inherited).</summary>
     public required ExternalAccessLevel? AccessLevel { get; init; }
+
+    /// <summary>
+    /// The highest level from the caller's <b>own</b> grant rows only, excluding org-inherited ones.
+    /// <c>null</c> when every contributing row was org-inherited (task 037 / FR-22) — see
+    /// <see cref="ExternalParticipation.DirectAccessLevel"/> for why this is additive rather than a
+    /// second entry per record.
+    /// </summary>
+    public ExternalAccessLevel? DirectAccessLevel { get; init; }
+}
+
+/// <summary>
+/// The two veto-bearing flags on a root record (task 037 · FR-21 / FR-22).
+/// </summary>
+/// <param name="IsSecure"><c>sprk_issecure</c> — suppresses derived-member and org-expansion terms
+/// BEFORE the max, for every principal kind.</param>
+/// <param name="IsRestricted"><c>sprk_accesspermission == Restricted</c> — removes every
+/// contact-sourced contribution AFTER the max.</param>
+/// <remarks>
+/// The two are independent, so a record can be neither, either, or both. They are carried together
+/// because they come from the same row and the same read.
+/// </remarks>
+public readonly record struct RootRecordFlags(bool IsSecure, bool IsRestricted)
+{
+    /// <summary>
+    /// What an unreadable or unreturned record resolves to: <b>both vetoes active</b> (spec NFR-01).
+    /// <para>
+    /// This is the fail-closed direction, and it is deliberately the MOST restrictive combination — not
+    /// merely "restricted". Treating an unknown record as non-secure would let a derived-member or
+    /// org-expansion term contribute access to a record nobody could confirm is safe to share.
+    /// </para>
+    /// </summary>
+    public static RootRecordFlags Unreadable => new(IsSecure: true, IsRestricted: true);
+
+    /// <summary>No veto applies. Only ever produced by a SUCCESSFUL read of a row carrying neither flag.</summary>
+    public static RootRecordFlags None => new(IsSecure: false, IsRestricted: false);
 }
 
 /// <summary>

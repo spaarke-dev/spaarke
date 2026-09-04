@@ -11,11 +11,11 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **037 / 038 / 039** — fill the ordered veto seam (033 ✅ done 2026-09-04) |
-| **Status** | `pending` — not started. 033 shipped the consumer side they need |
+| **Task** | **038** — deny-list store (schema + fail-closed reader). 037 ✅ done 2026-09-04 |
+| **Status** | `pending` — not started. **`parallel-safe: TRUE`** (group P1-A), no deps |
 | **Repo state** | Branch **clean**, **0 unpushed**, master merged 2026-09-04 (`eb71df826`) |
-| **Next Action** | `task-execute` on 037 (Secure suppression / Restricted). **Read `notes/task-033-consumer-propagation.md` § For the next task first** — the consumer side is already wired, so a veto only has to REMOVE a key |
-| **Progress** | **36 completed** · 2 completed-with-escalation · 1 blocked-shipped · **53 pending** (of 92) |
+| **Next Action** | `task-execute` on 038, then 039 (deny veto wiring — needs 037 ✅ + 038). **Read `notes/task-037-restricted-secure-vetoes.md` § For task 039 first** — the deny slot runs FIRST by construction and must REMOVE keys, never write `None` |
+| **Progress** | **37 completed** · 2 completed-with-escalation · 1 blocked-shipped · **52 pending** (of 92) |
 
 ### Completed THIS session (all merged or pushed)
 
@@ -30,6 +30,7 @@
 | **doc drift** | Two guides repointed at the shared wizards. `DATA-ACCESS-DECISION-CRITERIA` was stale **3 ways**, not the 1 filed |
 | **LW build** 🔧 | RED since 2026-07-02 — **fixed + watched**. Alias + 15 TipTap deps; `nightly-health.yml` now builds it. Verified by DELETING the alias (exit 1) and from a clean checkout |
 | **033** 🔑 | The write gates were already there and **could not fire**. Stamp deleted; rights per record on all 3 root types; caught a `HasFlag(None)` fail-open |
+| **037** | Restricted + Secure vetoes. Dedupe was destroying the provenance suppression needs → additive `DirectAccessLevel`. Surfaced 5 doubles silently failing closed |
 
 ### Files modified this session
 
@@ -46,6 +47,40 @@
 still blanket-stamps Collaborate over every accessible record, which 032 deliberately left alone.
 **Verified at HEAD**: clean `dotnet build Spaarke.sln --no-incremental` · BFF unit **12,062 passed / 0
 failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed** (ceiling 60).
+
+---
+
+### ✅ Task 037 findings (DONE 2026-09-04) — full record in `notes/task-037-restricted-secure-vetoes.md`
+
+**Step 1 — live metadata verified (escalation trigger 1 does NOT fire).** All THREE root types carry
+BOTH flags, with identical option sets:
+
+| Entity | `sprk_issecure` | `sprk_accesspermission` | Restricted |
+|---|---|---|---|
+| `sprk_project` | BIT | CHOICE | **100000002** |
+| `sprk_matter` | BIT | CHOICE | **100000002** |
+| `sprk_workassignment` | BIT | CHOICE | **100000002** |
+
+⚠️ The POML cited `TrackingFieldTrio/index.ts:136-138` for the raw values, but that file's own
+comment says those are **`sprk_communication`** values, "entity-specific … never in the shared core".
+The number happens to be right for all three roots — **verified live, not inherited from the citation.**
+
+**Escalation trigger 2 does NOT fire** — provenance is already structural at read time: org grants are a
+SEPARATE query keyed `_sprk_contact_value eq null` (the org-grant marker). An additive field suffices.
+
+**🔴 The design crux.** `ExternalParticipationService` merges org rows into the direct lists and then
+dedupes by record id keeping the MAX level. That **destroys** what Secure suppression needs: a contact
+with a ViewOnly DIRECT grant + a Collaborate ORG grant collapses to Collaborate, so after suppressing
+the org term there is no ViewOnly left to fall back to. The acceptance criterion requires exactly
+**Read** in that case.
+**Chosen shape**: keep ONE entry per record id (changing the dedupe key to `(id, provenance)` would let
+duplicates reach `CallerPrincipal.ProjectAccess`, where `GetEffectiveRights`'s `FirstOrDefault` would
+pick one **arbitrarily** — a silent wrong answer). Instead add an **additive** `DirectAccessLevel`
+alongside the existing `AccessLevel`: non-secure reads `AccessLevel` (byte-identical to today), secure
+reads `DirectAccessLevel`.
+
+**Reuse (§11)**: `SecurableEntityRegistry` already answers "which entities carry `sprk_issecure`" from
+live metadata with a 6h cache and a fail-closed empty-set rule — do NOT rebuild that.
 
 ---
 

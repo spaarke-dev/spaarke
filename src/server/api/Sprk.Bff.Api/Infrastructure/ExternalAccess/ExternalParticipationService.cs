@@ -458,6 +458,159 @@ public class ExternalParticipationService
         }
     }
 
+    // ── Root-record veto flags (task 037 · FR-21 / FR-22) ────────────────────────────────────────
+
+    /// <summary>
+    /// Collection name + primary-key attribute for each root entity that carries the veto flags.
+    /// <b>Verified against live Dataverse metadata 2026-09-04</b>: all three carry BOTH
+    /// <c>sprk_issecure</c> (BIT) and <c>sprk_accesspermission</c> (CHOICE), with identical option sets.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, (string Collection, string IdAttribute)> RootFlagSources =
+        new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_project"] = ("sprk_projects", "sprk_projectid"),
+            ["sprk_matter"] = ("sprk_matters", "sprk_matterid"),
+            ["sprk_workassignment"] = ("sprk_workassignments", "sprk_workassignmentid"),
+        };
+
+    /// <summary>
+    /// The <c>sprk_accesspermission</c> option value meaning RESTRICTED.
+    /// <b>Verified live 2026-09-04</b> on all three root entities (Standard 100000000 / Limited 100000001 /
+    /// Restricted 100000002).
+    /// </summary>
+    /// <remarks>
+    /// The task brief cited <c>TrackingFieldTrio/index.ts</c> for this number, but that file documents the
+    /// <c>sprk_communication</c> option set and says so explicitly ("entity-specific: lives ONLY here …").
+    /// The value happens to match on all three roots — established by querying metadata, not by trusting
+    /// the citation.
+    /// </remarks>
+    internal const int AccessPermissionRestricted = 100000002;
+
+    /// <summary>Ids per flag query. Bounded so a large candidate set cannot produce an over-length URL.</summary>
+    private const int FlagQueryChunkSize = 50;
+
+    /// <summary>
+    /// Reads the veto flags for a batch of root records (NFR-02: batched — never a per-record round trip).
+    /// </summary>
+    /// <remarks>
+    /// <b>Fail-closed, per NFR-01.</b> Every id the caller asked about is present in the returned map. An id
+    /// the query did not return — deleted, filtered, or invisible to the app-only identity — is
+    /// indistinguishable from a read that failed, so it comes back as <b>secure AND restricted</b>. That is
+    /// the deny direction: unknown flags suppress derived terms and veto contact-sourced rights, rather than
+    /// defaulting a record to open. A transport fault or non-success status does the same for the whole chunk.
+    /// <para>
+    /// An entity type with no flag columns returns an empty map, meaning "no vetoes apply" — that is a
+    /// STATIC fact about the schema (verified above), not a failed read, so it is not a fail-closed case.
+    /// </para>
+    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        if (recordIds is null || recordIds.Count == 0)
+        {
+            return new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        if (!RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source))
+        {
+            // Not a flag-bearing root type. No veto applies — see the remarks.
+            return new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        var distinct = recordIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinct.Count == 0)
+        {
+            return new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        var flags = new Dictionary<Guid, RootRecordFlags>();
+
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            var apiUrl = GetDataverseApiUrl();
+
+            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            {
+                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
+                var query = $"{apiUrl}/{source.Collection}" +
+                            $"?$filter=({idFilter})" +
+                            $"&$select={source.IdAttribute},sprk_issecure,sprk_accesspermission";
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, query);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                request.Headers.Add("OData-MaxVersion", "4.0");
+                request.Headers.Add("OData-Version", "4.0");
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                var response = await _httpClient.SendAsync(request, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError(
+                        "[EXT-ACCESS] Root-flag query FAILED for {EntityType} ({Count} ids): {Status}. "
+                        + "Failing CLOSED — every id in this chunk is treated as secure AND restricted (NFR-01).",
+                        entityType, chunk.Count, response.StatusCode);
+                    foreach (var id in chunk)
+                    {
+                        flags[id] = RootRecordFlags.Unreadable;
+                    }
+                    continue;
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(ct);
+                var byId = (result?.Value ?? new List<RootFlagRow>())
+                    .GroupBy(r => r.GetId(source.IdAttribute))
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                foreach (var id in chunk)
+                {
+                    flags[id] = byId.TryGetValue(id, out var row)
+                        ? new RootRecordFlags(
+                            IsSecure: row.sprk_issecure == true,
+                            IsRestricted: row.sprk_accesspermission == AccessPermissionRestricted)
+                        // Asked about, not returned. Cannot be distinguished from an unreadable row.
+                        : RootRecordFlags.Unreadable;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS] Root-flag query threw for {EntityType}. Failing CLOSED — all {Count} ids "
+                + "treated as secure AND restricted (NFR-01).", entityType, distinct.Count);
+            foreach (var id in distinct)
+            {
+                flags[id] = RootRecordFlags.Unreadable;
+            }
+        }
+
+        return flags;
+    }
+
+    /// <summary>Projection of the flag columns. Ids arrive as strings over OData.</summary>
+    private sealed class RootFlagRow
+    {
+        public string? sprk_projectid { get; set; }
+        public string? sprk_matterid { get; set; }
+        public string? sprk_workassignmentid { get; set; }
+        public bool? sprk_issecure { get; set; }
+        public int? sprk_accesspermission { get; set; }
+
+        public Guid GetId(string idAttribute)
+        {
+            var raw = idAttribute switch
+            {
+                "sprk_projectid" => sprk_projectid,
+                "sprk_matterid" => sprk_matterid,
+                "sprk_workassignmentid" => sprk_workassignmentid,
+                _ => null,
+            };
+            return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
+        }
+    }
+
     private async Task<ExternalGrantSet> QueryGrantSetAsync(Guid contactId, CancellationToken ct)
     {
         try
@@ -495,12 +648,15 @@ public class ExternalParticipationService
 
             // Partition each grant into its root bucket by which typed lookup is populated. A project
             // grant keeps its access level; matter/WA grants contribute an id only.
+            // Task 037 (FR-22): DIRECT rows carry their level in BOTH slots. `DirectAccessLevel` is what
+            // survives Secure suppression; `AccessLevel` stays the all-sources effective level.
             var projects = rows
                 .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
                 .Select(r => new ExternalParticipation
                 {
                     ProjectId = r._sprk_project_value!.Value,
-                    AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
+                    AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value,
+                    DirectAccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
                 })
                 .ToList();
             // Task 032 (FR-19): matter/WA grants now KEEP the level that was already on the row —
@@ -518,7 +674,8 @@ public class ExternalParticipationService
                 .Select(r => new ExternalRootGrant
                 {
                     RecordId = r._sprk_matter_value!.Value,
-                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                    DirectAccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
                 })
                 .ToList();
             var workAssignments = rows
@@ -526,7 +683,8 @@ public class ExternalParticipationService
                 .Select(r => new ExternalRootGrant
                 {
                     RecordId = r._sprk_workassignment_value!.Value,
-                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                    DirectAccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
                 })
                 .ToList();
 
@@ -538,33 +696,50 @@ public class ExternalParticipationService
             var orgRows = await QueryOrganizationGrantRowsAsync(contactId, token, apiUrl, ct);
             if (orgRows.Count > 0)
             {
+                // Task 037 (FR-22): ORG-INHERITED rows leave DirectAccessLevel NULL. That null is the
+                // provenance marker Secure suppression reads — an org row contributes to the effective
+                // level but never to the direct one.
                 projects.AddRange(orgRows
                     .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
                     .Select(r => new ExternalParticipation
                     {
                         ProjectId = r._sprk_project_value!.Value,
-                        AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
+                        AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value,
+                        DirectAccessLevel = null
                     }));
                 foreach (var r in orgRows.Where(r => r._sprk_matter_value.HasValue))
                     matters.Add(new ExternalRootGrant
                     {
                         RecordId = r._sprk_matter_value!.Value,
-                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                        DirectAccessLevel = null
                     });
                 foreach (var r in orgRows.Where(r => r._sprk_workassignment_value.HasValue))
                     workAssignments.Add(new ExternalRootGrant
                     {
                         RecordId = r._sprk_workassignment_value!.Value,
-                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                        DirectAccessLevel = null
                     });
             }
 
             // Dedupe project grants by id, keeping the HIGHEST access level — a contact may hold a direct
             // project grant AND inherit one via an org grant; the strongest level wins (the enum orders
             // ViewOnly < Collaborate < FullAccess).
+            //
+            // ⚠️ Task 037: the dedupe MUST carry both levels forward. Collapsing to a single max would
+            // destroy exactly what Secure suppression needs — a ViewOnly DIRECT grant plus a Collaborate
+            // ORG grant would become "Collaborate", and once the org term is suppressed there would be no
+            // ViewOnly left to fall back to. `Max` over the nullable direct level skips org rows (null) and
+            // yields null only when EVERY contributing row was org-inherited.
             projects = projects
                 .GroupBy(p => p.ProjectId)
-                .Select(g => new ExternalParticipation { ProjectId = g.Key, AccessLevel = g.Max(x => x.AccessLevel) })
+                .Select(g => new ExternalParticipation
+                {
+                    ProjectId = g.Key,
+                    AccessLevel = g.Max(x => x.AccessLevel),
+                    DirectAccessLevel = g.Max(x => x.DirectAccessLevel)
+                })
                 .ToList();
 
             // Task 032: the SAME highest-wins rule now applies to matters + work assignments, for the
@@ -611,7 +786,9 @@ public class ExternalParticipationService
             {
                 RecordId = g.Key,
                 // Max over a nullable enum skips nulls; all-null yields null -> AccessRights.None.
-                AccessLevel = g.Max(x => x.AccessLevel)
+                AccessLevel = g.Max(x => x.AccessLevel),
+                // Task 037: same rule for the direct-only level — null iff every row was org-inherited.
+                DirectAccessLevel = g.Max(x => x.DirectAccessLevel)
             })
             .ToList();
 

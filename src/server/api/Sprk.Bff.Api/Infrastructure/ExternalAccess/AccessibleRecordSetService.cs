@@ -191,20 +191,62 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </summary>
     private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
         ExternalGrantSet grants, string entityType)
+        => GrantedRightsFor(grants, entityType, isSecure: _ => false);
+
+    /// <summary>
+    /// The grant term with <b>Secure pre-max suppression</b> applied (task 037 · FR-22).
+    /// </summary>
+    /// <param name="isSecure">Whether a given record id is flagged <c>sprk_issecure</c>.</param>
+    /// <remarks>
+    /// For a secure record the grant contributes only its <b>direct</b> level — the caller's own grant rows.
+    /// Anything inherited through an organization grant is suppressed, per FR-22.
+    /// <para>
+    /// ⚠️ <b>This is suppression, not subtraction, and the difference is the whole point.</b> The org
+    /// contribution is never added, so it cannot participate in the max. Subtracting afterwards would be
+    /// wrong in a way that is easy to miss: with a ViewOnly direct grant and a Collaborate org grant, the max
+    /// yields Collaborate, and there is no arithmetic that recovers "Read" from it — the direct level has
+    /// already been absorbed. That is why <c>ExternalParticipation.DirectAccessLevel</c> exists.
+    /// </para>
+    /// <para>
+    /// A secure record whose ONLY source was an org grant has a null direct level, which maps to
+    /// <see cref="AccessRights.None"/>. The id still appears in the map with no rights; the Restricted veto
+    /// or a downstream consumer sees an entry that permits nothing. It is not resurrectable by the max.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
+        ExternalGrantSet grants, string entityType, Func<Guid, bool> isSecure)
     {
         if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
             return grants.Projects.Select(p => KeyValuePair.Create(
-                p.ProjectId, ExternalAccessLevels.ToAccessRights(p.AccessLevel)));
+                p.ProjectId,
+                ExternalAccessLevels.ToAccessRights(
+                    isSecure(p.ProjectId) ? p.DirectAccessLevel : p.AccessLevel)));
 
         if (string.Equals(entityType, MatterEntity, StringComparison.OrdinalIgnoreCase))
             return grants.MatterGrants.Select(g => KeyValuePair.Create(
-                g.RecordId, ExternalAccessLevels.ToAccessRights(g.AccessLevel)));
+                g.RecordId,
+                ExternalAccessLevels.ToAccessRights(
+                    isSecure(g.RecordId) ? g.DirectAccessLevel : g.AccessLevel)));
 
         if (string.Equals(entityType, WorkAssignmentEntity, StringComparison.OrdinalIgnoreCase))
             return grants.WorkAssignmentGrants.Select(g => KeyValuePair.Create(
-                g.RecordId, ExternalAccessLevels.ToAccessRights(g.AccessLevel)));
+                g.RecordId,
+                ExternalAccessLevels.ToAccessRights(
+                    isSecure(g.RecordId) ? g.DirectAccessLevel : g.AccessLevel)));
 
         return Enumerable.Empty<KeyValuePair<Guid, AccessRights>>();
+    }
+
+    /// <summary>Every record id any term could contribute — the candidate set for one batched flag read.</summary>
+    private static IEnumerable<Guid> GrantedIdsFor(ExternalGrantSet grants, string entityType)
+    {
+        if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
+            return grants.Projects.Select(p => p.ProjectId);
+        if (string.Equals(entityType, MatterEntity, StringComparison.OrdinalIgnoreCase))
+            return grants.MatterGrants.Select(g => g.RecordId);
+        if (string.Equals(entityType, WorkAssignmentEntity, StringComparison.OrdinalIgnoreCase))
+            return grants.WorkAssignmentGrants.Select(g => g.RecordId);
+        return Enumerable.Empty<Guid>();
     }
 
     /// <summary>
@@ -224,6 +266,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </summary>
     internal const AccessRights MembershipTermRights =
         AccessRights.Read | AccessRights.Write | AccessRights.Create;
+
+    /// <summary>Nothing survives the Restricted veto — used by the contact plane, where every term is contact-sourced.</summary>
+    private static readonly IReadOnlyDictionary<Guid, AccessRights> EmptyRights =
+        new Dictionary<Guid, AccessRights>();
 
     /// <summary>
     /// The additive composition: merge a term's contribution into the accumulator, HIGHEST WINS.
@@ -274,17 +320,48 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </para>
     /// </summary>
     /// <param name="composed">The post-max map, mutated in place.</param>
-    private static void ApplyVetoPipeline(Dictionary<Guid, AccessRights> composed)
+    /// <param name="flags">Veto flags for every candidate record (fail-closed for unreadable ones).</param>
+    /// <param name="survivesRestricted">
+    /// The rights that are NOT contact-sourced and therefore survive the Restricted veto — the systemuser
+    /// plane's own ADR-034 membership term. Empty on the contact plane, where every term is contact-sourced.
+    /// </param>
+    private static void ApplyVetoPipeline(
+        Dictionary<Guid, AccessRights> composed,
+        IReadOnlyDictionary<Guid, RootRecordFlags> flags,
+        IReadOnlyDictionary<Guid, AccessRights> survivesRestricted)
     {
         // Slot 1 — deny list (ethical wall + per-child revocation). Task 038/039.
         //   foreach (var id in denyList) composed.Remove(id);
+        // Still a no-op. It runs FIRST by construction: a record removed here is gone before Restricted
+        // looks at it, so a deny can never be "downgraded" into a survivable Restricted outcome.
 
-        // Slot 2 — Restricted (sprk_accesspermission). Task 037.
-        //   foreach (var id in restricted) composed.Remove(id);
+        // Slot 2 — Restricted (sprk_accesspermission == Restricted). Task 037 / FR-21.
+        //
+        // "Only system users may have access" (register F-4). Every CONTACT-SOURCED contribution is
+        // removed regardless of how strong it was — an explicit FullAccess grant included. What remains is
+        // whatever the principal held through a non-contact term, which today is the systemuser plane's
+        // ADR-034 membership.
+        //
+        // ⚠️ The veto REMOVES the key when nothing survives. It does not write None. Absence is the only
+        // representation of no access: a None value would still be a key in the map, would still appear in
+        // the derived RecordIds set, and would still read as "in the accessible set" to any consumer that
+        // checks membership rather than rights.
+        foreach (var recordId in composed.Keys.ToList())
+        {
+            if (!flags.TryGetValue(recordId, out var f) || !f.IsRestricted)
+            {
+                continue;
+            }
 
-        // Intentionally empty until those tasks land. The seam exists so that filling it is an
-        // additive change at a named point, rather than a re-derivation of where vetoes belong.
-        _ = composed;
+            if (survivesRestricted.TryGetValue(recordId, out var surviving) && surviving != AccessRights.None)
+            {
+                composed[recordId] = surviving;
+            }
+            else
+            {
+                composed.Remove(recordId);
+            }
+        }
     }
 
     /// <summary>
@@ -577,15 +654,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Each term contributes (recordId -> rights); AccumulateTerm merges them highest-wins.
         var composed = new Dictionary<Guid, AccessRights>();
 
-        // Term — ADR-034 membership. Contributes at the membership term level (see MembershipTermRights).
-        AccumulateTerm(composed, walk.Ids.Select(id => KeyValuePair.Create(id, MembershipTermRights)));
-
-        // Term — contact grants. Grants span project / matter / work-assignment root types (task 028,
-        // closing R1 gap #2), so this applies for any grant-supported entity. Prefer the derived contact
-        // (sprk_primarycontact); fall back to a verified-email match when the systemuser has no linked
-        // contact. Each grant contributes ITS OWN level, so a ViewOnly grant no longer arrives as
-        // Collaborate.
+        // Resolve the caller's contact + grants FIRST, so the candidate id set is complete before the
+        // single batched flag read. Prefer the derived contact (sprk_primarycontact); fall back to a
+        // verified-email match when the systemuser has no linked contact.
         var contactGrantsApplied = false;
+        ExternalGrantSet? grants = null;
         if (IsGrantSupported(entityType))
         {
             Guid? grantContactId =
@@ -600,16 +673,45 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
             if (grantContactId is { } resolved && resolved != Guid.Empty)
             {
-                var grants = await _participations
-                    .GetGrantSetAsync(resolved, ct)
-                    .ConfigureAwait(false);
-                AccumulateTerm(composed, GrantedRightsFor(grants, entityType));
+                grants = await _participations.GetGrantSetAsync(resolved, ct).ConfigureAwait(false);
                 contactGrantsApplied = true;
             }
         }
 
-        // ── VETOES, after the max, in order (no-op seam until 037/038/039) ─────────────────────────
-        ApplyVetoPipeline(composed);
+        // ── FLAGS: ONE batched read over every candidate id (NFR-02) ───────────────────────────────
+        var candidates = walk.Ids
+            .Concat(grants is null ? Enumerable.Empty<Guid>() : GrantedIdsFor(grants, entityType))
+            .ToList();
+        var flags = await _participations
+            .GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false);
+        bool IsSecure(Guid id) => flags.TryGetValue(id, out var f) && f.IsSecure;
+
+        // Term 1 — ADR-034 membership. NOT contact-sourced, so it survives BOTH vetoes: it is the
+        // systemuser's own Dataverse-governed access, which is exactly what Restricted preserves
+        // ("only system users may have access") and what Secure leaves alone (the Secure BU covers the
+        // Dataverse half; the veto covers the grant half — design §5.1).
+        var membershipTerm = walk.Ids
+            .Select(id => KeyValuePair.Create(id, MembershipTermRights))
+            .ToList();
+        AccumulateTerm(composed, membershipTerm);
+
+        // Term 2 — contact grants, with Secure suppression applied BEFORE the max: on a secure record only
+        // the caller's OWN grant rows contribute; org-inherited access is suppressed (FR-22).
+        //
+        // ⚠️ This applies on the SYSTEMUSER plane too, deliberately. A Type 1 user whose linked contact
+        // holds an org grant would otherwise derive access to a secure record through the contact term —
+        // access Dataverse knows nothing about, so the Secure BU cannot catch it (design §5.1, register C-10).
+        if (grants is not null)
+        {
+            AccumulateTerm(composed, GrantedRightsFor(grants, entityType, IsSecure));
+        }
+
+        // ── VETOES, after the max, in order: deny-list (038/039) → Restricted (this task) ──────────
+        // The membership term is what survives Restricted on this plane.
+        ApplyVetoPipeline(
+            composed,
+            flags,
+            membershipTerm.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
@@ -639,25 +741,23 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         var composed = new Dictionary<Guid, AccessRights>();
 
-        // Term 1 — explicit sprk_externalrecordaccess grants (per-record, materialized). Grants now span
-        // project / matter / work-assignment root types (task 028, closing R1 gap #2): they contribute
-        // for any grant-supported entity, each at ITS OWN level (task 032).
+        // Read grants + standing membership FIRST so the candidate id set is complete before the single
+        // batched flag read (NFR-02).
         var grantsApplied = false;
+        ExternalGrantSet? grants = null;
         if (IsGrantSupported(entityType))
         {
-            var grants = await _participations
-                .GetGrantSetAsync(contactId, ct)
-                .ConfigureAwait(false);
-            AccumulateTerm(composed, GrantedRightsFor(grants, entityType));
+            grants = await _participations.GetGrantSetAsync(contactId, ct).ConfigureAwait(false);
             grantsApplied = true;
         }
 
-        // Term 2 — standing-grant runtime membership, GATED on the subject-level policy flag. The
-        // negative case is load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit
-        // grants above — NEVER automatic membership. (task-051 seam: IContactStandingGrantReader.)
+        // Standing-grant runtime membership, GATED on the subject-level policy flag. The negative case is
+        // load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit grants — NEVER automatic
+        // membership. (task-051 seam: IContactStandingGrantReader.)
         var standingApplied = false;
         var capped = false;
         var membershipPages = 0;
+        var standingIds = new HashSet<Guid>();
         if (await _standingGrant.HasStandingGrantAsync(contactId, ct).ConfigureAwait(false))
         {
             // FR-14: same continuation-following fix as the systemuser plane — the pre-fix
@@ -668,14 +768,43 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 $"contact {contactId}",
                 ct).ConfigureAwait(false);
 
-            AccumulateTerm(composed, walk.Ids.Select(id => KeyValuePair.Create(id, MembershipTermRights)));
+            standingIds = walk.Ids;
             capped = walk.Capped;
             membershipPages = walk.Pages;
             standingApplied = true;
         }
 
-        // ── VETOES, after the max, in order (no-op seam until 037/038/039) ─────────────────────────
-        ApplyVetoPipeline(composed);
+        // ── FLAGS: ONE batched read over every candidate id (NFR-02) ───────────────────────────────
+        var candidates = standingIds
+            .Concat(grants is null ? Enumerable.Empty<Guid>() : GrantedIdsFor(grants, entityType))
+            .ToList();
+        var flags = await _participations
+            .GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false);
+        bool IsSecure(Guid id) => flags.TryGetValue(id, out var f) && f.IsSecure;
+
+        // Term 1 — explicit sprk_externalrecordaccess grants, with Secure suppression applied BEFORE the
+        // max: on a secure record only the contact's OWN grant rows contribute (FR-22).
+        if (grants is not null)
+        {
+            AccumulateTerm(composed, GrantedRightsFor(grants, entityType, IsSecure));
+        }
+
+        // Term 2 — standing-grant membership. This is a DERIVED-MEMBER term, so Secure suppresses it
+        // entirely: the record simply never receives the contribution (structural suppression, per FR-22 —
+        // not a post-hoc subtraction that the max would already have absorbed).
+        if (standingApplied)
+        {
+            AccumulateTerm(
+                composed,
+                standingIds
+                    .Where(id => !IsSecure(id))
+                    .Select(id => KeyValuePair.Create(id, MembershipTermRights)));
+        }
+
+        // ── VETOES, after the max, in order: deny-list (038/039) → Restricted (this task) ──────────
+        // NOTHING survives Restricted on this plane: a contact principal's every term is contact-sourced,
+        // which is precisely FR-21's "denies ALL contact principals regardless of grant source".
+        ApplyVetoPipeline(composed, flags, EmptyRights);
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +

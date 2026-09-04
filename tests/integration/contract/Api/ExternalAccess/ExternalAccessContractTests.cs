@@ -553,6 +553,14 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
         return Task.FromResult<Guid?>(Guid.TryParse(contact, out var id) ? id : Guid.NewGuid());
     }
 
+        // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
+        // and fails CLOSED — every record would read as secure AND restricted and this double would
+        // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
+        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+                recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.None));
+
     public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
     {
         var raw = Header("X-Test-Projects");

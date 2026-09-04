@@ -598,6 +598,254 @@ public class AccessibleRecordSetServiceTests
             .Should().BeFalse("the caller holds Read but not Write — the conjunction is not satisfied");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // FR-21 — Restricted post-max veto (task 037)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_ContactWithFullAccessGrant_OnRestrictedRecord_IsDeniedEntirely()
+    {
+        // FR-21: "denies ALL contact principals regardless of grant source". The STRENGTH of the grant is
+        // irrelevant — FullAccess is chosen precisely because it is the strongest thing a contact can hold.
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+        });
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(AccessRights.None);
+        set.Contains(GrantedProject).Should().BeFalse(
+            "a veto REMOVES the key — it never writes a low value that max() would ignore");
+        set.RecordIds.Should().NotContain(GrantedProject,
+            "the derived id view must follow, or a vetoed record still reads as 'in the accessible set'");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserOnRestrictedRecord_KeepsMembershipButLosesContactGrant()
+    {
+        // FR-21's other half: Restricted means "only system users may have access". The systemuser's own
+        // ADR-034 membership is Dataverse-governed and survives; the contact-sourced grant does not.
+        // A DUAL-IDENTITY user (systemuser + granted contact) is the only shape where both are present.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA, GrantedProject));
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+        });
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(
+            AccessibleRecordSetService.MembershipTermRights,
+            "the systemuser keeps membership rights but the FullAccess contact grant is vetoed — "
+            + "note Delete is ABSENT, proving the grant's contribution did not survive");
+        set.RightsFor(MemberRecordA).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "an unrestricted record is untouched");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FR-22 — Secure pre-max suppression (task 037)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_ContactOrgInheritedGrantOnSecureRecord_IsSuppressed_ButDirectGrantSurvives()
+    {
+        // The FR-22 survivor pair, on the SAME secure record:
+        //   org-inherited only  -> suppressed  -> None
+        //   direct personal     -> survives    -> the granted rights
+        var orgOnly = GrantedProject;
+        var direct = StandingMatter;   // reused as a second project id
+
+        var participations = new FakeParticipationService(new[]
+        {
+            // Org-inherited: DirectAccessLevel is null — that null IS the provenance marker.
+            new ExternalParticipation
+            {
+                ProjectId = orgOnly,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = null,
+            },
+            new ExternalParticipation
+            {
+                ProjectId = direct,
+                AccessLevel = ExternalAccessLevel.Collaborate,
+                DirectAccessLevel = ExternalAccessLevel.Collaborate,
+            },
+        });
+        participations.Flags[orgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[direct] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(orgOnly).Should().Be(AccessRights.None,
+            "a FullAccess ORG grant confers nothing on a secure record — Secure suppresses org expansion");
+        set.RightsFor(direct).Should().Be(
+            ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate),
+            "a DIRECT personal grant survives Secure (FR-22 survivor case)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SecureRecord_SuppressedOrgGrantCannotOutbidSurvivingDirectGrant()
+    {
+        // ⚠️ THE ORDERING PROOF, and the reason DirectAccessLevel exists.
+        //
+        // One record, two sources: a ViewOnly DIRECT grant and a Collaborate ORG grant. If suppression ran
+        // AFTER the max, the max would already have produced Collaborate and there would be no arithmetic
+        // that recovers Read. Getting exactly Read proves the org term never entered the max at all.
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.Collaborate,     // the all-sources max
+                DirectAccessLevel = ExternalAccessLevel.ViewOnly,  // ...but only ViewOnly is the caller's own
+            },
+        });
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(AccessRights.Read,
+            "EXACTLY Read — a suppressed Collaborate term cannot outbid the surviving ViewOnly grant");
+        set.RightsFor(GrantedProject).HasFlag(AccessRights.Write).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ContactStandingMembershipOnSecureRecord_IsSuppressed()
+    {
+        // The derived-member half of FR-22: standing-grant membership is a DERIVED term, so a secure record
+        // never receives it. The same contact still reaches a non-secure record through it (control).
+        var secure = MemberRecordA;
+        var open = MemberRecordB;
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, secure, open));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[secure] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var sut = CreateSut(membership.Object, participations, AlwaysStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Contains(secure).Should().BeFalse(
+            "standing-grant membership is a derived-member term and is suppressed on a secure record");
+        set.Contains(open).Should().BeTrue("the non-secure record still comes through the same term");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserWhoseContactHoldsStandingGrant_GetsNoDerivedAccessToSecureRecord()
+    {
+        // FR-22 acceptance, the Type 1 case (register C-10): a systemuser must not derive access to a secure
+        // record through their linked contact.
+        //
+        // Two independent guarantees, asserted together because either alone would let this regress:
+        //   (a) the systemuser plane NEVER consults the standing-grant flag at all, and
+        //   (b) even the contact-GRANT term it does consult is Secure-suppressed for org-inherited rows.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity));   // no ADR-034 membership on the secure project
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = null,   // reached only through the contact's organization
+            },
+        });
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var standing = AlwaysStandingMock();
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
+            "a Type 1 user must not derive access to a secure record via their linked contact — the Secure "
+            + "BU covers the Dataverse half, this veto covers the grant half (design §5.1)");
+        standing.Verify(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the systemuser plane must never consult the standing-grant flag");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // NFR-01 — fail-closed flag read
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_WhenFlagReadFaults_DeniesContactSourcedTerms()
+    {
+        // An unreadable flag row resolves to Secure AND Restricted, so a contact's grant contributes
+        // nothing. The alternative — treating unknown as open — is the failure this whole wave exists to
+        // remove: it would grant access to a record nobody could confirm is safe to share.
+        var participations = new ThrowingFlagParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+        });
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse(
+            "an unreadable flag row must deny, not default the record to open (NFR-01)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_WhenFlagReadFaults_SystemUserMembershipStillSurvives()
+    {
+        // The other side of fail-closed: it must not become fail-BROKEN. Restricted denies contacts, not
+        // system users, so an unreadable flag must not lock internal staff out of their own records.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        var sut = CreateSut(
+            membership.Object,
+            new ThrowingFlagParticipationService(Array.Empty<ExternalParticipation>()),
+            NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(MemberRecordA).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "fail-closed applies to contact-sourced terms; the systemuser's Dataverse-governed membership "
+            + "survives, exactly as it does on a genuinely Restricted record");
+    }
+
+    private static Mock<IContactStandingGrantReader> AlwaysStandingMock()
+    {
+        var m = new Mock<IContactStandingGrantReader>();
+        m.Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        return m;
+    }
+
     private static AccessibleRecordSetService CreateSut(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
@@ -707,5 +955,65 @@ public class AccessibleRecordSetServiceTests
         public override Task<Guid?> ResolveExternalContactAsync(
             string? oid, string? email, CancellationToken ct = default)
             => Task.FromResult(_resolveContactId);
+
+        // ── Task 037 veto flags ──────────────────────────────────────────────────────────────────
+        //
+        // Per-record overrides; anything not listed is unflagged. Defaulting to "no vetoes" keeps every
+        // pre-037 test meaning what it meant.
+        //
+        // ⚠️ This override is REQUIRED, not convenience. Without it the base implementation runs, hits
+        // `credential: null!` above, throws, and fails CLOSED — so every record would come back secure AND
+        // restricted and the whole contact plane would compose to nothing. That is the production fail-closed
+        // path behaving correctly; it is exercised deliberately by ThrowingFlagParticipationService below.
+        public Dictionary<Guid, RootRecordFlags> Flags { get; } = new();
+
+        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        {
+            // Distinct(): the candidate set is a concat of the membership and grant terms, so the SAME id
+            // legitimately arrives twice. The real implementation dedupes; a fake that throws on it would
+            // fail tests for a reason production does not have.
+            IReadOnlyDictionary<Guid, RootRecordFlags> result = recordIds.Distinct().ToDictionary(
+                id => id,
+                id => Flags.TryGetValue(id, out var f) ? f : RootRecordFlags.None);
+            return Task.FromResult(result);
+        }
+    }
+
+    /// <summary>
+    /// A participation service whose flag read FAULTS, exercising the NFR-01 fail-closed path end-to-end
+    /// (the real implementation catches and returns <see cref="RootRecordFlags.Unreadable"/> for every id;
+    /// this reproduces that contract without an HTTP stack).
+    /// </summary>
+    private sealed class ThrowingFlagParticipationService : ExternalParticipationService
+    {
+        private readonly ExternalGrantSet _grantSet;
+
+        public ThrowingFlagParticipationService(IReadOnlyList<ExternalParticipation> participations)
+            : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
+                   httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
+        {
+            _grantSet = new ExternalGrantSet
+            {
+                Projects = participations,
+                MatterGrants = Array.Empty<ExternalRootGrant>(),
+                WorkAssignmentGrants = Array.Empty<ExternalRootGrant>(),
+            };
+        }
+
+        public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(_grantSet);
+
+        public override Task<Guid?> ResolveExternalContactAsync(
+            string? oid, string? email, CancellationToken ct = default)
+            => Task.FromResult<Guid?>(null);
+
+        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        {
+            IReadOnlyDictionary<Guid, RootRecordFlags> result =
+                recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.Unreadable);
+            return Task.FromResult(result);
+        }
     }
 }
