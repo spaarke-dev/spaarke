@@ -47,13 +47,18 @@ import { cleanGuid } from './PolymorphicResolverService';
  *
  * Per spaarke-multi-container-multi-index-r1 spec (FR-WIZ-01..05) the 5 parent-record
  * wizards (Matter, Project, Invoice, WorkAssignment, Event) and DocumentUploadWizard
- * cascade three fields from `businessunit` onto the create payload:
+ * cascade SEARCH-INDEX ROUTING fields from `businessunit` onto the create payload:
  *
- *   - `sprk_containerid` — SPE container/drive ID
  *   - `sprk_searchindexname` — Azure AI Search index name (text, soak-only — Phase G/110 drop)
  *   - `sprk_ai_search_index` — `sprk_aisearchindex` lookup (canonical Phase G post-2026-06-10)
  *
- * All three fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
+ * 🔴 **`sprk_containerid` is NO LONGER cascaded onto any create payload** (task 076, 2026-09-03).
+ * A storage location is not the client's to choose; the server derives it from the record. The
+ * `containerId` field below is still RETURNED by `resolveUserBuDefaults` because callers outside
+ * the create-payload path read it (notably Compose's `resolveContainer`) — but nothing writes it
+ * to `sprk_containerid` any more, and nothing should.
+ *
+ * These fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
  * leave the corresponding payload field untouched and the BFF tenant-default
  * chain (or downstream backfill) takes over server-side.
  */
