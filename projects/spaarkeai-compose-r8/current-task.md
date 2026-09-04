@@ -215,18 +215,66 @@ constraint).
 **Resolving it is a decision, not just a patch** — and it belongs to the agreements/NDA feature, not R8:
 - **Wire it** — add the DTO property + mapping (server half, ~2 lines, mirrors `revisionReport`) AND a
   client sender. Without the client half, wiring the server only re-creates the same dead state.
-- **Or retire it** — if the Summary Page was superseded by `AgreementReviewSummaryPanel` / the memo
-  (`ReviewMemoDocumentBuilder`), delete `SummaryPage`, its generator and its seam test. **A field that
-  still exists is a capability that still exists** (issue #858's reasoning).
+- **Or retire it** — delete `SummaryPage`, its generator and its seam test. **A field that still exists is
+  a capability that still exists** (issue #858's reasoning).
 - **Do not leave it half-wired.** That is the state that produced this whole class.
+
+#### ✅ The evidence was gathered 2026-09-04 — the call is now informed, not a coin flip
+
+**The user need is already met by a shipped, UAT'd feature.** `ai-advanced-capabilities-agreements-r1`
+(FR-13/FR-14, tasks 050/051) built **"Create Summary Memo"**, and unlike `summaryPage` it is wired
+end to end: a toolbar dropdown in `ComposeFormatToolbar.tsx`, both reads in `ComposeWorkspace.tsx`
+(`GET .../review-memo` and `.../review-memo/docx`), a negative-path banner in `ComposeBannerStack.tsx`,
+unit tests, and **four UAT rounds** of position/label refinement. It delivers the NDA-review digest as a
+separate memo with a downloadable `.docx` and an "Email memo" prefill.
+
+**Telling detail**: `ReviewMemoAssembler`'s own docblock cites `SaveComposeDocumentRequest.SummaryPage` as
+*precedent for the client-supplies-the-tuple pattern* — the later project **looked straight at this field,
+copied its shape, and built a parallel path rather than extending it.** That is what supersession looks
+like in practice.
+
+**But the two are not the same artifact, and that is the whole remaining question:**
+
+| | `summaryPage` (nda-r1 t041) | `reviewMemo` (agreements-r1 FR-13/14) |
+|---|---|---|
+| Shape | Appendix **inside** the .docx, appended on save | **Separate** memo record + downloadable .docx |
+| Client | ❌ none, ever | ✅ toolbar · 2 endpoints · banner · UAT'd |
+| Mechanism | `ComposeDocumentRenderer.AppendSection` | `ReviewMemoDocumentBuilder` |
+
+**Recommendation: RETIRE**, unless the owner specifically wants the NDA digest *inside* the document.
+The need is served; a second path to it earns its keep only if the in-document shape is itself the
+requirement. And per nda-r1's own task-041 notes, the wiring section stops at the server — no client half
+was ever scoped, so nothing downstream is waiting on it.
+
+**If the owner instead wants it wired, note that R8 just made that cheap.** `revisionReport` shipped this
+week over the *same* `AppendSection` mechanism with a full client path (Word-menu trigger → save-menu
+toggle → DTO → mapping). Wiring `summaryPage` is now "mirror `revisionReport`", not new design.
+
+⚠️ **Not actioned unilaterally.** Deleting another project's feature surface is the owner's call, and the
+retire path removes a generator + seam test that are green. The investigation the directive asked for is
+done; the decision is one question, with a recommendation and its evidence above.
 
 ### Next step for this section
 
-1. Ask the owner which path (wire / retire) — it is another project's feature and the call is theirs.
-2. **Widen the audit.** Only the Compose SAVE body has a guard. The same hand-mapping shape exists on
-   other endpoints (`ComposeEndpoints`, `OfficeEndpoints`, the AI dispatch surface). Enumerate every
-   `[FromBody]` DTO → request hand-mapping in the BFF and check each for unread properties. **Assume the
-   two found instances are not the only ones** — nobody had looked before today.
+1. **Owner decision: wire or retire `summaryPage`.** ONE question, evidence + recommendation above
+   (recommendation: retire). It is another project's feature, so the call is theirs.
+2. ~~**Widen the audit.**~~ ✅ **DONE 2026-09-04** — all 23 inbound body DTOs in `Api/**` scanned across
+   both dialects; found and resolved `SummarizeSessionRequest.Style`; `InboundBodyDtoMappingGuardTests`
+   now makes the class non-recurring repo-wide. The suspicion that "the found instances are not the only
+   ones" was correct.
+
+### What the audit did NOT cover (name it, so nobody reads "done" as "everything")
+
+The guard scans **request-body DTOs in `Api/**`**. Adjacent surfaces where the same silence is possible
+and no one has looked:
+
+- **Response DTOs the client never reads.** The mirror image: the server computes and returns a field no
+  client consumes. Harmless-ish, but it is how a "supported" field becomes fiction. My first scan pass
+  flagged ~20 of these and I discarded them as false positives *for the body-mapping rule* — that is a
+  correct exclusion for THIS guard, not a clean bill of health for those fields.
+- **Endpoints with no client caller at all.** A whole route can be dead; a per-property scan cannot see it.
+- **Query/route/header-bound parameters**, which this scan does not model.
+- **DTOs outside `Api/**`** — e.g. the `Services/Ai/LinearConsumers` surface master merged in today.
 
 ---
 
