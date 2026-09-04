@@ -2,7 +2,7 @@
 
 > **Last Updated**: **2026-09-04** (by `context-handoff`).
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION — ORDERED WORK ITEMS**.
-> ⚠️ **This project's own notes have now been WRONG THIRTEEN times.** Verify before believing —
+> ⚠️ **This project's own notes have been WRONG THIRTEEN times.** Verify before believing —
 > especially counts, route names, "already done" claims, and open-vs-answered questions.
 
 ---
@@ -11,24 +11,57 @@
 
 | Field | Value |
 |---|---|
-| **State** | Branch **clean**, 0 unpushed, **0 behind master**. **PR #939 is MERGED.** |
-| **Just completed** | **PR #939 merged** · **ALL THREE ADR AMENDMENTS** (030 / 031-as-**A5** / 040) · 🔑 **TASK 032 — THE EVALUATOR SPINE**, the deliverable this project is named for |
-| **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ · BFF unit **12,062 passed / 0 failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed** (ceiling 60) · 032's rights assertions **perturbation-verified** |
-| **Also done 2026-09-04** | Owner-approved dead-code sweep: task 096's 27-file deletion was already on master; **completed the remainder** — `WorkspaceGrid` now consumes the **shared** `CloseProjectDialog` (LW twin + its `closureService` deleted), and the zero-mount `ProvisioningProgressStep` is gone. −859 lines. 🔴 Surfaced a **pre-existing** break: [LegalWorkspace's Vite build has been RED since 2026-07-02](notes/finding-legalworkspace-build-broken-since-2026-07-02.md) — `tsc` passes, only the bundler fails, and no CI job runs it. |
-| **Next Action** | **Task 033** — propagate the new shape to consumers + delete the blanket Collaborate stamp (`CallerPrincipalResolver`), which 032 deliberately left alone. Then **037** (Secure/Restricted) and **038/039** (deny list) fill the ordered veto seam 032 wired as a no-op. **041** is also open and is `parallel-safe: TRUE`. |
+| **Task** | **033** — FR-19 consumer propagation + delete the blanket Collaborate stamp |
+| **Status** | `pending` — **not started**. Its dependency (032) is ✅ done |
+| **Repo state** | Branch **clean**, **0 unpushed**, **3 behind master** (fetch + merge before starting) |
+| **Next Action** | Merge `origin/master`, then run `task-execute` on `tasks/033-fr19-consumer-propagation-write-enforcement.poml`. **Read `notes/task-032-evaluator-spine.md` first** — 033 consumes the shape 032 built |
+| **Progress** | **35 completed** · 2 completed-with-escalation · 1 blocked-shipped · **54 pending** (of 92) |
 
-### 🔴 The traps that still apply
+### Completed THIS session (all merged or pushed)
+
+| Item | Result |
+|---|---|
+| **PR #939** | **MERGED.** Resolved a real conflict — two branches each shrank the SPE provenance census and each wrote its own count in the same comment. Resolved with the machine count the file prescribes → **2** ClientSupplied sinks remain (both in `Api/DocumentsEndpoints.cs`) |
+| **030** | ADR-003 **Amendment A1** — two surfaces, one evaluator |
+| **031** | ADR-028 **Amendment A5** (numbered A5; A1–A4 already existed) — impersonated derivation. **Exactly ONE line changed** in a 428-line ADR |
+| **040** | ADR-034 **Amendment A1** — allow-list first-class + per-surface |
+| **032** 🔑 | **The evaluator spine** — `(recordId → rights)`, additive max, ordered veto seam |
+| **dead-code sweep** | Owner-directed. `WorkspaceGrid` → **shared** `CloseProjectDialog`; twin + `ProvisioningProgressStep` deleted. **−859 lines** |
+
+### Files modified this session
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/` — `AccessibleRecordSetService.cs` (rights map + terms + veto seam), `ExternalCallerContext.cs` (extracted mapping, `ExternalRootGrant`, derived views), `ExternalParticipationService.cs` (levels + dedupe + **`CacheVersion` 3→4**)
+- `.claude/adr/` — ADR-003 (rewritten), ADR-028 (+A5), ADR-034 (+A1) · `.claude/CHANGELOG.md` (3 entries)
+- `docs/adr/` — ADR-003 full (+A1), ADR-034 full (+A1)
+- `tests/` — new `AccessibleRecordSetTestFactory.cs`; 5 test files migrated; **10 new rights-fidelity tests**
+- `src/solutions/LegalWorkspace/.../WorkspaceGrid.tsx` + shared `CreateProjectWizard/**` — consolidation
+- `projects/unified-access-control-r2/notes/` — 5 new notes (030, 031, 032, 040, LW-build finding)
+
+### Critical context
+
+**032 changed the evaluator's return shape**, so 033 exists to propagate it: `CallerPrincipalResolver`
+still blanket-stamps Collaborate over every accessible record, which 032 deliberately left alone.
+**Verified at HEAD**: clean `dotnet build Spaarke.sln --no-incremental` · BFF unit **12,062 passed / 0
+failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed** (ceiling 60).
+
+---
+
+## 🔴 The traps that still apply
 
 1. **`Router` is the ONLY required check on master** — it has passed while other jobs were RED (#934
-   reached master with a broken solution build that way). **Gate on the FULL rollup; only `CLEAN` merges.**
+   reached master with a broken solution build). **Gate on the FULL rollup; only `CLEAN` merges.**
 2. **The incremental solution build LIES.** Always `--no-incremental`. `MSB3026`/`MSB3027` = a
    concurrent test run, not a code error.
-3. **STALE PROSE HAS COST REAL WORK THIRTEEN TIMES.** The two newest, both found 2026-09-04 while
-   amending ADRs: `notes/access-model-decision.md` pairs `MSCRMCallerID` with the **AAD oid** (it takes
-   the **systemuserid**), and ADR-034 documented contact resolution as AAD-oid-only when
-   **`sprk_primarycontact` is primary and the AAD cross-ref is the fallback**.
-4. **NEVER `git stash` here, and never `git add -A` with concurrent agents.** Both have caused loss.
-5. **Both arch guards fire on new work and are RIGHT every time.** Fix them honestly.
+3. **🆕 `tsc` PASSING IS NOT EVIDENCE A VITE SOLUTION BUILDS.** TypeScript resolves via tsconfig
+   paths, the bundler via Vite aliases, and the two lists drift. This hid a **2-month-old broken
+   LegalWorkspace build**, and bit me once in the same session
+   (`@spaarke/ui-components/src/components/…` typechecks, bundles as a doubled `src/src/`).
+   **Run the build, not just the typecheck.**
+4. **STALE PROSE HAS COST REAL WORK THIRTEEN TIMES.** Newest: `notes/access-model-decision.md` pairs
+   `MSCRMCallerID` with the **AAD oid** (it takes the **systemuserid**), and ADR-034 documented contact
+   resolution as AAD-oid-only when **`sprk_primarycontact` is primary**.
+5. **NEVER `git stash` here, and never `git add -A` with concurrent agents.** Both caused loss.
+6. **Both arch guards fire on new work and are RIGHT every time.** Fix them honestly.
 
 ---
 
@@ -36,46 +69,36 @@
 
 ### 1. Task 033 — consumer propagation + delete the blanket Collaborate stamp
 
-⚠️ **Start this one FRESH — it changes effective rights on LIVE routes.** Deleting the stamp means a
-deliberate **ViewOnly grant stops conferring Write**, which is the correct fix (register A-8) and is
-also a real, user-visible change. Every mutating `/api/v1/external` route then has to require Write
-from the evaluator's answer *for that record*. A half-applied version of this leaves the authorization
-boundary partially enforced, so it wants full context headroom, not the tail of a long session.
-`opus` @ high · `parallel-safe: false` · touches `CallerPrincipalResolver.cs` (hot file).
+⚠️ **Start FRESH — this changes effective rights on LIVE routes.** Deleting the stamp
+(`CallerPrincipalResolver.cs` `WorkforceProjectAccessLevel` :354-360, applied :429-431) means a
+deliberate **ViewOnly grant stops conferring Write** — correct per register A-8, and user-visible.
+Every mutating `/api/v1/external` route must then require Write from the evaluator's answer **for that
+record**. A half-applied version leaves the boundary partially enforced.
+`opus` @ high · `parallel-safe: false` · deps **032 ✅**.
 
+### 2. Tasks 037 / 038 / 039 — fill the veto seam 032 wired
 
-032 deliberately did NOT touch `CallerPrincipalResolver.cs` (task 033 owns it). That file still
-blanket-stamps Collaborate over every accessible record (register A-8) — 032 relocated that stamp INTO
-the evaluator as an explicit **term level**, so the two now coexist. 033 deletes the downstream stamp
-so per-record rights actually reach consumers.
-
-### 1b. Tasks 037 / 038 / 039 — fill the veto seam 032 wired
-
-`ApplyVetoPipeline` in `AccessibleRecordSetService.cs` is an **ordered no-op** with two named slots.
-The order is already correct and load-bearing — pre-max Secure suppression, then deny list, then
-Restricted. Filling a slot is an additive change at a named point.
-⚠️ A veto **removes a key**. It must never write a low rights value: under `max()` a low value is
+`ApplyVetoPipeline` is an **ordered no-op** with two named slots; the order is already correct and
+load-bearing (pre-max Secure suppression → deny list → Restricted).
+⚠️ **A veto REMOVES a key.** It must never write a low rights value — under `max()` a low value is
 ignored, so an ethical wall modelled as a level fails silently in exactly the case it exists for.
 
-### 2. Task 041 — the access-conferring column registry (contact **+ org**)
+### 3. Task 041 — access-conferring column registry (contact **+ org**)
 
-Unblocked by **040**. `sonnet` @ high, **`parallel-safe: TRUE`** (group **P2-A** with 044) — one of the
-few genuinely parallelizable tasks left. Adding a conferring column must be a **registry edit**;
-a **rename must not** grant or revoke access (FR-24).
-
-### 3. Task 083 — container-selection sweep (now much smaller than recorded)
-
-🔴 **The remaining surface is TWO sinks, not seven.** Machine-counted at the 2026-09-04 merge
-(`grep -c "^            Provenance.ClientSupplied," tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`):
-compose-r8's #858 + drive-provenance work converted four, and task 076 removed one. **Both survivors are
-in `Api/DocumentsEndpoints.cs`** — the `{driveId}` upload and the `{driveId}/{itemId}` delete, both
-app-only (MI) behind the wrong-resource-domain `canwritefiles` policy. The delete is the worse of the
-two: a destroy leaves no record to audit. Re-run the grep; do not trust this number either.
-`fable` @ `xhigh`, `parallel-safe: false`.
+Unblocked by 040. `sonnet` @ high, **`parallel-safe: TRUE`** (group P2-A with 044) — one of the few
+genuinely parallelizable tasks left. Adding a conferring column must be a **registry edit**; a
+**rename must not** grant or revoke access (FR-24).
 
 ### 4. Task 035 — `ImpersonatedRootSetSource` + per-user cache
 
-Unblocked by **031**. ⚠️ Task **036** (the FR-20 swap) stays **BLOCKED** on open decision B below.
+Unblocked by 031. ⚠️ **036 (the FR-20 swap) stays BLOCKED** on open decision B.
+
+### 5. Task 083 — container-selection sweep (**2** sinks, not 7)
+
+Machine-counted at the 2026-09-04 merge. Both survivors are in `Api/DocumentsEndpoints.cs` — the
+`{driveId}` upload and the `{driveId}/{itemId}` delete, both app-only behind the wrong-resource-domain
+`canwritefiles` policy. The delete is worse: a destroy leaves no record to audit. **Re-run the grep;
+do not trust this number either.**
 
 ---
 
@@ -83,32 +106,11 @@ Unblocked by **031**. ⚠️ Task **036** (the FR-20 swap) stays **BLOCKED** on 
 
 | # | Decision | Blocks |
 |---|---|---|
-| A | **`sprk_account` / `sprk_contact` lookups on `sprk_document`.** Use schema names **`sprk_Account`** / **`sprk_Contact`** (PascalCase is load-bearing for `@odata.bind`). **Do NOT wire code before the columns exist** — that turns today's silent drop into a hard write error. | Office saves filed to account/contact persist **unassociated** today |
-| B | **034 canary user + CI path.** No non-admin canary user exists in dev; no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + manual gate over standing CI secrets. | **Task 036 must NOT proceed** |
-| C | **`sprk_todo` has no `sprk_regardingservicerequest` column** — handled as `unstampable` + warn. Schema change vs accept. | 028 / 056 |
-| D | **Real-Dataverse smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys (case-sensitive `sprk_Project@odata.bind` has never run against real Dataverse). | external SPA deploy |
-
----
-
-## ✅ Deployment obligations — RESOLVED 2026-09-04 (the earlier note was WRONG)
-
-The previous handoff called this a merge blocker: *"7 PCF bundles still call the deleted route — a
-deploy 404s every upload while the repo greps clean."* **That was wrong, in the alarming direction.**
-A full audit of every tracked artifact found:
-
-- The 7 `Communication*`/`TrackingFieldTrio` bundles **contain** the route string but have **0 upload
-  references in their source** — dead code the bundler pulled in transitively from the
-  `@spaarke/ui-components` barrel. Never invoked.
-- `DocumentUploadWizard` is built at deploy time — `src/solutions/**` has **zero** tracked build output.
-- The `dist/` trees carrying the deleted `SdapApiClient` are **gitignored** (`.gitignore:9`).
-- **Across the whole tracked repo, no deployable artifact both contains AND reaches the deleted route.**
-
-**Obligation 1 still stands**: client + BFF ship together — `PUT /api/obo/containers/{id}/files/{*path}`
-is deleted, with no compatibility window.
-**Residual (not a blocker)**: `SemanticSearchControl`'s stale bundle still carries the old
-`if (!containerId) return;` guard — the bug where the wizard **refuses to open** when the acting user's
-BU has no container. The fix is in source and ships on the next normal PCF rebuild
-(`npm run build:prod`, version bump ×4). It is waiting on a **fix**, not a break.
+| A | **`sprk_account` / `sprk_contact` lookups on `sprk_document`.** Use schema names **`sprk_Account`** / **`sprk_Contact`** (PascalCase is load-bearing for `@odata.bind`). **Do NOT wire code before the columns exist.** | Office saves filed to account/contact persist **unassociated** today |
+| B | **034 canary user + CI path.** No non-admin canary user in dev; no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + manual gate. | **Task 036 must NOT proceed** |
+| C | **`sprk_todo` has no `sprk_regardingservicerequest`** — handled as `unstampable` + warn. Schema change vs accept. | 028 / 056 |
+| D | **Real-Dataverse smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. | external SPA deploy |
+| E | 🆕 **LegalWorkspace standalone Vite build is BROKEN since 2026-07-02** (pre-existing, not ours). Needs a `@spaarke/document-operations` alias **and** TipTap deps, then `npm run build` in CI. See [`notes/finding-legalworkspace-build-broken-since-2026-07-02.md`](notes/finding-legalworkspace-build-broken-since-2026-07-02.md). Standalone page is retired, so urgency is low — **the CI gap is not**. | nothing here; owner call |
 
 ---
 
@@ -121,6 +123,11 @@ BU has no container. The fix is in source and ships on the next normal PCF rebui
   (`DataverseWebApiService.cs:978`), **not** in `DataverseImpersonation`, which adds no header for an
   empty id. A new impersonated call site that bypasses the read method would silently issue an
   **unscoped app-only query**. ADR-028 A5 now requires new paths to carry their own refusal.
+- **New (dead-code sweep)**: two docs still cite files deleted by task 096 —
+  `docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md:353-356` lists LW `ProjectWizardDialog.tsx` as
+  current, and `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md:139-145` cites the LW
+  `provisioningService.ts` (repoint to the shared `CreateProjectWizard/provisioningService.ts`).
+  Step 5 of [`notes/create-wizard-duplication-analysis.md`](notes/create-wizard-duplication-analysis.md).
 
 ---
 
