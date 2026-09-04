@@ -40,10 +40,10 @@ export {
 // ── Sub-components ──────────────────────────────────────────────────────────
 export { CreateProjectStep, type ICreateProjectStepProps } from './CreateProjectStep';
 export { SecureProjectSection, type ISecureProjectSectionProps } from './SecureProjectSection';
-export {
-  ProvisioningProgressStep,
-  type IProvisioningProgressStepProps,
-  type IProvisioningStepState,
-  type ProvisioningStepStatus,
-} from './ProvisioningProgressStep';
+// `ProvisioningProgressStep` was exported here until 2026-09-04 and is DELETED. It had zero mounts in
+// EITHER tree: barrel-exported but never rendered (CreateProjectWizard imports only
+// `provisionSecureProject` and runs provisioning silently inside `onFinish`), and the LegalWorkspace
+// twin had no importers at all. Two copies of a component nothing displayed.
+// If a visible provisioning step is ever wanted, build ONE against the current wizard — do not
+// resurrect this from history; it froze at 2026-03 semantics.
 export { CloseProjectDialog, type ICloseProjectDialogProps } from './CloseProjectDialog';

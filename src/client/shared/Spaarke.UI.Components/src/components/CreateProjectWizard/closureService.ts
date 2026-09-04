@@ -63,7 +63,9 @@ export interface ICloseProjectResult {
  */
 export async function closeSecureProject(
   request: ICloseProjectRequest,
-  authenticatedFetch: typeof fetch,
+  // See CloseProjectDialog's prop of the same name: narrowed from `typeof fetch` to the repo-wide
+  // `@spaarke/auth` shape (ADR-028) so a real `authenticatedFetch` is assignable.
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
   bffBaseUrl: string
 ): Promise<ICloseProjectResult> {
   const url = `${bffBaseUrl}/api/v1/external-access/close-project`;
