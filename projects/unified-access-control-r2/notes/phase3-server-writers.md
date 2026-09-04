@@ -2,165 +2,238 @@
 
 > Produced by task **052**. Companion to [`phase3-derivation-rules.md`](phase3-derivation-rules.md) (task 050, the
 > client side). Derivation rules are identical on both sides and pinned by a **cross-language parity test**.
+>
+> **2026-09-03 — convergence pass.** The first 052 pass shipped the resolver + inventory and stopped, blocked on
+> `Services/Communication/**` ownership. That block cleared; this document is the rewritten result. §1 records
+> what the first pass got wrong, because three of its eleven rows were misclassified and its headline finding was
+> false.
 
 ---
 
-## 0. Status of this task — read this first 🔴
+## 0. Status
 
 | Deliverable | Status |
 |---|---|
-| Grep-complete writer inventory (§2) | ✅ Done — this document |
-| C# `CoreAncestorResolver` + tests | ✅ Done — 24/24, incl. TS↔C# taxonomy parity |
-| **Convergence of the inventoried writers** | ⛔ **NOT DONE — blocked, see §1** |
-
-Task 052 is therefore **partially complete**. It is recorded as `blocked`, not `completed`. The reason is a
-real coordination constraint, not an implementation difficulty.
+| Grep-complete writer inventory (§2) | ✅ Re-verified independently, 3 corrections |
+| C# `CoreAncestorResolver` + tests | ✅ Extended with the stamping surface + DI registration |
+| **Convergence of the inventoried writers** | ✅ **Done** — 6 converged, 2 verified-trivial, 3 reclassified |
 
 ---
 
-## 1. Why convergence is blocked ⛔
+## 1. Corrections to the first pass 🔴
 
-**5 of the 9 server writers live under `src/server/api/Sprk.Bff.Api/Services/Communication/**`, which another
-agent owns concurrently in this worktree.** The project's parallel-safety rule
-(`projects/unified-access-control-r2/CLAUDE.md` → *Parallel-safety rules*) is explicit: two agents editing an
-authorization path concurrently produce a silent merge mess. Editing them anyway is the failure mode the rule
-exists to prevent, so this task stopped instead.
+The first pass's inventory was grep-complete but its **classifications were not verified against each writer's
+own constraints**. Re-inspection found three rows wrong, and the headline conclusion wrong with them.
 
-**⚠️ The POML is wrong about this.** `052-server-writer-ancestor-stamping.poml` declares:
+### 1a. "The verified-trivial category is EMPTY in practice" — FALSE
 
-```xml
-<parallel-safe>true</parallel-safe>
-<parallel-reason>Touches Services/Communication/** + a new helper — disjoint from task 050's
-                 TS shared-lib files; …</parallel-reason>
-<file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
-```
+The first pass claimed *"every writer above is on a child-class host, so each can receive a child-of-child
+target"* and concluded the POML's verified-trivial category was empty. That reasoning conflates the **host** with
+the **target**. A writer on a child host is only a risk if it can be handed a *child target*, and two writers
+cannot be:
 
-It reasons about disjointness **only against task 050** and concludes `parallel-safe: true`. But
-`Services/Communication/**` is a heavily-shared surface across this project's own waves and across the
-concurrently-active email/communication projects. The POML's `<parallel-reason>` establishes disjointness with
-one sibling task and then generalizes it to "safe" — which is not the same claim.
+| Writer | Why it is genuinely trivial |
+|---|---|
+| `Spaarke.Dataverse/DataverseServiceClientImpl.StageAnalysisRegardingFields` | Its lookup map is `RegardingRecordType.GetRegardingLookupFieldByEntity` (`Models.cs:977`), which returns non-null **only** for `sprk_matter` and `sprk_project` — both CORE — and the caller **throws** on anything else (`:453-458`, `:537-540`). A child target cannot reach the write. |
+| `Infrastructure/ExternalAccess/ExternalDataService.CreateTodoAsync` | The regarding entity is the **string literal `"sprk_project"`** (`:543-544`), bound alongside a literal `sprk_RegardingProject@odata.bind`. There is no parameter to pass a child through. |
 
-**Recommended fix to the POML/plan:** mark 052 `parallel-safe: false`, or split it:
+Both write the CORE lookup directly, which **is** the FR-26 stamp. No change needed; changing them would add a
+metadata round-trip and a failure mode for zero access-model gain. `ExternalDataService` is additionally inside
+the project-wide `parallel-safe:false` zone, so leaving it alone is doubly correct.
 
-| Split | Scope | Parallel-safe |
-|---|---|---|
-| **052a** | Audit + `CoreAncestorResolver` + tests | ✅ true — **this is what landed** |
-| **052b** | Converge the `Services/Communication/**` writers | ❌ false — serialize with the communication owner |
-| **052c** | Converge the non-communication writers (§2 rows 1, 6–8) | ✅ true |
+### 1b. `IncomingCommunicationProcessor.cs:1260` is a READ, not a write
+
+Classified "Narrow `sprk_regardingmatter` write". It is
+`RetrieveAsync("sprk_communication", communicationId, ["sprk_regardingmatter"], ct)` — a projection feeding an
+email-received notification. The same file states at `:661-662` that *"Regarding fields … are set in step 4.5 by
+IncomingAssociationResolver"*. It is not a writer.
+
+### 1c. `ExplicitReferenceRung` is an emitter, not a writer — and converging it would be the wrong seam
+
+It returns `RungMatch { RegardingFieldName = … }`. It writes nothing. So do the other ~9 rungs. **Every** rung
+funnels into one write, `IncomingAssociationResolver.ApplyDecisionAsync` → `UpdateAsync` (`:316`). Converging at
+the rung would have to be repeated 10 times and would still miss any rung added later; converging at the single
+write covers all of them permanently. That is where the stamp went.
+
+### 1d. `ThreadResolver`'s host is `sprk_communicationthread`, not `sprk_communication`
+
+The row said "`sprk_communication` (thread anchor)". `CreateThreadAsync` and `FindOrCreateDefaultThreadAsync`
+both build `new DataverseEntity("sprk_communicationthread")`. That entity is **in neither taxonomy set** — not
+CORE, not CHILD. See §3 for why that means "do not stamp", not "stamp anyway".
+
+### 1e. The POML was right about one thing the first pass called wrong
+
+The first pass recommended splitting 052 into 052a/b/c. Not needed: with `Services/Communication/**` released,
+the whole convergence is one coherent change, and splitting it would have shipped a resolver used by half its
+writers — the worst of both states. `parallel-safe:false` (already corrected in the POML) is the right fix.
 
 ---
 
 ## 2. Writer inventory (acceptance artifact)
 
-Method: `grep` over `src/server` for `sprk_regarding{matter,project,workassignment,servicerequest,
-communication,event,invoice,document,analysis,todo}` plus the four denormalized resolver fields, then
-hand-inspection of each hit to separate **writes** from **reads/projections**.
+Method: `Grep` for `sprk_regarding*` across all `.cs` under `src/` (51 files, 344 occurrences), then
+hand-inspection of each hit to separate **writes** from **reads/projections**, and — new in this pass —
+inspection of each writer's **target map** to determine whether a CHILD target can actually reach it.
 
-| # | Writer | Host (child) entity | Evidence | Classification |
+| # | Writer | Host entity | Can take a CHILD target? | Classification |
 |---|---|---|---|---|
-| 1 | `Services/Workspace/TodoRegardingBuilder.cs:169` | `sprk_todo` | Writes the typed lookup + 4 resolver fields. 11-entity map at `:54-68`. | 🔲 **Converge** — in-lane, deferred with 052c |
-| 2 | `Services/Communication/CommunicationService.cs:1903,1936-1954` | `sprk_communication` | `RegardingLookupMap` (12 entities incl. service request at `:1914`) → typed lookup + resolver fields | ⛔ **Blocked** (owned) |
-| 3 | `Services/Communication/ThreadResolver.cs:153-160,257` | `sprk_communication` (thread anchor) | Writes anchor resolver fields; reads `RegardingFieldMap.AllRegardingFields` | ⛔ **Blocked** (owned) |
-| 4 | `Services/Communication/IncomingAssociationResolver.cs:381-420` | `sprk_communication` | Fallback regarding-field writer over `RegardingFieldMap.All` | ⛔ **Blocked** (owned) |
-| 5 | `Services/Communication/IncomingCommunicationProcessor.cs:1260` | `sprk_communication` | Narrow `sprk_regardingmatter` write | ⛔ **Blocked** (owned) |
-| 6 | `Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs:56-106` | `sprk_communication` | Emits `RegardingFieldName` for the engine to write | ⛔ **Blocked** (owned) |
-| 7 | `Services/Office/OfficeService.cs:1487-1560` | `sprk_todo` | Add-in "Related to" picker → typed lookup + resolver fields. **Map covers only Matter/Project/Invoice** | 🔲 **Converge** (052c) |
-| 8 | `Services/Ai/Nodes/ActionCore/TaskActionCore.cs:57-73` | `sprk_event` | Creates a Task-typed `sprk_event` with a typed regarding lookup | 🔲 **Converge** (052c) |
-| 9 | `Services/Ai/Handlers/EmailDraftToolHandler.cs:127-134,837` | `sprk_communication` | Draft-email create with regarding map + `sprk_regardingrecordid` | 🔲 **Converge** (052c) |
-| 10 | `Spaarke.Dataverse/DataverseServiceClientImpl.cs:546-560` | `sprk_analysis` | Analysis resolver-field write (no `…recordurl` — not a deployed attribute there) | 🔲 **Converge** (052c) |
-| 11 | `Infrastructure/ExternalAccess/ExternalDataService.cs:678-703` | `sprk_todo` (external) | Web-API mirror of `TodoRegardingBuilder` | ⛔ **Blocked** — `Infrastructure/ExternalAccess/**` is `parallel-safe:false` per project CLAUDE.md |
+| 1 | `Services/Workspace/TodoRegardingBuilder.cs:169` | `sprk_todo` | ✅ 5 of 11 (event, communication, invoice, analysis, document) | ✅ **Converged** |
+| 2 | `Services/Communication/CommunicationService.cs:1936` (`MapAssociationFields`, **3 call sites**) | `sprk_communication` | ✅ 4 of 12 (analysis, invoice, event, communication) | ✅ **Converged** |
+| 3 | `Services/Communication/ThreadResolver.cs:156,588` | **`sprk_communicationthread`** | n/a — host is outside the taxonomy | ⚪ **Out of scope** (§3) |
+| 4 | `Services/Communication/IncomingAssociationResolver.cs:316` | `sprk_communication` | ✅ 4 of 12 via `RegardingFieldMap.All` | ✅ **Converged** — the single seam for all ~10 rungs |
+| 5 | `Services/Communication/IncomingCommunicationProcessor.cs:1260` | — | — | ❌ **Not a writer** (§1b) |
+| 6 | `Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs:56-106` | — | — | ❌ **Emitter**, covered by #4 (§1c) |
+| 7 | `Services/Office/OfficeService.cs:1547` | `sprk_todo` | ✅ Invoice (of Matter/Project/Invoice) | ✅ **Converged** |
+| 8 | `Services/Ai/Nodes/ActionCore/TaskActionCore.cs:106` | `sprk_event` | ✅ 4 of 14 (invoice, analysis, event, communication) | ✅ **Converged** |
+| 9 | `Services/Ai/Handlers/EmailDraftToolHandler.cs:832` | `sprk_communication` | ✅ 2 of 8 (analysis, invoice) | ✅ **Converged** |
+| 10 | `Spaarke.Dataverse/DataverseServiceClientImpl.cs:543` | `sprk_analysis` | ❌ matter/project only, **throws** otherwise | ✅ **Verified-trivial** (§1a) |
+| 11 | `Infrastructure/ExternalAccess/ExternalDataService.cs:544` | `sprk_todo` | ❌ literal `"sprk_project"` | ✅ **Verified-trivial** (§1a) |
 
-### Verified-trivial (no change needed)
-
-None. **Every writer above is on a child-class host**, so each can receive a child-of-child target and each
-needs the stamp. The POML anticipated a "writers that only ever set a CORE target lookup directly" category —
-it is **empty in practice**, because all these maps accept child targets (communication, event, invoice,
-analysis, document) as regarding parents.
-
-### Escalation trigger — NOT fired ✅
-
-The POML's `<escalation>` fires if a writer is found inside a Dataverse **plugin** (`src/dataverse/plugins`).
-Grep found none: every regarding writer is in the BFF or `Spaarke.Dataverse`. No scope escalation needed on
-that axis. (The block in §1 is a different, unanticipated axis.)
+**Escalation trigger — NOT fired.** No regarding writer exists in `src/dataverse/plugins`. Every one is in the
+BFF or `Spaarke.Dataverse`. No deployment-surface escalation needed.
 
 ---
 
-## 3. What landed: `CoreAncestorResolver`
+## 3. `sprk_communicationthread` — the decision not to stamp
 
-`src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs`
-Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/CoreAncestorResolverTests.cs` — 24 passing.
+`ThreadResolver` writes typed regarding lookups onto `sprk_communicationthread` (via `RegardingFieldMap`, so it
+CAN bind a child target). It was not converged, deliberately:
 
-### Placement justification (CLAUDE.md §10)
+- `sprk_communicationthread` is in **neither** `CORE_RECORD_ENTITIES` nor `CHILD_RECORD_ENTITIES`. Per
+  `phase3-derivation-rules.md` §2, entities in neither set are **`unclassified`** — a real third state, not an
+  oversight. They confer access through other evaluator terms, never through core-ancestor inheritance.
+- Stamping it would extend child inheritance to a new entity. That is a **model change**, and the place to make
+  it is task **056** (child-module registration), where the entity would also get its `ScopeDimension` — a stamp
+  with no registered child module does nothing except look like the question was already answered.
+- Writing an access-conferring lookup onto an entity the evaluator does not read is the worst of both: no
+  benefit today, and a future reader who finds the column populated will reasonably assume inheritance works.
+
+**Filed for task 056**: decide whether threads are child-class. If yes, add `sprk_communicationthread` to the
+taxonomy (both sides — the parity test enforces it) and converge `ThreadResolver` in the same change.
+
+---
+
+## 4. What the convergence actually does
+
+### 4.1 The resolver's new surface
+
+`CoreAncestorResolver` gained the stamping half of the job (it previously only derived):
+
+| Member | For |
+|---|---|
+| `StampAsync(Entity child, targetEntity, targetId, ct)` | Writers building an `Entity` (#1, #2, #7, #8) |
+| `StampAsync(IDictionary<string,object> fields, hostEntity, …)` | Writers building an update payload |
+| `DeriveForHostAsync(hostEntity, targetEntity, targetId, ct)` | Writers whose payload is neither (#4's multi-target loop, #9's hand-written JSON) |
+| `ApplyStamps(IDictionary<string,object>, …)` | Dictionary sibling of the existing `Entity` overload |
+| `CoreAncestorStampOutcome` | The result a writer must inspect: `Succeeded`, `Stamps`, `Unstampable`, `Error` |
+
+Derivation, host-column probe, and application are **one call** on purpose. Split across three, every writer
+re-implements the same three failure branches, and one of them forgetting the `Succeeded` check is a silent
+under-grant that no test would catch. One call, one outcome object, one thing to get wrong.
+
+The **host** column set is resolved from live metadata, exactly like the target's — not from each writer's own
+regarding map. Two writers (#1 and #7) share the `sprk_todo` host, so a static per-writer list would have
+duplicated that knowledge in two modules and drifted. It also matches the client's discover-never-assume rule
+(F-050-1: a `$select` of a non-existent column is an HTTP 400).
+
+### 4.2 Ordering — the same as the client's
+
+Every converged writer stamps **after** it binds its own typed lookup. Two reasons, both load-bearing:
+
+1. A stamp applied last cannot be nulled by a pre-clear or overwritten by the direct bind.
+2. `TodoRegardingBuilder`'s ADR-024 mutual-exclusion guard fires on an **already-set** lookup. Stamping first
+   would make an ancestor stamp look like a competing user choice and throw. The client's
+   `buildRegardingSelectionPayload` orders it the same way, for the same reason
+   (`phase3-derivation-rules.md` §4).
+
+The directly-bound target is always skipped (`skipEntityType`) — the writer already wrote it.
+
+### 4.3 Fail-closed, in each writer's own error contract (NFR-01)
+
+The POML says *"fail the operation (or queue retry per the writer's existing error contract) — never create the
+child silently unstamped."* Each writer's existing shape was used rather than a new one:
+
+| Writer | Existing failure shape | Fail-closed behaviour |
+|---|---|---|
+| #1 `TodoRegardingBuilder` | throws (`ArgumentException` / `InvalidOperationException`) | throws; callers create the to-do only after it returns |
+| #2 `CommunicationService` | `SdapProblemException` (as `ValidateRequest`) | `SdapProblemException` 502 `CORE_ANCESTOR_DERIVATION_FAILED` |
+| #4 `IncomingAssociationResolver` | defensive; association failure is non-fatal (NFR-06) | throws → association fails, communication survives unassociated; **no partial write** |
+| #7 `OfficeService.CreateTodoAsync` | `null` return | `null` |
+| #8 `TaskActionCore` | "degraded success" `Guid.Empty` | `Guid.Empty`, **and no `CreateAsync` call** |
+| #9 `EmailDraftToolHandler` | `ToolResult` error | `ToolErrorCodes.InternalError`, before the payload is built |
+
+`Unstampable` is **never** a failure. A derived ancestor the host has no column for is a schema gap (F-050-2),
+surfaced as a warning and returned on the outcome — aborting the write there would turn a known schema hole into
+an outage.
+
+### 4.4 One deliberate asymmetry: #4 does not clear stale stamps
+
+`phase3-derivation-rules.md` F-050-3 requires reparent paths to **null** the core-ancestor lookups the new
+target does not supply. `IncomingAssociationResolver` does **not** do this, on purpose:
+
+The engine is additive by contract — *"a sibling regarding field is never cleared"* (task-042 semantics), and it
+runs on inbound mail **suggestion**, not on a user's deliberate reparent. Making it clear would let an inbound
+heuristic silently unfile a human's manual filing. Clearing on reparent belongs to the deliberate reparent paths
+(tasks 050/051), where a person chose the new target. Recorded here so the asymmetry is a decision, not an
+omission.
+
+Related: a rung that wrote a CORE lookup **explicitly** is never overwritten by a derived stamp. The rung
+observed evidence about *this message*; the stamp is only an inherited pointer.
+
+---
+
+## 5. DI placement (CLAUDE.md §10)
 
 | Question | Answer |
 |---|---|
-| **Existing?** | No C# equivalent. `grep CoreAncestor src/` returned zero before this task. Closest neighbours are the per-module regarding maps (`RegardingFieldMap.cs`, `TodoRegardingBuilder.RegardingLookupByEntity`, `TaskActionCore.RegardingFieldByEntity`) — all *field maps*, none derive an ancestor. |
-| **Extension?** | No. `ThreadResolver` is communication-specific; derivation must serve todo, event, analysis, document and invoice writers too. Extending it would couple every child writer to the communication module — the opposite of what §10 asks for. |
-| **Cost of doing nothing** | Concrete FR-27 acceptance failure: *"a contact with Project access sees its communications"* returns **0 rows** for server-filed emails, because the row carries no ancestor stamp. The one-time backfill (053) would also permanently miss every future server-created row. |
-| **Placed in** | `Services/Dataverse/` — a cross-cutting Dataverse read helper, cohesive with `RecordService`/`MetadataService`, and deliberately NOT in `Services/Communication/`. |
-| **New packages** | None. |
-| **New endpoints / DI** | **None yet** — deliberately unregistered until a converged writer consumes it (CLAUDE.md §11: an unconsumed DI registration is surface with no cost-of-doing-nothing). 052c registers it alongside its first consumer. |
-| **New interface** | None (ADR-010). Reads go through the already-registered `IGenericEntityService`; the column-presence test seam is a **delegate** (`EntityColumnProbe`), not a fresh abstraction. Production binds it to the 6h-cached `MetadataService` via `CoreAncestorResolver.FromMetadata`. |
-| **Publish size** | Unchanged — one source file, zero package references. Not re-measured; the ≤60 MB ceiling is unaffected by a leaf class with no new dependency. Re-measure at 052c when DI + consumers land. |
-| **CVE** | No package change → no new surface. |
-
-### Design parity with the client (task 050)
-
-Identical status model, identical rules:
-
-| | Client (TS) | Server (C#) |
-|---|---|---|
-| Core target | stamps itself, **no read** | same |
-| Child target | **one** read of its own core-ancestor lookups | same |
-| Matter → Project | never stamped | same |
-| Column presence | discovered nav-props | live metadata (`MetadataService`) |
-| Statuses | `core-target` / `derived` / `no-ancestor` / `unclassified` / `error` | `CoreTarget` / `Derived` / `NoAncestor` / `Unclassified` / `Error` |
-| Fail-closed | error result, caller aborts | `Error` status, caller aborts (**does not throw** — so a broad `catch` cannot swallow it) |
-| Unstampable ancestor | returned + warned | returned + warned |
-
-`CoreAncestorResolverTests.Taxonomy_MatchesTheTypeScriptSide` **reads the TypeScript file and compares the
-literal arrays**, so the two implementations cannot drift silently — a one-sided edit fails the C# build.
-That is stronger than the POML's "pinned by test on each side" (which only catches an edit on the side you
-happen to run).
+| **Existing?** | No C# equivalent existed before task 052. Nearest neighbours are per-module field maps (`RegardingFieldMap`, `TodoRegardingBuilder.RegardingLookupByEntity`, `TaskActionCore.RegardingFieldByEntity`, `RegardingRecordType`) — maps, not derivations. |
+| **Extension?** | No. `ThreadResolver` is communication-specific; the derivation serves todo, event, communication and (trivially) analysis writers across four modules. |
+| **Cost of doing nothing** | FR-27 acceptance failure: *"a contact with Project access sees its communications"* returns 0 rows for every server-created child of a child. Task 053's backfill would also permanently miss every future one. |
+| **Placed in** | `Services/Dataverse/` — a cross-cutting Dataverse helper, deliberately not `Services/Communication/`. |
+| **Lifetime** | **Singleton** with a scope-bridged metadata probe. Consumers span every lifetime (`CommunicationService` + `IncomingAssociationResolver` are singletons; `OfficeService` and the tool handlers are scoped; `TaskActionCore` / `TodoRegardingBuilder` are constructed inline) — only a singleton serves all. `MetadataService` is **scoped**, so capturing one would be a captive dependency; the `EntityColumnProbe` opens a scope per call, the same bridge `UpdateRecordActionCore.cs:222` already uses. Metadata is Redis-cached 6h, so steady state is a cache read. |
+| **Registered** | `AddCoreAncestorResolver()` (idempotent `TryAddSingleton`), called from `AddDataverseMetadataServices()` **and** from both `AddToolFramework` overloads. The second call is not redundant: `EmailDraftToolHandler` is registered by the tool-framework assembly scan, so registering only in the metadata module would make it unresolvable wherever the tool framework is composed without that module — the §10 F.1 asymmetric-registration anti-pattern. Same posture as `TimeProvider` three lines above. |
+| **New interface** | None (ADR-010). The only seam is the `EntityColumnProbe` delegate. |
+| **New packages / endpoints** | None. |
+| **Publish size** | Unaffected: no package reference added, no new project reference. Baseline ~44.96 MB incl. PDBs; ceiling 60 MB. |
 
 ---
 
-## 4. Convergence recipe for 052b / 052c
+## 6. Tests
 
-For each writer, at the point it binds a regarding target:
+| File | Covers |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/CoreAncestorResolverTests.cs` | Taxonomy pinned literally + **TS↔C# parity by reading the TypeScript file**, derivation rules, one-hop cap, Matter≠Project-child, fail-closed states |
+| `tests/integration/data-mutation/CoreAncestorStamping/ServerWriterAncestorStampingTests.cs` | **New.** That the WRITERS call it: stamp-on-create for a child-of-child on `sprk_todo` / `sprk_event` / `sprk_communication`, core-target-stamps-only-itself, explicit-rung-write-not-overwritten, and a fail-closed negative per writer |
+| `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/CoreAncestorResolverFixtures.cs` | **New.** `Inert()` / `WithAncestors(…)` / `Failing()` — the ~42 existing writer tests take `Inert()`, which exercises the real derivation path but derives nothing, so their assertions are unchanged |
 
-```csharp
-var ancestor = await _coreAncestors.ResolveStampsAsync(targetEntity, targetId, ct);
-if (!ancestor.Succeeded)
-{
-    // NFR-01: fail the operation or queue a retry per THIS writer's existing error contract.
-    // Never create the child unstamped.
-    return /* the writer's own failure shape */;
-}
-var hostColumns = await columnProbe(hostEntity, ct);
-var unstampable = _coreAncestors.ApplyStamps(child, ancestor, hostColumns, skipEntityType: targetEntity);
-```
-
-Reparent paths must additionally **null** the core-ancestor lookups the new target does not supply — the same
-stale-stamp hazard task 050 found on the client (`phase3-derivation-rules.md` F-050-3). A stale stamp keeps the
-child visible to the OLD ancestor's principals after the user believes they detached it.
-
-Per-writer notes:
-
-- **#7 `OfficeService`** — its map covers only Matter/Project/Invoice. Invoice is child-class, so the add-in can
-  already produce a child-of-child To Do today. Highest-value convergence outside the blocked set.
-- **#8 `TaskActionCore`** — the host is `sprk_event`; keep the schema's own `sprk_regardingorganziation`
-  misspelling (it is real, per the file's own warning).
-- **#10 `DataverseServiceClientImpl`** — shared client; `sprk_analysis` has a reduced resolver field set (no
-  `…recordurl`). Verify the four core-ancestor lookups actually exist on `sprk_analysis` before converging —
-  the probe will report it, but the write path must not assume.
+KEEP path: the new writer tests are at `tests/integration/data-mutation/**` per `tests/CLAUDE.md`
+("every new write path → ≥1 integration test"). The negative cases are the point — an unstamped row is
+indistinguishable from a correct one until records go missing from a client's view, so a happy-path-only suite
+would pass against a writer that swallowed derivation errors.
 
 ---
 
-## 5. Open finding carried from task 050
+## 7. Open findings
 
-**F-050-2 (unchanged, now confirmed server-side):** `sprk_todo` has no `sprk_regardingservicerequest` column
-while `sprk_communication` does (`RegardingFieldMap.cs:18`). A To Do regarding a Communication whose ancestor is
-a Service Request cannot be stamped, and will not be visible to principals whose access comes from that Service
-Request. `ApplyStamps` reports it as `unstampable`; closing it requires a Dataverse schema change. Owner
-decision needed — see tasks 028 and 056.
+### F-050-2 (unchanged, confirmed server-side) 🔴
+
+`sprk_todo` has no `sprk_regardingservicerequest` column; `sprk_communication` does
+(`RegardingFieldMap.cs:18`). A To Do regarding a Communication whose ancestor is a Service Request **cannot be
+stamped**, and will not be visible to principals whose access comes from that Service Request.
+
+Server behaviour now matches the client exactly: the ancestor is derived, `ApplyStamps` reports it in
+`Unstampable`, a warning names the missing column and the affected record, and **the write proceeds**. Closing
+it requires a Dataverse schema change. Owner decision — tasks **028** and **056**.
+
+### F-052-1 — `sprk_communicationthread` taxonomy question (new)
+
+See §3. Needs a decision at task 056.
+
+### F-052-2 — `EmailDraftToolHandler` derives app-only under a user-context write (new, low)
+
+That handler writes through `IDataverseUserClient` (user OBO), but the ancestor derivation goes through the
+app-only `IGenericEntityService` like every other writer. The user can already bind the target as regarding, so
+they can see it; the ancestor id is a denormalization onto a row they are creating, not a new disclosure. Noted
+rather than fixed — a user-context derivation path would be a second mechanism for one caller, and the stamp
+would be *missing* (breaking FR-26) whenever the user cannot read the ancestor. Revisit if the evaluator ever
+treats the stamp as caller-asserted rather than system-derived.

@@ -356,6 +356,72 @@ public class CoreAncestorResolverTests
     }
 
     // ---------------------------------------------------------------------
+    // StampAsync — the single call every converged writer makes (task 052)
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task StampAsync_WhenTheHostColumnProbeFails_FailsClosedRatherThanReportingEverythingUnstampable()
+    {
+        // The subtle one. Derivation SUCCEEDS here — the ancestor is known. If an unreadable host column
+        // set were treated as "no columns", every stamp would fall into `unstampable`, which is a warning,
+        // not a failure — and the writer would cheerfully create a child with no inherited access while
+        // logging that it could not store it. That is a total inheritance loss disguised as a schema gap,
+        // so the host probe fails the operation exactly like the target probe does.
+        var row = new Entity("sprk_communication", CommId);
+        row["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+
+        var calls = 0;
+        CoreAncestorResolver.EntityColumnProbe probe = (entity, _) =>
+        {
+            // First call is the TARGET (sprk_communication) and succeeds; the second is the HOST.
+            calls++;
+            return calls == 1
+                ? Task.FromResult<IReadOnlySet<string>>(
+                    new HashSet<string>(CommunicationColumns, StringComparer.OrdinalIgnoreCase))
+                : throw new InvalidOperationException($"metadata unavailable for {entity}");
+        };
+
+        var resolver = Build(EntityServiceReturning(row), probe);
+        var child = new Entity("sprk_todo");
+
+        var outcome = await resolver.StampAsync(child, "sprk_communication", CommId);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Status.Should().Be(CoreAncestorStatus.Error);
+        child.Attributes.Should().BeEmpty("a failed stamp must leave the payload untouched");
+    }
+
+    [Fact]
+    public async Task StampAsync_WhenTheHostCannotStoreADerivedAncestor_ReportsItUnstampableAndStillSucceeds()
+    {
+        // F-050-2, server side. sprk_todo has no sprk_regardingservicerequest column, so a to-do filed
+        // under a communication anchored to a Service Request cannot inherit that access. This is a SCHEMA
+        // gap, not a runtime failure: surface it (so the owner can close it by adding the column) and let
+        // the write proceed. Failing here would turn a known, bounded hole into an outage.
+        var row = new Entity("sprk_communication", CommId);
+        row["sprk_regardingservicerequest"] = new EntityReference("sprk_servicerequest", SrId);
+
+        var calls = 0;
+        CoreAncestorResolver.EntityColumnProbe probe = (_, _) =>
+        {
+            calls++;
+            var columns = calls == 1 ? CommunicationColumns : TodoColumns; // target, then host
+            return Task.FromResult<IReadOnlySet<string>>(
+                new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase));
+        };
+
+        var resolver = Build(EntityServiceReturning(row), probe);
+        var child = new Entity("sprk_todo");
+
+        var outcome = await resolver.StampAsync(child, "sprk_communication", CommId);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Unstampable.Should().ContainSingle().Which.Should().Be("sprk_regardingservicerequest");
+        child.Contains("sprk_regardingservicerequest").Should().BeFalse(
+            "writing a column sprk_todo does not have would fault the whole create");
+    }
+
+    // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 

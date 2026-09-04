@@ -327,6 +327,204 @@ public sealed class CoreAncestorResolver
 
         return unstampable;
     }
+
+    /// <summary>
+    /// Apply derived ancestor stamps to a field dictionary being written, skipping any the host cannot store.
+    /// The <c>Dictionary&lt;string, object&gt;</c> shape used by
+    /// <see cref="IGenericEntityService.UpdateAsync(string, Guid, Dictionary{string, object}, CancellationToken)"/>.
+    /// </summary>
+    /// <returns>Lookup attributes that could not be stamped because the host lacks the column.</returns>
+    public IReadOnlyList<string> ApplyStamps(
+        IDictionary<string, object> fields,
+        string hostEntityLogicalName,
+        CoreAncestorResult result,
+        IReadOnlySet<string> hostColumns,
+        string? skipEntityType = null)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(hostColumns);
+
+        var unstampable = new List<string>();
+        foreach (var stamp in result.Stamps)
+        {
+            if (skipEntityType is not null &&
+                string.Equals(stamp.EntityType, skipEntityType, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!hostColumns.Contains(stamp.LookupAttribute))
+            {
+                unstampable.Add(stamp.LookupAttribute);
+                _logger.LogWarning(
+                    "Derived core ancestor {Entity}({Id}) cannot be stamped on {Host}: no '{Lookup}' column. " +
+                    "This record will NOT inherit that ancestor's access (FR-26 gap).",
+                    stamp.EntityType, stamp.RecordId, hostEntityLogicalName, stamp.LookupAttribute);
+                continue;
+            }
+
+            fields[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
+        }
+
+        return unstampable;
+    }
+
+    // -------------------------------------------------------------------------
+    // The single call a converged writer makes.
+    //
+    // Derivation + host-column probe + application are ONE operation because every writer that split
+    // them would have to re-implement the same three failure branches, and one of them forgetting the
+    // Succeeded check is a silent under-grant. The outcome record is the contract: a writer that
+    // ignores it does not compile away the check, it fails review visibly.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Derive the target's core-record ancestors and stamp them onto the child <see cref="Entity"/> being
+    /// written. The host entity is taken from <see cref="Entity.LogicalName"/>.
+    /// </summary>
+    /// <remarks>
+    /// Call this AFTER the writer has bound its own typed regarding lookup: the directly-bound target is
+    /// skipped (it is already written), and applying stamps last means an earlier pre-clear cannot null
+    /// them — the same ordering the client's <c>buildRegardingSelectionPayload</c> enforces.
+    /// <para>
+    /// <b>Fail closed (NFR-01).</b> Inspect <see cref="CoreAncestorStampOutcome.Succeeded"/> and abort the
+    /// write per the writer's own error contract when it is false. Never create the child anyway.
+    /// </para>
+    /// </remarks>
+    public async Task<CoreAncestorStampOutcome> StampAsync(
+        Entity child,
+        string targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+
+        var (result, hostColumns, failure) =
+            await DeriveAndProbeAsync(child.LogicalName, targetEntityLogicalName, targetRecordId, ct)
+                .ConfigureAwait(false);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        var unstampable = ApplyStamps(child, result!, hostColumns!, skipEntityType: targetEntityLogicalName);
+        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null);
+    }
+
+    /// <summary>
+    /// Dictionary-shaped sibling of <see cref="StampAsync(Entity, string, Guid, CancellationToken)"/> for
+    /// writers that build an update payload rather than an <see cref="Entity"/>.
+    /// </summary>
+    public async Task<CoreAncestorStampOutcome> StampAsync(
+        IDictionary<string, object> fields,
+        string hostEntityLogicalName,
+        string targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var (result, hostColumns, failure) =
+            await DeriveAndProbeAsync(hostEntityLogicalName, targetEntityLogicalName, targetRecordId, ct)
+                .ConfigureAwait(false);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        var unstampable = ApplyStamps(
+            fields, hostEntityLogicalName, result!, hostColumns!, skipEntityType: targetEntityLogicalName);
+        return new CoreAncestorStampOutcome(result!.Status, result.Stamps, unstampable, null);
+    }
+
+    /// <summary>
+    /// Derive the ancestors WITHOUT applying them — for writers whose payload is not an
+    /// <see cref="Entity"/> or a dictionary (e.g. a hand-written JSON body). The caller emits each
+    /// returned stamp in its own payload shape and must honour the same fail-closed contract.
+    /// </summary>
+    /// <param name="hostEntityLogicalName">Host entity, used only to report unstampable ancestors.</param>
+    public async Task<CoreAncestorStampOutcome> DeriveForHostAsync(
+        string hostEntityLogicalName,
+        string targetEntityLogicalName,
+        Guid targetRecordId,
+        CancellationToken ct = default)
+    {
+        var (result, hostColumns, failure) =
+            await DeriveAndProbeAsync(hostEntityLogicalName, targetEntityLogicalName, targetRecordId, ct)
+                .ConfigureAwait(false);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        var stampable = new List<CoreAncestorStamp>();
+        var unstampable = new List<string>();
+        foreach (var stamp in result!.Stamps)
+        {
+            if (string.Equals(stamp.EntityType, targetEntityLogicalName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue; // already bound by the caller
+            }
+
+            if (hostColumns!.Contains(stamp.LookupAttribute))
+            {
+                stampable.Add(stamp);
+            }
+            else
+            {
+                unstampable.Add(stamp.LookupAttribute);
+                _logger.LogWarning(
+                    "Derived core ancestor {Entity}({Id}) cannot be stamped on {Host}: no '{Lookup}' column. " +
+                    "This record will NOT inherit that ancestor's access (FR-26 gap).",
+                    stamp.EntityType, stamp.RecordId, hostEntityLogicalName, stamp.LookupAttribute);
+            }
+        }
+
+        return new CoreAncestorStampOutcome(result.Status, stampable, unstampable, null);
+    }
+
+    private async Task<(CoreAncestorResult? Result, IReadOnlySet<string>? HostColumns, CoreAncestorStampOutcome? Failure)>
+        DeriveAndProbeAsync(
+            string hostEntityLogicalName,
+            string targetEntityLogicalName,
+            Guid targetRecordId,
+            CancellationToken ct)
+    {
+        var result = await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed."));
+        }
+
+        if (result.Stamps.Count == 0)
+        {
+            // Nothing to apply — skip the host probe entirely rather than pay a metadata call to
+            // discover columns we will not write.
+            return (result, EmptyColumns, null);
+        }
+
+        IReadOnlySet<string> hostColumns;
+        try
+        {
+            hostColumns = await _columnProbe(hostEntityLogicalName, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // An unreadable host column set would make EVERY ancestor look unstampable — silently
+            // downgrading a derivation success into a total inheritance loss. Fail closed instead.
+            _logger.LogError(ex,
+                "Core-ancestor host column probe failed for {Host}; failing closed per NFR-01.",
+                hostEntityLogicalName);
+            return (null, null, CoreAncestorStampOutcome.Failed(
+                $"Could not read metadata for host '{hostEntityLogicalName}': {ex.Message}"));
+        }
+
+        return (result, hostColumns, null);
+    }
+
+    private static readonly IReadOnlySet<string> EmptyColumns =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -365,4 +563,28 @@ public sealed record CoreAncestorResult(
 
     internal static CoreAncestorResult Failed(string error) =>
         new(CoreAncestorStatus.Error, [], error);
+}
+
+/// <summary>
+/// Outcome of a converged writer's single stamping call — derivation, host-column probe, and application
+/// collapsed into one result the writer must inspect before it writes.
+/// </summary>
+/// <param name="Status">Derivation status; <see cref="CoreAncestorStatus.Error"/> means DO NOT WRITE.</param>
+/// <param name="Stamps">Ancestors that were applied (or, from <c>DeriveForHostAsync</c>, are the caller's to apply).</param>
+/// <param name="Unstampable">
+/// Ancestors derived but NOT written because the host entity has no column for them. A real hole in child
+/// inheritance (F-050-2), surfaced rather than swallowed — never a reason to abort the write.
+/// </param>
+/// <param name="Error">Populated only when <see cref="Status"/> is <see cref="CoreAncestorStatus.Error"/>.</param>
+public sealed record CoreAncestorStampOutcome(
+    CoreAncestorStatus Status,
+    IReadOnlyList<CoreAncestorStamp> Stamps,
+    IReadOnlyList<string> Unstampable,
+    string? Error)
+{
+    /// <summary>True when the caller may proceed with the write.</summary>
+    public bool Succeeded => Status != CoreAncestorStatus.Error;
+
+    internal static CoreAncestorStampOutcome Failed(string error) =>
+        new(CoreAncestorStatus.Error, [], [], error);
 }

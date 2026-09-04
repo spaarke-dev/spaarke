@@ -609,7 +609,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 |---|---|---|---|---|---|---|---|
 | ✅ **050** | Core-ancestor derivation in the shared resolver | FR-26 | — | **P3-W1** | ✅ | **opus** | **xhigh** |
 | 🔲 051 | `RegardingResolver` re-stamp on set/reparent/clear | FR-26 | 050 | **P3-W2** | ✅ | opus | high |
-| 🔄 052 | Server-writer audit + C# `CoreAncestorResolver` — **audit + resolver DONE; writer convergence BLOCKED** (5 of 9 writers are in `Services/Communication/**`, concurrently owned; POML `parallel-safe` was wrong — corrected to false). Split 052b/052c proposed in `notes/phase3-server-writers.md` | FR-26 | 050 soft | **P3-W1** | ❌ | sonnet | high |
+| ✅ 052 | Server-writer audit + C# `CoreAncestorResolver` — **DONE**. 6 writers converged (TodoRegardingBuilder, CommunicationService ×3 call sites, IncomingAssociationResolver, OfficeService, TaskActionCore, EmailDraftToolHandler), 2 verified-trivial (CORE-only by construction — the first pass's "verified-trivial is empty" claim was FALSE), 3 reclassified (1 read, 1 emitter, 1 out-of-taxonomy host). See `notes/phase3-server-writers.md` §1 for the corrections | FR-26 | 050 soft | **P3-W1** | ❌ | sonnet | high |
 | 🔲 053 | Ancestor-stamp backfill script | FR-26 | 050,052 | **P3-W2** | ✅ | sonnet | medium |
 | 🔲 054 | Root-set generalization (`sprk_servicerequest` 4th root) | FR-27 | 032,035,036 | — | ❌ | sonnet | high |
 | 🔲 055 | Evaluator child-inheritance term | FR-27 | 054,032,037,038 | — | ❌ | sonnet | high |

@@ -39,6 +39,9 @@ public class OfficeService : IOfficeService
     private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
     private readonly RecordContainerResolver _containerResolver;
+
+    /// <summary>FR-26 core-ancestor derivation for the To Do write path (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
     private readonly IMembershipEventPublisher _membershipEventPublisher;
     // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
     // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
@@ -68,6 +71,7 @@ public class OfficeService : IOfficeService
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
         RecordContainerResolver containerResolver,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null,
         DataverseWebApiClient? dataverseClient = null,
@@ -75,6 +79,8 @@ public class OfficeService : IOfficeService
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
+        _coreAncestors = coreAncestors
+            ?? throw new ArgumentNullException(nameof(coreAncestors));
         _jobStatusService = jobStatusService;
         _jobService = jobService;
         _emailEnricher = emailEnricher;
@@ -1558,6 +1564,26 @@ public class OfficeService : IOfficeService
             if (recordTypeId is { } rtId && rtId != Guid.Empty)
             {
                 entity["sprk_regardingrecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", rtId);
+            }
+
+            // FR-26 core-ancestor stamp (task 052) — applied AFTER the typed lookup so it cannot be
+            // overwritten. Two of the three types this picker offers are CORE (Matter, Project) and stamp
+            // only themselves; INVOICE is child-class, so the add-in can already file a To Do under an
+            // invoice today and that To Do would otherwise carry no matter/project stamp — invisible to
+            // everyone whose access comes from the invoice's matter.
+            var stamp = await _coreAncestors
+                .StampAsync(entity, reg.LogicalName, regardingId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!stamp.Succeeded)
+            {
+                // NFR-01 fail-closed, expressed in THIS method's existing error contract: a null return
+                // is what every other guard here uses, and the endpoint maps it to a failure. Creating
+                // the To Do without the stamp would be a silent inheritance hole, which is worse.
+                _logger.LogError(
+                    "Create To Do aborted: core-ancestor derivation failed for {RegardingType} {RegardingId}. {Error}",
+                    reg.LogicalName, regardingId, stamp.Error);
+                return null;
             }
         }
 
