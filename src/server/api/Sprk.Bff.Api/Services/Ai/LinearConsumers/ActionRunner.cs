@@ -453,6 +453,17 @@ public sealed class ActionRunner : IActionRunner
                     continue;
                 }
 
+                // Only a STRING property takes a top-level string enum. lookup:/optionset: resolve to a
+                // string field (enforced here); a multiselect: field is an array ({items:{type:string}}),
+                // where a top-level enum would be an invalid constraint — skip it (falls back to the
+                // pre-change unconstrained behavior for that field rather than corrupting the schema).
+                if (prop["type"] is not JsonValue typeNode
+                    || !typeNode.TryGetValue<string>(out var propType)
+                    || !string.Equals(propType, "string", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 var enumArray = new JsonArray();
                 foreach (var value in values)
                 {
