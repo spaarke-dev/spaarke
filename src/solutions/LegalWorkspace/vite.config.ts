@@ -51,6 +51,12 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // Skeleton placeholder for the real TipTap editor). Mirrors the
     // daily-briefing-components entry above.
     path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
+    // unified-access-control-r2 (2026-09-04): @spaarke/document-operations is
+    // pulled in TRANSITIVELY — Compose's ComposeToolbar.tsx imports it. LW never
+    // names it, which is exactly why it was missed: the Compose alias above was
+    // added without its dependency, so the standalone LW build had been RED
+    // since 2026-07-02. Mirrors SpaarkeAi/vite.config.ts:49.
+    path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -124,6 +130,11 @@ export default defineConfig({
         // components source (consumed by sections/composeEditor.registration.ts).
         path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.ts"),
+        // unified-access-control-r2 (2026-09-04): transpile DocumentOperations
+        // source, reached transitively through Compose's toolbar. Mirrors
+        // SpaarkeAi/vite.config.ts:140-141.
+        path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src/**/*.ts"),
       ],
     }),
     viteSingleFile(),
@@ -167,6 +178,13 @@ export default defineConfig({
       // + `useComposeLaunch` from `@spaarke/compose-components` (barrel).
       // Mirrors the daily-briefing entry above.
       "@spaarke/compose-components": path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
+      // unified-access-control-r2 (2026-09-04): required by the Compose alias
+      // above, not by any LW import — `ComposeToolbar.tsx` imports
+      // `useDocumentActions` from here. Mirrors SpaarkeAi/vite.config.ts:210-211.
+      // ⚠️ `tsc --noEmit` resolved this through tsconfig paths and reported green
+      // while Rollup could not resolve it at all; only `npm run build` catches it.
+      "@spaarke/document-operations/src": path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
+      "@spaarke/document-operations": path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
       // @spaarke/sdap-client — pulled in transitively via
       // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
       // multi-container-multi-index-r1 / PR #369). Mirrors the alias already

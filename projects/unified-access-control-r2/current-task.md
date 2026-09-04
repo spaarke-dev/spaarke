@@ -110,7 +110,8 @@ do not trust this number either.**
 | B | **034 canary user + CI path.** No non-admin canary user in dev; no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + manual gate. | **Task 036 must NOT proceed** |
 | C | **`sprk_todo` has no `sprk_regardingservicerequest`** — handled as `unstampable` + warn. Schema change vs accept. | 028 / 056 |
 | D | **Real-Dataverse smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. | external SPA deploy |
-| E | 🆕 **LegalWorkspace standalone Vite build is BROKEN since 2026-07-02** (pre-existing, not ours). Needs a `@spaarke/document-operations` alias **and** TipTap deps, then `npm run build` in CI. See [`notes/finding-legalworkspace-build-broken-since-2026-07-02.md`](notes/finding-legalworkspace-build-broken-since-2026-07-02.md). Standalone page is retired, so urgency is low — **the CI gap is not**. | nothing here; owner call |
+| ~~E~~ | ✅ **FIXED 2026-09-04** (owner: "addressed here, not deferred"). LW build green from a clean checkout: `@spaarke/document-operations` alias + 15 TipTap deps at SpaarkeAi's exact versions + a `Build LegalWorkspace solution` step in `nightly-health.yml`. **The chain ended at TipTap** — my note's "expect more" was wrong. Verified by DELETING the alias and confirming exit 1. See [`notes/finding-legalworkspace-build-broken-since-2026-07-02.md`](notes/finding-legalworkspace-build-broken-since-2026-07-02.md) § Resolution. | — |
+| F | 🆕 **28 of 30 `src/solutions/**` have NO build signal at all** — measured 2026-09-04 while fixing E. Nothing builds a solution on `pull_request`; only deploy workflows and the nightly job (2 of 30 before today, 3 now). Any of the other 27 may be red right now for exactly the reason LW was. Sizing that gate is `ci-cd-unit-test-remediation-r1`'s call — the three tier files are **frozen** for the shadow window and this is not a freeze-carve-out "gate repair" (there is no gate to repair). | nothing here; CI-owner call |
 
 ---
 
@@ -123,11 +124,12 @@ do not trust this number either.**
   (`DataverseWebApiService.cs:978`), **not** in `DataverseImpersonation`, which adds no header for an
   empty id. A new impersonated call site that bypasses the read method would silently issue an
   **unscoped app-only query**. ADR-028 A5 now requires new paths to carry their own refusal.
-- **New (dead-code sweep)**: two docs still cite files deleted by task 096 —
-  `docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md:353-356` lists LW `ProjectWizardDialog.tsx` as
-  current, and `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md:139-145` cites the LW
-  `provisioningService.ts` (repoint to the shared `CreateProjectWizard/provisioningService.ts`).
-  Step 5 of [`notes/create-wizard-duplication-analysis.md`](notes/create-wizard-duplication-analysis.md).
+- ~~**New (dead-code sweep)**: two docs still cite files deleted by task 096.~~ **✅ FIXED 2026-09-04**
+  (owner: "addressed here, not deferred"). `WORKSPACE-ENTITY-CREATION-GUIDE.md` now points at the
+  shared `Create{Entity}Wizard/` dirs and carries a note explaining the half-finished 2026-03 move;
+  `DATA-ACCESS-DECISION-CRITERIA.md`'s worked example was **stale in three ways**, not one — the path
+  had moved, the deps are now injected params, and the endpoint's contract changed 2026-08-25 (no
+  per-project BU, no External Access Account). All `src/` paths in both docs re-verified to exist.
 
 ---
 
