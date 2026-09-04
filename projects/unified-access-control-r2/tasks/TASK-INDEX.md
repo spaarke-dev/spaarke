@@ -597,7 +597,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 040 | ADR-034 amendment — registry first-class | FR-24 sanction | — | — | ❌ *main-session* | opus | high |
+| ✅ **040** | **ADR-034 Amendment A1 — allow-list first-class + per-surface.** Scoping keeps ALL descriptors; authorization gets **registry-listed only** (contact **+ org** typed). Retires the `sprk_assigned*` convention — it admits `sprk_assignedmonitor`, denies `sprk_leadcontact`, and lets a **rename** grant/revoke access. **1-hop cap NOT amended** (FR-26 makes chains 1 hop by construction — an exception would weaken for nothing). Live-consumer check done first: only `AccessibleRecordSetService` uses these as an access answer; `IThreadPrivateGrantProvider` is a doc-comment reference, not a consumer. 3 staleness fixes verified in source. Notes: [`notes/task-040-adr-034-a1-amendment.md`](../notes/task-040-adr-034-a1-amendment.md) | FR-24 sanction | — | — | ❌ *main-session* | opus | high |
 | 🔲 041 | Access-conferring column registry (contact **+ org**) | FR-24 | 040 | **P2-A** | ✅ | sonnet | high |
 | 🔲 042 | Standing-grant baseline levels (contact + org) | FR-25 | 032 | — | ❌ | sonnet | high |
 | 🔲 043 | Org-expansion term + fallback registry filter | FR-24/25/22 | 037,041,042 | — | ❌ | sonnet | high |

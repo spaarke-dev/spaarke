@@ -8,6 +8,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-04 — `unified-access-control-r2`: **ADR-034 Amendment A1** — the access-conferring allow-list becomes first-class and per-surface (path B)
+
+- **Both ADR-034 versions amended.** Root CLAUDE.md §6.5 **path B**. Adds a distinction the ADR did not
+  originally make: discovery over the 6 identity tables stays **correct for AI scoping** and is
+  **over-inclusive for authorization**. Nothing is retired — A1 **narrows one consumer**.
+- **The prefix convention is replaced by an explicit registry**, covering **contact-typed AND
+  organization-typed** lookups. `sprk_assigned*` silently *admits* `sprk_assignedmonitor` (a watcher,
+  who should confer nothing) and silently *denies* `sprk_leadcontact` (who should confer access) —
+  nobody chose either outcome, a naming convention did. Worse: under a convention, **renaming a column
+  grants or revokes access**, so a schema edit no reviewer reads as a security change becomes one.
+  A1 makes adding a conferring column a **registry edit** (FR-24).
+- **Org-typed conferral was unfiltered.** M4 already resolves `sprk_assignedlawfirm1/2` to
+  `Organization` — the precedent exists — but the live filter
+  (`FilterToAccessConferringContactRoles`) covers contact-typed lookups **only**. Unfiltered org
+  expansion confers access from *any* organization named on a record, **including opposing counsel**.
+- **One mechanism, two policies.** The registry is a filter **inside** the canonical resolver (M1), an
+  extension — **not** a second membership engine, which this ADR forbids and A1 does not create.
+- **The 1-hop cap (M7/N4) is explicitly NOT amended, and needs no exception**: FR-26 denormalizes the
+  core ancestor, so every child→core chain is **one hop by construction**. The data model removed the
+  need rather than the rule being relaxed. M8/M9 event semantics and N2 unchanged (with the precision
+  that real `teammembership` **is** legitimately used — the ban is only on **non-existent** entities).
+- **Live-consumer check performed BEFORE amending**, since a per-surface split is only safe if nothing
+  else treats unfiltered descriptors as an access answer. All consumers enumerated and classified:
+  `AccessibleRecordSetService` (authorization — the one being rehomed), `MembershipEndpoints` (scoping;
+  the caller's **own** memberships under OBO — a self-query), the briefing + playbook-node collectors
+  (AI scoping), and `IThreadPrivateGrantProvider` (**not** a consumer — doc-comment reference only, no
+  code dependency). **No other surface's behaviour contract changes.**
+- **Three documented staleness items fixed in the concise ADR, each verified in source**: added
+  `ResolveByContactAsync` (`IMembershipResolverService.cs:104` — the contact plane's only membership
+  path; its absence implied the plane had none) and `MembershipResponse.RelatedByRole`; corrected the
+  identity contract to **`sprk_primarycontact` FIRST with the AAD-oid cross-ref as *fallback*** — the
+  table had documented only the fallback as if it were the primary.
+
 ###### 2026-09-04 — `unified-access-control-r2`: **ADR-028 Amendment A5** — workforce `systemuser` root sets derive from Dataverse's impersonated answer (path B, narrow)
 
 - **`.claude/adr/ADR-028-spaarke-auth-architecture.md` gains Amendment A5** (concise-only; no full
