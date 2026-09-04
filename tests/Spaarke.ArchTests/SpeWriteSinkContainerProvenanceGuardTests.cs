@@ -348,19 +348,30 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     private static readonly IReadOnlyList<SinkSite> AllowList = new[]
     {
         // ---------------------------------------------------------------------------------------------
-        // ClientSupplied — the work list. SIX sites, all owned.
+        // ClientSupplied — the work list. TWO sites, all owned. Both are in Api/DocumentsEndpoints.cs.
         //
-        // 7 -> 6 on 2026-09-03: `Api/OBOEndpoints.cs :: UploadSmallAsUserAsync #1` left the list
-        // because its ROUTE was deleted (task 076). There is no longer a ClientSupplied upload sink
-        // in OBOEndpoints.cs at all.
+        // COUNT CORRECTED 2026-08-28, TWICE ON 2026-09-01, AND AGAIN AT THE 2026-09-03 MERGE. The header
+        // said "nine" on the day the guard was written when the block held TWELVE, then "eleven" while the
+        // block actually held EIGHT, then "seven" when a machine count said SIX — the prose count is
+        // enforced by nothing (Rule A pins AllowList.Count against the DISCOVERED set, not against a
+        // number in a comment), so it drifts EVERY time, including in the same edit that corrects it.
         //
-        // COUNT CORRECTED 2026-08-28, AND AGAIN 2026-09-01. The header said "nine" on the day the guard
-        // was written when the block held TWELVE, then "eleven" while the block actually held EIGHT —
-        // the prose count is enforced by nothing (Rule A pins AllowList.Count against the DISCOVERED
-        // set, not against a number in a comment), so it drifts. Recounted at seven on 2026-09-01 when
-        // issue #858 converted the Compose create-on-save mint to ServerDerivedRecord. If you change
-        // this block, recount; a hand-maintained number in a comment is exactly the kind of census this
-        // guard was built to distrust.
+        // ⚠️ THE 2026-09-03 MERGE IS THE SHARPEST INSTANCE YET, and it is why this paragraph is kept.
+        // TWO branches each shrank this list, and each wrote its own count in this same header — so the
+        // merge conflicted on the NUMBER while both bodies merged cleanly. Neither number was right
+        // afterward:
+        //   · compose-r8 wrote THREE  — true on its branch: #858 converted the Compose create-on-save
+        //     mint, and the drive-provenance fix converted the three ComposeSaveStorageCoordinator
+        //     replace sinks, all to ServerDerivedRecord.
+        //   · unified-access-control-r2 wrote SIX — true on ITS branch: task 076 deleted the route behind
+        //     `Api/OBOEndpoints.cs :: UploadSmallAsUserAsync #1`, so that sink left the list. There is no
+        //     longer a ClientSupplied upload sink in OBOEndpoints.cs at all.
+        // Both reductions are real and they compose. The merged answer is TWO, and it was obtained by
+        // running the grep below — NOT by picking a side, and NOT by subtracting one prose number from
+        // the other.
+        //
+        // Recount with `grep -c "^            Provenance.ClientSupplied,"` rather than by reading — that
+        // is a machine count, and the five wrong numbers above are the argument for taking one.
         // ---------------------------------------------------------------------------------------------
         new SinkSite("Api/DocumentsEndpoints.cs", "UploadSmallAsync", 1,
             Provenance.ClientSupplied, "083 (row 4)",
@@ -442,14 +453,32 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "UploadFileToContainerForConfigAsync, a sink name absent from every list this project has "
             + "kept. That omission is why the vocabulary is now pinned too."),
 
-        new SinkSite("Services/Compose/ComposeService.cs", "ReplaceFileContentAsUserAsync", 1,
-            Provenance.ClientSupplied, "#858 (behind PR #806)",
-            "body.DriveId, threaded from ComposeEndpoints apply-template",
-            "ApplyTemplateAsync replaces the bytes of a drive item in a client-named drive under OBO "
-            + "(ADR-049 makes OOXML server-authoritative but says nothing about who chooses the drive; "
-            + "ADR-003 says the container follows the record). Sequenced behind PR #806 per task 083's "
-            + "explicit do-not-edit constraint on the three Compose files, so this stays declared rather "
-            + "than fixed here."),
+        // ── The APPLY-TEMPLATE replace MOVED, 2026-09-01 (issue #776) ──────────────────────────────
+        //
+        // It was Services/Compose/ComposeService.cs :: ReplaceFileContentAsUserAsync #1. #776 gave
+        // apply-template an If-Match precondition asserting the version its merge was computed from, and
+        // routed the write through ComposeSaveStorageCoordinator.ReplaceWithPreconditionAsync rather than
+        // adding a second precondition idiom (root §11). No NEW sink line appeared: apply-template became
+        // an additional CALLER of the coordinator's two existing sinks, so the coordinator's declared
+        // ordinals are unchanged in count and only their caller list grows (noted on both entries below).
+        //
+        // ⚠️ SAME CASE RULE A WARNS ABOUT — "a rename looks identical to a deletion from here." The guard
+        // reported 27 sites found against 28 declared with NOTHING undeclared, which is the signature of a
+        // site that left without a replacement appearing. Deleting the entry on that evidence alone would
+        // have been wrong twice over: it would have read as "fixed" when nothing about the provenance
+        // changed, and it would have dropped an unresolved #858-family container decision out of the
+        // census during a refactor whose subject was concurrency, not provenance.
+        //
+        // ✅ RESOLVED 2026-09-01 (drive provenance). The note that stood here read: "Provenance UNCHANGED
+        // and still unfixed: apply-template's driveId is a ROUTE parameter … When that task lands it must
+        // convert apply-template too, not just the save replace branch." It landed, and it did convert
+        // both. ApplyTemplateAsync's route parameter is renamed `requestedDriveId` and is now a CLAIM: the
+        // method resolves the drive recorded on the owning sprk_document row
+        // (ComposeRecordResolution.TryResolveRecordedDriveIdAsync) and uses that for the metadata read, the
+        // download AND the preconditioned write. Reading from one drive while writing to another was the
+        // sharpest form of the divergence, and apply-template is the only read-merge-write on this list.
+        //
+        // The concern is therefore discharged on the coordinator entries below rather than deferred to them.
 
         // ── CONVERTED by issue #858 (2026-09-01) — was ClientSupplied ("SaveComposeDocumentRequest."
         // ── "ContainerId (client body)"), the entry this guard carried since the census was built. ──
@@ -485,37 +514,67 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // container provenance. Both new sites are declared BEFORE the old entry was deleted, which is
         // the order the maintenance procedure requires.
         //
-        // Provenance UNCHANGED: traced back through ComposeService.cs:1652 to `request.DriveId` — the
-        // client body, exactly as before. The refactor moved and split the sink; it did not fix it.
-        // Still owned by #858.
+        // ── CONVERTED 2026-09-01 (drive provenance) — all three were ClientSupplied, owned by #858 ──
+        //
+        // The origin these entries recorded — "driveId parameter <- ComposeService.cs (save replace
+        // branch) <- request.DriveId (client body)" — is no longer true. `SaveAsync` now resolves the
+        // drive RECORDED on the owning sprk_document row ONCE, at the top of the method, and folds it back
+        // onto the request (`request = request with { DriveId = … }`), so every consumer on the replace
+        // path — baseline re-fetch, pre-write metadata read + PDF guard, stale-base re-anchor download,
+        // and all three sinks below — addresses the record's drive. Same for apply-template, the trio's
+        // other caller (see the note above it).
+        //
+        // ⚠️ READ THIS BEFORE TREATING IT AS AN ACCESS-CONTROL FIX, because the surrounding entries in this
+        // list ARE access-control findings and the shapes look identical. Compose's writes are OBO: SPE
+        // authorizes them as the acting user, so a caller could never reach a drive their own token did not
+        // already permit — the old entries said as much ("the OBO leg is what limits blast radius here").
+        // What was actually broken is PROVENANCE: the row said the document lived at drive X while the
+        // bytes went to drive Y, so the record and the storage could disagree and nothing noticed. That is
+        // an audit-trail defect, and it is the reason this converts to ServerDerivedRecord rather than
+        // being deleted as a non-finding.
+        //
+        // THE FALLBACK IS DECLARED, NOT HIDDEN. When the row carries no `sprk_graphdriveid` the caller's
+        // value is still used, logged at Debug. Legacy rows predating the full-SPE-pointer stamp exist —
+        // PromoteIfEphemeralAsync documents that such a row makes downstream readers 409 "No file is
+        // attached" — so a hard fail-closed would break saves on real documents to close a hole OBO
+        // already closes. An attacker cannot make a row's drive id DISAPPEAR, so the fallback covers legacy
+        // data, not an attack path. A divergence between the two values logs at Warning: that divergence is
+        // the signal the fix exists to produce.
         new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 1,
-            Provenance.ClientSupplied, "#858 (was behind PR #806; #806 MERGED 2026-08-30)",
-            "driveId parameter <- ComposeService.cs:1652 <- request.DriveId (client body)",
+            Provenance.ServerDerivedRecord, "",
+            "driveId parameter <- ComposeService.SaveAsync/ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync "
+            + "<- ComposeRecordResolution.TryResolveRecordedDriveIdAsync (sprk_graphdriveid on the sprk_document "
+            + "row keyed by sprk_graphitemid); caller-supplied value only when the row records no drive",
             "The blind-PUT branch of the ordinary Compose save: no resolved version to precondition on "
-            + "(a drive-less or transient path), so it replaces content in a client-named drive under OBO "
-            + "with no If-Match (ADR-049; ADR-003). Was ComposeService #3 until PR #806 extracted it. "
-            + "Note the OBO leg is what limits blast radius here — unlike the app-only Office path this "
-            + "list also tracks, a caller can only reach drives their own token permits."),
+            + "(a drive-less path), so it replaces content with no If-Match (ADR-049; ADR-003). The DRIVE, "
+            + "however, is now the one the authorized record itself records, so a missing precondition is a "
+            + "concurrency exposure and not also a provenance one. Was ComposeService #3 until PR #806 "
+            + "extracted it, and ClientSupplied under #858 until the drive-provenance fix converted it."),
 
         new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 2,
-            Provenance.ClientSupplied, "#858 (was behind PR #806; #806 MERGED 2026-08-30)",
-            "driveId parameter <- ComposeService.cs:1652 <- request.DriveId (client body)",
-            "The preconditioned branch of the same save (FR-S02 If-Match, added by PR #806). Same "
-            + "client-supplied drive as ordinal 1; the precondition protects against a lost UPDATE, not "
-            + "against writing to the wrong drive — worth stating because an ETag check reads like a "
-            + "safety mechanism and does nothing about container provenance (ADR-049; ADR-003). #806 is now "
-            + "MERGED, so the sequencing that deferred #858 has lapsed: this trio is unblocked work, "
-            + "not blocked work."),
+            Provenance.ServerDerivedRecord, "",
+            "driveId parameter <- ComposeService.SaveAsync/ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync "
+            + "<- ComposeRecordResolution.TryResolveRecordedDriveIdAsync (sprk_graphdriveid on the sprk_document "
+            + "row keyed by sprk_graphitemid); caller-supplied value only when the row records no drive",
+            "The preconditioned branch of the same save (FR-S02 If-Match, added by PR #806). Its old entry "
+            + "made a point worth keeping now that it reads the other way round: an ETag check protects "
+            + "against a lost UPDATE and says nothing about WHERE the update lands, so the precondition was "
+            + "never evidence about drive provenance (ADR-049; ADR-003). The two concerns are now covered by "
+            + "two different mechanisms — If-Match for the version, the record for the drive — rather than "
+            + "one of them being mistaken for both."),
 
         new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 3,
-            Provenance.ClientSupplied, "#858 (was behind PR #806; #806 MERGED 2026-08-30)",
-            "driveId parameter <- ComposeService.cs:1652 <- request.DriveId (client body)",
+            Provenance.ServerDerivedRecord, "",
+            "driveId parameter <- ComposeService.SaveAsync/ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync "
+            + "<- ComposeRecordResolution.TryResolveRecordedDriveIdAsync (sprk_graphdriveid on the sprk_document "
+            + "row keyed by sprk_graphitemid); caller-supplied value only when the row records no drive",
             "The single rebase RETRY inside catch(EtagPreconditionFailedException): re-reads the live "
-            + "version and re-issues the replace against the same client-named drive. Declared "
-            + "separately because it is a distinct write that a reader skimming the method will miss — "
-            + "it sits inside a catch block, three sites deep, and I missed it myself on first read, "
+            + "version and re-issues the replace against the same drive the record names (ADR-049; ADR-003). "
+            + "Declared separately because it is a distinct write that a reader skimming the method will "
+            + "miss — it sits inside a catch block, three sites deep, and I missed it myself on first read, "
             + "declaring only ordinals 1 and 2 until Rule A named the third. That is the argument for "
-            + "keying this list per CALL SITE rather than per method in one line (ADR-049; ADR-003)."),
+            + "keying this list per CALL SITE rather than per method in one line, and it is why the "
+            + "provenance conversion had to reach all three ordinals rather than the two obvious ones."),
 
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
@@ -617,13 +676,20 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "previously archived to the shared container unconditionally, which is the defect task 075 "
             + "closed (ADR-003; ADR-045)."),
 
-        new SinkSite("Services/Compose/ComposeService.cs", "ReplaceFileContentAsUserAsync", 2,
+        // ORDINAL CHANGED 2 -> 1 on 2026-09-01 (#776), and this is the entry that proves the ordinal
+        // keying earns its keep. Nothing about this SITE changed — same call, same method, same
+        // Dataverse-derived drive. It renumbered only because #776 removed the apply-template sink that
+        // used to occupy #1 EARLIER IN THE SAME FILE. The guard caught it as a matched pair (this entry
+        // stale + the dedup site undeclared) in one run, which is what distinguished a renumber from a
+        // deletion; had it reported only the stale half, the honest move would have looked like a fix.
+        new SinkSite("Services/Compose/ComposeService.cs", "ReplaceFileContentAsUserAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "match.DriveId / match.SpeId from the Dataverse transient-key lookup",
             "The create-on-save dedup path replaces content in the drive item recorded on the row the "
             + "transient key resolved to, so the drive comes from Dataverse and not from the request "
-            + "(ADR-049; ADR-003). Interleaved with two ClientSupplied siblings in the same method — pinned "
-            + "individually so a future edit cannot quietly swap which ordinal is which."),
+            + "(ADR-049; ADR-003). Was ordinal #2 until #776 removed the apply-template sink above it. "
+            + "Pinned individually so a future edit cannot quietly swap which ordinal is which — the "
+            + "renumber this entry just went through is exactly that risk materialising benignly."),
 
         new SinkSite("Services/DocumentCheckoutService.cs", "DeleteFileAsync", 1,
             Provenance.ServerDerivedRecord, "",
