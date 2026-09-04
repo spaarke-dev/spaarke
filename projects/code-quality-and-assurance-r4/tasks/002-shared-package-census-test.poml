@@ -4,7 +4,7 @@
     <title>Add SharedPackageCensusTests — a 16th shared package fails the build</title>
     <phase>1 The shared surface is knowable</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs under tests/**; TEST-MODIFYING override row in CLAUDE.md §8 applies unconditionally — code-review + adr-check run at Step 9.5 regardless of the default level.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,13 +93,22 @@
     <criterion testable="true">Given the current repository, the census passes on exactly the 15 enumerated packages.</criterion>
     <criterion testable="true">Given a synthetic 16th directory under src/client/shared/, the census fails.</criterion>
     <criterion testable="true">Given that failure, the message names all three ADR-012 evaluation questions and the amendment requirement.</criterion>
-    <criterion testable="true">Given Spaarke.LegalWorkspace has no package.json, it is still counted — proving the census is keyed on directory presence.</criterion>
+    <criterion testable="true">SUPERSEDED (false premise — Spaarke.LegalWorkspace DOES have a package.json; all 15 of 15 do). Replaced by an equivalent with a true premise: given a directory under src/client/shared/ with NO package.json, the scan still counts it — proving the census is keyed on directory presence. Verified by Census_CountsADirectoryWithNoPackageJson over a real temporary directory. See notes/task-002-deviations.md.</criterion>
     <criterion testable="true">Negative: the four application-scoped @spaarke/* names do not trigger a failure.</criterion>
     <criterion testable="true">Negative: the test performs no DI resolution and does not fork SourceScan.</criterion>
     <criterion testable="true">dotnet build Spaarke.sln is green; the ArchTests project passes.</criterion>
   </acceptance-criteria>
 
-  <notes>Maps spec.md FR-02 (closed acceptance set a–g). Measured 2026-09-04: 15 directories present; Spaarke.LegalWorkspace confirmed to have no package.json. Step 8's empirical check exists because a synthetic in-memory negative control can pass while the real scan path is broken.</notes>
+  <notes>Maps spec.md FR-02 (closed acceptance set a–g). Measured 2026-09-04: 15 directories present. Step 8's empirical check exists because a synthetic in-memory negative control can pass while the real scan path is broken — it earned its keep: a real Spaarke.Interloper.Empirical/ on disk produced the full teaching failure.
+
+CORRECTION (applied on completion 2026-09-04): this task asserted FOUR times that Spaarke.LegalWorkspace has no package.json, and used that as the stated reason for keying the census on directory presence. It is FALSE — all 15 of 15 carry a manifest. The DESIGN (directory-keyed) is still correct, for a different reason: ADR-012 enumerates directories, and a package arriving without a manifest, or with one added a commit later, would otherwise be invisible. The affected acceptance criterion was replaced with a true-premise equivalent rather than waived. Full record: notes/task-002-deviations.md.</notes>
+
+  <completion>
+    <date>2026-09-04</date>
+    <summary>Added tests/Spaarke.ArchTests/SharedPackageCensusTests.cs — 8 tests, 4 asserting the invariant and 4 negative controls. The census mirrors ADR-012's closed 15-package enumeration with a written reason per entry, keyed on directory presence under src/client/shared/. The failure message is built by a named method so the negative control can assert its CONTENT: all three promotion-evaluation questions, the ADR-012 §6.5 path-B amendment requirement, the explicit "None of the three is a gate", and the absence of any "just add it to the census" instruction. SourceScan was EXTENDED with SharedClientPackageDirectories() (precedent: TestSourceFiles() was added the same way) — not forked, so the fork escalation did not fire. The application allow-list is asserted rather than used as a filter, since none of the four names lives in the scanned tree. Verified empirically by creating a real 16th directory on disk. ArchTests 199/199; dotnet build Spaarke.sln 0 errors.</summary>
+    <files-modified>tests/Spaarke.ArchTests/SharedPackageCensusTests.cs (new); tests/Spaarke.ArchTests/SourceScan.cs (extended); projects/code-quality-and-assurance-r4/notes/task-002-deviations.md</files-modified>
+    <quality-gates>code-review: self-review, clean. adr-check ADR-038: 0 DI resolution (ban B3), 0 Moq/Mock&lt;HttpMessageHandler&gt; (B1/B2), 0 ctor-null tests (B4), 0 hand-rolled directory walkers, SourceScan reused 5x; positive AND negative controls present; fitness-function naming + high setup ratio are sanctioned for tests/Spaarke.ArchTests/** per tests/CLAUDE.md (B13/B15 do not apply to this path); maintenance procedure lives in the test file. Build: green.</quality-gates>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
