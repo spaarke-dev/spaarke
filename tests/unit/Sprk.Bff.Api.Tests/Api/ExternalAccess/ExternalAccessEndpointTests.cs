@@ -525,7 +525,7 @@ public class ExternalAccessEndpointTests
             Email = "external@test.com",
             ProjectAccess = new List<CallerProjectAccess>
             {
-                new() { ProjectId = projectId, AccessLevel = ExternalAccessLevel.Collaborate }
+                CallerProjectAccess.FromLevel(projectId, ExternalAccessLevel.Collaborate)
             }
         };
 

@@ -52,8 +52,29 @@ public interface IAccessibleRecordSetService
     /// accessible set for <paramref name="entityType"/>? A <c>false</c> result MUST be enforced as a
     /// DENY (not merely an omission) by the caller.
     /// </summary>
+    /// <remarks>
+    /// Membership only — it answers "may the caller SEE this record", not "may the caller change it".
+    /// A mutating route MUST use <see cref="IsOperationPermittedAsync"/> instead; treating membership
+    /// as permission to write is the defect FR-19 removes.
+    /// </remarks>
     Task<bool> IsRecordAccessibleAsync(
         WorkforcePrincipal principal, string entityType, Guid recordId, CancellationToken ct);
+
+    /// <summary>
+    /// The rights-aware enforcement decision (task 033 / FR-19): does the principal hold
+    /// <b>every</b> right in <paramref name="requiredRights"/> on <paramref name="recordId"/>?
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed on every path: an empty record id, a record outside the composed set, and rights
+    /// that do not cover the requirement all return <c>false</c>. A faulted composition throws rather
+    /// than returning <c>false</c>, so a caller cannot mistake an outage for a considered deny.
+    /// </remarks>
+    Task<bool> IsOperationPermittedAsync(
+        WorkforcePrincipal principal,
+        string entityType,
+        Guid recordId,
+        AccessRights requiredRights,
+        CancellationToken ct);
 }
 
 /// <summary>
@@ -348,6 +369,45 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         var set = await ComposeAsync(principal, entityType, ct).ConfigureAwait(false);
         return set.Contains(recordId);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsOperationPermittedAsync(
+        WorkforcePrincipal principal,
+        string entityType,
+        Guid recordId,
+        AccessRights requiredRights,
+        CancellationToken ct)
+    {
+        if (recordId == Guid.Empty)
+        {
+            // No record to evaluate — cannot prove the rights; deny (fail-closed).
+            return false;
+        }
+
+        // ⚠️ `AccessRights.None` is NOT "no requirement" — it is a caller bug, and it must not pass.
+        //
+        // AccessRights is a [Flags] enum, so `anything.HasFlag(None)` is ALWAYS true (zero is a subset
+        // of every set). Without this guard, a call site that computed its requirement dynamically and
+        // arrived at None — an unmapped operation, a defaulted field, a mis-parsed config value —
+        // would be granted permission on ANY record, including one the caller cannot see at all. That
+        // is a fail-OPEN reachable purely by a caller mistake, on the one method whose entire job is to
+        // deny. Asking "may I do nothing?" gets No.
+        if (requiredRights == AccessRights.None)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] IsOperationPermittedAsync called with requiredRights=None for {EntityType} " +
+                "record {RecordId}; denying. This is a CALLER BUG — an operation must name the rights " +
+                "it needs. (HasFlag(None) is always true, so permitting here would grant every record.)",
+                entityType, recordId);
+            return false;
+        }
+
+        var set = await ComposeAsync(principal, entityType, ct).ConfigureAwait(false);
+
+        // RightsFor is None for an absent record, so out-of-set is denied by the same expression —
+        // there is no separate membership branch that could drift from the rights branch.
+        return set.RightsFor(recordId).HasFlag(requiredRights);
     }
 
     /// <summary>

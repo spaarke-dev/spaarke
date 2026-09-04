@@ -66,7 +66,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
             Email = "external.user@example.test",
             ProjectAccess = access
-                .Select(a => new CallerProjectAccess { ProjectId = a.ProjectId, AccessLevel = a.Level })
+                .Select(a => CallerProjectAccess.FromLevel(a.ProjectId, a.Level))
                 .ToList()
         };
 
@@ -81,10 +81,16 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
             Email = "external.user@example.test",
             ProjectAccess = (projects ?? Array.Empty<(Guid, ExternalAccessLevel)>())
-                .Select(a => new CallerProjectAccess { ProjectId = a.ProjectId, AccessLevel = a.Level })
+                .Select(a => CallerProjectAccess.FromLevel(a.ProjectId, a.Level))
                 .ToList(),
-            AccessibleMatterIds = (matters ?? Array.Empty<Guid>()).ToHashSet(),
-            AccessibleWorkAssignmentIds = (workAssignments ?? Array.Empty<Guid>()).ToHashSet()
+            // Task 033: the id sets are DERIVED from the rights maps, so scope is expressed by
+            // populating rights. These roots default to Collaborate — the level matter/WA membership
+            // effectively carried before FR-19, so the pre-existing cases keep their meaning. The
+            // ViewOnly-cannot-write cases below pass rights explicitly.
+            MatterAccess = (matters ?? Array.Empty<Guid>())
+                .ToDictionary(id => id, _ => ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate)),
+            WorkAssignmentAccess = (workAssignments ?? Array.Empty<Guid>())
+                .ToDictionary(id => id, _ => ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate))
         };
 
     // =====================================================================
@@ -142,16 +148,25 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Data.UpdateCallCount.Should().Be(0,
             "THE A-7 REGRESSION GUARD — the PATCH must never reach Dataverse for an out-of-scope to-do");
 
-        // Assert WHICH guard denied, not merely that something did. The record-scope check and the
-        // rights check are deliberately redundant for this case (GetEffectiveRights returns None for
-        // a project outside ProjectAccess, so the rights gate would also deny). Without this
-        // assertion, deleting the scope check entirely leaves all tests green — verified by
-        // perturbation, see notes/task-009-external-todo-scope.md §Perturbation.
+        // ⚠️ This assertion's REASON changed in task 033 (FR-19), though its text did not.
+        //
+        // It was written when the handler had TWO guards — a record-scope check followed by a rights
+        // check — and it pinned WHICH one denied, because deleting the scope check alone would
+        // otherwise have left every test green.
+        //
+        // There is now ONE guard. Rights accessors return None for a record outside the caller's set,
+        // so "out of scope" and "insufficient rights" are the same expression and cannot drift apart.
+        // That strictly strengthens the original perturbation property: the check this test protects
+        // can no longer be half-removed, and removing it entirely fails the UpdateCallCount assertion
+        // above. Re-verified by perturbation 2026-09-04 — see notes/task-033-consumer-propagation.md.
+        //
+        // The message is still asserted, for a different reason: an out-of-scope caller and an
+        // under-privileged caller must receive the SAME response, so neither can infer which one they
+        // are. A future edit that reintroduces a distinct "your access level..." message here would
+        // leak that distinction, and this line catches it.
         (await response.Content.ReadAsStringAsync())
             .Should().Contain("You do not have access to this to-do",
-                "the RECORD-SCOPE guard must be the one that denies an out-of-scope to-do — if this "
-                + "reports the access-level message instead, HasProjectAccess has been bypassed and "
-                + "only the rights check is left standing");
+                "out-of-scope and insufficient-rights must be indistinguishable to the caller");
     }
 
     [Fact]
@@ -344,6 +359,96 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             "ViewOnly maps to AccessRights.Read — read access must not confer write access");
         _fixture.Data.UpdateCallCount.Should().Be(0);
     }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenCallerIsViewOnlyOnTheProject_DeniesWithAMachineReadableReasonCode()
+    {
+        // FR-19 acceptance: the deny is machine-readable, not just a status code. ADR-003 requires a
+        // deny code on every authorization refusal; the three sibling POST routes carry the same one.
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.ViewOnly));
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync())
+            .Should().Contain("sdap.access.deny.insufficient_rights");
+    }
+
+    // ── The asymmetry FR-19 removed: matter / WA membership no longer implies write ───────────────
+    //
+    // Until 2026-09-04 these two cases would have returned 204 and WRITTEN. Matter and work-assignment
+    // access were bare id sets, so the handler had no level to honour and treated membership as
+    // permission to write — documented in the handler as deliberate. Tasks 032/033 gave both root
+    // types real per-record rights, so a ViewOnly grant is now honoured everywhere.
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenCallerIsViewOnlyOnTheMatter_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            matterRights: new[] { (InScopeMatter, ExternalAccessLevel.ViewOnly) });
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Matter, InScopeMatter, "Matter to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a ViewOnly matter grant must not permit a write — this is the asymmetry FR-19 removed");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenCallerIsViewOnlyOnTheWorkAssignment_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            workAssignmentRights: new[] { (InScopeWorkAssignment, ExternalAccessLevel.ViewOnly) });
+        _fixture.Data.TodoLookupResult =
+            (ExternalDataService.TodoRootKind.WorkAssignment, InScopeWorkAssignment, "WA to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a ViewOnly work-assignment grant must not permit a write");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PatchExternalTodo_WhenCallerIsCollaborateOnTheMatter_AppliesTheUpdate()
+    {
+        // POSITIVE CONTROL for the two denials above. Without it, a bug that denied every matter-rooted
+        // PATCH would leave them green while breaking the feature.
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            matterRights: new[] { (InScopeMatter, ExternalAccessLevel.Collaborate) });
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Matter, InScopeMatter, "Matter to-do");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.Data.UpdateCallCount.Should().Be(1);
+    }
+
+    /// <summary>A principal whose matter / work-assignment roots carry EXPLICIT levels (task 033).</summary>
+    private static CallerPrincipal PrincipalWithRootRights(
+        (Guid Id, ExternalAccessLevel Level)[]? matterRights = null,
+        (Guid Id, ExternalAccessLevel Level)[]? workAssignmentRights = null) =>
+        new()
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = (matterRights ?? Array.Empty<(Guid, ExternalAccessLevel)>())
+                .ToDictionary(x => x.Id, x => ExternalAccessLevels.ToAccessRights(x.Level)),
+            WorkAssignmentAccess = (workAssignmentRights ?? Array.Empty<(Guid, ExternalAccessLevel)>())
+                .ToDictionary(x => x.Id, x => ExternalAccessLevels.ToAccessRights(x.Level)),
+        };
 
     // =====================================================================
     // Surface pinning — the request is a closed DTO, not a property bag

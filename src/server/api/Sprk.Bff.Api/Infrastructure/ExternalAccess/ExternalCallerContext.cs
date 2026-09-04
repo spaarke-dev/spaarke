@@ -120,6 +120,36 @@ public static class ExternalAccessLevels
         ExternalAccessLevel.FullAccess => AccessRights.Read | AccessRights.Create | AccessRights.Write | AccessRights.Delete,
         _ => AccessRights.None
     };
+
+    /// <summary>
+    /// The reverse projection: the coarse level to SHOW for a set of rights (task 033 / FR-19).
+    /// Returns the highest level whose rights are FULLY CONTAINED in <paramref name="rights"/>, or
+    /// <c>null</c> when even Read is absent.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>Display only. Never authorize on this.</b> The projection is deliberately LOSSY, because
+    /// rights are a flags set and levels are three fixed points: <c>Read|Write</c> (no Create) reports as
+    /// <c>ViewOnly</c>, under-stating a real Write. Authorization must therefore read
+    /// <c>AccessRights</c> — which is why <c>CallerProjectAccess</c> stores rights and derives the level,
+    /// not the reverse.
+    /// <para>
+    /// It is not currently possible to hit the lossy case: every term contributes either
+    /// <c>ToAccessRights(level)</c> or <c>MembershipTermRights</c> (== Collaborate), and a union of
+    /// those is always exactly one of the three points. The containment test is written for the general
+    /// case anyway, so that a future term contributing an off-grid combination degrades to an
+    /// UNDER-statement rather than silently reporting a level the caller does not hold.
+    /// </para>
+    /// </remarks>
+    public static ExternalAccessLevel? ToDisplayLevel(AccessRights rights)
+    {
+        if (rights.HasFlag(ToAccessRights(ExternalAccessLevel.FullAccess)))
+            return ExternalAccessLevel.FullAccess;
+        if (rights.HasFlag(ToAccessRights(ExternalAccessLevel.Collaborate)))
+            return ExternalAccessLevel.Collaborate;
+        if (rights.HasFlag(ToAccessRights(ExternalAccessLevel.ViewOnly)))
+            return ExternalAccessLevel.ViewOnly;
+        return null;
+    }
 }
 
 /// <summary>

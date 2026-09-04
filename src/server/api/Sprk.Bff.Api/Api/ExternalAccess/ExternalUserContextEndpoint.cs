@@ -1,3 +1,4 @@
+using Spaarke.Dataverse;   // AccessRights — nameof(AccessRights.None) for the /me level string
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -63,10 +64,15 @@ public static class ExternalUserContextEndpoint
             "[EXT-ME] Caller {ContactId} ({Plane}) requested context: {Count} accessible projects. TraceId={TraceId}",
             caller.ContactId, caller.Plane, caller.ProjectAccess.Count, httpContext.TraceIdentifier);
 
+        // The /me contract is a level STRING, so this is the one place the lossy rights→level display
+        // projection is used (task 033 — CallerProjectAccess stores AccessRights and derives the level;
+        // see ExternalAccessLevels.ToDisplayLevel). "None" is emitted rather than an empty string when
+        // a project carries no rights at all: a blank level in a client UI reads as "unknown", which is
+        // exactly the wrong impression for a caller who holds nothing.
         var projects = caller.ProjectAccess
             .Select(p => new ProjectAccessEntry(
                 p.ProjectId,
-                p.AccessLevel.ToString()))
+                p.AccessLevel?.ToString() ?? nameof(AccessRights.None)))
             .ToList();
 
         var response = new ExternalUserContextResponse(

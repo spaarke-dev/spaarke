@@ -12,9 +12,9 @@
 | Field | Value |
 |---|---|
 | **Task** | **033** — FR-19 consumer propagation + delete the blanket Collaborate stamp |
-| **Status** | `pending` — **not started**. Its dependency (032) is ✅ done |
-| **Repo state** | Branch **clean**, **0 unpushed**, **3 behind master** (fetch + merge before starting) |
-| **Next Action** | Merge `origin/master`, then run `task-execute` on `tasks/033-fr19-consumer-propagation-write-enforcement.poml`. **Read `notes/task-032-evaluator-spine.md` first** — 033 consumes the shape 032 built |
+| **Status** | 🔄 **IN PROGRESS** (2026-09-04). Code complete; suite running. |
+| **Repo state** | master MERGED (was 5 behind, clean merge); LW-build + doc-drift work committed + pushed |
+| **Next Action** | Finish 033: verify suite, run Step 9.5 gates (code-review + adr-check), measure publish size, write `notes/task-033-consumer-propagation.md`, flip TASK-INDEX |
 | **Progress** | **35 completed** · 2 completed-with-escalation · 1 blocked-shipped · **54 pending** (of 92) |
 
 ### Completed THIS session (all merged or pushed)

@@ -24,13 +24,19 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /projects/{id}/organizations    — organizations linked to project contacts
 ///   PATCH /todos/{id}                    — update a to-do (scoped to the caller's projects)
 ///
-/// All project-specific endpoints verify the caller has a participation record for the requested
-/// project via CallerPrincipal.HasProjectAccess(). Returns 403 if no access.
+/// READ routes verify the caller has a participation record for the requested project via
+/// CallerPrincipal.HasProjectAccess(). Returns 403 if no access.
 ///
-/// PATCH /todos/{id} takes a to-do id rather than a project id, so it resolves the to-do's
-/// regarding-project first (ExternalDataService.GetTodoProjectAsync) and scopes on that — see
-/// FR-08 / finding A-7. Writes additionally require the Write right, mirroring the Create right
-/// that POST /projects/{id}/todos requires.
+/// MUTATING routes additionally require the specific right from the evaluator's answer FOR THAT
+/// RECORD (unified-access-control-r2 task 033 / FR-19): Create on the three POSTs, Write on the
+/// PATCH. A View Only grant does not permit a write on any route. These gates existed before task
+/// 033 but could not fire on the workforce plane, which blanket-stamped Collaborate over every
+/// accessible project; that stamp is deleted.
+///
+/// PATCH /todos/{id} takes a to-do id rather than a project id, so it resolves the to-do's root
+/// first (ExternalDataService.GetTodoRootAsync — project, matter OR work assignment) and gates on
+/// that root's rights — see FR-08 / finding A-7. All three root types are gated identically; the
+/// former "matter/WA membership implies write" asymmetry is gone (register A-8).
 ///
 /// smart-todo-decoupling-r3 (FR-29): Routes formerly exposed an event-based to-do model
 /// (GET/POST /events, PATCH /events/{id}). Replaced with sprk_todo routes here. See
@@ -338,11 +344,16 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        // Require at least Collaborate access to create to-dos
+        // Require Create on THIS project. Effective as of task 033: the workforce plane no longer
+        // blanket-stamps Collaborate, so a ViewOnly caller now actually fails here.
         var rights = callerContext.GetEffectiveRights(id);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit creating to-dos on this project");
+                detail: "Your access level does not permit creating to-dos on this project",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+                });
 
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
@@ -413,7 +424,11 @@ public static class ExternalProjectDataEndpoints
                 "[EXT-UPLOAD] Contact {ContactId} denied — access level lacks Create on project {ProjectId}",
                 callerContext.ContactId, id);
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit uploading documents to this project");
+                detail: "Your access level does not permit uploading documents to this project",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+                });
         }
 
         if (file is null || file.Length == 0)
@@ -628,11 +643,15 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        // Require at least Collaborate access to create events
+        // Require Create on THIS project (see CreateTodo — effective as of task 033).
         var rights = callerContext.GetEffectiveRights(id);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit creating events on this project");
+                detail: "Your access level does not permit creating events on this project",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+                });
 
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
@@ -706,41 +725,44 @@ public static class ExternalProjectDataEndpoints
         // Scope on whichever of the three A-9 root sets the to-do is parented to. Owner decision
         // 2026-08-24: matter and work assignment get the same functionality as project.
         //
-        // ⚠️ ASYMMETRY, deliberate and owner-approved. Project access carries a LEVEL
-        // (ViewOnly/Collaborate/FullAccess → AccessRights), so a project-parented to-do additionally
-        // requires Write below. Matter and work-assignment accessible sets are bare id sets with no
-        // level anywhere in the pipeline (grantSet.Matters / .WorkAssignments are IReadOnlySet<Guid>),
-        // so for those, MEMBERSHIP IMPLIES WRITE. A matter collaborator who would have been
-        // "ViewOnly" on a project can therefore edit matter-parented to-dos. Closing that gap needs
-        // a per-matter access level in the grant model, which does not exist yet.
-        var inScope = rootKind switch
+        // ✅ THE ASYMMETRY IS GONE (unified-access-control-r2 task 033 / FR-19 / register A-8).
+        //
+        // This block used to carry a long comment explaining that matter and work-assignment access
+        // were "bare id sets with no level anywhere in the pipeline", so for those two root types
+        // MEMBERSHIP IMPLIED WRITE — a caller who would have been ViewOnly on a project could edit
+        // matter-parented to-dos. That was an accurate description of the code, and it was load-bearing
+        // in the wrong direction: it read as a settled design decision, so the next reader honoured it
+        // instead of fixing it (FAILURE-MODES AP-12).
+        //
+        // Tasks 032 + 033 removed the premise. Grant rows always carried sprk_accesslevel for all three
+        // root types; the level was simply dropped at partitioning. CallerPrincipal now carries
+        // (recordId -> AccessRights) for projects, matters AND work assignments, so all three are gated
+        // identically below. There is no root type left for which membership implies write.
+        var rights = rootKind switch
         {
             ExternalDataService.TodoRootKind.Project =>
-                callerContext.HasProjectAccess(rootId!.Value),
+                callerContext.GetEffectiveRights(rootId!.Value),
             ExternalDataService.TodoRootKind.Matter =>
-                callerContext.GetAccessibleMatterIds().Contains(rootId!.Value),
+                callerContext.GetMatterRights(rootId!.Value),
             ExternalDataService.TodoRootKind.WorkAssignment =>
-                callerContext.GetAccessibleWorkAssignmentIds().Contains(rootId!.Value),
+                callerContext.GetWorkAssignmentRights(rootId!.Value),
             // None (absent parent, or one of the ten non-scopeable regarding types) and Ambiguous
             // (more than one root lookup populated) both deny. Same response as out-of-scope so the
             // caller cannot infer WHY.
-            _ => false,
+            _ => Spaarke.Dataverse.AccessRights.None,
         };
 
-        if (!inScope)
+        // Out-of-scope and insufficient-rights are ONE check: every accessor above returns None for a
+        // record the caller cannot reach, so an absent record can never satisfy Write. Keeping them as
+        // one expression means a future root type cannot be added to the scope branch while being
+        // forgotten in the rights branch.
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this to-do");
-
-        // Project-parented to-dos additionally honour the access level — mirrors CreateTodo's gate
-        // (which requires Create) with Write for an update. Matter / work assignment have no level
-        // to honour; see the asymmetry note above.
-        if (rootKind == ExternalDataService.TodoRootKind.Project)
-        {
-            var rights = callerContext.GetEffectiveRights(rootId!.Value);
-            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
-                return Results.Problem(statusCode: 403, title: "Forbidden",
-                    detail: "Your access level does not permit updating to-dos on this project");
-        }
+                detail: "You do not have access to this to-do",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = "sdap.access.deny.insufficient_rights"
+                });
 
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();

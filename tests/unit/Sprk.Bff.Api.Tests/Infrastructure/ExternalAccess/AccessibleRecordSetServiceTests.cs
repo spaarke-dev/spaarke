@@ -506,6 +506,98 @@ public class AccessibleRecordSetServiceTests
         Assert.Equal(1, set.Count);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // IsOperationPermittedAsync — the rights-aware gate (task 033 / FR-19)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task IsOperationPermittedAsync_ContactWithViewOnlyGrant_PermitsReadButDeniesWrite()
+    {
+        // The FR-19 acceptance in evaluator terms: a ViewOnly grant answers YES to Read and NO to
+        // Write on the SAME record. Before task 032/033 the level never reached this layer at all.
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+
+        (await sut.IsOperationPermittedAsync(
+                ContactPrincipal(), ProjectEntity, GrantedProject, AccessRights.Read, CancellationToken.None))
+            .Should().BeTrue();
+
+        (await sut.IsOperationPermittedAsync(
+                ContactPrincipal(), ProjectEntity, GrantedProject, AccessRights.Write, CancellationToken.None))
+            .Should().BeFalse("ViewOnly maps to Read alone — it must not confer Write");
+    }
+
+    [Fact]
+    public async Task IsOperationPermittedAsync_RecordOutsideTheComposedSet_DeniesEveryRight()
+    {
+        var sut = CreateSut(
+            new Mock<IMembershipResolverService>().Object, ParticipationsFor(GrantedProject), NeverStanding());
+
+        foreach (var right in new[] { AccessRights.Read, AccessRights.Write, AccessRights.Create, AccessRights.Delete })
+        {
+            (await sut.IsOperationPermittedAsync(
+                    ContactPrincipal(), ProjectEntity, UnrelatedRecord, right, CancellationToken.None))
+                .Should().BeFalse($"a record absent from the rights map must deny {right}");
+        }
+    }
+
+    [Fact]
+    public async Task IsOperationPermittedAsync_EmptyRecordId_DeniesWithoutComposing()
+    {
+        // Fail-closed on a missing subject: there is no record to evaluate, so nothing can be proven.
+        // The membership resolver is strict — composing at all would throw and fail this test.
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var sut = CreateSut(membership.Object, NoParticipations(), NeverStanding());
+
+        (await sut.IsOperationPermittedAsync(
+                ContactPrincipal(), ProjectEntity, Guid.Empty, AccessRights.Read, CancellationToken.None))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsOperationPermittedAsync_RequiredRightsNone_DeniesInsteadOfPermittingEverything()
+    {
+        // 🔴 THE FAIL-OPEN THIS GUARD EXISTS FOR.
+        //
+        // AccessRights is a [Flags] enum, so `anything.HasFlag(None)` is ALWAYS true — zero is a subset
+        // of every set. A caller that computed its requirement dynamically and landed on None (an
+        // unmapped operation, a defaulted field, a mis-parsed config value) would otherwise be granted
+        // permission on ANY record, INCLUDING one it cannot see at all. That is a fail-OPEN reachable
+        // purely by caller error, on the one method whose entire job is to deny.
+        //
+        // Both cases below would return TRUE without the explicit None guard in the implementation.
+        var sut = CreateSut(
+            new Mock<IMembershipResolverService>().Object, ParticipationsFor(GrantedProject), NeverStanding());
+
+        (await sut.IsOperationPermittedAsync(
+                ContactPrincipal(), ProjectEntity, GrantedProject, AccessRights.None, CancellationToken.None))
+            .Should().BeFalse("asking for no rights is a caller bug, not a free pass");
+
+        (await sut.IsOperationPermittedAsync(
+                ContactPrincipal(), ProjectEntity, UnrelatedRecord, AccessRights.None, CancellationToken.None))
+            .Should().BeFalse("...and it must not grant access to a record outside the set either");
+    }
+
+    [Fact]
+    public async Task IsOperationPermittedAsync_RequiresALLRequestedRights_NotMerelyOne()
+    {
+        // Read|Write against a ViewOnly grant must DENY. A caller asking for a compound requirement is
+        // asking for the conjunction; satisfying it partially is not satisfying it.
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+
+        (await sut.IsOperationPermittedAsync(
+                ContactPrincipal(), ProjectEntity, GrantedProject,
+                AccessRights.Read | AccessRights.Write, CancellationToken.None))
+            .Should().BeFalse("the caller holds Read but not Write — the conjunction is not satisfied");
+    }
+
     private static AccessibleRecordSetService CreateSut(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
