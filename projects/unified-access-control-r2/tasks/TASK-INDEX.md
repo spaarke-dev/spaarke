@@ -605,7 +605,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 050 | Core-ancestor derivation in the shared resolver | FR-26 | — | **P3-W1** | ✅ | **opus** | **xhigh** |
+| ✅ **050** | Core-ancestor derivation in the shared resolver | FR-26 | — | **P3-W1** | ✅ | **opus** | **xhigh** |
 | 🔲 051 | `RegardingResolver` re-stamp on set/reparent/clear | FR-26 | 050 | **P3-W2** | ✅ | opus | high |
 | 🔲 052 | Server-writer audit + C# `CoreAncestorResolver` | FR-26 | 050 soft | **P3-W1** | ✅ | sonnet | high |
 | 🔲 053 | Ancestor-stamp backfill script | FR-26 | 050,052 | **P3-W2** | ✅ | sonnet | medium |
