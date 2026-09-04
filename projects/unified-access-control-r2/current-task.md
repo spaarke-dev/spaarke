@@ -14,7 +14,7 @@
 | **State** | Branch **clean**, 0 unpushed, **0 behind master**. **PR #939 is MERGED.** |
 | **Just completed** | **PR #939 merged** (task 076 container contract + 050/052 + 034 canary) · **ALL THREE ADR AMENDMENTS**: **030** (ADR-003 A1), **031** (ADR-028 **A5**), **040** (ADR-034 A1) |
 | **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ after merging 73 commits of master · ArchTests **191/191** · full CI rollup **CLEAN** (32 pass / 1 skip) before merge |
-| **Next Action** | **Task 032 — the evaluator spine.** It is now UNBLOCKED (030 sanctioned its shape) and it is the thing this project is named for. |
+| **Next Action** | **Task 032 — IMPLEMENT.** Status `in-progress`: investigation **done**, `src/` **untouched**. ⚠️ **Read [`notes/task-032-evaluator-spine.md`](notes/task-032-evaluator-spine.md) FIRST** — it carries five findings, three of which are invisible from the POML's step list and one of which needed live Dataverse data. Implementing without it reproduces a silent cache bug and possibly a revocation. |
 
 ### 🔴 The traps that still apply
 
@@ -33,7 +33,18 @@
 
 ## ▶ NEXT SESSION — ORDERED WORK ITEMS
 
-### 1. 🔑 Task 032 — the evaluator spine (THE deliverable, now unblocked)
+### 1. 🔑 Task 032 — the evaluator spine (THE deliverable) — **investigation done, code not started**
+
+⚠️ **Start by reading [`notes/task-032-evaluator-spine.md`](notes/task-032-evaluator-spine.md).** Five
+findings, each of which changes what the implementation must do:
+
+| # | Finding | Consequence |
+|---|---|---|
+| 1 | **Escalation trigger #2 does NOT fire** — verified against **live** Dataverse: every active grant row carries a non-null `sprk_accesslevel` on all three root types | Carry the real level; invent no default; no escalation needed |
+| 2 | 🔴 The project partition drops level-less rows; matter/WA does not. Making them "symmetrical" **silently revokes** access | Carry the level **without** adding the `HasValue` filter |
+| 3 | Live duplicate rows exist (one contact, **5 grant rows on one matter**) | Highest-wins dedupe must generalize to matters + WAs, or the answer depends on **row order** |
+| 4 | The level→rights mapping **already exists** (`ExternalCallerContext.GetEffectiveRights`) | **Extract** it to one internal static (§11) — the step's "add the mapping" wording invites a duplicate |
+| 5 | 🔴 The Redis cache persists project levels but **matter/WA ids only** | Fixing only the query path is correct on a cache **miss** and `None` on a cache **hit** (60 s TTL) while unit tests stay green. Extend `CachedGrantSet` **and bump `CacheVersion`** |
 
 `(recordId → rights)` with additive terms composed by highest-wins `max()`, then ordered vetoes.
 **ADR-003 Amendment A1 sanctions exactly this shape**, so it lands compliant rather than in violation.
