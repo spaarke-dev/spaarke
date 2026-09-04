@@ -1,4 +1,4 @@
-# Current Task State — `spaarkeai-compose-r8`
+﻿# Current Task State — `spaarkeai-compose-r8`
 
 > **Last Updated**: 2026-09-03 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
 > **Recovery**: read Quick Recovery, then **§UAT (owner is UATing item 8 in parallel)**, then **§GAPS (highest-priority open work)**, then §UX, then §U8-BUILD.
@@ -13,7 +13,7 @@
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`cd6f54c84`** — **pushed, 0 unpushed, tree clean.** **PR #924 is MERGED** (master @ `d7fd88366`); the 4 commits after it have **NO open PR** and need a new one to reach master. |
 | **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
-| **Next Action** | **0) Owner is UATing item 8 in parallel (2026-09-03) — expect findings; see §UAT for what was exercised and the known limits that are NOT defects.** Then: **§GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
+| **Next Action** | **0) 🔴 §GAPS-5 — the Review Summary Memo CANNOT SUCCEED: its write half (`POST .../review-memo`) has no production caller, so both toolbar actions always hit the negative banner. A whole shipped, UAT'd feature is dead at the seam. Owner decision needed — recommendation: complete `reviewMemo`, retire `summaryPage`.** Then: **0b) Owner is UATing item 8 in parallel (2026-09-03) — expect findings; see §UAT for what was exercised and the known limits that are NOT defects.** Then: **§GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
 | **Suite** | Compose client **1,443/1,443** (110 suites) · Compose server **2,009/2,009** · ArchTests **191/191** · BFF build 0 errors — re-run after the 17-commit master merge, not carried over |
 | **Deployed (current)** | ✅ **2026-09-03 late** from **`91123fa23`** — BFF + `sprk_spaarkeai` together (NFR-05). BFF `/healthz` passed; code page `sprk_spaarkeai` 5,756 KB published to `spaarkedev1`. **Artifact verified by STRING LITERAL before upload**: `Summarise changes` ×2, `Include revision report` ×1, `Open in preview` ×1, `Auto Save On` **0**. Item 8 is now exercisable end-to-end. |
 | **PR** | **#938** open against master (5 commits). #924 already merged (master @ `d7fd88366` → now includes email-intelligence #936/#937). |
@@ -219,7 +219,17 @@ constraint).
   a capability that still exists** (issue #858's reasoning).
 - **Do not leave it half-wired.** That is the state that produced this whole class.
 
-#### ✅ The evidence was gathered 2026-09-04 — the call is now informed, not a coin flip
+#### 🔴 CORRECTION (2026-09-04, same session) — READ THIS BEFORE THE EVIDENCE BLOCK BELOW
+
+**The recommendation immediately below ("retire — the need is already met") was based on a FALSE premise
+and is WITHDRAWN.** It claimed "Create Summary Memo" is a working shipped feature. It is not. Its READ half
+is wired; its WRITE half is never called in production. See **§GAPS-5** for the proof chain. The evidence
+block below is kept because its supersession-intent finding still stands — the later project genuinely did
+build a parallel path — but **"the need is met" is false**, so the conclusion drawn from it does not follow.
+
+**Revised recommendation → §GAPS-5.**
+
+#### The evidence gathered 2026-09-04 — supersession INTENT (still valid); "need is met" (FALSE, see above)
 
 **The user need is already met by a shipped, UAT'd feature.** `ai-advanced-capabilities-agreements-r1`
 (FR-13/FR-14, tasks 050/051) built **"Create Summary Memo"**, and unlike `summaryPage` it is wired
@@ -262,6 +272,75 @@ done; the decision is one question, with a recommendation and its evidence above
    both dialects; found and resolved `SummarizeSessionRequest.Style`; `InboundBodyDtoMappingGuardTests`
    now makes the class non-recurring repo-wide. The suspicion that "the found instances are not the only
    ones" was correct.
+
+---
+
+## GAPS-5. 🔴 The Review Summary Memo cannot succeed — a whole feature, dead at the write half
+
+**Found 2026-09-04, minutes after listing "endpoints with no client caller" as a blind spot the guard cannot
+see.** That blind spot immediately produced a live instance. This is the most consequential instance of the
+class so far: not a dropped field, but an entire **shipped, UAT'd feature that cannot complete**.
+
+### The proof chain (each link verified, repo-wide)
+
+| # | Link | Evidence |
+|---|---|---|
+| 1 | The memo lives in an `sprk_analysisoutput` row named **"Review Summary Memo"** | `AnalysisResultPersistence.cs:331` |
+| 2 | Exactly one method writes it — `PersistReviewMemoAsync` | `AnalysisResultPersistence.cs:298` |
+| 3 | It has exactly ONE caller: the POST handler `GenerateReviewMemo` | `ReviewMemoEndpoints.cs:166` |
+| 4 | `POST .../review-memo` has **no production caller anywhere in the repo** — only `ReviewMemoEndpointContractTests` | `git grep "review-memo"` across all of `src/`, `infra/`, `src/solutions/` |
+| 5 | The read looks up that exact output name, returns `null` otherwise → `NoMemoProblem()` | `AnalysisResultPersistence.cs:347`, `ReviewMemoEndpoints.cs:196` |
+| 6 | BOTH toolbar actions ("Generate memo" .docx, "Email memo") call the **GETs** — `method: 'GET'`, twice | `ComposeWorkspace.tsx:3189`, `:3213` |
+
+**Therefore both toolbar actions always hit the "generate the review/memo first" negative banner.** The row
+they render from is never written.
+
+### The tell that was sitting in the code the whole time
+
+`ComposeWorkspace.tsx:3176` states the design assumption outright:
+
+> *"…derive from the SAME server-persisted `sprk_analysisoutput` row **task 050's POST assembled** — never a
+> client-side re-derivation"*
+
+Task 051 (the read half, FR-14) was built **against task 050's POST as though it were already being called**.
+Nothing ever called it. Each task was correct in isolation; the seam between them was nobody's deliverable.
+
+### Why four UAT rounds did not catch it
+
+The FR-14 UAT rounds (`ComposeFormatToolbar.test.tsx` documents rounds 1 and 4) moved the button and made it
+icon-only — they were about **position and label**. Reaching the negative banner looks like "no review yet",
+which is a legitimate state. Nobody clicked through to a *successful* memo, and the negative path is
+indistinguishable from correct behaviour unless you know a memo should have existed.
+
+### Revised recommendation for `summaryPage` — the decision is bigger than wire-vs-retire
+
+There are **two half-built paths to one need**, and **neither delivers today**:
+
+| Path | Built | Missing |
+|---|---|---|
+| `summaryPage` (nda-r1 t041) — appendix inside the .docx | generator · `AppendSection` · `SaveAsync` call site · seam test | DTO property · endpoint mapping · **any client** |
+| `reviewMemo` (agreements-r1 FR-13/14) — separate memo doc | POST assemble+persist · both GETs · toolbar · docx render · email prefill · banner | **the client POST that creates the row** |
+
+**Recommendation: complete `reviewMemo`, retire `summaryPage`.**
+- `reviewMemo` is far closer to done — everything except one client call exists and was UAT'd. The POST needs
+  `{overallRisk, sections[]}` from the agreement-review Action's ledgered result plus the client-held
+  `afterText`; **verify the client actually holds those tuples before scoping** (`ReviewMemoAssembler`'s
+  docblock asserts it does — that assertion is exactly the kind that went unchecked here).
+- Keeping both means maintaining two paths to one outcome (§11), and `summaryPage` is the one with no client
+  at all.
+- If the owner wants the digest *in-document* rather than as a separate memo, invert it: wire `summaryPage`
+  by mirroring `revisionReport` and retire the memo instead. **Pick one. Do not finish both.**
+
+⚠️ Not actioned unilaterally — this spans two other projects' features.
+
+### What this instance teaches that the DTO guard cannot
+
+The guard proves every declared field is *read*. It cannot prove a **route is called**, and this defect lives
+entirely in that gap. A cheap forcing function to consider: assert every `MapPost`/`MapPut` route literal in
+`Api/**` appears in client source or is allowlisted with a reason (background jobs, webhooks and
+external-system callers are legitimate entries). That would have caught this on the day task 050 merged.
+
+---
 
 ### What the audit did NOT cover (name it, so nobody reads "done" as "everything")
 
