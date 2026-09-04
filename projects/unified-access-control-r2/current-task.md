@@ -1,22 +1,112 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-02** (by `context-handoff`, pre-`/compact`).
-> **Recovery**: read "Quick Recovery", then **§ REMAINING WORK (ordered)**. Everything below the
-> Quick Recovery block is history/detail — the ordered list is the authority on what to do next.
-> ⚠️ If a header ever disagrees with § REMAINING WORK, **trust the list and fix the header**. This has
-> already happened twice (a header claiming "ACTIVE TASK 076 step 4" with two commits described as
-> unpushed that had merged long since).
+> **Last Updated**: **2026-09-03** (by `context-handoff`, pre-`/compact`).
+> **Recovery**: read Quick Recovery, then **§ NEXT SESSION — ORDERED WORK ITEMS**. Everything below
+> that is history. ⚠️ If a header ever disagrees with the ordered list, **trust the list**.
+> ⚠️ **This project's own notes have been WRONG ELEVEN times.** Verify before believing — especially
+> counts, route names, "already done" claims, and open-vs-answered questions.
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-02
+## Quick Recovery (READ THIS FIRST) — 2026-09-03
 
 | Field | Value |
 |---|---|
-| **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
-| **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
-| **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. Branch is **fully merged** — `git rev-list --count origin/master..HEAD` = 0. Verify with `git log --oneline -3` rather than trusting a SHA written here (a commit cannot state its own hash; two attempts to do so were wrong within seconds). |
-| **Next Action** | **076 step 4 IN PROGRESS — server done, client chokepoint done, CALL SITES REMAIN.** ✅ Built: the record-LESS route (`756e089cb`) + the two client contracts `uploadFileForRecord` / `uploadFileWithoutRecord` (`3fcfebeed`, 27/27 green). `uploadFile(containerId,…)` is @deprecated but ALIVE, and both server routes co-exist — so callers move ONE AT A TIME with nothing broken between. 🔴 **NEXT (in this order)**: (1) change `EntityCreationService.uploadFilesToSpe` to take `(entityLogicalName, recordId)` and cut its **6 record-bearing** call sites — matterService:339, projectService/CreateProjectWizard:712, invoiceService:314, workAssignmentService:545, CreateEventWizard:401, +1 more; (2) cut the **3 parentless** sites to `uploadFileWithoutRecord` — createXrmEmailComposeHandlers:255, CreateAnalysisWizardWidget:778, DocumentUploadWizard skip-path (`uploadOrchestrator`/`FileUploadService`); (3) delete **W1** `applyDefaultContainerId` (`EntityCreationService.ts:327` via `applyUserBuDefaults:374`) + **W2** `DocumentUploadWizard/sprk_subgrid_commands.js`; (4) classify all 12 container suppliers (delete upload-only; name the owning task for the rest — an unclassified one is a SURVIVOR); (5) route the **7 Communication** sites through 075's `CommunicationContainerResolver`; (6) **LAST** — delete `PUT /api/obo/containers/{id}/files/{*path}`, its Pending waiver, `uploadFile()`, and drop the route count 4→3. 🔴 **STEP 6 IS THE SHIP-TOGETHER MOMENT** — everything before it is additive and independently deployable. (7) absence-grep = the acceptance evidence. |
+| **State** | Branch **clean**, 0 unpushed, 0 behind master. **PR #939 OPEN** — https://github.com/spaarke-dev/spaarke/pull/939 (14 commits, NOT merged). |
+| **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ · ArchTests **182/182** · BFF unit **11,845 passed / 0 failed** / 58 skipped · client suite **9 suites / 14 tests failing = the documented baseline**, all untouched by this work (verified by diff) · publish **44.14 MB** incl. PDBs (−0.82, ceiling 60). |
+| **Just completed** | **076 COMPLETE** (the container contract, open since 2026-08-25) · **050** + **052** core-ancestor stamping · **034** canary (🟡 shipped-not-closed) · **item 7** association map · **N-1** one upload client. |
+| **Next Action** | **START AT § NEXT SESSION — ORDERED WORK ITEMS.** Item 1 is merging PR #939, and it has TWO deploy obligations that must be honoured or every upload 404s. |
+
+### 🔴 The five things that will bite a fresh session
+
+1. **`Router` is the ONLY required check on master.** It has passed while other jobs were RED —
+   #934 reached master with a **broken solution build** that way, and I had to repair it. **Gate on
+   the FULL rollup; only `CLEAN` merges.**
+2. **The incremental solution build LIES.** `dotnet build Spaarke.sln` came back green while a real
+   compile error sat in a test project. Always `--no-incremental`. Also: `MSB3026`/`MSB3027` file
+   locks mean a *concurrent test run*, not a code error.
+3. **STALE PROSE HAS COST REAL WORK ELEVEN TIMES.** Worst instances: an "open escalation" that had
+   been ANSWERED five days earlier (cost a wrong status report to the owner); "12 container
+   suppliers" that is really ~32; "7 Communication sites need routing" when all 4 were already done;
+   `sprk_todo` described as a live upload target when it has no upload call site at all.
+4. **NEVER `git stash` in this worktree, and never `git add -A` with concurrent agents.** Both
+   happened: a stash swept up another agent's uncommitted work, and a `git add` swept up another
+   agent's file leaving `origin` briefly non-compiling. **Use isolated worktrees for parallel agents.**
+5. **Both arch guards fire on new work and are RIGHT every time** (3 instances now):
+   `RouteAuthorizationGuardTests` (waiver + route-count ratchet) and
+   `SpeWriteSinkContainerProvenanceGuardTests` (provenance inventory). Fix them honestly; never
+   convert a `Pending` waiver to `Permanent` to go green.
+
+---
+
+## ▶ NEXT SESSION — ORDERED WORK ITEMS (owner-directed 2026-09-03)
+
+### 1. Merge PR #939 — ⚠️ TWO DEPLOY OBLIGATIONS
+
+Gate on the FULL check rollup, not `Router`. Then:
+
+- 🔴 **CLIENT + BFF SHIP TOGETHER.** `PUT /api/obo/containers/{id}/files/{*path}` is **DELETED**.
+  BFF-first **or** client-first both **404 every upload**. No compatibility window, no feature flag.
+  Surfaces: BFF · `sprk_documentuploadwizard` · SemanticSearchControl · LegalWorkspace ·
+  `sprk_wizard_commands.js`.
+- 🔴 **REBUILD 7 CHECKED-IN PCF `bundle.js` ARTIFACTS** (dated 2026-07-29). They still contain the
+  OLD inlined fetch to the deleted route. **Source is clean; the built artifacts are not** — so a
+  deploy that ships them 404s even though the repo greps clean. Use `npm run build:prod`, NEVER
+  `npm run build` (root CLAUDE.md §12 / FAILURE-MODES AP-1). Bump PCF versions in all 4 locations.
+
+### 2. Parallel agents → use ISOLATED WORKTREES (owner-directed)
+
+Three agents in one shared worktree collided twice (see trap 4). Next time pass
+`isolation: "worktree"` to the Agent tool, or restrict fan-out to provably disjoint directories.
+Fences that DID help and should be kept: no `.claude/` writes, `git add` by explicit path, explicit
+per-agent file exclusion lists, and leaving `current-task.md` to the main session only.
+
+### 3. Task 083 — container-selection sweep
+
+**Now unblocked by 076** and down from 7 → **6 `ClientSupplied` sinks** (`OBOEndpoints
+UploadSmallAsUserAsync#1` is gone with the deleted route). Parse the live allow-list in
+`SpeWriteSinkContainerProvenanceGuardTests.cs` — do NOT trust the prose count. 083 must not be
+closed while any sink is unclassified.
+
+### 4. Tasks 030 / 031 / 040 — the ADR amendments 🔑 **HIGHEST LEVERAGE**
+
+**MAIN-SESSION-ONLY** — they edit `.claude/**` and sub-agents are blocked there by design
+(root CLAUDE.md §3; "Edit denied" is the boundary working, not a bug).
+
+They are the bottleneck for everything else: **030 → 032** (the evaluator spine, the thing this
+project is NAMED for and still unstarted), **031 → 035**, **040 → 041**. Landing all three converts
+one long dependency chain into several runnable branches — this is what actually unlocks parallelism
+for the remaining ~50 tasks. All three are CLAUDE.md §6.5 **path B** (ADR amendment); the tensions
+are already written up in the project CLAUDE.md "ADR tensions" table.
+
+### 5. Then: the evaluator spine (032 → 033/037/042 → 036/039/043/044)
+
+Task **032** — `(recordId → rights)` with additive terms, highest-wins, then the ordered vetoes
+(deny list → Restricted → Secure). This is the core deliverable and it has not started.
+
+---
+
+## 🔔 OPEN OWNER DECISIONS (blocking specific tasks)
+
+| # | Decision | Blocks |
+|---|---|---|
+| A | **`sprk_account` / `sprk_contact` lookups on `sprk_document`.** Owner is adding them. Use schema names **`sprk_Account`** / **`sprk_Contact`** → logical `sprk_account`/`sprk_contact`, nav props `sprk_Account`/`sprk_Contact` (PascalCase is load-bearing for `@odata.bind`). **Do NOT wire the code before the columns exist** — that converts today's silent drop into a hard write error. Then add cases to `DocumentAssociationMap` + `DataverseServiceClientImpl` + the client `ENTITY_CONFIGS`. | Office saves filed to account/contact are persisted **unassociated** today |
+| B | **034 canary user + CI path.** No non-admin canary user exists in dev (owner action: new `systemuser` + custom role), and no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + required manual gate, over standing CI secrets. | **Task 036 must NOT proceed** until the canary runs truthfully |
+| C | **`sprk_todo` has no `sprk_regardingservicerequest` column** (F-050-2 / F-052-1), so a To Do under a service-request-anchored communication cannot inherit that access. Handled consistently client+server as `unstampable` + warn, write proceeds. Schema change vs accept. | tasks 028 / 056 |
+| D | **Real-Dataverse create+read smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. Field names + case-sensitive `sprk_Project@odata.bind` have never executed against real Dataverse. SPA deploy is manual `workflow_dispatch`. | external SPA deploy |
+
+---
+
+## Filed, not fixed
+
+- Outbound-attachment path records a wrong `(driveId, itemId)` pair — `CommunicationService.cs:1259/1573` → `:2308` writes the `sprk_document` GUID into `sprk_graphitemid`.
+- **Tasks 005/007/008 parked live-tenant checklists on 034 on a FALSE premise** ("034 is the first task with a real tenant" — it isn't). Nine unverified items need re-homing; enumerated in `notes/task-034-negative-canary.md` §5.
+- **F-052-2** (low): `EmailDraftToolHandler` derives app-only under a user-context write.
+- `DocumentOperations.js` supplies a drive to the MI route `/api/drives/{driveId}/upload` — already dead (its `GET /api/containers/{id}/drive` hop is mapped nowhere).
+
+---
+
+## Session history + detail (below this line is the prior record)
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
 
