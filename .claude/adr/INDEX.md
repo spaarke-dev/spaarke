@@ -100,7 +100,7 @@ Every ADR classified on **enforceability** (can a mechanical test assert it?), *
 
 `Status: Proposed` on **ADR-014, 016, 017, 018, 019, 020, 041, 042, 043, 047**. These are not idle drafts: **ADR-019 (ProblemDetails) is implemented across 187 files**, ADR-042 across 92, ADR-043 across 59. The codebase rests substantially on decisions nobody ratified.
 
-They are classified `contested` **not because they are inaccurate** — several describe the code precisely — but because enforcing an unratified rule in CI means enforcing something nobody agreed to, which is what FR-08 exists to prevent. **The likely §6.5 path is confirm (ratify), not amend.** Two need a closer look first: **ADR-047** has zero server-side evidence, and **ADR-018** (Proposed) is enforced by **ADR-032** (Accepted) — an accepted ADR enforcing an unratified one.
+They are classified `contested` **not because they are inaccurate** — several describe the code precisely — but because enforcing an unratified rule in CI means enforcing something nobody agreed to, which is what FR-08 exists to prevent. **The likely §6.5 path is confirm (ratify), not amend.** Two need a closer look first. **ADR-018** (Proposed) is enforced by **ADR-032** (Accepted) — an accepted ADR enforcing an unratified one. And **ADR-047** is fully built (outbox + SignalR delivery + `@spaarke/notifications` client + four producers) yet `spaarke-notification-spine-r1` shows **0 of 22 tasks complete**, which suggests the spine was assembled piecemeal by its consumers — the fork-collapsing ADR-047 exists to prevent. Its conformance to its own six MUSTs is **unverified**.
 
 ### Enforcement is 17/49, not 7/49
 

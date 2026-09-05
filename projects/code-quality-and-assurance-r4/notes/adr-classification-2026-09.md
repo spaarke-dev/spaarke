@@ -41,13 +41,38 @@ These are not drafts sitting unused. Measured hits for their subject code:
 | ADR-017 | Async job status | 42 hits (broad terms — weak evidence) |
 | ADR-014 | AI caching & reuse | 2 files |
 | ADR-020 | Versioning strategy | 14 files |
-| ADR-047 | Notification spine | **0** server-side |
+| ADR-047 | Notification spine | **CORRECTED — substantially built** (see below) |
 
 **The governance gap this exposes**: the codebase is substantially built on decisions nobody ever ratified. ADR-019 in particular is load-bearing — 187 files implement an error contract whose ADR still says "Proposed."
 
 **Why these are classified `contested` rather than `current`.** On the literal accuracy definition several of them *are* accurate — ADR-019 describes the code precisely. But the accuracy axis exists to feed **FR-08**, which decides what may be enforced in CI. Enforcing an unratified rule means enforcing something nobody agreed to, and the whole point of FR-08 is to prevent exactly that. So the verdict is `contested` with a precise reason: **accurate to the code, but never ratified.** That is a different defect from "the ADR is wrong", and task 012 must treat it differently — the fix is ratification (confirm) or withdrawal, not amendment.
 
-**ADR-047 is the odd one out**: Proposed *and* zero server-side evidence. Either the spine was never built, or it is named differently than the ADR describes. Flagged for task 012 as needing a look before either verdict sticks.
+> ### ⚠️ CORRECTION 2026-09-04 — ADR-047 "zero server-side evidence" was WRONG
+>
+> The original grep searched for `NotificationSpine|INotification`. Neither string is used; the code is
+> named `OutboxService`, `SignalRDeliveryService`, `NotificationsModule`. **I guessed identifier names
+> instead of reading the ADR for what it actually names, or looking at the directory.** Owner caught it.
+>
+> ADR-047's four layers are all present in code:
+>
+> | Layer | ADR-047 says | Actually in the tree |
+> |---|---|---|
+> | B — durable outbox | `sprk_notificationoutbox` + write/read/dismiss/expire | `Services/Notifications/OutboxService.cs`, `Envelopes/`, `SignalRDeliveryOptions.cs` |
+> | C — SignalR + host-agnostic client + poll fallback | Azure SignalR Serverless in-BFF; `@spaarke/notifications` | `SignalRDeliveryService.cs`; `Spaarke.Notifications/src/{negotiate,kindRouter,pollFallback,NotificationsClient}.ts` — an exact match to the described shape |
+> | D — per-source producers | grounding + gating per source | `CommunicationArrivedProducer.cs`, `DailyBriefingSuggestionProducer.cs`, `PreferenceDirectiveProducer.cs`, `ICommunicationAssessedProducer.cs` |
+> | A — shared domain-action seam | behind `*NodeExecutor.cs` | not separately verified |
+>
+> **The accuracy verdict for ADR-047 is therefore `contested` for the SAME reason as the other nine —
+> `Status: Proposed`, never ratified — and NOT for absence of implementation.**
+>
+> **A genuinely open question remains, and it is the owner's**: `projects/spaarke-notification-spine-r1`
+> reports **0 of 22 tasks complete** ("execution gated on FR-01 spike"), yet the code exists. The most
+> likely reading is that the spine was built **piecemeal by its consumers** (the communication, daily-
+> briefing and preference producers each shipped their own slice) rather than built once as a spine — which
+> is precisely what ADR-047's core commitment forbids: *"ONE server-initiated spine built once for all
+> client surfaces (collapses the email-r4/messaging-r3/assistant-r1 forks)"*. **Whether the built thing
+> satisfies ADR-047's six MUSTs is NOT answered here** and needs its own look. That is a real
+> conformance question, not a bookkeeping one.
 
 ---
 
@@ -168,7 +193,7 @@ The spec asked whether **ADR-028 (auth, 1,523 citations) is already effectively 
 | 7 | ADR-016 AI Cost/Rate Limits | Broad-term evidence only. |
 | 8 | ADR-017 Async Job Status | Broad-term evidence only. |
 | 9 | ADR-014 AI Caching | 2 files — may never have shipped. |
-| **10** | **ADR-047** Notification Spine | **0 server-side hits.** Verify existence before assigning any verdict. |
+| **2** | **ADR-047** Notification Spine | **Built** (outbox + SignalR + client + 4 producers) but `spaarke-notification-spine-r1` shows **0/22 tasks done** — likely assembled piecemeal by consumers, which is the fork-collapsing the ADR exists to prevent. **Conformance against its six MUSTs is unverified.** |
 
 For all ten the §6.5 path is likely **confirm (ratify)** rather than amend — the decisions appear sound and are already implemented. The defect is procedural, not architectural. **ADR-018's case deserves attention**: ADR-032, which is Accepted, exists to enforce ADR-018, which is Proposed.
 
