@@ -14,7 +14,7 @@
 | **Found** | 2026-09-04, during `/project-pipeline` initialization (finding **F-g**) |
 | **Owner** | **`unified-access-control-r2`** — its 2026-09-03 Q4 widening added the `event` entry, and `EntityAccessFilter` is its component |
 | **Severity** | Filing a document to an Event is authorized and then cannot associate |
-| **GitHub Issue** | ⏳ **not yet filed** — pending operator decision on routing to UAC-r2 |
+| **GitHub Issue** | ➖ **Not filed — operator decision 2026-09-04**: no GitHub Issue needed. Routing to `unified-access-control-r2` handled out-of-band. This entry remains the record; do not treat the missing URL as an unfiled obligation or block push on it. |
 
 ### What fails
 
