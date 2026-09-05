@@ -188,13 +188,36 @@ access-WIDENING (each extra lookup is another way to be granted). The census set
 not that a document should *inherit* through both. 054/055/056 must flag the widening explicitly rather
 than inherit it as a free consequence.
 
-🔴 **THE WRITERS ARE ON THE LEGACY FAMILY.** `DocumentAssociationMap` — the ONE map item 7 unified all four
-drifted copies into — sets `MatterLookup`/`ProjectLookup`/… which
-[`DataverseServiceClientImpl.cs:906-916`](../../src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs#L906-L916)
-binds to the **legacy direct** columns. That is why related is 0 and direct is 116. A resolver reading ONLY
-`sprk_related*` today resolves NOTHING for all 509 documents — fail-closed, silent, invisible to every
-offline test (no fixture carries live data). "Check both" is what makes this safe in the interim; the
-writer repoint is what makes it converge.
+✅ **ALREADY RESOLVED ON MASTER by email-r2 — REUSE IT, do not invent a map** (owner, 2026-09-04:
+*"check master for updated code"*). I first wrote "the writers are all on the legacy family." **Wrong** —
+the READ side was solved by `email-communication-intelligence-r2` 061 UAT round-2b (`15e18fc05` →
+`cef295cf4` → `5040d95c5`, all on master). The canonical pattern is **follow EVERY record link a document
+carries, BOTH families, type-agnostically** — `related{X}` targets the same entity as `{X}`
+(*"a related matter is still a matter"*):
+
+```csharp
+// AttachmentDocumentAssociationRung.cs:71-79  — DocumentLinkFields
+("sprk_matter","sprk_matter"), ("sprk_relatedmatter","sprk_matter"),
+("sprk_project","sprk_project"), ("sprk_relatedproject","sprk_project"),
+("sprk_invoice","sprk_invoice"), ("sprk_workassignment","sprk_workassignment"),
+```
+
+So "check both" is not an interim migration hack — it is the **standing, shipped design**, and no backfill
+is required for a READER to be correct. (`DocumentAssociationMap` → `DataverseServiceClientImpl.cs:906-916`
+does still WRITE only the direct columns, which is why related is 0 / direct is 116. That is a write-side
+convergence question, NOT a blocker for the resolver.)
+
+🔴 **THERE ARE ALREADY TWO COPIES OF THIS VOCABULARY — do not make a third (CLAUDE.md §11).**
+[`AttachmentDocumentAssociationRung.DocumentLinkFields`](../../src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AttachmentDocumentAssociationRung.cs#L71)
+and [`ComposeService.DocumentAssociationLookupAttributes`](../../src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs#L96),
+whose own comment concedes it is *"the SAME closed set AttachmentDocumentAssociationRung follows"* and cites
+**task 041 B-MED-3 option C**. This is the exact drift shape item 7 just finished fixing for the association
+*switch*, now present in the association *vocabulary*. **054/055/056 must HOIST it to one home** — task 041's
+access-conferring registry is the natural owner — not add a third copy.
+
+🔴 **BOTH COPIES ARE INCOMPLETE.** Neither lists **`sprk_relatedinvoice`** or **`sprk_relatedworkassignment`**,
+and both exist (owner screenshot + live metadata). A document linked only through those is invisible to
+every consumer of these lists today. Fix at the hoist.
 
 🔴 **THE `sprk_related*` FAMILY IS NOT UNIFORMLY CASED** (owner screenshot, 2026-09-04). PascalCase:
 `sprk_RelatedAgreement`, `sprk_RelatedCommunication`, `sprk_RelatedContact`, `sprk_RelatedInvoice`,
