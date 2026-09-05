@@ -1,5 +1,7 @@
 # Spaarke Office Add-in (Word + Outlook) — r1
 
+> **Portfolio**: [Project #945](https://github.com/spaarke-dev/spaarke/issues/945) · Parent [Epic #424 — DOCUMENT INTELLIGENCE](https://github.com/spaarke-dev/spaarke/issues/424) · [Board](https://github.com/users/spaarke-dev/projects/2)
+
 > **Status**: Initialized (tasks generated, not started)
 > **Branch**: `work/spaarkeai-word-add-in-r1`
 > **Created**: 2026-09-04
