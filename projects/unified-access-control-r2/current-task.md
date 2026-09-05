@@ -151,10 +151,10 @@ lookups are NOT what we build on.** The resolver targets `sprk_related*`.
 (I first claimed it was settled in *this* project's design.md; the owner corrected me — that was a
 downstream record, not the discussion.)
 
-| Where | What it established |
-|---|---|
-| [`x-financial-intelligence-module-r1` task 002](../x-financial-intelligence-module-r1/notes/scratch/002-document-field-diff.yaml) **2026-02-11 — ORIGIN** | Created `sprk_relatedmatter`/`sprk_relatedproject`/`sprk_relatedvendororg`. Purpose verbatim: **"Confirmed by reviewer — matter this invoice relates to."** Naming rationale verbatim: *"use 'related' prefix to **distinguish from primary lookups** on other entities."* |
-| [`email-communication-intelligence-r2` task 029](../email-communication-intelligence-r2/notes/027-028-029-schema-closeout.md) **— THE DISCUSSION** | Operator §11 challenge. `sprk_relatedcommunication` is *"the sibling of `sprk_relatedmatter`/`sprk_relatedproject` = **the confirmed related record this document points at**"*. `sprk_linkedcommunication` was NOT created; `CrossPathLink` was rewired onto the existing column. The POML's contrary justification is recorded as *"simply wrong."* |
+| Where | Standing | What it established |
+|---|---|---|
+| [`email-communication-intelligence-r2` task 029](../email-communication-intelligence-r2/notes/027-028-029-schema-closeout.md) | ✅ **CURRENT — THIS IS THE GUIDANCE** (owner, 2026-09-04) | Operator §11 challenge. `sprk_relatedcommunication` is *"the sibling of `sprk_relatedmatter`/`sprk_relatedproject` = **the confirmed related record this document points at**"*. `sprk_linkedcommunication` was NOT created; `CrossPathLink` was rewired onto the existing column. The POML's contrary justification is recorded as *"simply wrong."* |
+| [`x-financial-intelligence-module-r1` task 002](../x-financial-intelligence-module-r1/notes/scratch/002-document-field-diff.yaml) 2026-02-11 | ⚠️ **HISTORICAL ORIGIN ONLY — do NOT treat as guidance** (owner, 2026-09-04: *"the finance project is old"*) | Where `sprk_relatedmatter`/`sprk_relatedproject`/`sprk_relatedvendororg` were first created. Its narrow framing (*"Confirmed by reviewer — matter this invoice relates to"*; *"'related' prefix to distinguish from primary lookups"*) is **superseded** by 029's general semantic. Cite it for provenance, never for meaning. |
 
 This project only carries the **consequences**: [`design.md` §5.1d](design.md) line 552's census
 (*"`sprk_document` carries **two** distinct project lookups, so any 'is this document on a secure
@@ -163,13 +163,13 @@ project?' test must check **both** or it will miss half the cases"*) and
 (owner screenshots 2026-08-31: two Many-to-one slots per type, **not** N:N; **option (b) intersection
 entity**; default that **a link does NOT confer access — the primary lookup stays the access ancestor**).
 
-✅ **THE TENSION IS RESOLVED — owner, 2026-09-04: "confirming IS filing."** At creation `related` was the
-*secondary, reviewer-confirmed* slot, named to be distinct from the *primary* lookup; by 029 it had
-generalized to "the confirmed related record". As the **access ancestor** that raised a sharper question —
-does a reviewer confirming an invoice's related matter GRANT access? — because 095's recorded default was
-the opposite (*a link does not confer access*).
+✅ **RESOLVED — owner, 2026-09-04: "confirming IS filing."** I raised a tension from the finance project's
+*"Confirmed by reviewer"* framing — would a reviewer confirming an invoice's related matter GRANT access,
+contradicting 095's *a link does not confer access*? **The premise was stale**: that framing is the old
+finance one, superseded by 029's general semantic. Recorded here because the question is the right one to
+ask of any column promoted to an authorization key — the answer just happens to be clean.
 
-**Answer: they are the same act.** `sprk_related{recordtype}` becomes the ONE filing lookup per record
+**They are the same act.** `sprk_related{recordtype}` becomes the ONE filing lookup per record
 type. Every writer repoints onto it — upload paths, Office save, email attachments, AND the finance
 confirm — so there is **one key for one authorization decision** and the reviewer-confirmed origin is
 historical, not a live distinction. The legacy direct lookups (`sprk_matter`/`sprk_project`/
