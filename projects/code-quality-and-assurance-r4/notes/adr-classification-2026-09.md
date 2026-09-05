@@ -24,7 +24,22 @@
 
 ---
 
-## 🔴 Headline finding: ten ADRs were never ratified, and six of them shipped anyway
+## 🔴 Headline finding — REVISED 2026-09-04 after owner challenge
+
+**The original claim ("ten ADRs were never ratified") over-stated the problem. Two different states were conflated:**
+
+| State | ADRs | Verdict |
+|---|---|---|
+| 🟠 **Orphaned `Proposed`** — bare status, **no gate named**, ~2025-12 era | **014, 016, 017, 018, 019, 020** — **6** | A real gap. ADR-019 (ProblemDetails) is implemented across 187 files and has sat unratified for ~9 months with nothing scheduled to change that. |
+| 🔵 **`Proposed` pending a NAMED gate** | **041, 042, 043, 047** — **4** | **A legitimate governance state, not a defect.** Each names its promotion trigger. The pattern demonstrably works: **ADR-039 and ADR-040 were both promoted** ("Accepted at migration P1", "Accepted at gate G-P0"). |
+
+**ADR-047 is the clearest case of the second kind, and I originally got it badly wrong twice** — see the correction box below. Its gate is `spaarke-notification-spine-r1` Phase 1. That project is **21 of 22 tasks complete**, and the single remaining task (090, wrap-up) explicitly includes *"ADR-047 Proposed→Accepted"*. So its "Proposed" status is **an unrun wrap-up task, not a governance gap**.
+
+**What this leaves as genuinely actionable**: the **6 orphans**, led by ADR-019. For the 4 gated ones the question is only *"has the gate been reached?"* — and for ADR-047 the answer is effectively yes.
+
+---
+
+## Original (over-stated) framing, kept for the record
 
 `Status: Proposed` on **10 of 49**: ADR-014, 016, 017, 018, 019, 020, 041, 042, 043, 047.
 
