@@ -1,4 +1,4 @@
-# Entity Relationship Model
+﻿# Entity Relationship Model
 
 > **Last Updated**: April 5, 2026
 > **Last Reviewed**: 2026-04-05
@@ -263,7 +263,7 @@ The Event entity has the richest polymorphic regarding pattern, supporting 9 tar
 | `sprk_regardinganalysis` | `sprk_analysis` | Event relates to an analysis |
 | `sprk_regardingcontact` | `contact` | Event relates to a person |
 | `sprk_regardingaccount` | `account` | Event relates to an account |
-| `sprk_regardingorganziation` | `sprk_organization` | Event relates to an organization |
+| `sprk_regardingorganization` | `sprk_organization` | Event relates to an organization |
 | `sprk_regardingworkassignment` | `sprk_workassignment` | Event relates to a work assignment |
 
 **Discriminator**: `sprk_regardingrecordtype` (Lookup to `sprk_recordtype_ref`)

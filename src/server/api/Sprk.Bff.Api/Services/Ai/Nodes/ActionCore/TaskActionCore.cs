@@ -50,8 +50,15 @@ internal sealed class TaskActionCore
     /// lookup for that target entity. This is <c>sprk_event</c>'s OWN regarding family — it differs from the
     /// <c>sprk_communication</c> <c>RegardingFieldMap</c> (e.g. <c>contact</c> → <c>sprk_regardingcontact</c> here vs
     /// <c>sprk_regardingperson</c> there), so it is NOT reused. The complete family, verified against the deployed
-    /// <c>sprk_event</c> schema — including the schema's own <c>sprk_regardingorganziation</c> misspelling (do not
-    /// "fix" it in code) and <c>sprk_regardingcommunication</c> (a task CAN regard the communication it follows up).
+    /// <c>sprk_event</c> schema — including <c>sprk_regardingcommunication</c> (a task CAN regard the communication
+    /// it follows up).
+    /// <para>
+    /// 2026-09-04: the schema's <c>sprk_regardingorganziation</c> misspelling (transposed z/i) was CORRECTED in
+    /// Dataverse to <c>sprk_regardingorganization</c>; the typo'd column no longer exists. This map and the
+    /// prior "do not fix it in code" instruction were updated with it. Confirmed via
+    /// <c>describe('tables/sprk_event')</c>. Fixed while pre-deployment, when a Dataverse logical name is still
+    /// cheap to change — after a customer holds rows in a column, renaming means a live-data migration.
+    /// </para>
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> RegardingFieldByEntity =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -66,7 +73,7 @@ internal sealed class TaskActionCore
             ["sprk_reportcard"] = "sprk_regardingreportcard",
             ["sprk_event"] = "sprk_regardingevent",
             ["sprk_communication"] = "sprk_regardingcommunication",
-            ["sprk_organization"] = "sprk_regardingorganziation", // schema spelling (SIC)
+            ["sprk_organization"] = "sprk_regardingorganization",
             ["sprk_recordtype_ref"] = "sprk_regardingrecordtype",
             ["account"] = "sprk_regardingaccount",
             ["contact"] = "sprk_regardingcontact",
