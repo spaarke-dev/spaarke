@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-09-04
+> **Last Updated**: 2026-09-05
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -26,7 +26,7 @@
 
 ### Critical Context
 
-The project is initialized but no code has been written. **Phase 0 gates most of Phase 1–3 scope**: four spikes (002–005) must close before Phase 1 is sized, and task 001 must run before the FR-18 typecheck tasks (006–008) can be sized — the "~397 errors" figure in the spec is unverified (`node_modules` is absent from this worktree, so typecheck aborts at 3 stub errors). Six discovery findings (F-a…F-f) modify spec assumptions; see [`plan.md`](plan.md) §3.
+Task 001 measured the real typecheck baseline: **395 diagnostics / 32 files**. The count validates "~397" but the characterization does not — `exactOptionalPropertyTypes` is only 23 (5.8%); TS2339 dominates at 181 (46%). **Escalation trigger 3 fired**: 11 of those errors live in `../shared/Spaarke.Communication.Components/`, outside the package, so FR-18's "typecheck clean" is unreachable by 006+007+008 alone. 006/007/008 are ⛔ blocked pending an operator ownership decision. Spikes 002–005 are unaffected and may run now. Full report: [`notes/typecheck-baseline.md`](notes/typecheck-baseline.md).
 
 ---
 
@@ -51,15 +51,20 @@ The project is initialized but no code has been written. **Phase 0 gates most of
 
 ### Completed Steps
 
-*No steps completed yet*
+- [x] Steps 1–13 of task 001 — all executed (2026-09-04/05)
 
 ### Current Step
 
-*No active task*
+*None — task 001 complete; successor wave blocked pending operator decision*
 
 ### Files Modified (All Task)
 
-*No files modified yet*
+- `projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md` — Created — the baseline report
+- `projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline-raw.log` — Created — untruncated tsc output (force-added; `.gitignore:33` ignores `*.log`)
+- `projects/spaarkeai-word-add-in-r1/tasks/001-*.poml` — Modified — status completed + summary
+- `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md` — Modified — 001 ✅, 006/007/008 ⛔
+
+No file under `src/` was modified (verified via `git status --porcelain src/`).
 
 ### Decisions Made
 
@@ -70,25 +75,36 @@ The project is initialized but no code has been written. **Phase 0 gates most of
 
 ## Next Action
 
-**Next Step**: Execute task 001 — worktree bootstrap + real typecheck baseline
+**Next Step**: **Operator decision** on the UNASSIGNED ownership question, then either re-scope 006/007/008 or dispatch spikes 002–005.
 
 **Pre-conditions**:
-- Branch `work/spaarkeai-word-add-in-r1` checked out, tree clean
-- Node available
+- Decision on who owns the 11 errors in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts`
+- Decision on whether FR-18 means "fix production types" (~99 errors) or "fix everything incl. a red test suite" (395)
 
 **Key Context**:
-- `src/client/office-addins/node_modules` does **not** exist in this worktree — install first with `npm install --legacy-peer-deps --no-audit --no-fund` (a bare `npm install` fails with ERESOLVE)
-- `npm run typecheck` = `tsc --noEmit --skipLibCheck`; there is **no** `build:prod` script — `build` is the production build
-- The spec's "~397 errors" traces to a single unverified source repeated in five places
+- `node_modules` now installed in `src/client/office-addins` **and** `src/client/shared/Spaarke.Auth` (its `dist/` must be built or webpack cannot resolve `@spaarke/auth`)
+- `npm run build` needs 4 env vars (`ADDIN_CLIENT_ID`, `TENANT_ID`, `BFF_API_CLIENT_ID`, `BFF_API_BASE_URL`) or it aborts before compiling
+- `npm test` is RED at baseline: 13/21 suites, 57/226 tests — one missing `jest-dom` registration, not 57 bugs
+- `npm run lint` errors (exit 2) — globs `src`, which this package lacks
 
 **Expected Output**:
-- `notes/typecheck-baseline.md` with the real error count + per-file breakdown, which sizes tasks 006–008
+- An ownership assignment for the out-of-package errors, and a re-scoped P0-typecheck wave (or an accepted narrowing of FR-18)
 
 ---
 
 ## Blockers
 
-**Status**: None
+**Status**: 🔴 **BLOCKED** — tasks 006 / 007 / 008
+
+Task 001 escalation trigger 3: *"If the UNASSIGNED bucket is non-empty with anything other than files under `shared/__mocks__/**`, STOP and request an ownership assignment before 006-008 are dispatched."*
+
+The UNASSIGNED bucket holds **11 errors** in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` — a different shared library, reachable only via the `@spaarke/communication-components` path alias (`tsconfig.json:27-29`). It is consumed by other solutions, so fixing it widens blast radius beyond the add-in.
+
+Two further findings argue for re-scoping rather than just assigning an owner:
+1. The three-way split measures **309 / 45 / 4** — task 006 carries 69× task 008.
+2. **75% of the debt (296/395) is in test files**, and the suite is already red.
+
+**Not blocked**: spikes 002–005 have no dependency on 001 and can proceed immediately.
 
 ---
 
@@ -97,13 +113,16 @@ The project is initialized but no code has been written. **Phase 0 gates most of
 ### Current Session
 
 - Started: 2026-09-04
-- Focus: `/project-pipeline` initialization (Steps 2–4, initialize-only)
+- Focus: `/project-pipeline` initialization (Steps 2–4), then task 001 execution
 
 ### Key Learnings
 
 - `HostAdapterFactory.registerAdapter()` has **zero call sites** — the factory is entirely dead; both taskpanes `new` their adapter directly. The "tested" `shared/adapters/WordAdapter.ts` still uses the broken `body.getOoxml()` path. Consolidation order matters (see F-e).
 - `POST /api/office/save` has **no executing contract coverage** — both tests are `[Fact(Skip)]`.
 - The shipped upload-collision handling is on the OBO `PUT` path, which the add-in does not use (F-a).
+- `sprk_document` has **two** lookup families and only **four** direct slots — there is no `sprk_event`, though shipped code writes it (F-g, ISS-001).
+- A fresh checkout cannot build `office-addins` until `@spaarke/auth` is built first (`dist/` is gitignored). Neither this nor the 4 required env vars is in the module CLAUDE.md.
+- The "~397 typecheck errors" figure was right on **count** and wrong on **kind** — it is not an `exactOptionalPropertyTypes` backlog.
 
 ### Handoff Notes
 
