@@ -1,5 +1,30 @@
 # Coordination — Document association map ↔ `EntityAccessFilter` (finding + outcome from email-communication-intelligence-r2)
 
+> # 🔴 CORRECTED 2026-09-04 — READ THIS BEFORE §3 AND §4
+>
+> **Two of this document's schema facts are wrong, and they were wrong in the same way.** Both came from
+> a check that enumerated only the bare `sprk_{type}` lookup family on `sprk_document` and never looked at
+> the **`sprk_related*` family**. Verified against live metadata (`spaarkedev1`, 2026-09-04):
+>
+> | This doc says | Actually | Evidence |
+> |---|---|---|
+> | §3: *"there is **no `sprk_todo`** column … Todo is **unmappable** … **needs a schema change first**"* | **`sprk_relatedtodo` EXISTS.** A document CAN be filed to a to-do. It needed **code**, not schema | `SELECT sprk_relatedtodo FROM sprk_document` **succeeds** |
+> | §2/§3: event was *"now wired end-to-end"*, mappable set includes *event* | **There is no `sprk_event` column.** The only event lookup is `sprk_relatedevent`. The code wrote `sprk_event`, and an unknown attribute **fails the whole save** — so every event-filed save was broken, not merely unassociated | `SELECT sprk_event FROM sprk_document` **errors**: *"'sprk_Document' entity doesn't contain attribute with Name = 'sprk_event'"* |
+>
+> **The §3 lockstep invariant itself is correct and has been kept** — only its worked example was wrong.
+>
+> **§4.1 is now CLOSED by owner decision (2026-09-04)**: `account` is **rejected up front** (removed from
+> the Office allow-list, `AssociationType`, and `EntityAccessFilter.EntitySetByType` — it was the one entry
+> violating the very invariant §3 states); `contact` is **now functional** via `sprk_relatedcontact`.
+>
+> **§4.2 is superseded**: `RecordKeyedUploadAuthorizationTests.UnmappedEntity` is **`account`**, not
+> `sprk_todo`. Repointing it at todo left the deny path untested for the second time, which is the exact
+> defect that repoint was made to fix. `account` is the first value there excluded **by decision** rather
+> than by omission, so it cannot drift again.
+>
+> All of the above is implemented in `e2c41143a` (this project). Nothing is owed back to email-r2 — that
+> project is closed. **Fixed here, not handed off.**
+
 > **From**: `email-communication-intelligence-r2` · **To**: `unified-access-control-r2`
 > **Date**: 2026-09-04 · **Commit**: `f85796f70` (`fix(documents): one association map — stop silently unassociating documents`, merged to master 2026-09-03)
 > **Why you (UAC-r2) care**: the fix modified **`Api/Filters/EntityAccessFilter.cs`** (your access map, `EntitySetByType`) and surfaced a **lockstep invariant** between that access map and the document association map, plus two live authorization gaps on the record-keyed upload path. This complements the "association slots" + "upload-collision data-loss" facts already in your notes.
