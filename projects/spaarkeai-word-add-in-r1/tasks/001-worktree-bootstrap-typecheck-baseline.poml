@@ -4,7 +4,7 @@
     <title>Worktree bootstrap and true typecheck baseline</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Measurement and documentation only. No .ts/.tsx/.cs source file is modified; the sole committed artifacts are markdown/log files under projects/spaarkeai-word-add-in-r1/notes/. No ADR surface is touched, so the Step 9.5 code-review and adr-check gates would have nothing to inspect.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -108,7 +108,9 @@
     <criterion testable="true">Negative: no typecheck error was fixed by this task; re-running `npm run typecheck` at the end of the task produces the same total as the committed raw log.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec reference: FR-18 (spec.md line 92) and Success Criterion 12. Plan reference: section 4 Phase 0 task 001, section 3 finding table, risk R-6 (section 7).
+  <notes>**COMPLETED 2026-09-04.** Measured total **395** diagnostics across **32** files (not 396 — the first capture ran before the `@spaarke/auth` prerequisite was built, which contributed one environmental TS2307; the committed log is the reproducible post-prerequisite state). Count validates "~397"; **characterization does not** — the exactOptionalPropertyTypes family is only 23 (5.8%), while TS2339 dominates at 181 (46%). Rollup 309/45/4 + 37 UNASSIGNED. 🔴 **Escalation trigger 3 FIRED**: UNASSIGNED contains 11 errors in `../shared/Spaarke.Communication.Components/...`, outside the package — 006/007/008 blocked pending ownership decision. Also: 75% of debt is in test files; `npm test` is red (13/21 suites, missing jest-dom registration); `npm run lint` errors (globs a nonexistent `src/`); `npm run build` passes only after building `@spaarke/auth` and supplying 4 env vars. Report: `notes/typecheck-baseline.md`.
+
+Spec reference: FR-18 (spec.md line 92) and Success Criterion 12. Plan reference: section 4 Phase 0 task 001, section 3 finding table, risk R-6 (section 7).
 
 No `&lt;justification&gt;` block is present because this task creates no new code surface — its only artifacts are project notes files in an already-provisioned directory (projects/spaarkeai-word-add-in-r1/notes/). CLAUDE.md section 11's three-question gate governs new services, abstractions, endpoints, DI registrations, packages and columns, none of which this task introduces.
 

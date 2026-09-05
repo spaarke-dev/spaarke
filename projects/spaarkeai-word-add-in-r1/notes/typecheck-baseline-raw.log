@@ -1,0 +1,557 @@
+
+> @spaarke/office-addins@0.1.0 typecheck
+> tsc --noEmit --skipLibCheck
+
+outlook/OutlookHostAdapter.ts(256,27): error TS2352: Conversion of type 'MessageRead | AppointmentRead | null' to type 'MessageCompose' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'AppointmentRead' is missing the following properties from type 'MessageCompose': bcc, cc, conversationId, delayDeliveryTime, and 23 more.
+outlook/OutlookHostAdapter.ts(281,27): error TS2352: Conversion of type 'MessageRead | AppointmentRead | null' to type 'MessageCompose' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'AppointmentRead' is missing the following properties from type 'MessageCompose': bcc, cc, conversationId, delayDeliveryTime, and 23 more.
+outlook/OutlookHostAdapter.ts(283,71): error TS2345: Argument of type '{ asyncContext: { contentType: string; }; }' is not assignable to parameter of type 'AsyncContextOptions & { isInline: boolean; }'.
+  Property 'isInline' is missing in type '{ asyncContext: { contentType: string; }; }' but required in type '{ isInline: boolean; }'.
+outlook/OutlookHostAdapter.ts(394,15): error TS2352: Conversion of type 'MessageRead | AppointmentRead' to type 'MessageCompose' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'AppointmentRead' is missing the following properties from type 'MessageCompose': bcc, cc, conversationId, delayDeliveryTime, and 23 more.
+shared/__mocks__/office-js.ts(27,36): error TS2694: Namespace 'Office.MailboxEnums' has no exported member 'Importance'.
+shared/__mocks__/office-js.ts(71,37): error TS2339: Property 'Importance' does not exist on type 'typeof MailboxEnums'.
+shared/__mocks__/office-js.ts(84,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(107,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(125,24): error TS6133: 'coercionType' is declared but its value is never read.
+shared/__mocks__/office-js.ts(126,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(136,8): error TS6133: 'data' is declared but its value is never read.
+shared/__mocks__/office-js.ts(136,22): error TS6133: 'options' is declared but its value is never read.
+shared/__mocks__/office-js.ts(137,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: undefined; error: null; }' to type 'AsyncResult<void>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: undefined; error: null; }' is missing the following properties from type 'AsyncResult<void>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(166,89): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/__mocks__/office-js.ts(170,15): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/__mocks__/office-js.ts(196,73): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/__mocks__/office-js.ts(199,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: Office.AttachmentContentAsync; error: null; }' to type 'AsyncResult<Office.AttachmentContentAsync>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: Office.AttachmentContentAsync; error: null; }' is missing the following properties from type 'AsyncResult<Office.AttachmentContentAsync>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(203,40): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/__mocks__/office-js.ts(205,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: Office.AttachmentContentAsync; error: null; }' to type 'AsyncResult<Office.AttachmentContentAsync>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: Office.AttachmentContentAsync; error: null; }' is missing the following properties from type 'AsyncResult<Office.AttachmentContentAsync>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(209,40): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/__mocks__/office-js.ts(237,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: { emailAddress: string; displayName: string; }[]; error: null; }' to type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: { emailAddress: string; displayName: string; }[]; error: null; }' is missing the following properties from type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(255,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: { emailAddress: string; displayName: string; }; error: null; }' to type 'AsyncResult<EmailAddressDetails>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: { emailAddress: string; displayName: string; }; error: null; }' is missing the following properties from type 'AsyncResult<EmailAddressDetails>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(269,7): error TS6133: 'base64Content' is declared but its value is never read.
+shared/__mocks__/office-js.ts(270,7): error TS6133: 'fileName' is declared but its value is never read.
+shared/__mocks__/office-js.ts(271,7): error TS6133: 'options' is declared but its value is never read.
+shared/__mocks__/office-js.ts(274,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/__mocks__/office-js.ts(383,3): error TS2322: Type 'Mock<void, [url: string, options: unknown, callback: (result: AsyncResult<Dialog>) => void], any>' is not assignable to type '{ (startAddress: string, options?: DialogOptions | undefined, callback?: ((result: AsyncResult<Dialog>) => void) | undefined): void; (startAddress: string, callback?: ((result: AsyncResult<...>) => void) | undefined): void; }'.
+  Target signature provides too few arguments. Expected 3 or more, but got 2.
+shared/__mocks__/office-js.ts(384,6): error TS6133: 'url' is declared but its value is never read.
+shared/__mocks__/office-js.ts(384,19): error TS6133: 'options' is declared but its value is never read.
+shared/__mocks__/office-js.ts(385,22): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: Office.Dialog; error: null; }' to type 'AsyncResult<Dialog>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: Dialog; error: null; }' is missing the following properties from type 'AsyncResult<Dialog>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(8,1): error TS6192: All imports in import declaration are unused.
+shared/adapters/__tests__/OutlookAdapter.test.ts(36,35): error TS2339: Property 'Importance' does not exist on type 'typeof MailboxEnums'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(42,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(50,6): error TS6133: 'attachmentId' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(50,73): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/adapters/__tests__/OutlookAdapter.test.ts(51,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: { content: string; format: Office.MailboxEnums.AttachmentContentFormat; }; error: null; }' to type 'AsyncResult<Office.AttachmentContentAsync>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: { content: string; format: AttachmentContentFormat; }; error: null; }' is missing the following properties from type 'AsyncResult<Office.AttachmentContentAsync>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(58,38): error TS2724: 'Office' has no exported member named 'AttachmentContentAsync'. Did you mean 'AttachmentContent'?
+shared/adapters/__tests__/OutlookAdapter.test.ts(67,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(77,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: { emailAddress: string; displayName: string; }; error: null; }' to type 'AsyncResult<EmailAddressDetails>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: { emailAddress: string; displayName: string; }; error: null; }' is missing the following properties from type 'AsyncResult<EmailAddressDetails>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(90,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: { emailAddress: string; displayName: string; }[]; error: null; }' to type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: { emailAddress: string; displayName: string; }[]; error: null; }' is missing the following properties from type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(103,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: never[]; error: null; }' to type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: never[]; error: null; }' is missing the following properties from type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(116,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: never[]; error: null; }' to type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: never[]; error: null; }' is missing the following properties from type 'AsyncResult<{ emailAddress: string; displayName: string; }[]>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(127,24): error TS6133: 'coercionType' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(128,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(135,8): error TS6133: 'data' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(135,22): error TS6133: 'options' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(136,18): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: undefined; error: null; }' to type 'AsyncResult<void>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: undefined; error: null; }' is missing the following properties from type 'AsyncResult<void>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(146,14): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(154,7): error TS6133: 'base64Content' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(155,7): error TS6133: 'fileName' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(156,7): error TS6133: 'options' is declared but its value is never read.
+shared/adapters/__tests__/OutlookAdapter.test.ts(159,16): error TS2352: Conversion of type '{ status: Office.AsyncResultStatus; value: string; error: null; }' to type 'AsyncResult<string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ status: AsyncResultStatus; value: string; error: null; }' is missing the following properties from type 'AsyncResult<string>': asyncContext, diagnostics
+shared/adapters/__tests__/OutlookAdapter.test.ts(194,9): error TS2353: Object literal may only specify known properties, and 'platform' does not exist in type '{ host: HostType; }'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(230,11): error TS2353: Object literal may only specify known properties, and 'platform' does not exist in type '{ host: HostType; }'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(284,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(285,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(332,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(333,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(334,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(405,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(406,16): error TS2532: Object is possibly 'undefined'.
+shared/adapters/__tests__/OutlookAdapter.test.ts(422,29): error TS18048: 'callArgs' is possibly 'undefined'.
+shared/adapters/__tests__/WordAdapter.test.ts(76,9): error TS2353: Object literal may only specify known properties, and 'platform' does not exist in type '{ host: HostType; }'.
+shared/adapters/__tests__/WordAdapter.test.ts(112,11): error TS2353: Object literal may only specify known properties, and 'platform' does not exist in type '{ host: HostType; }'.
+shared/adapters/HostAdapterFactory.ts(42,3): error TS2375: Type '{ code: HostAdapterErrorCode; message: string; innerError: Error | undefined; }' is not assignable to type 'HostAdapterError' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'innerError' are incompatible.
+    Type 'Error | undefined' is not assignable to type 'Error'.
+      Type 'undefined' is not assignable to type 'Error'.
+shared/adapters/OutlookAdapter.ts(53,3): error TS2375: Type '{ code: HostAdapterErrorCode; message: string; innerError: Error | undefined; }' is not assignable to type 'HostAdapterError' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'innerError' are incompatible.
+    Type 'Error | undefined' is not assignable to type 'Error'.
+      Type 'undefined' is not assignable to type 'Error'.
+shared/adapters/OutlookAdapter.ts(269,12): error TS2339: Property 'body' does not exist on type 'Item'.
+shared/adapters/OutlookAdapter.ts(269,40): error TS7006: Parameter 'result' implicitly has an 'any' type.
+shared/adapters/OutlookAdapter.ts(427,16): error TS2339: Property 'bcc' does not exist on type 'MessageRead'.
+shared/adapters/OutlookAdapter.ts(428,32): error TS2339: Property 'bcc' does not exist on type 'MessageRead'.
+shared/adapters/OutlookAdapter.ts(598,83): error TS2353: Object literal may only specify known properties, and 'contentType' does not exist in type 'AsyncContextOptions & { isInline: boolean; }'.
+shared/adapters/OutlookAdapter.ts(716,31): error TS2339: Property 'importance' does not exist on type 'MessageRead'.
+shared/adapters/OutlookAdapter.ts(719,46): error TS2339: Property 'Importance' does not exist on type 'typeof MailboxEnums'.
+shared/adapters/OutlookAdapter.ts(722,46): error TS2339: Property 'Importance' does not exist on type 'typeof MailboxEnums'.
+shared/services/ApiClient.ts(55,11): error TS6133: 'bffApiClientId' is declared but its value is never read.
+shared/taskpane/App.tsx(6,10): error TS6133: 'useOfficeTheme' is declared but its value is never read.
+shared/taskpane/App.tsx(108,45): error TS6133: 'isDarkMode' is declared but its value is never read.
+shared/taskpane/App.tsx(114,10): error TS6133: 'hostContext' is declared but its value is never read.
+shared/taskpane/App.tsx(135,10): error TS6133: 'isSaving' is declared but its value is never read.
+shared/taskpane/App.tsx(136,10): error TS6133: 'saveProgress' is declared but its value is never read.
+shared/taskpane/App.tsx(137,10): error TS6133: 'saveError' is declared but its value is never read.
+shared/taskpane/App.tsx(138,10): error TS6133: 'saveSuccess' is declared but its value is never read.
+shared/taskpane/App.tsx(205,9): error TS6133: 'handleSave' is declared but its value is never read.
+shared/taskpane/App.tsx(371,10): error TS2375: Type '{ children: Element; title: string; hostType: HostType; isAuthenticated: false; version: string; buildDate: string | undefined; connectionStatus: "connected" | "disconnected" | "connecting"; ... 4 more ...; onError: (boundaryError: Error, errorInfo: ErrorInfo) => void; }' is not assignable to type 'TaskPaneShellProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'buildDate' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/App.tsx(393,8): error TS2375: Type '{ children: (false | Element)[]; title: string; hostType: HostType; userName: string | undefined; userEmail: string | undefined; isAuthenticated: true; onSignOut: () => Promise<...>; ... 10 more ...; onError: (boundaryError: Error, errorInfo: ErrorInfo) => void; }' is not assignable to type 'TaskPaneShellProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'userName' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(8,37): error TS6133: 'waitFor' is declared but its value is never read.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(8,46): error TS6133: 'act' is declared but its value is never read.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(9,23): error TS2307: Cannot find module '@testing-library/user-event' or its corresponding type declarations.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(36,27): error TS6133: 'ALL_ENTITY_TYPES' is declared but its value is never read.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(109,82): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(115,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(121,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(127,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(128,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(129,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(135,71): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(143,50): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(144,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(150,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(168,27): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(192,50): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement | null>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(204,50): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(205,52): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(235,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(249,48): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(276,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(277,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(278,49): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(279,49): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(333,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(346,21): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(364,59): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(375,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(382,21): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(390,54): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(396,59): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(424,21): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/EntityPicker.test.tsx(433,21): error TS2339: Property 'toBeRequired' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(2,26): error TS6133: 'fireEvent' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(2,37): error TS6133: 'waitFor' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(2,46): error TS6133: 'within' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(3,23): error TS2307: Cannot find module '@testing-library/user-event' or its corresponding type declarations.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(61,7): error TS6133: 'mockEntity' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(73,7): error TS6133: 'mockSaveResponse' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(84,7): error TS6133: 'mockJobStatus' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(111,13): error TS2322: Type '{ hostType: "outlook"; itemId: string; itemName: string; attachments: AttachmentInfo[]; emailSender: string; getAccessToken: Mock<any, any, any>; }' is not assignable to type 'IntrinsicAttributes & SaveFlowProps'.
+  Property 'emailSender' does not exist on type 'IntrinsicAttributes & SaveFlowProps'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(117,50): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(118,70): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(128,13): error TS2322: Type '{ hostType: "outlook"; itemId: string; itemName: string; emailSender: string; getAccessToken: Mock<any, any, any>; }' is not assignable to type 'IntrinsicAttributes & SaveFlowProps'.
+  Property 'emailSender' does not exist on type 'IntrinsicAttributes & SaveFlowProps'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(134,41): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(135,54): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(136,60): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(152,44): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(153,54): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(169,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(170,48): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(171,45): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(186,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(196,49): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(197,51): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(198,48): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(199,49): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(209,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(224,26): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(240,29): error TS2339: Property 'toBeChecked' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(243,33): error TS2339: Property 'toBeChecked' does not exist on type 'Matchers<void, HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(257,27): error TS2339: Property 'toBeChecked' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(260,31): error TS2339: Property 'toBeChecked' does not exist on type 'Matchers<void, HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(274,34): error TS2339: Property 'toBeChecked' does not exist on type 'Matchers<void, HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(277,30): error TS2339: Property 'toBeChecked' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(305,57): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(322,51): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(343,40): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(361,70): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(371,79): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(372,76): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(373,80): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(395,13): error TS6133: 'onDuplicate' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(430,13): error TS6133: 'onViewDocument' is declared but its value is never read.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(464,46): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(465,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(481,40): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(482,39): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/SaveFlow.test.tsx(499,37): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(14,41): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(19,46): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(25,41): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(30,41): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(46,38): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(47,39): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(48,38): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(57,24): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(61,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(62,50): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(63,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx(80,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(15,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(16,64): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(18,63): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(19,64): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(25,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(27,70): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(34,27): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(37,21): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(52,21): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx(60,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(19,41): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(20,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(30,46): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(41,49): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(43,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(53,41): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(54,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(55,57): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(65,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(88,40): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(98,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(112,24): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx(129,54): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/AttachmentSelector.tsx(1,17): error TS6133: 'useState' is declared but its value is never read.
+shared/taskpane/components/AttachmentSelector.tsx(7,3): error TS6133: 'Button' is declared but its value is never read.
+shared/taskpane/components/AttachmentSelector.tsx(347,11): error TS6133: 'isTotalSizeWarning' is declared but its value is never read.
+shared/taskpane/components/AttachmentSelector.tsx(351,11): error TS6133: 'someSelected' is declared but its value is never read.
+shared/taskpane/components/AttachmentSelector.tsx(373,11): error TS6133: 'handleSelectAll' is declared but its value is never read.
+shared/taskpane/components/AttachmentSelector.tsx(407,69): error TS2322: Type 'ForwardedRef<HTMLDivElement>' is not assignable to type 'Ref<never> | undefined'.
+  Type 'RefObject<HTMLDivElement | null>' is not assignable to type 'Ref<never> | undefined'.
+    Type 'RefObject<HTMLDivElement | null>' is not assignable to type 'RefObject<null>'.
+      Type 'HTMLDivElement | null' is not assignable to type 'null'.
+        Type 'HTMLDivElement' is not assignable to type 'null'.
+shared/taskpane/components/AttachmentSelector.tsx(419,69): error TS2322: Type 'ForwardedRef<HTMLDivElement>' is not assignable to type 'Ref<never> | undefined'.
+  Type 'RefObject<HTMLDivElement | null>' is not assignable to type 'Ref<never> | undefined'.
+    Type 'RefObject<HTMLDivElement | null>' is not assignable to type 'RefObject<null>'.
+      Type 'HTMLDivElement | null' is not assignable to type 'null'.
+        Type 'HTMLDivElement' is not assignable to type 'null'.
+shared/taskpane/components/AttachmentSelector.tsx(432,9): error TS2322: Type 'ForwardedRef<HTMLDivElement>' is not assignable to type 'Ref<never> | undefined'.
+  Type 'RefObject<HTMLDivElement | null>' is not assignable to type 'Ref<never> | undefined'.
+    Type 'RefObject<HTMLDivElement | null>' is not assignable to type 'RefObject<null>'.
+      Type 'HTMLDivElement | null' is not assignable to type 'null'.
+        Type 'HTMLDivElement' is not assignable to type 'null'.
+shared/taskpane/components/EntityPicker.tsx(274,5): error TS6133: 'setTypeFilter' is declared but its value is never read.
+shared/taskpane/components/EntityPicker.tsx(375,27): error TS18048: 'selected' is possibly 'undefined'.
+shared/taskpane/components/EntityPicker.tsx(550,11): error TS2322: Type 'ForwardedRef<HTMLInputElement>' is not assignable to type 'Ref<never> | undefined'.
+  Type 'RefObject<HTMLInputElement | null>' is not assignable to type 'Ref<never> | undefined'.
+    Type 'RefObject<HTMLInputElement | null>' is not assignable to type 'RefObject<null>'.
+      Type 'HTMLInputElement | null' is not assignable to type 'null'.
+        Type 'HTMLInputElement' is not assignable to type 'null'.
+shared/taskpane/components/EntityPicker.tsx(555,11): error TS2322: Type '(event: React.ChangeEvent<HTMLInputElement>) => void' is not assignable to type 'InputEventHandler<HTMLInputElement>'.
+  Types of parameters 'event' and 'event' are incompatible.
+    Type 'InputEvent<HTMLInputElement>' is not assignable to type 'ChangeEvent<HTMLInputElement, Element>'.
+      Types of property 'target' are incompatible.
+        Type 'EventTarget' is not assignable to type 'EventTarget & HTMLInputElement'.
+          Type 'EventTarget' is missing the following properties from type 'HTMLInputElement': accept, align, alt, autocomplete, and 370 more.
+shared/taskpane/components/EntityPicker.tsx(572,14): error TS2322: Type '{ children: Element; value: string; disabled: true; }' is not assignable to type 'IntrinsicAttributes & (OptionProps & RefAttributes<never>)'.
+  Property 'text' is missing in type '{ children: Element; value: string; disabled: true; }' but required in type '{ text: string; children?: ReactNode; }'.
+shared/taskpane/components/EntityPicker.tsx(615,14): error TS2322: Type '{ children: Element; value: string; disabled: true; }' is not assignable to type 'IntrinsicAttributes & (OptionProps & RefAttributes<never>)'.
+  Property 'text' is missing in type '{ children: Element; value: string; disabled: true; }' but required in type '{ text: string; children?: ReactNode; }'.
+shared/taskpane/components/ErrorBoundary.tsx(185,10): error TS2375: Type '{ error: Error | null; errorInfo: ErrorInfo | null; onReset: () => void; showDetails: boolean | undefined; }' is not assignable to type '{ error: Error | null; errorInfo: ErrorInfo | null; onReset?: () => void; showDetails?: boolean; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'showDetails' are incompatible.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+shared/taskpane/components/SaveFlow.tsx(7,3): error TS6133: 'CardHeader' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(19,3): error TS6133: 'Link' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(29,3): error TS6133: 'InfoRegular' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(39,1): error TS6133: 'ALL_ENTITY_TYPES' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(44,8): error TS6133: 'SaveFlowState' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(45,8): error TS6133: 'ProcessingOptions' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(46,8): error TS6133: 'JobStatus' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(369,5): error TS6133: 'onQuickCreate' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(371,5): error TS6133: 'onNavigate' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(372,5): error TS6133: 'allowedEntityTypes' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(392,21): error TS6133: 'docId' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(405,5): error TS6133: 'includeBody' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(406,5): error TS6133: 'setIncludeBody' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(418,5): error TS6133: 'savedDocumentId' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(434,29): error TS2375: Type '{ hostType: HostType; itemId: string | undefined; itemName: string | undefined; documentName: string | undefined; documentDescription: string | undefined; attachments: AttachmentInfo[]; ... 6 more ...; documentContentBase64: string | undefined; }' is not assignable to type 'SaveFlowContext' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'itemId' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/components/SaveFlow.tsx(657,12): error TS18048: 'jobStatus.stages' is possibly 'undefined'.
+shared/taskpane/components/SaveFlow.tsx(756,9): error TS6133: 'renderProcessingOptions' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(855,26): error TS6133: 'e' is declared but its value is never read.
+shared/taskpane/components/SaveFlow.tsx(869,26): error TS6133: 'e' is declared but its value is never read.
+shared/taskpane/components/TaskPaneHeader.tsx(126,3): error TS6133: 'hostType' is declared but its value is never read.
+shared/taskpane/components/TaskPaneNavigation.tsx(148,31): error TS6133: 'hostType' is declared but its value is never read.
+shared/taskpane/components/TaskPaneShell.tsx(127,3): error TS6133: 'title' is declared but its value is never read.
+shared/taskpane/components/TaskPaneShell.tsx(205,10): error TS2375: Type '{ children: ReactNode; onError: ((error: Error, errorInfo: ErrorInfo) => void) | undefined; showDetails: boolean; onReset: () => void; }' is not assignable to type 'Readonly<ErrorBoundaryProps>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'onError' are incompatible.
+    Type '((error: Error, errorInfo: ErrorInfo) => void) | undefined' is not assignable to type '(error: Error, errorInfo: ErrorInfo) => void'.
+      Type 'undefined' is not assignable to type '(error: Error, errorInfo: ErrorInfo) => void'.
+shared/taskpane/components/TaskPaneShell.tsx(218,8): error TS2375: Type '{ version: string; buildDate: string | undefined; appName: string; connectionStatus: ConnectionStatus | undefined; showHelpLink: true; compact: boolean; }' is not assignable to type 'TaskPaneFooterProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'buildDate' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(8,26): error TS6133: 'fireEvent' is declared but its value is never read.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(8,37): error TS6133: 'waitFor' is declared but its value is never read.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(9,23): error TS2307: Cannot find module '@testing-library/user-event' or its corresponding type declarations.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(11,25): error TS2614: Module '"../SaveView"' has no exported member 'SaveOptions'. Did you mean to use 'import SaveOptions from "../SaveView"' instead?
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(11,25): error TS6133: 'SaveOptions' is declared but its value is never read.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(21,3): error TS2353: Object literal may only specify known properties, and 'hostType' does not exist in type 'IHostContext'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(36,3): error TS2353: Object literal may only specify known properties, and 'hostType' does not exist in type 'IHostContext'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(46,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(48,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(49,51): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(53,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(55,54): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(59,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(61,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(65,36): error TS2322: Type '{ hostContext: null; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(67,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(73,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(75,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(79,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(81,78): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(85,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(88,48): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(89,45): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(93,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(100,54): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(104,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(109,31): error TS2339: Property 'toBeChecked' does not exist on type 'Matchers<void, HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(112,27): error TS2339: Property 'toBeChecked' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(118,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(120,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(124,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(126,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(127,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(134,36): error TS2322: Type '{ hostContext: IHostContext; onSave: Mock<any, any, any>; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(156,36): error TS2322: Type '{ hostContext: IHostContext; onSave: Mock<any, any, any>; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(177,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(191,36): error TS2322: Type '{ hostContext: IHostContext; isSaving: true; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(194,26): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(198,36): error TS2322: Type '{ hostContext: IHostContext; isSaving: true; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(200,45): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(204,36): error TS2322: Type '{ hostContext: IHostContext; isSaving: true; progress: number; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(206,56): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(207,47): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(211,36): error TS2322: Type '{ hostContext: IHostContext; isSaving: true; progress: number; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(214,27): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(220,36): error TS2322: Type '{ hostContext: IHostContext; error: string; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(222,59): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(226,36): error TS2322: Type '{ hostContext: IHostContext; success: string; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(228,64): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(232,36): error TS2322: Type '{ hostContext: IHostContext; error: string; success: string; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(234,48): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(235,51): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(249,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(251,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(262,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(264,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(273,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(275,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(286,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(288,43): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/SaveView.test.tsx(299,36): error TS2322: Type '{ hostContext: IHostContext; }' is not assignable to type 'IntrinsicAttributes & SaveViewProps'.
+  Property 'hostContext' does not exist on type 'IntrinsicAttributes & SaveViewProps'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(8,26): error TS6133: 'fireEvent' is declared but its value is never read.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(9,23): error TS2307: Cannot find module '@testing-library/user-event' or its corresponding type declarations.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(11,53): error TS6133: 'SharePermissions' is declared but its value is never read.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(54,49): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(55,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(61,63): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(68,28): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(80,32): error TS2339: Property 'toBeDisabled' does not exist on type 'Matchers<void, HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(114,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(115,58): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(127,55): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(128,53): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(140,28): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(154,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(163,59): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(164,71): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(179,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(188,59): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(196,78): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(205,84): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(222,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(230,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(254,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(262,48): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(293,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(301,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(310,78): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(327,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(334,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(343,63): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(364,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(371,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(380,63): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(388,45): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(395,42): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(415,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(422,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(431,70): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(451,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(458,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(462,74): error TS2339: Property 'toBeInTheDocument' does not exist on type 'Matchers<void, HTMLElement | null>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(470,59): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(485,61): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(492,72): error TS2339: Property 'toBeInTheDocument' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/__tests__/ShareView.test.tsx(498,30): error TS2339: Property 'toBeDisabled' does not exist on type 'JestMatchers<HTMLElement>'.
+shared/taskpane/components/views/index.ts(2,30): error TS2614: Module '"./SaveView"' has no exported member 'SaveOptions'. Did you mean to use 'import SaveOptions from "./SaveView"' instead?
+shared/taskpane/components/views/SaveView.tsx(162,15): error TS2345: Argument of type '{ email: string; displayName: string | undefined; type: "to" | "cc" | "bcc"; }[]' is not assignable to parameter of type 'SetStateAction<{ email: string; displayName?: string; type: "to" | "cc" | "bcc"; }[]>'.
+  Type '{ email: string; displayName: string | undefined; type: "to" | "cc" | "bcc"; }[]' is not assignable to type '{ email: string; displayName?: string; type: "to" | "cc" | "bcc"; }[]'.
+    Type '{ email: string; displayName: string | undefined; type: "to" | "cc" | "bcc"; }' is not assignable to type '{ email: string; displayName?: string; type: "to" | "cc" | "bcc"; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+      Types of property 'displayName' are incompatible.
+        Type 'string | undefined' is not assignable to type 'string'.
+          Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/components/views/SaveView.tsx(193,47): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+shared/taskpane/components/views/SaveView.tsx(257,8): error TS2375: Type '{ onQuickCreate: ((entityType: EntityType, searchQuery: string) => void) | undefined; onViewDocument: (url: string) => void; onNavigate: ((view: "status" | "save") => void) | undefined; ... 15 more ...; onComplete: ((documentId: string, documentUrl: string) => void) | undefined; }' is not assignable to type 'SaveFlowProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'itemId' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(56,28): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<Element | null>'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(57,28): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<Element | null>'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(65,31): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<Element | null>'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(66,31): error TS2339: Property 'toHaveAttribute' does not exist on type 'JestMatchers<Element | null>'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(278,11): error TS6133: 'result' is declared but its value is never read.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(360,16): error TS2322: Type 'null' is not assignable to type 'string'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(360,37): error TS2322: Type 'null' is not assignable to type 'string'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(384,16): error TS2322: Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts(384,37): error TS2322: Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts(11,7): error TS7022: 'mockSessionStorage' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts(13,20): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts(71,14): error TS2532: Object is possibly 'undefined'.
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts(249,14): error TS2532: Object is possibly 'undefined'.
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts(269,14): error TS2532: Object is possibly 'undefined'.
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts(304,14): error TS2532: Object is possibly 'undefined'.
+shared/taskpane/hooks/__tests__/useSaveFlow.test.ts(128,33): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/useSaveFlow.ts(1,52): error TS6133: 'useMemo' is declared but its value is never read.
+shared/taskpane/hooks/useSaveFlow.ts(6,8): error TS6133: 'ProblemDetails' is declared but its value is never read.
+shared/taskpane/hooks/useSaveFlow.ts(457,22): error TS2345: Argument of type '(prev: JobStatus | null) => { progress: number; currentPhase: string | undefined; stages: StageStatus[] | undefined; jobId: string; status: "Running" | ... 4 more ... | "Cancelled"; ... 9 more ...; documentUrl?: string; } | null' is not assignable to parameter of type 'SetStateAction<JobStatus | null>'.
+  Type '(prev: JobStatus | null) => { progress: number; currentPhase: string | undefined; stages: StageStatus[] | undefined; jobId: string; status: "Running" | ... 4 more ... | "Cancelled"; ... 9 more ...; documentUrl?: string; } | null' is not assignable to type '(prevState: JobStatus | null) => JobStatus | null'.
+    Type '{ progress: number; currentPhase: string | undefined; stages: StageStatus[] | undefined; jobId: string; status: "Running" | "Completed" | "Failed" | "Queued" | "PartialSuccess" | "Cancelled"; ... 9 more ...; documentUrl?: string; } | null' is not assignable to type 'JobStatus | null'.
+      Type '{ progress: number; currentPhase: string | undefined; stages: StageStatus[] | undefined; jobId: string; status: "Queued" | "Running" | "Completed" | "Failed" | "PartialSuccess" | "Cancelled"; ... 9 more ...; documentUrl?: string; }' is not assignable to type 'JobStatus' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+        Types of property 'currentPhase' are incompatible.
+          Type 'string | undefined' is not assignable to type 'string'.
+            Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/useSaveFlow.ts(478,22): error TS2345: Argument of type '(prev: JobStatus | null) => { stages: StageStatus[] | undefined; jobId: string; status: "Running" | "Completed" | "Failed" | "Queued" | "PartialSuccess" | "Cancelled"; ... 11 more ...; documentUrl?: string; } | null' is not assignable to parameter of type 'SetStateAction<JobStatus | null>'.
+  Type '(prev: JobStatus | null) => { stages: StageStatus[] | undefined; jobId: string; status: "Running" | "Completed" | "Failed" | "Queued" | "PartialSuccess" | "Cancelled"; ... 11 more ...; documentUrl?: string; } | null' is not assignable to type '(prevState: JobStatus | null) => JobStatus | null'.
+    Type '{ stages: StageStatus[] | undefined; jobId: string; status: "Running" | "Completed" | "Failed" | "Queued" | "PartialSuccess" | "Cancelled"; jobType: string; progress: number; ... 9 more ...; documentUrl?: string; } | null' is not assignable to type 'JobStatus | null'.
+      Type '{ stages: StageStatus[] | undefined; jobId: string; status: "Queued" | "Running" | "Completed" | "Failed" | "PartialSuccess" | "Cancelled"; jobType: string; progress: number; ... 9 more ...; documentUrl?: string; }' is not assignable to type 'JobStatus' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+        Types of property 'stages' are incompatible.
+          Type 'StageStatus[] | undefined' is not assignable to type 'StageStatus[]'.
+            Type 'undefined' is not assignable to type 'StageStatus[]'.
+shared/taskpane/hooks/useSaveFlow.ts(591,31): error TS2379: Argument of type '{ name: string; status: "Completed"; completedAt: string | undefined; }' is not assignable to parameter of type 'StageStatus' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'completedAt' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/useSaveFlow.ts(614,15): error TS2375: Type '{ stages: StageStatus[]; documentId: string | undefined; documentUrl: string | undefined; jobId: string; status: "Queued" | "Running" | "Completed" | "Failed" | "PartialSuccess" | "Cancelled"; ... 9 more ...; error?: JobErrorResponse; }' is not assignable to type 'JobStatus' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'documentId' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/useSaveFlow.ts(698,20): error TS2345: Argument of type '{ jobId: string; status: "Queued"; stages: StageStatus[]; }' is not assignable to parameter of type 'SetStateAction<JobStatus | null>'.
+  Type '{ jobId: string; status: "Queued"; stages: StageStatus[]; }' is missing the following properties from type 'JobStatus': jobType, progress, createdAt
+shared/taskpane/hooks/useSaveFlow.ts(834,20): error TS2367: This comparison appears to be unintentional because the types '"Document"' and '"Attachment"' have no overlap.
+shared/taskpane/hooks/useSaveFlow.ts(872,11): error TS2375: Type '{ emailId: string | undefined; includeBody: boolean; attachmentIds: string[]; documentUrl: string | undefined; documentName: string | undefined; }' is not assignable to type 'SaveContentData' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'emailId' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/hooks/useSaveFlow.ts(934,40): error TS18046: 'responseData' is of type 'unknown'.
+shared/taskpane/hooks/useSaveFlow.ts(937,25): error TS18046: 'responseData' is of type 'unknown'.
+shared/taskpane/hooks/useSaveFlow.ts(938,22): error TS18046: 'responseData' is of type 'unknown'.
+shared/taskpane/hooks/useSaveFlow.ts(941,25): error TS18046: 'responseData' is of type 'unknown'.
+shared/taskpane/hooks/useSaveFlow.ts(941,50): error TS18046: 'responseData' is of type 'unknown'.
+shared/taskpane/index.ts(3,25): error TS2305: Module '"./App"' has no exported member 'ViewType'.
+shared/taskpane/index.ts(18,30): error TS2614: Module '"./components/views/SaveView"' has no exported member 'SaveOptions'. Did you mean to use 'import SaveOptions from "./components/views/SaveView"' instead?
+shared/taskpane/services/SseClient.ts(203,21): error TS2379: Argument of type '{ event: string | undefined; data: unknown; id: string | undefined; retry: number | undefined; }' is not assignable to parameter of type 'SseEvent' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'event' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+shared/taskpane/utils/errorMessages.ts(186,5): error TS2375: Type '{ message: string; title?: string; type?: NotificationType; recoverable?: boolean; action?: string; }' is not assignable to type 'ErrorMessage' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Property 'title' is optional in type '{ message: string; title?: string; type?: NotificationType; recoverable?: boolean; action?: string; }' but required in type 'ErrorMessage'.
+shared/taskpane/utils/errorMessages.ts(188,34): error TS18048: 'mapped' is possibly 'undefined'.
+shared/taskpane/utils/errorMessages.ts(218,12): error TS2532: Object is possibly 'undefined'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(119,3): error TS2375: Type '{ where: string | undefined; matched: string | undefined; number: string | undefined; reason: string | undefined; }' is not assignable to type 'NameMatchInfo' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'where' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(289,17): error TS2379: Argument of type '{ targetName: string; recordNumber: string | undefined; matchReason: string; confidence: number; candidates: ProvenanceCandidate[]; }' is not assignable to parameter of type 'CandidateGroup' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'recordNumber' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(330,59): error TS2532: Object is possibly 'undefined'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(342,14): error TS2379: Argument of type '{ field: string; entity: string; slotLabel: string; targetName: string; targetId: string; confidence: number; status: "confirmed" | "suggested" | "ambiguous"; alternatives: ProvenanceCandidate[] | undefined; otherCandidates: ProvenanceCandidate[] | undefined; matchReason: string; recordNumber: string | undefined; or...' is not assignable to parameter of type 'Connection' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'alternatives' are incompatible.
+    Type 'ProvenanceCandidate[] | undefined' is not assignable to type 'ProvenanceCandidate[]'.
+      Type 'undefined' is not assignable to type 'ProvenanceCandidate[]'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(406,7): error TS2412: Type 'undefined' is not assignable to type 'ProvenanceCandidate[]' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(407,7): error TS2412: Type 'undefined' is not assignable to type 'ProvenanceCandidate[]' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(452,19): error TS2532: Object is possibly 'undefined'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(737,11): error TS2375: Type '{ entity: string; targetName: string; targetId: string; recordNumber: string | undefined; confidence: number; matchReason: string; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'recordNumber' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(763,5): error TS2375: Type '{ entity: string; targetId: string; targetName: string; recordNumber: string | undefined; confidence: number; matchReason: string | undefined; typeLabel: string | undefined; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'recordNumber' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(774,5): error TS2375: Type '{ entity: string; targetId: string; targetName: string; recordNumber: string | undefined; confidence: number; typeLabel: string | undefined; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'recordNumber' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(816,11): error TS2375: Type '{ recordNumber: string | undefined; entity: string; targetId: string; targetName: string; confidence: number; matchReason?: string; typeLabel?: string; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'recordNumber' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.

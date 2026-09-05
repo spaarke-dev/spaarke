@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, no task started |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Invoke `task-execute` with `tasks/001-worktree-bootstrap-typecheck-baseline.poml` |
+| **Task** | 001 — Worktree bootstrap and true typecheck baseline |
+| **Step** | 1 of 13: `npm install --legacy-peer-deps --no-audit --no-fund` in `src/client/office-addins` |
+| **Status** | in-progress |
+| **Next Action** | On install exit 0 → Step 2: `npm run typecheck` capturing stdout+stderr untruncated to `notes/typecheck-baseline-raw.log` |
 
 ### Files Modified This Session
 
@@ -34,12 +34,16 @@ The project is initialized but no code has been written. **Phase 0 gates most of
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 001 |
+| **Task File** | `tasks/001-worktree-bootstrap-typecheck-baseline.poml` |
+| **Title** | Worktree bootstrap and true typecheck baseline |
+| **Phase** | 0 De-risk and baseline |
+| **Status** | in-progress |
+| **Started** | 2026-09-04 |
+
+**Rigor Level**: MINIMAL (as authored)
+**Reason**: Measurement/documentation only — `src/client/office-addins/**` is read-only; artifacts are markdown/log under `notes/`. Step 9.5 gates would have no code to inspect. The tree's "6+ steps" trigger fires (14 steps) but is procedural, not blast-radius; steps are tracked individually rather than MINIMAL's start/end-only reporting.
+**Model tier / effort**: sonnet @ medium · **Step mode**: directional
 
 ---
 

@@ -14,14 +14,16 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 001 | Worktree bootstrap and true typecheck baseline | 🔲 | MINIMAL | sonnet / medium | — | none |
+| 001 | Worktree bootstrap and true typecheck baseline | ✅ | MINIMAL | sonnet / medium | — | none |
 | 002 | **Spike-1**: `document.url` shape for SPE files in Word desktop | 🔲 | STANDARD | opus / high | P0-spikes | none |
 | 003 | **Spike-2**: Office Dialog API for opening a record | 🔲 | STANDARD | sonnet / high | P0-spikes | none |
 | 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | 🔲 | MINIMAL | sonnet / medium | P0-spikes | none |
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | 🔲 | STANDARD | opus / high | P0-spikes | none |
-| 006 | FR-18: clear typecheck debt in `shared/taskpane` | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
-| 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
-| 008 | FR-18: clear typecheck debt in `word/` + `outlook/` | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 006 | FR-18: clear typecheck debt in `shared/taskpane` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
+| 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
+| 008 | FR-18: clear typecheck debt in `word/` + `outlook/` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
+
+> ⛔ **006/007/008 are BLOCKED pending an operator decision.** Task 001's escalation trigger 3 fired: the UNASSIGNED bucket contains 11 errors in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` — **outside the `office-addins` package**, pulled in by the `@spaarke/communication-components` path alias. FR-18's "typecheck clean" cannot be met by 006+007+008 alone. Two further findings change the decomposition: the split measures **309 / 45 / 4** (not balanced), and **75% of the debt (296/395) is in test files** whose suite is already red (13/21 suites failing on a missing `jest-dom` registration). See [`notes/typecheck-baseline.md`](../notes/typecheck-baseline.md) § Recommendations.
 
 **Gate**: typecheck clean · four spike reports in `notes/spikes/` · FR-01, FR-12 and FR-20 scope decided.
 
