@@ -12,10 +12,40 @@
 | Field | Value |
 |---|---|
 | **Task** | **039** — deny-veto wiring + ordered-pipeline tests. Deps 032 ✅ 037 ✅ 038 ✅ all met |
-| **Status** | `pending` — not started |
-| **Repo state** | See "IF THE COMMIT DID NOT HAPPEN" below — verify with `git status` FIRST |
-| **Next Action** | `task-execute` on `tasks/039-fr23-deny-veto-wiring-pipeline-tests.poml`. **Read `notes/task-037-restricted-secure-vetoes.md` § "For task 039" first** — the deny slot already runs FIRST by construction and must REMOVE keys, never write `None` |
+| **Status** | 🔄 **in-progress — step 1 of 6 DONE, steps 2–6 remain.** Tree clean, all work committed (`d1c1e0bb5`) |
+| **Repo state** | Clean · 0 unpushed at last check · master 2 commits ahead (CI + docs only, **zero overlap** — `/conflict-check` silent pass) |
+| **Next Action** | **Step 2 — wire the deny veto.** Everything needed is gathered; see § "039 — entry state" below. No further discovery required before editing code |
 | **Progress** | **42 completed** · 2 completed-with-escalation · 1 blocked-shipped · **47 pending** (of 92) |
+
+### 039 — entry state (step 1 done; start at step 2)
+
+**Step 1 ✅** — org-typed lookup inventory from live metadata:
+[`notes/task-039-org-reference-inventory.md`](notes/task-039-org-reference-inventory.md). All three roots
+are uniform: `sprk_assignedlawfirm1` + `sprk_assignedlawfirm2` → `sprk_organization`. `$select` =
+`_sprk_assignedlawfirm1_value,_sprk_assignedlawfirm2_value`. It also files a **new owner decision** (the
+`sprk_externalaccount` → `account` gap: an account-modelled counterparty is **unwallable**) — not a blocker.
+
+**The seams, all read and confirmed (do not re-derive):**
+
+| Need | Where |
+|---|---|
+| Veto slot 1 (currently a documented no-op) | `AccessibleRecordSetService.ApplyVetoPipeline` **:328-365** — add a third param (the denied set) and remove keys BEFORE the Restricted loop |
+| Both call sites of the pipeline | `ComposeForSystemUserAsync` **:711** (passes `membershipTerm`) and `ComposeForContactAsync` **:807** (passes `EmptyRights`) |
+| Candidate id set is already built | `:682-684` and `:778-780` — the same list fed to `GetRootRecordFlagsAsync`; reuse it, do not rebuild |
+| Contact's active org ids (subject side) | `ExternalParticipationService.QueryActiveOrgIdsAsync` **:852** — the POML's "reuse the existing `sprk_contactorganization` resolution" |
+| Batched-read shape to mirror | `ExternalParticipationService.GetRootRecordFlagsAsync` **:507**, `FlagQueryChunkSize = 50` |
+| Reader contract | `INoAccessListReader.GetDeniedRecordsAsync(contactId, organizationIds, candidates, ct)` → `NoAccessListResult.DeniedRecordIds`. Takes `NoAccessCandidateRecord(EntityLogicalName, RecordId, ReferencedOrganizationIds)` — **the caller resolves the referenced orgs**; the reader is deliberately agnostic |
+
+**Constraints that bite here:**
+1. **A veto REMOVES a key — never writes `None`.** `IsOperationPermittedAsync` **:465-469** rejects
+   `AccessRights.None` as a caller bug, so a `None` written by a veto is refused as *malformed* rather than
+   honoured as a denial. Absence is the only representation of no access.
+2. **Deny runs FIRST**, before Restricted — already true by construction; pin it with a test.
+3. **`ctor` change**: `AccessibleRecordSetService` takes 4 deps today (**:400-414**); adding
+   `INoAccessListReader` is a 5th → **every existing test double must be updated** (037 hit exactly this,
+   surfacing 5 doubles failing closed silently). Expect a compile cascade; that is the forcing function working.
+4. `NoAccessListReader` fails **closed toward DENIAL** (opposite of `ContactStandingGrantReader`). A throwing
+   reader must deny the queried candidates, never skip the veto — acceptance criterion 6.
 
 ### 🚨 IF THE COMMIT DID NOT HAPPEN
 
