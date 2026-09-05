@@ -164,12 +164,21 @@ public class EntityAccessFilterCharacterizationTests : IClassFixture<OfficeSaveT
     /// entry here reintroduces the defect for that one entity type only — which is the shape that
     /// survives review, because the other four keep working.
     /// </summary>
+    /// <remarks>
+    /// <c>account</c> was removed from this theory 2026-09-04 with the type itself: <c>sprk_document</c>
+    /// has no account lookup column in either family, so an account-filed save could only ever land
+    /// unassociated, and authorizing the type was the LOCKSTEP-invariant violation described in
+    /// <c>EntityAccessFilter.EntitySetByType</c>. This is a characterization suite, so the case is
+    /// deleted rather than inverted — there is no longer a behavior here to characterize. The denial
+    /// is pinned instead by <c>RecordKeyedUploadAuthorizationTests</c>, whose unmappable-entity example
+    /// is now <c>account</c> and which fails if the type is ever re-added.
+    /// </remarks>
     [Theory]
-    [InlineData("account", "accounts")]
     [InlineData("contact", "contacts")]
     [InlineData("sprk_matter", "sprk_matters")]
     [InlineData("sprk_project", "sprk_projects")]
     [InlineData("sprk_invoice", "sprk_invoices")]
+    [InlineData("sprk_todo", "sprk_todos")]
     public async Task PostOfficeSave_ForEachSupportedTargetType_ProbesThatTypesCollection(
         string entityType, string expectedEntitySet)
     {

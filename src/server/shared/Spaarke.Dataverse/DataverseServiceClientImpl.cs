@@ -929,6 +929,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_workassignment"] = new EntityReference("sprk_workassignment", request.WorkAssignmentLookup.Value);
         if (request.EventLookup.HasValue)
             document["sprk_relatedevent"] = new EntityReference("sprk_event", request.EventLookup.Value);
+        // Added 2026-09-04. Both columns are in the sprk_related* family — the one the 2026-09-03
+        // check never looked at. Verified by queries that SUCCEED (contrast sprk_event above, whose
+        // query errors). sprk_relatedcontact targets the OOB `contact` table, not a Spaarke one.
+        if (request.TodoLookup.HasValue)
+            document["sprk_relatedtodo"] = new EntityReference("sprk_todo", request.TodoLookup.Value);
+        if (request.ContactLookup.HasValue)
+            document["sprk_relatedcontact"] = new EntityReference("contact", request.ContactLookup.Value);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Search Index Tracking Fields (RAG/Semantic Search)

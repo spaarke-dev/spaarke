@@ -84,6 +84,24 @@ public static class DocumentAssociationMap
             case "sprk_event":
                 request.EventLookup = recordId;
                 return true;
+            // Added 2026-09-04 (unified-access-control-r2). Both columns EXIST and always did; the
+            // 2026-09-03 metadata check missed them because it enumerated only the bare `sprk_{type}`
+            // family and never looked at `sprk_related*`. See UpdateDocumentRequest.TodoLookup /
+            // ContactLookup for the queries that prove it.
+            case "todo":
+            case "sprk_todo":
+                request.TodoLookup = recordId;
+                return true;
+            case "contact":
+                request.ContactLookup = recordId;
+                return true;
+            // ⚠️ `account` is deliberately ABSENT and must stay absent (owner decision, 2026-09-04).
+            // `sprk_document` has NO account lookup in EITHER family, so a save filed to an account
+            // could only ever land unassociated — the user believes it filed and it did not. The type
+            // was removed from the Office endpoint's allow-list and from AssociationType rather than
+            // being accepted-and-dropped. Spaarke's organization analogue is `sprk_organization`
+            // (`sprk_relatedorganization` / `sprk_relatedvendororg` both exist on sprk_document); if
+            // "file to an organization" is wanted, add THAT — do not re-add `account`.
             default:
                 return false;
         }
@@ -252,10 +270,32 @@ public class UpdateDocumentRequest
     public Guid? WorkAssignmentLookup { get; set; }
 
     /// <summary>
-    /// Event lookup (<c>sprk_event</c>). Added 2026-09-03, same reason as
-    /// <see cref="WorkAssignmentLookup"/>.
+    /// Event lookup. Added 2026-09-03, same reason as <see cref="WorkAssignmentLookup"/> — but the
+    /// column is <c>sprk_relatedevent</c>, NOT <c>sprk_event</c>, which does not exist on
+    /// <c>sprk_document</c> at all (corrected 2026-09-04; the original write failed every event-filed
+    /// save outright rather than dropping silently).
     /// </summary>
     public Guid? EventLookup { get; set; }
+
+    /// <summary>
+    /// To-do lookup (<c>sprk_relatedtodo</c>). Added 2026-09-04 (unified-access-control-r2).
+    /// <para>
+    /// ⚠️ This column ALWAYS existed. It was previously recorded across three places — the Q4 note,
+    /// <c>EntityAccessFilter</c>, and the inbound email-r2 coordination doc — as proof that a document
+    /// is <b>unmappable</b> to a to-do and that a SCHEMA change was required first. That was wrong in
+    /// exactly one way: the check looked for a bare <c>sprk_todo</c> column and never looked at the
+    /// <c>sprk_related*</c> family. <c>SELECT sprk_relatedtodo FROM sprk_document</c> succeeds.
+    /// </para>
+    /// </summary>
+    public Guid? TodoLookup { get; set; }
+
+    /// <summary>
+    /// Contact lookup (<c>sprk_relatedcontact</c>). Added 2026-09-04 per the owner decision that closed
+    /// the "account/contact saves are filed nowhere" gap: <c>contact</c> becomes real (the column
+    /// exists), and <c>account</c> is REJECTED up front rather than accepted and silently dropped —
+    /// <c>sprk_document</c> has no account lookup in either family.
+    /// </summary>
+    public Guid? ContactLookup { get; set; }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Document Source Tracking
