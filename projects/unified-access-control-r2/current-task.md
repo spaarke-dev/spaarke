@@ -147,14 +147,40 @@ lookups are NOT what we build on.** The resolver targets `sprk_related*`.
 | **`sprk_related*` — THE STANDARD** | `relatedmatter`, `relatedproject`, `relatedworkassignment`, `relatedservicerequest`, `relatedcontact`, `relatedtodo`, `relatedorganization`, `relatedvendororg`, `relatedagreement`, `relatedcommunication`, `relatedevent`, `relatedinvoice` | **0 across the board** |
 | legacy direct | `sprk_matter`, `sprk_project`, `sprk_workassignment`, `sprk_invoice` | 105 / 10 / 1 |
 
-⚠️ **THIS WAS ALREADY DECIDED IN THIS PROJECT — do not reopen it (I did, 2026-09-04).**
-[`design.md` §5.1d](design.md) line 552 enumerated the census from `OneToManyRelationships` and concluded:
-*"`sprk_document` carries **two** distinct project lookups, so any 'is this document on a secure project?'
-test must check **both** or it will miss half the cases."* And
+⚠️ **THE `sprk_related*` CONVENTION WAS SETTLED IN OTHER PROJECTS — read them before 054/055/056.**
+(I first claimed it was settled in *this* project's design.md; the owner corrected me — that was a
+downstream record, not the discussion.)
+
+| Where | What it established |
+|---|---|
+| [`x-financial-intelligence-module-r1` task 002](../x-financial-intelligence-module-r1/notes/scratch/002-document-field-diff.yaml) **2026-02-11 — ORIGIN** | Created `sprk_relatedmatter`/`sprk_relatedproject`/`sprk_relatedvendororg`. Purpose verbatim: **"Confirmed by reviewer — matter this invoice relates to."** Naming rationale verbatim: *"use 'related' prefix to **distinguish from primary lookups** on other entities."* |
+| [`email-communication-intelligence-r2` task 029](../email-communication-intelligence-r2/notes/027-028-029-schema-closeout.md) **— THE DISCUSSION** | Operator §11 challenge. `sprk_relatedcommunication` is *"the sibling of `sprk_relatedmatter`/`sprk_relatedproject` = **the confirmed related record this document points at**"*. `sprk_linkedcommunication` was NOT created; `CrossPathLink` was rewired onto the existing column. The POML's contrary justification is recorded as *"simply wrong."* |
+
+This project only carries the **consequences**: [`design.md` §5.1d](design.md) line 552's census
+(*"`sprk_document` carries **two** distinct project lookups, so any 'is this document on a secure
+project?' test must check **both** or it will miss half the cases"*) and
 [`notes/plan-upload-path-decomposition-2026-08-31.md` §095](notes/plan-upload-path-decomposition-2026-08-31.md)
-records the owner's screenshots of 2026-08-31 (two Many-to-one slots per type, **not** an N:N), the choice
-of **option (b) an intersection entity**, and the default that **a link does NOT confer access — the
-primary lookup stays the access ancestor**. **Read design.md §5.1d before touching 054/055/056.**
+(owner screenshots 2026-08-31: two Many-to-one slots per type, **not** N:N; **option (b) intersection
+entity**; default that **a link does NOT confer access — the primary lookup stays the access ancestor**).
+
+✅ **THE TENSION IS RESOLVED — owner, 2026-09-04: "confirming IS filing."** At creation `related` was the
+*secondary, reviewer-confirmed* slot, named to be distinct from the *primary* lookup; by 029 it had
+generalized to "the confirmed related record". As the **access ancestor** that raised a sharper question —
+does a reviewer confirming an invoice's related matter GRANT access? — because 095's recorded default was
+the opposite (*a link does not confer access*).
+
+**Answer: they are the same act.** `sprk_related{recordtype}` becomes the ONE filing lookup per record
+type. Every writer repoints onto it — upload paths, Office save, email attachments, AND the finance
+confirm — so there is **one key for one authorization decision** and the reviewer-confirmed origin is
+historical, not a live distinction. The legacy direct lookups (`sprk_matter`/`sprk_project`/
+`sprk_workassignment`/`sprk_invoice`) retire. 095's "a link does not confer access" still holds — it
+governs the **intersection-entity links**, which remain non-conferring; it was never about these lookups.
+
+**Work this creates for 054/055/056** (do NOT split — the resolver alone ships inert):
+1. Repoint `DocumentAssociationMap` + [`DataverseServiceClientImpl.cs:906-916`](../../src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs#L906-L916) onto `sprk_related*`, **fixing the non-existent `sprk_event` write in the same pass**.
+2. Pin a per-column name map — **the casing is not uniform** (see below); never string-build the name.
+3. Backfill the 116 legacy rows (dry-run default, operator executes — the task 053 pattern).
+4. Read both families ONLY until the backfill lands, then delete the legacy read on a dated follow-up.
 
 🔴 **The nuance §5.1d did NOT settle — POLARITY.** "Check both" is stated for the **secure veto**, where
 checking both is fail-SAFE (more detection ⇒ tighter). For **inheritance** the identical rule is
