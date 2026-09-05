@@ -90,8 +90,8 @@ Every ADR classified on **enforceability** (can a mechanical test assert it?), *
 | **Enforceability** | enforceable | 21 | 001, 002, 003, 005, 007, 008, 009, 010, 012, 013, 018, 019, 020, 027, 028, 029, 032, 038, 040, 043, 044 |
 | | partially-enforceable | 25 | 004, 006, 011, 014, 015, 016, 017, 021, 022, 024, 026, 030, 031, 033, 034, 036, 037, 039, 042, 045, 046, 047, 048, 049, 050, 051 |
 | | judgment-only | 3 | 023, 025, 041 |
-| **Accuracy** | current | 38 | all not listed below |
-| | **contested** | **10** | **014, 016, 017, 018, 019, 020, 041, 042, 043, 047** — every one is `Status: Proposed` |
+| **Accuracy** | current | 36 | all not listed below — re-verified 2026-09-04 against the artifacts each ADR NAMES, not guessed identifiers ([report](../../projects/code-quality-and-assurance-r4/notes/adr-accuracy-reverification-2026-09.md)) |
+| | **contested** | **12** | by ratification (10): 014, 016, 017, 018, 019, 020, 041, 042, 043, 047 · by **drift** (2): **005** (names `sprk_documentassociation`, which exists nowhere) and **033** (names `WorkingDocumentHandler`/`WorkingDocumentTools.cs`; code has `WorkingDocumentService`) |
 | | **stale** | **1** | **023** (Superseded 2026-03-19, demoted to a pattern) |
 | **Checkability** *(judgment-only only)* | checkable-by-reading | 2 | 025, 041 |
 | | aesthetic | 1 | 023 |
