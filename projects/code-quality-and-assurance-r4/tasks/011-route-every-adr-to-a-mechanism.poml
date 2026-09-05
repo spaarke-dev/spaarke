@@ -4,7 +4,7 @@
     <title>Route every ADR to a mechanism — coverage is 49/49 routed, not 7/49 enforced</title>
     <phase>2a Every ADR is routed, accurate, and measured</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation mapping derived from task 010's classification; no code, no tests. The judgment was spent in 010.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -72,7 +72,7 @@
   <acceptance-criteria>
     <criterion testable="true">Given INDEX.md, all 49 ADRs carry a mechanism assignment.</criterion>
     <criterion testable="true">Given each assignment, it is consistent with the ADR's task-010 classification per the four-way rule.</criterion>
-    <criterion testable="true">Given the coverage statement, it reads 49/49 routed with a per-mechanism breakdown.</criterion>
+    <criterion testable="true">SUPERSEDED to 50/50 (same cause as task 010): ADR-038 is a real, Accepted, named-test-enforced ADR with 1,778 citations whose concise version lives in its INDEX row rather than a .claude/adr/ file. Excluding it to reach a round 49 would drop an ENFORCED ADR from the coverage statement. Coverage reads 50/50 routed with a per-mechanism breakdown.</criterion>
     <criterion testable="true">Given the aesthetic ADRs, each is explicitly recorded as deliberately unenforced rather than left blank.</criterion>
     <criterion testable="true">Negative: no ADR marked stale or contested is scheduled for enforcement.</criterion>
     <criterion testable="true">Negative: no arch test is written by this task.</criterion>
@@ -82,4 +82,11 @@
   <notes>Maps spec.md FR-06. The extracted reviewer scope list is consumed by task 053 (prompt refresh — sections aligned to what routing sends it) and task 054 (reviewer wiring).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <date>2026-09-04</date>
+    <summary>All 50 ADR entries routed to one of the four FR-06 destinations: 21 arch test (blocking), 26 arch test + nightly review, 2 nightly review, 1 deliberately unenforced. The rule mapped cleanly for every ADR — no fifth destination needed, so the escalation trigger did not fire. 37 scheduled; 13 routed-but-not-scheduled per FR-08 (contested or stale). FR-23 reviewer scope extracted as 28 ADRs (26 partially-enforceable + 2 judgment-only/checkable-by-reading), 22 schedulable today — a sizing input task 052/054 needs BEFORE the spike, since a 2-ADR scope would have been hard to justify wiring.</summary>
+    <files-modified>.claude/adr/INDEX.md; projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md; projects/code-quality-and-assurance-r4/notes/adr-inventory-2026-09.md (enriched with all 010/011 findings at owner request)</files-modified>
+    <findings>12 of the 15 artifact-less ADRs are routed to an arch test. Mostly NOT a contradiction — "names no artifact" concerns verifying the ADR's ACCURACY, not whether its RULE is testable (ADR-002 names nothing and has a working named test). But P2b will hit ADRs whose rule is testable while the ADR gives nothing to anchor the test to; the three that matter are ADR-039 (858 citations), ADR-019 (555, also FR-08-held) and ADR-040 (483). Cheap remedy for task 012: one sentence per ADR naming its canonical artifact.</findings>
+  </completion>
+
 </task>

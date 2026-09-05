@@ -102,6 +102,27 @@ Every ADR classified on **enforceability** (can a mechanical test assert it?), *
 
 They are classified `contested` **not because they are inaccurate** — several describe the code precisely — but because enforcing an unratified rule in CI means enforcing something nobody agreed to, which is what FR-08 exists to prevent. **The likely §6.5 path is confirm (ratify), not amend.** Two need a closer look first. **ADR-018** (Proposed) is enforced by **ADR-032** (Accepted) — an accepted ADR enforcing an unratified one. And **ADR-047** is fully built (outbox + SignalR delivery + `@spaarke/notifications` client + four producers) yet `spaarke-notification-spine-r1` shows **0 of 22 tasks complete**, which suggests the spine was assembled piecemeal by its consumers — the fork-collapsing ADR-047 exists to prevent. Its conformance to its own six MUSTs is **unverified**.
 
+
+### Routing (FR-06) — coverage is **50/50 routed**, not "17/50 enforced"
+
+Every ADR has a mechanism that carries it; one left unenforced is a decision on the record, not a gap. Full record: [`adr-routing-2026-09.md`](../../projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md).
+
+| Mechanism | ADRs | Scheduled | Held by FR-08 |
+|---|---|---|---|
+| arch test (blocking) | 21 | 16 | 5 |
+| arch test + nightly review | 26 | 20 | 6 |
+| nightly review | 2 | 1 | 1 |
+| deliberately unenforced | 1 | — | — |
+| **Total** | **50** | **37** | **13** |
+
+**Held by FR-08 (13)** — routed but NOT scheduled until task 012 resolves their status: 005, 014, 016, 017, 018, 019, 020, 023, 033, 041, 042, 043, 047.
+
+**FR-23 nightly-reviewer scope = 28 ADRs** (26 partially-enforceable + 2 judgment-only/checkable-by-reading), of which 22 are schedulable today.
+
+⚠️ **15 ADRs name no checkable artifact** — 002, 004, 008, 014, 016, 017, 019, 020, 023, 025, 027, 039, 040, 041, 051. Their accuracy cannot be verified by tooling or by a person without interpretation. Note this is about verifying ACCURACY, not about whether the rule is testable: ADR-002 names nothing and still has a working named test. Cheap remedy for task 012 — have each name ONE canonical artifact.
+
+---
+
 ### Enforcement is 17/49, not 7/49
 
 **8 ADRs have a test named after them** (001, 002, 007, 008, 009, 010, 013, 038). **9 more are enforced by guards that never name them in the title** (003, 012, 028, 032, 034, 036, 040, 045, 049) — including **ADR-028**, asserted by six separate arch tests. The spec's "7 of 49" counts only named tests. Both figures are defensible; FR-09a must state which it reports.
