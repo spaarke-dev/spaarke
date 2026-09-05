@@ -124,14 +124,71 @@ not a code error. Give each agent the session's hard-won traps — it measurably
 
 | # | Decision | Blocks |
 |---|---|---|
-| A | `sprk_account`/`sprk_contact` lookups on `sprk_document` — schema names **`sprk_Account`**/**`sprk_Contact`** (PascalCase is load-bearing for `@odata.bind`) | Office saves file unassociated today |
-| B | 034 canary user + CI path | **036 must NOT proceed** |
+| ~~A~~ | ✅ **ANSWERED 2026-09-04** — **drop `account`** from the Office-save allow-list + `AssociationType` enum + `ENTITY_CONFIGS`; map **`contact` → `sprk_relatedcontact`** (the column EXISTS — owner knew, verified live). There is NO `account` lookup in either family, but `sprk_relatedorganization`/`sprk_relatedvendororg` → `sprk_organization` do exist if "file to an organization" is ever wanted | 076/083 |
+| ~~B~~ | ✅ **ANSWERED 2026-09-04** — **nightly scheduled run against `spaarkedev1` + a required manual gate on 036's PR** citing the last green run. NO Dataverse credential in PR builds. ⚠️ Still needs the operator to **provision the non-admin canary user** per `tests/integration/auth/README.md` — that half is not a choice | **036** |
 | ~~C~~ | ~~`sprk_todo` has no `sprk_regardingservicerequest`~~ ✅ **MOOT — the column EXISTS** (verified live) | 028/056 unblocked on this point |
 | D | Real-Dataverse smoke on `POST /api/v1/external/projects/{id}/documents` | external SPA deploy |
 | ~~E~~ | ~~LegalWorkspace build~~ ✅ **FIXED + watched** | — |
 | F | **28 of 30 `src/solutions/**` have NO build signal**, and **none of the 29 e2e specs run in any workflow**. Both need CI infrastructure, not spec fixes | CI-owner call |
-| G | 🆕 `sprk_document`/`sprk_invoice` cannot inherit (finding #2). Rename columns, widen the resolver map, or accept the gap? | **054/055/056** |
+| ~~G~~ | ✅ **ANSWERED 2026-09-04** — **widen the resolver map to the existing DIRECT lookups; no schema change.** See § "The two lookup families" below — reading `sprk_related*` instead would resolve NOTHING for all 509 documents | **054/055/056** |
 | H | 🆕 Native form CLEAR needs a Dataverse plugin (finding #3) | FR-26 completeness |
+| **I** | 🆕 **`CanDownload` aligns DOWN to Read** (D3, answered 2026-09-04) — enforcement already requires Read; the capability required Write, so the UI hid a button that works. Read-only users gain a visible download they already had server-side | FR-05 criterion 5 |
+| **J** | 🆕 **MDA document reads bypass Dataverse row-level security** — on a Matter reachable only by share, the record was correctly DENIED while the Documents PCF listed the files and the Viewer opened + downloaded them (`SemanticSearchControl` v1.1.80 never uses `Xrm.WebApi`). Contradicts design §5's "enforced by Dataverse natively — no code". Traced to TWO defects in `notes/task-046-secure-project-owner-role.md` §7b. **Not filed as a task yet** | ranked above everything else on this list |
+| **K** | 🆕 **Finish the BU restructure, or narrow the depth.** Fix A was operator-**validated** 2026-08-25 (sibling BU, user kept `Deep`, secure record denied, share granted). Everyone else still sits in root BU and existing records were left there — so relocating users is a **data-migration** decision. Correct rule: *"don't let ordinary users sit at or above the secure BU"*, NOT "reduce the depth" | live exposure |
+
+### 🔴 The two lookup families on `sprk_document` — **`sprk_related*` is the standard** (owner, 2026-09-04)
+
+`sprk_document` carries **two parallel parent-lookup families**. **OWNER DIRECTION: `sprk_related{recordtype}`
+is the convention we rely on; the bare `sprk_matter`/`sprk_project`/`sprk_workassignment`/`sprk_invoice`
+lookups are NOT what we build on.** The resolver targets `sprk_related*`.
+
+| Family | Columns | Populated (of **509** docs, `spaarkedev1`) |
+|---|---|---|
+| **`sprk_related*` — THE STANDARD** | `relatedmatter`, `relatedproject`, `relatedworkassignment`, `relatedservicerequest`, `relatedcontact`, `relatedtodo`, `relatedorganization`, `relatedvendororg`, `relatedagreement`, `relatedcommunication`, `relatedevent`, `relatedinvoice` | **0 across the board** |
+| legacy direct | `sprk_matter`, `sprk_project`, `sprk_workassignment`, `sprk_invoice` | 105 / 10 / 1 |
+
+⚠️ **THIS WAS ALREADY DECIDED IN THIS PROJECT — do not reopen it (I did, 2026-09-04).**
+[`design.md` §5.1d](design.md) line 552 enumerated the census from `OneToManyRelationships` and concluded:
+*"`sprk_document` carries **two** distinct project lookups, so any 'is this document on a secure project?'
+test must check **both** or it will miss half the cases."* And
+[`notes/plan-upload-path-decomposition-2026-08-31.md` §095](notes/plan-upload-path-decomposition-2026-08-31.md)
+records the owner's screenshots of 2026-08-31 (two Many-to-one slots per type, **not** an N:N), the choice
+of **option (b) an intersection entity**, and the default that **a link does NOT confer access — the
+primary lookup stays the access ancestor**. **Read design.md §5.1d before touching 054/055/056.**
+
+🔴 **The nuance §5.1d did NOT settle — POLARITY.** "Check both" is stated for the **secure veto**, where
+checking both is fail-SAFE (more detection ⇒ tighter). For **inheritance** the identical rule is
+access-WIDENING (each extra lookup is another way to be granted). The census settled which columns exist,
+not that a document should *inherit* through both. 054/055/056 must flag the widening explicitly rather
+than inherit it as a free consequence.
+
+🔴 **THE WRITERS ARE ON THE LEGACY FAMILY.** `DocumentAssociationMap` — the ONE map item 7 unified all four
+drifted copies into — sets `MatterLookup`/`ProjectLookup`/… which
+[`DataverseServiceClientImpl.cs:906-916`](../../src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs#L906-L916)
+binds to the **legacy direct** columns. That is why related is 0 and direct is 116. A resolver reading ONLY
+`sprk_related*` today resolves NOTHING for all 509 documents — fail-closed, silent, invisible to every
+offline test (no fixture carries live data). "Check both" is what makes this safe in the interim; the
+writer repoint is what makes it converge.
+
+🔴 **THE `sprk_related*` FAMILY IS NOT UNIFORMLY CASED** (owner screenshot, 2026-09-04). PascalCase:
+`sprk_RelatedAgreement`, `sprk_RelatedCommunication`, `sprk_RelatedContact`, `sprk_RelatedInvoice`,
+`sprk_RelatedOrganization`, `sprk_RelatedServiceRequest`, `sprk_RelatedToDo`, `sprk_RelatedWorkAssignment`,
+`sprk_RelatedEvent`. **lowercase: `sprk_relatedmatter`, `sprk_relatedproject`, `sprk_relatedvendororg`.**
+The navigation-property name is **case-sensitive** for `@odata.bind`, so any code building it as
+`$"sprk_Related{type}"` **silently fails for matter and project** — the two that matter most. Pin a
+per-column map; never derive the name from a convention.
+
+🔴 **`sprk_event` DOES NOT EXIST on `sprk_document`** — verified by query, which errors:
+`'sprk_Document' entity doesn't contain attribute with Name = 'sprk_event'`. But
+`DataverseServiceClientImpl.cs:916` writes `document["sprk_event"]` for item 7's `event` case. **Every
+document filed to an event fails or drops.** The only event lookup is `sprk_relatedevent` — more evidence
+the direct family is the wrong target. Item 7's note claiming live metadata has an event lookup was WRONG.
+
+🔴 **Item 7's `sprk_todo` claim is also WRONG (notes wrong #16)**: "`sprk_todo` is NOT mappable … needs a
+SCHEMA change, not code". **`sprk_relatedtodo` EXISTS.** Code-only. Second time this week the notes told us
+to buy schema we already own — same shape as decision C.
+
+⚠️ ~**393 of 509** documents have no parent in EITHER family — 076's parentless-upload problem, in data.
 
 ---
 
