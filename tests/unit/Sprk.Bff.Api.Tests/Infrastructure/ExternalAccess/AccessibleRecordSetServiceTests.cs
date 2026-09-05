@@ -838,6 +838,392 @@ public class AccessibleRecordSetServiceTests
             + "survives, exactly as it does on a genuinely Restricted record");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // FR-23 — deny-list veto (task 039). Order: additive max → deny-list → Restricted, with Secure
+    // suppression pre-max. These tests are WIRING tests for AccessibleRecordSetService — they do not
+    // re-test NoAccessListReader's own query/matching correctness (NoAccessListReaderTests.cs, task 038
+    // owns that); DenyingReader below is a canned double that mirrors the reader's two match shapes
+    // (record-keyed / org-keyed) just closely enough to prove the composer builds candidates, resolves
+    // the subject, and removes denied keys correctly.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_FullAccessGrant_WithMatchingContactOrgDenyEntry_ResolvesToNone_NeverResurrectedByMax()
+    {
+        // FR-23's load-bearing negative: "No Access" is never a level. A Full Access grant plus a deny
+        // entry yields None, because the veto runs AFTER the additive max and max() can therefore never
+        // resurrect it.
+        var deniedOrg = Guid.Parse("d1000000-0000-0000-0000-000000000001");
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+        });
+        participations.ReferencedOrgs[GrantedProject] = new[] { deniedOrg };
+
+        var reader = DenyingReader(deniedOrgIds: new[] { deniedOrg });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
+            "a Full Access grant plus a matching deny entry must resolve to None — the veto runs after the max");
+        set.Contains(GrantedProject).Should().BeFalse(
+            "a veto REMOVES the key; it never writes AccessRights.None (which IsOperationPermittedAsync " +
+            "would refuse as a malformed request, not honour as a denial)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ContactRecordDenyEntry_RemovesExactlyThatRecord_SiblingReferencingSameOrgSurvives()
+    {
+        // Record-keyed specificity: the deny is scoped to the NAMED record, not to every record sharing
+        // the same referenced organization — proven by giving both records the SAME org reference.
+        var denied = GrantedProject;
+        var sibling = StandingMatter; // reused here as a second project id (file convention)
+        var sharedOrg = Guid.Parse("f1000000-0000-0000-0000-000000000001");
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = denied, AccessLevel = ExternalAccessLevel.ViewOnly },
+            new ExternalParticipation { ProjectId = sibling, AccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        participations.ReferencedOrgs[denied] = new[] { sharedOrg };
+        participations.ReferencedOrgs[sibling] = new[] { sharedOrg };
+
+        var reader = DenyingReader(deniedRecordIds: new[] { denied }); // record-keyed, NOT org-keyed
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(denied).Should().BeFalse("a contact×record deny entry removes exactly that record");
+        set.Contains(sibling).Should().BeTrue(
+            "a sibling record referencing the SAME organization is unaffected — the deny was record-keyed");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_DenyEntryKeyedOnAnOrganizationReferencedOnlyViaTheSecondLawFirmSlot_StillDenies()
+    {
+        // Over-match (register B-10): the record-side match uses EVERY organization the record
+        // references, not narrowed to task 041's access-conferring registry. Framed on the second
+        // assigned-law-firm slot — the task brief's own "opposing counsel" example of a reference that
+        // need not confer access yet must still be walled.
+        var opposingCounselOrg = Guid.Parse("a3000000-0000-0000-0000-000000000001");
+        var unrelated = StandingMatter;
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = unrelated, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+        participations.ReferencedOrgs[GrantedProject] = new[] { opposingCounselOrg };
+        // `unrelated` references nothing — a control proving the match is org-scoped, not blanket.
+
+        var reader = DenyingReader(deniedOrgIds: new[] { opposingCounselOrg });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse(
+            "a deny entry keyed on an organization the record references still denies it, regardless of " +
+            "whether that same lookup would ALSO confer access under a different registry");
+        set.Contains(unrelated).Should().BeTrue("a record referencing no denied organization is unaffected");
+    }
+
+    [Fact]
+    public void BuildOrganizationReferenceSelect_IncludesEveryRegisteredLookup_NoConferralNarrowing()
+    {
+        // The over-match property pinned at the query-construction level: the $select that drives the
+        // deny-list's record-side org match includes EVERY registered org-typed lookup unconditionally
+        // — there is no filtering against task 041's access-conferring registry.
+        var select = ExternalParticipationService.BuildOrganizationReferenceSelect(
+            new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" });
+
+        select.Should().Be("_sprk_assignedlawfirm1_value,_sprk_assignedlawfirm2_value");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_QueriesDenyListWithContactsOwnIdAndActiveOrganizationIds()
+    {
+        // Subject wiring: contact×org / org×record deny entries only fire if the composer actually
+        // resolved and passed BOTH the contact's own id AND its active organization membership.
+        var activeOrg = Guid.Parse("a2000000-0000-0000-0000-000000000001");
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        participations.ActiveOrgIds.Add(activeOrg);
+
+        var reader = new Mock<INoAccessListReader>();
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NoAccessListResult.Empty);
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader.Object);
+        await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        reader.Verify(r => r.GetDeniedRecordsAsync(
+            ContactId,
+            It.Is<IReadOnlyCollection<Guid>>(orgs => orgs.Contains(activeOrg)),
+            It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
+            It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the composer must resolve and pass the contact's own id AND its active organization ids as the deny-list subject");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_OrganizationSubjectDenyEntry_DeniesEveryRecordForAContactActiveInThatOrg()
+    {
+        // org×org / org×record: an organization-subject deny entry denies every contact who is an
+        // ACTIVE member of that org. The fake reader denies ONLY when the subject organizationIds
+        // argument carries the seeded org — a wiring defect (e.g. passing an empty org list) leaves the
+        // GENERAL setup in force, which denies nothing, so the assertion below would correctly go red
+        // rather than being masked by any fail-closed path.
+        var subjectOrg = Guid.Parse("a4000000-0000-0000-0000-000000000001");
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        participations.ActiveOrgIds.Add(subjectOrg);
+
+        var reader = new Mock<INoAccessListReader>();
+        reader // general default: nothing denied
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NoAccessListResult.Empty);
+        reader // specific: fires only when the subject org is present — Moq prefers the LAST matching setup
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(),
+                It.Is<IReadOnlyCollection<Guid>>(orgs => orgs.Contains(subjectOrg)),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid? _, IReadOnlyCollection<Guid> __, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ___) =>
+                new NoAccessListResult
+                {
+                    DeniedRecordIds = candidates.Select(c => c.RecordId).ToHashSet(),
+                    DenyingEntryIds = candidates.ToDictionary(c => c.RecordId, _ => (IReadOnlyList<Guid>)Array.Empty<Guid>()),
+                    FailedClosed = false,
+                });
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse(
+            "an organization-subject deny entry denies every record for a contact whose active org set " +
+            "contains the subject org");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserRecordThatWouldSurviveRestricted_IsStillRemovedWhenAlsoDenyListed()
+    {
+        // Ordering: deny is evaluated as an UNCONDITIONAL removal, independent of what Restricted would
+        // otherwise have preserved. A record that would normally SURVIVE Restricted (the systemuser's
+        // own ADR-034 membership) must still end up ABSENT when it is also on the deny list — proving
+        // the deny veto's removal is not something Restricted's survival logic can protect a record
+        // from, regardless of which slot's loop runs first.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var reader = DenyingReader(deniedRecordIds: new[] { GrantedProject });
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse(
+            "a record that would otherwise survive Restricted (systemuser's own membership) must still " +
+            "be removed once it is also deny-listed");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_FullPipeline_SecureSuppression_DenyVeto_AndRestrictedVeto_EachApplyIndependently()
+    {
+        // One composition, four records, three mechanisms — Secure suppression (pre-max), the deny veto
+        // (post-max slot 1), and Restricted (post-max slot 2) — each applying to its OWN record without
+        // leaking into the others or into the untouched control record.
+        var secureRecord = GrantedProject;      // org-inherited grant on a Secure record -> suppressed
+        var deniedRecord = StandingMatter;      // FullAccess grant + a matching deny entry -> removed
+        var restrictedRecord = UnrelatedRecord; // FullAccess grant on a Restricted record -> removed
+        var openRecord = MemberRecordA;         // ordinary ViewOnly grant, no vetoes -> Read
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = secureRecord, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = null },
+            new ExternalParticipation { ProjectId = deniedRecord, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = restrictedRecord, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = openRecord, AccessLevel = ExternalAccessLevel.ViewOnly, DirectAccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        participations.Flags[secureRecord] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[restrictedRecord] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var reader = DenyingReader(deniedRecordIds: new[] { deniedRecord });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(secureRecord).Should().Be(AccessRights.None, "Secure suppresses the org-inherited grant pre-max");
+        set.Contains(deniedRecord).Should().BeFalse("the deny veto removes the entry post-max, slot 1");
+        set.Contains(restrictedRecord).Should().BeFalse("Restricted removes every contact-sourced entry post-max, slot 2");
+        set.RightsFor(openRecord).Should().Be(AccessRights.Read, "an unvetoed record is untouched by any of the three mechanisms");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_WhenDenyListReaderFaults_DeniesQueriedCandidates_VetoNeverSkipped()
+    {
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+
+        var throwingReader = new Mock<INoAccessListReader>();
+        throwingReader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated deny-list outage"));
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), throwingReader.Object);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse(
+            "a faulting deny-list reader must deny every queried candidate — the veto is never skipped (NFR-01)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_WhenDenyListReaderReturnsFailedClosed_RemovesEveryDeniedId()
+    {
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+
+        var reader = new Mock<INoAccessListReader>();
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NoAccessListResult
+            {
+                DeniedRecordIds = new HashSet<Guid> { GrantedProject },
+                DenyingEntryIds = new Dictionary<Guid, IReadOnlyList<Guid>>(),
+                FailedClosed = true,
+            });
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse(
+            "the composer must remove every id the reader reports as denied, including a fail-closed deny-all answer");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_WhenReferencedOrganizationResolutionIsUnreadableForARecord_ThatRecordIsDeniedDirectly()
+    {
+        // A record whose own referenced organizations could not be resolved must not be silently
+        // treated as "references nothing" — that would let it slip past an org-keyed deny entry the
+        // read simply could not confirm or rule out. Denied directly, independent of the reader (which
+        // is configured here to deny nothing, proving the force-deny does not depend on it).
+        var unresolvable = GrantedProject;
+        var resolvable = StandingMatter;
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = unresolvable, AccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = resolvable, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+        participations.UnreadableOrgReferences.Add(unresolvable);
+
+        var reader = DenyingReader(); // denies nothing — isolates the force-deny path
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(unresolvable).Should().BeFalse(
+            "a record whose referenced organizations could not be resolved must be denied directly");
+        set.Contains(resolvable).Should().BeTrue("a sibling record whose org references DID resolve is unaffected");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserWithNoResolvableContact_NeverQueriesDenyList()
+    {
+        // The deny list is keyed on contact/organization identities only (spec FR-23); organization
+        // membership is itself read FROM the contact. A systemuser with no linked and no email-resolvable
+        // contact has no deny-list-relevant subject on EITHER axis, so the reader must never be asked —
+        // pinned with a Strict mock that throws on ANY invocation.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        var principal = new WorkforcePrincipal
+        {
+            Kind = WorkforcePrincipalKind.SystemUser,
+            SystemUserId = SystemUserId,
+            ContactId = null,
+            Oid = Oid.ToString("D"),
+            TenantId = Tenant,
+            Email = string.Empty,
+        };
+
+        var strictReader = new Mock<INoAccessListReader>(MockBehavior.Strict);
+        var sut = CreateSut(
+            membership.Object, new FakeParticipationService(Array.Empty<ExternalParticipation>()),
+            NeverStanding(), strictReader.Object);
+
+        var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { MemberRecordA });
+        strictReader.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// A canned <see cref="INoAccessListReader"/> for task 039 WIRING tests — it does NOT re-test
+    /// NoAccessListReader's own query/matching correctness (task 038 owns that in
+    /// NoAccessListReaderTests.cs). Denies a candidate when its own record id is in
+    /// <paramref name="deniedRecordIds"/> OR any of its referenced organizations is in
+    /// <paramref name="deniedOrgIds"/> — mirroring the real reader's two match shapes closely enough to
+    /// prove the CALLER assembles candidates (record id + referenced orgs) and removes denials correctly.
+    /// </summary>
+    private static INoAccessListReader DenyingReader(
+        IReadOnlyCollection<Guid>? deniedRecordIds = null,
+        IReadOnlyCollection<Guid>? deniedOrgIds = null)
+    {
+        var recordIds = deniedRecordIds ?? Array.Empty<Guid>();
+        var orgIds = deniedOrgIds ?? Array.Empty<Guid>();
+        var reader = new Mock<INoAccessListReader>();
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid? _, IReadOnlyCollection<Guid> __, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ___) =>
+            {
+                var denied = candidates
+                    .Where(c => recordIds.Contains(c.RecordId) || c.ReferencedOrganizationIds.Any(orgIds.Contains))
+                    .Select(c => c.RecordId)
+                    .ToHashSet();
+                return new NoAccessListResult
+                {
+                    DeniedRecordIds = denied,
+                    DenyingEntryIds = denied.ToDictionary(id => id, _ => (IReadOnlyList<Guid>)Array.Empty<Guid>()),
+                    FailedClosed = false,
+                };
+            });
+        return reader.Object;
+    }
+
     private static Mock<IContactStandingGrantReader> AlwaysStandingMock()
     {
         var m = new Mock<IContactStandingGrantReader>();
@@ -849,8 +1235,10 @@ public class AccessibleRecordSetServiceTests
     private static AccessibleRecordSetService CreateSut(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
-        IContactStandingGrantReader standing)
-        => new(membership, participations, standing, NullLogger<AccessibleRecordSetService>.Instance);
+        IContactStandingGrantReader standing,
+        INoAccessListReader? noAccessList = null)
+        => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
+               NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>
     /// Matches the membership options the composer is now required to pass.
@@ -978,6 +1366,40 @@ public class AccessibleRecordSetServiceTests
                 id => Flags.TryGetValue(id, out var f) ? f : RootRecordFlags.None);
             return Task.FromResult(result);
         }
+
+        // ── Task 039 deny-veto seams ─────────────────────────────────────────────────────────────
+        //
+        // Per-record referenced-organization overrides (deny-veto tests seed these); anything not
+        // listed references no organization. This contact's own active org memberships (deny-veto
+        // subject side); empty by default.
+        //
+        // ⚠️ Both overrides are REQUIRED, not convenience — exactly like the Flags override above. The
+        // base ExternalParticipationService implementations need `credential`/`configuration`, which are
+        // `null!` here; without an override, QueryActiveOrgIdsAsync's token acquisition throws
+        // uncaught into AccessibleRecordSetService.ResolveDenyVetoAsync's own fail-closed catch, which
+        // then denies EVERY candidate in the composition — silently failing every pre-039 test that
+        // reaches the deny-veto call (i.e. almost all of them, since a resolved contact id is enough to
+        // reach it). "References/belongs to nothing" is the deny-veto's honest, inert default for a
+        // test that predates it.
+        public HashSet<Guid> ActiveOrgIds { get; } = new();
+        public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
+        public HashSet<Guid> UnreadableOrgReferences { get; } = new();
+
+        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
+
+        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        {
+            IReadOnlyDictionary<Guid, ReferencedOrganizations> result = recordIds.Distinct().ToDictionary(
+                id => id,
+                id => UnreadableOrgReferences.Contains(id)
+                    ? ReferencedOrganizations.Unresolved
+                    : ReferencedOrgs.TryGetValue(id, out var orgs)
+                        ? new ReferencedOrganizations(orgs, Unreadable: false)
+                        : ReferencedOrganizations.None);
+            return Task.FromResult(result);
+        }
     }
 
     /// <summary>
@@ -1015,5 +1437,18 @@ public class AccessibleRecordSetServiceTests
                 recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.Unreadable);
             return Task.FromResult(result);
         }
+
+        // Task 039: this double exists to isolate the FLAG-read fault path (NFR-01) — it must NOT also
+        // fault the deny-veto resolution, or ComposeAsync_WhenFlagReadFaults_SystemUserMembershipStillSurvives
+        // would see its systemuser membership force-denied by ResolveDenyVetoAsync's own catch-all,
+        // for a reason unrelated to what this double is testing. Benign, non-throwing defaults keep the
+        // fault surface exactly where this class's name says it is.
+        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
+        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
+                recordIds.Distinct().ToDictionary(id => id, _ => ReferencedOrganizations.None));
     }
 }

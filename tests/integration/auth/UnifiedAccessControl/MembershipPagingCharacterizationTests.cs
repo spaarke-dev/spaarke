@@ -617,10 +617,13 @@ public class MembershipPagingCharacterizationTests
             .Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(standingGrant);
 
+        // Task 039: this file characterizes MEMBERSHIP PAGING — an inert deny-list double keeps that
+        // scope, rather than letting the deny-veto's own subject/org resolution enter the picture.
         return new AccessibleRecordSetService(
             membership,
             new NoGrantsParticipationService(),
             standing.Object,
+            NeverDeniesReader(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 
@@ -680,6 +683,17 @@ public class MembershipPagingCharacterizationTests
 
         public override Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)
             => Task.FromResult<Guid?>(null);
+
+        // Task 039: same reasoning as the RootRecordFlags override above — without these, the base
+        // implementations throw on `credential: null!`, and the deny-veto resolution would fail closed
+        // (deny everything), which is out of scope for a suite characterizing membership PAGING.
+        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
+        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
+                recordIds.Distinct().ToDictionary(id => id, _ => ReferencedOrganizations.None));
     }
 
     /// <summary>

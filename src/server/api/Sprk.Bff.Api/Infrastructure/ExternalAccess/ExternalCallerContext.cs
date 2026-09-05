@@ -153,6 +153,41 @@ public readonly record struct RootRecordFlags(bool IsSecure, bool IsRestricted)
 }
 
 /// <summary>
+/// The organizations ONE record references, via any org-typed lookup (task 039 · FR-23) — the record
+/// side of the deny-list's ethical-wall match.
+/// </summary>
+/// <param name="OrganizationIds">
+/// Every organization the record references, from EVERY org-typed lookup — deliberately not narrowed
+/// to task 041's access-conferring registry (denial over-matches on purpose; register B-10). Empty when
+/// a SUCCESSFUL read found no populated org lookup on the row.
+/// </param>
+/// <param name="Unreadable">
+/// <c>true</c> when this record's own org-reference read could not be completed (fault, non-success
+/// status, or an id the query did not return at all). The fail-closed direction for THIS read is toward
+/// denial, not toward "references nothing" — see <see cref="Unresolved"/>.
+/// </param>
+/// <remarks>
+/// Unlike <see cref="RootRecordFlags"/>, there is no single "worst case" combination of the two vetoes
+/// to fold an unreadable row into — an org id set has no analogous most-restrictive value. So this type
+/// carries the unreadable signal as its OWN field rather than encoding it into
+/// <see cref="OrganizationIds"/> (e.g. via a sentinel guid), which would be silently defeated by any
+/// downstream code that copies or re-wraps the collection.
+/// </remarks>
+public readonly record struct ReferencedOrganizations(IReadOnlyCollection<Guid> OrganizationIds, bool Unreadable)
+{
+    /// <summary>
+    /// What an unreadable or unreturned record resolves to (spec NFR-01 applied to this read). The
+    /// caller (task 039's deny-veto wiring) treats this as a forced deny of the record, independent of
+    /// what the deny-list reader itself would say — see
+    /// <c>AccessibleRecordSetService.ResolveDenyVetoAsync</c>.
+    /// </summary>
+    public static ReferencedOrganizations Unresolved => new(Array.Empty<Guid>(), Unreadable: true);
+
+    /// <summary>No organization reference. Only ever produced by a SUCCESSFUL read of a row with no populated org lookup.</summary>
+    public static ReferencedOrganizations None => new(Array.Empty<Guid>(), Unreadable: false);
+}
+
+/// <summary>
 /// The ONE <see cref="ExternalAccessLevel"/> → <see cref="AccessRights"/> mapping (task 032; root
 /// CLAUDE.md §11 — reuse, do not fork).
 /// </summary>

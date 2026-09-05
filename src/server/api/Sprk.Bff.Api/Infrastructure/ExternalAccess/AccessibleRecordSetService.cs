@@ -297,12 +297,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <summary>
-    /// The ordered veto pipeline seam (ADR-003 as amended by task 030 — design §4.5).
-    /// <para>
-    /// WIRED AS A NO-OP HERE, deliberately. Task 032 establishes the SHAPE and the ORDER; the terms that
-    /// fill these slots arrive later — Secure suppression (task 037), deny list (038/039), Restricted
-    /// (037). Reading flags or deny rows in this task is explicitly outside its envelope.
-    /// </para>
+    /// The ordered veto pipeline (ADR-003 as amended by task 030 — design §4.5): deny-list (task 039 /
+    /// FR-23), then Restricted (task 037 / FR-21). Secure suppression (task 037 / FR-22) happens
+    /// EARLIER, on the additive TERMS before they are accumulated into <paramref name="composed"/> —
+    /// it is not a slot in this method at all; see the <c>isSecure</c> parameter of
+    /// <see cref="GrantedRightsFor(ExternalGrantSet, string, Func{Guid, bool})"/>.
     /// <para>
     /// The order is load-bearing and is asserted by the shape of this method rather than by a comment
     /// elsewhere:
@@ -310,9 +309,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <list type="number">
     /// <item><b>Pre-max suppression (Secure)</b> — must run BEFORE the max, on the TERMS. After the max
     /// the suppressed term has already won and the suppression is a no-op on the only inputs that
-    /// mattered.</item>
-    /// <item><b>Deny list</b> — post-max; removes the entry.</item>
-    /// <item><b>Restricted</b> — post-max, after the deny list; removes the entry.</item>
+    /// mattered. (Not in this method — see above.)</item>
+    /// <item><b>Deny list</b> — post-max, FIRST among the vetoes below; removes the entry.</item>
+    /// <item><b>Restricted</b> — post-max, after the deny list; removes the entry (or keeps a
+    /// non-contact-sourced survivor).</item>
     /// </list>
     /// <para>
     /// A veto REMOVES a key. It never writes a value, and there is no <c>AccessRights</c> value in this
@@ -320,6 +320,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </para>
     /// </summary>
     /// <param name="composed">The post-max map, mutated in place.</param>
+    /// <param name="deniedRecordIds">
+    /// The FR-23 deny-list veto set for this composition (task 039) — every candidate record id the
+    /// principal is denied on, whether by a direct per-record entry or by referencing an organization
+    /// the principal (or their active organization membership) is denied against. Computed by the
+    /// caller (<see cref="ResolveDenyVetoAsync"/>) BEFORE this method runs, from the SAME candidate id
+    /// list used for the flag read below — never derived from <paramref name="composed"/>'s current
+    /// keys, so it is unaffected by whatever the Restricted slot does.
+    /// </param>
     /// <param name="flags">Veto flags for every candidate record (fail-closed for unreadable ones).</param>
     /// <param name="survivesRestricted">
     /// The rights that are NOT contact-sourced and therefore survive the Restricted veto — the systemuser
@@ -327,13 +335,26 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </param>
     private static void ApplyVetoPipeline(
         Dictionary<Guid, AccessRights> composed,
+        IReadOnlySet<Guid> deniedRecordIds,
         IReadOnlyDictionary<Guid, RootRecordFlags> flags,
         IReadOnlyDictionary<Guid, AccessRights> survivesRestricted)
     {
-        // Slot 1 — deny list (ethical wall + per-child revocation). Task 038/039.
-        //   foreach (var id in denyList) composed.Remove(id);
-        // Still a no-op. It runs FIRST by construction: a record removed here is gone before Restricted
-        // looks at it, so a deny can never be "downgraded" into a survivable Restricted outcome.
+        // Slot 1 — deny list (ethical wall + per-child revocation). Task 039 / FR-23.
+        //
+        // Runs FIRST, by construction: a record removed here is gone before Restricted's loop below
+        // even considers it, so a deny can never be "downgraded" into a survivable Restricted outcome —
+        // and, combined with running after the additive max above (in both composers), a Full Access
+        // grant plus a matching deny entry can never be resurrected: max() has already run, and nothing
+        // after this point can add a key back.
+        //
+        // The veto REMOVES the key. It does not write None. IsOperationPermittedAsync explicitly
+        // rejects AccessRights.None as a CALLER BUG (task 033), so a None written here would be refused
+        // as a malformed request rather than honoured as a denial — absence is the only representation
+        // of no access.
+        foreach (var recordId in deniedRecordIds)
+        {
+            composed.Remove(recordId);
+        }
 
         // Slot 2 — Restricted (sprk_accesspermission == Restricted). Task 037 / FR-21.
         //
@@ -361,6 +382,130 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             {
                 composed.Remove(recordId);
             }
+        }
+    }
+
+    /// <summary>Shared "nothing to evaluate / nothing denied" result for <see cref="ResolveDenyVetoAsync"/>.</summary>
+    private static readonly IReadOnlySet<Guid> EmptyDeniedSet = new HashSet<Guid>();
+
+    /// <summary>
+    /// Resolves the FR-23 deny-list veto set for one composition (task 039). Builds each candidate's
+    /// referenced organizations (the org-typed lookups enumerated in
+    /// projects/unified-access-control-r2/notes/task-039-org-reference-inventory.md — today
+    /// <c>sprk_assignedlawfirm1</c>/<c>2</c> on all three roots), resolves the SUBJECT's own active
+    /// organization membership, and queries <see cref="INoAccessListReader"/>. Shared by both principal
+    /// planes so this resolution logic exists in exactly one place.
+    /// </summary>
+    /// <param name="entityType">The root entity type being composed.</param>
+    /// <param name="candidateIds">
+    /// The SAME candidate id list already built for the flag read (task 037) — never rebuilt here, per
+    /// the task's own notes.
+    /// </param>
+    /// <param name="subjectContactId">
+    /// The contact identity to check as a DIRECT subject (contact×org / contact×record deny rows) — the
+    /// SAME resolved contact used for the contact-grant term, so "who is checked against the wall"
+    /// never diverges from "whose grants applied". Null (or <see cref="Guid.Empty"/>) when no contact
+    /// identity is available for this principal on this entity type — the deny list is keyed on
+    /// contact/organization identities only (spec FR-23), and organization membership is itself read
+    /// FROM the contact, so a principal with no contact identity has no deny-list-relevant subject on
+    /// EITHER axis. The deny-list reader is never even queried in that case.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Denial deliberately OVER-matches (spec FR-23 / register B-10).</b> The record-side
+    /// organization match uses EVERY organization the record references — it is NOT narrowed to task
+    /// 041's access-conferring registry. An organization referenced only via a non-conferring lookup
+    /// (e.g. opposing counsel) still denies if it is named as a deny object.
+    /// </para>
+    /// <para>
+    /// <b>Fails closed toward DENIAL, at every step, by wrapping the whole resolution in one
+    /// try/catch.</b> Three independent fault surfaces all resolve to the SAME outcome — every id in
+    /// <paramref name="candidateIds"/> denied:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>The deny-list reader itself already fails closed (task 038), returning a deny-all-queried
+    /// result with <see cref="NoAccessListResult.FailedClosed"/> set rather than throwing. That result
+    /// flows straight through — its denied ids are unioned into the return value.</item>
+    /// <item>A record whose OWN referenced-organizations could not be resolved
+    /// (<see cref="ReferencedOrganizations.Unreadable"/>) is denied DIRECTLY, independent of whatever
+    /// the reader would say — it is never even added to the candidate batch sent to the reader.
+    /// Silently treating an unreadable record as "references nothing" would let it slip past a real
+    /// deny entry keyed on an organization it actually references but which the read could not
+    /// confirm — exactly the "skipped record is an unevaluated wall" case this task's escalation
+    /// trigger names.</item>
+    /// <item>Any OTHER unexpected fault (including a fault resolving the SUBJECT's own active
+    /// organization membership — <see cref="ExternalParticipationService.QueryActiveOrgIdsAsync(Guid, CancellationToken)"/>)
+    /// is caught here and denies every queried candidate, mirroring <see cref="NoAccessListReader"/>'s
+    /// own over-large-subject-set fail-closed precedent: a subject that cannot be safely evaluated is
+    /// treated the same as a subject the reader could not evaluate.</item>
+    /// </list>
+    /// <para>
+    /// In every case the veto is never SKIPPED — a fault denies, it never causes the pipeline to
+    /// proceed as though nothing needed checking (spec NFR-01).
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlySet<Guid>> ResolveDenyVetoAsync(
+        string entityType,
+        IReadOnlyCollection<Guid> candidateIds,
+        Guid? subjectContactId,
+        CancellationToken ct)
+    {
+        if (candidateIds.Count == 0)
+        {
+            return EmptyDeniedSet;
+        }
+
+        var hasContactSubject = subjectContactId is { } cid && cid != Guid.Empty;
+        if (!hasContactSubject)
+        {
+            return EmptyDeniedSet;
+        }
+
+        try
+        {
+            var subjectOrgIds = await _participations
+                .QueryActiveOrgIdsAsync(subjectContactId!.Value, ct).ConfigureAwait(false);
+
+            var referencedOrgs = await _participations
+                .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
+
+            var forcedDeny = new HashSet<Guid>();
+            var candidateRecords = new List<NoAccessCandidateRecord>(candidateIds.Count);
+            foreach (var recordId in candidateIds)
+            {
+                if (referencedOrgs.TryGetValue(recordId, out var refs) && refs.Unreadable)
+                {
+                    forcedDeny.Add(recordId);
+                    continue;
+                }
+
+                var orgIds = referencedOrgs.TryGetValue(recordId, out var resolved)
+                    ? resolved.OrganizationIds
+                    : Array.Empty<Guid>();
+                candidateRecords.Add(new NoAccessCandidateRecord(entityType, recordId, orgIds));
+            }
+
+            if (candidateRecords.Count > 0)
+            {
+                var result = await _noAccessList
+                    .GetDeniedRecordsAsync(subjectContactId, subjectOrgIds, candidateRecords, ct)
+                    .ConfigureAwait(false);
+                forcedDeny.UnionWith(result.DeniedRecordIds);
+            }
+
+            return forcedDeny;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[WF-AUTHZ] Deny-veto resolution FAILED for {EntityType} ({Count} candidates). Failing " +
+                "CLOSED — denying every queried candidate; the veto is never skipped (NFR-01).",
+                entityType, candidateIds.Count);
+            return candidateIds.ToHashSet();
         }
     }
 
@@ -395,21 +540,25 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly IMembershipResolverService _membership;
     private readonly ExternalParticipationService _participations;
     private readonly IContactStandingGrantReader _standingGrant;
+    private readonly INoAccessListReader _noAccessList;
     private readonly ILogger<AccessibleRecordSetService> _logger;
 
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
         IContactStandingGrantReader standingGrant,
+        INoAccessListReader noAccessList,
         ILogger<AccessibleRecordSetService> logger)
     {
         ArgumentNullException.ThrowIfNull(membership);
         ArgumentNullException.ThrowIfNull(participations);
         ArgumentNullException.ThrowIfNull(standingGrant);
+        ArgumentNullException.ThrowIfNull(noAccessList);
         ArgumentNullException.ThrowIfNull(logger);
         _membership = membership;
         _participations = participations;
         _standingGrant = standingGrant;
+        _noAccessList = noAccessList;
         _logger = logger;
     }
 
@@ -659,9 +808,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // verified-email match when the systemuser has no linked contact.
         var contactGrantsApplied = false;
         ExternalGrantSet? grants = null;
+        // Hoisted out of the `if` below (task 039) so the SAME resolved contact identity that fed the
+        // grant term also feeds the deny-veto subject — "who is checked against the wall" must never
+        // diverge from "whose grants applied".
+        Guid? grantContactId = null;
         if (IsGrantSupported(entityType))
         {
-            Guid? grantContactId =
+            grantContactId =
                 principal.ContactId is { } cid && cid != Guid.Empty ? cid : null;
 
             if (grantContactId is null && !string.IsNullOrWhiteSpace(principal.Email))
@@ -706,10 +859,16 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             AccumulateTerm(composed, GrantedRightsFor(grants, entityType, IsSecure));
         }
 
-        // ── VETOES, after the max, in order: deny-list (038/039) → Restricted (this task) ──────────
-        // The membership term is what survives Restricted on this plane.
+        // ── VETOES, after the max, in order: deny-list (task 039) → Restricted (task 037) ──────────
+        // Deny-veto subject = this principal's OWN resolved contact identity (the SAME one the grant
+        // term used above) + that contact's active organizations (task 039 / FR-23). The membership
+        // term is what survives Restricted on this plane.
+        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, grantContactId, ct)
+            .ConfigureAwait(false);
+
         ApplyVetoPipeline(
             composed,
+            deniedIds,
             flags,
             membershipTerm.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
 
@@ -801,10 +960,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                     .Select(id => KeyValuePair.Create(id, MembershipTermRights)));
         }
 
-        // ── VETOES, after the max, in order: deny-list (038/039) → Restricted (this task) ──────────
+        // ── VETOES, after the max, in order: deny-list (task 039) → Restricted (task 037) ──────────
+        // Deny-veto subject = this contact's OWN id + its active organizations (task 039 / FR-23).
         // NOTHING survives Restricted on this plane: a contact principal's every term is contact-sourced,
         // which is precisely FR-21's "denies ALL contact principals regardless of grant source".
-        ApplyVetoPipeline(composed, flags, EmptyRights);
+        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, ct)
+            .ConfigureAwait(false);
+
+        ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +

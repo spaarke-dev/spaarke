@@ -611,6 +611,190 @@ public class ExternalParticipationService
         }
     }
 
+    // ── Referenced-organization resolution (task 039 · FR-23) ────────────────────────────────────
+
+    /// <summary>
+    /// Org-typed lookup columns per root entity — the record side of the FR-23 deny-list's ethical-wall
+    /// match. Enumerated from LIVE metadata (task 039 step 1, spaarkedev1, 2026-09-04) and recorded in
+    /// projects/unified-access-control-r2/notes/task-039-org-reference-inventory.md.
+    /// </summary>
+    /// <remarks>
+    /// All three roots are uniform TODAY (both carry exactly <c>sprk_assignedlawfirm1</c> +
+    /// <c>sprk_assignedlawfirm2</c> → <c>sprk_organization</c>) — but per the inventory notes this must
+    /// NOT be assumed forward. A future root (e.g. <c>sprk_servicerequest</c>) needs its own VERIFIED
+    /// entry here, never an inferred one.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> OrganizationLookupAttributes =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_project"] = new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" },
+            ["sprk_matter"] = new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" },
+            ["sprk_workassignment"] = new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" },
+        };
+
+    /// <summary>
+    /// The <c>$select</c> fragment for a batch of org-typed lookups — <c>_{attribute}_value</c> per
+    /// column. Extracted as a PURE member (task 007 / A-5 precedent) so the over-match property (every
+    /// registered lookup is selected unconditionally — no narrowing to a conferring subset) is directly
+    /// assertable without an HTTP stack.
+    /// </summary>
+    internal static string BuildOrganizationReferenceSelect(IReadOnlyCollection<string> orgAttributes)
+        => string.Join(",", orgAttributes.Select(a => $"_{a}_value"));
+
+    /// <summary>
+    /// Resolves EVERY organization each candidate record references (task 039 / FR-23) — deliberately
+    /// ANY org-typed lookup, not narrowed to task 041's access-conferring registry (denial over-matches
+    /// on purpose; register B-10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="GetRootRecordFlagsAsync"/>'s batched-read shape (same
+    /// <see cref="FlagQueryChunkSize"/>, same per-root-entity-type source lookup) but answers a
+    /// DIFFERENT question — WHICH organizations a record references, not whether it is
+    /// secure/restricted — so it is a separate method rather than a widened <see cref="RootRecordFlags"/>
+    /// read: conflating the two would give one method two unrelated reasons to change.
+    /// </para>
+    /// <para>
+    /// <b>Fail-closed toward UNRESOLVED — the worst case for THIS read, mirroring
+    /// <see cref="GetRootRecordFlagsAsync"/>'s Unreadable contract.</b> A record whose org-reference
+    /// read faults must not silently resolve to "references no organizations": the caller (task 039's
+    /// veto wiring) would then have no way to know it missed a possible ethical-wall match — exactly
+    /// the "skipped record is an unevaluated wall" case this task's escalation trigger names. Every id
+    /// in a faulted chunk comes back with <see cref="ReferencedOrganizations.Unresolved"/>
+    /// (<c>Unreadable = true</c>); the caller treats that as a forced deny, independent of whatever the
+    /// deny-list reader itself would say.
+    /// </para>
+    /// <para>
+    /// An entity type with NO org-typed lookups returns a totally EMPTY map — a static SCHEMA fact, not
+    /// a failed read, mirroring <see cref="GetRootRecordFlagsAsync"/>'s "not a flag-bearing type"
+    /// branch. Callers must not confuse absence-because-no-columns with Unreadable; the two are only
+    /// comparable once the entity type is known to be org-bearing (i.e. once ANY id is present in the
+    /// returned map).
+    /// </para>
+    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        if (recordIds is null || recordIds.Count == 0)
+        {
+            return new Dictionary<Guid, ReferencedOrganizations>();
+        }
+
+        if (!RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source) ||
+            !OrganizationLookupAttributes.TryGetValue(entityType ?? string.Empty, out var orgAttributes) ||
+            orgAttributes.Count == 0)
+        {
+            // Not an org-bearing root type. No organization reference is possible — a static schema
+            // fact, not a failed read (see remarks).
+            return new Dictionary<Guid, ReferencedOrganizations>();
+        }
+
+        var distinct = recordIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinct.Count == 0)
+        {
+            return new Dictionary<Guid, ReferencedOrganizations>();
+        }
+
+        var result = new Dictionary<Guid, ReferencedOrganizations>();
+        var selectClause = BuildOrganizationReferenceSelect(orgAttributes);
+
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            var apiUrl = GetDataverseApiUrl();
+
+            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            {
+                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
+                var query = $"{apiUrl}/{source.Collection}" +
+                            $"?$filter=({idFilter})" +
+                            $"&$select={source.IdAttribute},{selectClause}";
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, query);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                request.Headers.Add("OData-MaxVersion", "4.0");
+                request.Headers.Add("OData-Version", "4.0");
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                var response = await _httpClient.SendAsync(request, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError(
+                        "[EXT-ACCESS] Org-reference query FAILED for {EntityType} ({Count} ids): {Status}. "
+                        + "Failing CLOSED — every id in this chunk is UNRESOLVED; task 039's caller denies them.",
+                        entityType, chunk.Count, response.StatusCode);
+                    foreach (var id in chunk)
+                    {
+                        result[id] = ReferencedOrganizations.Unresolved;
+                    }
+                    continue;
+                }
+
+                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(ct);
+                var byId = (payload?.Value ?? new List<OrganizationReferenceRow>())
+                    .GroupBy(r => r.GetId(source.IdAttribute))
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                foreach (var id in chunk)
+                {
+                    result[id] = byId.TryGetValue(id, out var row)
+                        ? new ReferencedOrganizations(row.ReferencedOrganizationIds(), Unreadable: false)
+                        // Asked about, not returned. Cannot be distinguished from an unreadable row.
+                        : ReferencedOrganizations.Unresolved;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS] Org-reference query threw for {EntityType}. Failing CLOSED — all {Count} "
+                + "ids are UNRESOLVED; task 039's caller denies them.", entityType, distinct.Count);
+            foreach (var id in distinct)
+            {
+                result[id] = ReferencedOrganizations.Unresolved;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Projection of the org-typed lookup columns (task 039). Ids arrive as strings over OData.</summary>
+    private sealed class OrganizationReferenceRow
+    {
+        public string? sprk_projectid { get; set; }
+        public string? sprk_matterid { get; set; }
+        public string? sprk_workassignmentid { get; set; }
+
+        [JsonPropertyName("_sprk_assignedlawfirm1_value")]
+        public Guid? sprk_assignedlawfirm1 { get; set; }
+
+        [JsonPropertyName("_sprk_assignedlawfirm2_value")]
+        public Guid? sprk_assignedlawfirm2 { get; set; }
+
+        public Guid GetId(string idAttribute)
+        {
+            var raw = idAttribute switch
+            {
+                "sprk_projectid" => sprk_projectid,
+                "sprk_matterid" => sprk_matterid,
+                "sprk_workassignmentid" => sprk_workassignmentid,
+                _ => null,
+            };
+            return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
+        }
+
+        /// <summary>Every populated org-lookup slot on this row, in declaration order (task 039 over-match: both slots, unconditionally).</summary>
+        public IReadOnlyCollection<Guid> ReferencedOrganizationIds()
+        {
+            var ids = new List<Guid>(2);
+            if (sprk_assignedlawfirm1 is { } id1) ids.Add(id1);
+            if (sprk_assignedlawfirm2 is { } id2) ids.Add(id2);
+            return ids;
+        }
+    }
+
     private async Task<ExternalGrantSet> QueryGrantSetAsync(Guid contactId, CancellationToken ct)
     {
         try
@@ -839,6 +1023,32 @@ public class ExternalParticipationService
             _logger.LogError(ex, "[EXT-ACCESS] Error querying org grants for Contact {ContactId}", contactId);
             return new List<ExternalAccessRow>();
         }
+    }
+
+    /// <summary>
+    /// Public entry point onto the private <see cref="QueryActiveOrgIdsAsync(Guid, string, string, CancellationToken)"/>
+    /// overload below, for the task 039 deny-list veto: the principal's own active organization
+    /// memberships are one of the two SUBJECT identities <see cref="INoAccessListReader"/> checks
+    /// (contact + organization). REUSED, not duplicated — resolves its own token/API-url so the caller
+    /// does not need this service's internal Dataverse plumbing.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to the SAME private query <see cref="QueryOrganizationGrantRowsAsync"/> already uses,
+    /// whose own internal try/catch fails toward an EMPTY org list on a query-level fault (correct for
+    /// that ADDITIVE caller — a fault there must not GRANT more access). Token/API-url acquisition here
+    /// is deliberately NOT separately guarded: if it throws, the exception propagates to
+    /// <c>AccessibleRecordSetService.ResolveDenyVetoAsync</c>, whose own catch-all denies every queried
+    /// candidate on ANY fault in the deny-veto resolution — the correct fail direction for a VETO
+    /// subject (unlike the additive org-grant caller above). A token-acquisition fault and a
+    /// query-level fault therefore resolve toward OPPOSITE defaults; both are deliberate for their
+    /// respective callers, not an inconsistency to "fix" by unifying them.
+    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+    {
+        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
+        var apiUrl = GetDataverseApiUrl();
+        return await QueryActiveOrgIdsAsync(contactId, token, apiUrl, ct).ConfigureAwait(false);
     }
 
     /// <summary>

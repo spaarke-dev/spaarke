@@ -72,8 +72,11 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         // ── production slice: real reader + real composer over the real compose surface ───────────
         var reader = new ContactStandingGrantReader(dataverse.Object, NullLogger<ContactStandingGrantReader>.Instance);
         var participations = new FakeParticipationService(new[] { GrantedProject });
+        // Task 039: the deny-list reader is an external boundary this seam does not exercise — an
+        // inert double keeps the seam's assertions about standing-grant union/revocation, not denial.
         var sut = new AccessibleRecordSetService(
-            membership.Object, participations, reader, NullLogger<AccessibleRecordSetService>.Instance);
+            membership.Object, participations, reader, NeverDeniesReader(),
+            NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();
 
@@ -203,6 +206,17 @@ public sealed class StandingGrantRuntimeUnionSeamTests
 
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_grantSet);
+
+        // Task 039: same reasoning as the RootRecordFlags override above — without these, the base
+        // implementations throw on `credential: null!`, and AccessibleRecordSetService's deny-veto
+        // resolution would fail closed (deny everything), which this seam is not testing.
+        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
+        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
+                recordIds.Distinct().ToDictionary(id => id, _ => ReferencedOrganizations.None));
     }
 
     private sealed class NoopHttpContextAccessor : Microsoft.AspNetCore.Http.IHttpContextAccessor
