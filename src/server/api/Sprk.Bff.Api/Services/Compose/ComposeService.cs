@@ -93,15 +93,12 @@ public class ComposeService : IComposeService
     // SAME closed set AttachmentDocumentAssociationRung follows, type-agnostic by design). A
     // PDF-sourced create-on-save copies every non-empty lookup from the source PDF's record onto the
     // new Word document's record so the two file side-by-side under the same matter/project/….
+    // 2026-09-04: this list USED to be a second hard-coded copy of the sprk_document link vocabulary,
+    // and it had drifted to 6 of the table's 17 link columns — so a PDF filed under an Agreement (or
+    // Service Request / To Do / Event / Contact / Organization / Vendor Org) produced a Word document
+    // that silently lost that filing. The vocabulary now lives in ONE place.
     internal static readonly string[] DocumentAssociationLookupAttributes =
-    {
-        "sprk_matter",
-        "sprk_relatedmatter",
-        "sprk_project",
-        "sprk_relatedproject",
-        "sprk_invoice",
-        "sprk_workassignment",
-    };
+        Documents.DocumentLinkFieldMap.AllAttributes.ToArray();
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).

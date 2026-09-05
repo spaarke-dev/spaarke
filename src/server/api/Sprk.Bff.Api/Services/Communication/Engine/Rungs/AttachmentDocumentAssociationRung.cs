@@ -68,15 +68,17 @@ public sealed class AttachmentDocumentAssociationRung : IAssociationRung
     /// surfaces as a dismissible SUGGESTION, not a filed association — without hard-coding invoices out.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// 2026-09-04: this was a second hard-coded copy of the <c>sprk_document</c> link vocabulary and had
+    /// drifted to 6 of the table's 17 link columns. It now reads the single source of truth,
+    /// <see cref="Sprk.Bff.Api.Services.Documents.DocumentLinkFieldMap"/>, whose
+    /// <c>AssociationCandidateFields</c> states this rung's exclusions explicitly instead of leaving them
+    /// as silent omissions.
+    /// </remarks>
     private static readonly IReadOnlyList<(string DocumentField, string TargetEntity)> DocumentLinkFields =
-    [
-        ("sprk_matter", "sprk_matter"),
-        ("sprk_relatedmatter", "sprk_matter"),
-        ("sprk_project", "sprk_project"),
-        ("sprk_relatedproject", "sprk_project"),
-        ("sprk_invoice", "sprk_invoice"),
-        ("sprk_workassignment", "sprk_workassignment"),
-    ];
+        Sprk.Bff.Api.Services.Documents.DocumentLinkFieldMap.AssociationCandidateFields
+            .Select(f => (f.Attribute, f.TargetEntity))
+            .ToArray();
 
     public AttachmentDocumentAssociationRung(
         IGenericEntityService entityService,

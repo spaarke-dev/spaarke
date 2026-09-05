@@ -257,15 +257,18 @@ internal sealed class ComposeCreateOnSavePromoter
                 var inherited = 0;
                 if (sourceEntity is not null)
                 {
-                    foreach (var lookup in ComposeService.DocumentAssociationLookupAttributes)
+                    // Column for column, deliberately — including the legacy unprefixed lookups. A subgrid
+                    // binds to ONE relationship, so re-filing the copy under a different column than the
+                    // source would stop the two appearing together, which is the whole point.
+                    var links = Documents.DocumentLinkFieldMap.ProjectForCopy(field =>
                     {
-                        var reference = sourceEntity.GetAttributeValue<EntityReference>(lookup);
-                        if (reference is null || reference.Id == Guid.Empty)
-                        {
-                            continue;
-                        }
+                        var reference = sourceEntity.GetAttributeValue<EntityReference>(field.Attribute);
+                        return reference is null || reference.Id == Guid.Empty ? null : reference;
+                    });
 
-                        entity[lookup] = new EntityReference(reference.LogicalName, reference.Id);
+                    foreach (var (attribute, reference) in links)
+                    {
+                        entity[attribute] = new EntityReference(reference.LogicalName, reference.Id);
                         inherited++;
                     }
                 }

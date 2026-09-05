@@ -429,9 +429,17 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         createdEntity.GetAttributeValue<EntityReference>("sprk_project")!.Id.Should().Be(projectId);
         createdEntity.Contains("sprk_invoice").Should().BeFalse(
             "lookups the source does not carry are NOT invented on the new record");
+        // 2026-09-04: this previously pinned SIX columns as "the ADR-024 document link vocabulary". That
+        // was the defect written down as an assertion — the live table carries 17, so the inheritance
+        // silently dropped ten link types and a PDF filed under an Agreement produced an unfiled Word doc.
+        // It now asserts the endpoint reads THE MAP; the map itself is pinned against the live schema by
+        // DocumentLinkFieldMapTests, so this stays honest without re-listing the columns in a second place.
         retrievedColumns.Should().BeEquivalentTo(
-            new[] { "sprk_matter", "sprk_relatedmatter", "sprk_project", "sprk_relatedproject", "sprk_invoice", "sprk_workassignment" },
-            "the inheritance reads exactly the ADR-024 document link vocabulary");
+            Sprk.Bff.Api.Services.Documents.DocumentLinkFieldMap.AllAttributes,
+            "the inheritance reads the whole sprk_document link vocabulary, not a subset of it");
+        retrievedColumns.Should().Contain(
+            "sprk_relatedagreement",
+            "the Agreement link was one of the ten the old hard-coded list missed");
     }
 
     // Task 041 B-MED-3: link-inheritance is BEST-EFFORT — a failed source read must not fail the save.
