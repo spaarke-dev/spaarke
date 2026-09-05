@@ -173,3 +173,4 @@ Six discovery findings modify spec assumptions. Full detail in [`../plan.md`](..
 | **F-d** | FR-11's `ExistingDocumentId` hook is inert on both sides | 023, 024 |
 | **F-e** | FR-04 as written would regress the `.docx` save | 010 |
 | **F-f** | `POST /api/office/save` has zero executing contract coverage | 016 |
+| **F-g** | `sprk_event` does not exist on `sprk_document` (only `sprk_relatedevent`), yet shipped code authorizes and writes it — the coordination doc's "mappable set" is wrong on `event`, `todo` and `contact` | 026, 035 (premise corrected) · **fix owned by UAC-r2** |

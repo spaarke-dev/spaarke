@@ -131,6 +131,18 @@ Discovery verified six spec assumptions as false or mis-sized. Full detail in [`
 | **F-d** | FR-11's `ExistingDocumentId` hook is inert on both sides | 023, 024 |
 | **F-e** | FR-04 as written would regress the `.docx` save; `HostAdapterFactory` is dead | 010 |
 | **F-f** | `POST /api/office/save` has zero executing contract coverage | 016 |
+| **F-g** | `sprk_event` is absent from `sprk_document` yet shipped code authorizes + writes it | 026, 035 · fix owned by UAC-r2 |
+
+### 🔴 `sprk_document` association slots — read this before touching any association code
+
+Verified live 2026-09-04 (MCP + maker-portal Columns view). **Two families, sixteen lookups:**
+
+- **Direct (4)** — `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`. **There is no `sprk_event`.**
+- **Related (12)** — `sprk_relatedagreement`, `sprk_relatedcommunication`, `sprk_relatedcontact`, `sprk_relatedevent`, `sprk_relatedinvoice`, `sprk_relatedmatter`, `sprk_relatedorganization`, `sprk_relatedproject`, `sprk_relatedservicerequest`, `sprk_relatedtodo`, `sprk_relatedvendororg`, `sprk_relatedworkassignment`.
+
+The Office save path writes **only the direct family**, so a card reading only `sprk_related*` is empty on every document the add-in created. Read `sprk_relatedevent` for Event — `sprk_event` will throw.
+
+**Do not trust these three claims**, all of which appear in shipped code comments and in [`coordination-document-association-map-from-email-r2-2026-09-04.md`](coordination-document-association-map-from-email-r2-2026-09-04.md) §3/§4.1 and are false against live schema: that a direct `sprk_event` column exists; that `sprk_todo` is "unmappable / needs a schema change first" (`sprk_relatedtodo` exists); that there is no contact lookup (`sprk_relatedcontact` exists). Only "no `account` lookup" is correct. See that doc's §0 correction.
 
 ---
 
