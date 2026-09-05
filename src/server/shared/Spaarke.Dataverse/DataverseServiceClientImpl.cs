@@ -908,12 +908,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_project"] = new EntityReference("sprk_project", request.ProjectLookup.Value);
         if (request.InvoiceLookup.HasValue)
             document["sprk_invoice"] = new EntityReference("sprk_invoice", request.InvoiceLookup.Value);
-        // Columns verified present on sprk_document against live Dataverse metadata 2026-09-03; they
-        // predate this code, which is why a save filed to one produced no error AND no association.
+        // ⚠️ The ATTRIBUTE name and the TARGET entity name are not the same thing, and sprk_document
+        // does not name them alike. The dictionary KEY is the lookup column; the EntityReference's
+        // first argument is the table it points AT. For events those differ.
+        //
+        // Corrected 2026-09-04 (unified-access-control-r2): this block previously read
+        // `document["sprk_event"]`. There is NO `sprk_event` column on sprk_document — the query
+        //     SELECT sprk_event FROM sprk_document
+        // fails with "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_event'".
+        // Setting an unknown attribute does not drop silently on this path; it fails the whole save,
+        // so every document filed to an event was breaking. The only event lookup is
+        // `sprk_relatedevent`, verified by a query that SUCCEEDS.
+        //
+        // The comment this replaces asserted "columns verified present ... against live Dataverse
+        // metadata 2026-09-03" — true for sprk_workassignment, false for the event beside it. It read
+        // as settled verification, which is what stopped anyone re-checking (FAILURE-MODES AP-12).
+        // The verification missed the `sprk_related*` family and so read `sprk_relatedevent` as
+        // evidence that "event" existed in the bare-name family. Re-verify per column, not per family.
         if (request.WorkAssignmentLookup.HasValue)
             document["sprk_workassignment"] = new EntityReference("sprk_workassignment", request.WorkAssignmentLookup.Value);
         if (request.EventLookup.HasValue)
-            document["sprk_event"] = new EntityReference("sprk_event", request.EventLookup.Value);
+            document["sprk_relatedevent"] = new EntityReference("sprk_event", request.EventLookup.Value);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Search Index Tracking Fields (RAG/Semantic Search)
