@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Make enforcement measurable — classification guard census + adr-audit issue body</title>
+    <phase>2a Every ADR is routed, accurate, and measured</phase>
+    <gate>011 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs under tests/** and a CI workflow; TEST-MODIFYING override in CLAUDE.md §8 applies unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Census test following the established pattern plus a workflow issue-body edit; both fully specified by FR-09's closed acceptance set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows/adr-audit.yml, a hot path shared with PR #894 and spaarkeai-compose-r8. Run /conflict-check first; keep it main-session so the collision is visible.</parallel-reason>
+    <deps>011</deps>
+    <tags>testing,arch-test,adr,ci-cd,governance</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make ADR enforcement self-sustaining: add a census asserting every ADR carries a classification so a new unclassified ADR fails the build, extend adr-audit.yml's issue body to report n/49 plus the classification breakdown plus the amendment count, and ensure every arch-test failure message names the CLAUDE.md §6.5 challenge path.</prompt>
+  <role>SPAARKE platform developer. Follow ADR-038 for the census; follow the existing adr-audit.yml idempotent-issue pattern for the workflow edit.</role>
+  <goal>A new ADR added without a classification fails the build; the weekly audit issue carries n/49, the breakdown, and the amendment count; and every arch-test failure message tells the reader how to challenge the rule rather than only that they violated it.</goal>
+
+  <context>
+    <background>spec.md FR-09 (closed set a–c). Classification that is not itself enforced decays the moment someone adds ADR-050 without one — which is the same decay mode the whole project exists to address, reproduced one level up. The §6.5 challenge-path requirement in failure messages matters because an arch test that only says "you violated ADR-N" invites either silent compliance with a possibly-wrong rule or a silent workaround; naming paths A/B/C makes challenging the rule a visible, legitimate option.</background>
+    <relevant-files>
+      <file role="new">tests/Spaarke.ArchTests/AdrClassificationCensusTests.cs</file>
+      <file role="modify">.github/workflows/adr-audit.yml</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/CredentialCensusTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/SourceScan.cs</file>
+      <file role="canonical-reference">.claude/adr/INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Supplies the completed classification + routing in INDEX.md that the census asserts against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope (the census): positive and negative controls required; no DI resolution (ban B3); reuse SourceScan, never fork it.</constraint>
+    <constraint source="spec">Scope (NFR-04): this task MUST NOT create a new workflow. Edit the existing adr-audit.yml issue body only. The one permitted new workflow belongs to FR-12 (task 035).</constraint>
+    <constraint source="spec">Scope (issue body): report n/49 plus the classification breakdown plus the amendment count. Do not add a threshold or a pass/fail gate on any of those numbers — they are reported, not enforced.</constraint>
+    <constraint source="spec">Scope (failure messages): every arch-test failure message across the project names the §6.5 challenge path. Apply to the tests this project adds; where an existing test is edited for another reason, add it there too, but do not sweep all 31 existing tests as part of this task.</constraint>
+    <constraint source="project">Scope (hot path): .github/workflows/ is contended — PR #894 (draft, held for the CI shadow window) and spaarkeai-compose-r8 both declare ci-workflows=Y. Run /conflict-check immediately before starting and again before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR audit automation</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent tracking issue" location=".github/workflows/adr-audit.yml">Updates one rolling issue rather than opening a new one per run. Extend its body; do not change its idempotency mechanism.</pattern>
+      <pattern name="Census test" location="tests/Spaarke.ArchTests/CredentialCensusTests.cs">Assert an enumerated fact with a teaching failure message and paired controls.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Run /conflict-check for .github/workflows/adr-audit.yml.</step>
+    <step order="1">Write AdrClassificationCensusTests: every ADR file has a classification entry in INDEX.md covering the applicable axes.</step>
+    <step order="2">Add the positive control (all 49 currently classified pass) and the negative control (a synthetic unclassified ADR fails).</step>
+    <step order="3">Write the failure message to name the §6.5 challenge path — paths A/B/C are how you say the rule is wrong here.</step>
+    <step order="4">Extend adr-audit.yml's issue body with n/49, the classification breakdown, and the §6.5 amendment count. Preserve its existing idempotent-update behaviour.</step>
+    <step order="5">Add the §6.5 challenge-path line to the failure messages of the arch tests this project has added so far (tasks 002 and this one).</step>
+    <step order="6">Verify empirically: add a synthetic unclassified ADR file, observe the census fail with the expected message, then remove it.</step>
+    <step order="7">Run dotnet build Spaarke.sln and the ArchTests project; confirm green.</step>
+    <step order="8">Update TASK-INDEX.md: set task 013 status to ✅.</step>
+    <step order="9">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If adr-audit.yml has been modified on master since /conflict-check was run, STOP and re-run the check before editing. Two worktrees declare ci-workflows=Y and a silent overwrite of another project's workflow edit is exactly what NFR-06 exists to prevent.</trigger>
+    <trigger>If making the census pass would require relaxing what counts as "classified", STOP and escalate. A census that accepts a partial classification asserts nothing, and loosening the assertion to get green is the failure mode ADR-038's control-pairing rule exists to catch.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/Spaarke.ArchTests/CredentialCensusTests.cs and the SharedPackageCensusTests added by task 002 are the closest neighbors.</existing>
+    <extension>No. Task 002's census asserts a package list; this asserts classification-completeness across ADR records. Different subject and a different failure message, and per-file locality is what makes a census failure legible.</extension>
+    <cost-of-doing-nothing>ADR-050 is added next month without a classification, INDEX.md silently returns to being incomplete, and FR-09a's n/49 becomes a number nobody can trust — reproducing the exact decay this phase just spent 3 tasks reversing.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build and run tests/Spaarke.ArchTests</tool></tools>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/AdrClassificationCensusTests.cs</output>
+    <output type="config">.github/workflows/adr-audit.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the current repository, the classification census passes on all 49 ADRs.</criterion>
+    <criterion testable="true">Given a synthetic ADR file with no classification entry, the census fails.</criterion>
+    <criterion testable="true">Given that failure, the message names the §6.5 challenge path.</criterion>
+    <criterion testable="true">Given adr-audit.yml's issue body, it reports n/49, the classification breakdown, and the amendment count.</criterion>
+    <criterion testable="true">Negative: no new workflow file is created — git diff --stat .github/workflows/ shows modifications only.</criterion>
+    <criterion testable="true">Negative: no threshold or gate is placed on n/49 or any reported count.</criterion>
+    <criterion testable="true">Negative: the census performs no DI resolution and does not fork SourceScan.</criterion>
+    <criterion testable="true">dotnet build Spaarke.sln is green; the ArchTests project passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-09 (closed set a–c). Completes P2a; P2a is independently mergeable here per NFR-01. Task 020 (P2b sizing) reads the routing and the task-012 enforcement block from this phase's output.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

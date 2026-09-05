@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Bound the test obligation up front — name the KEEP category at authoring</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>050 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One directive addition to task-create; no code, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A single specified directive with a named destination.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills/task-create/SKILL.md — main-session only; contended with unified-access-control-r2.</parallel-reason>
+    <deps>050</deps>
+    <tags>skill-directives,testing,governance</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add one directive at task-create: a new test must name its ADR-038 KEEP category. Carry the project's stated test obligation into the FR-21 checklist so /test-diet reconciles against what the project actually promised rather than a general classifier.</prompt>
+  <role>SPAARKE platform developer editing a skill directive. One rule, stated once.</role>
+  <goal>Every new test declares its KEEP category at authoring time, and /test-diet reconciles against the project's stated obligation.</goal>
+
+  <context>
+    <background>spec.md FR-26. /test-diet currently classifies tests at project close using a general build-vs-maintain classifier, which means an ambiguous test gets adjudicated months after the person who knew its purpose moved on. Naming the KEEP category when the test is authored moves that decision to the moment the answer is actually known. It also extends /test-diet's existing contract rather than replacing it — the skill stays read-only and reviewer-actionable.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/test-diet/SKILL.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-038-testing-strategy.md</file>
+      <file role="canonical-reference">scripts/quality/Generate-ReviewChecklist.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">The checklist that carries the project's stated test obligation to /test-diet.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (one directive): a new test names its ADR-038 KEEP category. Do NOT add a broader testing policy — ADR-038 already is that policy.</constraint>
+    <constraint source="spec">Scope (checklist): the project's stated test obligation flows into the FR-21 checklist so /test-diet reconciles against it.</constraint>
+    <constraint source="project">Scope (extend, don't replace): /test-diet keeps its existing contract — read-only, reviewer-actionable, emitting git commands rather than executing them. MUST NOT make it auto-execute.</constraint>
+    <constraint source="project">Scope (the 7 categories): reference ADR-038's KEEP categories rather than restating them, so the two cannot drift.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check before starting and before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Test lifecycle governance</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Run /conflict-check for task-create/SKILL.md.</step>
+    <step order="1">Add the KEEP-category directive to task-create's test-authoring guidance, referencing ADR-038 rather than restating the categories.</step>
+    <step order="2">Ensure the checklist generator carries the project's stated test obligation.</step>
+    <step order="3">Confirm /test-diet can read that obligation and reconcile against it.</step>
+    <step order="4">Verify /test-diet's read-only contract is unchanged.</step>
+    <step order="5">Update TASK-INDEX.md: set task 057 status to ✅.</step>
+    <step order="6">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a test genuinely does not fit any of ADR-038's seven KEEP categories, that is a signal about the test, not a gap in the categories — the correct response is usually not to write it. Escalate under §6.5 rather than adding an eighth category.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/skills/task-create/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given task-create, a task authoring a new test must name its ADR-038 KEEP category.</criterion>
+    <criterion testable="true">Given the directive, it references ADR-038's categories rather than restating them.</criterion>
+    <criterion testable="true">Given a generated checklist, it carries the project's stated test obligation.</criterion>
+    <criterion testable="true">Given /test-diet, it reconciles against that obligation.</criterion>
+    <criterion testable="true">Negative: /test-diet remains read-only and does not auto-execute.</criterion>
+    <criterion testable="true">Negative: no eighth KEEP category was introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-26. Extends the /test-diet contract the spec names as the model for this requirement.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

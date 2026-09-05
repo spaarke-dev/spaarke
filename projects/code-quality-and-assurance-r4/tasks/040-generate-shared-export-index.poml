@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Generate the shared-library export index</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a Class-1 generated artifact that two later requirements (FR-17, FR-18) resolve against. If the index is wrong or incomplete, both silently return "nothing found" — a false negative that looks like a clean result.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Parsing barrel files and emitting a structured index; mechanical with a bounded input set of 15 packages.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/catalogs/shared-export-index.json — sub-agents cannot write to .claude/ paths (root CLAUDE.md §3). The generator script itself is under scripts/, but the artifact it emits is not.</parallel-reason>
+    <deps>none</deps>
+    <tags>scripts,tooling,shared-components,reuse</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Generate an export index from the shared-library barrel files — symbol, kind, package, source path — greppable in one pass. Shared libraries only: not the 940 BFF service files, not the 37 solutions, not the 46 PCF controls.</prompt>
+  <role>SPAARKE platform developer building repository tooling. The scope fence is the design: an index of everything is an index of nothing.</role>
+  <goal>A generated, greppable index of every symbol exported by the 15 shared packages, with nothing hand-authored.</goal>
+
+  <context>
+    <background>spec.md FR-16 (closed set a–e). FR-17's escalation ladder and FR-18's equivalence check both cite a lookup rung that does not exist today, so both currently resolve to guesswork. The scope fence — shared libs only — is what keeps the index useful: the question these mechanisms ask is "does a shared capability for this already exist", and indexing every BFF service would drown that signal while multiplying maintenance cost.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/Generate-ExportIndex.ps1</file>
+      <file role="new">.claude/catalogs/shared-export-index.json</file>
+      <file role="canonical-reference">src/client/shared/</file>
+      <file role="canonical-reference">.claude/adr/ADR-012-shared-components.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent. Task 001's enumeration is a useful cross-check but not required.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (source): generate from the shared-library barrel files. Record symbol, kind, package, and source path for each export.</constraint>
+    <constraint source="spec">Scope (fence): shared libraries ONLY — the 15 packages under src/client/shared/. MUST NOT index BFF services, solutions, or PCF controls.</constraint>
+    <constraint source="spec">Scope (greppability): one pass over the artifact must answer "does a symbol like X exist". A format needing a query engine fails the requirement.</constraint>
+    <constraint source="spec">Scope (Class-1): NOTHING hand-authored. A hand edit means the generator is broken. State that in the artifact's header.</constraint>
+    <constraint source="project">Scope (idempotence): regenerating on an unchanged tree must produce a byte-identical artifact, or task 041's diff check reports permanent phantom drift.</constraint>
+    <constraint source="project">Scope (worktrees): MUST NOT scan sibling worktrees.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Export indexing for reuse discovery</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Inspect several barrel files to understand the export shapes actually present.</step>
+    <step order="1">Enumerate the 15 packages and locate each one's barrel entry point.</step>
+    <step order="2">Parse exports, capturing symbol, kind, package, and source path.</step>
+    <step order="3">Emit the index in a greppable format with a header stating it is generated and must never be hand-edited.</step>
+    <step order="4">Verify idempotence: regenerate twice, confirm byte-identical output.</step>
+    <step order="5">Spot-check coverage against several known exports from different packages, including at least one re-export and one type-only export.</step>
+    <step order="6">Confirm no BFF, solution, or PCF path appears anywhere in the artifact.</step>
+    <step order="7">Update TASK-INDEX.md: set task 040 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a package's exports cannot be parsed reliably — dynamic re-exports, generated barrels, or unusual TypeScript shapes — STOP and report which package rather than silently emitting a partial index. A partial index causes FR-18 to return false negatives, which read as "no duplicate found" and are therefore worse than no index at all.</trigger>
+    <trigger>If Spaarke.LegalWorkspace has no barrel file (it has no package.json), STOP and escalate on how it should be represented rather than silently omitting it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>.claude/catalogs/ holds spaarke-components-inventory.json — a Dataverse component inventory pulled from a live environment.</existing>
+    <extension>No. That indexes Dataverse solution components from an environment; this indexes TypeScript exports from source barrels. Different source, different lifecycle, different consumer — nothing to extend.</extension>
+    <cost-of-doing-nothing>FR-17 and FR-18 both cite a rung that does not exist, so absence claims stay lexical guesses and the equivalence check has nothing to resolve against. Both requirements become unimplementable.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="pwsh">Run the generator</tool><tool name="npm">Inspect barrel resolution if needed</tool></tools>
+
+  <outputs>
+    <output type="code">scripts/quality/Generate-ExportIndex.ps1</output>
+    <output type="data">.claude/catalogs/shared-export-index.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the 15 shared packages, every barrel export appears with symbol, kind, package, and source path.</criterion>
+    <criterion testable="true">Given the artifact, one grep pass answers whether a named symbol exists.</criterion>
+    <criterion testable="true">Given two consecutive runs on an unchanged tree, output is byte-identical.</criterion>
+    <criterion testable="true">Given the artifact header, it states the file is generated and must never be hand-edited.</criterion>
+    <criterion testable="true">Negative: no BFF service, solution, or PCF path appears in the artifact.</criterion>
+    <criterion testable="true">Negative: no sibling worktree is scanned.</criterion>
+    <criterion testable="true">Spot-checks confirm a re-export and a type-only export are both captured.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-16 (closed set a–e). Task 041 wires regeneration into the nightly job so drift is reported. Consumed by tasks 042 and 043.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

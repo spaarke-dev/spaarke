@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Generate the per-project review checklist</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a Class-1 generated artifact consumed by three separate mechanisms; a wrong projection misdirects every downstream review.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Projection from three structured sources into a defined output shape; mechanical once the sources are parsed.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P5-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>scripts,tooling,code-review,governance</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build a generator producing projects/{name}/review-checklist.md from three sources — spec.md's ADR Tensions, design.md's hot-path declaration and component justification, and the POML tasks' constraint, acceptance-criteria, and justification elements. Machine-readable front matter plus a prose checklist. Never hand-authored.</prompt>
+  <role>SPAARKE platform developer building repository tooling. The checklist is a projection of three existing artifacts, not a fourth artifact to maintain.</role>
+  <goal>A generator producing a per-project checklist with front matter (ADRs in scope, hot files, invariants) and a prose checklist, consumable by all three downstream consumers.</goal>
+
+  <context>
+    <background>spec.md FR-21 (closed set a–d). The reviewer that has been written since March is generic; run across ~17 worktrees it produces findings nobody acts on because none are scoped to what a given project actually promised. The checklist is what makes review tailored — it projects each project's own stated obligations into a form the reviewer, code-review Step 9.5, and wrap-up can all read. It must be generated rather than authored, because a hand-written checklist is a fourth thing to keep in sync with the three sources it summarises.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/Generate-ReviewChecklist.ps1</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/spec.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/tasks/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent — r4's own artifacts serve as the test case.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (three sources, exactly): spec.md ADR Tensions; design.md hot-path declaration and component justification; POML constraint, acceptance-criteria, and justification elements. Do not invent content from any other source.</constraint>
+    <constraint source="spec">Scope (never hand-authored): generated only. State this in the artifact header. A hand edit means the generator is broken.</constraint>
+    <constraint source="spec">Scope (output shape): machine-readable front matter — ADRs in scope, hot files, invariants — PLUS a prose checklist. Both halves are required; the front matter serves machines, the prose serves humans.</constraint>
+    <constraint source="spec">Scope (three consumers): the output must be consumable by FR-23's reviewer, code-review Step 9.5, and wrap-up. Verify against all three shapes, not just one.</constraint>
+    <constraint source="project">Scope (idempotence): regenerating on unchanged inputs produces byte-identical output.</constraint>
+    <constraint source="project">Scope (generality): the generator works for any project folder, not only r4. Test against at least one other project.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Review checklist generation</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/templates/task-execution.template.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read all three source shapes.</step>
+    <step order="1">Parse spec.md's ADR Tensions table.</step>
+    <step order="2">Parse design.md's hot-path declaration and component-justification section.</step>
+    <step order="3">Parse POML constraint, acceptance-criteria, and justification elements across the project's tasks.</step>
+    <step order="4">Emit front matter: ADRs in scope, hot files, invariants.</step>
+    <step order="5">Emit the prose checklist.</step>
+    <step order="6">Add the generated-never-hand-edit header.</step>
+    <step order="7">Test against r4's own artifacts and against one other project with a different shape.</step>
+    <step order="8">Verify idempotence.</step>
+    <step order="9">Update TASK-INDEX.md: set task 050 status to ✅.</step>
+    <step order="10">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a project lacks one of the three sources — no ADR Tensions section, or no hot-path declaration — emit a checklist noting the gap explicitly rather than silently producing a thinner one. A silently-partial checklist gives false confidence that review was scoped when it was not.</trigger>
+    <trigger>If the three consumers turn out to need materially different shapes, STOP and escalate before building three variants. FR-21d specifies one artifact for all three, and three variants would be three things to keep in sync.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spec.md, design.md, and the POML tasks each hold part of a project's review obligations; nothing projects them into one reviewable surface.</existing>
+    <extension>No, and the spec is explicit that it must not be authored: it is a projection of those three, so hand-writing it creates a fourth thing to sync. The generator is the extension — it reads existing artifacts rather than introducing a new source of truth.</extension>
+    <cost-of-doing-nothing>FR-23's reviewer runs generically across 17 worktrees and produces findings nobody acts on, because nothing tells it what this project actually promised.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="pwsh">Run the generator</tool></tools>
+
+  <outputs>
+    <output type="code">scripts/quality/Generate-ReviewChecklist.ps1</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/review-checklist.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given r4's artifacts, the generator produces a checklist with both front matter and prose.</criterion>
+    <criterion testable="true">Given the front matter, it lists ADRs in scope, hot files, and invariants.</criterion>
+    <criterion testable="true">Given a second project with a different shape, the generator produces a valid checklist.</criterion>
+    <criterion testable="true">Given unchanged inputs, regeneration is byte-identical.</criterion>
+    <criterion testable="true">Given a project missing a source, the gap is stated explicitly in the output.</criterion>
+    <criterion testable="true">Negative: no checklist content originates outside the three specified sources.</criterion>
+    <criterion testable="true">Negative: the artifact header states it is generated and must not be hand-edited.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-21 (closed set a–d). Assumption recorded in spec: filename review-checklist.md (input) chosen over the owner's original code-review.md (reads like output). Trivially changed if the owner prefers otherwise.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

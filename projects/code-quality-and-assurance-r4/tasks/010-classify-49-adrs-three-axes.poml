@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Classify all 49 ADRs on three axes and grow INDEX.md from 36 to 49</title>
+    <phase>2a Every ADR is routed, accurate, and measured</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architectural classification with repo-wide blast radius — the enforceability and accuracy verdicts decide what P2b enforces and what FR-08 blocks from enforcement. A wrong "current" verdict causes a stale rule to be enforced in CI.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Judgment-dense architectural reading across 49 ADRs; the accuracy axis requires deciding whether each ADR still describes the code as it is, which is exactly the reasoning Sonnet is not tiered for (CLAUDE.md §8.5 — architectural / ADR-migration work).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/adr/INDEX.md — sub-agents cannot write to .claude/ paths (root CLAUDE.md §3). Reading and analysis may be fanned out; the write is main-session only.</parallel-reason>
+    <deps>none</deps>
+    <tags>adr,governance,classification,docs</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Classify every one of the 49 ADRs on three axes — enforceability, accuracy, and (for judgment-only ADRs) checkability — recording one line of reason per axis in .claude/adr/INDEX.md. INDEX.md grows from 36 to 49 entries as a side effect, because 13 ADRs exist as files but are absent from the index.</prompt>
+  <role>SPAARKE platform architect. Read each ADR against the code it governs before assigning an accuracy verdict. Conservative: when unsure whether an ADR is current, mark it contested rather than guessing current.</role>
+  <goal>All 49 ADRs classified on (a) enforceability: enforceable | partially-enforceable | judgment-only; (b) accuracy: current | stale | contested; (c) for judgment-only only: checkable-by-reading | aesthetic — each with one line of reason, recorded in INDEX.md, which now lists 49 entries.</goal>
+
+  <context>
+    <background>spec.md FR-05. Enforcement today is 7 of 49, but nobody knows the denominator's shape: which ADRs COULD be enforced mechanically, which are still accurate, and which are judgment calls that no test could ever assert. Without that, "7/49 enforced" reads as failure when the honest framing may be "49/49 routed". This classification produces the routing input for FR-06, the exclusion list for FR-08, and the candidate pool for FR-07. Measured 2026-09-04: 49 ADR files exist; INDEX.md lists 36.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/INDEX.md</file>
+      <file role="canonical-reference">.claude/adr/</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent. Task 003's citation counts help prioritise reading order but are not required.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (all 49): every ADR gets all applicable axes with one line of reason each. An ADR classified without a reason is incomplete — the reason is what makes the verdict reviewable.</constraint>
+    <constraint source="spec">Scope (third axis): the checkable-by-reading / aesthetic axis applies ONLY to judgment-only ADRs. Do not assign it to enforceable or partially-enforceable ADRs.</constraint>
+    <constraint source="spec">Scope (accuracy axis): "current" means the ADR still describes the code as it is TODAY. Verify against code before asserting it — an ADR that is merely well-written is not thereby current.</constraint>
+    <constraint source="project">Scope (this task): classification ONLY. Do NOT write any arch test, do NOT amend any ADR, do NOT act on a stale verdict. Task 011 routes, task 012 records §6.5 paths, P2b writes tests.</constraint>
+    <constraint source="project">Scope (INDEX.md): add the 13 missing entries so the index lists all 49. Do not remove or renumber existing entries.</constraint>
+    <constraint source="project">Scope (.claude/ write): main-session only. Analysis may be fanned out to sub-agents, but they cannot write here and will fail with "Edit denied" if dispatched to do so.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR classification and enforcement routing</topic>
+    <files>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing arch tests as enforceability evidence" location="tests/Spaarke.ArchTests/">An ADR already carrying a test is demonstrably enforceable. Check this directory before classifying — some ADRs may be enforced by unnamed guards, which changes the verdict.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Enumerate the 49 ADR files and diff against INDEX.md's 36 entries to identify the 13 missing.</step>
+    <step order="1">Inventory tests/Spaarke.ArchTests/ and map each existing test to the ADR it enforces. An ADR enforced by an unnamed guard is still enforced — record which.</step>
+    <step order="2">For each ADR, assign enforceability with one line of reason: can a mechanical test assert this rule at all?</step>
+    <step order="3">For each ADR, assign accuracy with one line of reason, verified against current code. Mark contested rather than current when the evidence is ambiguous.</step>
+    <step order="4">For judgment-only ADRs only, assign checkable-by-reading or aesthetic with one line of reason.</step>
+    <step order="5">Write all three axes into INDEX.md and add the 13 missing entries so it lists 49.</step>
+    <step order="6">Produce a summary in notes/: counts per axis value, and the explicit list of stale and contested ADRs handed to task 012.</step>
+    <step order="7">Update TASK-INDEX.md: set task 010 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an ADR appears to conflict with another ADR (not merely with code), STOP and escalate per CLAUDE.md §6.5. Two ADRs disagreeing is a governance defect that classification cannot resolve, and picking a winner silently is exactly the failure mode §6.5 exists to prevent.</trigger>
+    <trigger>If the file count is not 49 or INDEX.md's entry count is not 36, STOP and report before classifying. The spec's denominator is load-bearing for FR-09a's n/49 reporting, and a changed count means the baseline moved.</trigger>
+    <trigger>If more than roughly a third of ADRs classify as stale or contested, STOP and report before continuing. That would indicate the governance surface has drifted far enough that FR-08's per-ADR §6.5 records become a project of their own rather than a step in task 012.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/adr/INDEX.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SUPERSEDED (arithmetic cannot hold): INDEX.md lists 50 rows — the 49 concise ADR files PLUS ADR-038, which has an INDEX row but no .claude/adr/ file (canonical at docs/adr/, its row carries the content inline). The task constraint forbids removing existing entries, so 49 rows was unreachable without deleting a protected row. All 49 files are now indexed; zero files lack a row. See notes/adr-classification-2026-09.md deviation 2.</criterion>
+    <criterion testable="true">Given each of the 49, an enforceability value and a one-line reason are recorded.</criterion>
+    <criterion testable="true">Given each of the 49, an accuracy value and a one-line reason are recorded.</criterion>
+    <criterion testable="true">Given each judgment-only ADR, a checkability value and a one-line reason are recorded.</criterion>
+    <criterion testable="true">Negative: no enforceable or partially-enforceable ADR carries a checkability value.</criterion>
+    <criterion testable="true">Negative: no arch test is written and no ADR is amended by this task.</criterion>
+    <criterion testable="true">The notes summary lists every stale and contested ADR explicitly, as task 012's input.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-05. Spec assumption worth testing here: ADR-028 (auth, 1,521 citations) may already be effectively enforced by unnamed auth guards — step 1 determines this, and the answer changes whether P2b needs a test for it. Feeds task 011 (routing), task 012 (§6.5 records), and task 020 (criterion sizing).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <date>2026-09-04</date>
+    <summary>All 49 ADRs classified on enforceability (21 enforceable / 25 partially-enforceable / 3 judgment-only), accuracy (38 current / 10 contested / 1 stale), and checkability for the 3 judgment-only ADRs. INDEX.md grew from 36 to 50 rows — 14 missing entries added, not the 13 the spec predicted. Full reasoning in notes/adr-classification-2026-09.md.
+
+HEADLINE FINDING: ten ADRs carry Status: Proposed and were never ratified, yet six have substantial shipped code — ADR-019 (ProblemDetails) across 187 files, ADR-042 across 92, ADR-043 across 59. Classified contested not because they are inaccurate but because enforcing an unratified rule is what FR-08 exists to prevent; the likely 6.5 path for all ten is CONFIRM (ratify), not amend. ADR-018 (Proposed) is enforced by ADR-032 (Accepted).
+
+SPEC ASSUMPTION RESOLVED: ADR-028 IS already enforced by unnamed guards — six arch-test files cite it. P2b needs no new test for it, only naming (task 011). More broadly enforcement is 17/49 (8 named + 9 unnamed), not 7/49.
+
+Escalation trigger 3 checked: 11 of 49 stale-or-contested = 22.4%, under the one-third threshold, so task 012 stays a step rather than becoming its own project.</summary>
+    <files-modified>.claude/adr/INDEX.md; projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md</files-modified>
+    <deviations>(1) 14 ADRs were missing from INDEX, not 13 — ADR-038 has a row with no file, so 36 rows = 35 file-backed + 1 fileless and the subtraction hid a compensating pair. Headline counts both matched, so the trigger did not fire. (2) The "exactly 49 entries" criterion is unreachable — superseded above. (3) ADR-035 exists in neither tier; a numbering gap, not a missing file. (4) Accuracy verification depth is uneven and stated: strong for the Proposed/Superseded findings and for enforceability, weaker for `current` on the 25 partially-enforceable ADRs.</deviations>
+  </completion>
+
+</task>
