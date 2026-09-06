@@ -5,8 +5,26 @@
 | | Commit | Compressed |
 |---|---|---|
 | `origin/master` | `379c221e0` | **45.46 MB** |
-| branch `work/unified-access-control-r2` | `94b1d6f54` | **45.48 MB** |
+| branch, before the parallel wave | `94b1d6f54` | **45.48 MB** |
+| **branch, after 039 + the vocabulary hoist** | **`6db37ef95`** | **45.48 MB** |
 | **Delta attributable to this branch** | | **+0.02 MB** |
+
+Measured **twice** — once before the 039 / vocabulary-hoist wave and once after. Master re-measured
+fresh both times (45.46 both times) and the branch delta did not move.
+
+### 🔴 A subagent reported 50.42 MB for the same branch. It was wrong.
+
+The task-039 agent reported its branch publish as **50.42 MB** — ~5 MB above the isolated measurement
+above, taken at essentially the same commit. It could not run the §10 procedure at all (agents in this
+project are forbidden from running git, and the procedure *requires* `git worktree add origin/master`),
+so it measured its own working tree by some other means and reported an absolute number with no
+comparison. That number was **kept out of every commit message and note** and is recorded here only as
+the correction.
+
+**The lesson is the §10 rule restated**: a publish-size figure is meaningless without (a) a fresh
+same-run master build to diff against, (b) the zip tool named, and (c) a clean tree. Miss any one and
+you get a confident number that is wrong by more than the entire escalation threshold — which is how a
++0.02 MB change could have been reported as a ≥+5 MB regression requiring justification.
 
 - **Zip tool**: PowerShell `Compress-Archive -CompressionLevel Optimal` (the method `scripts/Deploy-BffApi.ps1` uses). Naming the tool is required — the same publish folder measures ~1.3 MB smaller under Python `shutil.make_archive`.
 - **PDBs**: included (default publish output).
