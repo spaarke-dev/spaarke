@@ -11,11 +11,29 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **039** — deny-veto wiring + ordered-pipeline tests. Deps 032 ✅ 037 ✅ 038 ✅ all met |
-| **Status** | 🔄 **in-progress — step 1 of 6 DONE, steps 2–6 remain.** Tree clean, all work committed (`d1c1e0bb5`) |
-| **Repo state** | Clean · 0 unpushed at last check · master 2 commits ahead (CI + docs only, **zero overlap** — `/conflict-check` silent pass) |
-| **Next Action** | **Step 2 — wire the deny veto.** Everything needed is gathered; see § "039 — entry state" below. No further discovery required before editing code |
-| **Progress** | **42 completed** · 2 completed-with-escalation · 1 blocked-shipped · **47 pending** (of 92) |
+| **Task** | **042** — next in the Phase 1→2 close-out (042 → 043 → 044). **039 is ✅ DONE** |
+| **Status** | `pending` — not started |
+| **Repo state** | Clean · master MERGED (0 behind) · commits local until pushed |
+| **Next Action** | `task-execute` on `tasks/042-*.poml`. **043 must route the org-expansion term through the same `isSecure` predicate** — the hook is already plane-agnostic |
+| **Progress** | **43 completed** · 2 completed-with-escalation · 1 blocked-shipped · **46 pending** (of 92) |
+
+### What landed 2026-09-04/05 (verified by the main session, not taken from agent reports)
+
+| | Result |
+|---|---|
+| **039** | Deny veto wired into slot 1. Perturbation re-run here: disabling removal → **9 of 49 red**. ⚠️ Slot ORDER proved **not independently observable** (deny and Restricted commute) — see the TASK-INDEX row |
+| **`sprk_event` live break** | `DataverseServiceClientImpl` wrote a column that does not exist, **failing every event-filed save**. Now `sprk_relatedevent` |
+| **Association set** | `todo` + `contact` added (columns existed all along), **`account` REMOVED** from the Office allow-list, `AssociationType` (ordinal 3 burned) and `EntityAccessFilter.EntitySetByType` |
+| **Vocabulary hoist** | Two copies → ONE `Spaarke.Dataverse.DocumentLinkFields`, completed **6 → 16** columns, each with pinned case-sensitive schema name |
+| **Publish size** | master **45.46** vs branch **45.48** = **+0.02 MB** (both fresh, same zip tool) |
+| **Suite** | **12,158 unit** / 0 failed / 58 skipped · ArchTests **191/191** |
+
+🔴 **The one lesson from this round**: three separate written records agreed a document could not be
+filed to a to-do, and that an `sprk_event` column existed. All three were wrong the **same** way — every
+check enumerated the bare `sprk_{type}` family and never looked at `sprk_related*`. **Verify a column with
+a query that SUCCEEDS, per column. Never infer absence from one family, and never derive a schema name
+from a convention** (`sprk_relatedmatter`/`sprk_relatedproject`/`sprk_relatedvendororg` are lowercase
+while their nine siblings are PascalCase).
 
 ### 039 — entry state (step 1 done; start at step 2)
 
