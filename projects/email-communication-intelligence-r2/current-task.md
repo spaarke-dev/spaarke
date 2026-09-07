@@ -1,11 +1,25 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-09-04 (context-handoff — triage fix shipped; add-in + dedup docs shipped; **R3-CARD-1 done**; next session builds R3-CARD-2 + creates email-r3 + worktree).
-> **Recovery**: Read "🟢 NEXT SESSION PLAN" first (below), then "Quick Recovery".
+> **Last Updated**: 2026-09-07 (task-execute — **ACTIVE TASK 064** started; the 2026-09-04 NEXT SESSION PLAN is DONE).
+> **Recovery**: Read "🔨 ACTIVE TASK" first (below), then "Quick Recovery".
 
 ---
 
-## 🟢 NEXT SESSION PLAN (2026-09-04 handoff — do these 3, in order)
+## 🔨 ACTIVE TASK — 064 (E1b create-new-via-Quick-Start + E1c .eml wizard pre-load)
+
+| Field | Value |
+|-------|-------|
+| **Task** | 064 — `tasks/064-createnew-quickstart-eml-preload.poml` (FULL rigor, opus·high, directional) |
+| **What** | E1b: "New record" in reconciliation Related-to → QuickStartModal create → filed as confirmed regarding via `applyRegardingSelection` (NFR-10). E1c: net-new BFF endpoint materializes the row's archived `.eml` (sprk_document) into a chat-session document → wizard AI-prepopulate pre-seeded. |
+| **Constraints** | Deploys PAUSED (build+merge behind gate, do NOT deploy); §10 BFF (Placement Justification, ≤60 MB, CVE, seam test); ADR-013 (AI via PublicContracts only); ADR-012 (shared lib host-injected, QuickStartModal stays SpaarkeAi); NFR-04 (best-effort pre-load, never blocks); NFR-10 (single write path); back-compat (new props additive/optional). |
+| **Status** | ✅ **VERIFIED ALREADY COMPLETE** — task-execute Step 1 investigation (2 Explore sweeps + git) found 064 shipped as "Option C" (`309e7f674`, on master): all 4 layers + `ChatDocumentEndpointsContractTests` + E1b RTL. Escalation trigger did NOT fire (raw `.eml` is the correct format). The 🔲 was a stale marker → reconciled to ✅. **No build work.** |
+| **Now** | Project conclusion (case 2b — all r2 tasks effectively complete): `/test-diet` → `/code-review` → `/devops-project-archive` → README→Complete. |
+
+> The 2026-09-04 NEXT SESSION PLAN below is **DONE**: R3-CARD-2 shipped (PR #951, merged); email-communication-intelligence-r3 created (branch `work/email-communication-intelligence-r3`, charter written); worktree set up. r2 conclusion (code-review/test-diet/devops-project-archive) follows 064.
+
+---
+
+## 🟢 NEXT SESSION PLAN (2026-09-04 handoff — ✅ DONE 2026-09-07)
 
 > Owner directed (option **b**): finish the pure-shared-lib card work here; the rest → a new **email-communication-intelligence-r3** project. R3-CARD-1 is DONE + committed (`2de7a006d`, on branch `work/email-communication-intelligence-r2`). Three tasks remain:
 

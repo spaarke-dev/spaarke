@@ -1,8 +1,8 @@
 # Email Communication Intelligence — R2
 
-> **Last Updated**: 2026-08-05
+> **Last Updated**: 2026-09-07
 >
-> **Status**: In Progress (tasks generated; execution pending)
+> **Status**: ✅ COMPLETE — all pillars A–E shipped to master; add-in deployed (live SWA); task 064 shipped (`309e7f674`); wrap-up (test-diet clean · doc-drift clean · publish ~44 MB ≤60 · 0 CVE · lessons · coordination · INDEX) done. Residual is one non-gating operator sign-in smoke (044); further add-in enhancements owned by `word-add-in-r1`; go-forward matching-quality work owned by `email-communication-intelligence-r3`.
 
 ## Overview
 
@@ -22,10 +22,10 @@ R2 hardens the **trusted-capture** layer beneath R1's email association/triage e
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development (tasks generated) |
-| **Progress** | 0% (execution not started) |
+| **Phase** | ✅ Complete |
+| **Progress** | 100% — all 40 tasks ✅ (044 = deployed + non-gating operator smoke; 064 shipped `309e7f674`) |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-09-07 |
 | **Owner** | ralph.schroeder |
 
 ## Problem Statement
