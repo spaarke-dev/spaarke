@@ -1,22 +1,73 @@
 ﻿# Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-09-04 (by `context-handoff`) — **session ends here; a FRESH session picks up the
-> §GAPS-5 build.** Branch pushed, tree clean, 0 behind master.
+> **Last Updated**: 2026-09-07 — **§GAPS-5 Phases 1, 3 and 4 are BUILT and committed.**
 >
-> ## 🎯 START HERE — the next session's job
+> ## 🎯 START HERE
 >
-> **Read [`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md) IN FULL
-> before touching anything.** It is the comprehensive approach + 5-phase build plan for the Review Summary
-> feature, and it is the work this session was set up to hand over. Read **§0 (naming) first** — "memo" is
-> retired as the user-facing name; the plan explains why it still appears in code identifiers.
+> **The Review Summary feature now works end to end for the first time.** Until 2026-09-07 the
+> `POST .../review-memo` endpoint had no caller anywhere in the repo, so both toolbar actions always hit
+> the "generate first" banner — the feature could not succeed for anyone.
 >
-> **Four owner decisions (D1–D4, §6 of the plan) were OPEN at handoff.** If they are still open, ask —
-> do not assume. **Phase 1 is safe to start under any answer to D1**: it fixes live data loss and is
-> harmless under every option.
+> **ONE item is open: Phase 5** (retire `summaryPage`). It deletes another project's feature surface, so
+> it waits for explicit owner sign-off — see §GAPS-5-STATUS below and §7 of
+> [`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md).
 >
-> **Recovery order**: this Quick Recovery → **the GAPS-5 plan** → §GAPS/§GAPS-5 in this file (the defect
-> class + evidence) → §SESSION (what 2026-09-04 shipped) → §UAT → §UX → §U8-BUILD.
+> **The next practical step is UAT on spaarkedev1**, because nothing here has run against a live
+> Dataverse row — until this change no such row could exist. Requires a redeploy (BFF + `sprk_spaarkeai`
+> together, per NFR-05).
+>
+> **Recovery order**: this Quick Recovery → §GAPS-5-STATUS → the plan's §7 → §GAPS/§GAPS-5 (the defect
+> class + evidence) → §UAT → §UX → §U8-BUILD.
 > Everything below "Full State" is preserved history from earlier checkpoints.
+
+---
+
+## GAPS-5-STATUS — the Review Summary build (2026-09-07)
+
+**The feature works end to end for the first time.** Before today, `POST .../review-memo` had no caller
+anywhere in the repo: the read half was built against it as though it were already being called, so
+Download and Email always hit the 404 "generate first" banner. Users were told to do a thing the UI
+offered no way to do — and no test caught it, because every test that exercised the POST called it
+directly.
+
+| Phase | Status | Commit |
+|---|---|---|
+| 1 — carry the FR-05 discrete fields into the summary | ✅ | `f60657a23` |
+| 2 — `afterText` (D2: ship without) | ✅ resolved, no code by design | — |
+| 3 — the write call | ✅ | `4134b7fda` |
+| 4 — rename to "Review Summary" (ran BEFORE 3) | ✅ | `117e9d83d` |
+| **5 — retire `summaryPage`** | 🔲 **OPEN — owner sign-off** | — |
+
+**Phase 1 fixed a live bug bigger than "a dropped field".** The panel derives its per-finding takeaway
+by hunting a "Judgment —" marker in the fused `explanation`. Post-split payloads compose that string
+from the discrete fields with NO markers, so the hunt failed and the fallback returned the blob's FIRST
+sentence — the grounded FACT. **Every post-split finding rendered the wrong half of itself**, with no
+error and no empty state. `resolveTakeaway` now reads `assessment` directly.
+
+**Why Phase 5 is the one thing left**: D1 (Option A) has two halves — complete `reviewMemo`, and retire
+`summaryPage`. The owner's §0 naming decision presupposes the feature ships, which settles the *build*
+half. It does not authorise *deleting* another project's surface, so that half waits.
+
+**Two plan claims corrected during the build** (both recorded in the plan's §7):
+1. "The rename is free because nothing POSTs" was an inference; it is now a measurement —
+   `sprk_analysisoutput` held **zero** rows under the old name (whole table: one row, "Too Long Didn't
+   Read"). `ReviewMemoOutputNameGuardTests` records that query as the recipe for any future rename.
+2. "Review Summary" was **not** an available name — the toolbar already had a "Toggle Review Summary"
+   control in the same group. The dropdown is **"Review Summary document"**.
+
+**`sprk_outputtypecode` wiring deliberately NOT built.** Its only benefit protects a *future* rename,
+and it would add a new `IAnalysisDataverseService` method — "future flexibility", which CLAUDE.md §11
+rejects as justification for new surface.
+
+**Publish size (CLAUDE.md §10)**: fresh same-day master **45.46 MB** vs branch **45.46 MB** =
+**+0.00 MB** (Compress-Archive Optimal, the method `Deploy-BffApi.ps1` uses). Note master itself drifted
+**45.42 → 45.46** since 2026-09-02 — the stale-baseline hazard the rule warns about, in miniature.
+
+**⚠️ NOT yet exercised against a real environment.** All verification is automated. The
+generate → download → email round trip has never run against a live Dataverse row, because until this
+change no such row could exist. **Next practical step: redeploy (BFF + `sprk_spaarkeai` together, per
+NFR-05) and UAT.** Verify the built artifact by string literal before upload — e.g.
+`grep -c 'Review Summary document' dist/spaarkeai.html` — per the 2026-09-03 stale-bundle lesson below.
 
 ---
 
@@ -25,14 +76,14 @@
 | Field | Value |
 |---|---|
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
-| **Branch** | `work/spaarkeai-compose-r8` @ **`4a6ce23cd`** — **pushed, tree clean, 0 behind master, 19 ahead.** **PR #924 and #938 are both MERGED.** The 19 commits since #938 have **NO open PR** — one is needed to reach master. |
-| **🎯 NEXT SESSION'S TASK** | **Build §GAPS-5 per [`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md).** Read it in full, §0 first. **Confirm D1–D4 with the owner** (§6 of the plan) before Phases 2–5. **Phase 1 needs no decision** — it fixes live data loss (`ComposeWorkspace.tsx:3777` + `:3395` drop `flaggedClause`/`assessment` that the SSE event already carries) and is a prerequisite for the recommended option, harmless under the others. |
-| **Ordering trap in that plan** | **Phase 4 (rename) MUST run BEFORE Phase 3 (the write call).** The persisted row is found by matching its **display name** (`OutputTypeId` is deliberately null — env-specific GUID), so renaming after rows exist orphans them silently, and the failure is indistinguishable from "not generated yet". Free only while zero rows exist — which is true today *because* of this very gap. |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`4134b7fda`** — **23 ahead of master, 5 BEHIND** (master moved after #938; merge master in before any PR — never rebase). **PR #924 and #938 are both MERGED.** The 23 commits since #938 have **NO open PR** — one is needed to reach master. |
+| **🎯 NEXT ACTION** | **Redeploy + UAT.** Phases 1/3/4 are built and committed; nothing has run against a live Dataverse row yet (until this change none could exist). Deploy BFF + `sprk_spaarkeai` **together** (NFR-05), verify the artifact by string literal first, then walk generate → download → email. **Then decide Phase 5** (retire `summaryPage`) — the only open item, held for owner sign-off because it deletes another project's surface. |
+| **Ordering trap (RESOLVED)** | Phase 4 (rename) ran BEFORE Phase 3 (write call), as required — the persisted row is found by matching its display name, so a later rename would orphan rows silently. Verified free by querying `sprk_analysisoutput` first: zero rows. Re-run that query before any future rename; `ReviewMemoOutputNameGuardTests` carries the recipe. |
 | **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
 | **Session 2026-09-04** | Dead-wire audit CLOSED (4th instance `Style` deleted + repo-wide guard). `organziation` typo fixed. **`DocumentLinkFieldMap`** unifies the `sprk_document` link vocabulary — it was declared twice and knew 6 of 17 columns, so Compose silently dropped ten link types. See §SESSION at the end of this file. |
-| **§GAPS-5 plan** | **[`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md)** — comprehensive approach + 5-phase build plan + the 4 decisions (D1–D4). Key correction: my earlier "one client POST call" sizing was WRONG. The client's finding shape is PRE-FR-05-SPLIT — the SSE event carries `flaggedClause`/`assessment` and the comment gutter uses them, but BOTH review-summary mappings DROP them (a third instance of the drop-in-a-hand-mapping class, client-side this time). `afterText` is NOT a blocker — the assembler already treats its absence as correct. **Phase 1 is safe to start under any decision.** |
-| **Next Action** | **1) Read the GAPS-5 plan (link above), §0 first.** **2) Confirm D1–D4 with the owner.** **3) Start Phase 1** (carry `flaggedClause`/`assessment` through BOTH review-summary mappings + widen `NdaReviewFindingSummary` + repoint its doc comment, which cites the deleted `nda-review.schema.json`) — no decision needed, fixes live data loss. **4) Then Phase 4 (rename) BEFORE Phase 3 (write call)** — see the ordering trap above. Deferred and evidenced, NOT urgent: owner UAT of item 8 (§UAT, no findings reported yet); numbering item 3 (stale decoration — DISPLAY only, the write path is proven correct, do NOT build the parity corpus); editable spacing (UX item 6); `projects/INDEX.md` stale since 2026-06-26. |
-| **Suite** | Re-run 2026-09-04 AFTER the master merge: BFF unit+contract **12,012 passed / 0 failed** (58 skipped) · ArchTests **199/199** · BFF build **0 errors 0 warnings** · associateToStep 19/19. Compose CLIENT suite NOT re-run this session (no client source changed after the last run). |
+| **§GAPS-5 plan** | **[`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md)** — comprehensive approach + 5-phase build plan + the 4 decisions (D1–D4). Key correction: my earlier "one client POST call" sizing was WRONG. The client's finding shape is PRE-FR-05-SPLIT — the SSE event carries `flaggedClause`/`assessment` and the comment gutter uses them, but BOTH review-summary mappings DROP them (a third instance of the drop-in-a-hand-mapping class, client-side this time). `afterText` is NOT a blocker — the assembler already treats its absence as correct. **See §7 of that plan for what shipped 2026-09-07 and how each decision resolved.** |
+| **Deferred, evidenced, NOT urgent** | Owner UAT of item 8 (§UAT, no findings reported yet); numbering item 3 (stale decoration — DISPLAY only, the write path is proven correct, do NOT build the parity corpus); editable spacing (UX item 6); `projects/INDEX.md` stale since 2026-06-26. |
+| **Suite** | Re-run 2026-09-07 after Phases 1/3/4: BFF unit+contract **12,066 passed / 0 failed** (58 skipped) · ArchTests **199/199** · Compose client **1,458/1,458** across 110 files · BFF build **0 errors 0 warnings**. The new end-to-end write test is a VERIFIED forcing function — removing the handler wiring makes it fail (control run). |
 | **Deployed (current)** | ✅ **2026-09-03 late** from **`91123fa23`** — BFF + `sprk_spaarkeai` together (NFR-05). BFF `/healthz` passed; code page `sprk_spaarkeai` 5,756 KB published to `spaarkedev1`. **Artifact verified by STRING LITERAL before upload**: `Summarise changes` ×2, `Include revision report` ×1, `Open in preview` ×1, `Auto Save On` **0**. Item 8 is now exercisable end-to-end. |
 | **PR** | **#938** open against master (5 commits). #924 already merged (master @ `d7fd88366` → now includes email-intelligence #936/#937). |
 | **⚠️ `projects/INDEX.md` is STALE — coordination gap** | Last refresh **2026-06-26**, 2+ months. It is the registry `/conflict-check` uses for hot-path overlap, and its "maintained atomically by two skills" contract is plainly not firing. A stale registry cannot say which projects are ACTIVE, so treat it as decorative: weight the open-PR list and `git log HEAD..origin/master` instead. **Worth its own remediation** — this repo has ~30 worktrees and no working coordination signal. |

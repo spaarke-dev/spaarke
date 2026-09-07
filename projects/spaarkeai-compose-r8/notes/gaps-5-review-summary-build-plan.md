@@ -1,8 +1,61 @@
 ﻿# §GAPS-5 — Review Summary: comprehensive approach + build plan
 
-> **Date**: 2026-09-04 · **Status**: awaiting owner decision (§6). Every claim below is verified against
-> code/schema, not inferred — citations inline.
+> **Date**: 2026-09-04 · **Status (2026-09-07)**: **Phases 1, 3, 4 BUILT and committed.**
+> **Phase 5 is the one open item** — it deletes another project's feature surface, so it waits for
+> explicit owner sign-off. See §7 for what shipped and what each decision was resolved as.
+> Every claim below is verified against code/schema, not inferred — citations inline.
 > **Supersedes** my earlier "one client POST call" sizing, which was wrong (§2.2).
+
+---
+
+## 7. What shipped (2026-09-07) — status of every phase + decision
+
+| Phase | Status | Commit |
+|---|---|---|
+| **1 — stop dropping the discrete fields** | ✅ Built | `f60657a23` |
+| **2 — decide `afterText`** | ✅ Resolved as D2: ship without | (no code, by design) |
+| **3 — the write call** | ✅ Built | `4134b7fda` |
+| **4 — rename to "Review Summary"** | ✅ Built (ran BEFORE 3, as required) | `117e9d83d` |
+| **5 — retire `summaryPage`** | 🔲 **OPEN — needs owner sign-off** | — |
+
+### Decisions as resolved
+
+- **D1 → Option A** (complete `reviewMemo`). Not assumed: the owner's own §0 naming decision
+  ("Review Summary") presupposes the feature ships, which excludes Option B. The half of A that
+  *deletes* (`summaryPage`, Phase 5) was deliberately NOT taken on that inference — deletion of
+  another project's surface is hard to reverse and is the one thing still open.
+- **D2 → ship without `afterText`.** The builder never invents one; a test pins that.
+- **D3 → relax, don't exclude.** The four grounding fields are optional server-side and render an
+  em dash. Findings with no `quotedText` are dropped, and the count is REPORTED to the user.
+- **D4 → confirmed.** Phase 4 ran before Phase 3.
+
+### Two things the plan got wrong, corrected during the build
+
+1. **"The rename is free because nothing POSTs" was an inference.** It is now a measurement:
+   `sprk_analysisoutput` was queried before the rename and held **zero** rows under the old name
+   (the whole table had one row, named "Too Long Didn't Read"). The guard test records that query
+   as the recipe to re-run before any future rename.
+2. **The plan assumed "Review Summary" was an available name.** It was not: the toolbar already
+   had a **"Toggle Review Summary"** control in the same group. Naming the dropdown the same thing
+   would have put two identically-named controls side by side — one toggling a view, one acting on
+   an artifact. The dropdown is therefore **"Review Summary document"**.
+
+### Scope deliberately NOT taken
+
+- **`sprk_outputtypecode` ("REVMEMO") wiring** — Phase 4 said to pair it with the rename. It was
+  not built. Its only benefit is protecting a *future* rename, and it would add a new
+  `IAnalysisDataverseService` method; "future flexibility" is exactly what CLAUDE.md §11 rejects as
+  justification for new surface. The hazard is handled where it bites instead: the constant
+  documents the name/key coupling, `ReviewMemoOutputNameGuardTests` makes a silent change
+  impossible, and the contract tests now reference the constant rather than repeating the literal.
+- **Phase 5.** See above.
+
+### Not yet exercised against a real environment
+
+Everything above is verified by automated tests (BFF 12,066 · ArchTests 199 · Compose client 1458)
+and a control run proving the new end-to-end test fails when the wiring is removed. **No UAT has
+been run against spaarkedev1** — the generate → download → email round trip has never executed
+against a live Dataverse row, because until this change no such row could exist.
 
 ## 0. ⚠️ Naming — read before the word "memo" appears below
 
