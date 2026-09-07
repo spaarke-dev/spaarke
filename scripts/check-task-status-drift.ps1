@@ -72,8 +72,12 @@ function Get-IndexMarkers {
     if (-not (Test-Path -LiteralPath $IndexPath)) { return $map }
     foreach ($line in (Get-Content -LiteralPath $IndexPath -Encoding UTF8)) {
         # `| <marker> <id> |` or `| <marker> **<id>** |`
-        $m = [regex]::Match($line, '^\|\s*([^\s|]+)\s*\*{0,2}(\d{3})\*{0,2}\s*\|')
-        if ($m.Success) { $map[$m.Groups[2].Value] = $m.Groups[1].Value }
+        # Row shape is `| <marker> [<token>] <id> | ...` — marker, optional ASCII token and the id
+        # all live in the SAME first cell. An earlier revision added a pattern that allowed a `|`
+        # between marker and id; it then matched rows whose first cell is a WAVE LABEL (`**P0-W0**`)
+        # and reported a phantom drift on task 001. Do not reintroduce a cell-spanning pattern.
+        $m = [regex]::Match($line, '^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(\d{3})\*{0,2}\s*\|')
+        if ($m.Success) { $map[$m.Groups[2].Value] = $m.Groups[1].Value.Trim() }
     }
     return $map
 }
@@ -86,14 +90,27 @@ function Test-PomlDone {
     return $Status.StartsWith('completed') -or $Status -eq 'blocked-shipped'
 }
 
-# TERMINAL markers — a task is "no longer open". Deliberately more than just ✅, because the index
-# has a real vocabulary for terminal-but-not-clean outcomes and they are NOT drift:
-#   ✅  completed
-#   ⚠️  completed-with-escalation  (accepted residue — e.g. 012 anonymous-share-link revocation)
-#   🟡  blocked-shipped            (e.g. 034 impersonation-inertness canary)
-# Scoping this to ✅ alone was the FIRST VERSION of this script, and it reported 012 and 034 as
-# drift on its very first run. Both were correct as authored. A gate that cries wolf on correct
+# TERMINAL states — a task is "no longer open".
+#
+# PREFERRED: the bracketed ASCII token (`[done]`, `[escalated]`, `[blocked]`), mandatory in the index
+# since 2026-09-03. ASCII is used because `grep` here SILENTLY returns 0 for characters above U+FFFF,
+# and 🔲 is U+1F532 — so `grep -c '🔲'` reported zero open tasks on a 37-open project. See
+# FAILURE-MODES G-16. This script reads the file in PowerShell (which handles non-BMP correctly), so
+# the tokens are not needed for THIS script to work — they exist so a human or a shell one-liner can
+# get the same answer the script does.
+#
+# FALLBACK: the emoji, for the ~150 pre-existing project indexes that predate the token.
+#
+# Deliberately more than just "done", because the index has a real vocabulary for
+# terminal-but-not-clean outcomes and they are NOT drift:
+#   [done]       ✅  completed
+#   [escalated]  ⚠️  completed-with-escalation  (accepted residue — e.g. 012 share-link revocation)
+#   [blocked]    🟡  blocked-shipped            (e.g. 034 impersonation-inertness canary)
+# Scoping this to ✅/[done] alone was the FIRST VERSION of this script, and it reported 012 and 034
+# as drift on its very first run. Both were correct as authored. A gate that cries wolf on correct
 # state is a gate that gets waived — so the vocabulary is matched, not narrowed.
+$doneTokens  = @('[done]', '[escalated]', '[blocked]')
+$openTokens  = @('[open]', '[wip]')
 $doneMarkers = @('✅', '⚠️', '🟡')
 
 function Invoke-ProjectCheck {
@@ -118,8 +135,14 @@ function Invoke-ProjectCheck {
         if (-not $idx.ContainsKey($id)) { continue }   # no row to compare against
         $pomlDone = Test-PomlDone -Status $poml[$id]
         $marker = $idx[$id]
-        $idxDone = $false
-        foreach ($d in $doneMarkers) { if ($marker.Contains($d)) { $idxDone = $true } }
+        # Token wins when present — it is unambiguous. Emoji only as fallback for legacy indexes.
+        $idxDone = $null
+        foreach ($t in $doneTokens) { if ($marker.Contains($t)) { $idxDone = $true } }
+        if ($null -eq $idxDone) { foreach ($t in $openTokens) { if ($marker.Contains($t)) { $idxDone = $false } } }
+        if ($null -eq $idxDone) {
+            $idxDone = $false
+            foreach ($d in $doneMarkers) { if ($marker.Contains($d)) { $idxDone = $true } }
+        }
         if ($pomlDone -ne $idxDone) {
             $details += [pscustomobject]@{
                 Id     = $id

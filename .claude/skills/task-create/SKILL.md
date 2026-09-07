@@ -703,7 +703,7 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <step order="2">{Second concrete action}</step>
     <step order="3">{Continue until task is complete}</step>
     <step order="N-2">Run tests and verify all pass</step>
-    <step order="N-1">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+    <step order="N-1">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` — the bracketed ASCII token is mandatory, the emoji alone is not greppable (see the Status token table + FAILURE-MODES G-16)</step>
     <step order="N">If any deviations from plan, document in projects/{project-name}/notes/</step>
   </steps>
 
@@ -756,11 +756,39 @@ UPDATE projects/{project-name}/CLAUDE.md:
 CREATE tasks/TASK-INDEX.md:
   | ID | Title | Phase | Status | Dependencies | Parallel |
   |----|-------|-------|--------|--------------|----------|
-  | 001 | ... | 1 | 🔲 | none | — |
-  | 002 | ... | 1 | 🔲 | 001 | — |
-  | 020 | ... | 2 | 🔲 | 010 | Group A |
-  | 021 | ... | 2 | 🔲 | 010 | Group A |
+  | 001 | ... | 1 | 🔲 [open] | none | — |
+  | 002 | ... | 1 | 🔲 [open] | 001 | — |
+  | 020 | ... | 2 | 🔲 [open] | 010 | Group A |
+  | 021 | ... | 2 | 🔲 [open] | 010 | Group A |
   ...
+
+  🔴 **THE BRACKETED ASCII TOKEN IS MANDATORY — the emoji alone is NOT greppable.**
+  (Added 2026-09-03 by `unified-access-control-r2`, owner-directed.)
+
+  | Token | Emoji | Meaning | POML `<status>` |
+  |---|---|---|---|
+  | `[open]` | 🔲 | not started | `pending` |
+  | `[wip]` | 🔄 | in progress | `in-progress` |
+  | `[done]` | ✅ | complete | `completed` |
+  | `[escalated]` | ⚠️ | complete, residue accepted | `completed-with-escalation` |
+  | `[blocked]` | 🟡 | shipped but blocked | `blocked-shipped` |
+
+  **Why.** Status is a DATA FIELD. `grep` in this environment **silently returns 0** for any
+  character above U+FFFF, and 🔲 is U+1F532 (4 bytes). So `grep -c '🔲'` reports **zero open tasks
+  on a project with dozens** — no error, just a plausible wrong number. ✅ (U+2705) happens to be
+  3-byte and works, which makes the failure look like data rather than tooling. Full mechanism:
+  [`.claude/FAILURE-MODES.md` G-16](../../FAILURE-MODES.md#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji).
+
+  Keep the emoji — it is genuinely faster for a human to scan a column of glyphs than a column of
+  words. The token is additive, in the same cell, so the table shape does not change.
+
+  ⚠️ **The status is written in TWO places** — here and the task's own `<status>` element — and
+  nothing structurally keeps them equal. A 2026-09-03 audit of one project found **17 disagreements
+  across 92 tasks** (14 tasks finished and merged whose POML still said `pending`; one finished task
+  the index still showed as `🔄`). Verify both with `pwsh scripts/check-task-status-drift.ps1`
+  after any status write — `task-execute` Step 10 requires it. The POML `<status>` is CANONICAL when
+  they disagree only in the sense that it is machine-readable; **resolve from git evidence, not by
+  assuming either side is right** — in that audit the POML was stale 14 times and the index once.
 
   ADD "Parallel Execution Groups" section:
   ```markdown

@@ -107,6 +107,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 - **Sequencing**: A1 merges **before** task 032 implements the evaluator, so the code lands under an ADR
   that sanctions it rather than in violation of one.
 
+###### 2026-09-03 — `unified-access-control-r2`: task status gets a greppable ASCII token (owner-directed)
+
+- **`task-create`'s `TASK-INDEX.md` template now REQUIRES a bracketed ASCII token in the Status cell**
+  — `🔲 [open]` / `🔄 [wip]` / `✅ [done]` / `⚠️ [escalated]` / `🟡 [blocked]`, mapped 1:1 to the POML
+  `<status>` vocabulary. The emoji stays (a column of glyphs genuinely scans faster for a human); the
+  token is additive in the same cell, so the table shape is unchanged.
+- **Why: status is a DATA FIELD, and the emoji encoding made it unreadable by the default text tool.**
+  `grep` here silently returns **0** for any character above U+FFFF, and 🔲 is U+1F532 — so
+  `grep -c '🔲'` reported **zero open tasks on a project with 37**. ✅ (U+2705) is 3-byte and works,
+  which made the failure look like bad data rather than bad tooling; it cost three wrong measurements
+  in one session, one of them written into a recovery file as a false claim that the index was
+  corrupt. Mechanism: [`FAILURE-MODES.md` G-16](FAILURE-MODES.md#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji).
+- **Owner framing, which is the right one**: *"it might look nice but it needs to be grep'able —
+  otherwise we should have a field that is reliably greppable."* The deeper defect it exposes is that
+  status is stored **twice** (POML `<status>` + index marker) with nothing keeping them equal — the
+  same duplication that produced 17 disagreements across 92 tasks. The ASCII token does not fix the
+  duplication; `check-task-status-drift.ps1` is what detects it. Long-term direction: the index should
+  be **derived** from the POMLs rather than authored beside them.
+- **`check-task-status-drift.ps1` now prefers the token and falls back to the emoji**, so it works on
+  both new indexes and the ~150 pre-existing ones. Retrofitted this project's 92 rows; `grep -cF
+  '[open]'` now returns **37**, matching the Python-derived audit exactly.
+- 🔴 **A third defect caught by the script's own controls**: widening the row regex to span table
+  cells made it match rows whose first cell is a **wave label** (`**P0-W0**`) and report a phantom
+  drift on task 001. Reverted to the single-cell form with a "do not reintroduce a cell-spanning
+  pattern" note. Both controls (seeded drift; unparseable index) re-verified after the parser change —
+  that is the third time this guard's controls have caught a defect in the guard before it shipped.
+
 ###### 2026-09-03 — `unified-access-control-r2`: task-status drift check — a forcing function for CLAUDE.md §7
 
 - **New `scripts/check-task-status-drift.ps1`**, wired into **`task-execute` Step 10** (the moment both
