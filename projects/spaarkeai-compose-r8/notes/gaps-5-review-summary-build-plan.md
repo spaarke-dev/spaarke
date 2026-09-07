@@ -1,8 +1,32 @@
-# §GAPS-5 — Review Summary: comprehensive approach + build plan
+﻿# §GAPS-5 — Review Summary: comprehensive approach + build plan
 
 > **Date**: 2026-09-04 · **Status**: awaiting owner decision (§6). Every claim below is verified against
 > code/schema, not inferred — citations inline.
 > **Supersedes** my earlier "one client POST call" sizing, which was wrong (§2.2).
+
+## 0. ⚠️ Naming — read before the word "memo" appears below
+
+**"Memo" is retired as the user-facing name for this feature.** It collides with **`sprk_memo`**, the
+first-class entity behind the Notepad — a user-authored scratchpad — and the collision became live on
+2026-08-25 when `sprk_agreement` joined `sprk_memo`'s supported parents, so one agreement record can now
+carry both a Notepad memo and a "Summary Memo" meaning unrelated things. A user who knows Memos will read
+"Create Summary Memo" as *make me one of those, on this record*; it does neither.
+
+**The product name is "Review Summary."** Owner decision, 2026-09-04.
+
+This document nonetheless says "memo" often, in exactly one sense — **naming the code artifacts by their
+CURRENT identifiers** (`ReviewMemoAssembler`, `POST /review-memo`, `review-memo-v1`, and today's
+`"Create Summary Memo"` toolbar label). Referring to an existing thing by a name it does not have would
+make the plan unusable. Two layers, different timelines:
+
+| Layer | Today | Plan |
+|---|---|---|
+| **User-facing** (toolbar label, tooltip, persisted row display name) | "Create Summary Memo" | → **"Review Summary"** — **Phase 4, before Phase 3** (§5) |
+| **Code identifiers** (class, route, schema tag) | `ReviewMemo*`, `/review-memo` | Cosmetic; rename later or never. No user sees them. |
+
+⚠️ The one that is **not** cosmetic is the **persisted row's display name**, because it doubles as the
+lookup key (§5 Phase 4). That is why the rename is sequenced BEFORE the write call rather than left to a
+tidy-up pass.
 
 ---
 
@@ -71,7 +95,7 @@ is absent, and its remarks call that semantically correct —
 > *"Its absence represents EITHER a rejected suggestion OR a section the reviewer never acted on — both
 > converge on the identical observable fact that the original text is what stands in the final document."*
 
-So a memo assembled with no `afterText` at all is **correct by the existing design**, not degraded. See
+So a Review Summary assembled with no `afterText` at all is **correct by the existing design**, not degraded. See
 §4 for what it does and does not then claim.
 
 ### 2.4 Nullability mismatch (small, but decide it)
@@ -95,7 +119,7 @@ design (appendix vs separate document) the owner already had built both ways.
 
 ---
 
-## 4. What the shipped memo will and will not say (be honest up front)
+## 4. What the shipped Review Summary will and will not say (be honest up front)
 
 **Will**: for each flagged section — location, the verbatim clause (`before`), what the clause says
 (`flaggedClause`), why it was flagged (`assessment`), the firm standard it was measured against
@@ -131,7 +155,7 @@ separately from the judgment and cannot, because the fields are discarded on the
 No code if deferred. The assembler already handles absence correctly.
 
 ### Phase 3 — The write call
-- Add a **"Generate"** action to the Create Summary Memo dropdown (today it has only the two read actions).
+- Add a **"Generate"** action to the dropdown (today labelled "Create Summary Memo"; Phase 4 renames it). It currently has only the two READ actions.
 - Build `GenerateReviewMemoRequest` from `reviewSummaryFindings` + `reviewSummaryOverallRisk`.
 - POST, then re-read. Gate on `hasReviewFindingsRef` — the existing "no findings" signal.
 - Reuse the `useComposeChangeSummary` outcome-union shape from R8 item 8 (`needs-save` / `no-changes` /
@@ -141,7 +165,7 @@ No code if deferred. The assembler already handles absence correctly.
 
 **Size: moderate.** One fetch, one payload builder, one menu item, tests.
 
-### Phase 4 — Rename to "… Summary", paired with the categorisation fix
+### Phase 4 — Rename to "Review Summary" (§0), paired with the categorisation fix
 - Toolbar label/tooltip + the persisted row's display name.
 - ⚠️ **Must be paired**: `PersistReviewMemoAsync` sets `OutputTypeId = null` deliberately (env-specific
   GUID), so the row is found by **matching its display name**. Renaming alone orphans rows silently — the
@@ -167,7 +191,7 @@ Delete `SaveComposeDocumentRequest.SummaryPage`, `ComposeSummaryPageGenerator`, 
 | **D1** | Option **A** (complete + retire `summaryPage`), **B** (retire both), or **C** (wire `summaryPage` instead)? | **A** |
 | **D2** | Ship Phase 1 **without** `afterText`, or block on disposition tracking? | **Ship without.** The assembler already treats absence as correct, and R8's revision report already answers "what changed". |
 | **D3** | Findings missing `sectionRef`/`standardRef`: relax the server contract to optional and render "—", or exclude them from the memo? | **Relax to optional.** Silently excluding findings is the exact failure class this whole session has been about. If excluded instead, the count MUST be surfaced. |
-| **D4** | Final name — "Review Summary"? And confirm Phase 4 runs **before** Phase 3. | "Review Summary"; yes, before. |
+| **D4** | Confirm the product name is **"Review Summary"** (§0 — "memo" retired; it collides with `sprk_memo`/Notepad) and that Phase 4 runs **before** Phase 3. | Yes to both. Code identifiers stay `ReviewMemo*` — cosmetic, no user sees them. |
 
 **Phase 1 is safe to start now under any answer to D1** — it fixes live data loss and is a prerequisite
 for A, harmless under B/C.
