@@ -129,7 +129,7 @@
          cert-bootstrap probe (KeyVaultCertBootstrapProbe), replacing
          `az keyvault secret show`. Same 4.11.0 pin as Sprk.Bff.Api for
          cross-service version parity. -->
-    <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.11.0" />
+    <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.11.1" />
 
     <!-- Azure.ResourceManager (core) + Azure.ResourceManager.ManagedServices —
          task 121 (Wave G-2) real ARM-backed H1 subscription-readiness probe
