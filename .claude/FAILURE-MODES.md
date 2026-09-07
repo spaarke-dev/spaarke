@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-02 (added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -32,6 +32,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-10: A JSON-aware renderer that escapes one nesting level, over a config that is re-parsed at a deeper level](#ap-10-a-json-aware-renderer-that-escapes-one-nesting-level-over-a-config-re-parsed-deeper)
 - [AP-11: Code that RUNS but reaches the wrong destination — no compiler and no test spans the seam](#ap-11-code-that-runs-but-reaches-the-wrong-destination--no-compiler-and-no-test-spans-the-seam)
 - [AP-12: A comment becomes the constraint — prose outlives the mechanism it describes](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes)
+- [G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)](#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -904,7 +905,7 @@ commit `304b6d8f2`; guard in `tests/Spaarke.ArchTests/ClientUploadRouteAgreement
 
 ---
 
-### G-NN: `grep` silently cannot match characters above U+FFFF (most colored emoji)
+### G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)
 
 > **Added 2026-09-03** by `unified-access-control-r2`. **Cost: three wrong measurements in one
 > session**, one of which was written into a recovery file as a false claim about file corruption.
