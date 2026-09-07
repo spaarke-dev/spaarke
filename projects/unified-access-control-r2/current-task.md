@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-07, session 2 end** (by `context-handoff`) — reflects through commit `3a71e9611`. ⚠️ **Refresh this line every time you write here.** It once read 2026-09-04 while the file's last commit was 2026-09-07; a gap between this stamp and `git log -1 --format=%ci current-task.md` is the signal this skill's Failure Modes table says means the handoff was incomplete.
+> **Last Updated**: **2026-09-07, session 3** (task 083 complete) — reflects through commit `8047cca15`. ⚠️ **Refresh this line every time you write here.** It once read 2026-09-04 while the file's last commit was 2026-09-07; a gap between this stamp and `git log -1 --format=%ci current-task.md` is the signal this skill's Failure Modes table says means the handoff was incomplete.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
 > ⚠️ **This project's notes have now been WRONG FIFTEEN times.** Verify before believing —
 > counts, route names, schema claims, "already done" claims, open-vs-answered questions.
@@ -15,11 +15,38 @@
 
 | Field | Value |
 |---|---|
-| **Branch** | `work/unified-access-control-r2` @ `d4b3b6720` · clean · 0 unpushed · **40 ahead** of master · 0 behind |
-| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · **32 pass, `Router` GREEN**, `mergeStateStatus=UNSTABLE` (required check passes; only non-required `Trivy` red) |
-| **Task status** | **53 completed** · 1 completed-with-escalation (012) · 1 blocked-shipped (034) · **37 open** · 92 total — reconciled 2026-09-03 against POMLs + git, all 17 disagreements resolved |
-| **Next Action** | **Task 083 — container-selection authorization sweep** (20 h, opus/fable, `parallel-safe=false`). Project's core thesis; on the critical path to wrap-up (090); still has **2 live `ClientSupplied` SPE write sinks** — `Api/DocumentsEndpoints.cs` `PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it) and its sibling `DeleteFileAsync`. Down from 7. Its own brief says it does those rows FIRST. |
-| **Before starting** | Decide the **scope cut** (see § COMPLETION PLAN) and the **uuid CVE disposition** (see the Trivy entry). Both are owner calls I proposed and did **not** assume. |
+| **Branch** | `work/unified-access-control-r2` @ `8047cca15` · clean · **1 unpushed** · **47 ahead** of master · 0 behind (merged `origin/master` this session) |
+| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · `Router` was GREEN at `d4b3b6720`; **re-check after this push** |
+| **Task status** | **54 completed** · 1 completed-with-escalation (012) · 1 blocked-shipped (034) · **36 open** · 92 total. Drift gate green: 92 POMLs = 92 index rows |
+| **Next Action** | **Task 082 — caller-identity primitive census** (`parallel-safe=false`). Then 035/036 → 042/043/044 → 054–058 → 060–069 → 090. |
+| **🔴 Do FIRST, ahead of order** | **Task 061 — the explicit share for Secure Projects.** Task 021 shipped the isolation (memberless owner team + BU) but *not* the share, so a secure project is currently **isolated and unreachable by any human**. Any sequence that leaves 061 late ships a locked box. This is a correctness gap, not a feature. |
+| **SCOPE** | 🔴 **NO CUT. Owner-directed 2026-09-07: "we cannot cut scope."** All 36 open tasks are in. The ~106 h / spin-out-82 h split proposed in § COMPLETION PLAN is **VOID** — do not resurrect it as an approved plan; it was a recommendation the owner rejected. |
+| **Still open (owner)** | The **uuid CVE disposition** (see the Trivy entry) — GHAS-high, introduced by this PR, not reachable (Tiptap uses `v4`), not simply patchable. Unapproved; I proposed accept-with-rationale + a follow-up `overrides` bump and did not assume it. |
+
+### ✅ Task 083 CLOSED 2026-09-07 — the founding defect class is finished
+
+`grep -c "^            Provenance.ClientSupplied," tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`
+returns **0**. No code path lets a caller name the container its bytes land in.
+
+- **Only rows 4 and 5 remained.** Row 6 closed by #858, rows 7/8/9 by task **085**, row 10 by **091** —
+  all while 083 waited on **PR #806, which merged 2026-08-30**, so its "hard block" was long gone.
+  ⚠️ Seven files in this project still carry "behind PR #806" wording. It is stale everywhere.
+- **Both routes DELETED, not gated**, taking `Api/DocumentsEndpoints.cs`, the orphaned
+  `canwritefiles` policy (its only two consumers), the already-orphaned `canreadfiles`, both
+  `UNOWNED` waivers (deleted — *not* promoted to Permanent), the last two `PolicyOnlyRoutes` entries,
+  and the file's `GovernedFiles` entry. Census 117 → 116.
+- **Two notes were wrong and are corrected**: the inventory's "S7/S9 stay `ClientSupplied`
+  deliberately" (the build-enforced guard says all three coordinator sinks converted 2026-09-01 —
+  **guard beats note**), and the "6 pre-existing ControlPlane ArchTest failures" baseline (**now 0**;
+  ArchTests are 191/191). That is wrongs **sixteen and seventeen** for this project's notes.
+- **Calibration**: those two routes were called "live holes" by the POML, the inventory *and* my own
+  earlier reporting. They were **not exploitable** — the policy resolved the route value as
+  `sprk_documents({id})`, so a `b!…` drive id 400s and a document GUID is not addressable as a drive.
+  Accidentally safe via value-space disjointness, with a source comment recording the accident as
+  design (**AP-12**). Right disposition, overstated reason.
+- Verified: build 0 warnings · ArchTests **191/191** · BFF **12,166 pass / 0 fail** · publish
+  **master 45.46 → branch 45.48 MB (+0.02)** vs a *fresh* master build @ `91cecb07d` · **0 vulnerable
+  packages**. Guard perturbation-checked both ways, residue-checked clean.
 
 ### 🔧 TOOLING CONVENTIONS CHANGED 2026-09-07 — read before measuring anything
 
