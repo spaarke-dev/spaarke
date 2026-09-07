@@ -942,12 +942,29 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             .Returns(Task.CompletedTask);
 
         // GetSessionAsync — returns a session for TestSessionId (with 2 messages)
+        // 🔴 `ReturnsAsync(() => new ...)`, NOT `ReturnsAsync(new ...)` — the factory form is
+        // load-bearing (fixed 2026-09-03 by unified-access-control-r2).
+        //
+        // The object form evaluates ONCE at setup, so Moq handed the SAME ChatSession instance to
+        // every GetSessionAsync call for the life of this class fixture. Any test that posts a
+        // message (`POST …/{TestSessionId}/messages`, two of them in this class) can then leave a
+        // third message on the aggregate that `GetHistory_ReturnsMessages_WhenAuthenticated` counts,
+        // and that test asserts an EXACT length of 2.
+        //
+        // xUnit does not guarantee intra-class ordering, so this was an order-dependent flake that
+        // stayed green by luck: the full 424-test assembly passes locally, while CI's
+        // "Changed-Surface Integration Smoke" job — which runs a FILTERED 53-test subset, and so a
+        // different order — failed on it and took the BLOCKING `Router` check down with it (PR #950).
+        //
+        // A repository read must not hand callers a shared mutable aggregate. The factory gives every
+        // call a pristine session, which removes the coupling instead of papering over it with a
+        // `>= 2` assertion that would stop detecting a real regression.
         MockDataverseRepository
             .Setup(r => r.GetSessionAsync(
                 It.IsAny<string>(),
                 TestSessionId,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ChatSession(
+            .ReturnsAsync(() => new ChatSession(
                 SessionId: TestSessionId,
                 TenantId: "chat-test-tenant-abc",
                 DocumentId: TestDocumentId,
@@ -980,7 +997,11 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 It.IsAny<string>(),
                 TestEmptySessionId,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ChatSession(
+            // Factory form for the same reason as TestSessionId above: this session's whole point is
+            // that it is EMPTY, so it is the one most damaged by another test appending to a shared
+            // instance — "existing but empty must stay 200" would start asserting against a
+            // non-empty session and the FR-D3 regression guard would quietly stop guarding.
+            .ReturnsAsync(() => new ChatSession(
                 SessionId: TestEmptySessionId,
                 TenantId: "chat-test-tenant-abc",
                 DocumentId: null,
