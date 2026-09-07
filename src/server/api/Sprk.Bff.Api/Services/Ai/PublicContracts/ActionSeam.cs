@@ -21,17 +21,20 @@ public sealed class ActionSeam : IActionSeam
     private readonly IGenericEntityService _entityService;
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
     private readonly ILogger<ActionSeam> _logger;
 
     public ActionSeam(
         IGenericEntityService entityService,
         IFieldMappingDataverseService fieldMappingService,
         IServiceScopeFactory scopeFactory,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<ActionSeam> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -84,7 +87,7 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
-        var core = new TaskActionCore(_entityService, _logger);
+        var core = new TaskActionCore(_entityService, _coreAncestors, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(
                 Subject: request.Subject,

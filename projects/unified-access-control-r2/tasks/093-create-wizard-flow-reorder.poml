@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="unified-access-control-r2">
+  <metadata>
+    <title>Reorder the 7 Create wizards: collect IsSecure → create record → provision-if-secure → upload → link</title>
+    <phase>0c Secure Documents — upload path decomposition</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the order of operations in every Create wizard and is the change that closes a real tenant-isolation gap. Getting the order wrong writes customer documents into a shared container.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The judgement is sequencing across 7 wizards with a provisioning step that cannot move, plus deciding which of two existing Secure UI components is live per wizard. A wrong pick produces a fix that never renders.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield across 7 wizards with a shared service; the reorder interacts with pre-fill, provisioning and the record-keyed upload contract simultaneously.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches EntityCreationService plus all 7 wizards; concurrent edits to the shared creation service produce a silent merge mess.</parallel-reason>
+    <deps>076</deps>
+    <tags>bff-api, frontend, auth, pcf</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>notes/plan-upload-path-decomposition-2026-08-31.md §3. Owner-directed 2026-08-31: "for the Secure Project UI it is a part of this solution so need to include it."</origin>
+  </metadata>
+
+  <prompt>Today a secure Matter created WITH documents puts those documents in the shared BU container, because at upload time no matter exists yet to be secure. Server-side container derivation alone cannot fix that — only reordering the wizard can.</prompt>
+
+  <role>SPAARKE full-stack engineer.</role>
+
+  <goal>In every Create wizard, the owning record exists and has been provisioned (if secure) BEFORE any bytes move, so the server derives the container from a record it authorized.</goal>
+
+  <context>
+    <background>`EntityCreationService.ts` orders the flow **upload → create → link**. At upload time
+there is no record, so the container defaults to the acting user's BU (`applyUserBuDefaults`). For a
+SECURE record that is the isolation gap: the documents land in the shared container and stay there.
+
+**The reorder is what closes it.** Target order: collect IsSecure early → create the record →
+provision the container if secure → upload against `(entity, recordId)` → create the document rows.
+
+⚠️ **Provisioning REQUIRES the record to already exist** (task 008 finding: its final act is an
+`UpdateAsync` stamping three fields on the project). So IsSecure is *collected* early and *acted on*
+after creation. These are compatible; the order cannot be inverted.
+
+⚠️ This is also why abandoning the wizard leaves **no orphaned container** — nothing is provisioned
+until the record exists.
+
+⚠️ `provision-project` is **project-only**. Owner: projects first, **matters as a later add-on**.
+
+🔴 **DO NOT AUTHOR A NEW SECURE PROJECT UI.** A 2026-08-31 note claimed the Secure Project wizard step
+"was never specified". That is WRONG — it exists in **two** implementations, and there is already a
+pending task **068** to rework it:
+  - `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx`
+  - `src/solutions/LegalWorkspace/src/components/CreateProject/SecureProjectSection.tsx`
+  - `tasks/068-create-project-wizard-secure-step.poml` (pending, Phase 4, FR-31)
+
+Per CLAUDE.md §11 (extend, do not fork), this task owns something NARROWER: move the IsSecure
+COLLECTION POINT earlier (owner: before the Info step) so the flag is known before record creation,
+and REUSE the existing section component where it renders. Whether that means depending on 068,
+folding 068 in, or landing first and letting 068 rework what moved is this task's sequencing call —
+but duplicating the component is not on the menu.
+
+⚠️ **Two copies is itself an open question to SURFACE, not silently resolve.** Determine which is live
+for each of the 7 wizards before editing either; changing the wrong one produces a fix that never
+renders.
+
+**Why the reorder is safe w.r.t. AI pre-fill** (the finding that makes it possible): pre-fill uploads
+to a server-configured STAGING container (`SpeOptions.StagingContainerId`, verified
+`MatterPreFillService.cs:307`), and the final document upload is a SEPARATE browser call holding the
+same `File` objects. The two legs are independent, so moving the final upload after record creation
+does not disturb field extraction. Bytes travel twice — true today as well, so not a regression.</background>
+
+    <ship-together>🔴 Client and BFF MUST deploy together — no compatibility window. BFF-first 404s every
+upload; client-first 404s every upload. This MUST appear in the PR description.</ship-together>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/plan-upload-path-decomposition-2026-08-31.md</file>
+      <file>projects/unified-access-control-r2/tasks/076-record-keyed-upload-contract.poml</file>
+      <file>projects/unified-access-control-r2/tasks/068-create-project-wizard-secure-step.poml</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-derive at current HEAD: the 7 wizards, which Secure section component each actually renders, and whether 076 has landed the record-keyed route. Do NOT inherit any of these from the plan note — it has been wrong twice already.</step>
+    <step order="1">Decide and RECORD the 068 sequencing (depend / fold in / land first). State it in the PR.</step>
+    <step order="2">Move the IsSecure collection point ahead of the Info step, reusing the existing section component.</step>
+    <step order="3">Reorder `EntityCreationService`: create → provision-if-secure → upload against `(entity, recordId)` → link.</step>
+    <step order="4">Verify pre-fill still extracts fields (staging leg untouched).</step>
+    <step order="5">Prove the isolation fix: a secure record created WITH documents puts them in the record's own container, not the shared BU one. This is the acceptance test that matters.</step>
+    <step order="6">Verify abandoning the wizard provisions nothing.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the two Secure section components turn out to be BOTH live across different wizards, STOP and surface it — consolidating them is its own change and may belong to 068.</trigger>
+    <trigger>If provisioning turns out to be reachable before record creation in any path, STOP — the whole premise of the ordering is that it is not.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`EntityCreationService` already owns create/upload/link; `SecureProjectSection.tsx` already renders the secure choice; `provision-project` already provisions.</existing>
+    <extension>Pure reordering plus moving a collection point. No new service, no new component — the explicit anti-goal here is authoring a second Secure UI.</extension>
+    <cost-of-doing-nothing>A secure Matter created with documents puts those documents in the shared BU container permanently. That is the exact isolation failure this project exists to close, and server-side container derivation cannot reach it.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">7 Create wizards reordered; IsSecure collected before the Info step</output>
+    <output type="test">Isolation test: secure record + documents → record's own container</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 7 Create wizards create the record before any upload.</criterion>
+    <criterion>A secure record created WITH documents places them in that record's own container — asserted by test, not inspection.</criterion>
+    <criterion>No NEW Secure Project UI component exists; the existing one is reused and the 068 relationship is recorded.</criterion>
+    <criterion>Abandoning any wizard provisions no container and leaves no orphan.</criterion>
+    <criterion>AI pre-fill still extracts fields (staging leg unaffected).</criterion>
+    <criterion>PR description carries the ship-together statement and the Placement Justification.</criterion>
+  </acceptance-criteria>
+
+  <notes>NOT STARTED. Depends on 076 landing the record-keyed contract this uploads against.</notes>
+</task>

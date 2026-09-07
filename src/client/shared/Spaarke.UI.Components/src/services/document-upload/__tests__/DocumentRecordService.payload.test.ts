@@ -13,9 +13,13 @@
  * regression by asserting `sprk_containerid` is NOT in the payload under any
  * code path (associated, unassociated, with index, without index).
  *
- * **Regression guard**: `sprk_graphdriveid` must still be populated from
- * `parentContext.containerId` exactly as before (regression coverage for the
- * pre-existing behavior).
+ * **Source guard (task 076, 2026-09-03)**: `sprk_graphdriveid` is populated from
+ * `SpeFileMetadata.driveId` — the drive the SERVER reports the bytes landed in —
+ * NOT from any container the client resolved. It used to come from
+ * `parentContext.containerId`, which agreed with reality only while the client
+ * also named the upload destination. Under the record-keyed contract the two
+ * provably disagree for a secure record, so the client-side source was deleted
+ * along with the field it read.
  *
  * @see spec.md FR-WIZ-07
  * @see design.md INV (Document container field)
@@ -96,11 +100,14 @@ function makeMatterConfig(): EntityDocumentConfig {
   };
 }
 
-function makeFile(name = 'contract.pdf', size = 12345): SpeFileMetadata {
+function makeFile(name = 'contract.pdf', size = 12345, driveId = 'drive-id-abc'): SpeFileMetadata {
   return {
     id: 'graph-item-id-001',
     name,
     size,
+    // The SERVER's answer for where these bytes went (task 076). This, not the parent context,
+    // is what `sprk_graphdriveid` must be built from.
+    driveId,
     createdDateTime: '2026-06-07T00:00:00Z',
     lastModifiedDateTime: '2026-06-07T00:00:00Z',
     isFolder: false,
@@ -112,7 +119,6 @@ function makeParentContext(overrides: Partial<ParentContext> = {}): ParentContex
   return {
     parentEntityName: 'sprk_matter',
     parentRecordId: '11111111-1111-1111-1111-111111111111',
-    containerId: 'drive-id-abc',
     parentDisplayName: 'MAT-2026-001',
     ...overrides,
   };
@@ -225,19 +231,37 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     expect('sprk_containerid' in client.createCalls[0].data).toBe(false);
   });
 
-  it('STILL populates sprk_graphdriveid from parentContext.containerId (regression guard — pre-existing behavior preserved)', async () => {
+  it('populates sprk_graphdriveid from the SERVER-reported file.driveId, not from the parent context', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
     await svc.createDocuments(
-      [makeFile()],
-      makeParentContext({ containerId: 'drive-id-abc' }),
+      // A secure record's own container — the value only the server knows, and the exact case the
+      // deleted client-side source got wrong (it would have written the shared BU container here).
+      [makeFile('contract.pdf', 12345, 'b!secure-record-own-container')],
+      makeParentContext(),
       makeFormData(),
       'spaarke-knowledge-index-v2'
     );
 
     const payload = client.createCalls[0].data;
-    expect(payload.sprk_graphdriveid).toBe('drive-id-abc');
+    expect(payload.sprk_graphdriveid).toBe('b!secure-record-own-container');
+  });
+
+  it('writes a NULL sprk_graphdriveid rather than guessing when the upload reported no driveId', async () => {
+    const client = makeCapturingClient();
+    const svc = makeService(client);
+
+    // `driveId` deliberately ABSENT from the object rather than passed as `undefined` through
+    // `makeFile` — a default parameter would silently substitute one and the test would assert
+    // nothing.
+    const fileWithoutDriveId: SpeFileMetadata = { ...makeFile(), driveId: undefined };
+
+    await svc.createDocuments([fileWithoutDriveId], makeParentContext(), makeFormData());
+
+    // Null is the honest answer. There is no client-side container left to fall back to, and
+    // inventing one would produce a pointer that 404s on every later download.
+    expect(client.createCalls[0].data.sprk_graphdriveid).toBeNull();
   });
 
   it('preserves all pre-existing Document fields alongside the new sprk_searchindexname', async () => {
@@ -296,7 +320,6 @@ describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
     return {
       parentEntityName: '',
       parentRecordId: '',
-      containerId: 'drive-id-unassoc',
       parentDisplayName: '',
     };
   }
@@ -330,12 +353,19 @@ describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
     expect('sprk_containerid' in client.createCalls[0].data).toBe(false);
   });
 
-  it('STILL populates sprk_graphdriveid in unassociated payload (regression guard)', async () => {
+  it('populates sprk_graphdriveid in the unassociated payload from file.driveId too', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    await svc.createDocuments([makeFile()], unassociatedParent(), makeFormData(), 'spaarke-knowledge-index-v2');
+    await svc.createDocuments(
+      [makeFile('contract.pdf', 12345, 'drive-id-unassoc')],
+      unassociatedParent(),
+      makeFormData(),
+      'spaarke-knowledge-index-v2'
+    );
 
+    // Both code paths read the SAME source. They diverged historically, and a divergence here is
+    // how "unassociated documents point at the wrong drive" would come back.
     expect(client.createCalls[0].data.sprk_graphdriveid).toBe('drive-id-unassoc');
   });
 });

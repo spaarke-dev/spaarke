@@ -47,7 +47,7 @@ public class TodoRegardingBuilderTests
                 .ReturnsAsync(recordTypeRef);
         }
 
-        return new TodoRegardingBuilder(_commServiceMock.Object, _loggerMock.Object);
+        return new TodoRegardingBuilder(_commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

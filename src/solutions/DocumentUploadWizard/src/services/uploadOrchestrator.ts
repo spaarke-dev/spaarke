@@ -28,6 +28,7 @@ import type {
     CreateResult,
     EntityDocumentConfig,
     UploadFilesResult,
+    UploadTarget,
 } from "@spaarke/ui-components/services/document-upload";
 import {
     FileUploadService,
@@ -129,6 +130,35 @@ export interface UploadOrchestratorConfig {
     onUnauthorized?: () => void;
 }
 
+// ---------------------------------------------------------------------------
+// Upload target (task 076)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map the wizard's parent context onto the upload contract the bytes go out on.
+ *
+ * The wizard has exactly two branches and they are decided by the SAME condition
+ * `DocumentRecordService` already uses to decide whether to bind a parent lookup — so a file can
+ * never be uploaded against one record and filed under another.
+ *
+ *   · a parent was resolved (associate branch)  -> `PUT /api/obo/records/{entity}/{id}/files/{path}`
+ *   · the user skipped associate                -> `PUT /api/obo/me/files/{path}`
+ *
+ * The GUID is normalized because the server route is constrained `{recordId:guid}`: a brace-wrapped
+ * id would MISS the route and 404, surfacing as a bare "upload failed" with no clue why. Ids reach
+ * this wizard from `Xrm.Utility.lookupObjects` and from URL parameters, both of which produce
+ * brace-wrapped values.
+ */
+export function resolveUploadTarget(parentContext: ParentContext): UploadTarget {
+    const entity = parentContext.parentEntityName?.trim() ?? "";
+    const recordId = (parentContext.parentRecordId ?? "").replace(/[{}]/g, "").trim().toLowerCase();
+
+    if (!entity || !recordId) {
+        return { kind: "no-record" };
+    }
+    return { kind: "record", entityLogicalName: entity, recordId };
+}
+
 // `CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 MB` was DELETED here 2026-09-02. It had zero references —
 // no branch ever read it — but it was the third copy of a 4 MiB limit that no server ever enforced
 // (`PathValidator.SmallUploadMaxBytes`, deleted in `4044286a6`, was the same fiction). The simple
@@ -217,10 +247,20 @@ export async function orchestrateUpload(
         });
     }
 
+    // Task 076: the destination is the OWNING RECORD, or an explicit "there is none" — never a
+    // container. `parentContext` already carries the same `(entity, id)` pair the wizard uses for
+    // the Dataverse lookup binding, so the record the bytes are authorized against and the record
+    // they are filed under are the same one by construction.
+    //
+    // "Skip associate" takes the record-less branch: the user declined a parent, so there is no
+    // record to resolve a container from and the server files it in the acting user's business-unit
+    // container. That is the ONLY branch that reaches `PUT /api/obo/me/files/{path}`.
+    const target = resolveUploadTarget(config.parentContext);
+
     const uploadResult: UploadFilesResult = await multiFileUploadService.uploadFiles(
         {
             files,
-            containerId: config.parentContext.containerId,
+            target,
             conflictBehavior,
         },
         (progress) => {
@@ -477,9 +517,23 @@ async function kickOffBackgroundTasks(
         if (!effectiveTenantId) {
             logger.warn("UploadOrchestrator", `tenantId missing — RAG indexing will fail for ${record.fileName}`);
         }
+        // 🔴 The `?? config.parentContext.containerId` fallback was DELETED here 2026-09-03 with the
+        // record-keyed cutover. It named the container the CLIENT resolved at wizard-open time,
+        // which under this contract is not where the bytes went — indexing there would read the
+        // wrong drive and 404, or worse, index a same-named file that is not this one. `driveId` is
+        // now always the SERVER's answer, carried through `SpeFileMetadata.driveId`. A file that
+        // somehow arrives without one is SKIPPED with a warning rather than indexed at a guess.
+        if (!record.driveId) {
+            logger.warn(
+                "UploadOrchestrator",
+                `RAG indexing skipped for ${record.fileName}: the upload response carried no driveId.`,
+            );
+            continue;
+        }
+
         tasks.push(
             triggerRagIndexing(
-                record.driveId ?? config.parentContext.containerId,
+                record.driveId,
                 record.itemId,
                 record.fileName,
                 effectiveTenantId,

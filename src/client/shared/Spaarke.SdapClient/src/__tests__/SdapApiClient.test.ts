@@ -51,13 +51,18 @@ describe('SdapApiClient', () => {
     });
   });
 
-  describe('uploadFile', () => {
-    it('should be defined', () => {
+  // `describe('uploadFile')` was re-pointed 2026-09-03 (task 076): `uploadFile(containerId, …)` is
+  // DELETED along with the route it called. The two surviving contracts are asserted here instead —
+  // and, more usefully, that the container-keyed one has NOT quietly come back.
+  describe('upload contracts', () => {
+    it('exposes the record-keyed and record-less methods, and no container-keyed one', () => {
       const client = new SdapApiClient({
         baseUrl: 'https://api.example.com',
       });
 
-      expect(client.uploadFile).toBeDefined();
+      expect(client.uploadFileForRecord).toBeDefined();
+      expect(client.uploadFileWithoutRecord).toBeDefined();
+      expect((client as unknown as Record<string, unknown>).uploadFile).toBeUndefined();
     });
   });
 

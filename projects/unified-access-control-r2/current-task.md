@@ -1,22 +1,112 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-02** (by `context-handoff`, pre-`/compact`).
-> **Recovery**: read "Quick Recovery", then **§ REMAINING WORK (ordered)**. Everything below the
-> Quick Recovery block is history/detail — the ordered list is the authority on what to do next.
-> ⚠️ If a header ever disagrees with § REMAINING WORK, **trust the list and fix the header**. This has
-> already happened twice (a header claiming "ACTIVE TASK 076 step 4" with two commits described as
-> unpushed that had merged long since).
+> **Last Updated**: **2026-09-03** (by `context-handoff`, pre-`/compact`).
+> **Recovery**: read Quick Recovery, then **§ NEXT SESSION — ORDERED WORK ITEMS**. Everything below
+> that is history. ⚠️ If a header ever disagrees with the ordered list, **trust the list**.
+> ⚠️ **This project's own notes have been WRONG ELEVEN times.** Verify before believing — especially
+> counts, route names, "already done" claims, and open-vs-answered questions.
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-02
+## Quick Recovery (READ THIS FIRST) — 2026-09-03
 
 | Field | Value |
 |---|---|
-| **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
-| **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
-| **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. Branch is **fully merged** — `git rev-list --count origin/master..HEAD` = 0. Verify with `git log --oneline -3` rather than trusting a SHA written here (a commit cannot state its own hash; two attempts to do so were wrong within seconds). |
-| **Next Action** | ✅ **N-1 + item 7 DONE**; **PR #933 OPEN** (https://github.com/spaarke-dev/spaarke/pull/933) — gate on the FULL rollup, not `Router`. Remaining: **item 5** (file tasks 093/094/095 — read [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST; ⚠️ its **094 is now largely SHIPPED** by `09025ab39`/`524a32fd3` — re-scope against current code, do not author it as written; `ls tasks/` before numbering, highest is 092), then **item 6** (execute 076 — ship-together, own session). Item 4 needs an ENVIRONMENT query. 🔔 **OWNER DECISION PENDING — see the account/contact row below.** |
+| **State** | Branch **clean**, 0 unpushed, 0 behind master. **PR #939 OPEN** — https://github.com/spaarke-dev/spaarke/pull/939 (14 commits, NOT merged). |
+| **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ · ArchTests **182/182** · BFF unit **11,845 passed / 0 failed** / 58 skipped · client suite **9 suites / 14 tests failing = the documented baseline**, all untouched by this work (verified by diff) · publish **44.14 MB** incl. PDBs (−0.82, ceiling 60). |
+| **Just completed** | **076 COMPLETE** (the container contract, open since 2026-08-25) · **050** + **052** core-ancestor stamping · **034** canary (🟡 shipped-not-closed) · **item 7** association map · **N-1** one upload client. |
+| **Next Action** | **START AT § NEXT SESSION — ORDERED WORK ITEMS.** Item 1 is merging PR #939, and it has TWO deploy obligations that must be honoured or every upload 404s. |
+
+### 🔴 The five things that will bite a fresh session
+
+1. **`Router` is the ONLY required check on master.** It has passed while other jobs were RED —
+   #934 reached master with a **broken solution build** that way, and I had to repair it. **Gate on
+   the FULL rollup; only `CLEAN` merges.**
+2. **The incremental solution build LIES.** `dotnet build Spaarke.sln` came back green while a real
+   compile error sat in a test project. Always `--no-incremental`. Also: `MSB3026`/`MSB3027` file
+   locks mean a *concurrent test run*, not a code error.
+3. **STALE PROSE HAS COST REAL WORK ELEVEN TIMES.** Worst instances: an "open escalation" that had
+   been ANSWERED five days earlier (cost a wrong status report to the owner); "12 container
+   suppliers" that is really ~32; "7 Communication sites need routing" when all 4 were already done;
+   `sprk_todo` described as a live upload target when it has no upload call site at all.
+4. **NEVER `git stash` in this worktree, and never `git add -A` with concurrent agents.** Both
+   happened: a stash swept up another agent's uncommitted work, and a `git add` swept up another
+   agent's file leaving `origin` briefly non-compiling. **Use isolated worktrees for parallel agents.**
+5. **Both arch guards fire on new work and are RIGHT every time** (3 instances now):
+   `RouteAuthorizationGuardTests` (waiver + route-count ratchet) and
+   `SpeWriteSinkContainerProvenanceGuardTests` (provenance inventory). Fix them honestly; never
+   convert a `Pending` waiver to `Permanent` to go green.
+
+---
+
+## ▶ NEXT SESSION — ORDERED WORK ITEMS (owner-directed 2026-09-03)
+
+### 1. Merge PR #939 — ⚠️ TWO DEPLOY OBLIGATIONS
+
+Gate on the FULL check rollup, not `Router`. Then:
+
+- 🔴 **CLIENT + BFF SHIP TOGETHER.** `PUT /api/obo/containers/{id}/files/{*path}` is **DELETED**.
+  BFF-first **or** client-first both **404 every upload**. No compatibility window, no feature flag.
+  Surfaces: BFF · `sprk_documentuploadwizard` · SemanticSearchControl · LegalWorkspace ·
+  `sprk_wizard_commands.js`.
+- 🔴 **REBUILD 7 CHECKED-IN PCF `bundle.js` ARTIFACTS** (dated 2026-07-29). They still contain the
+  OLD inlined fetch to the deleted route. **Source is clean; the built artifacts are not** — so a
+  deploy that ships them 404s even though the repo greps clean. Use `npm run build:prod`, NEVER
+  `npm run build` (root CLAUDE.md §12 / FAILURE-MODES AP-1). Bump PCF versions in all 4 locations.
+
+### 2. Parallel agents → use ISOLATED WORKTREES (owner-directed)
+
+Three agents in one shared worktree collided twice (see trap 4). Next time pass
+`isolation: "worktree"` to the Agent tool, or restrict fan-out to provably disjoint directories.
+Fences that DID help and should be kept: no `.claude/` writes, `git add` by explicit path, explicit
+per-agent file exclusion lists, and leaving `current-task.md` to the main session only.
+
+### 3. Task 083 — container-selection sweep
+
+**Now unblocked by 076** and down from 7 → **6 `ClientSupplied` sinks** (`OBOEndpoints
+UploadSmallAsUserAsync#1` is gone with the deleted route). Parse the live allow-list in
+`SpeWriteSinkContainerProvenanceGuardTests.cs` — do NOT trust the prose count. 083 must not be
+closed while any sink is unclassified.
+
+### 4. Tasks 030 / 031 / 040 — the ADR amendments 🔑 **HIGHEST LEVERAGE**
+
+**MAIN-SESSION-ONLY** — they edit `.claude/**` and sub-agents are blocked there by design
+(root CLAUDE.md §3; "Edit denied" is the boundary working, not a bug).
+
+They are the bottleneck for everything else: **030 → 032** (the evaluator spine, the thing this
+project is NAMED for and still unstarted), **031 → 035**, **040 → 041**. Landing all three converts
+one long dependency chain into several runnable branches — this is what actually unlocks parallelism
+for the remaining ~50 tasks. All three are CLAUDE.md §6.5 **path B** (ADR amendment); the tensions
+are already written up in the project CLAUDE.md "ADR tensions" table.
+
+### 5. Then: the evaluator spine (032 → 033/037/042 → 036/039/043/044)
+
+Task **032** — `(recordId → rights)` with additive terms, highest-wins, then the ordered vetoes
+(deny list → Restricted → Secure). This is the core deliverable and it has not started.
+
+---
+
+## 🔔 OPEN OWNER DECISIONS (blocking specific tasks)
+
+| # | Decision | Blocks |
+|---|---|---|
+| A | **`sprk_account` / `sprk_contact` lookups on `sprk_document`.** Owner is adding them. Use schema names **`sprk_Account`** / **`sprk_Contact`** → logical `sprk_account`/`sprk_contact`, nav props `sprk_Account`/`sprk_Contact` (PascalCase is load-bearing for `@odata.bind`). **Do NOT wire the code before the columns exist** — that converts today's silent drop into a hard write error. Then add cases to `DocumentAssociationMap` + `DataverseServiceClientImpl` + the client `ENTITY_CONFIGS`. | Office saves filed to account/contact are persisted **unassociated** today |
+| B | **034 canary user + CI path.** No non-admin canary user exists in dev (owner action: new `systemuser` + custom role), and no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + required manual gate, over standing CI secrets. | **Task 036 must NOT proceed** until the canary runs truthfully |
+| C | **`sprk_todo` has no `sprk_regardingservicerequest` column** (F-050-2 / F-052-1), so a To Do under a service-request-anchored communication cannot inherit that access. Handled consistently client+server as `unstampable` + warn, write proceeds. Schema change vs accept. | tasks 028 / 056 |
+| D | **Real-Dataverse create+read smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. Field names + case-sensitive `sprk_Project@odata.bind` have never executed against real Dataverse. SPA deploy is manual `workflow_dispatch`. | external SPA deploy |
+
+---
+
+## Filed, not fixed
+
+- Outbound-attachment path records a wrong `(driveId, itemId)` pair — `CommunicationService.cs:1259/1573` → `:2308` writes the `sprk_document` GUID into `sprk_graphitemid`.
+- **Tasks 005/007/008 parked live-tenant checklists on 034 on a FALSE premise** ("034 is the first task with a real tenant" — it isn't). Nine unverified items need re-homing; enumerated in `notes/task-034-negative-canary.md` §5.
+- **F-052-2** (low): `EmailDraftToolHandler` derives app-only under a user-context write.
+- `DocumentOperations.js` supplies a drive to the MI route `/api/drives/{driveId}/upload` — already dead (its `GET /api/containers/{id}/drive` hop is mapped nowhere).
+
+---
+
+## Session history + detail (below this line is the prior record)
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
 
@@ -196,8 +286,8 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 3b | **R15 external upload** | ✅ **DONE** `524a32fd3` | `POST /api/v1/external/projects/{id}/documents` (multipart `file`). Two-stage gate from `CreateEvent`; container server-derived via `RecordContainerResolver.ResolveForRecordAsync("sprk_project", id)` — **there is no container parameter to bind**, so a client that sends one gains nothing (asserted, not assumed); `Unresolved`/`FailClosed` → **422**, never a shared-container fallback; app-only `UploadSmallAsync` with **`ConflictBehavior.Fail`**; bare sanitized filename. **Needed a new app-only `UploadSmallAsync` overload** taking `ConflictBehavior` (an OVERLOAD — ~a dozen callers depend on replace-in-place) **plus the `ODataError` 409 → `SpaarkeStorageException` translation the OBO twin already had**; without it `Fail` surfaces as an opaque 500, because Kiota's `ODataError` does NOT derive from `ServiceException`. 🔴 **Both arch guards caught the new sink before I did**: the provenance inventory needs an entry, and the path local must be **named `uploadPath`** (a file name IS a path — real folders were minted from a typed date). Client repointed at `DocumentLibrary.tsx`; 409/422/403 now say what happened. ⚠️ `ApiError` exposes **`statusCode`, not `status`, and has NO `detail`** — my first version's branching was dead code. |
 | 3c | **Two-option collision dialog** | ✅ **DONE** `09025ab39` | The signal was dying at **`MultiFileUploadService`**: its loop wrapped everything in `try/catch` and re-threw `new Error(serviceResult.error)`, discarding `nameConflict`. Now wired BOTH ways — up: `nameConflict` → `UploadFilesResult.errors[]` → `UploadProgress` → `OrchestratorFileProgress` → the row; down: `conflictBehavior` → `orchestrateUpload` → `uploadFiles` → `uploadFile` → BFF. **Two** buttons (Keep both / Save as new version) per owner decision. A retry re-runs the FULL pipeline for that one file and **merges** into the batch result (assigning it would drop every other file from the counts). Also: a pending conflict row now renders ABOVE `SummaryStep` — previously one successful file switched the step and the choice vanished, silently dropping the pending file. Deleted `CHUNKED_UPLOAD_THRESHOLD_BYTES` (4 MB, zero refs) — third copy of a limit no server enforced. 8 tests, perturbation-checked (3 redden). |
 | 4 | `__SPAARKE_OPEN_CLOSE_PROJECT__` has **zero in-repo callers** | 🔲 | Set at `WorkspaceGrid.tsx:450`, never called. Origin task exposed it "for ribbon command integration". **Secure-project closure — the access-revocation cascade this project is about — may be unlaunchable.** Needs an ENVIRONMENT query (org-side ribbon), not a repo search. |
-| 5 | File tasks **093 / 094 / 095 / 096** | 🔲 | Per [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) — **read it first**. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it — see the plan's 2026-09-01 correction). 096 = replace-path drive provenance. `ls tasks/` before numbering (highest is 092). |
-| 6 | Execute **076** | 🔲 | The container contract. **Ship-together** (client+BFF). Its own session. |
+| 5 | File tasks **093 / 094 / 095** | ✅ **DONE** 2026-09-03 | Per [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) — **read it first**. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it — see the plan's 2026-09-01 correction). 096 = replace-path drive provenance. `ls tasks/` before numbering (highest is 092). |
+| 6 | Execute **076** | 🔄 **IN PROGRESS — not blocked** | Server half complete incl. the record-LESS route (`756e089cb`). Remaining = client cutover (steps 4–11). |
 | 7 | Q4 widening + association map | ✅ **DONE** `f85796f70` | See the item-7 row in the status table below — the note was wrong twice. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
 
@@ -212,8 +302,8 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | **8** bookkeeping | ✅ `b8260826e` | 012 → `completed-with-escalation` **with the residue stated**; **083 explicitly NOT closed** |
 | **N-1** one upload client | ✅ **DONE** `920ba6b7a` + `047c9df8d` | First half: shared client given working auth (4 sites), `TokenProvider` deleted, U2's failure copy + typed `SdapHttpError` ported ahead of the cut, `DriveItem.webUrl` widened, U1's raw fetch → `SdapApiClient.uploadFile()`. Second half: `FileUploadService` repointed, U2's 408-line `SdapApiClient.ts` DELETED, `pcf-safe.ts` + barrel + 4 dead request types cleaned, wizard orchestrator on `authenticatedFetch`. 🔴 **The second half could not land until a defect in the SURVIVING client was fixed** — an injected `authenticatedFetch` has TWO production shapes: `@spaarke/auth`'s **THROWS** `ApiError` on non-2xx (every code page + wizard) while `external-spa`'s **RETURNS** the raw response. Only the second was handled, so every `response.ok` / `status === 409` check was unreachable under the canonical one: `UploadNameConflictError` could not be produced, and repointing the wizard would have silently killed the collision dialog `09025ab39` shipped two days earlier — with nothing failing to compile and no test going red. `requestOrThrow` now normalizes both shapes across upload/download/delete/getFileMetadata; its `onStatus` hook fires before the generic translation in BOTH branches, so the 409-before-generic ordering still holds — **do not reorder it**. Also: `DriveItem.parentReferenceId` → **`parentId`** (the wire field; the old name was invented by the type and undefined on every response, and the wizard reads `parentId`), and `FileUploadRequest.fileName` removed rather than accepted-and-ignored. |
 | **4** `__SPAARKE_OPEN_CLOSE_PROJECT__` | 🔲 **NEEDS OWNER/ENV** | zero in-repo callers; it is an **org-side ribbon**, so a repo search cannot answer it. Query the ENVIRONMENT's ribbon definitions for the command. If genuinely uncalled, secure-project closure — the access-revocation cascade this project is about — may be unlaunchable. |
-| **5** file tasks 093–096 | 🔲 | read `notes/plan-upload-path-decomposition-2026-08-31.md` FIRST. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it). `ls tasks/` before numbering — highest is **092**. |
-| **6** execute **076** | 🔲 | the container contract, ship-together client+BFF, own session. **Gates 083's OBO row.** |
+| **5** file tasks 093–095 | ✅ **DONE** | read `notes/plan-upload-path-decomposition-2026-08-31.md` FIRST. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it). `ls tasks/` before numbering — highest is **092**. |
+| **6** execute **076** | 🔔 **BLOCKED — owner decision** | Server half SHIPPED. Blockers (a) + (b) both CLOSED 2026-09-03 — (a) by item 7's map additions, plus the finding that `sprk_todo` was never an upload target. Only the three parentless upload paths remain; owner picks option 1/2/3 (§5 of the task notes). Still **gates 083's OBO row**. |
 | **7** Q4 widening + association map | ✅ **DONE** `f85796f70` | 🔴 **The note was wrong twice.** (1) There were **FOUR** copies of the association switch, not one, and they had DRIFTED on spelling — `UploadFinalizationWorker` took only friendly ("matter"), `EmailAttachmentProcessor` only logical ("sprk_matter"), `OfficeDocumentPersistence` both, `RecordMatchEndpoints` only logical and the ONLY one failing closed. The same token applied in one path and silently vanished in another; three then warn-and-continued, so the document was created unassociated with no error. Now ONE map — `Spaarke.Dataverse.DocumentAssociationMap` — accepting BOTH spellings, returning a bool so each caller keeps its own miss behaviour. (2) **`sprk_todo` is NOT mappable.** Live `sprk_document` metadata has lookup columns for matter/project/invoice/**workassignment**/**event** but **no `sprk_todo` column** — so a document cannot be associated to a to-do at all. It is deliberately absent from the map AND from `EntitySetByType`; widening access for it would authorize a route whose upload could only land unassociated. Needs a SCHEMA change, not code. Two forcing functions fired correctly and were fixed, not silenced: the `UpdateDocumentRequest` field-mapping count, and `RecordKeyedUploadAuthorizationTests`' unmapped-entity example (was `sprk_workassignment`, which this widening mapped → repointed at `sprk_todo`). 22 new tests, perturbation-checked. Note S13 in the 083 inventory is `UploadFinalizationWorker` and is still **LIVE** with a client-supplied container via the job payload — untouched here. |
 
 ### 🔔 OWNER DECISION PENDING — `account` / `contact` saves are filed NOWHERE

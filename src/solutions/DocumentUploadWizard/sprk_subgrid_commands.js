@@ -292,25 +292,32 @@ async function getContainerId(formContext, entityConfig) {
             if (buContainerId) {
                 console.log("[Spaarke] Got container ID from business unit:", buContainerId);
 
-                // Write back to parent record so future lookups are synchronous
-                var parentEntityName = formContext.data.entity.getEntityName();
-                var parentRecordId = formContext.data.entity.getId().replace(/[{}]/g, '');
-                var targetField = entityConfig.containerIdField || "sprk_containerid";
-                try {
-                    var updateData = {};
-                    updateData[targetField] = buContainerId;
-                    await Xrm.WebApi.updateRecord(parentEntityName, parentRecordId, updateData);
-                    console.log("[Spaarke] Wrote container ID back to " + parentEntityName + "." + targetField);
-                    // Also update the form attribute so it's visible without refresh
-                    var formAttr = formContext.getAttribute(targetField);
-                    if (formAttr) {
-                        formAttr.setValue(buContainerId);
-                        formAttr.setSubmitMode("never"); // Already saved via WebApi
-                    }
-                } catch (writeError) {
-                    // Non-fatal: container ID was retrieved, just couldn't write back
-                    console.warn("[Spaarke] Could not write container ID back to parent record:", writeError);
-                }
+                // ─────────────────────────────────────────────────────────────────────────────────
+                // 🔴 THE WRITE-BACK HERE WAS DELETED 2026-09-03 by unified-access-control-r2
+                //    task 076 (harmful write "W2"). DO NOT REINTRODUCE IT.
+                //
+                // It used to stamp the ACTING USER's business-unit container onto the PARENT RECORD
+                // (`Xrm.WebApi.updateRecord(parentEntityName, ..., { sprk_containerid: buContainerId })`)
+                // whenever the field was not present on the form — as a caching convenience, so
+                // "future lookups are synchronous".
+                //
+                // Two things made that harmful rather than merely redundant:
+                //
+                //   1. It DEFEATS A CORRECT RESOLVER AFTER THE FACT. A secure project's own
+                //      container is stamped by provisioning. If that field simply is not on the
+                //      form the user has open, this code overwrote it with the SHARED business-unit
+                //      container — silently, from a ribbon command, as a side effect of clicking
+                //      "Add Documents". Everything resolving the container from the record
+                //      afterwards then reads the wrong answer, permanently.
+                //
+                //   2. The field's absence FROM A FORM says nothing about its value in the DATABASE.
+                //      `formContext.getAttribute` returns null for any column not placed on that
+                //      form, so the trigger for overwriting was "this form does not display the
+                //      column", not "this record has no container".
+                //
+                // The container is now resolved SERVER-SIDE from the owning record at upload time,
+                // so nothing needs it cached on the row and no client has the authority to write it.
+                // ─────────────────────────────────────────────────────────────────────────────────
 
                 return buContainerId;
             }

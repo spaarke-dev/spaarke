@@ -50,55 +50,90 @@ export class UploadOperation {
   ) {}
 
   /**
-   * Upload a file in a single request (Graph simple PUT — up to 250 MB).
+   * Upload against the OWNING RECORD. The server resolves the container from that record.
+   *
+   * This is the task-076 contract. The caller names the record it is already authorized against and
+   * the server derives the container from it, so the authorization key and the container are the
+   * same value by construction and cannot disagree. There is deliberately NO container parameter.
+   *
+   * Refusals are the contract, not faults: a secure record with no container of its own fails closed
+   * (`secure_record_container_missing`), an unresolvable record 404s, and a non-secure record whose
+   * business unit has no container returns 409. None of them fall back to a shared container.
    */
-  public async uploadSmall(
-    containerId: string,
+  public async uploadSmallForRecord(
+    entityLogicalName: string,
+    recordId: string,
     file: File,
     options?: {
       onProgress?: (percent: number) => void;
       signal?: AbortSignal;
-      /**
-       * Name-collision behaviour. Omitted ⇒ the BFF defaults to `fail`, which returns 409 and
-       * leaves the existing file untouched. Pass `rename` or `replace` only after the USER has
-       * chosen — see UploadNameConflictError.
-       */
       conflictBehavior?: ConflictBehaviorOption;
     }
   ): Promise<DriveItem> {
-    // Auth comes from `authenticatedFetch` (@spaarke/auth, ADR-028) — the same contract indexFile
-    // uses. It replaced a `TokenProvider` shim that returned '' and made this request omit the
-    // Authorization header entirely: an unauthenticated call to a RequireAuthorization BFF, which
-    // could only ever 401. It went unnoticed because this method has no production callers yet.
+    return this.put(
+      `/api/obo/records/${encodeURIComponent(entityLogicalName)}/${encodeURIComponent(recordId)}/files/${encodeURIComponent(file.name)}`,
+      file,
+      options
+    );
+  }
+
+  /**
+   * Upload content that has NO OWNING RECORD YET. The server resolves the container from the ACTING
+   * USER's business unit.
+   *
+   * For the three flows where the bytes genuinely move before any record exists — an EmailComposer
+   * local attachment, the Analysis wizard's standalone document, and DocumentUploadWizard's "skip
+   * associate". Per the owner's 2026-08-28 resolution order.
+   *
+   * ⚠️ This is NOT a general-purpose escape hatch, and it is not "upload without authorization". If
+   * the content HAS an owning record, use {@link uploadSmallForRecord} — routing it here would place
+   * it in the caller's business-unit container rather than the record's, which for a secure record is
+   * provably the wrong container and cannot be undone (SPE permissions are additive-only).
+   */
+  public async uploadSmallWithoutRecord(
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    return this.put(`/api/obo/me/files/${encodeURIComponent(file.name)}`, file, options);
+  }
+
+  /**
+   * Shared transport for both record-keyed and record-less uploads.
+   *
+   * Extracted so the two contracts cannot drift in how they authenticate, report progress, encode
+   * `conflictBehavior`, or translate a 409 — that drift is exactly what produced four divergent
+   * copies of the association switch on the server side.
+   */
+  private async put(
+    routePath: string,
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
     const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'uploadFile');
 
-    // Report initial progress
     options?.onProgress?.(0);
 
     const query = options?.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(options.conflictBehavior)}` : '';
 
-    // `requestOrThrow` rather than a bare `authFetch` + `response.ok` check: the canonical injected
-    // fetch (`@spaarke/auth`) THROWS on non-2xx and never returns the response, so an inline
-    // `response.status === 409` test never runs under it. See requestOrThrow's own note.
     const response = await requestOrThrow(
       authFetch,
-      `${this.baseUrl}/api/obo/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(file.name)}${query}`,
+      `${this.baseUrl}${routePath}${query}`,
       {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          // Content-Length is deliberately NOT set: it is a forbidden header name, so the browser
-          // ignores it and computes the real value from the body.
-        },
+        headers: { 'Content-Type': 'application/octet-stream' },
         body: file,
         signal: options?.signal ?? AbortSignal.timeout(this.timeout),
       },
       'Upload failed',
       status => {
-        // A name collision is a DISTINCT, RECOVERABLE outcome, not a generic failure. It must be
-        // distinguishable by type rather than by string-matching a message, so the UI can offer the
-        // rename / new-version choice. Nothing was overwritten to get here — the BFF sends
-        // conflictBehavior=fail unless the caller says otherwise.
         if (status === 409) {
           throw new UploadNameConflictError(file.name);
         }
@@ -106,12 +141,24 @@ export class UploadOperation {
     );
 
     const result = await response.json();
-
-    // Report completion
     options?.onProgress?.(100);
-
     return result;
   }
+
+  /**
+   * 🔴 `uploadSmall(containerId, file, options)` was DELETED here 2026-09-03
+   * (unified-access-control-r2 task 076), together with `SdapApiClient.uploadFile` and the BFF route
+   * it called, `PUT /api/obo/containers/{id}/files/{*path}`.
+   *
+   * The caller named the CONTAINER and the server wrote there, with no per-resource authorization
+   * decision behind the destination. Use {@link uploadSmallForRecord} when the content has an owning
+   * record, or {@link uploadSmallWithoutRecord} when it genuinely does not. Both are above, both
+   * share {@link put}, and NEITHER takes a container — deliberately.
+   *
+   * Note the `Content-Length` gotcha this method carried, because {@link put} inherits it: the
+   * header is deliberately NOT set. It is a forbidden header name, so the browser ignores any value
+   * and computes the real one from the body.
+   */
 
   /**
    * DELETED 2026-08-27 (unified-access-control-r2 task 076): `uploadChunked`,

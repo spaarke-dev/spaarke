@@ -157,9 +157,11 @@ public static class EndpointMappingExtensions
         // documentId / id interchangeably). Real mechanism, wrong resource domain.
         //
         // RETIRED, NOT GATED, because a repo-wide caller sweep found ZERO callers: every live upload
-        // flow uses the OBO sibling PUT /api/obo/containers/{id}/files/{*path} (11 call sites via
-        // EntityCreationService.ts:493, Spaarke.SdapClient UploadOperation.ts:27, document-upload
-        // SdapApiClient.ts:101). Gating instead would have required a container->owning-record
+        // flow then used the OBO sibling PUT /api/obo/containers/{id}/files/{*path} (11 call sites).
+        // ⚠️ That sibling was ITSELF deleted on 2026-09-03 by task 076, for the same class of reason —
+        // it wrote bytes to a CALLER-NAMED container. Live uploads now go to the record-keyed routes
+        // or PUT /api/obo/me/files/{*path}, none of which takes a container parameter.
+        // Gating instead would have required a container->owning-record
         // mapping that tasks 075/076 own, i.e. a second copy of that mapping — which task 075's
         // constraints forbid. Deletion is remedy #2 in RouteAuthorizationGuardTests' own remedy list
         // and follows task 071's precedent for the OBO drive-keyed routes.

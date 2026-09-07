@@ -168,6 +168,7 @@ public class SpeFlatUploadPathTests
             BuildJobMock().Object,
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<CommunicationService>>(),
             scopeFactory: Sprk.Bff.Api.Tests.Services.Communication.SpeScopeFactoryStub.Create(speFileStore));
     }
@@ -342,10 +343,12 @@ public class SpeFlatUploadPathTests
     public void IsSafeSegment_ForOneSegmentOfACallerSuppliedPath_AcceptsNamesAndRejectsNavigationAndInvalidChars(
         string segment, bool expected)
     {
-        // PUT /api/obo/containers/{id}/files/{*path} is the ONE upload surface that does not sanitize: its
-        // {*path} is a wildcard route where a caller may legitimately address a location inside a container
-        // it already holds, and silently rewriting a caller's path would move their bytes without telling
-        // them. So it REJECTS per segment instead — which is why this returns a verdict, not a clean string.
+        // The OBO upload routes are the surfaces that do not sanitize: their {*path} is a wildcard where a
+        // caller may legitimately address a location inside the destination, and silently rewriting a
+        // caller's path would move their bytes without telling them. So they REJECT per segment instead —
+        // which is why this returns a verdict, not a clean string. (Named PUT /api/obo/containers/{id}/...
+        // until 2026-09-03; that route was deleted by task 076 and the rule moved with its siblings, which
+        // all call the same ValidatePathForOBO.)
         //
         // The four gaps this closed in ValidatePathForOBO: a LEADING '/', EMPTY segments ("a//b"), a bare
         // "." segment, and invalid characters. '\\' is the one that mattered most: several SharePoint
@@ -358,8 +361,8 @@ public class SpeFlatUploadPathTests
     public void IsSafeSegment_ForEverySegmentOfALegitimateSubPath_AcceptsAllOfThem()
     {
         // The capability that must SURVIVE the hardening. A multi-segment path is still legal on the OBO
-        // route — this rule tightens each segment, it does not forbid having several. (Reported separately:
-        // that capability is currently dormant; all three client callers send a single file name.)
+        // routes — this rule tightens each segment, it does not forbid having several. (Reported separately:
+        // that capability is currently dormant; every client caller sends a single file name.)
         "folder/sub folder/Report 2026.docx"
             .Split('/')
             .Should().OnlyContain(segment => SpeUploadPath.IsSafeSegment(segment));

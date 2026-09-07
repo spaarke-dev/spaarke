@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Dataverse.Extensions;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -51,6 +52,14 @@ public static class ToolFrameworkExtensions
         // without a feature module that also registers TimeProvider.
         services.TryAddSingleton(TimeProvider.System);
 
+        // unified-access-control-r2 task 052 (FR-26) - EmailDraftToolHandler stamps the core-record
+        // ancestor of its regarding target onto the sprk_communication it drafts. The handler is
+        // registered by the assembly scan below, so its dependency must be registered HERE too:
+        // relying on AddDataverseMetadataServices alone would make the handler unresolvable wherever
+        // the tool framework is composed without that module - the asymmetric-registration
+        // anti-pattern (CLAUDE.md 10 F.1). Idempotent, same posture as TimeProvider above.
+        services.AddCoreAncestorResolver();
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -90,6 +99,14 @@ public static class ToolFrameworkExtensions
         // asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) if the tool framework is added
         // without a feature module that also registers TimeProvider.
         services.TryAddSingleton(TimeProvider.System);
+
+        // unified-access-control-r2 task 052 (FR-26) - EmailDraftToolHandler stamps the core-record
+        // ancestor of its regarding target onto the sprk_communication it drafts. The handler is
+        // registered by the assembly scan below, so its dependency must be registered HERE too:
+        // relying on AddDataverseMetadataServices alone would make the handler unresolvable wherever
+        // the tool framework is composed without that module - the asymmetric-registration
+        // anti-pattern (CLAUDE.md 10 F.1). Idempotent, same posture as TimeProvider above.
+        services.AddCoreAncestorResolver();
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

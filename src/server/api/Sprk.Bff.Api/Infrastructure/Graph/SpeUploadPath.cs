@@ -28,8 +28,8 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 /// </list>
 ///
 /// <para><b>Why here and not in the facade.</b> Sanitizing inside <c>SpeFileStore</c> would also rewrite
-/// <c>PUT /api/obo/containers/{id}/files/{*path}</c>, whose <c>{*path}</c> is a wildcard route where the
-/// caller may legitimately address a sub-path inside a container it already holds. That capability is
+/// the OBO upload routes, whose <c>{*path}</c> is a wildcard where the caller may legitimately address a
+/// sub-path inside the destination the SERVER resolved. That capability is
 /// deliberate, so the facade stays path-transparent and sanitization happens at each site that knows its
 /// value is a FILE NAME. <c>tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs</c> is what stops a new
 /// site from forgetting.</para>
@@ -92,8 +92,8 @@ public static class SpeUploadPath
     /// </summary>
     /// <remarks>
     /// <para>The sibling of <see cref="SanitizeFileName"/> for the one surface that cannot simply strip:
-    /// <c>PUT /api/obo/containers/{id}/files/{*path}</c>, whose <c>{*path}</c> is a wildcard route where the
-    /// caller MAY legitimately address a location inside a container it already holds. Silently rewriting a
+    /// the OBO upload routes (record-keyed, record-less, and upload-session), whose <c>{*path}</c> is a
+    /// wildcard where the caller MAY legitimately address a location inside the destination. Silently rewriting a
     /// caller's path would change where their bytes land without telling them, so that route REJECTS
     /// (400 ValidationProblem) instead of sanitizing — which is why this returns a verdict rather than a
     /// cleaned string.</para>

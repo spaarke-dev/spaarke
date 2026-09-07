@@ -1,254 +1,213 @@
 # Office Add-ins Integration Architecture
 
-> **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Updated**: 2026-09-04
+> **Last Reviewed**: 2026-09-04
+> **Reviewed By**: email-communication-intelligence-r2 (Pillar B add-in realignment — as-built refresh; supersedes the Apr-2026 "Dialog API" version, which predated the NAA auth cutover + the inline Create-To-Do + Word `.docx` save)
 > **Status**: Current
-> **Purpose**: Architecture of the SDAP Office Add-ins for Outlook and Word integration with SharePoint Embedded
+> **Purpose**: Architecture of the SDAP Office Add-ins for Outlook and Word — how they are built and function today, as the entry point for any project extending them.
+> **Code is the source of truth.** This doc is the map; the code under `src/client/office-addins/**` (+ the module pointer `src/client/office-addins/CLAUDE.md`) is the territory.
 
 ---
 
 ## Overview
 
-The SDAP Office Add-ins provide integration between Microsoft Office applications (Outlook and Word) and the Spaarke Document Access Platform (SDAP). Users can save emails, attachments, and documents directly to SharePoint Embedded containers with AI-powered metadata extraction via the Document Profile playbook.
+The SDAP Office Add-ins integrate **Outlook** and **Word** with the Spaarke platform: save emails / attachments / documents to SharePoint Embedded, file them against a Dataverse record (Matter / Project / Invoice), create first-class **To Dos** from an email, and (Outlook) surface AI triage + linked to-dos. They are **React 18 + Fluent UI v9** task-pane apps hosted on **Azure Static Web Apps**, calling the BFF's `/api/office/*` surface for every backend operation.
 
-The add-ins are React 18 task pane applications hosted on Azure Static Web Apps. They authenticate via MSAL.js using the Dialog API (not NAA), call the BFF API for all backend operations, and use a multi-stage Service Bus pipeline for asynchronous file processing, AI profiling, and search indexing. A Host Adapter pattern (`IHostAdapter`) abstracts differences between Outlook and Word, making UI components portable across both hosts.
+Two patterns make the code portable across hosts:
+- **`IHostAdapter`** (`shared/adapters/`) abstracts host differences — Outlook reads `Office.context.mailbox`, Word reads `Office.context.document` — so the UI components are host-agnostic.
+- **`@spaarke/auth` `OfficeNaaStrategy`** provides authentication (see below) — the add-in never constructs MSAL directly.
 
-> **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)**: Office Add-ins use MSAL Dialog API + in-memory token cache, rather than the `@spaarke/auth` `useAuth()` + `localStorage` pattern used by internal PCFs and Code Pages. Rationale: Office task pane lifecycle is transient (created/destroyed per session); `localStorage` cross-tab sharing has no analog in the Office host process model. Phase B4 added `OfficeNaaStrategy` to `@spaarke/auth` for future migration to Nested App Authentication; tasks 081/082 fixed token-staleness via per-call `getAccessToken()`. Full migration to `useAuth()` is deferred to V3 Phase H — see [`projects/spaarke-auth-v3-and-hardening/design.md`](../../projects/spaarke-auth-v3-and-hardening/design.md).
-
-### Key Capabilities
-
-- **Email Artifact Capture**: Save emails with full metadata (sender, recipients, dates, subjects)
-- **Attachment Processing**: Extract and process email attachments with AI analysis
-- **Document Integration**: Save Word documents with version tracking
-- **AI-Powered Metadata**: Automatic extraction of topics, entities, and summaries via Document Profile playbook
-- **Unified Experience**: Consistent UI across Outlook and Word using Fluent UI v9
+> **⚠️ What changed since the Apr-2026 version of this doc:** authentication moved from a bespoke **Dialog API** service to **`@spaarke/auth` + NAA** (`OfficeNaaStrategy`); the task pane became a **tabbed shell** (Save / Share / Create To Do / Search / Recent); **Create To Do** became a first-class inline `sprk_todo` flow; **Word** now saves a real `.docx`; and the manifests/naming/icons were reworked for the M365 Admin Center. The old doc's "Dialog API (not NAA)" and "SavePanel/FolderPicker/StatusDisplay" descriptions are retired.
 
 ---
 
-## Component Structure
+## Authentication (the load-bearing change) — `@spaarke/auth` + NAA
 
-### Add-in Source Layout
+The add-in authenticates through **`@spaarke/auth`**, not a bespoke MSAL service:
 
-| Component | Path | Responsibility |
-|-----------|------|---------------|
-| Outlook adapter | `src/client/office-addins/outlook/OutlookHostAdapter.ts` | Email/attachment access via `Office.context.mailbox` |
-| Outlook manifest | `src/client/office-addins/outlook/outlook-manifest.xml` | XML manifest for M365 Admin Center deployment |
-| Word adapter | `src/client/office-addins/word/WordHostAdapter.ts` | Document access via `Office.context.document` |
-| Word manifest | `src/client/office-addins/word/word-manifest.xml` | XML manifest for M365 Admin Center deployment |
-| Shared task pane | `src/client/office-addins/shared/taskpane/` | React 18 UI components (SavePanel, FolderPicker, StatusDisplay) |
-| Dialog auth service | `src/client/office-addins/shared/auth/DialogAuthService.ts` | Dialog API authentication (popup → MSAL → messageParent) |
-| NAA auth service | `src/client/office-addins/shared/auth/NaaAuthService.ts` | Future NAA authentication (disabled in V1) |
-| Auth config | `src/client/office-addins/shared/auth/authConfig.ts` | Client ID, tenant ID, BFF scope configuration |
-| API client | `src/client/office-addins/shared/services/ApiClient.ts` | BFF API client with Bearer token |
-| Auth service | `src/client/office-addins/shared/services/AuthService.ts` | Token acquisition orchestrator (Dialog API primary) |
+- `shared/services/AuthService.ts` is a **thin singleton wrapper** over `SpaarkeAuthProvider` + **`OfficeNaaStrategy`** (`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`). Per ADR-028, the add-in **MUST NOT** `new PublicClientApplication` / `createNestablePublicClientApplication` itself — all MSAL construction lives inside `OfficeNaaStrategy`.
+- **Two acquisition paths, auto-selected by host:**
+  - **NAA-capable hosts (Outlook/Word desktop + modern web)** → silent **Nested App Authentication** via the MSAL broker. Redirect URI is **portable**: `brk-multihub://${window.location.hostname}` (derived from the serving host, never hardcoded).
+  - **Office-on-the-web without NAA** → standard MSAL `PublicClientApplication` popup, redirecting to **`${origin}/auth-callback.html`** (`public/auth-callback.html`).
+- **Token cache** is in-memory only (Office task-pane lifecycle is transient), keyed on the JWT `exp` with a 5-minute freshness buffer. Callers use `authService.getAccessToken()` per request.
 
-### Architecture Diagram
+### Entra registration (per environment — REQUIRED)
+
+Each environment's SWA host needs **both** redirect URIs registered on the Entra app's **SPA** platform:
+
+| Redirect URI | For |
+|---|---|
+| `brk-multihub://<swa-host>` | NAA broker (desktop + web) |
+| `https://<swa-host>/auth-callback.html` | Office-on-the-web popup fallback |
+
+A missing / mismatched `brk-multihub://<host>` → **AADSTS7000471** ("reply address scheme is reserved for brokered application requests"). Because the code derives the host from `window.location`, **no code change is needed per environment** — only the Entra registration. Full operator steps: [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3 (H3)](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
+
+> **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md):** the add-ins consume `SpaarkeAuthProvider` + `OfficeNaaStrategy` **directly** rather than the `useAuth()` hook + `localStorage` used by PCFs / Code Pages — the Office host has no cross-tab `localStorage` analog and a transient pane lifecycle. This is now the `@spaarke/auth`-blessed Office strategy (not a bespoke service). Full `useAuth()` migration remains deferred.
+
+---
+
+## Component structure (as-built)
 
 ```
-+-----------------------------------------------------------------------------+
-|  Office Add-in Runtime (Task Pane -- React 18)                              |
-|  +----------------+  Host Adapter Layer  +----------------+                 |
-|  | OutlookAdapter |  (IHostAdapter)      |  WordAdapter   |                 |
-|  +----------------+                      +----------------+                 |
-|  AuthService: Dialog API -> MSAL.js 3.x -> token cache (memory only)       |
-+-----------------------------------+-----------------------------------------+
-                                    | HTTPS (Bearer Token)
-+-----------------------------------v-----------------------------------------+
-|  BFF API (spe-api-dev-67e2xz.azurewebsites.net)                            |
-|  POST /api/office/emails | POST /api/office/attachments | POST /office/docs |
-|  Token Exchange: User Token -> BFF Token -> Microsoft Graph Token (OBO)     |
-+------------------+------------------------+---------------------------------+
-                   |                        |
-          SharePoint Embedded          Azure AI Services
-          + Dataverse (CRM)            (OpenAI, Doc Intel, AI Search)
+src/client/office-addins/
+├── outlook/                         # Outlook host entry
+│   ├── OutlookHostAdapter.ts        # mailbox item/attachment access
+│   ├── outlook-manifest.xml         # XML manifest (M365 Admin Center)
+│   ├── manifest.json                # Unified manifest (icons.color/outline)
+│   ├── taskpane/index.tsx           # mounts <App> with the Outlook adapter
+│   └── commands/                    # ribbon command surface (e.g. ?action=createTodo)
+├── word/
+│   ├── WordHostAdapter.ts           # document access + getFileAsync(Compressed) → .docx
+│   ├── word-manifest.xml
+│   └── taskpane/index.tsx           # mounts <App>, save-only (no nav)
+├── shared/
+│   ├── adapters/                    # IHostAdapter contract + HostAdapterFactory + Outlook/Word impls
+│   ├── services/                    # AuthService (NAA wrapper), ApiClient, authenticatedJsonFetch
+│   └── taskpane/
+│       ├── App.tsx                  # the shell composition (tabs, auth gate, save-context wiring)
+│       ├── components/              # TaskPaneShell/Header/Toolbar/Navigation/Footer,
+│       │   │                        #   RelatedToPicker, SaveFlow, AttachmentSelector, EntityPicker,
+│       │   │                        #   LinkedTodosBanner, ErrorBoundary, LoadingSkeleton, SpaarkeLogo
+│       │   └── views/               # SaveView, CreateTodoView, ShareView, StatusView, SignInView
+│       ├── hooks/                   # useSaveFlow, useCreateTodoFromEmail, useEntitySearch,
+│       │                            #   useLinkedTodosForCommunication, useOfficeTheme/useTheme, useAnnounce
+│       └── services/                # communicationSuggestionsService, communicationLookupService,
+│                                    #   createTodoLauncher, quickSaveHelpers, SseClient, todoChoices
+├── public/auth-callback.html        # web popup redirect target
+└── staticwebapp.config.json         # SWA routing/headers
 ```
 
----
+### Task-pane tabs (`App.tsx`)
 
-## Data Flow: Email Save
+Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'}`); **Word is Save-only**.
 
-1. User clicks "Save to Spaarke" button in Outlook task pane
-2. `OutlookAdapter.getCurrentItem()` retrieves email metadata (sender, recipients, subject, dates)
-3. `OutlookAdapter.getAttachments()` retrieves attachment list
-4. `AuthService.getAccessToken()` obtains BFF token via Dialog API (cached with 5-minute expiry buffer)
-5. `POST /api/office/emails` — BFF receives email metadata + attachment content
-6. BFF uploads email body to SPE container, creates `sprk_emailartifact` in Dataverse
-7. BFF queues `office-upload-finalization` job to Service Bus — returns job ID
-8. `UploadFinalizationWorker` processes: moves temp files to SPE, creates Dataverse records, queues next stages
-9. `ProfileSummaryWorker` generates AI document profile via "Document Profile" playbook
-10. `IndexingWorkerHostedService` indexes document content in Azure AI Search for RAG
-11. Task pane polls `GET /api/office/process/{id}/status` via SSE for progress updates
+| Tab | View | Status |
+|---|---|---|
+| **Save** | `SaveView` → `useSaveFlow` → `POST /api/office/save` | ✅ Live (real save + `RelatedToPicker` filing) |
+| **Create To Do** | `CreateTodoView` → `POST /api/office/todo` | ✅ Live (r2 — first-class `sprk_todo`, see below) |
+| **Share** | `ShareView` | ⚠️ **Placeholder** — `onSearch`/`onGenerateLink`/`onInsertLink` are stubs in `App.tsx` |
+| **Search** | `StatusView` | ⚠️ **Placeholder** — `onFetchJobs` returns `[]` |
+| **Recent** | `StatusView` | ⚠️ **Placeholder** — `onFetchJobs` returns `[]` |
+
+> A new project extending the add-ins should know Share / Search / Recent are **scaffolded but not wired** — do not assume they call the BFF.
 
 ---
 
-## Design Decisions
+## Headline features shipped by email-communication-intelligence-r2
 
-| Decision | Choice | Rationale | ADR |
-|----------|--------|-----------|-----|
-| Auth method | Dialog API (not NAA) | NAA requires dynamic broker URIs (`brk-{GUID}://`) that cannot be pre-registered; not yet GA | — |
-| Manifest format | XML (not Unified Manifest) | Unified Manifest requires NAA; XML is production-proven with M365 Admin Center | — |
-| Processing model | Service Bus pipeline (not synchronous) | Email/doc processing is time-intensive; parallel stages with retry/dead-letter semantics | — |
-| Error categorization | Core vs Enhancement | Core (upload, record creation) must succeed; Enhancement (AI, indexing) failures are warnings | — |
-| Host abstraction | `IHostAdapter` interface | Components portable across Outlook and Word without modification | — |
-| Token storage | Memory only (not localStorage/sessionStorage) | Office add-in task pane lifecycle is transient; memory cache with 5-minute expiry buffer | — |
-| UI framework | Fluent UI v9 with dark mode | Consistent with platform design system per ADR-021 | ADR-021 |
+### Create To Do (inline, first-class `sprk_todo`)
+- The **Create To Do** tab creates a **first-class `sprk_todo`** — **not** an `sprk_event` of type "to do", and **not** the SmartTodo popup wizard. (Spaarke no longer uses the `sprk_event` "to do" type.)
+- `POST /api/office/todo` with `{ name, description, assignedToContactId, dueDate, priorityScore, effortScore, regardingEntityType, regardingRecordId, regardingRecordName }` → `OfficeService.CreateTodoAsync` (app-only create via `IGenericEntityService`, `ownerid` = caller; regarding wired via `sprk_regardingmatter/project/invoice`).
+- **Regarding = the record the email was filed to.** `SaveView.onSaved(selectedEntity)` seeds `App.savedContext`, which the Create To Do form reads — so the To Do is created "related to" the filed record.
+- Assignee is a **Contact** typeahead via `GET /api/office/search/entities?type=Contact`. Priority/Effort choice→score mapping is mirrored add-in-side in `todoChoices.ts` (sanctioned duplicate of the wizard's score tables).
 
-### Why Dialog API (Not NAA) for Authentication
+### Word real `.docx` save
+- `WordHostAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation).
 
-NAA (Nested App Authentication) provides seamless authentication without popups but requires Azure AD configuration with dynamic broker URIs (`brk-{GUID}://`) that are generated per Office session and cannot be pre-registered. This makes NAA impractical for current deployments.
+### Save flow + "Related to" filing
+- `SaveFlow` / `RelatedToPicker` present auto-matched Matter/Project/Invoice candidates (with confidence) + inline "create new record" (`POST /api/office/quickcreate/{type}`) + green-check select; the chosen record becomes the `sprk_document` regarding.
 
-**Dialog API** is the production authentication method: opens a popup for MSAL.js redirect flow, returns the token via `Office.context.ui.messageParent()`, and caches it in memory with a 5-minute expiry buffer. Works universally across all Office hosts and versions.
-
-**Future**: When Microsoft provides a stable `brk-multihub://` URI for registration, NAA can be enabled for seamless authentication. The `NaaAuthService.ts` file already exists as a placeholder.
-
-### Why Graceful Degradation for AI and Indexing
-
-Core operations (file upload, Dataverse record creation) must succeed or the job fails. Enhancement operations (AI profile extraction, RAG indexing) are optional — their failure means the document is saved without AI fields or search indexing, but the document itself is accessible. This ensures the core save workflow is reliable even if Azure OpenAI or AI Search are temporarily unavailable.
+### Outlook linked-to-dos banner
+- `LinkedTodosBanner` (Outlook only) queries `GET /api/office/communications/{commId}/linked-todos` and pins a "N linked to-dos" indicator when the email's saved communication has them.
 
 ---
 
-## Manifest Requirements
+## BFF surface (`/api/office/*`)
 
-> **CRITICAL**: These requirements were validated through production testing. Non-compliance causes M365 Admin Center validation failures.
+Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`; logic in `Services/Office/OfficeService.cs`. As-built routes:
 
-### Common Requirements (All Add-ins)
+| Method + route | Purpose |
+|---|---|
+| `POST /api/office/save` (+ `/save-debug`) | Save the current email/document → queues async processing, returns a job id |
+| `GET /api/office/{jobId}` · `GET /api/office/{jobId}/stream` | Job status (poll + **SSE** progress) |
+| `GET /api/office/search/entities` | Entity search (Matter/Project/Invoice/Contact) — powers RelatedToPicker + Contact assignee |
+| `GET /api/office/documents` · `GET /api/office/recent` | Document/recent lookups |
+| `POST /api/office/quickcreate/{entityType}` | Inline "create new record" for filing |
+| `POST /api/office/todo` | **Create first-class `sprk_todo`** (r2) |
+| `POST /api/office/links` · `POST /api/office/attach` | Sharing links / attach flows |
+| `GET /api/office/communications/by-message-id/{id}` (+ `/suggestions`) | Resolve the saved communication + AI association suggestions |
+| `GET /api/office/communications/{commId}/linked-todos` | Linked `sprk_todo` records for the banner |
+| `GET /api/office/health` | Add-in-facing health probe |
 
-| Element | Requirement |
-|---------|-------------|
-| **Version** | Must be 4-part format: `X.X.X.X` (not `X.X.X`) |
-| **Icon URLs** | Must return HTTP 200 — all icon sizes must be accessible |
-| **DefaultLocale** | Required (`en-US`) |
-| **AppDomains** | Required — list all domains the add-in uses |
+Auth: the caller's bearer token → BFF **OBO** → Graph/SPE + Dataverse (ADR-028; the BFF is secret-free). The async save pipeline (upload finalization → AI profiling → RAG indexing) is **shared with the communication-intelligence capture pipeline** — see [`communication-intelligence-architecture.md`](communication-intelligence-architecture.md) and the job handlers under `Services/**` (canonical source; do not re-document queue/worker names here — read the code).
 
-### Outlook Add-in Critical Rules
+---
+
+## Manifests, naming, icons
+
+| Item | As-built |
+|---|---|
+| **XML manifests** | `outlook/outlook-manifest.xml`, `word/word-manifest.xml` — for M365 Admin Center upload |
+| **Unified manifest** | `outlook/manifest.json` — carries `icons.color` (128px) + `icons.outline` (32px) |
+| **Names** | "Spaarke Outlook" / "Spaarke Word" |
+| **Icons** | white-on-black brand marks generated into `shared/assets` (`icon-color.png` 128, `icon-outline.png` 32, plus `icon-16/32/64/80/128`) via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep, not in `package.json`) |
+
+### Manifest rules (validated against M365 Admin Center — still binding)
 
 | Rule | Reason |
-|------|--------|
-| **NO FunctionFile** | Causes validation failures in M365 Admin Center |
-| **Single VersionOverrides V1.0** | Do NOT nest V1.1 inside V1.0 |
-| **RuleCollection Mode="Or"** | Use collection, not single Rule |
-| **DisableEntityHighlighting** | Must be present in manifest |
-| **FormType="Read"** for MessageReadCommandSurface | Match extension point to form type |
-
-### Manifest Format Strategy
-
-| Format | Status | Use When |
-|--------|--------|---------|
-| **XML Manifest** (V1, current) | Production GA | Now — works with Dialog API, full Admin Center support |
-| **Unified Manifest** (V2, future) | Preview — NAA not GA | When NAA is GA with stable broker URI format |
+|---|---|
+| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part |
+| **No** `<FunctionFile>` in the Outlook manifest | Causes validation failure |
+| Single `VersionOverridesV1_0` (do not nest V1.1) | Validation failure |
+| `RuleCollection Mode="Or"` + `DisableEntityHighlighting` present | Required for Outlook read surface |
+| All icon URLs return HTTP 200 | Manifest validation fails otherwise |
+| Bump the manifest version on any change | M365 requires re-register at the new version |
 
 ---
 
-## Background Workers Pipeline
+## Build & deploy
 
-Three Service Bus queues process saves asynchronously:
+```bash
+cd src/client/office-addins
+npm install --legacy-peer-deps --no-audit --no-fund
+npm run build:dev          # (or build:prod)
+npm run typecheck          # NOTE: ~397 PRE-EXISTING exactOptional errors — filter to changed files
+```
 
-| Queue | Worker | Purpose |
-|-------|--------|---------|
-| `office-upload-finalization` | `UploadFinalizationWorker` | Move temp files to SPE, create Dataverse records, link relationships, queue next stages |
-| `office-profile` | `ProfileSummaryWorker` | Generate AI document profile via "Document Profile" playbook |
-| `office-indexing` | `IndexingWorkerHostedService` | Index document content in Azure AI Search for RAG |
-
-**Error categories**:
-- **Core** (file upload, record creation): must succeed or job fails
-- **Enhancement** (AI profile, indexing): failures logged as warnings, job completes without those fields
-
-**Job status tracked** in `sprk_processingjob` via SSE polling (`GET /api/office/process/{id}/status`).
-
-**Queue configuration**: `MaxConcurrentCalls=5`, `AutoCompleteMessages=false`, `MaxAutoLockRenewalDuration=10 minutes`, dead-letter enabled.
-
-**Idempotency**: Each processing stage is guarded by a Redis cache key with 7-day TTL to prevent reprocessing.
+- **Hosting**: Azure **Static Web App**. **Deploy runs in CI** — GitHub Actions **`deploy-office-addins.yml`** (holds the SWA secrets); it is **not** an agent-run script. Push the branch → confirm the run is green (`gh run list --workflow=deploy-office-addins.yml`).
+- **Version bumps**: `outlook/manifest.json` + `outlook/taskpane/index.tsx` (and the Word equivalents), then **M365 re-register** at the new version.
+- **Config (env-driven, not hardcoded)**: `BFF_API_BASE_URL` (defaults to `spaarke-bff-dev`), `ORG_URL` (Quick-Create Dataverse deep-link; unset → Quick Create is a safe no-op). Never pin the add-in to the dev org.
 
 ---
 
-## Authentication
+## Constraints (MUST / MUST NOT)
 
-### App Registration
-
-| Property | Value |
-|----------|-------|
-| Application (Client) ID | `c1258e2d-1688-49d2-ac99-a7485ebd9995` |
-| Directory (Tenant) ID | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
-| BFF API App ID | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
-
-> **CRITICAL**: The Office Add-in client ID MUST be registered as an authorized client application in the BFF API's "Expose an API" configuration (Azure Portal -> App registrations -> SDAP-BFF-SPE-API -> Expose an API -> Authorized client applications). Without this, the add-in receives 401 errors.
-
-### API Permissions Required
-
-| API | Permission | Purpose |
-|-----|------------|---------|
-| Microsoft Graph | `User.Read`, `Mail.Read`, `Files.ReadWrite.All` | Profile, email, SPE file access |
-| BFF API | `access_as_user` | API access |
-
-### Token Lifecycle
-
-Tokens are cached in memory with expiration tracking. A 5-minute buffer ensures tokens are refreshed before expiry. Re-authentication triggers automatically when the token expires. Same browser session = silent auth (no login prompts after first Dialog API flow).
+- **MUST** authenticate via `@spaarke/auth` `OfficeNaaStrategy`; **MUST NOT** construct MSAL directly in the add-in (ADR-028).
+- **MUST** register **both** `brk-multihub://<host>` and `https://<host>/auth-callback.html` as **SPA** redirect URIs per environment.
+- **MUST** create To Dos as first-class **`sprk_todo`** (never `sprk_event` type "to do").
+- **MUST** keep host/org values **config-driven** (`BFF_API_BASE_URL`, `ORG_URL`) — no hardcoded org URLs.
+- **MUST** use Fluent UI v9 + Office theme dark-mode (ADR-021); keep UI host-agnostic behind `IHostAdapter`.
+- **MUST** use XML manifests for M365 Admin Center + the 4-part version + the Outlook manifest rules above.
+- **MUST** treat AI profiling / search indexing as non-fatal enhancements (core save must still succeed).
 
 ---
 
-## Constraints
-
-- **MUST** use Dialog API for authentication — NAA is not yet GA
-- **MUST** use XML manifests — Unified Manifest requires NAA
-- **MUST** use 4-part version format (`X.X.X.X`) in manifests
-- **MUST NOT** include `FunctionFile` element in Outlook manifest
-- **MUST NOT** nest VersionOverrides V1.1 inside V1.0
-- **MUST** include `DisableEntityHighlighting` in Outlook manifest
-- **MUST** treat AI profiling and search indexing as non-fatal enhancements
-- **MUST** register add-in client ID as authorized client on BFF API app registration
-
----
-
-## Known Pitfalls
+## Known pitfalls
 
 | Pitfall | Symptom | Resolution |
-|---------|---------|------------|
-| FunctionFile in Outlook manifest | M365 Admin Center rejects the manifest | Remove all `<FunctionFile>` elements from the Outlook XML manifest |
-| Nested VersionOverrides | Validation failure on upload | Use a single `VersionOverridesV1_0` block — do not nest V1.1 inside V1.0 |
-| 3-part version number | Admin Center rejects manifest | Use `X.X.X.X` format (4 parts), not `X.X.X` |
-| NAA broker URI not registered | `acquireTokenSilent` fails with interaction_required | Fall back to Dialog API; NAA requires pre-registered `brk-{GUID}://` URIs which vary per session |
-| 401 from BFF API | Add-in token rejected by BFF | Ensure add-in client ID is listed in BFF API's "Authorized client applications" in Azure Portal |
-| Icon URLs return 404 | Manifest fails validation | Verify all icon URLs (`32x32`, `64x64`, `80x80`) return HTTP 200 from hosting domain |
-| Dialog popup blocked | Auth flow never completes | Office Desktop clients may block popups; user must allow popups for the add-in domain |
-| AI service unavailable | Document saved without AI fields | By design — enhancement failures are logged as warnings, core save completes successfully |
-
----
-
-## Integration Points
-
-| Direction | Subsystem | Interface | Notes |
-|-----------|-----------|-----------|-------|
-| Depends on | BFF API | `/api/office/*` endpoints | Email, attachment, document save operations |
-| Depends on | Office.js API | `Office.context.mailbox`, `Office.context.document` | Host-specific content access |
-| Depends on | MSAL.js 3.x | Dialog API authentication | Token acquisition via popup flow |
-| Depends on | Azure Static Web App | `spaarke-office-addins` | Add-in hosting (HTML/JS/CSS) |
-| Depends on | Service Bus | Three processing queues | Async file processing pipeline |
-| Depends on | Azure AI Services | OpenAI, Doc Intel, AI Search | Enhancement stage (non-fatal) |
-| Consumed by | Outlook Desktop/Web | Task pane extension | Email and attachment capture |
-| Consumed by | Word Desktop/Web | Task pane extension | Document save and versioning |
-
----
-
-## Azure Resources
-
-| Service | Resource Name | Purpose |
-|---------|---------------|---------|
-| App Service | `spe-api-dev-67e2xz` | BFF API |
-| Azure OpenAI | `spaarke-openai-dev` | Entity extraction, summarization |
-| Document Intelligence | `spaarke-docintel-dev` | Document parsing, OCR |
-| AI Search | `spaarke-search-dev` | Full-text search indexing |
-| Static Web App | `spaarke-office-addins` | Add-in hosting (dev) |
+|---|---|---|
+| `brk-multihub://<host>` not registered (SPA) | `AADSTS7000471` on web sign-in | Register `brk-multihub://<swa-host>` under the Entra app's **SPA** platform for that host |
+| `auth-callback.html` redirect not registered | Web popup never completes | Register `https://<swa-host>/auth-callback.html` (SPA) |
+| Assumed Share/Search/Recent tabs work | Empty results / no-op | They are **placeholders** in `App.tsx` — wire them to the BFF before relying on them |
+| Manifest version not bumped | Old add-in served after deploy | Bump the 4-part version + M365 re-register |
+| `FunctionFile` / nested VersionOverrides / 3-part version | M365 Admin Center rejects manifest | See the manifest-rules table |
+| Icon URL 404 | Manifest validation fails | Verify all icon sizes return HTTP 200; regenerate via `generate-icons.mjs` (+ `npm i --no-save sharp`) |
+| 401 from BFF | Add-in token rejected | Ensure the add-in client id is an authorized client on the BFF API app registration |
+| Quick Create opens a broken window | `ORG_URL` unset | By design it no-ops when unset — set `ORG_URL` to enable the Dataverse deep-link |
 
 ---
 
 ## Related
 
-- [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) — Fluent UI v9 requirements
-- [sdap-auth-patterns.md](sdap-auth-patterns.md) — Authentication patterns
-- [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF API endpoint patterns
-- [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — Communication Intelligence substrate incl. the .eml→document conversion pipeline (canonical R4)
+- **Module pointer**: [`src/client/office-addins/CLAUDE.md`](../../src/client/office-addins/CLAUDE.md) — the per-file "where to start reading" map
+- [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — auth architecture (+ the Office NAA exception)
+- [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) — Fluent UI v9 / dark mode
+- [`communication-intelligence-architecture.md`](communication-intelligence-architecture.md) — the email capture + association + triage substrate the Save flow feeds
+- [`content-identity-and-deduplication-architecture.md`](content-identity-and-deduplication-architecture.md) — the dedup layers the Save / save-back path rides (item identity, content hash, message id; graduate-on-divergence for editable docs)
+- [`spaarke-todo-architecture.md`](spaarke-todo-architecture.md) — the `sprk_todo` entity the Create To Do flow writes
+- [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.3 — per-env Entra redirect-URI registration
+- [`docs/guides/office-addins-admin-guide.md`](../guides/office-addins-admin-guide.md) · [`docs/guides/office-addins-deployment-checklist.md`](../guides/office-addins-deployment-checklist.md) — operator guides (verify against this doc; may lag)
 
 ---
 
-*Last Updated: April 5, 2026*
+*Last Updated: 2026-09-04 — as-built after email-communication-intelligence-r2 Pillar B.*

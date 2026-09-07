@@ -239,7 +239,11 @@ public sealed class TodoGenerationService : BackgroundService
             _events = _serviceProvider.GetRequiredService<IEventDataverseService>();
             var commService = _serviceProvider.GetRequiredService<ICommunicationDataverseService>();
             var builderLogger = _serviceProvider.GetRequiredService<ILogger<TodoRegardingBuilder>>();
-            _regardingBuilder = new TodoRegardingBuilder(commService, builderLogger);
+            // FR-26 (task 052): the builder stamps the regarding target's core-record ancestor onto every
+            // to-do it writes, so generated to-dos inherit access the same way PCF-authored ones do.
+            var coreAncestors = _serviceProvider
+                .GetRequiredService<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>();
+            _regardingBuilder = new TodoRegardingBuilder(commService, coreAncestors, builderLogger);
         }
         catch (Exception ex)
         {

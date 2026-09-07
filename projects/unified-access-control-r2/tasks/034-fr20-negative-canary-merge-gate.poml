@@ -4,7 +4,8 @@
     <title>FR-20 negative canary (NFR-04) — impersonation-inertness merge gate, authored BEFORE the swap</title>
     <phase>1 One evaluator</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>blocked-shipped</status>
+    <status-note>2026-09-03 — mechanism SHIPPED and perturbation-proven; the LIVE run is blocked on two owner decisions (provision a non-admin canary user; choose scheduled-canary vs CI-secrets). Both POML escalation triggers fired legitimately. Decision record: notes/task-034-negative-canary.md. Task 036 MUST NOT proceed until the canary runs truthfully against a provisioned user.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (modifies tests/**, tags testing/integration-test) — code-review + adr-check unconditional; also auth tags.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -153,7 +153,8 @@ export interface ParentEntityContext {
  *
  * Pattern: writer-identity matching (Pattern 4) — the same user who wrote the
  * file via OBO MUST be the caller indexing it via OBO. Used by wizards after
- * a successful PUT to `/api/obo/containers/{id}/files/{path}`.
+ * a successful PUT to `/api/obo/records/{entityLogicalName}/{recordId}/files/{path}` (or
+ * `/api/obo/me/files/{path}`). The container-keyed route this used to name was deleted by task 076.
  */
 export interface IndexFileRequest {
   /** SPE drive ID (NOT the container ID — these are different). */

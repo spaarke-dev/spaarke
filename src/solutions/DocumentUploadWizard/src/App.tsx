@@ -9,7 +9,10 @@
  *   - parentEntityType: Dataverse entity type of the parent record (e.g., "sprk_document")
  *   - parentEntityId:   ID of the parent record
  *   - parentEntityName: Display name of the parent record
- *   - containerId:      SPE container ID for file uploads
+ *
+ * `containerId` was REMOVED from this envelope 2026-09-03 (task 076). The server resolves the
+ * upload container from the parent record; a client-supplied one is no longer read by anything,
+ * and accepting one would leave the impression that it still selects a destination.
  *
  * @see ADR-006  - Code Pages for standalone dialogs (not PCF)
  * @see ADR-007  - Document access through BFF API (SpeFileStore facade)
@@ -35,8 +38,6 @@ export interface AppProps {
     parentEntityId: string;
     /** Display name of the parent record. */
     parentEntityName: string;
-    /** SPE container ID for file uploads. */
-    containerId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +63,6 @@ export function App({
     parentEntityType,
     parentEntityId,
     parentEntityName,
-    containerId,
 }: AppProps): JSX.Element {
     const styles = useStyles();
 
@@ -106,7 +106,6 @@ export function App({
                 parentEntityType={parentEntityType}
                 parentEntityId={parentEntityId}
                 parentEntityName={parentEntityName}
-                containerId={containerId}
                 onClose={handleClose}
             />
         </div>

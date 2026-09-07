@@ -12,7 +12,8 @@ import { AuthenticatedFetchFn, IndexFileRequest, IndexFileResult } from '../type
  *
  * @remarks
  * Pair with {@link UploadOperation}: after a successful PUT to
- * `/api/obo/containers/{containerId}/files/{path}`, call this operation with
+ * `/api/obo/records/{entityLogicalName}/{recordId}/files/{path}` (or `/api/obo/me/files/{path}`),
+ * call this operation with
  * the returned `DriveItem`'s `driveId` + `id` to make the file searchable.
  *
  * Non-fatal by design — callers should `try/catch` and continue if indexing

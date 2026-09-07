@@ -230,6 +230,7 @@ public class InboundPipelineTests
                 _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
                 AssociationTestSupport.Mapper(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             new GraphMessageToEmlConverter(),

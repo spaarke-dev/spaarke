@@ -16,7 +16,7 @@
 
 import { SdapApiClient } from '@spaarke/sdap-client';
 import { FileUploadService } from '../FileUploadService';
-import type { ILogger } from '../types';
+import type { ILogger, UploadTarget } from '../types';
 
 const silentLogger: ILogger = {
   info: () => undefined,
@@ -42,13 +42,20 @@ function serviceOver(authenticatedFetch: (url: string, init?: RequestInit) => Pr
 
 const file = () => new File(['contents'], 'brief.docx');
 
+/** The record-keyed target every record-bearing caller now uses (task 076). */
+const RECORD_TARGET: UploadTarget = {
+  kind: 'record',
+  entityLogicalName: 'sprk_matter',
+  recordId: '11111111-1111-1111-1111-111111111111',
+};
+
 describe('FileUploadService over @spaarke/sdap-client', () => {
   it('reports a 409 as a recoverable nameConflict, not as a plain error', async () => {
     const service = serviceOver(async () => {
       throw new FakeApiError('nameAlreadyExists', 409);
     });
 
-    const result = await service.uploadFile({ file: file(), driveId: 'container-1' });
+    const result = await service.uploadFile({ file: file(), target: RECORD_TARGET });
 
     expect(result.success).toBe(false);
     expect(result.nameConflict).toEqual({ fileName: 'brief.docx' });
@@ -61,7 +68,7 @@ describe('FileUploadService over @spaarke/sdap-client', () => {
       throw new FakeApiError('forbidden', 403);
     });
 
-    const result = await service.uploadFile({ file: file(), driveId: 'container-1' });
+    const result = await service.uploadFile({ file: file(), target: RECORD_TARGET });
 
     expect(result.success).toBe(false);
     expect(result.nameConflict).toBeUndefined();
@@ -72,38 +79,80 @@ describe('FileUploadService over @spaarke/sdap-client', () => {
     const authFetch = jest.fn(async (_url: string, _init?: RequestInit) => uploadResponse());
     const service = serviceOver(authFetch);
 
-    await service.uploadFile({ file: file(), driveId: 'container-1' });
+    await service.uploadFile({ file: file(), target: RECORD_TARGET });
     // Omitted first time so the BFF's non-destructive `fail` default applies.
     expect(authFetch.mock.calls[0][0]).not.toContain('conflictBehavior');
 
-    await service.uploadFile({ file: file(), driveId: 'container-1', conflictBehavior: 'replace' });
+    await service.uploadFile({ file: file(), target: RECORD_TARGET, conflictBehavior: 'replace' });
     expect(authFetch.mock.calls[1][0]).toContain('conflictBehavior=replace');
   });
 
   it('maps the DriveItem onto SpeFileMetadata including the fields consumers persist', async () => {
     const service = serviceOver(async () => uploadResponse());
 
-    const result = await service.uploadFile({ file: file(), driveId: 'container-1' });
+    const result = await service.uploadFile({ file: file(), target: RECORD_TARGET });
 
     expect(result.success).toBe(true);
-    // `webUrl` -> sprk_filepath and `parentId` -> the wizard's driveId fallback. Both were absent
-    // or misnamed on the shared DriveItem type until 2026-09-02/03; a mapping that compiles is not
-    // evidence that the field arrives.
+    // `webUrl` -> sprk_filepath, `parentId` -> parent folder, and `driveId` -> sprk_graphdriveid.
+    // All three were absent or misnamed on the shared DriveItem type until 2026-09-02/03; a mapping
+    // that compiles is not evidence that the field arrives.
     expect(result.data?.webUrl).toBe('https://sharepoint.example.com/brief.docx');
     expect(result.data?.sharePointUrl).toBe('https://sharepoint.example.com/brief.docx');
     expect(result.data?.parentId).toBe('parent-1');
     expect(result.data?.driveItemId).toBe('item-1');
     expect(result.data?.fileSize).toBe(8);
+    // 🔴 The one the record-keyed contract makes load-bearing: `sprk_document.sprk_graphdriveid`
+    // is now sourced from HERE, not from any container the client resolved. If this drops, every
+    // uploaded document gets a null drive pointer and later downloads 404.
+    expect(result.data?.driveId).toBe('drive-1');
   });
 
-  it('validates its own inputs before reaching the client', async () => {
+  // ── Route selection — the whole point of task 076 ─────────────────────────────────────────────
+  //
+  // Asserted on the URL rather than on a client double: the failure being locked out is a
+  // record-bearing upload silently taking the record-LESS route, which files a secure record's
+  // documents in the CALLER's business-unit container. That is invisible at the client boundary and
+  // only shows up in the path.
+
+  it('sends a record-bearing upload to the RECORD-keyed route, naming no container', async () => {
+    const authFetch = jest.fn(async (_url: string, _init?: RequestInit) => uploadResponse());
+    const service = serviceOver(authFetch);
+
+    await service.uploadFile({ file: file(), target: RECORD_TARGET });
+
+    const url = authFetch.mock.calls[0][0];
+    expect(url).toContain('/api/obo/records/sprk_matter/11111111-1111-1111-1111-111111111111/files/brief.docx');
+    expect(url).not.toContain('/api/obo/containers/');
+    expect(url).not.toContain('/api/obo/me/');
+  });
+
+  it('sends a parentless upload to the record-LESS route', async () => {
+    const authFetch = jest.fn(async (_url: string, _init?: RequestInit) => uploadResponse());
+    const service = serviceOver(authFetch);
+
+    await service.uploadFile({ file: file(), target: { kind: 'no-record' } });
+
+    const url = authFetch.mock.calls[0][0];
+    expect(url).toContain('/api/obo/me/files/brief.docx');
+    expect(url).not.toContain('/api/obo/containers/');
+  });
+
+  it('refuses a record target missing its identifiers instead of downgrading to the /me route', async () => {
     const authFetch = jest.fn(async () => uploadResponse());
     const service = serviceOver(authFetch);
 
-    const result = await service.uploadFile({ file: file(), driveId: '' });
+    for (const target of [
+      { kind: 'record', entityLogicalName: '', recordId: 'rec-1' },
+      { kind: 'record', entityLogicalName: 'sprk_matter', recordId: '' },
+    ] as UploadTarget[]) {
+      const result = await service.uploadFile({ file: file(), target });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('No drive ID provided');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('owning record');
+    }
+
+    // Fail CLOSED: no request at all. Falling back to `/api/obo/me/files` here would put a secure
+    // record's document in the caller's business-unit container, which cannot be undone.
     expect(authFetch).not.toHaveBeenCalled();
   });
 });

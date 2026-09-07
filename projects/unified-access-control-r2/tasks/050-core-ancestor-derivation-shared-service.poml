@@ -4,7 +4,7 @@
     <title>Core-ancestor derivation in the shared resolver service (FR-26, client write path)</title>
     <phase>3 Child inheritance</phase>
     <gate>startable (Phase 0-2 not required for the shared-lib derivation contract; taxonomy is spec-fixed)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-relevant .ts in the shared write path every child record's access stamp depends on; wrong derivation silently grants or hides records.</rigor-reason>
     <model-tier>opus</model-tier>

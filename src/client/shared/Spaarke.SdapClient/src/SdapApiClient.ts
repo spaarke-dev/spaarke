@@ -32,11 +32,11 @@ import { requireAuthenticatedFetch, requestOrThrow } from './operations/httpFail
  * ```typescript
  * const client = new SdapApiClient({
  *   baseUrl: 'https://spe-bff-api.azurewebsites.net',
- *   timeout: 300000
+ *   authenticatedFetch,
  * });
  *
- * // Upload file
- * const item = await client.uploadFile(containerId, file, {
+ * // Upload against the owning record — the server resolves the container from it.
+ * const item = await client.uploadFileForRecord('sprk_matter', matterId, file, {
  *   onProgress: (percent) => console.log(`${percent}% uploaded`)
  * });
  *
@@ -104,55 +104,91 @@ export class SdapApiClient {
   }
 
   /**
-   * Uploads a file to SDAP.
+   * 🔴 `uploadFile(containerId, file, options)` was DELETED here 2026-09-03 (unified-access-control-r2
+   * task 076), together with `UploadOperation.uploadSmall` and the BFF route they called,
+   * `PUT /api/obo/containers/{id}/files/{*path}`.
    *
-   * Single request (Graph simple PUT). Files up to 250 MB are supported; above that a resumable
-   * session is required and this client does not yet wire one. There is no automatic chunking —
-   * the chunked path was deleted in task 076 because it never worked.
+   * The caller named a CONTAINER, and the server obeyed it with no per-resource authorization
+   * decision behind it. For a SECURE record that meant its documents could be written into the
+   * shared business-unit container — and SPE permissions are additive-only, so nothing retracts that
+   * afterwards. It is replaced, not renamed:
    *
-   * @param containerId - Container ID
-   * @param file - File to upload
-   * @param options - Upload options (progress callback, cancellation)
-   * @returns Uploaded file metadata
-   * @throws Error if upload fails
+   *   · content WITH an owning record  -> {@link uploadFileForRecord}
+   *   · content with genuinely NONE    -> {@link uploadFileWithoutRecord}
+   *
+   * ⚠️ Do not reintroduce a container parameter on either of those "just for one caller". That is
+   * the shape this deletion removed.
    */
-  public async uploadFile(
-    containerId: string,
+
+  /**
+   * The Graph simple-PUT ceiling, enforced in ONE place for both upload methods.
+   *
+   * Extracted 2026-09-03 with the record-keyed/record-less pair, so the two cannot drift on the
+   * limit. This project has already deleted THREE separate copies of a 4 MiB ceiling that no server
+   * ever enforced (`PathValidator.SmallUploadMaxBytes`, the client constant, and
+   * `CHUNKED_UPLOAD_THRESHOLD_BYTES`) — a fourth divergence is the predictable next instance.
+   *
+   * 250 MB is the real, current boundary for `PUT /drives/{d}/root:/{path}:/content` (4 MB ->
+   * 25 MB -> 256 MB -> 250 MB across Oct 2023; stable since) and SharePoint Embedded documents the
+   * same figure for containers. Verified against MS Learn + the docs source repos, 2026-08-20:
+   * src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md
+   */
+  private guardSimpleUploadSize(file: File): void {
+    const SIMPLE_UPLOAD_MAX_BYTES = 250 * 1024 * 1024; // 250 MB — Graph simple-PUT ceiling
+
+    if (file.size > SIMPLE_UPLOAD_MAX_BYTES) {
+      // Fails only where Graph itself would refuse. Above this a caller genuinely needs a resumable
+      // upload session; the record-keyed one is at POST /api/obo/records/{entity}/{id}/upload-session.
+      throw new Error(UploadOperation.fileTooLarge(file.size, SIMPLE_UPLOAD_MAX_BYTES));
+    }
+  }
+
+  /**
+   * Uploads a file against its OWNING RECORD (task 076 contract).
+   *
+   * The server resolves the container from the record — the same record it authorizes the caller
+   * against — so the authorization key and the storage destination are one value and cannot
+   * disagree. There is no container parameter, by design.
+   *
+   * This is THE upload method for content that has an owning record. Use
+   * {@link uploadFileWithoutRecord} only for the flows where bytes genuinely move first.
+   *
+   * @throws UploadNameConflictError on a name collision (nothing was overwritten)
+   * @throws SdapHttpError with the server's typed refusal — notably a secure record with no
+   *   container of its own, which FAILS CLOSED rather than falling back
+   */
+  public async uploadFileForRecord(
+    entityLogicalName: string,
+    recordId: string,
     file: File,
     options?: {
       onProgress?: (percent: number) => void;
       signal?: AbortSignal;
-      /**
-       * Name-collision behaviour. Omit on the FIRST attempt — the BFF defaults to `fail`, so a
-       * collision throws `UploadNameConflictError` with the existing file untouched. Pass
-       * `'rename'` or `'replace'` only when retrying after the user has chosen.
-       */
       conflictBehavior?: ConflictBehaviorOption;
     }
   ): Promise<DriveItem> {
-    // Graph's simple `PUT .../content` boundary, which is what uploadSmall actually uses.
-    //
-    // Corrected 2026-09-02: this was 4 MiB, described as matching
-    // "PathValidator.SmallUploadMaxBytes, enforced at UploadSessionManager.cs:131". Neither half was
-    // true. The server guard at that site was DELETED by spaarkeai-compose-r8 task 015 (FR-S08)
-    // because it enforced a Graph limit that had not existed since October 2023, and
-    // PathValidator.SmallUploadMaxBytes is referenced by NOTHING but a comment — it is not enforced
-    // anywhere. So this client was the only thing rejecting >4 MiB files, on the strength of a
-    // server cap that is not there.
-    //
-    // 250 MB is the real, current boundary for `PUT /drives/{d}/root:/{path}:/content` (4 MB ->
-    // 25 MB -> 256 MB -> 250 MB across Oct 2023; stable since) and SharePoint Embedded documents the
-    // same figure for containers. Verified against MS Learn + the docs source repos, 2026-08-20:
-    // src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md
-    const SIMPLE_UPLOAD_MAX_BYTES = 250 * 1024 * 1024; // 250 MB — Graph simple-PUT ceiling
+    this.guardSimpleUploadSize(file);
+    return await this.uploadOp.uploadSmallForRecord(entityLogicalName, recordId, file, options);
+  }
 
-    if (file.size > SIMPLE_UPLOAD_MAX_BYTES) {
-      // Still fails honestly, but now only where Graph itself would refuse. Above this a caller
-      // genuinely needs a resumable upload session, which this client is not wired to.
-      throw new Error(UploadOperation.fileTooLarge(file.size, SIMPLE_UPLOAD_MAX_BYTES));
+  /**
+   * Uploads content that has NO owning record yet; the server resolves the container from the acting
+   * user's business unit.
+   *
+   * ⚠️ Only for the flows that genuinely cannot create the record first. If a record exists, use
+   * {@link uploadFileForRecord} — sending it here stores it in the caller's business-unit container
+   * instead of the record's, which for a secure record is the wrong container and is not reversible.
+   */
+  public async uploadFileWithoutRecord(
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
     }
-
-    return await this.uploadOp.uploadSmall(containerId, file, options);
+  ): Promise<DriveItem> {
+    this.guardSimpleUploadSize(file);
+    return await this.uploadOp.uploadSmallWithoutRecord(file, options);
   }
 
   /**

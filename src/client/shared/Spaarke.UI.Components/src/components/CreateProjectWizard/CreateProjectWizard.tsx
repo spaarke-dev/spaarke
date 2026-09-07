@@ -705,11 +705,18 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 2. Upload files to SPE + create document records
-        if (context.uploadedFiles.length > 0 && context.speContainerId && authFetch && bffBaseUrl) {
+        //
+        // Task 076: keyed on the PROJECT. This is the site finding F-9 named — the wizard uploaded
+        // into the container resolved when it OPENED, so a project that had just been provisioned a
+        // secure container of its own (step 1d above) still had its files written to the shared
+        // business-unit container, and the correct stamp was discarded. Resolving server-side from
+        // `projectId` closes that window: provisioning has already run by the time we get here, so
+        // the server reads the container provisioning just stamped.
+        if (context.uploadedFiles.length > 0 && authFetch && bffBaseUrl) {
           try {
             const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
-            const uploadResult = await entityService.uploadFilesToSpe(context.speContainerId, context.uploadedFiles);
+            const uploadResult = await entityService.uploadFilesToSpe('sprk_project', projectId, context.uploadedFiles);
 
             if (uploadResult.errors.length > 0) {
               for (const err of uploadResult.errors) {
@@ -724,7 +731,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                 'sprk_Project',
                 uploadResult.uploadedFiles,
                 {
-                  containerId: context.speContainerId,
+                  // No `containerId` — `sprk_graphdriveid` comes from the server's upload response,
+                  // which for a secure project is its OWN container, not the shared BU one.
                   parentRecordName: projectName,
                 }
               );

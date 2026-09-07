@@ -782,3 +782,482 @@ export async function applyResolverFields(
     displayName: finalDisplayName,
   };
 }
+
+// ===========================================================================
+// FR-26 — Core-ancestor derivation (unified-access-control-r2, task 050)
+// ===========================================================================
+//
+// WHY THIS EXISTS
+// ---------------
+// The access model splits records into two classes (spec.md FR-26 /
+// design.md §4.3):
+//
+//   CORE  — sprk_project, sprk_matter, sprk_workassignment, sprk_servicerequest
+//           Access requires a DIRECT grant.
+//   CHILD — sprk_invoice, sprk_communication, sprk_document, sprk_event,
+//           sprk_todo, sprk_analysis
+//           Access is INHERITED from the child's core ancestor.
+//
+// The evaluator's child-inheritance term is a set-membership test of the shape
+// `child.sprk_regarding{core} ∈ {accessible core ids}`. That test can only read
+// a lookup the child ROW already carries — it cannot walk a chain. So a
+// todo → communication → matter chain is inexpressible unless the ULTIMATE
+// core ancestor is denormalized onto the todo at write time
+// (notes/investigation/06-adversarial-critique.md §F1 proved this).
+//
+// Denormalizing the ancestor is what keeps every chain ONE hop, which is why
+// ADR-034's 1-hop cap holds with no exception. This module is where that stamp
+// is derived, on the ONE shared client write path (ADR-024: no consumer may
+// reimplement resolver field-write logic).
+//
+// TWO RULES THAT ARE EASY TO GET BACKWARDS
+// ----------------------------------------
+//  1. Matter does NOT inherit from Project. Both are CORE. Selecting a core
+//     target stamps ONLY that target — never its own parent associations.
+//     Inverting this silently grants every Project-holder access to every
+//     Matter under it.
+//  2. Derivation reads the target's OWN core-ancestor lookups and stops
+//     (ADR-034 1-hop). It never recurses. Those lookups are themselves FR-26
+//     stamps, which is what makes one read sufficient.
+
+/**
+ * CORE record entities — direct grants required; these never inherit.
+ *
+ * Pinned literally by a unit test. Changing this set changes who can see what,
+ * so it must be a deliberate, reviewed edit — not a drive-by.
+ *
+ * @see projects/unified-access-control-r2/spec.md FR-26
+ * @see projects/unified-access-control-r2/design.md §4.3
+ */
+export const CORE_RECORD_ENTITIES: ReadonlyArray<string> = [
+  'sprk_project',
+  'sprk_matter',
+  'sprk_workassignment',
+  'sprk_servicerequest',
+] as const;
+
+/**
+ * CHILD record entities — inherit their core ancestor's rights (1 hop, via the
+ * stamp this module writes).
+ *
+ * Pinned literally by a unit test alongside {@link CORE_RECORD_ENTITIES}.
+ *
+ * NOTE: entities in NEITHER set (e.g. `sprk_budget`, `sprk_organization`,
+ * `contact`, `sprk_reportcard`) are intentionally unclassified for FR-26.
+ * They confer access through other evaluator terms (org-expansion, explicit
+ * grant) — not through core-ancestor inheritance — so no stamp is derived for
+ * them. That is a distinct, non-error state; see
+ * {@link CoreAncestorDerivationStatus}.
+ */
+export const CHILD_RECORD_ENTITIES: ReadonlyArray<string> = [
+  'sprk_invoice',
+  'sprk_communication',
+  'sprk_document',
+  'sprk_event',
+  'sprk_todo',
+  'sprk_analysis',
+] as const;
+
+/** True when `entityLogicalName` is a CORE record (direct grants required). */
+export function isCoreRecordEntity(entityLogicalName: string): boolean {
+  return CORE_RECORD_ENTITIES.includes(entityLogicalName?.toLowerCase?.() ?? entityLogicalName);
+}
+
+/** True when `entityLogicalName` is a CHILD record (inherits via core ancestor). */
+export function isChildRecordEntity(entityLogicalName: string): boolean {
+  return CHILD_RECORD_ENTITIES.includes(entityLogicalName?.toLowerCase?.() ?? entityLogicalName);
+}
+
+/**
+ * The core-ancestor lookup column that carries each CORE entity's stamp on a
+ * child row, plus the OData entity-set needed to build the `@odata.bind` value.
+ *
+ * These four columns are the ONLY access-conferring ancestor lookups. Any other
+ * `sprk_regarding*` column on a child (e.g. `sprk_regardingcommunication`) is a
+ * relationship, not an access edge.
+ *
+ * ⚠️ Not every child entity carries all four. `sprk_todo`, for example, has no
+ * `sprk_regardingservicerequest` column (verified: 11 regarding lookups, none
+ * for service request — notes/investigation/06-adversarial-critique.md §F1).
+ * Presence is therefore always resolved against the entity's DISCOVERED
+ * nav-props rather than assumed; a `$select` of a non-existent column would
+ * otherwise 400 and fail an otherwise-valid write.
+ */
+export const CORE_ANCESTOR_LOOKUPS: ReadonlyArray<{
+  entityType: string;
+  entitySet: string;
+  lookupAttribute: string;
+}> = [
+  { entityType: 'sprk_project', entitySet: 'sprk_projects', lookupAttribute: 'sprk_regardingproject' },
+  { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter' },
+  {
+    entityType: 'sprk_workassignment',
+    entitySet: 'sprk_workassignments',
+    lookupAttribute: 'sprk_regardingworkassignment',
+  },
+  {
+    entityType: 'sprk_servicerequest',
+    entitySet: 'sprk_servicerequests',
+    lookupAttribute: 'sprk_regardingservicerequest',
+  },
+] as const;
+
+/** One resolved core-ancestor stamp to write onto the child being saved. */
+export interface ICoreAncestorStamp {
+  /** Core entity logical name (e.g. `sprk_matter`). */
+  entityType: string;
+  /** OData entity set for the `@odata.bind` value (e.g. `sprk_matters`). */
+  entitySet: string;
+  /** Lookup column on the child that carries this stamp. */
+  lookupAttribute: string;
+  /** Bare lowercase GUID of the core record. */
+  recordId: string;
+}
+
+/**
+ * Outcome of {@link deriveCoreAncestorStamps}. The status is deliberately a
+ * closed set of DISTINCT states rather than "stamps.length === 0", because
+ * "the target has no ancestor" and "we could not find out" must never collapse
+ * into the same branch (NFR-01 fail-closed).
+ *
+ * - `core-target`   — target is itself CORE. The stamp is the target. Its own
+ *                     parent associations are NOT ancestors (Matter ≠ child of
+ *                     Project).
+ * - `derived`       — target is CHILD and carried ≥1 core-ancestor stamp.
+ * - `no-ancestor`   — target is CHILD and every core-ancestor lookup is null.
+ *                     A real, legitimate state (an orphan communication); the
+ *                     child simply inherits nothing.
+ * - `unclassified`  — target is neither CORE nor CHILD (budget, organization,
+ *                     contact, report card). No ancestor concept applies.
+ * - `error`         — the ancestor read failed. The caller MUST NOT write.
+ */
+export type CoreAncestorDerivationStatus = 'core-target' | 'derived' | 'no-ancestor' | 'unclassified' | 'error';
+
+/** Result of {@link deriveCoreAncestorStamps}. */
+export interface ICoreAncestorDerivationResult {
+  status: CoreAncestorDerivationStatus;
+  /** Stamps to write. Empty for `no-ancestor` / `unclassified` / `error`. */
+  stamps: ICoreAncestorStamp[];
+  /** Populated only when `status === 'error'`. */
+  error?: string;
+}
+
+/**
+ * Derive the ultimate CORE-record ancestor stamp(s) for a selected regarding
+ * target — the FR-26 write-time step that keeps every access chain one hop.
+ *
+ * Behaviour by target class:
+ *
+ * | Target class | Read performed | Result |
+ * |---|---|---|
+ * | CORE  | none | `core-target`, stamp = the target itself |
+ * | CHILD | ONE `$select` of the target's own core-ancestor lookups | `derived` / `no-ancestor` |
+ * | other | none | `unclassified` |
+ *
+ * **1-hop, enforced structurally (ADR-034).** The read selects the target's own
+ * `sprk_regarding{core}` columns and stops. There is no recursion and no
+ * grandparent walk — those columns are themselves FR-26 stamps written by this
+ * same function when the target was saved, which is exactly why one read is
+ * enough.
+ *
+ * **Fail-closed (NFR-01).** A read failure returns `status: 'error'`. Callers
+ * MUST abort the write rather than saving a child that silently carries no
+ * inherited access. Note the asymmetry with the resolver's other optional
+ * fields (record-number / display-name), which degrade gracefully per NFR-06:
+ * those are cosmetic, this one is an access edge.
+ *
+ * @param webApi        WebApi shim used to read the target row.
+ * @param targetEntityLogicalName  Logical name of the selected regarding target.
+ * @param targetRecordId           GUID of the target (braced or bare).
+ * @param fetchImpl     Fetch implementation for nav-prop discovery (test seam).
+ */
+export async function deriveCoreAncestorStamps(
+  webApi: IPolymorphicWebApi,
+  targetEntityLogicalName: string,
+  targetRecordId: string,
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<ICoreAncestorDerivationResult> {
+  const targetEntity = (targetEntityLogicalName ?? '').toLowerCase();
+  const cleanTargetId = cleanGuid(targetRecordId);
+
+  // --- CORE target: the target IS the ancestor. Do not look at its own
+  //     parents — a Matter associated to a Project does not inherit from it
+  //     (design.md §4.3). One stamp, no read.
+  if (isCoreRecordEntity(targetEntity)) {
+    const core = CORE_ANCESTOR_LOOKUPS.find(c => c.entityType === targetEntity);
+    if (!core) {
+      // Unreachable while CORE_RECORD_ENTITIES and CORE_ANCESTOR_LOOKUPS agree;
+      // the taxonomy parity test pins that. Fail closed rather than guess.
+      return {
+        status: 'error',
+        stamps: [],
+        error:
+          `[PolymorphicResolver] "${targetEntity}" is a CORE entity with no entry in CORE_ANCESTOR_LOOKUPS. ` +
+          `The taxonomy and the lookup table have diverged.`,
+      };
+    }
+    return {
+      status: 'core-target',
+      stamps: [
+        {
+          entityType: core.entityType,
+          entitySet: core.entitySet,
+          lookupAttribute: core.lookupAttribute,
+          recordId: cleanTargetId,
+        },
+      ],
+    };
+  }
+
+  // --- Neither core nor child: no ancestor concept. Not an error.
+  if (!isChildRecordEntity(targetEntity)) {
+    return { status: 'unclassified', stamps: [] };
+  }
+
+  // --- CHILD target: read ITS core-ancestor stamps (the single hop).
+  //
+  // Only select columns that actually exist on the target entity — selecting a
+  // missing lookup returns HTTP 400 and would turn a schema gap into a blocked
+  // save. Nav-props are the presence oracle and are cached per entity.
+  const targetNavProps = await discoverNavProps(targetEntity, fetchImpl);
+  const presentColumns = new Set(targetNavProps.map(n => n.columnName.toLowerCase()));
+  const applicable = CORE_ANCESTOR_LOOKUPS.filter(c => presentColumns.has(c.lookupAttribute.toLowerCase()));
+
+  if (targetNavProps.length === 0) {
+    // Discovery failed (HTTP error / network). We cannot distinguish "target
+    // has no core-ancestor columns" from "we could not read the metadata", and
+    // guessing the optimistic branch would write an unstamped child. Fail closed.
+    return {
+      status: 'error',
+      stamps: [],
+      error:
+        `[PolymorphicResolver] Could not discover nav-props for child target "${targetEntity}"; ` +
+        `core-ancestor derivation cannot be verified (FR-26 / NFR-01 fail-closed).`,
+    };
+  }
+
+  if (applicable.length === 0) {
+    // The target is child-class but carries no core-ancestor lookup at all.
+    // Its own chain is already broken upstream; nothing to inherit.
+    console.warn(
+      `[PolymorphicResolver] Child target "${targetEntity}" has none of the core-ancestor lookups ` +
+        `(${CORE_ANCESTOR_LOOKUPS.map(c => c.lookupAttribute).join(', ')}); no ancestor stamp can be derived.`
+    );
+    return { status: 'no-ancestor', stamps: [] };
+  }
+
+  const selectFields = applicable.map(c => `_${c.lookupAttribute}_value`);
+  let row: Record<string, unknown> | undefined;
+  try {
+    const primaryIdAttr = `${targetEntity}id`;
+    const query = `?$filter=${primaryIdAttr} eq ${cleanTargetId}&$select=${selectFields.join(',')}&$top=1`;
+    const result = await webApi.retrieveMultipleRecords(targetEntity, query, 1);
+    row = result.entities?.[0];
+  } catch (err) {
+    return {
+      status: 'error',
+      stamps: [],
+      error:
+        `[PolymorphicResolver] Failed to read core-ancestor lookups from ${targetEntity}(${cleanTargetId}): ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (!row) {
+    // The target row is unreadable by this caller (or gone). Writing an
+    // unstamped child here would silently under-grant, so fail closed.
+    return {
+      status: 'error',
+      stamps: [],
+      error: `[PolymorphicResolver] Core-ancestor read returned no row for ${targetEntity}(${cleanTargetId}).`,
+    };
+  }
+
+  const stamps: ICoreAncestorStamp[] = [];
+  for (const c of applicable) {
+    const raw = row[`_${c.lookupAttribute}_value`];
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      stamps.push({
+        entityType: c.entityType,
+        entitySet: c.entitySet,
+        lookupAttribute: c.lookupAttribute,
+        recordId: cleanGuid(raw),
+      });
+    }
+  }
+
+  if (stamps.length === 0) {
+    console.warn(
+      `[PolymorphicResolver] Child target ${targetEntity}(${cleanTargetId}) carries no core-ancestor stamp; ` +
+        `the record being written will inherit no access (FR-26 no-ancestor).`
+    );
+    return { status: 'no-ancestor', stamps: [] };
+  }
+
+  return { status: 'derived', stamps };
+}
+
+// ---------------------------------------------------------------------------
+// Combined, ordering-safe payload assembly (FR-26)
+// ---------------------------------------------------------------------------
+
+/** A regarding target as the catalogs describe it. */
+export interface IRegardingTargetDescriptor {
+  entityType: string;
+  entitySet: string;
+  lookupAttribute: string;
+  navPropHint: string;
+}
+
+/** Result of {@link buildRegardingSelectionPayload}. */
+export interface IRegardingSelectionPayloadResult {
+  /** False when derivation failed — the caller MUST NOT write (NFR-01). */
+  success: boolean;
+  /** The assembled payload. Undefined when `success` is false. */
+  payload?: Record<string, unknown>;
+  /** The derivation outcome that produced (or blocked) the ancestor stamps. */
+  ancestor: ICoreAncestorDerivationResult;
+  /** Pass-through from {@link applyResolverFields}. */
+  resolverResult?: IApplyResolverFieldsResult;
+  /**
+   * Core-ancestor stamps that were derived but could NOT be written because the
+   * host entity has no matching lookup column (e.g. a `sprk_todo` regarding a
+   * communication whose ancestor is a Service Request — `sprk_todo` has no
+   * `sprk_regardingservicerequest`). Surfaced rather than swallowed: each entry
+   * is a real hole in child inheritance for that host/ancestor pair and is a
+   * schema finding, not a runtime condition to paper over.
+   */
+  unstampable: string[];
+  /** Populated when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Build the COMPLETE regarding-selection payload for a child record, in the one
+ * order that is correct — the reason this is exported instead of leaving
+ * consumers to assemble it.
+ *
+ * Sequence (each step's position is load-bearing):
+ *
+ *  1. **Derive the core ancestor FIRST.** If derivation fails the function
+ *     returns before any payload exists, so a failed derivation cannot become a
+ *     partially-built write (NFR-01).
+ *  2. **Pre-clear** every other regarding lookup that exists on the host —
+ *     the FR-13 mutual-exclusivity contract — INCLUDING the four core-ancestor
+ *     lookups even when the host catalog does not list them. Without that
+ *     union, a reparent leaves the previous ancestor stamp behind and the child
+ *     stays visible to the OLD parent's principals.
+ *  3. **`applyResolverFields`** sets the chosen lookup + the 5 resolver fields.
+ *  4. **Apply the ancestor stamps LAST**, so a stamp this payload is setting can
+ *     never be nulled by the pre-clear in step 2. (Step 2 before step 4 is the
+ *     whole point of centralizing this.)
+ *
+ * @param webApi        WebApi shim.
+ * @param hostNavProps  Nav-props DISCOVERED for the host (child) entity. Doubles
+ *                      as the presence oracle for which lookups may be written.
+ * @param catalog       The host's allowed regarding targets (pre-clear set).
+ * @param target        The selected target descriptor.
+ * @param recordId      Selected target GUID (braced or bare).
+ * @param recordName    Selected target display name (fallback for the 3rd field).
+ * @param options       Passed through to {@link applyResolverFields}.
+ * @param fetchImpl     Fetch implementation for nav-prop discovery (test seam).
+ */
+export async function buildRegardingSelectionPayload(
+  webApi: IPolymorphicWebApi,
+  hostNavProps: INavPropEntry[],
+  catalog: ReadonlyArray<IRegardingTargetDescriptor>,
+  target: IRegardingTargetDescriptor,
+  recordId: string,
+  recordName: string,
+  options?: IApplyResolverFieldsOptions,
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<IRegardingSelectionPayloadResult> {
+  // --- 1. Derivation first. A failure here aborts before any payload exists.
+  const ancestor = await deriveCoreAncestorStamps(webApi, target.entityType, recordId, fetchImpl);
+  if (ancestor.status === 'error') {
+    return {
+      success: false,
+      ancestor,
+      unstampable: [],
+      error: ancestor.error ?? 'Core-ancestor derivation failed.',
+    };
+  }
+
+  const payload: Record<string, unknown> = {};
+
+  // --- 2. Pre-clear. The clear set is the UNION of the host catalog and the
+  //        four core-ancestor lookups, intersected with what the host actually
+  //        has. The union matters: a host whose catalog omits a core lookup
+  //        (sprk_todo has no service-request entry) would otherwise never clear
+  //        a stale stamp on reparent.
+  const clearTargets: Array<{ entityType: string; lookupAttribute: string; navPropHint?: string }> = [
+    ...catalog.map(c => ({ entityType: c.entityType, lookupAttribute: c.lookupAttribute, navPropHint: c.navPropHint })),
+    ...CORE_ANCESTOR_LOOKUPS.map(c => ({ entityType: c.entityType, lookupAttribute: c.lookupAttribute })),
+  ];
+  const seenClear = new Set<string>();
+  for (const other of clearTargets) {
+    if (other.entityType === target.entityType) continue;
+    if (seenClear.has(other.lookupAttribute.toLowerCase())) continue;
+    seenClear.add(other.lookupAttribute.toLowerCase());
+    const navProp = findHostNavPropForLookup(hostNavProps, other.entityType, other.lookupAttribute, other.navPropHint);
+    if (!navProp) continue; // Column absent on this host — writing it would 400.
+    payload[`${navProp}@odata.bind`] = null;
+  }
+
+  // --- 3. The canonical SET path (ADR-024). Never reimplemented.
+  const resolverResult = await applyResolverFields(
+    webApi,
+    payload,
+    hostNavProps,
+    target.entityType,
+    target.entitySet,
+    recordId,
+    recordName,
+    target.navPropHint,
+    options
+  );
+
+  // --- 4. Ancestor stamps LAST so they survive step 2's nulls.
+  const unstampable: string[] = [];
+  for (const stamp of ancestor.stamps) {
+    if (stamp.entityType === target.entityType) continue; // Already bound by step 3.
+    const navProp = findHostNavPropForLookup(hostNavProps, stamp.entityType, stamp.lookupAttribute);
+    if (!navProp) {
+      unstampable.push(stamp.lookupAttribute);
+      console.warn(
+        `[PolymorphicResolver] Derived core ancestor ${stamp.entityType}(${stamp.recordId}) cannot be stamped: ` +
+          `host entity has no "${stamp.lookupAttribute}" lookup. This child will NOT inherit that ancestor's access (FR-26 gap).`
+      );
+      continue;
+    }
+    payload[`${navProp}@odata.bind`] = `/${stamp.entitySet}(${stamp.recordId})`;
+  }
+
+  return { success: true, payload, ancestor, resolverResult, unstampable };
+}
+
+/**
+ * Resolve the host nav-prop name for a regarding lookup column, or `undefined`
+ * when the host has no such column.
+ *
+ * Matches on the DISCOVERED column name first (exact, unambiguous) and falls
+ * back to the historical `referencedEntity` + hint heuristic so existing
+ * catalog-driven callers keep their current resolution behaviour.
+ *
+ * @internal — exported for the ancestor-derivation tests.
+ */
+export function findHostNavPropForLookup(
+  hostNavProps: INavPropEntry[],
+  referencedEntity: string,
+  lookupAttribute: string,
+  navPropHint?: string
+): string | undefined {
+  const byColumn = hostNavProps.find(n => n.columnName.toLowerCase() === lookupAttribute.toLowerCase());
+  if (byColumn) return byColumn.navPropName;
+
+  const hint = navPropHint?.toLowerCase();
+  const byEntity = hostNavProps.find(
+    n => n.referencedEntity === referencedEntity && (!hint || n.columnName.toLowerCase().includes(hint))
+  );
+  return byEntity?.navPropName;
+}

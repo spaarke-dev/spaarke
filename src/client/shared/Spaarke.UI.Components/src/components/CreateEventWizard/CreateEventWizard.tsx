@@ -394,11 +394,15 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         const warnings: string[] = [...result.warnings];
 
         // Upload files to SPE + create document records
-        if (context.uploadedFiles.length > 0 && context.speContainerId && authFetch && bffBaseUrl) {
+        //
+        // Task 076: keyed on the EVENT. `sprk_event` was added to
+        // `EntityAccessFilter.EntitySetByType` by item 7 (`f85796f70`) with its `sprk_document`
+        // lookup column verified present, so the record-keyed route resolves for this type.
+        if (context.uploadedFiles.length > 0 && authFetch && bffBaseUrl) {
           try {
             const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
-            const uploadResult = await entityService.uploadFilesToSpe(context.speContainerId, context.uploadedFiles);
+            const uploadResult = await entityService.uploadFilesToSpe('sprk_event', eventId, context.uploadedFiles);
 
             if (uploadResult.errors.length > 0) {
               for (const err of uploadResult.errors) {
@@ -413,7 +417,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
                 'sprk_Event',
                 uploadResult.uploadedFiles,
                 {
-                  containerId: context.speContainerId,
+                  // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
                   parentRecordName: eventName,
                 }
               );

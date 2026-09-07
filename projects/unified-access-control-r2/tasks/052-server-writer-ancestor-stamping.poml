@@ -4,15 +4,15 @@
     <title>Server-side regarding writers: audit + converge on core-ancestor stamping (FR-26)</title>
     <phase>3 Child inheritance</phase>
     <gate>startable (derivation rules are spec-fixed; runs parallel to 050)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes: server-created children (emails, todos from automation) without stamps are invisible to inheriting principals; wrong stamps over-grant.</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Audit + convergence against an explicit derivation-rules table; well-specified after 050's rules note; default tier.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>phase3-wave1</parallel-group>
-    <parallel-safe>true</parallel-safe>
-    <parallel-reason>Touches Services/Communication/** + a new helper — disjoint from task 050's TS shared-lib files; does NOT touch Infrastructure/ExternalAccess, Api/ExternalAccess or DataverseWebApiService.cs.</parallel-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>CORRECTED 2026-09-03 (task 052 execution): was true, which was WRONG. The original reason established disjointness with task 050 ONLY, then generalized it to "safe". Services/Communication/** is a heavily shared surface across this project and the concurrent email/communication projects; convergence there must serialize. See notes/phase3-server-writers.md 1. ORIGINAL TEXT: Touches Services/Communication/** + a new helper — disjoint from task 050's TS shared-lib files; does NOT touch Infrastructure/ExternalAccess, Api/ExternalAccess or DataverseWebApiService.cs.</parallel-reason>
     <deps>none</deps>
     <tags>bff-api, auth, dataverse, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
@@ -95,7 +95,38 @@
     <criterion testable="true">dotnet build + all unit tests green; publish size reported ≤ 60 MB with delta vs baseline in the PR.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-26; design.md §4.3. The one-time backfill for existing rows is task 053.</notes>
+  <notes>spec.md FR-26; design.md §4.3. The one-time backfill for existing rows is task 053.
+
+COMPLETED 2026-09-03 (second pass; the first pass shipped the resolver + inventory and stopped, correctly,
+because Services/Communication/** was concurrently owned). Full record: notes/phase3-server-writers.md.
+
+Outcome: 6 writers converged, 2 verified-trivial, 3 reclassified. Resolver extended with the stamping half
+(StampAsync / DeriveForHostAsync / dictionary ApplyStamps / CoreAncestorStampOutcome) and registered as a
+singleton with a scope-bridged metadata probe.
+
+Three things this POML got wrong, recorded per project convention:
+
+1. The POML anticipated a "writers that only ever set a CORE target lookup" category and the FIRST PASS
+   declared it empty. It is NOT empty: DataverseServiceClientImpl.StageAnalysisRegardingFields accepts only
+   matter|project and throws otherwise, and ExternalDataService.CreateTodoAsync hard-codes the literal
+   "sprk_project". Both write the CORE lookup directly, which IS the stamp. The first pass reasoned from the
+   HOST being child-class; what matters is whether a CHILD TARGET can reach the write.
+
+2. relevant-files named ThreadResolver.cs as the primary file to modify. Its host is
+   sprk_communicationthread, which is in NEITHER taxonomy set - stamping it would be a model change belonging
+   to task 056 (child-module registration), not an FR-26 convergence. The real communication-side seams are
+   CommunicationService.MapAssociationFields (3 call sites) and IncomingAssociationResolver's single
+   ApplyDecisionAsync write.
+
+3. The acceptance criterion "a server-created communication regarding Matter M carries sprk_regardingmatter"
+   is satisfied but was never at risk: the inbound engine's AddWrites gate persists ONLY entities in
+   AutoFileOptions.CoreWritableEntities (default matter/project/servicerequest - all CORE). The real exposure
+   there is LATENT: that set is operator-tunable per ADR-018 without a redeploy, so adding sprk_invoice would
+   start writing unstamped child regardings. Pinned by test in both directions.
+
+New finding F-052-1: sprk_communicationthread taxonomy question -> task 056.
+New finding F-052-2 (low): EmailDraftToolHandler derives app-only under a user-context write.
+F-050-2 (sprk_todo has no service-request column) confirmed server-side; reported as unstampable, not fatal.
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

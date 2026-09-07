@@ -36,7 +36,9 @@ public sealed class EmailDraftToolHandlerPerItemToolsTests : TypedToolHandlerTes
     private readonly Mock<IEmailDraftAi> _emailDraftAi = new();
 
     private EmailDraftToolHandler CreateHandler() =>
-        new(_dataverse.Object, _emailDraftAi.Object, CreateLogger<EmailDraftToolHandler>());
+        new(_dataverse.Object, _emailDraftAi.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            CreateLogger<EmailDraftToolHandler>());
 
     private static AnalysisTool BuildTool(string method, string name) =>
         BuildAnalysisTool(

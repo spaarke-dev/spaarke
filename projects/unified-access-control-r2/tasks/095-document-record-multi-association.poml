@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095" project="unified-access-control-r2">
+  <metadata>
+    <title>Document ↔ record multi-association via an intersection entity (owner chose option b, NOT native N:N)</title>
+    <phase>0c Secure Documents — upload path decomposition</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Introduces a schema surface and touches the access model's ancestor assumption. Getting the regarding shape wrong is expensive to undo once rows exist.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The load-bearing decisions (polymorphic target list; whether a link confers access) are architectural and interact with the evaluator.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Schema + access-model interaction; a wrong default on "does a link confer access" is a silent disclosure.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the access-ancestor model.</parallel-reason>
+    <deps></deps>
+    <tags>bff-api, auth, dataverse, schema</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>notes/plan-upload-path-decomposition-2026-08-31.md §3. Owner chose option (b), an intersection entity, from live metadata screenshots 2026-08-31.</origin>
+  </metadata>
+
+  <prompt>One document can belong to only one matter today. The owner wants a document associable to several records — via an INTERSECTION ENTITY, explicitly not native N:N.</prompt>
+
+  <role>SPAARKE backend engineer with Dataverse schema authority.</role>
+
+  <goal>A document can be associated to multiple records without multiplying `sprk_document` rows and without making the access ancestor multi-valued.</goal>
+
+  <context>
+    <background>**Live metadata (owner screenshots, 2026-08-31)**: Document→Matter has **two**
+Many-to-one relationships (`sprk_matter_document`, `sprk_sprk_matter_sprk_document_sprk_relatedmatter`);
+Document→Project likewise (`sprk_Project_Document_1n`, `…_sprk_relatedproject`); Document→WorkAssignment
+has **one** (`sprk_WorkAssignment_Document_1n`). All **Many-to-one** — i.e. *two slots per type*, not a
+many-to-many.
+
+**Why NOT native N:N** (all three reasons, do not re-litigate):
+  1. It breaks this project's access model — documents inherit **1 hop via a denormalized core
+     ancestor**, and N:N makes "the ancestor" multi-valued.
+  2. Dataverse intersect tables **cannot carry columns** (no why/who/when/primary-flag) and cannot be
+     secured.
+  3. The codebase already has the polymorphic-regarding pattern (`sprk_todo` / ADR-024;
+     `sprk_event.sprk_regardingrecordid`) — extend that, do not invent a third shape.
+
+🔴 **Two decisions belong IN this task, not before it:**
+  - the polymorphic TARGET LIST, and
+  - **whether a link confers access. DEFAULT: NO** — the primary lookup stays the access ancestor, so
+    the evaluator is untouched. Changing this default is a security decision needing explicit owner
+    sign-off, because a link that confers access is a grant path that bypasses the ancestor model.
+
+⚠️ **Do NOT relax the alternate key on the SPE item id** to allow duplicate rows. A second
+`sprk_document` row for the same file is the naive workaround and it violates that key — which is
+exactly what produces the owner's HTTP 412. Compose's transient-key dedup AND promote-idempotency both
+rest on that key.
+
+⚠️ Related context from item 7 (2026-09-03): `sprk_document` has real lookup columns for matter /
+project / invoice / workassignment / event — but **NOT** for `sprk_todo`, `account` or `contact`. If
+the target list is meant to include any of those, the intersection entity is the mechanism that makes
+it possible without adding five more lookup columns. That is an argument FOR this task's shape; state
+it in the design rather than adding lookups piecemeal.</background>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/plan-upload-path-decomposition-2026-08-31.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>docs/data-model/</file>
+      <file>src/server/shared/Spaarke.Dataverse/Models.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify the live relationship metadata — do not inherit the screenshot summary.</step>
+    <step order="1">Decide and RECORD the polymorphic target list, with the reason each target is in or out.</step>
+    <step order="2">Decide and RECORD whether a link confers access. Default NO. If YES is proposed, escalate for explicit owner sign-off before any code.</step>
+    <step order="3">Design the intersection entity following the ADR-024 regarding pattern; state which columns it carries and why (why/who/when/primary-flag are the point of choosing it over N:N).</step>
+    <step order="4">Confirm the evaluator is untouched under the default, by test.</step>
+    <step order="5">Confirm the SPE-item-id alternate key is unchanged and Compose's dedup + promote-idempotency still hold.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the design needs a link to confer access, STOP and escalate — that is a grant path outside the ancestor model and needs explicit owner sign-off (root CLAUDE.md §6).</trigger>
+    <trigger>If anything appears to require relaxing the SPE-item-id alternate key, STOP — that key is load-bearing for Compose.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ADR-024's polymorphic regarding pattern (`sprk_todo`, `sprk_event.sprk_regardingrecordid`) already solves "one row, many possible parents".</existing>
+    <extension>Extends that established pattern to documents rather than inventing a third association shape. Native N:N was evaluated and rejected for three concrete reasons.</extension>
+    <cost-of-doing-nothing>A document that genuinely belongs to two matters can only be represented by a second `sprk_document` row, which violates the SPE-item-id alternate key and surfaces to the user as an HTTP 412 with unsubstituted Dataverse placeholders. Users cannot file a document to more than one record at all.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="schema">Intersection entity for document ↔ record association</output>
+    <output type="doc">Recorded decisions: target list, and whether a link confers access</output>
+    <output type="test">Evaluator unchanged under the default; alternate key intact</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A document can be associated to multiple records without a second `sprk_document` row.</criterion>
+    <criterion>The SPE-item-id alternate key is unchanged; Compose transient-key dedup and promote-idempotency still pass.</criterion>
+    <criterion>Under the default, a link confers NO access — asserted by an evaluator test, not by inspection.</criterion>
+    <criterion>The polymorphic target list and the access decision are both recorded with reasons.</criterion>
+    <criterion>No native N:N was introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>NOT STARTED. Gates 094's "Use existing" option.</notes>
+</task>

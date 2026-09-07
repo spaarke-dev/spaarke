@@ -136,11 +136,16 @@ public sealed class EmailDraftToolHandler : IToolHandler
 
     private readonly IDataverseUserClient _dataverse;
     private readonly IEmailDraftAi _emailDraftAi;
+
+    /// <summary>FR-26 core-ancestor derivation for the drafted communication (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
     private readonly ILogger<EmailDraftToolHandler> _logger;
 
     public EmailDraftToolHandler(
         IDataverseUserClient dataverse,
         IEmailDraftAi emailDraftAi,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<EmailDraftToolHandler> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
@@ -149,6 +154,9 @@ public sealed class EmailDraftToolHandler : IToolHandler
         // NullEmailDraftAi mirror is registered when the AzureOpenAI gate is off (ADR-032; AiModule),
         // so adding this dependency does NOT create an asymmetric-registration risk (§10 F.1).
         _emailDraftAi = emailDraftAi ?? throw new ArgumentNullException(nameof(emailDraftAi));
+        // FR-26 (task 052). Registered by AddToolFramework alongside the handler assembly scan, so
+        // this dependency is resolvable wherever the handler is - no asymmetric registration (§10 F.1).
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -298,9 +306,35 @@ public sealed class EmailDraftToolHandler : IToolHandler
                     stopwatch);
             }
 
+            // FR-26 core-ancestor derivation (task 052) BEFORE the item is built, so a failure aborts
+            // before any payload exists and cannot become a partially-built write. Two of the eight
+            // regarding tables this tool accepts are child-class (sprk_analysis, sprk_invoice), so a draft
+            // filed against an invoice would otherwise carry no matter stamp and be invisible to everyone
+            // whose access comes from that matter.
+            IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps = [];
+            if (args.RegardingTable is not null && args.RegardingRecordId is { } ancestorTargetId)
+            {
+                var ancestors = await _coreAncestors
+                    .DeriveForHostAsync(CommunicationTable, args.RegardingTable, ancestorTargetId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!ancestors.Succeeded)
+                {
+                    // NFR-01 fail-closed, in this handler's existing error contract (a ToolResult error the
+                    // model surfaces to the user), NOT a silent unstamped draft.
+                    return LogOutcome(context, args,
+                        Error(tool,
+                            "The regarding record's access ancestry could not be resolved, so the draft was not created.",
+                            ToolErrorCodes.InternalError, startedAt),
+                        stopwatch);
+                }
+
+                ancestorStamps = ancestors.Stamps;
+            }
+
             // Build the record ITEM server-side (Communication-service column contract).
             // DRAFT-ONLY: statuscode/statecode are pinned constants — never model-supplied.
-            var item = BuildCommunicationItem(args, context);
+            var item = BuildCommunicationItem(args, context, ancestorStamps);
 
             // Reuse the task-009 write mapper: metadata-driven lookup navigation-property
             // resolution for the regarding association, OData-annotation smuggling blocked.
@@ -802,7 +836,10 @@ public sealed class EmailDraftToolHandler : IToolHandler
     /// outgoing-email discriminators are CONSTANTS here — the parsed args carry no status,
     /// direction, or type vocabulary, so no model/prompt content can alter them.
     /// </summary>
-    private static JsonElement BuildCommunicationItem(EmailDraftArgs args, ChatInvocationContext context)
+    private static JsonElement BuildCommunicationItem(
+        EmailDraftArgs args,
+        ChatInvocationContext context,
+        IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -838,6 +875,19 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 if (!string.IsNullOrWhiteSpace(args.RegardingName))
                 {
                     writer.WriteString("sprk_regardingrecordname", Truncate(args.RegardingName!, 100));
+                }
+
+                // FR-26 core-ancestor stamps (task 052) — emitted in the SAME mapper object shape as the
+                // regarding lookup above, so navigation properties stay metadata-resolved. Written last so
+                // nothing above can overwrite them; the directly-bound target is already excluded upstream
+                // by DeriveForHostAsync.
+                foreach (var stamp in ancestorStamps)
+                {
+                    writer.WritePropertyName(stamp.LookupAttribute);
+                    writer.WriteStartObject();
+                    writer.WriteString("relatedTable", stamp.EntityType);
+                    writer.WriteString("recordId", stamp.RecordId.ToString("D"));
+                    writer.WriteEndObject();
                 }
             }
 

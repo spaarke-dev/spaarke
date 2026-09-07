@@ -221,10 +221,22 @@ export class MatterService {
     if (form.summary && form.summary.trim() !== '') {
       entity['sprk_matterdescription'] = form.summary.trim();
     }
-    // Store the SPE container ID on the matter record
-    if (this._containerId) {
-      entity['sprk_containerid'] = this._containerId;
-    }
+    // 🔴 The `entity['sprk_containerid'] = this._containerId` write that stood here was DELETED
+    // 2026-09-03 by task 076 (harmful write "W1", second half). Do not reintroduce it.
+    //
+    // W1 was originally scoped as "delete `applyDefaultContainerId`" — but deleting only that would
+    // have left THIS write alive and W1 unfixed. This assignment ran FIRST, deliberately, so that
+    // the INV-5 guard inside the BU cascade would treat it as an explicit override and preserve it.
+    // The two were a pair: the helper was the fallback, this was the primary.
+    //
+    // The value is the container the HOST resolved when the wizard opened, from the acting user's
+    // business unit. Stamping it on the row asserts a storage location the client has no authority
+    // to choose, and for a secure record it is simply the wrong one.
+    //
+    // Nothing is lost: `RecordContainerResolver.ResolveForRecordAsync` reads the record's own
+    // `sprk_containerid` first and falls back to the record's `owningbusinessunit` container — which
+    // for a non-secure matter is the SAME value this used to write. For a secure record the column
+    // is stamped SERVER-side by provisioning, which is the only authority that should write it.
 
     // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_containerid`
     // AND `sprk_searchindexname` from the current user's owning Business Unit.
@@ -335,9 +347,16 @@ export class MatterService {
     }
 
     // -- Step 2: Upload files to SPE via BFF + create document records --
-    if (uploadedFiles.length > 0 && this._containerId) {
+    //
+    // Task 076: the upload is keyed on the MATTER, not on a container this service resolved when the
+    // wizard opened. The `&& this._containerId` guard is gone with it — it made the upload silently
+    // depend on a client-side lookup that is no longer consulted, so retaining it would skip uploads
+    // for a caller whose BU happens to have no container stamped even though the server can resolve
+    // one from the matter itself.
+    if (uploadedFiles.length > 0) {
       const uploadResult = await this._entityService.uploadFilesToSpe(
-        this._containerId,
+        'sprk_matter',
+        matterId,
         uploadedFiles,
         onUploadProgress
       );
@@ -359,7 +378,9 @@ export class MatterService {
           docMatterNavProp,
           uploadResult.uploadedFiles,
           {
-            containerId: this._containerId,
+            // No `containerId`: `sprk_graphdriveid` now comes from the drive the SERVER reported on
+            // each upload result, which is the only value that can be trusted to say where the bytes
+            // actually landed.
             parentRecordName: form.matterName.trim(),
           }
         );

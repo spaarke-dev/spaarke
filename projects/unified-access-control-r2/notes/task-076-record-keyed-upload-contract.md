@@ -163,7 +163,39 @@ for a secure record — were entirely unpinned. Closed by
 
 ---
 
-## 5 — 🔔 ESCALATION: three client upload paths have no owning record
+## 5 — ~~🔔 ESCALATION~~ ✅ ANSWERED 2026-08-28. Route BUILT 2026-09-03.
+
+> 🔴 **THIS SECTION WAS STALE FOR FIVE DAYS AND CAUSED A WRONG STATUS REPORT.** It presents an open
+> escalation asking the owner to choose option 1, 2 or 3. **The owner answered on 2026-08-28** — in
+> [`SESSION-STATUS-2026-08-28.md`](SESSION-STATUS-2026-08-28.md) §6.5 Q1 — and the answer is **none of
+> those three**:
+>
+> > **Q1 → acting user's BU, but the SERVER derives it. No upload ticket needed.**
+>
+> The resolution order the owner settled:
+>
+> ```
+> record exists + secure    -> the record's OWN sprk_containerid, or FAIL CLOSED
+> record exists, non-secure -> the RECORD's owningbusinessunit -> sprk_containerid
+> NO record yet             -> the ACTING USER's businessunitid -> sprk_containerid  (server-derived)
+> server-side ingest        -> Communication:ArchiveContainerId
+> ```
+>
+> The invariant survives because *the user's BU container is the correct **VALUE*** ≠ ***the CLIENT**
+> should send a container id*. The server reads Dataverse and derives it.
+>
+> **✅ The route is BUILT** — `PUT /api/obo/me/files/{*path}` (`756e089cb`), using
+> `RecordContainerResolver.ResolveForActingUserAsync`, the same resolver ComposeService already uses for
+> the matter-less draft. No container parameter; typed 403 for an unresolvable caller; 409 for a BU with
+> no container; secure content can never reach it.
+>
+> **What remains for 076 is the CLIENT CUTOVER**, not a decision. Nothing below is a live question.
+> This note was written independently of SESSION-STATUS-2026-08-28 and never reconciled with it — do not
+> re-derive an open escalation from it.
+
+### Original text (superseded, kept for the reasoning)
+
+## 5 — ~~🔔 ESCALATION~~: three client upload paths have no owning record
 
 **The POML's first escalation trigger has fired.** It reads:
 
@@ -192,7 +224,26 @@ There is no fourth move that is not a silent regression.
 
 ### Two further blockers surfaced while verifying, both owner-visible
 
-**(a) Three upload target entities are not in the shared map.** `sprk_workassignment`
+**(a) ✅ RESOLVED 2026-09-03 — no longer a blocker. See the correction below.**
+
+> **Closed by item 7 (`f85796f70`) plus one factual correction.** `sprk_workassignment` and `sprk_event`
+> are now IN `EntityAccessFilter.EntitySetByType` — added with their lookup columns verified present on
+> `sprk_document` against live Dataverse metadata, so the record-keyed route resolves rather than denies
+> for both. The behaviour-change concern below was real but points the SAFE way: these types previously
+> **400'd** at the Office endpoint, so adding them converts "rejected outright" into "allowed if the
+> caller is authorized". Nothing became more permissive; a new capability arrived already gated.
+>
+> 🔴 **And the third entity was never an upload target.** This note listed `sprk_todo` alongside the
+> other two. Verified 2026-09-03: there is **no `uploadFilesToSpe` call site for `sprk_todo`** anywhere,
+> and `CreateTodoWizard/TodoWizardDialog.tsx` has no upload path at all. It is also unmappable —
+> `sprk_document` has no `sprk_todo` lookup column — so a document could not be filed to a to-do even if
+> one were uploaded. It is deliberately absent from the map. Do not re-derive "todo is a live upload
+> target" from this file's history.
+>
+> **What this means for 076**: blocker (a) is gone and needs no separate task. The ONLY thing still
+> blocking the client cutover is the owner decision in "Options for the owner" below.
+
+**(a) — ORIGINAL TEXT, superseded, kept for the reasoning: Three upload target entities are not in the shared map.** `sprk_workassignment`
 (`workAssignmentService.ts:545`), `sprk_event` (`CreateEventWizard.tsx:401`) and `sprk_todo` are live
 upload targets absent from `EntityAccessFilter.EntitySetByType`, so the new route would **deny** them.
 Adding them is §11-clean (extending the existing table, not a fourth) — but that table is **shared with
@@ -217,7 +268,14 @@ server's chosen drive id. Eliminating even that means moving `sprk_document` cre
 | **3** | **Accept a bounded parentless route** — keep the container-keyed route permanently for the three, gated by *something* | Low | ⚠️ Effectively option (B) with a boundary. Not recommended: it preserves the shape 073 deleted from the app-only twin. |
 
 **Recommendation: option 1**, path by path, with option 2 only if a flow genuinely cannot persist a
-parent first. Either way the map additions in (a) are a prerequisite and should be their own task.
+parent first. ~~Either way the map additions in (a) are a prerequisite and should be their own task.~~
+**Superseded 2026-09-03: the (a) map additions are DONE (`f85796f70`) and needed no separate task.**
+
+🔔 **THIS IS THE ONLY OPEN QUESTION IN 076.** The server half shipped, the resolver is wired, blockers
+(a) and (b) are both closed. The client cutover — and with it deleting the container-keyed route and its
+three Pending waivers — cannot proceed until the owner picks 1, 2 or 3 for the three parentless paths.
+A partial cutover (the 6 clean sites only) does NOT help: it leaves the container-keyed route alive for
+the other three, which is option 3 by default — the one option this note recommends against.
 
 ---
 

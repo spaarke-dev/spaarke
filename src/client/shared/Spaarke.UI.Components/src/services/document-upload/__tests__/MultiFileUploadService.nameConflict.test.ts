@@ -20,7 +20,14 @@
 
 import { MultiFileUploadService } from '../MultiFileUploadService';
 import type { FileUploadService } from '../FileUploadService';
-import type { ILogger, ServiceResult, SpeFileMetadata, FileUploadRequest, UploadProgress } from '../types';
+import type {
+  ILogger,
+  ServiceResult,
+  SpeFileMetadata,
+  FileUploadRequest,
+  UploadProgress,
+  UploadTarget,
+} from '../types';
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -70,7 +77,11 @@ function file(name: string): File {
   return new File(['x'], name, { type: 'text/plain' });
 }
 
-const CONTAINER = 'b!container';
+// Task 076: a batch names its OWNING RECORD, never a container. `MultiFileUploadService` only
+// forwards this — the branch that turns it into a route lives in `FileUploadService` — but the
+// forwarding is asserted below, because a target that silently defaulted to `no-record` would file
+// a secure record's documents in the caller's business-unit container.
+const TARGET: UploadTarget = { kind: 'record', entityLogicalName: 'sprk_matter', recordId: 'rec-1' };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -88,7 +99,7 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     const result = await new MultiFileUploadService(service, silentLogger).uploadFiles({
       files: [file('contract.docx')],
-      containerId: CONTAINER,
+      target: TARGET,
     });
 
     expect(result.errors).toHaveLength(1);
@@ -109,7 +120,7 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     const progress: UploadProgress[] = [];
     await new MultiFileUploadService(service, silentLogger).uploadFiles(
-      { files: [file('contract.docx')], containerId: CONTAINER },
+      { files: [file('contract.docx')], target: TARGET },
       p => progress.push(p)
     );
 
@@ -125,7 +136,7 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     const result = await new MultiFileUploadService(service, silentLogger).uploadFiles({
       files: [file('broken.docx')],
-      containerId: CONTAINER,
+      target: TARGET,
     });
 
     expect(result.errors).toHaveLength(1);
@@ -139,7 +150,7 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     const result = await new MultiFileUploadService(service, silentLogger).uploadFiles({
       files: [file('slow.docx')],
-      containerId: CONTAINER,
+      target: TARGET,
     });
 
     expect(result.errors[0].error).toContain('timeout');
@@ -158,13 +169,40 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     const result = await new MultiFileUploadService(service, silentLogger).uploadFiles({
       files: [file('ok.docx'), file('clash.docx')],
-      containerId: CONTAINER,
+      target: TARGET,
     });
 
     expect(result.successCount).toBe(1);
     expect(result.failureCount).toBe(1);
     expect(result.uploadedFiles.map(f => f.name)).toEqual(['ok.docx']);
     expect(result.errors[0].nameConflict).toEqual({ fileName: 'clash.docx' });
+  });
+
+  it('forwards the upload target down to every file in the batch', async () => {
+    const { service, requests } = stubUploadService({
+      'a.docx': { success: true, data: speMetadata('a.docx') },
+      'b.docx': { success: true, data: speMetadata('b.docx') },
+    });
+
+    await new MultiFileUploadService(service, silentLogger).uploadFiles({
+      files: [file('a.docx'), file('b.docx')],
+      target: TARGET,
+    });
+
+    expect(requests.map(r => r.target)).toEqual([TARGET, TARGET]);
+  });
+
+  it('forwards a record-LESS target verbatim rather than inventing a record', async () => {
+    const { service, requests } = stubUploadService({
+      'a.docx': { success: true, data: speMetadata('a.docx') },
+    });
+
+    await new MultiFileUploadService(service, silentLogger).uploadFiles({
+      files: [file('a.docx')],
+      target: { kind: 'no-record' },
+    });
+
+    expect(requests[0].target).toEqual({ kind: 'no-record' });
   });
 
   it('omits conflictBehavior by default so the server keeps its non-destructive `fail`', async () => {
@@ -174,7 +212,7 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     await new MultiFileUploadService(service, silentLogger).uploadFiles({
       files: [file('a.docx')],
-      containerId: CONTAINER,
+      target: TARGET,
     });
 
     expect(requests).toHaveLength(1);
@@ -188,7 +226,7 @@ describe('MultiFileUploadService — name-collision propagation', () => {
 
     await new MultiFileUploadService(service, silentLogger).uploadFiles({
       files: [file('a.docx')],
-      containerId: CONTAINER,
+      target: TARGET,
       conflictBehavior: behavior,
     });
 

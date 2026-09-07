@@ -82,6 +82,7 @@ public class AttachmentValidationTests
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             _loggerMock.Object);
     }
 
