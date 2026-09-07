@@ -309,12 +309,18 @@ public class AnalysisResultPersistence
             Name = ReviewMemoOutputName,
             Value = json,
             AnalysisId = analysisId,
-            // OutputTypeId intentionally left null: a "Review Summary Memo" sprk_aioutputtype row
-            // was seeded (task 050 notes), but its GUID is environment-specific data, not portable
-            // C# — hardcoding it here would 400 in any org that doesn't happen to share the same
-            // GUID. Categorization by sprk_name (below) is env-portable; a future task can wire the
-            // lookup by sprk_outputtypecode ("REVMEMO") once IAnalysisDataverseService exposes a
-            // by-code resolver.
+            // OutputTypeId intentionally left null: a sprk_aioutputtype row was seeded (task 050
+            // notes), but its GUID is environment-specific data, not portable C# — hardcoding it here
+            // would 400 in any org that doesn't happen to share the same GUID. Categorization by
+            // sprk_name (below) is env-portable.
+            //
+            // Still deferred after R8 §GAPS-5 Phase 4 (2026-09-07), deliberately. Wiring the by-code
+            // ("REVMEMO") resolver would add a new IAnalysisDataverseService method whose only benefit
+            // is protecting a FUTURE rename — and "future flexibility" is exactly what CLAUDE.md §11
+            // rejects as a justification for new surface. The present hazard is instead handled where
+            // it actually bites: ReviewMemoOutputName documents the name/key coupling and
+            // ReviewMemoOutputNameGuardTests makes a silent change impossible. Revisit when a second
+            // output type needs the same treatment, or when rows exist and a rename is genuinely wanted.
             OutputTypeId = null,
         };
 
@@ -327,8 +333,27 @@ public class AnalysisResultPersistence
         return outputId;
     }
 
-    /// <summary>Display name for the persisted memo row — the categorization signal (see <see cref="PersistReviewMemoAsync"/> remarks on <c>OutputTypeId</c>).</summary>
-    private const string ReviewMemoOutputName = "Review Summary Memo";
+    /// <summary>
+    /// Display name for the persisted row — and, because <c>OutputTypeId</c> is null, ALSO the lookup
+    /// key <see cref="GetReviewMemoWithMetadataAsync"/> matches on. Those two roles being one string is
+    /// the hazard: changing it orphans every existing row, and the read then returns "not generated
+    /// yet" — a silent wrong answer, not an error.
+    /// <para>
+    /// Renamed "Review Summary Memo" → "Review Summary" on 2026-09-07 (R8 §GAPS-5 Phase 4). "Memo"
+    /// collided with <c>sprk_memo</c>, the first-class Notepad entity, whose supported parents gained
+    /// <c>sprk_agreement</c> on 2026-08-25 — so one agreement could carry both a Notepad memo and a
+    /// "Summary Memo" meaning unrelated things. The rename was free: <c>sprk_analysisoutput</c> was
+    /// queried before the change and held ZERO rows under the old name (the whole table had one row,
+    /// named "Too Long Didn't Read"), because nothing has ever called the POST that writes them.
+    /// </para>
+    /// <para>
+    /// <b>Before changing this string again, re-run that check.</b> Once rows exist the rename stops
+    /// being free and needs either a data migration or the by-code lookup described on
+    /// <see cref="PersistReviewMemoAsync"/>. <c>ReviewMemoOutputNameGuardTests</c> pins this value so
+    /// the change cannot be made silently.
+    /// </para>
+    /// </summary>
+    internal const string ReviewMemoOutputName = "Review Summary";
 
     /// <summary>
     /// FR-14 (ai-advanced-capabilities-agreements-r1 task 051) — the Review Summary Memo READ path.

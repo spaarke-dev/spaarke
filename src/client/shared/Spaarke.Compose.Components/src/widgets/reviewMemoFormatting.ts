@@ -90,11 +90,14 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * Builds the "Review Summary Memo — {analysis name}" subject line (spec FR-14). Falls back to a generic
+ * Builds the "Review Summary — {analysis name}" subject line (spec FR-14). Falls back to a generic
  * label when no analysis name is resolvable (e.g. the bound Analysis record was later renamed/removed).
+ *
+ * R8 §GAPS-5 Phase 4 (2026-09-07): "Memo" dropped from the user-facing name — it collided with
+ * `sprk_memo`, the Notepad entity. The function name keeps `ReviewMemo` (code identifier, cosmetic).
  */
 export function buildReviewMemoEmailSubject(response: ReviewMemoReadResponse): string {
-  return `Review Summary Memo — ${response.analysisName?.trim() || 'Agreement Review'}`;
+  return `Review Summary — ${response.analysisName?.trim() || 'Agreement Review'}`;
 }
 
 /**
@@ -137,7 +140,7 @@ export function buildReviewMemoEmailBody(response: ReviewMemoReadResponse): stri
           .join('');
 
   return `
-    <p><strong>Review Summary Memo</strong></p>
+    <p><strong>Review Summary</strong></p>
     <p>${metaParts.join(' &middot; ')}</p>
     <table style="border-collapse:collapse;width:100%;">
       <thead>

@@ -3218,7 +3218,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
       const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
-      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary Memo.docx';
+      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary.docx';
 
       const url = URL.createObjectURL(blob);
       try {
@@ -3235,7 +3235,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
       // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
       const negative = await memoNegativeFromError(err);
-      setMemoActionMessage(negative ?? (err instanceof ApiError ? err.message : 'Could not generate the review memo.'));
+      setMemoActionMessage(
+        negative ?? (err instanceof ApiError ? err.message : 'Could not download the Review Summary.')
+      );
     } finally {
       setMemoActionInFlight(false);
     }
@@ -3262,7 +3264,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       setMemoEmailBody(buildReviewMemoEmailBody(outcome.memo));
       setMemoEmailOpen(true);
     } catch (err) {
-      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the review memo.');
+      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the Review Summary.');
     } finally {
       setMemoActionInFlight(false);
     }

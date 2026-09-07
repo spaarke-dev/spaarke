@@ -1041,14 +1041,20 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       {hasReview && (onGenerateMemo || onEmailMemo) ? (
         <Menu positioning="below-start">
           <MenuTrigger disableButtonEnhancement>
+            {/* R8 §GAPS-5 Phase 4 — "Create Summary Memo" → "Review Summary document". Two changes in
+                one label: "Memo" is dropped (it collided with sprk_memo, the Notepad entity), and the
+                noun is qualified as the DOCUMENT because the sibling control immediately to the left is
+                already "Toggle Review Summary" (the panel). Naming both plain "Review Summary" would
+                put two identically-named controls side by side in the same group — one toggling a
+                view, one acting on an artifact. */}
             {(triggerProps: MenuButtonProps) => (
-              <Tooltip content="Create Summary Memo" relationship="label" withArrow>
+              <Tooltip content="Review Summary document" relationship="label" withArrow>
                 <Button
                   {...triggerProps}
                   appearance="subtle"
                   size="small"
                   icon={isMemoActionInFlight ? <Spinner size="tiny" /> : <DocumentBulletList24Regular />}
-                  aria-label="Create Summary Memo"
+                  aria-label="Review Summary document"
                   disabled={controlDisabled || isMemoActionInFlight}
                   data-testid="compose-format-memo-menu"
                 />
@@ -1063,7 +1069,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                 onClick={() => onGenerateMemo?.()}
                 data-testid="compose-format-memo-generate"
               >
-                Generate memo (.docx)
+                Download (.docx)
               </MenuItem>
               <MenuItem
                 icon={<Mail24Regular />}
@@ -1071,7 +1077,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                 onClick={() => onEmailMemo?.()}
                 data-testid="compose-format-memo-email"
               >
-                Email memo
+                Email
               </MenuItem>
             </MenuList>
           </MenuPopover>

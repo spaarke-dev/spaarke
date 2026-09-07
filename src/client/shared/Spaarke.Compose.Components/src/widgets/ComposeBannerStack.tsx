@@ -1041,7 +1041,8 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       {memoActionMessage ? (
         <MessageBar intent="warning" data-testid="compose-workspace-memo-action-message" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Create Summary Memo</MessageBarTitle>
+            {/* R8 §GAPS-5 Phase 4 — "Memo" dropped (collided with sprk_memo/Notepad). */}
+            <MessageBarTitle>Review Summary</MessageBarTitle>
             {memoActionMessage}
           </MessageBarBody>
         </MessageBar>
