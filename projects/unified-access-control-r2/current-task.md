@@ -515,10 +515,29 @@ and the shipped code. Two things in it bear directly on planning:
 
 - ✅ The Tier 1 blocker is FIXED. `ChatEndpointsTests.GetHistory_ReturnsMessages_WhenAuthenticated`
   no longer appears in the failure list.
-- 🔴 **Trivy fails consistently at ~4s** across three runs while `sdap-ci.yml` on master is green.
-  **I called it "transient" and that was wrong** — a repeatable 4-second failure is not a flake.
-  It is NOT a required check and does not block the merge, but it is undiagnosed. Do not repeat my
-  "transient" explanation without evidence.
+- 🔴 **`Trivy` DIAGNOSED 2026-09-03 — it was a REAL finding, and I dismissed it twice** (first as
+  "transient", then as "infrastructure"). Both wrong. `Trivy` is a **GitHub Advanced Security
+  code-scanning** check, not a CI job — which is why `SDAP CI` itself reports success while the
+  check reads red, and why `gh run view --job` 404s on its id (it is a check-run id).
+  **Two independent causes:**
+  1. **This PR introduces `uuid@10.0.0` → CVE-2026-41907 (GHAS: high).** Verified NEW, not a
+     size-attribution artefact: `uuid` is **absent** from `origin/master`'s copy of
+     `src/solutions/LegalWorkspace/package-lock.json` and **present** on this branch, added by
+     `9edbb011c` ("repair a build that had been RED for two months" — the install regenerated the
+     lockfile). **Transitive** via `@tiptap/extension-unique-id` (`^10.0.0`).
+     **NOT REACHABLE**: the CVE is an out-of-bounds write in uuid's `v3`/`v5`/`v6` external-buffer
+     handling; `@tiptap/extension-unique-id/dist/index.js` imports **`v4`** and nothing else.
+     **NOT SIMPLY PATCHABLE**: fixes are 11.1.1/12.0.1/13.0.1/14.0.0, all excluded by Tiptap's
+     `^10.0.0` — it needs an npm `overrides` across a major boundary plus a LegalWorkspace
+     build+smoke. Recommendation posted on the PR: **accept with documented rationale, file the
+     override as a follow-up.** OWNER'S CALL — not assumed.
+  2. **"1 configuration not found"** — `.github/workflows/build-provisioning-sidecar.yml:build-scan-push`
+     is configured on master but did not report for this PR. A coverage gap that would make this
+     check red **even with zero alerts**.
+  🔴 **THE GATE GAP THAT LET THIS THROUGH**: CLAUDE.md §10 bullet 5 specifies
+  `dotnet list package --vulnerable --include-transitive` — **NuGet only**. There is no npm
+  equivalent in that rule, so a clean §10 CVE check says nothing about JS dependencies. The PR body's
+  "CVEs: none" was true and incomplete; corrected in a PR comment. **Worth amending §10.**
 - **Two checks were still pending at handoff.** Do NOT judge the PR from the numbers above —
   re-run `gh pr checks 950` and confirm `grep -c pending` is `0` first.
 
