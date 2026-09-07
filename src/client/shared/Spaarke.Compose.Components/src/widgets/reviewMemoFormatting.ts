@@ -47,9 +47,112 @@ export interface ReviewMemoReadResponse {
  */
 export type MemoProblemCode = 'session-not-bound' | 'no-completed-review' | 'no-memo';
 
-/** Banner shown when the session's Analysis has no persisted memo yet (404 / `no-memo`). */
-export const MEMO_NO_MEMO_MESSAGE =
-  'Generate the review memo first — no summary memo has been created for this review yet.';
+/** Banner shown when the session's Analysis has no persisted Review Summary yet (404 / `no-memo`). */
+export const MEMO_NO_MEMO_MESSAGE = 'Generate the Review Summary first — none has been created for this review yet.';
+
+/**
+ * Banner for the WRITE path's own negative (400 / `no-completed-review`): the user asked to generate a
+ * Review Summary with no flagged findings in hand.
+ *
+ * R8 §GAPS-5 Phase 3. `MemoProblemCode` has always DECLARED this code and `selectMemoNegativeMessage`
+ * never handled it — harmless while nothing POSTed, and reachable the moment something does. A summary
+ * of nothing is itself the defect, so this refuses rather than persisting an empty artifact (the same
+ * rule R8 item 8 applies to the change summary).
+ */
+export const MEMO_NO_FINDINGS_MESSAGE =
+  'There are no review findings to summarise yet. Run a review on this document first.';
+
+/** Confirmation after a successful generate — names the count so "it worked" is verifiable, not implied. */
+export function buildReviewSummaryGeneratedMessage(sectionCount: number): string {
+  const noun = sectionCount === 1 ? 'finding' : 'findings';
+  return `Review Summary created (${sectionCount} ${noun}). Use Download (.docx) or Email to share it.`;
+}
+
+/** One section on the WRITE payload — mirrors `Sprk.Bff.Api.Services.Ai.ReviewMemo.ReviewMemoSectionInput`. */
+export interface GenerateReviewSummarySectionInput {
+  sectionRef?: string;
+  quotedText: string;
+  afterText?: string;
+  assessment?: string;
+  standardRef?: string;
+  flaggedClause?: string;
+  riskLevel?: string;
+}
+
+/** The WRITE payload — mirrors `Sprk.Bff.Api.Services.Ai.ReviewMemo.GenerateReviewMemoRequest`. */
+export interface GenerateReviewSummaryRequest {
+  overallRisk: string;
+  sections: GenerateReviewSummarySectionInput[];
+}
+
+/** Risk band used when neither the Action nor the findings supply one — never invented as a severity. */
+export const UNSPECIFIED_OVERALL_RISK = 'Unspecified';
+
+/**
+ * Builds the `POST .../review-memo` payload from the panel's live findings (R8 §GAPS-5 Phase 3 — the
+ * write half that had no caller, so both READ actions always hit the "generate first" banner).
+ *
+ * Mapping notes, each of which is a decision rather than a mechanical copy:
+ *
+ * - **`quotedText` is the only hard requirement.** Findings without one are DROPPED — they carry no
+ *   document span, so there is nothing for the memo's before/after columns to be about. The count of
+ *   dropped rows is returned rather than swallowed (see {@link BuiltReviewSummaryRequest.droppedCount}),
+ *   because silently shipping fewer findings than the panel shows is the failure this project exists to
+ *   stop. In practice this drops nothing: the projections upstream already require `quotedText`.
+ * - **The four grounding fields pass through as-is, `undefined` included** (decision D3). The server
+ *   relaxed them from `required` and renders an em dash for each absent one. Sending a partially
+ *   grounded finding with a visible gap beats excluding it.
+ * - **No `afterText`** (decision D2). Per-finding accept/reject is not tracked durably anywhere, and the
+ *   server assembler already treats its absence as "the original text stands" — which is correct for
+ *   both a rejected suggestion and an untouched clause. Adding a guessed value would be worse than
+ *   omitting it.
+ * - **`overallRisk` prefers the server-asserted value**, falling back to the caller-derived band and
+ *   finally to {@link UNSPECIFIED_OVERALL_RISK}. The field is `required` server-side, so it cannot be
+ *   omitted; inventing a severity would be worse than naming the absence.
+ */
+export function buildGenerateReviewSummaryRequest(
+  findings: readonly {
+    sectionRef?: string;
+    quotedText: string;
+    riskLevel?: string;
+    standardRef?: string;
+    flaggedClause?: string;
+    assessment?: string;
+  }[],
+  overallRisk?: string,
+  derivedOverallRisk?: string
+): BuiltReviewSummaryRequest {
+  const sections: GenerateReviewSummarySectionInput[] = [];
+  let droppedCount = 0;
+  for (const finding of findings) {
+    if (!finding.quotedText || finding.quotedText.trim().length === 0) {
+      droppedCount += 1;
+      continue;
+    }
+    sections.push({
+      sectionRef: finding.sectionRef,
+      quotedText: finding.quotedText,
+      assessment: finding.assessment,
+      standardRef: finding.standardRef,
+      flaggedClause: finding.flaggedClause,
+      riskLevel: finding.riskLevel,
+    });
+  }
+  return {
+    request: {
+      overallRisk: overallRisk?.trim() || derivedOverallRisk?.trim() || UNSPECIFIED_OVERALL_RISK,
+      sections,
+    },
+    droppedCount,
+  };
+}
+
+/** The built payload plus what it had to leave behind — the caller MUST surface a non-zero drop count. */
+export interface BuiltReviewSummaryRequest {
+  request: GenerateReviewSummaryRequest;
+  /** Findings excluded for having no `quotedText`. Non-zero MUST be reported, never silently absorbed. */
+  droppedCount: number;
+}
 
 /**
  * Banner shown when the Compose session is NOT bound to an Analysis (400 / `session-not-bound`) —
@@ -63,8 +166,8 @@ export const MEMO_NO_MEMO_MESSAGE =
  * to conversation History to link an Analysis.
  */
 export const MEMO_SESSION_NOT_BOUND_MESSAGE =
-  'This document isn’t saved yet, so there’s nowhere to save the summary memo. ' +
-  'Save the document first — that creates its Analysis — then generate the summary memo again. ' +
+  'This document isn’t saved yet, so there’s nowhere to save the Review Summary. ' +
+  'Save the document first — that creates its Analysis — then generate the Review Summary again. ' +
   'Any completed review is preserved.';
 
 /**
@@ -77,6 +180,10 @@ export const MEMO_SESSION_NOT_BOUND_MESSAGE =
 export function selectMemoNegativeMessage(status: number, code?: string | null): string | null {
   if (status === 404 || code === 'no-memo') return MEMO_NO_MEMO_MESSAGE;
   if (status === 400 && code === 'session-not-bound') return MEMO_SESSION_NOT_BOUND_MESSAGE;
+  // R8 §GAPS-5 Phase 3 — the WRITE path's negative. Declared in `MemoProblemCode` since task 051 but
+  // unhandled until a caller existed to reach it; without this arm the server's guided 400 degrades to
+  // the generic "Failed (400)" this function exists to prevent.
+  if (status === 400 && code === 'no-completed-review') return MEMO_NO_FINDINGS_MESSAGE;
   return null;
 }
 

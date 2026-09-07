@@ -916,6 +916,11 @@ export interface ComposeEditorProps {
      */
     onGenerateMemo?: () => void;
     /**
+     * R8 §GAPS-5 Phase 3 — the dropdown's CREATE action (POSTs the panel's findings, then reads back).
+     * The host owns the request; the editor is a pure forwarder, as with the two read actions.
+     */
+    onCreateReviewSummary?: () => void;
+    /**
      * FR-14 (task 051) — the dropdown's Email action (reads the persisted memo, opens the canonical
      * EmailComposer prefilled with its body + subject; the user must act to send — ADR-045).
      */
@@ -3744,6 +3749,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onToggleReviewNotes={() => setReviewNotesVisible(v => !v)}
           // FR-14 (task 051) — "Create Summary Memo" dropdown. Pure forwarder to the host
           // (ComposeWorkspace), which owns the fetch/download/EmailComposer-open logic.
+          onCreateReviewSummary={reviewSummary?.onCreateReviewSummary}
           onGenerateMemo={reviewSummary?.onGenerateMemo}
           onEmailMemo={reviewSummary?.onEmailMemo}
           isMemoActionInFlight={reviewSummary?.isMemoActionInFlight}

@@ -130,6 +130,10 @@ const composeOutputsReadUrls: string[] = [];
 let loadParaIdMap: unknown[] = [];
 const annotationPosts: Array<{ anchoredAnnotations: Array<Record<string, unknown>> }> = [];
 
+// R8 §GAPS-5 Phase 3 — every POST body sent to the Review Summary write endpoint. Before Phase 3 this
+// array could only ever stay empty: nothing in the repo called that endpoint.
+const reviewMemoPosts: Array<{ overallRisk: string; sections: Array<Record<string, unknown>> }> = [];
+
 /** The review-flag annotations from the most recent session-annotations write. */
 function latestReviewFlagAnnotations(): Array<Record<string, unknown>> {
   const last = annotationPosts[annotationPosts.length - 1];
@@ -205,6 +209,44 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
         documentRecordId: 'sprk-doc-1',
         size: 1024,
         wasPromotedThisSave: false,
+      }),
+    } as unknown as Response;
+  }
+  // R8 §GAPS-5 Phase 3 — Review Summary write + read-back. The GET deliberately 404s until a POST has
+  // landed, mirroring production: the row the READ actions look for is the row the POST writes, which
+  // is exactly the loop that had no entry point before Phase 3.
+  if (url.includes('/review-memo')) {
+    const method = (_init?.method ?? 'GET').toUpperCase();
+    if (method === 'POST') {
+      const body = JSON.parse(String(_init?.body ?? '{}'));
+      reviewMemoPosts.push(body);
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({
+          analysisId: '00000000-0000-0000-0000-0000000a0a01',
+          outputId: '00000000-0000-0000-0000-0000000a0a02',
+          sectionCount: body.sections?.length ?? 0,
+        }),
+      } as unknown as Response;
+    }
+    const latest = reviewMemoPosts[reviewMemoPosts.length - 1];
+    if (!latest) {
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        analysisId: '00000000-0000-0000-0000-0000000a0a01',
+        analysisName: 'Agreement Review',
+        documentName: 'contract.docx',
+        memo: {
+          schemaVersion: 'review-memo-v1',
+          overallRisk: latest.overallRisk,
+          sectionCount: latest.sections.length,
+          sections: [],
+        },
       }),
     } as unknown as Response;
   }
@@ -296,6 +338,7 @@ beforeEach(() => {
   bridgeRef.current = null;
   loadParaIdMap = [];
   annotationPosts.length = 0;
+  reviewMemoPosts.length = 0;
   // Task 032 — the 128KB-budget degraded-restore marker rides `window.sessionStorage`, keyed by
   // session id. DOC_SESSION is a shared constant across this whole file's tests, so clear it every
   // test to prevent cross-test leakage of a marker one test wrote.
@@ -1237,5 +1280,100 @@ describe('FR-16 task 032: 031-residual dedupe guard — a same-mount status-cycl
     // the SAME clause set the live path already placed and skipped the ledger-driven re-placement
     // (`placeAdvisoryComments` has no idempotency of its own).
     expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R8 §GAPS-5 Phase 3 — the WRITE half. `POST .../review-memo` had NO production caller anywhere in
+// the repo: the read half (Download / Email) was built against it as though it were already being
+// called, so both actions always hit the 404 "generate first" banner. The feature could not succeed
+// for anyone. These tests are the forcing function for that call existing.
+// ---------------------------------------------------------------------------
+
+describe('R8 §GAPS-5 Phase 3: the Review Summary write call', () => {
+  /** Opens the toolbar's Review Summary document dropdown and returns its menu. */
+  async function openMemoMenu(): Promise<void> {
+    const trigger = await screen.findByTestId('compose-format-memo-menu', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(trigger);
+    });
+  }
+
+  function seedReview(): void {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [
+            {
+              quotedText: 'Sample document body.',
+              flaggedClause: 'The body imposes an unqualified obligation.',
+              assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+              sectionRef: '1.1',
+              riskLevel: 'High',
+              standardRef: 'B5 - Obligations',
+            },
+          ],
+        },
+      },
+    ];
+  }
+
+  it('Generate POSTs the panel findings, then reports success from the READ-BACK count', async () => {
+    seedReview();
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+    // Wait for the ledger restore to populate the findings the payload is built from.
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    await openMemoMenu();
+    const create = await screen.findByTestId('compose-format-memo-create', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(create);
+    });
+
+    // (1) The POST actually happened — the whole point of Phase 3.
+    await waitFor(() => expect(reviewMemoPosts).toHaveLength(1));
+
+    // (2) It carried the findings, with the FR-05 discrete fields Phase 1 stopped dropping.
+    const body = reviewMemoPosts[0];
+    expect(body.overallRisk).toBe('High');
+    expect(body.sections).toHaveLength(1);
+    expect(body.sections[0]).toMatchObject({
+      sectionRef: '1.1',
+      quotedText: 'Sample document body.',
+      flaggedClause: 'The body imposes an unqualified obligation.',
+      assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+      standardRef: 'B5 - Obligations',
+      riskLevel: 'High',
+    });
+
+    // (3) Decision D2 — afterText is never invented.
+    expect(body.sections[0].afterText).toBeUndefined();
+
+    // (4) Success is reported from the server's read-back, not assumed from the POST returning 201.
+    const banner = await screen.findByTestId('compose-workspace-memo-action-message', undefined, { timeout: 5000 });
+    expect(banner.textContent).toContain('Review Summary created (1 finding)');
+  });
+
+  it('refuses to generate a summary of nothing — no POST, an actionable message instead', async () => {
+    // A review that produced NO findings. A summary of nothing is itself the defect (the same rule R8
+    // item 8 applies to the change summary), so this must refuse rather than persist an empty artifact.
+    composeOutputsBySession[DOC_SESSION] = [];
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+
+    // With no findings the dropdown is gated off entirely (`hasReview` is false), so the refusal is
+    // structural: there is no control to press. Assert THAT, rather than a message that cannot appear.
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+    expect(reviewMemoPosts).toHaveLength(0);
   });
 });

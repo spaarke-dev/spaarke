@@ -407,7 +407,13 @@ export interface ComposeFormatToolbarProps {
   //      a record that hasn't been generated yet surfaces the host's "generate the review/memo first"
   //      negative state, never a silent empty export. Pure forwarder (mirrors onSave/onOpenDocument): the
   //      host (ComposeWorkspace) owns the fetch/download/EmailComposer-open logic. ----
-  /** Generate + download the memo as a .docx. Rendered only when set. */
+  /**
+   * R8 §GAPS-5 Phase 3 — CREATE the Review Summary (the POST). This is the action the dropdown was
+   * missing: it had only the two READ actions, so the record they read was never written and both
+   * always reported "generate first". Rendered only when set.
+   */
+  onCreateReviewSummary?: () => void;
+  /** Download the persisted Review Summary as a .docx. Rendered only when set. */
   onGenerateMemo?: () => void;
   /** Read the persisted memo and open the EmailComposer prefilled with its body + subject. Rendered only when set. */
   onEmailMemo?: () => void;
@@ -626,6 +632,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     reviewNotesOpen,
     onToggleReviewNotes,
     reviewDisclaimer,
+    onCreateReviewSummary,
     onGenerateMemo,
     onEmailMemo,
     isMemoActionInFlight,
@@ -1038,7 +1045,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
              both items while a memo fetch is in flight — never a silent empty export. The accessible
              NAME lives on `aria-label` (icon-only); a Tooltip carries the full label on hover
              (ADR-021/a11y — icon-only needs both). ---- */}
-      {hasReview && (onGenerateMemo || onEmailMemo) ? (
+      {hasReview && (onCreateReviewSummary || onGenerateMemo || onEmailMemo) ? (
         <Menu positioning="below-start">
           <MenuTrigger disableButtonEnhancement>
             {/* R8 §GAPS-5 Phase 4 — "Create Summary Memo" → "Review Summary document". Two changes in
@@ -1063,6 +1070,16 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
+              {/* R8 §GAPS-5 Phase 3 — the CREATE action, listed FIRST because it is the prerequisite:
+                  the two below read what this writes. */}
+              <MenuItem
+                icon={<DocumentBulletList24Regular />}
+                disabled={!onCreateReviewSummary || controlDisabled || isMemoActionInFlight}
+                onClick={() => onCreateReviewSummary?.()}
+                data-testid="compose-format-memo-create"
+              >
+                Generate
+              </MenuItem>
               <MenuItem
                 icon={<ArrowDownload24Regular />}
                 disabled={!onGenerateMemo || controlDisabled || isMemoActionInFlight}

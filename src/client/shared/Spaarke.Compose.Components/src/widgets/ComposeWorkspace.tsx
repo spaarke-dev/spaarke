@@ -138,13 +138,17 @@ import {
   ConfirmModal,
   type LookupResult,
 } from '@spaarke/ui-components';
-// FR-14 (task 051) — "Create Summary Memo" toolbar control: shared types + pure email-body formatting
-// for the persisted review-memo record (render-from-persisted; see file docblock).
+// FR-14 (task 051) — Review Summary toolbar control: shared types + pure email-body formatting for the
+// persisted record (render-from-persisted; see file docblock). R8 §GAPS-5 Phase 3 adds the WRITE-path
+// payload builder + its two messages.
 import {
   buildReviewMemoEmailBody,
   buildReviewMemoEmailSubject,
+  buildGenerateReviewSummaryRequest,
+  buildReviewSummaryGeneratedMessage,
   selectMemoNegativeMessage,
   MEMO_NO_MEMO_MESSAGE,
+  MEMO_NO_FINDINGS_MESSAGE,
   type ReviewMemoReadResponse,
 } from './reviewMemoFormatting';
 
@@ -3200,7 +3204,82 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [bffBaseUrl, state.sessionId, memoNegativeFromError]);
 
   /**
-   * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
+   * "Generate" — the WRITE half of the Review Summary (R8 §GAPS-5 Phase 3).
+   *
+   * Until this existed, `POST .../review-memo` had NO production caller anywhere in the repo: the read
+   * half was built against it as though it were already being called. The consequence was that both
+   * toolbar actions always hit the 404 "generate first" banner, telling the user to do a thing the UI
+   * offered no way to do. The feature could not succeed for anyone.
+   *
+   * POSTs the panel's live findings, then READS BACK before reporting success. The read-back is not
+   * ceremony: because `PersistReviewMemoAsync` leaves `OutputTypeId` null, the row is found by matching
+   * its display name, so "written" and "findable" are genuinely separate facts. Confirming both here
+   * surfaces a mismatch immediately, instead of at Download time as a mystery "no Review Summary yet".
+   */
+  const handleCreateReviewSummary = React.useCallback(async (): Promise<void> => {
+    if (!bffBaseUrl || !state.sessionId || memoActionInFlight) return;
+
+    // A summary of nothing is itself the defect (the rule R8 item 8 established for the change
+    // summary). Refuse locally with the actionable message rather than round-tripping to earn the
+    // server's identical 400 — while still handling that 400, since a race can empty the findings.
+    const built = buildGenerateReviewSummaryRequest(
+      reviewSummaryFindings,
+      reviewSummaryOverallRisk,
+      deriveOverallRisk(reviewSummaryFindings)
+    );
+    if (built.request.sections.length === 0) {
+      setMemoActionMessage(MEMO_NO_FINDINGS_MESSAGE);
+      return;
+    }
+
+    setMemoActionInFlight(true);
+    setMemoActionMessage(null);
+    try {
+      await authenticatedFetch(
+        `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(built.request),
+        }
+      );
+
+      const readBack = await fetchReviewMemo();
+      if (readBack.kind === 'negative') {
+        // Persisted, then not found by the read path. Do NOT report success — say exactly that, since
+        // the generic "generate first" banner would send the user round the same loop forever.
+        setMemoActionMessage(
+          'The Review Summary was saved but could not be read back. Try again; if it recurs, the saved ' +
+            'record may not be categorised as expected.'
+        );
+        return;
+      }
+
+      const dropped =
+        built.droppedCount > 0
+          ? ` ${built.droppedCount} finding(s) were left out because they carry no quoted text.`
+          : '';
+      setMemoActionMessage(buildReviewSummaryGeneratedMessage(readBack.memo.memo.sectionCount) + dropped);
+    } catch (err) {
+      const negative = await memoNegativeFromError(err);
+      setMemoActionMessage(
+        negative ?? (err instanceof ApiError ? err.message : 'Could not create the Review Summary.')
+      );
+    } finally {
+      setMemoActionInFlight(false);
+    }
+  }, [
+    bffBaseUrl,
+    state.sessionId,
+    memoActionInFlight,
+    reviewSummaryFindings,
+    reviewSummaryOverallRisk,
+    fetchReviewMemo,
+    memoNegativeFromError,
+  ]);
+
+  /**
+   * "Download (.docx)" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
    * table) via the docx READ endpoint. A blob download, not a client-side render — the .docx byte
    * authoring stays server-side (ComposeDocumentRenderer), matching every other Compose document write.
    */
@@ -5251,6 +5330,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 // persisted review-memo record server-side (render-from-persisted); the negative "no
                 // memo yet" state surfaces via the memoActionMessage banner above, never a silent
                 // empty export.
+                onCreateReviewSummary: () => void handleCreateReviewSummary(),
                 onGenerateMemo: () => void handleGenerateMemo(),
                 onEmailMemo: () => void handleEmailMemo(),
                 isMemoActionInFlight: memoActionInFlight,
