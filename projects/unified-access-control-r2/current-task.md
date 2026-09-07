@@ -14,7 +14,7 @@
 | **Task** | **042** — next in the Phase 1→2 close-out (042 → 043 → 044). **039 is ✅ DONE** |
 | **Status** | `pending` — not started |
 | **Repo state** | Clean · master MERGED (0 behind) · commits local until pushed |
-| **Next Action** | `task-execute` on `tasks/042-*.poml`. **043 must route the org-expansion term through the same `isSecure` predicate** — the hook is already plane-agnostic |
+| **Next Action** | 🔴 **OPEN A PR FOR THE 33 COMMITS — NO CI HAS RUN ON ANY OF THEM.** `ci-router.yml` fires on `pull_request` and `push:[master]` only, and this branch has **no open PR**, so all 33 commits ahead of `origin/master` are CI-unverified. Do this before more work stacks on them. Then **task 083 rows 4/5** — the last 2 `ClientSupplied` sinks (`PUT /api/drives/{driveId}/upload`, app-only MI + the sibling DELETE); 083's own brief says it does these FIRST. |
 | **Progress** | **43 completed** · 2 completed-with-escalation · 1 blocked-shipped · **46 pending** (of 92) |
 
 ### What landed 2026-09-04/05 (verified by the main session, not taken from agent reports)
@@ -493,6 +493,50 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 6 | Execute **076** | 🔄 **IN PROGRESS — not blocked** | Server half complete incl. the record-LESS route (`756e089cb`). Remaining = client cutover (steps 4–11). |
 | 7 | Q4 widening + association map | ✅ **DONE** `f85796f70` | See the item-7 row in the status table below — the note was wrong twice. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
+
+### ▶ STATUS AS OF 2026-09-03 (authoritative — supersedes every status block below)
+
+**Branch state**: `work/unified-access-control-r2` @ `7d02f0b36` · **33 ahead** of `origin/master`
+(`379c221e0`) · **0 behind** · **0 unpushed** · tree clean · **NO OPEN PR** ⟵ the problem.
+
+| Landed since the 2026-09-02 checkpoint | Evidence |
+|---|---|
+| **N-1 COMPLETE** — U2 deleted | `services/document-upload/SdapApiClient.ts` no longer exists; `httpFailure.ts` is now the only definition of the failure copy |
+| **Task 076 contract landed** — `UploadTarget` | `document-upload/types.ts:187`; a batch now names its OWNING RECORD (`kind:'record'`, `entityLogicalName`, `recordId`), never a container. The shape change was made deliberately breaking so every un-migrated call site fails to compile |
+| **083 sinks 7 → 2** | Provenance allow-list now: **2** ClientSupplied / 17 ServerDerivedRecord / 1 ServerDerivedActingUser / 5 ServerDerivedConfig / 3 AdministrativeRoleScoped / 1 Dead. The OBO row and the whole Compose REPLACE trio converted |
+| Task 039 + FR-23 deny veto; `sprk_document` record-link vocabulary | commits `800b82af4`, `6db37ef95`, `30dd5f397`, `392fc251b` |
+
+**The 2 remaining `ClientSupplied` sinks are 083's rows 4 and 5**, both in `Api/DocumentsEndpoints.cs`:
+`PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it — a LIVE hole,
+gated by the `canwritefiles` policy only, and `ResourceAccessHandler.ExtractResourceId` accepts
+driveId/containerId/documentId interchangeably so the policy authorizes a DRIVE id against DOCUMENT
+rights) and the sibling `DeleteFileAsync`. **083 is still `pending` — correctly.**
+
+🔴 **`tasks/TASK-INDEX.md` now reads as BINARY to grep** (mojibake in at least the 083 row region).
+Status counts derived from it are unreliable — `grep -c` reports 0 open tasks while 083's POML says
+`pending`. **Trust the POML `<status>`, not the index**, and fix the encoding when convenient.
+
+### Office add-in implications — CHECKED 2026-09-03, no breakage
+
+Asked by the owner; answered from code, not inference. Keep this — it is the kind of claim that rots.
+
+1. **`SaveRequest.ContainerId` deletion (task 085) does NOT affect the add-in.** The `containerId` at
+   `useSaveFlow.ts:62` is on `JobResultArtifact` — a **response** field where the server reports the
+   container it chose. That is the direction 085 wanted: returning the chosen drive is required,
+   *accepting* one was the vulnerability. `FolderPath` likewise — the add-in never sent it.
+2. **Word "Save" still replaces in place.** `OfficeStorageUploader.cs:62` calls the **4-arg**
+   `UploadSmallAsync`, which delegates `ConflictBehavior.Replace`. This is why the collision control was
+   added as an OVERLOAD rather than a signature change — flipping the default would make every re-save
+   of an existing document 409. **Do not "tidy" that overload away.**
+3. **The add-in has its OWN auth and its OWN upload client, on purpose.** `ApiClient.ts` uses
+   `OfficeNaaStrategy` + `authService.getAccessToken()` and only *mirrors* `authenticatedFetch`'s
+   401-retry shape, because Office NAA cannot call it directly. So the ADR-028 rewiring inside
+   `@spaarke/sdap-client` does not reach it. Its `uploadFile()` has **zero production callers**.
+   ⚠️ **The "three upload implementations" census was short by one** — this is a fourth, dormant. It
+   should NOT be consolidated blindly (the NAA constraint is a real reason for it), but it must be known.
+4. ⚠️ **Coordination**: `work/spaarkeai-word-add-in-r1` is active and carries task
+   **016-office-save-contract-coverage**, directly on this contract. Run `/conflict-check` before either
+   branch merges.
 
 ### ▶ STATUS AFTER 2026-09-02 SESSION 2 (authoritative — supersedes the N-x rows above)
 
