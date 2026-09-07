@@ -1,21 +1,51 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-04** (by `context-handoff`, end of the 5-agent parallel wave).
+> **Last Updated**: **2026-09-07** (by `context-handoff`). ⚠️ This stamp read **2026-09-04** while the file's last commit was 2026-09-07 — a 3-day gap. That is precisely the staleness signal this skill's own Failure Modes table says to check on resume (`git log -1 --format=%ci current-task.md` vs this line). Three handoffs added content without refreshing it. **Refresh this line every time you write here.**
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
 > ⚠️ **This project's notes have now been WRONG FIFTEEN times.** Verify before believing —
 > counts, route names, schema claims, "already done" claims, open-vs-answered questions.
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-04
+## Quick Recovery (READ THIS FIRST) — 2026-09-07
+
+> ⚠️ **This file had THREE stacked "Quick Recovery" blocks**, and the top one was stale — it said
+> "Task 042 next" (it is 083) and "43 completed / 46 pending" (it is 53 / 37). Consolidated
+> 2026-09-07. The other two are demoted to 🗄️ HISTORICAL below. **This block is the only current one.**
 
 | Field | Value |
 |---|---|
-| **Task** | **042** — next in the Phase 1→2 close-out (042 → 043 → 044). **039 is ✅ DONE** |
-| **Status** | `pending` — not started |
-| **Repo state** | Clean · master MERGED (0 behind) · commits local until pushed |
-| **Next Action** | **Task 083 — container-selection authorization sweep** (20h, opus/fable, serial, `parallel-safe=false`). It is the project's core thesis, it is on the critical path to wrap-up (090), and it still has **2 live `ClientSupplied` SPE write sinks** — `Api/DocumentsEndpoints.cs` `PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it) and its sibling `DeleteFileAsync`. Down from 7. 083's own brief says it does those rows FIRST. ⚠️ **First check PR #950** — see below. |
-| **Progress** | **43 completed** · 2 completed-with-escalation · 1 blocked-shipped · **46 pending** (of 92) |
+| **Branch** | `work/unified-access-control-r2` @ `d4b3b6720` · clean · 0 unpushed · **40 ahead** of master · 0 behind |
+| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · **32 pass, `Router` GREEN**, `mergeStateStatus=UNSTABLE` (required check passes; only non-required `Trivy` red) |
+| **Task status** | **53 completed** · 1 completed-with-escalation (012) · 1 blocked-shipped (034) · **37 open** · 92 total — reconciled 2026-09-03 against POMLs + git, all 17 disagreements resolved |
+| **Next Action** | **Task 083 — container-selection authorization sweep** (20 h, opus/fable, `parallel-safe=false`). Project's core thesis; on the critical path to wrap-up (090); still has **2 live `ClientSupplied` SPE write sinks** — `Api/DocumentsEndpoints.cs` `PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it) and its sibling `DeleteFileAsync`. Down from 7. Its own brief says it does those rows FIRST. |
+| **Before starting** | Decide the **scope cut** (see § COMPLETION PLAN) and the **uuid CVE disposition** (see the Trivy entry). Both are owner calls I proposed and did **not** assume. |
+
+### Two open owner decisions — neither is approved
+
+1. **Scope cut for "done".** 37 open ≈ 188 h ≈ 23 working days, and **27 of 37 are
+   `parallel-safe=false`** so parallelism cannot compress it. Task 090's own `<deps>` are narrower
+   than the open set (Phase 3 + Phase 4 + 082 + 083), making the declared contract ~96 h ≈ 12 days.
+   Recommended: that plus 023 / 024 / 047 ≈ **106 h**, spinning out ~82 h (093–095, 086–089, 025,
+   026, 028, 029). **I raised this and withdrew the question — it is unanswered.**
+2. **`uuid@10.0.0` / CVE-2026-41907 (GHAS high), introduced by this PR.** Not reachable (Tiptap uses
+   `v4`; the CVE is in `v3`/`v5`/`v6` external-buffer handling) and not simply patchable (every fixed
+   version is excluded by `@tiptap/extension-unique-id`'s `^10.0.0`). Recommended on the PR: accept
+   with documented rationale, file the npm `overrides` bump as a follow-up.
+
+### The single most important OPEN item (from [`SYNOPSIS.md`](SYNOPSIS.md))
+
+**Task 061 — the explicit share for Secure Projects.** Task 021 shipped *isolation* (named BU +
+memberless owner team) but NOT the share. Until per-record access teams land, **a secure project is
+isolated and unreachable by any human.** Any cut line that defers 061 ships a locked box.
+
+### Read next
+
+- [`SYNOPSIS.md`](SYNOPSIS.md) — objectives, deliverables per phase, user impact, UI/UX implications.
+  **4 of the 9 success criteria need LIVE-environment verification** (5, 6, 8 live dev; 7 UAT), so this
+  project cannot be closed from CI alone — which is why task **047** is not optional.
+- § COMPLETION PLAN (below) — the serial execution order and the effort table.
+- § FULL STATUS AUDIT (below) — how the 17 status disagreements were found and resolved.
 
 ### What landed 2026-09-04/05 (verified by the main session, not taken from agent reports)
 
@@ -952,7 +982,11 @@ unassociated**. Plural forms attested in live Web API URLs: `sprk_workassignment
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+### 🗄️ HISTORICAL — superseded Quick Recovery (kept for provenance, NOT current)
+
+> ⚠️ **Do not act on anything below this line without checking it against the CURRENT Quick
+> Recovery at the top of this file.** Known-stale content in these blocks includes: "PR #887
+> still DRAFT", "ArchTests 176/176", and task-status counts that predate the 2026-09-03 audit.
 
 | Field | Value |
 |---|---|
@@ -1713,7 +1747,11 @@ to exist afterwards.
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+### 🗄️ HISTORICAL — superseded Quick Recovery (kept for provenance, NOT current)
+
+> ⚠️ **Do not act on anything below this line without checking it against the CURRENT Quick
+> Recovery at the top of this file.** Known-stale content in these blocks includes: "PR #887
+> still DRAFT", "ArchTests 176/176", and task-status counts that predate the 2026-09-03 audit.
 
 | Field | Value |
 |---|---|
