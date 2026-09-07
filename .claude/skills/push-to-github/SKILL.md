@@ -237,6 +237,29 @@ IF NOT inside a project (ad-hoc work at repo root):
 
 **Why this step exists**: deferred work hidden in a project's `notes/` folder is invisible to anyone working on other projects. Surfacing entries as GitHub Issues at push time is the latest-possible reliable hook for visibility. See `/project-defer-issue-tracking` skill for the full protocol.
 
+### Step 1.65: Task-Status Drift Check (MANDATORY when inside a project)
+
+**Added 2026-09-03 by `unified-access-control-r2`. Cheap (<2s), zero false positives, and it catches a
+bookkeeping failure that silently misreports project state to everyone.**
+
+```
+IF inside a project (branch matches work/{project-name}):
+  pwsh scripts/check-task-status-drift.ps1
+
+  IF exit 0 → continue to Step 1.7
+  IF exit 1 → 🚨 the POML <status> and the TASK-INDEX marker disagree for the named task(s).
+     The output says which side is behind. Resolve from EVIDENCE (a git completion commit
+     touching projects/{name}/), set BOTH artifacts, then re-run.
+     Do NOT push a project whose own status artifacts contradict each other — the next
+     session, and the portfolio board, both read them.
+```
+
+**Why**: completion is written in two places and nothing enforced agreement. A 2026-09-03 audit found
+**17 disagreements across 92 tasks** in one project — 14 finished-and-merged tasks still marked
+`pending` in their POML. That is not a discipline problem, it is a missing check. Both artifacts drift
+in both directions (POML stale ×14, index stale ×1), so never resolve it by assuming one is
+authoritative. Gates the current project only; `-All` is a non-blocking repo-wide report.
+
 ### Step 1.7: Real-Dataverse Smoke Check (Widget/Dataverse Changes)
 
 **Added 2026-08-17 by `smart-todo-r5` task 060 per spec FR-20 / PROC-1. Advisory (ask-user-first), NOT a blocking CI gate — same shape as Steps 1.5/1.6.**

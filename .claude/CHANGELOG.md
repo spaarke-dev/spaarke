@@ -107,6 +107,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 - **Sequencing**: A1 merges **before** task 032 implements the evaluator, so the code lands under an ADR
   that sanctions it rather than in violation of one.
 
+###### 2026-09-03 — `unified-access-control-r2`: task-status drift check — a forcing function for CLAUDE.md §7
+
+- **New `scripts/check-task-status-drift.ps1`**, wired into **`task-execute` Step 10** (the moment both
+  writes happen) and **`push-to-github` Step 1.65** (the last reliable hook before the state goes public).
+  Completion is recorded in TWO places — the task POML's `<status>` and its `TASK-INDEX.md` row marker —
+  and nothing kept them in agreement.
+- **The evidence**: a full audit of `unified-access-control-r2` on 2026-09-03 found **17 disagreements
+  across 92 tasks** — **14 tasks finished and merged whose POML still said `pending`**, plus one finished
+  task the index still showed as `🔄`. The index is updated as work proceeds; the POML status is a
+  separate write that nothing enforced, and it was skipped 14 times. A drift of 14 is a missing check,
+  not a discipline problem.
+- **Both artifacts drift, in both directions** (POML stale ×14, index stale ×1), so the script never
+  picks a winner — it names the task, says which side is behind, and tells the operator to resolve from
+  a git completion commit.
+- **Scoped to the CURRENT project, deliberately.** Repo-wide drift is **82 disagreements across 151
+  projects**, concentrated in archived `x-`-prefixed work. Gating on that total would be red on day one
+  and waived on day two — the failure that retired the God-class LOC ratchet (CLAUDE.md §11.5). `-All`
+  gives a non-blocking repo-wide observation report instead, mirroring `report-large-server-files.ps1`.
+- 🔴 **Two defects in the guard, caught by its own controls before it shipped** — the same pattern as
+  task 092's route-agreement guard:
+  1. **False positives on correct state.** v1 treated only `✅` as terminal, so it reported task 012
+     (`completed-with-escalation` / ⚠️) and 034 (`blocked-shipped` / 🟡) as drift on its very first run.
+     Both were correctly authored. The marker vocabulary is now matched, not narrowed — a gate that
+     cries wolf on correct state is a gate that gets waived.
+  2. **A parser that reads nothing must not report "clean".** 137 of 151 projects use an index row
+     format this parser does not recognise. Returning "no drift" for them would launder a broken
+     instrument into a green check, so POMLs-found-but-zero-index-rows is reported as **UNPARSEABLE**
+     and fails in gating mode. This is `FAILURE-MODES.md` AP-12 applied to the checker itself — a
+     lesson learned twice on 2026-09-03, when a `grep` with emoji patterns under a non-UTF-8 locale
+     reported "0 open tasks" on a 37-open project, and a `jest --rootDir` from the wrong directory
+     reported "232 failed suites / 0 tests".
+
 ###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
 
 - **New `FAILURE-MODES.md` AP-12: prose outlives the mechanism it describes.** Promoted from a single
