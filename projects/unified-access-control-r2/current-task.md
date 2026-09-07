@@ -14,7 +14,7 @@
 | **Task** | **042** — next in the Phase 1→2 close-out (042 → 043 → 044). **039 is ✅ DONE** |
 | **Status** | `pending` — not started |
 | **Repo state** | Clean · master MERGED (0 behind) · commits local until pushed |
-| **Next Action** | 🔴 **OPEN A PR FOR THE 33 COMMITS — NO CI HAS RUN ON ANY OF THEM.** `ci-router.yml` fires on `pull_request` and `push:[master]` only, and this branch has **no open PR**, so all 33 commits ahead of `origin/master` are CI-unverified. Do this before more work stacks on them. Then **task 083 rows 4/5** — the last 2 `ClientSupplied` sinks (`PUT /api/drives/{driveId}/upload`, app-only MI + the sibling DELETE); 083's own brief says it does these FIRST. |
+| **Next Action** | **Task 083 — container-selection authorization sweep** (20h, opus/fable, serial, `parallel-safe=false`). It is the project's core thesis, it is on the critical path to wrap-up (090), and it still has **2 live `ClientSupplied` SPE write sinks** — `Api/DocumentsEndpoints.cs` `PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it) and its sibling `DeleteFileAsync`. Down from 7. 083's own brief says it does those rows FIRST. ⚠️ **First check PR #950** — see below. |
 | **Progress** | **43 completed** · 2 completed-with-escalation · 1 blocked-shipped · **46 pending** (of 92) |
 
 ### What landed 2026-09-04/05 (verified by the main session, not taken from agent reports)
@@ -493,6 +493,94 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 6 | Execute **076** | 🔄 **IN PROGRESS — not blocked** | Server half complete incl. the record-LESS route (`756e089cb`). Remaining = client cutover (steps 4–11). |
 | 7 | Q4 widening + association map | ✅ **DONE** `f85796f70` | See the item-7 row in the status table below — the note was wrong twice. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
+
+### ▶ PROJECT SYNOPSIS — read this before deciding scope
+
+[`SYNOPSIS.md`](SYNOPSIS.md) (written 2026-09-03) states the objectives, the deliverables by phase,
+what changes for USERS, and the UI/UX implications — reconciled from `spec.md` against the 92 POMLs
+and the shipped code. Two things in it bear directly on planning:
+
+- 🔴 **Task 061 is the single most important open item.** Task 021 shipped Secure Project
+  *isolation* (named BU + memberless owner team) but NOT the explicit share. Until per-record access
+  teams land, **a secure project is isolated but unshared — no human can reach it at all.** Any cut
+  line that defers 061 ships a locked box.
+- **4 of the 9 success criteria require LIVE-environment verification**, not a green suite
+  (criteria 5, 6, 8 are live dev tests; 7 is UAT). This project cannot be closed from CI alone, which
+  is why task **047** should not be treated as optional. Criterion 9 is gated entirely on Phase 5
+  (086–089) — if attestation is spun out, say so explicitly rather than claiming nine-of-nine.
+
+### ▶ HANDOFF 2026-09-03 — PR #950 open, and the COMPLETION PLAN
+
+**PR #950** — 39 commits. `mergeStateStatus=BLOCKED`. 24 pass / **1 fail (Trivy)** / 2 pending at handoff.
+
+- ✅ The Tier 1 blocker is FIXED. `ChatEndpointsTests.GetHistory_ReturnsMessages_WhenAuthenticated`
+  no longer appears in the failure list.
+- 🔴 **Trivy fails consistently at ~4s** across three runs while `sdap-ci.yml` on master is green.
+  **I called it "transient" and that was wrong** — a repeatable 4-second failure is not a flake.
+  It is NOT a required check and does not block the merge, but it is undiagnosed. Do not repeat my
+  "transient" explanation without evidence.
+- **Two checks were still pending at handoff.** Do NOT judge the PR from the numbers above —
+  re-run `gh pr checks 950` and confirm `grep -c pending` is `0` first.
+
+**The chat-flake fix took two attempts, and the first was wrong about WHERE.** Recorded because the
+mechanism is easy to re-misdiagnose: `ChatSessionManager.GetSessionAsync` consults the `ITenantCache`
+hot path BEFORE the Dataverse mock (ADR-009 Redis-first), and this fixture registers a REAL in-memory
+cache shared for the class. A `POST …/{id}/messages` write-through left a 4-message session in that
+cache, so the history read got a CACHE HIT and never consulted the mock at all — which is why
+reseeding the mock (`be8663d27`) changed nothing and CI returned the identical "found 4". The cure
+(`6a5547c49`) gives the history test its own session id that **nothing writes**, so the cache is never
+populated for it. Guarantee is structural (one `GetAsync`, no POST/PATCH/DELETE anywhere), because I
+could not reproduce the race locally in either direction.
+
+---
+
+### ▶ COMPLETION PLAN — built from the dependency graph, 2026-09-03
+
+**37 open · ~188 h · ~23 working days of task time.**
+
+🔴 **The reason this project has felt endless: 27 of the 37 remaining tasks are
+`parallel-safe=false`.** Parallelism cannot rescue it. The 5-task wave that worked earlier
+(`30dd5f397`) is not available for most of what is left, because these tasks touch the same
+authorization surfaces and concurrent agents on one evaluator produce silent lost writes. 9 tasks
+also require opus/fable tier. **Plan for serial execution.**
+
+**Effort is concentrated in late-added scope:**
+
+| Phase | Tasks | Hours |
+|---|---|---|
+| Upload-path decomposition (**093/094/095**) | 3 | **48** ⟵ 26% of all remaining work |
+| Phase 4 — Secure Project / Manage Access / wizard | 10 | 32 |
+| Phase 0 enforcement remediation | 6 | 28 |
+| **083** container-selection sweep | 1 | 20 |
+| Phase 3 child inheritance | 5 | 16 |
+| Phases 1–2 evaluator | 5 | 16 |
+| Phase 5 attestation | 4 | 12 |
+| **082** caller-identity census | 1 | 8 |
+| 0b live validation + wrap-up | 2 | 6 |
+
+**THE LEVER — task 090's own `<deps>` are the project's declared definition-of-done**, and they are
+narrower than the open set: **Phase 3 + Phase 4 + 082 + 083 only**. 090 does NOT depend on Phase 0
+remediation, Phases 1–2, Phase 5 attestation, or 093–095. So the declared contract is **~96 h ≈ 12
+days**, not 188 h; the other ~92 h accreted past it.
+
+**Recommended cut (~106 h ≈ 13 days)** = 090's declared blockers + the three real correctness gaps:
+- **023** — expiring grants never write `sprk_expiresdate` (a grant that cannot expire)
+- **024** — SPE honesty: Graph paging + `/revoke` status parity
+- **047** — live validation of secure-project provisioning
+Rationale: shipping a *secure access* project with grants that cannot expire is not defensible, and
+those three cost ~10 h combined.
+
+**Spin out (~82 h)**: 093/094/095 (upload + wizard decomposition — late scope, no live hole),
+086–089 (Phase 5 attestation — needs a new Dataverse table), 025 (test-integrity), 026 (doc repair),
+028, 029. ⚠️ **The owner has NOT chosen a cut line** — I proposed this and the question was
+withdrawn. Do not treat it as approved; re-raise it.
+
+**Serial order once the cut is chosen:**
+`083` → `082` → `035`→`036` → `042`→`043`→`044` → `054`→`055`→`056`→`057`/`058` →
+`060`→{`061`,`063`}→`064`→{`065`,`066`,`067`,`068`,`069`} → `090`
+
+Only 10 tasks are parallel-safe; the branch points above (`061`/`063`, and the `065`–`069` fan) are
+the only genuine concurrency available.
 
 ### ▶ FULL STATUS AUDIT — 2026-09-03 (POML-vs-index reconciled; this is the number to trust)
 
