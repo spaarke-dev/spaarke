@@ -1,0 +1,13 @@
+Archived: 2026-09-07
+Final status: Completed
+Closing PR: #952 (https://github.com/spaarke-dev/spaarke/pull/952) — merged 2026-09-07
+Closed Date: 2026-09-07
+Worktree: c:/code_files/spaarke-wt-email-communication-intelligence-r2 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/email-communication-intelligence-r2 (still on origin)
+Issue: (none — project was never registered on DevOps board / GitHub project #2; local marker only)
+
+Notes:
+- All 40 tasks complete. Task 064 shipped as "Option C" (309e7f674, on master); 044 add-in deployed to the live SWA (only a non-gating operator sign-in smoke remains).
+- Wrap-up gates: /test-diet clean (notes/test-diet-report.md); /code-review clean (064 endpoint object-level authz verified).
+- Go-forward matching-quality work owned by email-communication-intelligence-r3 (branch work/email-communication-intelligence-r3). Further Outlook/Word add-in enhancements owned by word-add-in-r1.
+- DevOps board archival (close Project Issue + Closed Date + drift) NOT performed: r2 was never registered on project #2. Run /devops-project-register --from-folder then /devops-project-archive if a portfolio record is wanted.
