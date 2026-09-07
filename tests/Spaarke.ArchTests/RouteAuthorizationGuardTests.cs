@@ -54,11 +54,26 @@ namespace Spaarke.ArchTests;
 /// <see cref="PolicyOnlyRoutes"/> — retirement removed the defect and the shape together. Its
 /// wrong-resource-domain shape survives only as an INLINE fixture inside
 /// <see cref="RetroactivelyDetectsAllFourHistoricalMisses"/>, which feeds the scanner literal source text
-/// and never reads the file. The shape is NOT extinct in the codebase: the drive-keyed
-/// <c>PUT /api/drives/{driveId}/upload</c> and <c>DELETE /api/drives/{driveId}/items/{itemId}</c> in
-/// <c>DocumentsEndpoints.cs</c> are the same policy-only pattern, still live and still waived, and
-/// <c>PUT /api/obo/containers/{id}/files/{*path}</c> is the same shape protected only by running under OBO
-/// rather than app-only. See
+/// and never reads the file.</para>
+///
+/// <para><b>The policy-only shape is now EXTINCT in this codebase, as of 2026-09-07.</b> This paragraph
+/// previously said it was not, and named the three survivors; all three are gone, each by deletion rather
+/// than by gating:</para>
+/// <list type="bullet">
+///   <item><c>PUT /api/drives/{driveId}/upload</c> and <c>DELETE /api/drives/{driveId}/items/{itemId}</c>
+///   in <c>DocumentsEndpoints.cs</c> — "still live and still waived" when that sentence was written.
+///   Task 083 deleted both routes, the file, and the now-orphaned <c>canwritefiles</c> policy behind
+///   them. These were the last two <c>UNOWNED</c> waivers in <see cref="Waivers"/>.</item>
+///   <item><c>PUT /api/obo/containers/{id}/files/{*path}</c> — the same shape "protected only by running
+///   under OBO rather than app-only". Task 076 deleted it once the last of its 11 call sites moved to a
+///   record-keyed contract.</item>
+/// </list>
+///
+/// <para>⚠️ Extinct is not the same as impossible, and this file is what keeps the difference. The shape
+/// died by three separate deletions across three tasks, none of which any structural rule here could
+/// detect — a policy pointed at the wrong resource domain is a real, fail-closed mechanism, so it reads
+/// as gated. What actually caught them was the waiver list demanding an OWNER for each one. Preserve that
+/// property when editing: an unnamed exemption is how this shape survived four recounts. See
 /// <c>projects/unified-access-control-r2/notes/task-074-route-authorization-forcing-function.md</c> §5.</para>
 /// </summary>
 public class RouteAuthorizationGuardTests
@@ -131,9 +146,13 @@ public class RouteAuthorizationGuardTests
             "document-id-keyed version history and prior-version BYTES, both gated \"read\" by task 079. "
             + "The drive-keyed pair was DELETED; the SPE pointer is now read off the authorized row."),
 
-        new GovernedFile("Api/DocumentsEndpoints.cs", Scope.RouteLevelGate,
-            "drive-keyed upload and item delete."),
-
+        // Api/DocumentsEndpoints.cs entry DELETED 2026-09-07 — task 083 deleted the file, retiring its
+        // last two routes (drive-keyed upload + item delete) rather than gating them. Same reason the
+        // UploadEndpoints.cs entry below was deleted: ScanFile's File.ReadAllText is unguarded, so an
+        // entry naming a deleted path throws FileNotFoundException rather than reporting anything
+        // useful. Its wrong-resource-domain shape is preserved as an INLINE fixture in
+        // RetroactivelyDetectsAllFourHistoricalMisses, which feeds the scanner literal source text.
+        //
         // Api/UploadEndpoints.cs entry DELETED 2026-08-27 — task 073 deleted the file (218 lines, zero
         // additions), retiring all three app-only container-keyed write routes. Left in place it would
         // throw FileNotFoundException from ScanFile's unguarded File.ReadAllText and account for 4 of the
@@ -306,21 +325,37 @@ public class RouteAuthorizationGuardTests
         // defect and the shape together. Regression guard:
         // tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs.
 
-        // ---------- PENDING — still live, still ungated, in DocumentsEndpoints.cs ----------
-        // Re-pointed off "073" 2026-08-27: these two are NOT in the file 073 deleted, and 073's scope did
-        // not extend to them. Leaving them owned by a completed task would read as done; deleting them
-        // would silently un-waive two live holes — one of them a DESTROY.
-        new Waiver("PUT /api/drives/{driveId}/upload", WaiverKind.Pending, "UNOWNED",
-            "Drive-keyed write with the canwritefiles policy only — the same wrong-domain shape 073 retired "
-            + "on the container-keyed twin, surviving here because it lives in DocumentsEndpoints.cs, "
-            + "outside 073's scope. Needs an owner."),
-
-        new Waiver("DELETE /api/drives/{driveId}/items/{itemId}", WaiverKind.Pending, "UNOWNED",
-            "Drive-keyed DESTROY with the canwritefiles policy only. A destroy path is the worst case for a "
-            + "wrong-domain check, and this is the route the merge plan flagged as REACHABLE via "
-            + "src/dataverse/webresources/spaarke_documents/DocumentOperations.js:578, which reads "
-            + "driveId/itemId off form attributes and so depends on no deleted route. Needs an owner, and "
-            + "that task must FIRST resolve whether the web resource is deployed."),
+        // ---------- task 083: TWO WAIVERS REMOVED 2026-09-07, the routes are GONE ----------
+        //
+        // PUT /api/drives/{driveId}/upload and DELETE /api/drives/{driveId}/items/{itemId} were RETIRED
+        // by task 083, which deleted Api/DocumentsEndpoints.cs outright rather than gating it — the same
+        // disposition, for the same reason, as 073 on the container-keyed twin above. These two carried
+        // WaiverKind.Pending / "UNOWNED"; they were the last UNOWNED waivers in this list.
+        //
+        // DELETED, NOT CONVERTED TO PERMANENT. That distinction is the whole point of the Pending kind:
+        // this file's own rule (maintenance rule 3) forbids promoting a Pending waiver to Permanent to
+        // make a build green, because doing so converts "someone must fix this" into "this is fine" with
+        // no fix in between — inverting the forcing function. The route being gone is the only clean way
+        // a Pending waiver is allowed to leave.
+        //
+        // What 083 actually closed: both took an SPE drive id off the ROUTE and wrote (or DESTROYED)
+        // app-only as the managed identity, so SPE applied no caller-side check, behind
+        // RequireAuthorization("canwritefiles") -> ResourceAccessRequirement("upload_file") ->
+        // ResourceAccessHandler, which resolves DOCUMENT rights from a DRIVE id. Wrong resource domain,
+        // not a missing mechanism — invisible to every structural rule in this file, which is why they
+        // needed a waiver rather than tripping a check. The now-orphaned canwritefiles + canreadfiles
+        // policies were deleted with them, and "canwritefiles" was removed from ResourcePolicies below.
+        //
+        // ⚠️ The second waiver's own instruction was DISCHARGED, not dropped: it said the owning task
+        // "must FIRST resolve whether the web resource is deployed." Deployment of
+        // src/dataverse/webresources/spaarke_documents/ is genuinely not determinable from the repo
+        // (manual portal deploy, per its README). That question turned out not to gate the decision:
+        // that file's getAuthToken returns null and its apiCall sends only credentials:'include', while
+        // the BFF's schemes are JwtBearer + ApiKey + Ciam with no cookie scheme — so a deployed copy
+        // 401s on every call. Deployed or not, it cannot reach these routes. Recorded because the
+        // waiver asked, and "could not determine" is a worse answer than "determined it does not matter".
+        //
+        // Regression guard: tests/integration/regression/DriveKeyedWriteRouteRetirementTests.cs.
 
         // ---------- PENDING — the OBO upload trio, re-pointed from 071 to 073/075/076 ----------
         //
@@ -473,8 +508,16 @@ public class RouteAuthorizationGuardTests
         // "PUT /api/upload-session/chunk" used to appear twice in this file, and why removing it from one
         // list is not enough. TheSetOfPolicyOnlyRoutesIsPinned compares against what the scanner actually
         // finds, so a stale entry here fails as `removed`, not silently.
-        "PUT /api/drives/{driveId}/upload",
-        "DELETE /api/drives/{driveId}/items/{itemId}",
+        //
+        // 🔴 THE SET IS NOW EMPTY (2026-09-07, task 083). The last two entries —
+        // "PUT /api/drives/{driveId}/upload" and "DELETE /api/drives/{driveId}/items/{itemId}" — went
+        // with the deletion of Api/DocumentsEndpoints.cs. Finding #4's shape (a real, fail-closed
+        // policy pointed at the wrong resource domain) no longer occurs anywhere in the governed set.
+        //
+        // Keep the set and its pin. An empty pinned set is a stronger statement than a missing one: it
+        // makes the NEXT route to be gated by a named policy alone fail TheSetOfPolicyOnlyRoutesIsPinned
+        // as `added`, forcing the resource-key-vs-resource-domain question to be asked out loud. That
+        // question is the one nothing else in this file can ask, because the mechanism looks correct.
     };
 
     /// <summary>
@@ -491,7 +534,13 @@ public class RouteAuthorizationGuardTests
         "candeletefiles", "canmovefiles", "cancopyfiles", "cancreatefolders",
         "cansharefiles", "canmanagefilepermissions",
         "canviewversions", "canrestoreversions",
-        "canwritefiles",
+        // "canwritefiles" REMOVED 2026-09-07 (task 083) — the POLICY no longer exists. Its only two
+        // consumers were the drive-keyed write/destroy routes 083 deleted, so AuthorizationModule's
+        // registration went with them. A name left in this set after its policy is gone is worse than
+        // unused: this set is what makes a route count as GATED, so a future
+        // RequireAuthorization("canwritefiles") would be classified as a genuine resource decision by
+        // this guard while ASP.NET Core threw at startup for an unregistered policy. The guard would be
+        // asserting safety about a route that cannot run.
     };
 
     // Census: the total routing surface. A new endpoint file must be classified before the build goes
@@ -564,7 +613,23 @@ public class RouteAuthorizationGuardTests
     // confirm it survives as the aggregator rather than assumed gone from the count alone; and the
     // anonymous webhook inside ComposeSyncEndpoints.cs was read before being classified rather than
     // assumed authenticated because its siblings are.
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 116 (2026-09-07, unified-access-control-r2 task 083). A DOWNWARD move, the census's fifth
+    // firing and the second in the delete direction:
+    //
+    //   083  -1  Api/DocumentsEndpoints.cs DELETED. Task 090 had already removed six of its eight
+    //            routes (unsatisfiable "canmanagecontainers" on collection endpoints); 083 removed the
+    //            last two — PUT /api/drives/{driveId}/upload and DELETE /api/drives/{driveId}/items/
+    //            {itemId} — so the file had no Map{Verb} call left and was deleted outright.
+    //
+    // Unlike the 110 -> 117 firing above, this one moves a GOVERNED file OUT of the set, so the same
+    // discipline applies in reverse: its GovernedFiles entry (Scope.RouteLevelGate) was DELETED in the
+    // same edit, and so were its two Pending/"UNOWNED" waivers. Bumping the count alone would have left
+    // Rule A scanning a path that no longer exists — which ScanFile treats as unparseable and therefore
+    // FAILS on, so in this direction the census and the governed set cannot silently disagree. That is
+    // the opposite of the ComposeEndpoints case, where the count could have gone green while the guarded
+    // surface escaped; worth recording that the two directions have different failure modes.
+    private const int ExpectedEndpointFileCount = 116;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
@@ -1104,6 +1169,20 @@ public class RouteAuthorizationGuardTests
         // container id against document rights. Asserting the honest classification is the point — a
         // detector that called this "gated" would be lying, and one that called it "ungated" would be
         // wrong about the mechanism.
+        //
+        // ⚠️ POLICY NAME CHANGED 2026-09-07 (task 083), and the change is deliberate rather than a
+        // relaxation. This fixture reproduced the historical route verbatim, including
+        // .RequireAuthorization("canwritefiles") — but 083 DELETED that policy along with its last two
+        // consumers, and removed the name from ResourcePolicies. Left as-was, this control would have
+        // started asserting ResourcePolicy for a policy that no longer exists, i.e. failing for a reason
+        // that has nothing to do with the detector it exists to test.
+        //
+        // "canuploadfiles" (ResourceAccessRequirement("driveitem.content.upload"), AuthorizationModule
+        // :238) is substituted because what is under test here is the SHAPE — a container-keyed write
+        // whose only gate is a named resource policy — not the literal string. The alternative was to
+        // keep a dead name in ResourcePolicies so this line would still classify, which would have made
+        // the set lie about which policies exist in order to keep a test green: the set is what marks a
+        // route GATED, so a stale name there is a guard vouching for a route that cannot start.
         var upload = ScanText("Api/UploadEndpoints.cs", new[]
         {
             "        app.MapPut(\"/api/containers/{containerId}/files/{*path}\", async (",
@@ -1111,7 +1190,7 @@ public class RouteAuthorizationGuardTests
             "        {",
             "            return TypedResults.Ok();",
             "        })",
-            "        .RequireAuthorization(\"canwritefiles\");",
+            "        .RequireAuthorization(\"canuploadfiles\");",
         });
         Assert.Single(upload);
         Assert.Equal(AuthMechanism.ResourcePolicy, upload[0].Mechanism);
@@ -1495,11 +1574,18 @@ public class RouteAuthorizationGuardTests
     /// <summary>
     /// The registration statement beginning at <paramref name="start"/>: text up to the first <c>;</c> that
     /// sits outside every parenthesis and brace opened after that point. Inline handler lambdas therefore
-    /// stay INSIDE the statement instead of truncating it, which is what makes the trailing
-    /// <c>.RequireAuthorization("canwritefiles")</c> on <c>PUT /api/drives/{driveId}/upload</c> in
-    /// <c>DocumentsEndpoints.cs</c> visible at all — it comes after a long lambda body. (This example named
-    /// <c>UploadEndpoints.cs</c> until 2026-08-27, when task 073 deleted that file; the surviving
-    /// drive-keyed route is the same shape.)
+    /// stay INSIDE the statement instead of truncating it, which is what makes a trailing
+    /// <c>.RequireAuthorization(…)</c> that comes AFTER a long lambda body visible at all.
+    ///
+    /// <para>This doc comment has now outlived two successive examples: it named
+    /// <c>PUT /api/containers/{containerId}/files/{*path}</c> in <c>UploadEndpoints.cs</c> until task 073
+    /// deleted that file (2026-08-27), was re-pointed at <c>PUT /api/drives/{driveId}/upload</c> in
+    /// <c>DocumentsEndpoints.cs</c>, and task 083 deleted that one too (2026-09-07). It is deliberately
+    /// left WITHOUT a concrete route this time: every route that motivated it has been retired, and
+    /// re-pointing it a third time would just queue up the same edit. The BEHAVIOUR is what matters and
+    /// it is pinned by <see cref="RetroactivelyDetectsAllFourHistoricalMisses"/>, whose inline fixtures
+    /// exercise exactly this trailing-call-after-lambda parse and cannot go stale, because they feed the
+    /// scanner literal source text rather than naming a file on disk.</para>
     /// </summary>
     private static string StatementFrom(string text, int start)
     {

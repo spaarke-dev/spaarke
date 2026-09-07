@@ -291,10 +291,27 @@ public static class AuthorizationModule
                 p.Requirements.Add(new ResourceAccessRequirement("driveitem.sensitivitylabel.assign")));
 
             // Legacy Compatibility
-            options.AddPolicy("canreadfiles", p =>
-                p.Requirements.Add(new ResourceAccessRequirement("preview_file")));
-            options.AddPolicy("canwritefiles", p =>
-                p.Requirements.Add(new ResourceAccessRequirement("upload_file")));
+            //
+            // "canwritefiles" + "canreadfiles" REMOVED 2026-09-07 (unified-access-control-r2 task 083)
+            // for the same reason "canmanagecontainers" was removed below, and by the same precedent.
+            //
+            // "canwritefiles" bound ResourceAccessRequirement("upload_file"). Its only two consumers
+            // were PUT /api/drives/{driveId}/upload and DELETE /api/drives/{driveId}/items/{itemId} in
+            // Api/DocumentsEndpoints.cs, both deleted by task 083 — so the policy is orphaned. It is
+            // deleted rather than left registered because it is not merely unused, it is WRONG-DOMAIN:
+            // ResourceAccessHandler.ExtractResourceId accepts containerId / driveId / documentId
+            // interchangeably and then resolves the value as sprk_documents({id}), so the policy
+            // authorizes a DRIVE id against DOCUMENT rights. The next endpoint author to reach for a
+            // plausibly-named "canwritefiles" would inherit that, and inherit it silently — the
+            // failure is a wrong ALLOW/DENY, not a startup error.
+            //
+            // "canreadfiles" (preview_file) was ALREADY orphaned before task 083 — zero consumers
+            // anywhere in src/ — and carries the identical wrong-resource-domain shape. It is removed
+            // in the same edit rather than left as the one surviving member of a retired pair.
+            //
+            // If a files read/write policy is genuinely needed again, it must evaluate the OWNING
+            // RECORD via the task 075/076 resolver, not an SPE key lifted off the route.
+            //
             // "canmanagecontainers" REMOVED 2026-08-25 (spaarke-auth-v4-dataverse-MI task 090,
             // obligation 031-A) together with its only six consumers in DocumentsEndpoints.
             // It bound ResourceAccessRequirement("create_container") — a PER-RESOURCE requirement —

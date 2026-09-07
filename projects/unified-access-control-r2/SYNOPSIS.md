@@ -55,7 +55,7 @@ grant rows, AI-search security trimming for contacts.
 | Phase | Deliverable | State |
 |---|---|---|
 | **0 — Enforcement remediation** | 22 confirmed findings closed, one regression test each | Mostly shipped; **6 tasks open** (023 expiry, 024 SPE honesty, 025 test-integrity, 026 doc repair, 028 service-request core type, 029 external To Do parity) |
-| **0b/0c — Secure Documents** | Server-derived storage containers; authorization before any byte moves; external document surface | Largely shipped. **083 open with 2 live holes**; **082** census open; **093/094/095** filed late |
+| **0b/0c — Secure Documents** | Server-derived storage containers; authorization before any byte moves; external document surface | **083 CLOSED 2026-09-07 — the `ClientSupplied` sink count is 0.** No code path lets a caller name the container its bytes land in. **082** census open; **093/094/095** filed late |
 | **1 — One evaluator** | Single evaluator; impersonated Dataverse reads replace column pattern-matching (FR-20) | **2 open** (035, 036) |
 | **2 — One definition of member** | Access-conferring allow-list for contact- **and** org-typed lookups (FR-24); standing grants carry a baseline level (FR-25) | **3 open** (042, 043, 044) |
 | **3 — Child inheritance** | Core-ancestor denormalization, re-stamped on reparent (FR-26); children inherit parent rights (FR-27) | **5 open** (054–058) |
@@ -210,6 +210,18 @@ Everything else on the list improves or completes the model. 061 is the differen
 that is *isolated* and one that is *usable*: task 021 delivered the memberless owner team and BU
 isolation, but until per-record access teams land, **no human can reach a secure project at all**.
 
-Runner-up: **083**, which still has 2 live `ClientSupplied` SPE write sinks — including an app-only
-managed-identity upload where no container ACL constrains the destination. That is the project's
-founding defect class, and it is not yet closed.
+Runner-up **083 is now CLOSED** (2026-09-07) — the project's founding defect class is finished. Its
+last two sinks (`PUT /api/drives/{driveId}/upload` and `DELETE /api/drives/{driveId}/items/{itemId}`,
+both app-only managed-identity) were **deleted**, along with the `canwritefiles` policy behind them.
+The deliverable is an argument from **absence**, not an inventory:
+`grep -c "^            Provenance.ClientSupplied," tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`
+returns **0**, and Rule A fails the build on any undeclared SPE write sink — so a new one cannot be
+added silently.
+
+One calibration note worth carrying: both of those routes were described as "live holes" in the task
+brief and in this document. They were **not exploitable as written** — the policy resolved the route
+value as `sprk_documents({id})`, so a real drive id (`b!…`) is not a GUID and denied, while a valid
+document GUID is not addressable as a drive. They were **accidentally** safe, via value-space
+disjointness, and the source carried a comment recording that accident as a design decision. The
+disposition (delete) was right; the stated reason was overstated. That distinction matters because the
+accident stops holding the moment either id domain widens.
