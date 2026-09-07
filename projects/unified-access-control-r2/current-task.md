@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-07** (by `context-handoff`). ⚠️ This stamp read **2026-09-04** while the file's last commit was 2026-09-07 — a 3-day gap. That is precisely the staleness signal this skill's own Failure Modes table says to check on resume (`git log -1 --format=%ci current-task.md` vs this line). Three handoffs added content without refreshing it. **Refresh this line every time you write here.**
+> **Last Updated**: **2026-09-07, session 2 end** (by `context-handoff`) — reflects through commit `3a71e9611`. ⚠️ **Refresh this line every time you write here.** It once read 2026-09-04 while the file's last commit was 2026-09-07; a gap between this stamp and `git log -1 --format=%ci current-task.md` is the signal this skill's Failure Modes table says means the handoff was incomplete.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
 > ⚠️ **This project's notes have now been WRONG FIFTEEN times.** Verify before believing —
 > counts, route names, schema claims, "already done" claims, open-vs-answered questions.
@@ -20,6 +20,34 @@
 | **Task status** | **53 completed** · 1 completed-with-escalation (012) · 1 blocked-shipped (034) · **37 open** · 92 total — reconciled 2026-09-03 against POMLs + git, all 17 disagreements resolved |
 | **Next Action** | **Task 083 — container-selection authorization sweep** (20 h, opus/fable, `parallel-safe=false`). Project's core thesis; on the critical path to wrap-up (090); still has **2 live `ClientSupplied` SPE write sinks** — `Api/DocumentsEndpoints.cs` `PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it) and its sibling `DeleteFileAsync`. Down from 7. Its own brief says it does those rows FIRST. |
 | **Before starting** | Decide the **scope cut** (see § COMPLETION PLAN) and the **uuid CVE disposition** (see the Trivy entry). Both are owner calls I proposed and did **not** assume. |
+
+### 🔧 TOOLING CONVENTIONS CHANGED 2026-09-07 — read before measuring anything
+
+Three commits after the main handoff (`0815f021b`, `fc8ea1293`, `3a71e9611`) changed how project
+status is read and written. A resuming session that misses these will produce wrong numbers.
+
+1. 🔴 **NEVER put a character above U+FFFF in a `grep` pattern.** `grep` here **silently returns 0**
+   — no error — for 4-byte UTF-8. The open-task marker 🔲 is U+1F532, so `grep -c '🔲'` reports
+   **zero open tasks on a 37-open project**. ✅ (U+2705) is 3-byte and works, which makes the failure
+   look like bad data rather than bad tooling. It cost three wrong measurements in one session, one
+   written into this very file as a false claim that the index was corrupt (it is clean UTF-8).
+   Filed as [`FAILURE-MODES.md` G-16](../../.claude/FAILURE-MODES.md#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji).
+   **Use Python with `encoding='utf-8'` for any count that will drive a decision.**
+
+2. ✅ **`TASK-INDEX.md` rows now carry a bracketed ASCII token** beside the emoji — owner-directed,
+   because status is a data field and the emoji made it ungreppable. Format is
+   `| ✅ [done] 001 | …` (marker, token and id in the SAME cell). Vocabulary:
+   `[open]`→`pending` · `[wip]`→`in-progress` · `[done]`→`completed` ·
+   `[escalated]`→`completed-with-escalation` · `[blocked]`→`blocked-shipped`.
+   `task-create` now REQUIRES it. This project's 92 rows are retrofitted, so
+   `grep -cF '[open]'` = **37**, `'[done]'` = **53**, `'[escalated]'` = 1, `'[blocked]'` = 1.
+
+3. ⚠️ **Run `pwsh scripts/check-task-status-drift.ps1` after ANY status write** —
+   `task-execute` Step 10 requires it. Status is stored TWICE (POML `<status>` + index marker) and
+   nothing structurally keeps them equal; that duplication produced 17 disagreements across 92 tasks.
+   The token made the index *readable*, it did NOT fix the duplication. **Recorded direction: the
+   index should eventually be DERIVED from the POMLs, not authored beside them** (deferred — it
+   touches 151 projects and three skills that write the index by hand).
 
 ### Two open owner decisions — neither is approved
 
