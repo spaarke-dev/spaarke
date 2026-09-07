@@ -494,6 +494,53 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 7 | Q4 widening + association map | ✅ **DONE** `f85796f70` | See the item-7 row in the status table below — the note was wrong twice. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
 
+### ▶ FULL STATUS AUDIT — 2026-09-03 (POML-vs-index reconciled; this is the number to trust)
+
+Built from primary sources: every POML's own `<status>`, cross-checked against `TASK-INDEX.md` markers and
+against git completion evidence. **17 disagreements found; all 17 resolved.**
+
+| | Count |
+|---|---|
+| **Complete** | **53** |
+| Complete with accepted residue (**012** anonymous-share-link revocation) | 1 |
+| `blocked-shipped` (**034** impersonation-inertness canary) | 1 |
+| **Genuinely OPEN** | **37** |
+| **Total tasks** | **92** |
+
+**What the 17 disagreements were, and which side was wrong:**
+
+- **14 tasks were DONE but their POML still said `pending`** — 011, 013, 015, 018, 020, 038, 039, 041,
+  051, 053, 070, 074, 080, 081. Root cause: root CLAUDE.md §7 step 1 ("update the task `.poml` status") is
+  a separate write that nothing enforces, while the index is updated during execution. **It was skipped 14
+  times.** Fixed 2026-09-03; each POML now carries its completion evidence inline. Two independent signals
+  were required before flipping (git evidence AND the index marker) — no status was changed on one alone.
+- **1 task was DONE but the INDEX said `🔄`** — **075**. The stale side was the index this time
+  (git: `893557380 "075 gates CLOSED — PASS at 3289844; all three worktrees mergeable"`). Corrected.
+- **2 were vocabulary, not conflicts** — 012 (`completed-with-escalation` ↔ ⚠️) and 034
+  (`blocked-shipped` ↔ 🟡). Both correct as-is; leave them.
+
+**Forcing-function candidate**: a status drift of 14 is not a discipline problem, it is a missing check.
+A trivial guard — parse each POML `<status>` and each index marker, fail on disagreement — would have
+caught all 17 the day they appeared. Worth filing.
+
+### ▶ CODE HEALTH — verified 2026-09-03, not inferred
+
+| Gate | Result |
+|---|---|
+| `dotnet build Spaarke.sln` | **clean** — 0 errors, 5 warnings |
+| `Spaarke.ArchTests` | **191 / 191** (was 182 — 9 guards added since) |
+| BFF unit + contract suite | **12,158 passed / 0 failed** / 58 skipped |
+| `@spaarke/ui-components` jest | **3,245 passed / 13 failed / 8 suites** — ⚠️ the recorded baseline of "9 suites / 14 tests" is now STALE by one; use **8 / 13**. Run it from INSIDE the package (`cd` first) — invoking jest with `--rootDir` from the repo root breaks module resolution and reports 232 failed suites / 0 tests, which is the instrument failing, not a regression |
+| 083 provenance allow-list | **2** ClientSupplied / 17 ServerDerivedRecord / 1 ServerDerivedActingUser / 5 ServerDerivedConfig / 3 AdministrativeRoleScoped / 1 Dead |
+
+The 2 surviving `ClientSupplied` sinks are 083's own rows 4 and 5, both in `Api/DocumentsEndpoints.cs`:
+`PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it — a LIVE hole) and
+its sibling `DeleteFileAsync`. 083's brief says it does these rows FIRST.
+
+**Item 5 (file tasks 093–096) is 3/4 done**: 093, 094, 095 exist; **096 was never filed**.
+Note 094 — "upload collision: ask BEFORE the bytes move (pre-flight probe), and add 'Use existing'" — is
+the follow-on to the shipped collision dialog.
+
 ### ▶ STATUS AS OF 2026-09-03 (authoritative — supersedes every status block below)
 
 **Branch state**: `work/unified-access-control-r2` @ `7d02f0b36` · **33 ahead** of `origin/master`
@@ -512,9 +559,7 @@ gated by the `canwritefiles` policy only, and `ResourceAccessHandler.ExtractReso
 driveId/containerId/documentId interchangeably so the policy authorizes a DRIVE id against DOCUMENT
 rights) and the sibling `DeleteFileAsync`. **083 is still `pending` — correctly.**
 
-🔴 **`tasks/TASK-INDEX.md` now reads as BINARY to grep** (mojibake in at least the 083 row region).
-Status counts derived from it are unreliable — `grep -c` reports 0 open tasks while 083's POML says
-`pending`. **Trust the POML `<status>`, not the index**, and fix the encoding when convenient.
+✅ **CORRECTION 2026-09-03 — the previous handoff's claim that `TASK-INDEX.md` "reads as BINARY to grep / is mojibake" was WRONG, and I wrote it.** The file is valid UTF-8: 0 NUL bytes, 0 double-encoded sequences, 311 clean em-dashes. **The instrument was at fault, not the file** — multi-byte emoji inside `grep -E` patterns and bracket classes are unreliable under this shell's locale, which is why `grep -cE '^\| *🔲'` returned 0 while the file actually contains **37** such rows (U+1F532). **Use Python with `encoding='utf-8'` for any status count over these files; do not use grep with emoji patterns.** Left in place deliberately as an instance of FAILURE-MODES AP-12 that I authored myself: a confident-sounding measurement, taken with a broken instrument, written into the recovery file where the next session would have wasted time "repairing" a file that was never damaged.
 
 ### Office add-in implications — CHECKED 2026-09-03, no breakage
 
