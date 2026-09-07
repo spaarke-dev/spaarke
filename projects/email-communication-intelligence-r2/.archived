@@ -4,7 +4,7 @@ Closing PR: #952 (https://github.com/spaarke-dev/spaarke/pull/952) — merged 20
 Closed Date: 2026-09-07
 Worktree: c:/code_files/spaarke-wt-email-communication-intelligence-r2 (PRESERVED — not removed by this skill; clean up separately if desired)
 Remote branch: work/email-communication-intelligence-r2 (still on origin)
-Issue: (none — project was never registered on DevOps board / GitHub project #2; local marker only)
+Issue: #954 (https://github.com/spaarke-dev/spaarke/issues/954) — registered + closed on the DevOps board (project #2) 2026-09-07; Status=Completed, Start=2026-08-03, Closed=2026-09-07, Task Count=40/40, Parent Epic=#431 EMAIL & MESSAGING
 
 Notes:
 - All 40 tasks complete. Task 064 shipped as "Option C" (309e7f674, on master); 044 add-in deployed to the live SWA (only a non-gating operator sign-in smoke remains).
