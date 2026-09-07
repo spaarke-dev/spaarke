@@ -30,7 +30,7 @@ Legend: 🔲 not started · 🔄 needs retry · ✅ complete · ⏸️ blocked
 |---|---|---|---|---|---|---|
 | 010 | [Classify all 49 ADRs on three axes; INDEX 36→**50**](010-classify-49-adrs-three-axes.poml) | — | FULL | **opus/xhigh** | ❌ | ✅ |
 | 011 | [Route every ADR — **50/50 routed**, not 17/50 enforced](011-route-every-adr-to-a-mechanism.poml) | 010 | STANDARD | sonnet/high | ❌ | ✅ |
-| 012 | [§6.5 records for every stale/contested ADR](012-section-6-5-records-for-stale-adrs.poml) | 010 | FULL | **opus/xhigh** | ❌ | 🔲 |
+| 012 | [§6.5 records for every stale/contested ADR](012-section-6-5-records-for-stale-adrs.poml) | 010 | FULL | **opus/xhigh** | ❌ | 🔄 |
 | 013 | [Classification guard census + adr-audit issue body](013-classification-guard-and-audit-issue-body.poml) | 011 | FULL | sonnet/high | ❌ | 🔲 |
 
 **Capability at phase end**: `n/49` + breakdown + amendment count visible weekly; nothing stale enforced; a new unclassified ADR fails the build. **Edit-only.**
