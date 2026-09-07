@@ -13,6 +13,7 @@
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`cd6f54c84`** — **pushed, 0 unpushed, tree clean.** **PR #924 is MERGED** (master @ `d7fd88366`); the 4 commits after it have **NO open PR** and need a new one to reach master. |
 | **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
+| **Session 2026-09-04** | Dead-wire audit CLOSED (4th instance `Style` deleted + repo-wide guard). `organziation` typo fixed. **`DocumentLinkFieldMap`** unifies the `sprk_document` link vocabulary — it was declared twice and knew 6 of 17 columns, so Compose silently dropped ten link types. See §SESSION at the end of this file. |
 | **Next Action** | **0) 🔴 §GAPS-5 — the Review Summary Memo CANNOT SUCCEED: its write half (`POST .../review-memo`) has no production caller, so both toolbar actions always hit the negative banner. A whole shipped, UAT'd feature is dead at the seam. Owner decision needed — recommendation: complete `reviewMemo`, retire `summaryPage`.** Then: **0b) Owner is UATing item 8 in parallel (2026-09-03) — expect findings; see §UAT for what was exercised and the known limits that are NOT defects.** Then: **§GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
 | **Suite** | Compose client **1,443/1,443** (110 suites) · Compose server **2,009/2,009** · ArchTests **191/191** · BFF build 0 errors — re-run after the 17-commit master merge, not carried over |
 | **Deployed (current)** | ✅ **2026-09-03 late** from **`91123fa23`** — BFF + `sprk_spaarkeai` together (NFR-05). BFF `/healthz` passed; code page `sprk_spaarkeai` 5,756 KB published to `spaarkedev1`. **Artifact verified by STRING LITERAL before upload**: `Summarise changes` ×2, `Include revision report` ×1, `Open in preview` ×1, `Auto Save On` **0**. Item 8 is now exercisable end-to-end. |
@@ -1830,3 +1831,65 @@ three previous fixes look right.
 **Do not "solve" it by deleting the tests.** 21 of the 24 assertions read editor-rendered DOM
 (`data-compose-mark`, `span[data-comment-id]`); the editor mount IS the system under test, and the names
 carry defect ids (DEF-09/11/12, FR-16 tasks 030/032, r8 task 055) — ADR-038 KEEP category.
+
+---
+
+## SESSION 2026-09-04 — dead-wire audit closed, Document link vocabulary unified
+
+Branch `work/spaarkeai-compose-r8` @ `c7370f79a` · 16 ahead of master, 0 behind · PR #938 MERGED.
+
+### What shipped
+
+| # | Change | Why it mattered |
+|---|---|---|
+| 1 | **`SummarizeSessionRequest.Style` DELETED** | 4th dead-wire instance. Documented as "passed through to the system prompt", read by nothing. Deleted rather than implemented — honouring the doc comment would thread free caller text into a system prompt, which **ADR-039's closed operand vocabulary forbids**. The field advertised a capability the architecture rejects. |
+| 2 | **`InboundBodyDtoMappingGuardTests`** | Generalises the dead-wire guard to all 23 inbound body DTOs, both binding dialects. `Style` lived in the convention-bound dialect the narrow guard never scanned. |
+| 3 | **`sprk_regardingorganziation` → `sprk_regardingorganization`** | Owner renamed the column and deleted the typo'd one. Code still pointed at the deleted column, so an Event→Organization association would have failed at write time. |
+| 4 | **`DocumentLinkFieldMap`** (the big one) | The `sprk_document` link vocabulary was declared twice and both copies knew **6 of 17** columns. Compose create-on-save silently dropped ten link types — a PDF filed under an Agreement produced a Word doc with no Agreement link, no error. |
+| 5 | **`DocumentLinkVocabularyGuardTests`** | A second hard-coded list now fails the build. Real-file control run: re-seeding a list into `ComposeService` makes it fail. |
+
+### The design error worth remembering
+
+My first cut of the copy-forward **redirected** legacy `sprk_matter` → `sprk_relatedmatter` on write, to migrate rows as they were touched. Two existing tests caught it, and they were right:
+
+> **A Dataverse subgrid binds to ONE relationship.** If the Matter form's Documents subgrid is bound to
+> `sprk_matter` and the source PDF sits there, writing the copy to `sprk_relatedmatter` means the two do
+> **not** appear together — silently defeating "files alongside the source", the entire point of the feature.
+
+Copy is now **column-for-column**. Migrating legacy columns is a deliberate one-time data operation, never a
+side effect of saving a document. The map still RECORDS `SupersededBy` so that migration has its mapping.
+
+One assertion did legitimately change: a contract test pinned those six columns as *"exactly the ADR-024
+document link vocabulary"* — the defect written down as a test. It now asserts the endpoint reads the map,
+with the map independently pinned against the live schema.
+
+### Schema facts established via MCP (authoritative — supersede any doc)
+
+- `sprk_document`: **17** link lookups (12 `Related*` + 4 unprefixed legacy + `sprk_email`).
+- **`sprk_relatedagreement` ALREADY EXISTS** — no schema work needed for the Agreement link.
+- `sprk_relatedorganization` **and** `sprk_relatedvendororg` both target `sprk_organization` (different
+  roles) — never key this vocabulary by target entity.
+- `sprk_document` has only **2 of 5** ADR-024 resolver fields (`regardingrecordid`, `regardingrecordnumber`)
+  — no `recordtype` discriminator, so **it cannot host `RegardingResolver`**. `sprk_event` has all six.
+- `spk_fileviewerid` — wrong publisher prefix, **zero code references**. Orphan; drop while pre-deployment.
+- `docs/data-model/field-mapping-reference.md` §Document is **doubly stale** (lists neither).
+
+### ⚠️ Behaviour change another project should know about
+
+`AttachmentDocumentAssociationRung` (email-communication-intelligence-r2's engine) now scans **15** link
+columns instead of 6. Matches stay suggest-band, surface-only candidates a reviewer confirms — never written
+as filed — so this widens what can be SUGGESTED, not what is committed. `/conflict-check` run 2026-09-04:
+**no open PR touches these files**; master merged clean.
+
+### Next actions
+
+1. 🔴 **§GAPS-5 — owner decision still open.** Complete `reviewMemo`'s write half (no production caller for
+   `POST .../review-memo`, so both toolbar actions always hit the negative banner) **or** retire
+   `summaryPage`. Recommendation: complete `reviewMemo`, retire `summaryPage`. **Neither path delivers
+   today.**
+2. Rename the memo feature to **"… Summary"** when #1 is decided — and pair it with wiring
+   `sprk_outputtypecode` ("REVMEMO"), because the row is currently categorised by matching its **display
+   name**, so renaming orphans rows silently. Free only while no rows exist.
+3. Owner UAT of item 8 — no findings reported yet (see §UAT).
+4. Deferred, evidenced, not urgent: numbering item 3 (stale decoration), editable spacing (UAT item 6),
+   `projects/INDEX.md` stale since 2026-06-26.
