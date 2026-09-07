@@ -904,6 +904,56 @@ commit `304b6d8f2`; guard in `tests/Spaarke.ArchTests/ClientUploadRouteAgreement
 
 ---
 
+### G-NN: `grep` silently cannot match characters above U+FFFF (most colored emoji)
+
+> **Added 2026-09-03** by `unified-access-control-r2`. **Cost: three wrong measurements in one
+> session**, one of which was written into a recovery file as a false claim about file corruption.
+
+**What happens.** GNU grep 3.0 under MSYS2 / Git Bash returns **`0` matches** — no error, no warning
+— for any pattern containing a **non-BMP** character (codepoint > U+FFFF, i.e. 4 bytes in UTF-8).
+Windows `wchar_t` is 16-bit, so such a codepoint needs a surrogate pair and cannot fit in one wide
+character; the match silently never fires.
+
+**It is NOT a locale problem.** Verified: `LANG=en_US.UTF-8`, and forcing `LC_ALL=C.UTF-8` changes
+nothing. The pattern also reaches grep intact — byte-dumping `'🔲'` gives the correct `f0 9f 94 b2`.
+Do not "fix" this by setting a locale.
+
+**The confusing part is that SOME emoji work**, so grep looks fine until it isn't:
+
+| Marker | Codepoint | UTF-8 | `grep -cF` on a file containing 38 |
+|---|---|---|---|
+| ✅ | U+2705 | 3-byte (BMP) | works |
+| ⚠ | U+26A0 | 3-byte (BMP) | works |
+| ❌ | U+274C | 3-byte (BMP) | works |
+| 🔲 | U+1F532 | 4-byte | **0** |
+| 🔄 | U+1F504 | 4-byte | **0** |
+| 🟡 | U+1F7E1 | 4-byte | **0** |
+| 🔴 | U+1F534 | 4-byte | **0** |
+| 🗄 | U+1F5C4 | 4-byte | **0** |
+
+A bracket class mixing them (`[🔲✅🔄]`) is worse: it made grep report **"Binary file matches"** and
+suppress output entirely.
+
+**Where this bites in this repo**: `projects/*/tasks/TASK-INDEX.md` uses 🔲 (U+1F532) for open tasks
+and ✅ (U+2705) for complete. So `grep -c '✅'` is right and `grep -c '🔲'` is **always 0** — which
+reads as "no open tasks" on a project with dozens.
+
+**Rule.** For any count or match over files with emoji status markers, use Python:
+
+```bash
+python -c "print(sum(1 for l in open(PATH,encoding='utf-8') if l.startswith('| 🔲')))"
+```
+
+**Why it earns an entry.** The failure is silent and returns a *plausible* number, so it launders
+itself into conclusions. In one session it produced "0 open tasks" on a 37-open project, then a
+follow-on false claim that the file was mojibake/binary (it was clean UTF-8 — 0 NULs, 0
+double-encoded sequences), then a third miss on a verification grep. Same family as
+[AP-12](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes), one
+layer up: there the stale *prose* misleads; here the *instrument* does, while sounding confident.
+**Cross-check any count that will drive a decision.**
+
+---
+
 ### AP-12: A comment becomes the constraint — prose outlives the mechanism it describes
 
 > **Added 2026-09-02** by `unified-access-control-r2`. **Class**: documentation drift promoted to
