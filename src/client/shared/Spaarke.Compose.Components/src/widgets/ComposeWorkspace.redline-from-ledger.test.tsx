@@ -925,8 +925,16 @@ describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)'
       fireEvent.click(toggle);
     });
     const row = await screen.findByTestId('nda-review-summary-finding-0', undefined, { timeout: 5000 });
-    // deriveTakeaway strips the trailing period off the first sentence — assert without it.
-    expect(row.textContent).toContain('The body imposes an unqualified obligation');
+    // R8 §GAPS-5 Phase 1 — this assertion CHANGED, because it had pinned the defect. It previously
+    // expected the flaggedClause ("The body imposes an unqualified obligation"), which is the grounded
+    // FACT. That was never the intended row content: the row renders a TAKEAWAY, and the takeaway is
+    // the judgment. It read the fact only because this mapping dropped `assessment`, leaving the panel
+    // to marker-parse a composed blob that carries no markers — so deriveTakeaway returned the blob's
+    // first sentence. Restoring the discrete fields makes the row render the judgment, which is what
+    // "the row carries the RIGHT content" always meant. (Trailing period stripped by deriveTakeaway.)
+    expect(row.textContent).toContain('Deviates from the firm standard, which requires a materiality qualifier');
+    // The grounded fact belongs on the in-document gutter note, NOT in the summary's scan strip.
+    expect(row.textContent).not.toContain('The body imposes an unqualified obligation');
     expect(row.textContent).toContain('High'); // the per-finding risk badge
 
     // (3) Zero LLM calls / zero dispatch — every network call is a GET (the point of FR-16).
@@ -934,6 +942,59 @@ describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)'
       ([, init]) => ((init?.method ?? 'GET') as string).toUpperCase() !== 'GET'
     );
     expect(nonReadCalls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R8 §GAPS-5 Phase 1 — the FR-05 discrete fields (flaggedClause / assessment) must survive into the
+// summary panel on BOTH population paths. The ledger-restore leg is asserted in the describe above;
+// this is the LIVE leg. Both mappings hand-copied five fields and dropped these two, so the panel
+// fell back to marker-parsing a blob that post-split payloads compose WITHOUT markers.
+// ---------------------------------------------------------------------------
+
+describe('R8 §GAPS-5 Phase 1: discrete FR-05 fields survive the LIVE advisory path into the summary', () => {
+  it('a live post-split review renders the ASSESSMENT (judgment) as the summary takeaway', async () => {
+    composeOutputsBySession[DOC_SESSION] = [];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+
+    // Mirrors useNdaReviewAdvisoryCommentsBridge's post-split projection: discrete fields carried
+    // through, with `explanation` COMPOSED as [flaggedClause, assessment].join('\n\n') — no
+    // "Grounded fact —"/"Judgment —" markers, which is precisely why parsing it cannot work.
+    const flaggedClause = 'The body imposes an unqualified obligation.';
+    const assessment = 'This deviates from the firm standard, which requires a materiality qualifier.';
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'compose_advisory_comments',
+        advisoryComments: [
+          {
+            targetText: 'Sample document body.',
+            explanation: `${flaggedClause}\n\n${assessment}`,
+            flaggedClause,
+            assessment,
+            sectionRef: '1.1',
+            riskLevel: 'High',
+            standardRef: 'B5 - Obligations',
+          },
+        ],
+        overallRisk: 'High',
+        sessionId: DOC_SESSION,
+        timestamp: '2026-09-07T00:00:00.000Z',
+      });
+    });
+
+    const toggle = await screen.findByTestId('compose-format-review-summary-toggle', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(toggle);
+    });
+
+    const row = await screen.findByTestId('nda-review-summary-finding-0', undefined, { timeout: 5000 });
+    expect(row.textContent).toContain('Deviates from the firm standard, which requires a materiality qualifier');
+    // The grounded fact is the OTHER half — it belongs on the gutter note, not the scan strip. Before
+    // Phase 1 this is what the row showed, because `assessment` never reached the panel.
+    expect(row.textContent).not.toContain('The body imposes an unqualified obligation');
   });
 });
 

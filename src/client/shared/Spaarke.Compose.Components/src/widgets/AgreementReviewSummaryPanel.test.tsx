@@ -19,6 +19,7 @@ import {
   AgreementReviewSummaryPanel,
   deriveOverallRisk,
   deriveTakeaway,
+  resolveTakeaway,
   formatSectionRef,
   formatClauseLocation,
   NDA_REVIEW_DISCLAIMER_TEXT,
@@ -89,6 +90,57 @@ describe('deriveTakeaway', () => {
 
   it('returns empty string for empty input', () => {
     expect(deriveTakeaway('')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b-ii. resolveTakeaway — vintage priority (R8 §GAPS-5 Phase 1 / FR-05 split)
+// ---------------------------------------------------------------------------
+
+describe('resolveTakeaway', () => {
+  // The exact blob a post-split payload produces: BOTH projections
+  // (projectFlaggedSectionsToAdvisoryComments, projectLedgerFindingsToAdvisoryComments) compose
+  // `explanation` as [flaggedClause, assessment].join('\n\n') — with NO "Grounded fact —"/"Judgment —"
+  // markers, because the discrete fields made them unnecessary.
+  const flaggedClause = 'The agreement permits assignment without the counterparty consenting.';
+  const assessment = 'This deviates from the firm standard, which requires prior written consent.';
+  const composedExplanation = `${flaggedClause}\n\n${assessment}`;
+
+  it('prefers a model-supplied takeaway over everything else', () => {
+    expect(
+      resolveTakeaway({ takeaway: 'Assignment without consent', assessment, explanation: composedExplanation })
+    ).toBe('Assignment without consent');
+  });
+
+  it('uses the discrete assessment (the judgment) when no takeaway is supplied', () => {
+    expect(resolveTakeaway({ assessment, explanation: composedExplanation })).toBe(
+      'Deviates from the firm standard, which requires prior written consent'
+    );
+  });
+
+  // THE REGRESSION GUARD. Before Phase 1 the panel called deriveTakeaway(explanation) directly. On a
+  // post-split payload the marker hunt finds nothing, so the fallback returns the blob's FIRST
+  // SENTENCE — which is flaggedClause, the grounded FACT. Every post-split finding rendered the wrong
+  // half of itself as its headline. This asserts the two differ AND that we now pick the judgment.
+  it('renders the JUDGMENT, not the grounded fact, on a post-split payload', () => {
+    const beforePhase1 = deriveTakeaway(composedExplanation);
+    expect(beforePhase1).toBe('The agreement permits assignment without the counterparty consenting');
+
+    const afterPhase1 = resolveTakeaway({ assessment, explanation: composedExplanation });
+    expect(afterPhase1).not.toBe(beforePhase1);
+    expect(afterPhase1).toContain('firm standard');
+  });
+
+  it('falls back to marker-parsing the fused blob for a LEGACY (pre-split) payload', () => {
+    const legacy =
+      'Grounded fact — The NDA has no survival period. Judgment — An indefinite term exceeds the standard.';
+    expect(resolveTakeaway({ explanation: legacy })).toBe('An indefinite term exceeds the standard');
+  });
+
+  it('ignores a blank/whitespace assessment rather than rendering an empty headline', () => {
+    expect(resolveTakeaway({ assessment: '   ', explanation: 'A fallback explanation sentence here.' })).toBe(
+      'A fallback explanation sentence here'
+    );
   });
 });
 

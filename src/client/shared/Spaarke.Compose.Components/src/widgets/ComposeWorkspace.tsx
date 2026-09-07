@@ -3400,6 +3400,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           riskLevel: item.riskLevel,
           explanation: item.explanation,
           standardRef: item.standardRef,
+          // R8 §GAPS-5 Phase 1 — carry the FR-05 discrete fields, which
+          // projectLedgerFindingsToAdvisoryComments already recovered from the ledger payload above
+          // and this mapping silently dropped. The header comment on this materializer claimed
+          // flaggedClause/assessment restored "intact"; that was true of the gutter and false here.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         })),
       ]);
       setReviewSummaryFailedCount(prev => prev + result.failed.length);
@@ -3781,6 +3787,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           riskLevel: item.riskLevel,
           explanation: item.explanation,
           standardRef: item.standardRef,
+          // R8 §GAPS-5 Phase 1 — the SSE event carries these (PaneEventTypes) and the gutter mapping
+          // 30 lines above already consumes them; only this summary mapping dropped them, so the panel
+          // string-parsed a fused blob that post-split payloads no longer mark up.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
