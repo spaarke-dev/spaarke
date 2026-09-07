@@ -210,6 +210,17 @@ export function entityLabel(entity: string): string {
 }
 
 /**
+ * True when a string is a bare Dataverse GUID (8-4-4-4-12 hex, optional braces). Used to detect a
+ * candidate whose display name fell back to the raw target id — the engine records only a GUID for
+ * thread/attachment matches (no embedded `name="…"`), so the card shows the match reason + entity type
+ * instead of an opaque GUID (email-communication-intelligence-r2 R3-CARD-1). Host `resolveDisplayName`
+ * wiring for real names on those cards is deferred to r3.
+ */
+export function looksLikeGuid(value: string | null | undefined): boolean {
+  return !!value && /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/.test(value);
+}
+
+/**
  * One-sentence rationale for a candidate, e.g.:
  * "Suggested because it continues an email thread already filed here and the
  *  sender and recipients are known participants."
@@ -343,7 +354,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       field,
       entity: primary.targetEntity,
       slotLabel: meta.label,
-      targetName: primary.targetName ?? primary.targetId,
+      targetName: primary.targetName ?? candidateDisplayName(primary) ?? primary.targetId,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
       status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
