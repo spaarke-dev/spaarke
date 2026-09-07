@@ -1,7 +1,21 @@
 ﻿# Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-09-03 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
-> **Recovery**: read Quick Recovery, then **§UAT (owner is UATing item 8 in parallel)**, then **§GAPS (highest-priority open work)**, then §UX, then §U8-BUILD.
+> **Last Updated**: 2026-09-04 (by `context-handoff`) — **session ends here; a FRESH session picks up the
+> §GAPS-5 build.** Branch pushed, tree clean, 0 behind master.
+>
+> ## 🎯 START HERE — the next session's job
+>
+> **Read [`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md) IN FULL
+> before touching anything.** It is the comprehensive approach + 5-phase build plan for the Review Summary
+> feature, and it is the work this session was set up to hand over. Read **§0 (naming) first** — "memo" is
+> retired as the user-facing name; the plan explains why it still appears in code identifiers.
+>
+> **Four owner decisions (D1–D4, §6 of the plan) were OPEN at handoff.** If they are still open, ask —
+> do not assume. **Phase 1 is safe to start under any answer to D1**: it fixes live data loss and is
+> harmless under every option.
+>
+> **Recovery order**: this Quick Recovery → **the GAPS-5 plan** → §GAPS/§GAPS-5 in this file (the defect
+> class + evidence) → §SESSION (what 2026-09-04 shipped) → §UAT → §UX → §U8-BUILD.
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -11,12 +25,14 @@
 | Field | Value |
 |---|---|
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
-| **Branch** | `work/spaarkeai-compose-r8` @ **`cd6f54c84`** — **pushed, 0 unpushed, tree clean.** **PR #924 is MERGED** (master @ `d7fd88366`); the 4 commits after it have **NO open PR** and need a new one to reach master. |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`4a6ce23cd`** — **pushed, tree clean, 0 behind master, 19 ahead.** **PR #924 and #938 are both MERGED.** The 19 commits since #938 have **NO open PR** — one is needed to reach master. |
+| **🎯 NEXT SESSION'S TASK** | **Build §GAPS-5 per [`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md).** Read it in full, §0 first. **Confirm D1–D4 with the owner** (§6 of the plan) before Phases 2–5. **Phase 1 needs no decision** — it fixes live data loss (`ComposeWorkspace.tsx:3777` + `:3395` drop `flaggedClause`/`assessment` that the SSE event already carries) and is a prerequisite for the recommended option, harmless under the others. |
+| **Ordering trap in that plan** | **Phase 4 (rename) MUST run BEFORE Phase 3 (the write call).** The persisted row is found by matching its **display name** (`OutputTypeId` is deliberately null — env-specific GUID), so renaming after rows exist orphans them silently, and the failure is indistinguishable from "not generated yet". Free only while zero rows exist — which is true today *because* of this very gap. |
 | **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
 | **Session 2026-09-04** | Dead-wire audit CLOSED (4th instance `Style` deleted + repo-wide guard). `organziation` typo fixed. **`DocumentLinkFieldMap`** unifies the `sprk_document` link vocabulary — it was declared twice and knew 6 of 17 columns, so Compose silently dropped ten link types. See §SESSION at the end of this file. |
 | **§GAPS-5 plan** | **[`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md)** — comprehensive approach + 5-phase build plan + the 4 decisions (D1–D4). Key correction: my earlier "one client POST call" sizing was WRONG. The client's finding shape is PRE-FR-05-SPLIT — the SSE event carries `flaggedClause`/`assessment` and the comment gutter uses them, but BOTH review-summary mappings DROP them (a third instance of the drop-in-a-hand-mapping class, client-side this time). `afterText` is NOT a blocker — the assembler already treats its absence as correct. **Phase 1 is safe to start under any decision.** |
-| **Next Action** | **0) 🔴 §GAPS-5 — the Review Summary Memo CANNOT SUCCEED: its write half (`POST .../review-memo`) has no production caller, so both toolbar actions always hit the negative banner. A whole shipped, UAT'd feature is dead at the seam. Owner decision needed — recommendation: complete `reviewMemo`, retire `summaryPage`.** Then: **0b) Owner is UATing item 8 in parallel (2026-09-03) — expect findings; see §UAT for what was exercised and the known limits that are NOT defects.** Then: **§GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
-| **Suite** | Compose client **1,443/1,443** (110 suites) · Compose server **2,009/2,009** · ArchTests **191/191** · BFF build 0 errors — re-run after the 17-commit master merge, not carried over |
+| **Next Action** | **1) Read the GAPS-5 plan (link above), §0 first.** **2) Confirm D1–D4 with the owner.** **3) Start Phase 1** (carry `flaggedClause`/`assessment` through BOTH review-summary mappings + widen `NdaReviewFindingSummary` + repoint its doc comment, which cites the deleted `nda-review.schema.json`) — no decision needed, fixes live data loss. **4) Then Phase 4 (rename) BEFORE Phase 3 (write call)** — see the ordering trap above. Deferred and evidenced, NOT urgent: owner UAT of item 8 (§UAT, no findings reported yet); numbering item 3 (stale decoration — DISPLAY only, the write path is proven correct, do NOT build the parity corpus); editable spacing (UX item 6); `projects/INDEX.md` stale since 2026-06-26. |
+| **Suite** | Re-run 2026-09-04 AFTER the master merge: BFF unit+contract **12,012 passed / 0 failed** (58 skipped) · ArchTests **199/199** · BFF build **0 errors 0 warnings** · associateToStep 19/19. Compose CLIENT suite NOT re-run this session (no client source changed after the last run). |
 | **Deployed (current)** | ✅ **2026-09-03 late** from **`91123fa23`** — BFF + `sprk_spaarkeai` together (NFR-05). BFF `/healthz` passed; code page `sprk_spaarkeai` 5,756 KB published to `spaarkedev1`. **Artifact verified by STRING LITERAL before upload**: `Summarise changes` ×2, `Include revision report` ×1, `Open in preview` ×1, `Auto Save On` **0**. Item 8 is now exercisable end-to-end. |
 | **PR** | **#938** open against master (5 commits). #924 already merged (master @ `d7fd88366` → now includes email-intelligence #936/#937). |
 | **⚠️ `projects/INDEX.md` is STALE — coordination gap** | Last refresh **2026-06-26**, 2+ months. It is the registry `/conflict-check` uses for hot-path overlap, and its "maintained atomically by two skills" contract is plainly not firing. A stale registry cannot say which projects are ACTIVE, so treat it as decorative: weight the open-PR list and `git log HEAD..origin/master` instead. **Worth its own remediation** — this repo has ~30 worktrees and no working coordination signal. |
