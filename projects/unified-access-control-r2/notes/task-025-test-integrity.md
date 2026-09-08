@@ -111,3 +111,37 @@ Running the union first and then isolating cost two suite runs instead of four, 
 evidence: seams 1, 3 and 4 are executed by **no test** (confirmed 2026-09-08, not inherited from the
 2026-08-24 review), and seam 2 is covered nine times over.
 
+
+## 7. M7 disposition — the file was DELETED, and why that was safe
+
+`tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalAccessEndpointTests.cs` — **1,004 lines,
+53 tests — deleted** (operator-approved 2026-09-08, conditional on "does not impact code, does not
+trigger a CI issue"). Both conditions were checked before deleting, not asserted after:
+
+| Check | Result |
+|---|---|
+| Anything reference the class or a type it declares? | **No** — it declares only itself; repo-grep finds no other reference |
+| Any CI workflow reference the path? | **No** |
+| Any pinned test-count ratchet in source? | **No** (matches were `bin/**` binaries, not source) |
+| Is it a KEEP path? (FR-B06 same-PR replacement) | **No** — the eight KEEP paths are `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**`, `tests/unit/domain/**`, `tests/Spaarke.ArchTests/**`. `tests/CLAUDE.md`: *"Tests authored elsewhere are anti-pattern by construction."* |
+| Coverage gate? | None — ADR-038 makes coverage an observation, never a gate |
+
+**Why per-test triage was not the right instrument.** The POML asks for delete/repair/keep *per test*,
+"do not bulk-delete". That instruction assumes a file with a mixture. This one does not have a mixture:
+**no test in it invokes any of the five endpoints its class summary claims to cover.** Grep for
+`await`/`HttpClient`/`PostAsJsonAsync`/`CreateClient` across 1,004 lines returns exactly two hits, and
+both are `await cacheMock.Object.RemoveAsync(...)` — a test awaiting its own mock and asserting the
+mock did what the test just configured. The assertions are on values the test itself constructed one
+line earlier. **They cannot fail**, so there is nothing for a per-test decision to discriminate.
+
+**The one genuine test was checked individually and is already covered.** Exactly one call reaches
+production code — `GrantExternalAccessEndpoint.ResolveGrantRoot(request).Ok.Should().BeFalse()`, the
+rootless-grant fail-closed assertion. Its scenario is already owned by
+`PolymorphicGrantWriteTests.ResolveGrantRoot_NoRootAtAll_FailsClosed()` (same directory, line 158),
+alongside seven sibling cases. **Nothing real is lost**, so no replacement was needed even in spirit.
+
+**Verified at the right level, not by a 16-minute suite** (operator direction): the test project
+builds (no compile break), the 782 external-access / access-control tests pass, and ArchTests are
+194/194 — which includes `Adr038TestBanGuardTests`, the guard that scans test source for banned
+shapes. A full-suite run adds nothing here: a deletion cannot break a test in an unrelated area, and
+the compile is what proves nothing referenced it.
