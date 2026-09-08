@@ -154,6 +154,73 @@ export interface BuiltReviewSummaryRequest {
   droppedCount: number;
 }
 
+/** One flagged section on the SAVE payload — mirrors `Services.Compose.NdaReviewFlaggedSectionInput`. */
+export interface SummaryPageFlaggedSectionInput {
+  sectionRef?: string;
+  quotedText?: string;
+  riskLevel?: string;
+  explanation?: string;
+  standardRef?: string;
+  flaggedClause?: string;
+  assessment?: string;
+}
+
+/** The Summary Page appendix payload — mirrors `Services.Compose.NdaReviewSummaryPageInput`. */
+export interface SummaryPageInput {
+  overallRisk: string;
+  flaggedSections: SummaryPageFlaggedSectionInput[];
+}
+
+/**
+ * Builds the `summaryPage` save-body field — the NDA-REVIEW findings digest appended to the END of the
+ * saved .docx (nda-r1 task 041, client wiring 2026-09-07).
+ *
+ * **Why append-at-end, and why that is the safe shape.** The generator emits only plain paragraphs with
+ * a literal "•" bullet — never `w:numPr`, never a named style — so `ComposeDocumentRenderer.AppendSection`
+ * never merges into the host document's `NumberingDefinitionsPart` or `StyleDefinitionsPart`. A
+ * corpus-wide test asserts both parts are byte-identical after the append; its control proved that making
+ * the bullets "proper list items" RENUMBERS the host agreement. Front-insertion is deliberately not
+ * offered: it needs a leading section break, which collides with `section-break-flattened`.
+ *
+ * **Sibling of, not a copy of, the revision report.** Same mechanism and placement; different source
+ * (the review RESULT vs the tracked-change summary) and one deliberate behavioural difference — see
+ * below.
+ *
+ * **An EMPTY findings list still produces a payload**, unlike `buildGenerateReviewSummaryRequest`. A
+ * clean NDA is itself a finding, and the page says so ("No material deviations from the firm NDA
+ * standard were found"). Returning `undefined` here would silently turn "we reviewed it and it is clean"
+ * into "we did not review it".
+ */
+export function buildSummaryPageInput(
+  findings: readonly {
+    sectionRef?: string;
+    quotedText: string;
+    riskLevel?: string;
+    explanation?: string;
+    standardRef?: string;
+    flaggedClause?: string;
+    assessment?: string;
+  }[],
+  overallRisk?: string,
+  derivedOverallRisk?: string
+): SummaryPageInput {
+  return {
+    overallRisk: overallRisk?.trim() || derivedOverallRisk?.trim() || UNSPECIFIED_OVERALL_RISK,
+    flaggedSections: findings.map(finding => ({
+      sectionRef: finding.sectionRef,
+      quotedText: finding.quotedText,
+      riskLevel: finding.riskLevel,
+      // Both vintages are carried. The server's overview line prefers `assessment` (the judgment) and
+      // falls back to `explanation` only for legacy payloads — sending both means neither a pre-split
+      // nor a post-split review loses its "why".
+      explanation: finding.explanation,
+      standardRef: finding.standardRef,
+      flaggedClause: finding.flaggedClause,
+      assessment: finding.assessment,
+    })),
+  };
+}
+
 /**
  * Banner shown when the Compose session is NOT bound to an Analysis (400 / `session-not-bound`) —
  * the direct-Compose door. This is DISTINCT from "no completed review": a review may well have

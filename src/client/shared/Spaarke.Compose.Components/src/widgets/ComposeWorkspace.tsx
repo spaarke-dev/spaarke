@@ -146,6 +146,8 @@ import {
   buildReviewMemoEmailSubject,
   buildGenerateReviewSummaryRequest,
   buildReviewSummaryGeneratedMessage,
+  buildSummaryPageInput,
+  type SummaryPageInput,
   selectMemoNegativeMessage,
   MEMO_NO_MEMO_MESSAGE,
   MEMO_NO_FINDINGS_MESSAGE,
@@ -1065,6 +1067,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // create. `onReviewedDocumentCreatedRef` mirrors the host callback; `hasReviewFindingsRef` mirrors
   // "a review actually ran on this doc" (reviewSummaryFindings.length > 0, defined further down — the
   // ref lets the earlier-declared save callback read it without a stale closure). Updated via effects.
+  // nda-r1 t041 (2026-09-07) — the Summary Page appendix payload, mirrored into a ref for the SAME
+  // reason `hasReviewFindingsRef` above exists: `reviewSummaryFindings` is declared BELOW `triggerSave`,
+  // so the save closure cannot list it as a dependency without a temporal-dead-zone error. Updated by an
+  // effect next to that state.
+  const summaryPageInputRef = React.useRef<SummaryPageInput | null>(null);
   const onReviewedDocumentCreatedRef = React.useRef(onReviewedDocumentCreated);
   React.useEffect(() => {
     onReviewedDocumentCreatedRef.current = onReviewedDocumentCreated;
@@ -1588,6 +1595,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     generatedFromVersionId: string | null;
   } | null>(null);
   const [includeRevisionReport, setIncludeRevisionReport] = React.useState(false);
+  // nda-r1 task 041 (client wiring 2026-09-07) — "Include review summary page". Opt-in per save, like
+  // the revision report: an appendix the user asks for, never one a save adds on its own.
+  const [includeSummaryPage, setIncludeSummaryPage] = React.useState(false);
 
   const { running: changeSummaryRunning, requestSummary } = useComposeChangeSummary({
     isEditorDirty: () => editorRef.current?.isDirty() ?? false,
@@ -2321,6 +2331,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                     asOf: revisionReportResult.generatedAt,
                   }
                 : undefined,
+            // nda-r1 task 041 — the NDA-REVIEW Summary Page appendix. Rides `replaceCommon` for the same
+            // reason the revision report does: the appendix is orthogonal to which authoring path the
+            // save takes. Gated ONLY on the user's opt-in — deliberately NOT on findings being non-empty,
+            // because a clean NDA is itself a finding and the page says so.
+            summaryPage: includeSummaryPage ? (summaryPageInputRef.current ?? undefined) : undefined,
           };
           if (bornInEditor) {
             // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
@@ -2766,6 +2781,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       effectiveDriveId,
       tenantId,
       onCreateOnSaveComplete,
+      // 2026-09-07 — these three were MISSING, and their absence was a live bug, not a lint nit. The
+      // save body reads all of them, so without them here the memoized closure kept the values from the
+      // render when the OTHER deps last changed: ticking an appendix toggle re-renders but does not
+      // recreate this callback, so the save still saw `false`. "Include revision report" (R8 item 8)
+      // shipped with exactly this defect — the toggle appeared to work and the appendix never rode the
+      // request. `reviewSummaryFindings`/`reviewSummaryOverallRisk` cannot be listed (declared below
+      // this callback) and go through `summaryPageInputRef` instead, the same way `hasReviewFindingsRef`
+      // already handles that ordering.
+      includeRevisionReport,
+      revisionReportResult,
+      includeSummaryPage,
     ]
   );
 
@@ -3132,6 +3158,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // round-5 #2) `overallRisk` prop — NOT re-introducing the removed banner, just completing the data
   // path so it is available/correct rather than silently dropped.
   const [reviewSummaryOverallRisk, setReviewSummaryOverallRisk] = React.useState<string | undefined>(undefined);
+  // nda-r1 t041 — keep the Summary Page payload current for the earlier-declared save closure. Null when
+  // no review has run; a CLEAN review (zero findings) is NOT null, because the page's whole point is that
+  // "no material deviations were found" is itself a finding worth writing down.
+  React.useEffect(() => {
+    summaryPageInputRef.current = hasReviewFindingsRef.current
+      ? buildSummaryPageInput(reviewSummaryFindings, reviewSummaryOverallRisk, deriveOverallRisk(reviewSummaryFindings))
+      : null;
+  }, [reviewSummaryFindings, reviewSummaryOverallRisk]);
   // Task 032 (128KB budget, Leg B) — see `ComposeReviewFindingsDegraded` JSDoc for the full rationale.
   const [reviewFindingsDegraded, setReviewFindingsDegraded] = React.useState<ComposeReviewFindingsDegraded | null>(
     null
@@ -5249,6 +5283,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // been generated, which is what keeps the menu item hidden until there is a report.
               includeRevisionReport={revisionReportResult ? includeRevisionReport : undefined}
               onIncludeRevisionReportToggle={revisionReportResult ? setIncludeRevisionReport : undefined}
+              includeSummaryPage={reviewSummaryFindings.length > 0 ? includeSummaryPage : undefined}
+              onIncludeSummaryPageToggle={reviewSummaryFindings.length > 0 ? setIncludeSummaryPage : undefined}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
               // 'new' fork) into the save path. FR-02 (task 030): route through requestSave so a first
               // create-on-save / Save As opens the name modal (UC-3) before persisting. Ctrl+S also

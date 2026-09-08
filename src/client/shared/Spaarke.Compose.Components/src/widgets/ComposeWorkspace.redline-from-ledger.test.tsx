@@ -134,6 +134,11 @@ const annotationPosts: Array<{ anchoredAnnotations: Array<Record<string, unknown
 // array could only ever stay empty: nothing in the repo called that endpoint.
 const reviewMemoPosts: Array<{ overallRisk: string; sections: Array<Record<string, unknown>> }> = [];
 
+// Every SAVE body the client sent. Added 2026-09-07 with the Summary Page wiring: nothing previously
+// asserted that an appendix field actually rides the save request, which is precisely how `summaryPage`
+// stayed dead at the transport boundary for so long.
+const saveBodies: Array<Record<string, unknown>> = [];
+
 /** The review-flag annotations from the most recent session-annotations write. */
 function latestReviewFlagAnnotations(): Array<Record<string, unknown>> {
   const last = annotationPosts[annotationPosts.length - 1];
@@ -201,6 +206,11 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
   // BOTH statuses), the SAME-editor-instance re-materialize race notes/031-execution-notes.md
   // escalated.
   if (url.includes('/api/compose/documents/') && url.includes('/save')) {
+    try {
+      saveBodies.push(JSON.parse(String(_init?.body ?? '{}')));
+    } catch {
+      /* a malformed body is a harness bug, not a product path */
+    }
     return {
       ok: true,
       status: 200,
@@ -339,6 +349,7 @@ beforeEach(() => {
   loadParaIdMap = [];
   annotationPosts.length = 0;
   reviewMemoPosts.length = 0;
+  saveBodies.length = 0;
   // Task 032 — the 128KB-budget degraded-restore marker rides `window.sessionStorage`, keyed by
   // session id. DOC_SESSION is a shared constant across this whole file's tests, so clear it every
   // test to prevent cross-test leakage of a marker one test wrote.
@@ -1375,5 +1386,123 @@ describe('R8 §GAPS-5 Phase 3: the Review Summary write call', () => {
     // structural: there is no control to press. Assert THAT, rather than a message that cannot appear.
     expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
     expect(reviewMemoPosts).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nda-r1 task 041 — the NDA-REVIEW "Summary Page" appendix, client wiring (2026-09-07).
+//
+// The generator, the SaveComposeDocumentRequest field, the SaveAsync call site and a corpus seam test
+// had all existed and been green since task 041. There was no HTTP body property and no client sender,
+// so the appendix had never been produced in the running app — the last open instance of the
+// "server-ready, client-unwired" defect class. These tests are the client half of the forcing function
+// (ComposeSaveBodyMappingGuardTests is the server half).
+// ---------------------------------------------------------------------------
+
+describe('nda-r1 t041: the Summary Page appendix rides the save body', () => {
+  function seedReview(): void {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [
+            {
+              quotedText: 'Sample document body.',
+              flaggedClause: 'The body imposes an unqualified obligation.',
+              assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+              sectionRef: '1.1',
+              riskLevel: 'High',
+              standardRef: 'B5 - Obligations',
+            },
+          ],
+        },
+      },
+    ];
+  }
+
+  async function saveDocument(): Promise<void> {
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const saveButton = saveWrapper.querySelector('button');
+    if (!saveButton) throw new Error('Save split-button primary action <button> not found');
+    act(() => {
+      fireEvent.click(saveButton);
+    });
+    await screen.findByTestId('compose-workspace-save-success-banner', undefined, { timeout: 5000 });
+  }
+
+  it('sends `summaryPage` — carrying BOTH finding vintages — once the user opts in', async () => {
+    seedReview();
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    // Open the Save split-button's menu and tick the appendix toggle.
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const menuButton = saveWrapper.querySelectorAll('button')[1];
+    if (!menuButton) throw new Error('Save split-button menu trigger not found');
+    act(() => {
+      fireEvent.click(menuButton);
+    });
+    const toggle = await screen.findByTestId('compose-format-summary-page-toggle', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(toggle);
+    });
+
+    await saveDocument();
+
+    expect(saveBodies.length).toBeGreaterThan(0);
+    const summaryPage = saveBodies[saveBodies.length - 1].summaryPage as
+      | { overallRisk: string; flaggedSections: Array<Record<string, unknown>> }
+      | undefined;
+    expect(summaryPage).toBeDefined();
+    expect(summaryPage!.overallRisk).toBe('High');
+    expect(summaryPage!.flaggedSections).toHaveLength(1);
+    // BOTH vintages ride along: the server's overview line prefers `assessment` and falls back to
+    // `explanation` only for legacy payloads, so sending both means neither vintage loses its "why".
+    expect(summaryPage!.flaggedSections[0]).toMatchObject({
+      sectionRef: '1.1',
+      riskLevel: 'High',
+      standardRef: 'B5 - Obligations',
+      flaggedClause: 'The body imposes an unqualified obligation.',
+      assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+    });
+  });
+
+  it("sends NOTHING when the user has not opted in — an appendix is never added on a save's own initiative", async () => {
+    seedReview();
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    await saveDocument();
+
+    expect(saveBodies.length).toBeGreaterThan(0);
+    expect(saveBodies[saveBodies.length - 1].summaryPage).toBeUndefined();
+  });
+
+  it('offers no toggle at all when no review has run — it cannot promise an appendix with no findings', async () => {
+    composeOutputsBySession[DOC_SESSION] = [];
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const menuButton = saveWrapper.querySelectorAll('button')[1];
+    if (!menuButton) throw new Error('Save split-button menu trigger not found');
+    act(() => {
+      fireEvent.click(menuButton);
+    });
+
+    expect(screen.queryByTestId('compose-format-summary-page-toggle')).not.toBeInTheDocument();
   });
 });

@@ -283,6 +283,15 @@ export interface ComposeFormatToolbarProps {
   includeRevisionReport?: boolean;
   /** Toggles {@link includeRevisionReport}. Rendered only when supplied alongside it. */
   onIncludeRevisionReportToggle?: (include: boolean) => void;
+  /**
+   * Whether the next save appends the NDA-REVIEW **Summary Page** appendix (nda-r1 task 041, wired
+   * 2026-09-07). Sibling of {@link includeRevisionReport}: same append-at-end mechanism, same opt-in
+   * shape, different source — the review RESULT rather than the tracked-change summary. Rendered only
+   * when a review has produced findings (the host gates it).
+   */
+  includeSummaryPage?: boolean;
+  /** Toggles {@link includeSummaryPage}. Rendered only when supplied alongside it. */
+  onIncludeSummaryPageToggle?: (include: boolean) => void;
 
   // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
   /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
@@ -608,6 +617,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onSummarizeChanges,
     includeRevisionReport,
     onIncludeRevisionReportToggle,
+    includeSummaryPage,
+    onIncludeSummaryPageToggle,
     hasLoadedBaseline,
     onSave,
     canSave,
@@ -735,6 +746,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
 
   const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onSummarizeChanges);
   const showRevisionReportToggle = includeRevisionReport !== undefined && Boolean(onIncludeRevisionReportToggle);
+  const showSummaryPageToggle = includeSummaryPage !== undefined && Boolean(onIncludeSummaryPageToggle);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
@@ -1245,10 +1257,12 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           checkedValues={{
             ...(autoSaveEnabled !== undefined && onAutoSaveToggle ? { autosave: autoSaveEnabled ? ['on'] : [] } : {}),
             ...(showRevisionReportToggle ? { revisionreport: includeRevisionReport ? ['on'] : [] } : {}),
+            ...(showSummaryPageToggle ? { summarypage: includeSummaryPage ? ['on'] : [] } : {}),
           }}
           onCheckedValueChange={(_e, data) => {
             if (data.name === 'autosave') onAutoSaveToggle?.(data.checkedItems.includes('on'));
             if (data.name === 'revisionreport') onIncludeRevisionReportToggle?.(data.checkedItems.includes('on'));
+            if (data.name === 'summarypage') onIncludeSummaryPageToggle?.(data.checkedItems.includes('on'));
           }}
         >
           <MenuTrigger disableButtonEnhancement>
@@ -1319,6 +1333,19 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                     data-testid="compose-format-revision-report-toggle"
                   >
                     Include revision report
+                  </MenuItemCheckbox>
+                </>
+              ) : null}
+              {/* nda-r1 task 041, wired 2026-09-07 — appends the NDA-REVIEW findings digest to the
+                  document as a "Summary Page" appendix on the next save. Sibling of the revision-report
+                  toggle directly above: same AppendSection mechanism, same end-of-document placement
+                  (front-insertion needs a leading section break, which collides with
+                  `section-break-flattened`). Only rendered once a review has findings. */}
+              {showSummaryPageToggle ? (
+                <>
+                  <MenuDivider />
+                  <MenuItemCheckbox name="summarypage" value="on" data-testid="compose-format-summary-page-toggle">
+                    Include review summary page
                   </MenuItemCheckbox>
                 </>
               ) : null}

@@ -28,9 +28,11 @@ namespace Spaarke.ArchTests;
 ///   them to <c>ComposeEditor</c>. Two shipped features were dead props. Fixed then; the regression
 ///   guard is <c>ComposeWorkspace.imports.test.tsx</c>, which is client-side and cannot see this side.</item>
 ///   <item><b>summaryPage</b> (nda-r1 task 041) — <c>ComposeSummaryPageGenerator</c>, its corpus seam
-///   test and the <c>SaveAsync</c> call site all exist and are green. <c>SaveComposeDocumentBody</c> has
-///   no such property and no client sends one, so the NDA Summary Page appendix has never been produced
-///   in the running app. STILL OPEN — see the allowlist entry below.</item>
+///   test and the <c>SaveAsync</c> call site all existed and were green, but <c>SaveComposeDocumentBody</c>
+///   had no such property and no client sent one, so the NDA Summary Page appendix had never been
+///   produced in the running app. <b>CLOSED 2026-09-07</b>: the body property, both endpoint mappings and
+///   a client sender are wired, and the live assertion below now covers it like any other property. The
+///   record-keeping test that used to hold this open was deleted, per its own instructions.</item>
 ///   <item><b>revisionReport</b> (r8 UAT item 8) — caught by this investigation BEFORE it shipped: the
 ///   client sent the field, the DTO did not declare it, so it was dropped at the transport boundary
 ///   while every unit and seam test stayed green. Fixed in the same change that added this guard.</item>
@@ -157,23 +159,5 @@ public sealed class ComposeSaveBodyMappingGuardTests
             .ToList();
 
         Assert.True(unread.Count == 0, "correctly-mapped code must not trip the guard");
-    }
-
-    [Fact]
-    public void SummaryPage_IsStillTheOpenInstanceOfThisDefectClass()
-    {
-        // Not a failure — a RECORD, kept executable so it cannot rot into stale prose (FAILURE-MODES
-        // AP-12: "a comment becomes the constraint"). `SaveComposeDocumentRequest.SummaryPage` is
-        // consumed by SaveAsync and has a generator + corpus seam test, but no HTTP body property and
-        // no client sender, so the NDA Summary Page appendix cannot be produced.
-        //
-        // When someone wires it, this test flips to red and SHOULD be deleted — its whole purpose is to
-        // stop the gap being forgotten, not to keep it.
-        var source = EndpointSource;
-
-        Assert.False(
-            source.Contains("body.SummaryPage", StringComparison.Ordinal),
-            "if the endpoint now forwards a summary page, the gap is CLOSED — delete this test and the " +
-            "corresponding entry in the class remarks");
     }
 }

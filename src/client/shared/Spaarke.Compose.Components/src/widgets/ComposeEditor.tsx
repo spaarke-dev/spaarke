@@ -812,6 +812,10 @@ export interface ComposeEditorProps {
   includeRevisionReport?: boolean;
   /** R8 UAT item 8 — passthrough toggle handler; the item renders only when both are supplied. */
   onIncludeRevisionReportToggle?: (include: boolean) => void;
+  /** nda-r1 t041 (wired 2026-09-07) — passthrough for the Save-menu "Include review summary page" toggle. */
+  includeSummaryPage?: boolean;
+  /** nda-r1 t041 — passthrough toggle handler; the item renders only when both are supplied. */
+  onIncludeSummaryPageToggle?: (include: boolean) => void;
   /** Save handler (create-on-save first Save, or update). Renders the Save split-button when set.
    *  G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup) or `'new'`
    *  (fork a new document). A bare call (Ctrl+S / cross-pane bridge) defaults to `'version'`. */
@@ -2193,6 +2197,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSummarizeChanges,
       includeRevisionReport,
       onIncludeRevisionReportToggle,
+      includeSummaryPage,
+      onIncludeSummaryPageToggle,
       wordActionsDisabled,
       onSave,
       canSave,
@@ -3713,6 +3719,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSummarizeChanges={onSummarizeChanges}
           includeRevisionReport={includeRevisionReport}
           onIncludeRevisionReportToggle={onIncludeRevisionReportToggle}
+          includeSummaryPage={includeSummaryPage}
+          onIncludeSummaryPageToggle={onIncludeSummaryPageToggle}
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}
