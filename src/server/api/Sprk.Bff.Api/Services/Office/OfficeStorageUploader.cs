@@ -59,14 +59,7 @@ public class OfficeStorageUploader
             // becomes "a path", so it is the last place that can still be honest about it. The double call
             // is idempotent (sanitizing a sanitized name is a no-op).
             var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
-            // A same-name save must fail before Graph replaces the existing file. The caller can then
-            // ask whether to save a version or create a separately named document.
-            var result = await _speFileStore.UploadSmallAsync(
-                driveId,
-                uploadPath,
-                content,
-                Sprk.Bff.Api.Models.ConflictBehavior.Fail,
-                cancellationToken);
+            var result = await _speFileStore.UploadSmallAsync(driveId, uploadPath, content, cancellationToken);
 
             if (result != null)
             {
@@ -79,11 +72,6 @@ public class OfficeStorageUploader
             }
 
             return (false, null, null, null, "Upload returned null result");
-        }
-        catch (SpaarkeStorageException)
-        {
-            // Preserve the typed 409 so OfficeService can expose the collision choice to the add-in.
-            throw;
         }
         catch (Exception ex)
         {
