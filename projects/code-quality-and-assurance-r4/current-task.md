@@ -14,14 +14,54 @@
 | **Progress** | **6 of 34 tasks complete** |
 | **Status** | blocked on a decision, **not** on work |
 | **Execution** | **AUTONOMOUS** — resume without per-wave confirmation |
-| **Next Action** | **(1)** Owner answers the 4 questions in [`notes/decisions/012-ESCALATION-security-adrs.md`](notes/decisions/012-ESCALATION-security-adrs.md). **(2)** Meanwhile **task 013 is unblocked** (deps=011 ✅) — run it. **(3)** Task 020 / all of P2b stays parked until 012 closes. **(4)** P3 (030+) is independent of P2 and can run in parallel if desired. |
+| **Next Action** | **(1)** Owner answers the **4 decisions detailed in the section below** (also in [`notes/decisions/012-ESCALATION-security-adrs.md`](notes/decisions/012-ESCALATION-security-adrs.md)). **(2)** Meanwhile **task 013 is unblocked** (deps=011 ✅) — run it. **(3)** Task 020 / all of P2b stays parked until 012 closes. **(4)** P3 (030+) is independent of P2 and can run in parallel if desired. |
 
-### Open decisions blocking task 012
+## 🔔 The 4 open decisions blocking task 012 (full detail)
 
-1. **Sign-off on 8 auth/security/compliance ADRs** — 005, 014, 017, 018, 041, 042, 043, 047. Recommendations supplied; no path chosen. Highest-consequence: **ADR-018** ("flags never bypass authorization"), where ADR-032 (Accepted) already exists to enforce ADR-018 (Proposed).
-2. **ADR-014 — ratify or withdraw?** Withdrawal is outside the B/C frame the task allows, so it needs an owner call.
-3. **ADR-047 — decide now, or run `spine-r1` task 090 first?** Recommend 090; its scope is literally this promotion + doc-drift reconciliation.
-4. **ADR-016 — I classified it *cost*, not security.** Overrule if you read rate limiting as abuse control.
+Full package: [`notes/decisions/012-ESCALATION-security-adrs.md`](notes/decisions/012-ESCALATION-security-adrs.md). Reproduced here so this file alone is sufficient.
+
+**Why these are blocked**: CLAUDE.md §6.5 — *"Not an excuse to bypass auth, security, or compliance ADRs without explicit human sign-off."* Task 012's own constraint and escalation trigger say the same, and project `CLAUDE.md` lists it as a named hard stop. **A path was NOT chosen for any of the 8.** Partial sign-off is fine — proceed with whatever is decided and leave the rest held.
+
+### Decision 1 — sign off on 8 auth/security/compliance ADRs
+
+Each was checked against its **actual MUST rules**, not its title. That mattered twice: **ADR-005** reads as a storage ADR but mandates where authorization is evaluated, and **ADR-041** reads as UX policy but is a fail-closed safety model.
+
+| ADR | The rule that triggers sign-off | Recommended | Reasoning |
+|---|---|---|---|
+| **018** Feature Flags | *"Flags never bypass authorization"* | **C — ratify, urgent** | Highest consequence in the set: the invariant that a kill switch cannot disable an authz check. **ADR-032 (Accepted) already exists to enforce ADR-018 (Proposed)** — an accepted ADR enforcing an unratified one is the anomaly to close. |
+| **047** Notification Spine | *"MUST NOT place message bodies, privileged content, or pre-authorized action tokens"* on the transport | **C — ratify** *(but see Decision 3)* | Gate effectively reached: `spine-r1` is 21/22 and task 090 does this promotion. |
+| **042** Memory Architecture | `retentionClass` → per-item Cosmos TTL at write | **C — ratify** | Gated `Proposed` (gate G-R2-B); 92 implementing files. Same pattern as ADR-039/040, both promoted cleanly. |
+| **043** AI Capability Spine | *"hybrid authorization — autonomous low-risk / confirm…"* | **C — ratify** | Gated `Proposed`; 59 files; the dispatch spine other ADRs depend on. |
+| **041** Judgment/Confirmation | *"classify request origin deterministically and **fail-closed**"*; writes gated by risk × origin × completeness | **C — ratify** | Gated `Proposed`. The fail-closed default is the conservative one; ratifying makes the safe behaviour binding. |
+| **017** Async Job Status | *"MUST enforce authorization on job status endpoints (ADR-008)"* | **C — ratify** | Evidence weak (broad keyword matches). The rule defers to ADR-008, which is Accepted and enforced by a named test. |
+| **005** Flat Storage in SPE | *"MUST evaluate permissions via UAC (not SPE native)"* | **B — amend, then ratify** | The permission rule is fine. But the ADR names **`sprk_documentassociation`, which exists nowhere in the repo**. Fix the artifact reference; the authorization rule itself needs no change. |
+| **014** AI Caching & Reuse | *"never cache raw content without governance approval"* | **see Decision 2** | Weakest evidence in the set — only 2 matching files. |
+
+### Decision 2 — ADR-014: ratify or **withdraw**?
+
+**This is outside the B/C frame and therefore cannot be decided without you.** Task 012's constraint permits paths B and C only, but for an orphaned `Proposed` ADR the real question is **ratify / amend-then-ratify / withdraw**, and withdraw maps to neither. I did not invent a fourth path.
+
+It bites here specifically: ADR-014 has **2 files of evidence** and may never have shipped. Choosing C would ratify a data-governance policy the codebase does not implement — **a rule that is false on the day it becomes binding**. Withdrawal may be the honest answer.
+
+### Decision 3 — ADR-047: decide here, or run `spine-r1` task 090 first?
+
+**Recommendation: run task 090 first.**
+
+Ratifying ADR-047 asserts the built spine matches the ADR, and **nobody has checked that**. There is a specific reason to doubt it: `spaarke-notification-spine-r1` is 21/22 complete, yet its four producers (`CommunicationArrivedProducer`, `DailyBriefingSuggestionProducer`, `PreferenceDirectiveProducer`, `ICommunicationAssessedProducer`) arrived through *consumer* projects. If the spine was assembled per-consumer rather than built once, that is exactly what ADR-047's core commitment forbids — *"ONE spine built once for all client surfaces (collapses the email-r4/messaging-r3/assistant-r1 forks)."*
+
+Task 090's stated scope is *"ADR-047 Proposed→Accepted, doc-drift reconciliation, repo-cleanup"* — so the conformance check is **already scheduled work, not new scope**.
+
+### Decision 4 — ADR-016: is rate limiting *cost* or *abuse control*?
+
+**I classified it cost and decided it** (path C, ratify) rather than escalating. Basis: it scored **zero** hits on every auth/security/compliance term, and its framing throughout is cost, capacity and backpressure.
+
+But per-endpoint rate limiting is also an abuse-control mechanism, and a reviewer reading it that way would be entitled to require sign-off. **Overrule and I'll move it into the escalated set.** Recorded openly so it can be corrected now rather than discovered later.
+
+### The 5 already decided (no action needed unless you disagree)
+
+**ADR-019** → C ratify (187 files comply; RFC 7807 settled; nothing to amend) · **ADR-033** → B amend (names `WorkingDocumentHandler`/`WorkingDocumentTools.cs`; neither exists; code has `WorkingDocumentService`) · **ADR-023** → C confirm the supersession, keep as a tombstone so the ADR-023→ADR-050 breadcrumb survives · **ADR-020** → C ratify (flagged: evidence weaker than ADR-019's) · **ADR-016** → C ratify (see Decision 4).
+
+**Enforcement block stands for all 13** — decided and escalated alike. A decided path is not an applied one: ADR-033 still needs its amendment, the ratifications still need a status flip. Task 020 must exclude all 13 from the FR-07 criterion set.
 
 ### Also awaiting owner review (not blocking)
 
@@ -43,7 +83,7 @@
 
 ### Files modified — all committed and pushed
 
-HEAD `ad2e2bac2`, tree clean, 0 unpushed. PR [#935](https://github.com/spaarke-dev/spaarke/pull/935).
+Tree clean, 0 unpushed, **0 behind master** (synced 2026-09-04). PR [#935](https://github.com/spaarke-dev/spaarke/pull/935), draft.
 
 - `.claude/adr/ADR-012-shared-components.md` · `docs/adr/ADR-012-shared-component-library.md` — the amendment
 - `.claude/adr/INDEX.md` — 36 → 50 rows + classification + routing sections
