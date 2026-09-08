@@ -1,62 +1,51 @@
 # Test diet report — email-communication-intelligence-r2
 
-**Run date**: 2026-08-31
+**Run date**: 2026-09-07 (project-close re-run) · supersedes the 2026-08-31 run (which was **clean / 0 deletes**)
 **Branch**: work/email-communication-intelligence-r2
-**Scope**: `tests/**/*.cs` added/modified during R2 (ADR-038 §7 classifier is .cs-only per skill Step 1; colocated TS/TSX `src/**/__tests__` are out of scope by design).
-**Method**: enumerate R2-touched `tests/**/*.cs`; apply the 17-ban classifier (heuristics 0–12). Grep for banned shapes (`Mock<HttpMessageHandler>`, `GetRequiredService` assertions, ctor-null `Throws`) returned **zero** matches.
+**Scope**: test files **authored by r2** since the 2026-08-31 diet (triage-category fix + R3-CARD + task 064).
+
+> **Scoping note (important).** A raw `git log --since=2026-08-31 -- tests/** '**/__tests__/**'` on this
+> branch lists ~60 files — but the branch has merged `origin/master` repeatedly, so that view is polluted
+> with **other projects'** tests that landed on master (Compose r8, ExternalAccess r3, UnifiedAccessControl
+> r2, SdapClient, the Create*Wizard services, Office contract tests from other streams). Those are **out of
+> scope** — each is dieted by its owning project. The r2-authored delta is isolated to the four files below,
+> confirmed by inspecting r2's own commits: `309e7f674` (064), `2de7a006d`+`a5d2ae216` (R3-CARD),
+> `ceba44928`+`143739ded` (triage `$choices` fix).
 
 ## Summary
 
 | Class | Count | Action |
 |---|---|---|
-| MAINTAIN (KEEP at canonical path) | 20 | confirmed — no action |
-| SCAFFOLDING (DELETE candidate) | **0** | none |
-| AMBIGUOUS (reviewer judgment) | 0 | none |
-| PATH-VIOLATION-PROTECTED (`tests/unit/Sprk.Bff.Api.Tests/**`) | 8 | **KEEP** — pre-existing repo-wide location, load-bearing, no same-PR replacement |
-| Likely-swept (not R2 — external-access) | 3 | out of scope; no action |
-| **Total `.cs` tests touched** | **31** | — |
+| MAINTAIN (KEEP at canonical path) | 4 | confirmed |
+| SCAFFOLDING (DELETE candidate) | 0 | — |
+| AMBIGUOUS (reviewer judgment) | 0 | — |
+| PATH-VIOLATION (wrong KEEP path) | 0 | — |
+| Stale reliability-registry entries | 0 | — |
+| **Total r2-authored test files touched** | **4** | — |
 
 ## Delete commands
-
-**None.** Zero scaffolding-class tests. R2 added no `Mock<HttpMessageHandler>`, DI-registration, or ctor-null tests.
+None — no scaffolding-class tests. (Consistent with the 2026-08-31 run: 0 deletes.)
 
 ## Path-move commands
-
-**None emitted.** The 8 `tests/unit/Sprk.Bff.Api.Tests/**` files are flagged PATH-VIOLATION by heuristic 1 (that tree is not among the enumerated KEEP paths), but they are classified **PATH-VIOLATION-PROTECTED per the skill's behavior contract**: they test real behavior (footer injection, HMAC token signing, alias/tracking rungs, cross-path link, Graph normalizer, queue-feed, attachment-text, schema), live in the historical repo-wide BFF unit-test tree that predates R2, and have no same-PR replacement. Moving them is a repo-wide test-tree decision, not an R2 close-out action. Recorded for a future test-architecture sweep, not deleted.
+None — both C# files are already at canonical KEEP paths.
 
 ## Maintain — confirmed (no action)
 
-| KEEP path | Files | Why maintain |
+| File:scope | KEEP path | Why maintain |
 |---|---|---|
-| `tests/integration/seam/Communication/**` | EmailPropose, EmailTriage, EmailRegardingIntent, EmailCreateTask, EmailUploadCapture, EmailAttachmentAction, CommunicationProposalApply, CreateTaskApply, CommsAssessedProducer, TriagePersistence, TestRoutingGate | Vertical-slice seam tests (KEEP path since ADR-038 §2 E-40) — DoD for the dispatch-spine + Pillar A/B/C/D/E behaviors |
-| `tests/integration/contract/Api/**` | ChatDocumentEndpointsContractTests, CommunicationsEndpointsContractTests | Endpoint contract tests (KEEP path) — the E1c `from-document` + Office comms endpoints |
-| `tests/unit/domain/Communication/**` | CategoryRoutingGateTests | Domain unit test (KEEP path) — FR-E task 057 routing gate |
-
-## PATH-VIOLATION-PROTECTED — keep (historical BFF unit-test tree)
-
-`tests/unit/Sprk.Bff.Api.Tests/**`: CommunicationServiceFooterTests, TrackingTokenSignerTests, TrackingTokenRungTests, RecipientAliasRungTests, GraphMessageNormalizerTests, CrossPathLinkTests, CommunicationAttachmentTextServiceTests, CommunicationQueueFeedServiceTests, DataverseEntitySchemaTests, CommunicationIntegrationTests. All behavioral; keep in place.
-
-## Likely-swept — out of R2 scope
-
-`tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs`, `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs`, `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalParticipationServiceInvalidationTests.cs` — matched the scope grep via a broad/merge commit but belong to the external-access workstream, not R2. No action.
-
-## Reliability registry
-
-No R2-touched `.cs` test method appears in `tests/.reliability-registry.json`; no stale entries to remove (registry `_exitRule` N/A).
+| `tests/integration/contract/Api/Ai/ChatDocumentEndpointsContractTests.cs` (064 `IngestFromDocument_*`) | `tests/integration/contract/**` | Behavior contract test: `IngestFromDocument_WhenArchive_Returns200…`, `_WhenDocumentMissing_ReturnsNotFound`, `_WhenNotEmailArchive_Returns422`, `_WhenCommunicationId_ResolvesArchiveAndReturns200` — real HTTP-status assertions on the E1c endpoint, `{Method}_{Scenario}_{ExpectedResult}` names, no `Mock<HttpMessageHandler>` / no `GetRequiredService` wiring / no ctor-null. Clean vs all 17 bans. |
+| `tests/integration/seam/Ai/ActionRunnerChoicesResolutionSeamTests.cs` (triage `$choices` enum injection) | `tests/integration/seam/**` | Real vertical-slice seam: live `ActionRunner` + `PromptSchemaRenderer` + `LookupChoicesResolver`; positive asserts the category enum lands in the constrained schema, control asserts free string. Not a wiring/mock test. |
+| `src/client/shared/Spaarke.Communication.Components/.../EmailAssociationsAndTracking.test.tsx` (E1b launcher + R3-CARD modal blocks) | co-located `__tests__` (shared-lib jest convention) | RTL behavior tests: "New record" launcher → `confirmCandidate` write; "See all" modal lists the hidden 4th + confirm files it; GUID-only card shows type+reason. Real component render + interaction + write-path assertion — not scaffolding. |
+| `src/client/shared/Spaarke.Communication.Components/.../__tests__/provenanceIdentity.test.ts` (R3-CARD logic) | co-located `__tests__` (shared-lib jest convention) | Pure-logic behavior tests: `looksLikeGuid` classification, `deriveConnections` name-fallback, `derivePrimaryReview.allCandidates` full-set-behind-top-3-cap. Value/state assertions, not coverage-filler. |
 
 ## Count delta
-
-- `.cs` tests touched during R2: 31
-- Classified MAINTAIN / PROTECTED-KEEP: 28
-- Classified SCAFFOLDING (delete): **0**
-- Classified AMBIGUOUS: 0
-- Out-of-scope swept: 3
-- **Net post-diet expected count: unchanged (no deletions).**
+- r2-authored test files touched since last diet: 4
+- MAINTAIN: 4 · SCAFFOLDING: 0 · AMBIGUOUS: 0 · PATH-VIOLATION: 0
+- Net post-diet expected count: unchanged (no deletes)
 
 ## Verdict
-
-**Clean diet — no reviewer action required.** R2's test additions are uniformly maintain-class behavioral/seam/contract tests. The only classifier flag is the pre-existing `tests/unit/Sprk.Bff.Api.Tests/**` location (repo-wide, not R2-introduced), protected from deletion by the skill's behavior contract.
+**Clean — 0 deletes, 0 path-moves, 0 ambiguous, 0 stale registry entries.** No reviewer action required.
+All four r2-authored deltas are behavior/contract/seam tests at their canonical KEEP paths (ADR-038 §7).
 
 ## Industry citation
-
-Build-vs-maintain per ADR-038 §7 (Beck scaffolding; Feathers characterization-vs-behavior; Google test-sizes). 17-ban classifier B1–B17.
+Build-vs-maintain criteria per ADR-038 §7 (Beck "delete the scaffolding"; Feathers characterization-vs-behavior; Google test-sizes). 17-ban classifier B1–B17; the eighth KEEP path (`tests/Spaarke.ArchTests/**`, Amendment A1) not exercised here.
