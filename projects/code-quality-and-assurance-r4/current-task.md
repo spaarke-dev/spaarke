@@ -97,7 +97,9 @@ Owner direction 2026-09-04: **run autonomously as long as it is safe and accurat
 - **`unified-access-control-r2` PR #939 — MERGED.** The skill-directives collision is resolved.
 - **`customer-provisioning-orchestration-r1`** (active) — unmerged edits to `.claude/adr/ADR-028`, `.claude/constraints/provisioning.md`, `.claude/patterns/provisioning/*`, `.claude/skills/provision-environment/SKILL.md`. **Will collide with P3 task 032's header backfill.** Mitigation (plan.md R7): the script is idempotent, so re-running after that branch merges is free.
 
-⚠️ **Branch is 13 commits behind `origin/master`** as of this checkpoint. Run `/worktree-sync` (Update Only) before the next wave — P3's backfill and P4's index both measure the tree at head.
+✅ **Synced with `origin/master` 2026-09-04** — merged 13 commits (email-communication-intelligence-r2 wrap-up + the Tier-1 CI fix), **0 behind**. Post-merge verification: `dotnet build Spaarke.sln` 0 errors / 5 pre-existing CA2024 warnings; ArchTests **199/199**.
+
+> **Worth knowing before P3/P5**: master's commit `ce5c2c3d7` — *"fix(ci): Tier 1 compiles the whole solution — closes the shadow window's false green"* — changed `.github/workflows/ci-tier1-blocking.yml`. r4 has not touched that file (its one permitted workflow is task 035), so there was no conflict, but tasks 035/054/056/058 should read it before adding sections.
 
 ---
 
