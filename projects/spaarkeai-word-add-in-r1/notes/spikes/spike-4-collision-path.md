@@ -94,6 +94,24 @@ forbids, without closing this spike or coordinating with UAC-r2 task 094.
   fix against a surface that FR-11 is about to shrink, and it leaves FR-12's false premise standing.
 - **Impact**: FR-12 and task 025 are re-scoped, not descoped. D2 needs its own owner (see §6).
 
+### ✅ Operator decision — 2026-09-08
+
+1. **Path C → B accepted.** Build FR-11 (023 → 024) first, re-measure the residual collision surface,
+   then amend FR-12 against what is actually left. No project-scoped exception is granted for new
+   Office-path collision logic ahead of FR-11.
+2. **F-h (D2) is owned by this project.** There is no other open project to route it to, and r1 is
+   already in this code. Filed as **task 028**.
+3. **🔴 Binding constraint on 028 — the fix is host-neutral.** The remedy MUST apply to Outlook as
+   well as Word, and MUST NOT branch on which host called. This is achievable as stated because the
+   editable/immutable axis is **`SaveContentType`**, not host: `Email` and `Attachment` (Outlook) are
+   immutable captures for which suppress is correct; `Document` (Word today, any host tomorrow) is
+   editable and requires link/graduate. `OfficeDocumentPersistence` already switches on
+   `SaveContentType` at lines 94-96, 133 and 178, so one branch in the shared persistence path lands
+   for both hosts by construction. Any design that introduces a Word-vs-Outlook Office.js API
+   divergence to solve this is out of contract — the divergence belongs in the host adapters, never
+   in save or dedup semantics. This also satisfies spec.md:274 ("fixed at the shared path… not
+   patched only in the add-in").
+
 ## 6. Recommended plan
 
 | # | Work | Owner | Depends on | Note |
@@ -101,7 +119,7 @@ forbids, without closing this spike or coordinating with UAC-r2 task 094.
 | 1 | Close **005** formally via `task-execute`, this report as input | 005 | — | Ratifies §2 and unblocks 025 |
 | 2 | Operator decides the §5 path (C-then-B recommended) | operator | 1 | Blocks 3 and 5 |
 | 3 | Build **FR-11** version-save: 023 (server) → 024 (client) | 023, 024 | 012 | **Strictly serial** — data-integrity. NFR-08: override routes link/graduate |
-| 4 | **D2 as its own defect**: editable saves must link/graduate, not suppress | ⚠️ **unowned — needs a task** | — | Not currently any task's job. `/defer` it if it lands outside r1 |
+| 4 | **D2/F-h**: editable saves must link/graduate, not suppress — **host-neutral, keyed on `SaveContentType`** | **028** (opus / xhigh) | — | ✅ owned by r1 per the 2026-09-08 decision. Mirror `ComposeService.PromoteIfEphemeralAsync`. Independent of 1-3; can start now |
 | 5 | Re-scope **025** against the measured residual; `/conflict-check` vs UAC-r2 **094** first | 025 | 2, 3 | May shrink to "surface the typed error", or may need a coordinated server change |
 | 6 | Amend FR-12 in `spec.md` to match §2 | — | 2 | Its premise is false as written |
 

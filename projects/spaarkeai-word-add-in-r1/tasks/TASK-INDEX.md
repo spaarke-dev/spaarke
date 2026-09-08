@@ -1,7 +1,7 @@
 # Task Index — `spaarkeai-word-add-in-r1`
 
 > **Generated**: 2026-09-04 by `/project-pipeline` (initialize-only)
-> **Total**: 35 tasks across 5 phases
+> **Total**: 36 tasks across 5 phases (028 added 2026-09-08 — finding F-h)
 > **Status legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked · ⏭️ deferred
 
 **Execute via `task-execute` only.** Never read a POML and implement manually (root CLAUDE.md §4).
@@ -25,16 +25,21 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 
 > ⛔ **006/007/008 are BLOCKED pending an operator decision.** Task 001's escalation trigger 3 fired: the UNASSIGNED bucket contains 11 errors in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` — **outside the `office-addins` package**, pulled in by the `@spaarke/communication-components` path alias. FR-18's "typecheck clean" cannot be met by 006+007+008 alone. Two further findings change the decomposition: the split measures **309 / 45 / 4** (not balanced), and **75% of the debt (296/395) is in test files** whose suite is already red (13/21 suites failing on a missing `jest-dom` registration). See [`notes/typecheck-baseline.md`](../notes/typecheck-baseline.md) § Recommendations.
 
-> 🔄 **005 has its evidence but is NOT closed.** [`notes/spikes/spike-4-addin-collision-path.md`](../notes/spikes/spike-4-addin-collision-path.md)
-> confirms finding **F-a**: the add-in rides `POST /api/office/save` → the **no-policy** `UploadSmallAsync`
-> overload, which hard-codes `ConflictBehavior.Replace` ([`UploadSessionManager.cs:103`](../../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs#L103)).
+> 🔄 **005 has its evidence but is NOT formally closed** (gathered as a review repair, not a `task-execute` run;
+> the POML's "small vs large payload", "implementation sketch" and "open questions" sections are still owed).
+> [`notes/spikes/spike-4-collision-path.md`](../notes/spikes/spike-4-collision-path.md) confirms finding **F-a**:
+> the add-in rides `POST /api/office/save` → the **no-policy** `UploadSmallAsync` overload, which hard-codes
+> `ConflictBehavior.Replace` ([`UploadSessionManager.cs:103`](../../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs#L103)).
 > UAC-r2's shipped `Fail` default is on the client/OBO path the add-in does not use, so **FR-12's
 > "consume, do not rebuild" premise is false** and its acceptance criterion cannot be met as written.
-> The report also surfaces **D2**, a 🔴 unowned data-loss shape: editable Word saves run the *immutable
-> suppress* path ([`OfficeDocumentPersistence.cs:78-85`](../../../src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs#L78-L85)),
-> which `DEDUP-AND-SAVE-BACK-IDENTITY.md` §3 forbids for editable documents (NFR-08 requires link/graduate).
-> **Two operator decisions are required** before 005 → ✅ and 025 unblocks — see report §5 (root CLAUDE.md §6.5).
 > A commit implementing a collision fix ahead of this spike (`45f45f626`) was **reverted** (`0b68943d1`); report §7.
+>
+> ✅ **Operator decisions, 2026-09-08** (report §5): **(1)** path **C → B** — build FR-11 (023 → 024) first,
+> re-measure the residual collision surface, then amend FR-12 against what is left. No exception is granted for
+> new Office-path collision logic ahead of FR-11; **025** is re-scoped and now depends on 023/024.
+> **(2)** **F-h is owned by r1** as task **028**, and its fix is **host-neutral** — keyed on `SaveContentType`
+> (`Email`/`Attachment` immutable, `Document` editable), never on Word-vs-Outlook. Host divergence belongs in the
+> client adapters, never in save or dedup semantics.
 
 **Gate**: typecheck clean · four spike reports in `notes/spikes/` · FR-01, FR-12 and FR-20 scope decided.
 
@@ -68,6 +73,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 025 | FR-12: surface collision handling per the Spike-4 outcome — ⚠️ **needs re-scope**, premise falsified | ⛔ | FULL | sonnet / high | — | **005**, 023, 024 |
 | 026 | FR-09: related-to record card honoring the two-slot model | 🔲 | FULL | sonnet / high | P2-b | 013 |
 | 027 | FR-10: open the related record and the Document record | 🔲 | FULL | sonnet / high | P2-b | 003, 026 |
+| 028 | 🔴 **F-h/NFR-08**: editable Office saves must link/graduate, never immutable-suppress | 🔲 | FULL | **opus / xhigh** | — | none |
 
 **Gate**: identified document saves as a version, not a duplicate row · override creates a linked copy · profile displays · record card opens the record.
 
@@ -181,7 +187,7 @@ Six discovery findings modify spec assumptions. Full detail in [`../plan.md`](..
 | ID | One-line | Owning task |
 |---|---|---|
 | **F-a** | The shipped collision handling is on an upload path the add-in does not use — ✅ **CONFIRMED** 2026-09-08, [spike-4 report](../notes/spikes/spike-4-addin-collision-path.md) | 005 → 025 |
-| **F-h** | 🔴 **NEW, UNOWNED** — editable Word saves run the *immutable suppress* dedup path, which NFR-08 / `DEDUP-AND-SAVE-BACK-IDENTITY.md` §3 forbid; two distinct drafts that are momentarily byte-identical collapse into one record | **needs a task** ([spike-4 §3 D2](../notes/spikes/spike-4-addin-collision-path.md)) |
+| **F-h** | 🔴 Editable Office saves (**both hosts**) run the *immutable suppress* dedup path, which NFR-08 / `DEDUP-AND-SAVE-BACK-IDENTITY.md` §3 forbid; two distinct drafts that are momentarily byte-identical collapse into one record | **028** — owned by r1 per operator decision 2026-09-08; host-neutral, keyed on `SaveContentType` ([spike-4 §3 D2](../notes/spikes/spike-4-collision-path.md)) |
 | **F-b** | FR-16's similarity engine has **no per-row authorization** | 032 (gates 033) |
 | **F-c** | No single endpoint returns similar documents *and* records | 034 |
 | **F-d** | FR-11's `ExistingDocumentId` hook is inert on both sides | 023, 024 |
