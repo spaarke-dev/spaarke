@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
 
 namespace Sprk.Bff.Api.Services.Communication.Access;
@@ -8,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// <summary>
 /// Default <see cref="IDirectThreadAccessService"/> — see the interface for the mechanism + Component
 /// Justification. Reads/writes <c>sprk_communicationthread</c> via the canonical
-/// <see cref="IGenericEntityService"/> (SDK) and POA shares via <see cref="IDataverseAccessGrantService"/>
+/// <see cref="IGenericEntityService"/> (SDK) and POA shares via <see cref="IDataverseRecordShareService"/>
 /// (Web API). Singleton-safe: all three dependencies are stateless singletons.
 /// </summary>
 public sealed class DirectThreadAccessService : IDirectThreadAccessService
@@ -31,7 +32,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private const int MaxCandidateThreads = 50;
 
     private readonly IGenericEntityService _entityService;
-    private readonly IDataverseAccessGrantService _accessGrant;
+    private readonly IDataverseRecordShareService _accessGrant;
     private readonly Lazy<IThreadMembershipDerivationService> _membershipDerivation;
     private readonly ILogger<DirectThreadAccessService> _logger;
 
@@ -47,7 +48,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// </param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
-        IDataverseAccessGrantService accessGrant,
+        IDataverseRecordShareService accessGrant,
         Lazy<IThreadMembershipDerivationService> membershipDerivation,
         ILogger<DirectThreadAccessService> logger)
     {
@@ -89,7 +90,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var threadId = await _entityService.CreateAsync(thread, ct);
 
         // Establish the explicit two-party list: "Manage access" (POA) share to the other participant.
-        await _accessGrant.GrantAccessAsync(ThreadEntitySet, threadId, otherSystemUserId, ReadAccessRights, ct);
+        await _accessGrant.GrantAccessAsync(
+            ThreadEntitySet, threadId, DataversePrincipalRef.User(otherSystemUserId), ReadAccessRights, ct);
 
         _logger.LogInformation(
             "Created Direct thread {ThreadId} owned by {Owner}, shared to {Other}",
@@ -121,7 +123,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         IReadOnlyList<Guid> shared;
         try
         {
-            shared = await _accessGrant.GetSharedSystemUserIdsAsync(ThreadEntity, threadId, ct);
+            shared = await GetSharedSystemUserIdsAsync(threadId, ct);
         }
         catch (Exception ex)
         {
@@ -148,7 +150,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// UNCHANGED). <b>Open / record-anchored</b> (topology gate on <see cref="GetParticipantSystemUserIdsAsync"/>
     /// returns empty) → the task-041 <see cref="IThreadMembershipDerivationService.DeriveAuthorizedSetAsync"/>
     /// systemuser participants (contacts skipped — R2 scope). No second grant mechanism: both branches call
-    /// the SAME <see cref="IDataverseAccessGrantService.GrantAccessAsync"/>.
+    /// the SAME <see cref="IDataverseRecordShareService.GrantAccessAsync"/>.
     /// </remarks>
     public async Task GrantMessageAccessAsync(Guid communicationId, Guid threadId, CancellationToken ct = default)
     {
@@ -190,7 +192,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         {
             try
             {
-                await _accessGrant.GrantAccessAsync(MessageEntitySet, communicationId, principalId, ReadAccessRights, ct);
+                await _accessGrant.GrantAccessAsync(
+                    MessageEntitySet, communicationId, DataversePrincipalRef.User(principalId), ReadAccessRights, ct);
             }
             catch (Exception ex)
             {
@@ -262,11 +265,32 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var candidates = await _entityService.RetrieveMultipleAsync(query, ct);
         foreach (var candidate in candidates.Entities)
         {
-            var shared = await _accessGrant.GetSharedSystemUserIdsAsync(ThreadEntity, candidate.Id, ct);
+            var shared = await GetSharedSystemUserIdsAsync(candidate.Id, ct);
             if (shared.Contains(sharedCandidateId))
                 return candidate.Id;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The <c>systemuser</c> principals holding a POA share on a thread.
+    /// </summary>
+    /// <remarks>
+    /// Task 060: the seam's read is principal-KIND-typed (it must be — teams now share through the same
+    /// client), so the Direct-thread caller projects it back to the systemuser ids this service reasons
+    /// about. That filter is what the pre-060 <c>GetSharedSystemUserIdsAsync</c> primitive merely
+    /// ASSUMED, so this tightens the no-leak property rather than relaxing it: a team share on a thread
+    /// can no longer be mistaken for a participating user.
+    /// </remarks>
+    private async Task<IReadOnlyList<Guid>> GetSharedSystemUserIdsAsync(Guid threadId, CancellationToken ct)
+    {
+        var shares = await _accessGrant.GetPrincipalAccessAsync(ThreadEntity, threadId, ct);
+
+        return shares
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser)
+            .Select(s => s.Principal.Id)
+            .Distinct()
+            .ToList();
     }
 }

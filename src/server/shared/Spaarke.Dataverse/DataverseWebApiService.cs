@@ -20,8 +20,8 @@ namespace Spaarke.Dataverse;
 /// <para><b>Runtime surface (RED-4 hardening, 2026-08-16):</b> this class serves ONLY the narrow
 /// interfaces <see cref="IEventDataverseService"/> and <see cref="IFieldMappingDataverseService"/>
 /// (wired in <c>GraphModule.cs</c>), plus the concrete-injected impersonation/POA methods
-/// (<c>RetrieveMultipleImpersonatedAsync</c>, <c>GrantAccessAsync</c>, <c>GetSharedSystemUserIdsAsync</c>)
-/// reached via the <c>IImpersonatedCommunicationQuery</c> / <c>IDataverseAccessGrantService</c> seams in
+/// (<c>RetrieveMultipleImpersonatedAsync</c>, <c>GrantAccessAsync</c>, <c>RevokeAccessAsync</c>, <c>GetPrincipalAccessAsync</c>)
+/// reached via the <c>IImpersonatedCommunicationQuery</c> / <c>IDataverseRecordShareService</c> seams in
 /// <c>CommunicationModule.cs</c>. Document / analysis / generic-entity / processing-job / KPI /
 /// communication-query / health capability all resolve to <see cref="DataverseServiceClientImpl"/>
 /// (SDK) — the former implementations of those surfaces here were runtime-dead and were removed.
@@ -1050,14 +1050,19 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <summary>
-    /// Grants POA access on a record to a <c>systemuser</c> principal — the OOB "Manage access" (GrantAccess)
-    /// mechanism, app-only. <paramref name="accessRightsCsv"/> is the Dataverse <c>AccessMask</c> literal (e.g.
+    /// Grants POA access on a record to a principal — the OOB "Manage access" (GrantAccess) mechanism,
+    /// app-only. <paramref name="accessRightsCsv"/> is the Dataverse <c>AccessMask</c> literal (e.g.
     /// <c>"ReadAccess"</c> or <c>"ReadAccess,AppendAccess"</c>).
     /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 060: generalized from systemuser-only to any
+    /// <see cref="DataversePrincipalKind"/>. This is the ONE place a <c>GrantAccess</c> payload is built —
+    /// <c>PlaybookSharingService</c>'s private team-grant duplicate was deleted in favour of it.
+    /// </remarks>
     public async Task GrantAccessAsync(
         string entitySetName,
         Guid recordId,
-        Guid principalSystemUserId,
+        DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
     {
@@ -1071,7 +1076,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             {
                 ["Principal"] = new Dictionary<string, object>
                 {
-                    ["@odata.id"] = $"systemusers({principalSystemUserId})",
+                    ["@odata.id"] = $"{principal.Kind.ToEntitySet()}({principal.Id})",
                 },
                 ["AccessMask"] = accessRightsCsv,
             },
@@ -1082,44 +1087,117 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <summary>
-    /// Reads the principals with an ACTIVE POA share on a record, as <c>systemuser</c> ids. Assumes every
-    /// share on the record was written by a Spaarke systemuser-only grant flow (R1 Direct-thread scope is
-    /// internal-only per <c>notes/access-model-decision.md</c> config prerequisite #3 — no team/contact
-    /// shares are written by this path, so no <c>principaltypecode</c> filter is needed to disambiguate).
-    /// Fails soft: a lookup error returns an empty list rather than throwing (callers treat "no shares" as
-    /// the safe default — see <see cref="Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService"/>).
+    /// Revokes a principal's POA share on a record — the OOB <c>RevokeAccess</c> action, app-only.
+    /// Revoking a share that does not exist is a Dataverse no-op (it succeeds), which is what makes
+    /// revoke safely idempotent for callers.
     /// </summary>
-    public async Task<IReadOnlyList<Guid>> GetSharedSystemUserIdsAsync(
+    /// <remarks>
+    /// unified-access-control-r2 task 060. Takes the SAME key shape as
+    /// <see cref="GrantAccessAsync(string, Guid, DataversePrincipalRef, string, CancellationToken)"/>
+    /// (entity set + record id + principal) — the A-13/FR-16 matcher lesson: a revoke keyed differently
+    /// from its grant silently fails to match the row it was meant to remove.
+    /// </remarks>
+    public async Task RevokeAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        CancellationToken ct = default)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["Target"] = new Dictionary<string, object>
+            {
+                ["@odata.id"] = $"{entitySetName}({recordId})",
+            },
+            ["Revokee"] = new Dictionary<string, object>
+            {
+                ["@odata.id"] = $"{principal.Kind.ToEntitySet()}({principal.Id})",
+            },
+        };
+
+        var response = await SendPostAsJsonAsync("RevokeAccess", payload, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Reads the principals with an ACTIVE POA share on a record, with the kind and rights mask of each
+    /// share. Fails soft: a lookup error returns an empty list rather than throwing (callers treat
+    /// "no shares" as the safe default — see
+    /// <see cref="Sprk.Bff.Api.Services.Access.IDataverseRecordShareService"/>).
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 060: replaces <c>GetSharedSystemUserIdsAsync</c>, which selected only
+    /// <c>principalid</c> and ASSUMED every share on the record was a systemuser. Now that teams are shared
+    /// through this same seam, the assumption is unsafe, so <c>principaltypecode</c> is selected and the
+    /// principal is returned typed — callers filter for the kind they mean. Rows whose principal type this
+    /// seam does not model are skipped rather than guessed at.
+    /// </remarks>
+    public async Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
         string entityLogicalName,
         Guid recordId,
         CancellationToken ct = default)
     {
         var objectTypeCode = await GetEntityObjectTypeCodeAsync(entityLogicalName, ct);
         if (objectTypeCode == 0)
-            return Array.Empty<Guid>();
+            return Array.Empty<DataversePrincipalAccess>();
 
-        var url = $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq {objectTypeCode}&$select=principalid";
+        var url = $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq {objectTypeCode}"
+            + "&$select=principalid,principaltypecode,accessrightsmask,modifiedon";
         var response = await SendGetAsync(url, ct);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "GetSharedSystemUserIdsAsync failed for {Entity}({RecordId}): {StatusCode}",
+                "GetPrincipalAccessAsync failed for {Entity}({RecordId}): {StatusCode}",
                 entityLogicalName, recordId, response.StatusCode);
-            return Array.Empty<Guid>();
+            return Array.Empty<DataversePrincipalAccess>();
         }
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
         if (data?.Value is null)
-            return Array.Empty<Guid>();
+            return Array.Empty<DataversePrincipalAccess>();
 
-        return data.Value
-            .Select(row => row.TryGetValue("principalid", out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g)
-                ? g
-                : (Guid?)null)
-            .Where(g => g.HasValue)
-            .Select(g => g!.Value)
-            .Distinct()
-            .ToList();
+        var results = new List<DataversePrincipalAccess>(data.Value.Count);
+        foreach (var row in data.Value)
+        {
+            if (!TryReadGuid(row, "principalid", out var principalId))
+                continue;
+
+            if (!TryReadInt(row, "principaltypecode", out var principalTypeCode))
+                continue;
+
+            var kind = DataversePrincipalRefExtensions.FromPrincipalTypeCode(principalTypeCode);
+            if (kind is null)
+                continue;
+
+            TryReadInt(row, "accessrightsmask", out var mask);
+
+            var modifiedOn = row.TryGetValue("modifiedon", out var modifiedElement)
+                && modifiedElement.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(modifiedElement.GetString(), out var parsedModified)
+                    ? parsedModified
+                    : DateTimeOffset.UtcNow;
+
+            results.Add(new DataversePrincipalAccess(
+                new DataversePrincipalRef(kind.Value, principalId), mask, modifiedOn));
+        }
+
+        return results;
+    }
+
+    private static bool TryReadGuid(Dictionary<string, JsonElement> row, string property, out Guid value)
+    {
+        value = Guid.Empty;
+        return row.TryGetValue(property, out var element)
+            && element.ValueKind == JsonValueKind.String
+            && Guid.TryParse(element.GetString(), out value);
+    }
+
+    private static bool TryReadInt(Dictionary<string, JsonElement> row, string property, out int value)
+    {
+        value = 0;
+        return row.TryGetValue(property, out var element)
+            && element.ValueKind == JsonValueKind.Number
+            && element.TryGetInt32(out value);
     }
 
     public async Task UpdateRecordFieldsAsync(

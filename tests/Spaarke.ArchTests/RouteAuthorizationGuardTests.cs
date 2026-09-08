@@ -1021,7 +1021,7 @@ public class RouteAuthorizationGuardTests
         "AccessRights",                  // the rights enum — a filter comparing rights is deciding
         "IAccessibleRecordSetService",   // the accessible-record-set gate (external / contact plane)
         "RetrievePrincipalAccess",       // the impersonated Dataverse call
-        "IDataverseAccessGrantService",  // explicit grants
+        "IDataverseRecordShareService",  // explicit grants + revokes (renamed from IDataverseAccessGrantService, uac-r2 task 060)
         "ICommunicationAccessFilter",    // the communication-scoped decision seam
 
         // Added after running Rule B against the real 30-filter surface. Both of these ARE genuine

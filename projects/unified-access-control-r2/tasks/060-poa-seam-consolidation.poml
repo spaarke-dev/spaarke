@@ -4,7 +4,7 @@
     <title>Consolidate the two POA share clients into one principal-parameterized seam with revoke (FR-28/FR-29 prerequisite)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>startable once 010 (FR-09 idempotent grant/revoke semantics) is merged; independent of Phases 1-3 files</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-critical write path (.cs, auth): POA shares ARE record access; two divergent clients merging is exactly where a regression grants or strands access.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -95,7 +95,23 @@
     <criterion testable="true">Build green; publish size ≤ 60 MB reported with delta.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md Placement table; design.md §3. Consumed by 061 (secure provisioning) and 063 (share endpoints).</notes>
+  <notes>spec.md Placement table; design.md §3. Consumed by 061 (secure provisioning) and 063 (share endpoints).
+
+COMPLETED 2026-09-08 (session 4). Two POA clients became ONE: `IDataverseRecordShareService`
+(`Services/Access/`, renamed from `IDataverseAccessGrantService` because it no longer only grants,
+and moved out of `Communication/` because it is now cross-cutting). Grant + Revoke + read, all
+parameterized by `DataversePrincipalRef(Kind, Id)` — one method set, not per-kind overloads.
+`PlaybookSharingService`s private POA helpers are DELETED and delegate; its uncached ObjectTypeCode
+lookup went with them. Concrete primitives extended in place on `DataverseWebApiService` (never
+duplicated). Escalation trigger did NOT fire — both clients already sent the same AccessMask CSV
+shape, so there was no semantic disagreement to reconcile (reasoning recorded in the notes file).
+Two latent bugs fixed as a consequence: the playbook POA read reported USER shares as teams named
+"Unknown Team", and the thread read assumed every share was a systemuser. Verified: build 0 errors
+0 warnings, ArchTests 194/194 (191 + 3 new guards, perturbation-checked both ways), BFF unit
+12,178 pass / 0 fail / 58 skipped, 0 vulnerable packages. Publish delta measured against a FRESH
+build of the pre-task commit in a clean worktree (see notes §8 — an in-place rebuild inflated the
+PDB by 5 MB and nearly produced a false +4.95 MB regression report). Full record:
+notes/phase4-poa-consolidation.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -621,7 +621,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 [open] 060 | POA seam consolidation (2→1, +revoke) | FR-28/29 pre | **010** | — | ❌ | **opus** | **xhigh** |
+| ✅ [done] 060 | POA seam consolidation (2→1, +revoke) | FR-28/29 pre | **010** | — | ❌ | **opus** | **xhigh** |
 | 🔲 [open] 061 | Secure provisioning rework — svc-acct owner, share-only | FR-28 | 060,**008** | **P4-W2** | ❌ | sonnet | high |
 | 🔲 [open] 062 | **NFR-05 role-depth standing assertion** | FR-28 | 034 | **P4-W2** | ✅ | sonnet | high |
 | 🔲 [open] 063 | Internal system-user share endpoints (delegation-gated) | FR-29 | 060,**008**,010 | **P4-W3** | ❌ | sonnet | high |
