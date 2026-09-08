@@ -4,7 +4,7 @@
     <title>Spike-2: Office Dialog API for opening a record</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Research and decision-record task producing a new notes artifact, not code. No .ts/.tsx/.cs file is modified, so the Step 9.5 gates have no code surface to inspect. STANDARD rather than MINIMAL because the four answers determine the entire shape of task 027 (FR-10) and weaken or hold FR-13's "finish editing in the record" premise.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -122,7 +122,9 @@ The documented fallback is option (c) in the owner's framing: read-only record d
 
 No `&lt;justification&gt;` block is present: this task creates no new code surface, only a project notes artifact in the already-provisioned notes/spikes/ directory.
 
-Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and modify no source. Safe to run all four concurrently.</notes>
+Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and modify no source. Safe to run all four concurrently.
+
+**Completed 2026-09-08.** Deliverable: `projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md`. Desk research independently verified against two fetched Microsoft Learn pages (`dialog-api-in-office-add-ins` updated 2026-06-24, `Office.UI` reference updated 2026-08-31) and MDN's `frame-ancestors` page (2026-08-27), plus in-repo evidence (`AuthService.ts`, `OfficeNaaStrategy.ts`, `outlook/manifest.json`, `staticwebapp.config.json`, and a repo-wide grep confirming zero production `displayDialogAsync`/`messageParent`/`messageChild` usage — greenfield). The `.claude/agent-memory/researcher/MEMORY.md` 2026-09-08 lead was treated as a lead only and its framing-refusal conclusion was **revised**: the Dialog API's default mode is a top-level window, not an iframe, so Dataverse's CSP `frame-ancestors` does not apply to it (question (a) resolves favorably on both platforms). Questions (b) and (d) also resolve more favorably than the lead suggested (no new Entra registration needed under any option; cross-domain `messageParent` is technically supported via Dialog Origin 1.1) — but (d) still fails for a raw MDA form specifically, because Dataverse's `main.aspx` never calls `Office.context.ui.messageParent` (Microsoft does not instrument it for Dialog API cooperation), and question (c) (form usability at dialog dimensions — save, lookup picker, subgrid) remains genuinely UNVERIFIED and can only be resolved by a live Word desktop + MDA tenant probe (the recipe is in the report). **Recommendation: option (3)**, the documented fallback — read-only detail in-pane + `Office.context.ui.openBrowserWindow` escape hatch — chosen because it is the only option with zero remaining platform risk that only a live probe could resolve, consistent with this project's guardrail against building ahead of spike verification (task 005's reverted commit). No escalation trigger fired. `git status` confirms no file was added or modified under `src/client/office-addins/` by this task (pre-existing dirty state on `webpack.config.js`, `word/taskpane/index.tsx`, `word/word-manifest.xml`, `word/manifest.json` predates this session and is untouched by it). Task closed as fully complete — no residual operator-gate blocks task 027 from proceeding with the option-(3) design; the operator verification recipe is offered only for anyone who later wants to revisit options (1)/(2), not as a precondition for closing this task.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
