@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -577,6 +578,25 @@ public class OfficeService : IOfficeService
                 JobId = jobId,
                 StatusUrl = $"/api/office/jobs/{jobId}",
                 StreamUrl = $"/api/office/jobs/{jobId}/stream"
+            };
+        }
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict)
+        {
+            _logger.LogInformation(
+                "Office save rejected because the file name already exists for {ContentType}: {ErrorMessage}",
+                request.ContentType,
+                ex.Message);
+
+            return new SaveResponse
+            {
+                Success = false,
+                Error = new SaveError
+                {
+                    Code = OfficeErrorCodes.DocumentAlreadyExists,
+                    Message = ex.Message,
+                    Details = ex.ErrorCode,
+                    Retryable = false
+                }
             };
         }
         catch (Exception ex)

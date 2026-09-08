@@ -112,11 +112,11 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
 
   // Conflict errors (409)
   OFFICE_011: {
-    title: 'Document Exists',
-    message: 'This document has already been saved to the selected entity.',
-    type: 'info',
+    title: 'File name already exists',
+    message: 'A file with this name already exists and was not overwritten.',
+    type: 'warning',
     recoverable: false,
-    action: 'View the existing document or select a different entity.',
+    action: 'Choose Save version for the existing document or Save as new with a different name.',
   },
 
   // Service errors (502)

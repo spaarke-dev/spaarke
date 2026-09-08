@@ -460,6 +460,17 @@ public static class OfficeEndpoints
             "OFFICE_007" => ProblemDetailsHelper.OfficeAssociationTargetNotFound("entity", Guid.Empty, correlationId),
             "OFFICE_009" => ProblemDetailsHelper.OfficeAccessDenied(correlationId),
             "OFFICE_012" => ProblemDetailsHelper.OfficeSpeUploadFailed(error.Message, correlationId),
+            "OFFICE_011" => Results.Problem(
+                type: "https://spaarke.com/errors/office/document_exists",
+                title: "Document already exists",
+                detail: error.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = error.Code,
+                    ["correlationId"] = correlationId,
+                    ["retryable"] = false
+                }),
             _ => Results.Problem(
                 title: "Save Failed",
                 detail: error.Message,
