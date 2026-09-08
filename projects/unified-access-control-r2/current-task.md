@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-07, session 3 END** (by `context-handoff`) — reflects through commit `c17c4e730`. ⚠️ **Refresh this line every time you write here.** It once read 2026-09-04 while the file's last commit was 2026-09-07; a gap between this stamp and `git log -1 --format=%ci current-task.md` is the signal this skill's Failure Modes table says means the handoff was incomplete.
+> **Last Updated**: **2026-09-08, session 4 END** — reflects through commit `10acd5345`. ⚠️ **Refresh this line every time you write here.** A gap between this stamp and `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
 > ⚠️ **This project's notes have now been WRONG FIFTEEN times.** Verify before believing —
 > counts, route names, schema claims, "already done" claims, open-vs-answered questions.
@@ -15,11 +15,13 @@
 
 | Field | Value |
 |---|---|
-| **Branch** | `work/unified-access-control-r2` @ `c17c4e730` · clean · 0 unpushed · **50 ahead** of master · ⚠️ **6 BEHIND** — merge `origin/master` before starting 060 |
-| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · `Router` was GREEN at `d4b3b6720`; **re-check `gh pr checks 950`** after the latest pushes |
-| **Task status** | **53 completed · 2 completed-with-escalation (012, 071) · 1 blocked-shipped (034) · 36 open · 92 total.** Machine-counted 2026-09-07 with **python, not grep** (see G-16). ⚠️ The long-standing "53 completed / 1 escalation / 37 open" figure was **wrong** — it counted **071** as plain `completed`. 56 terminal / 36 open. Drift gate green: 92 POMLs = 92 index rows |
-| **Next Action** | **Task 060 — consolidate the two POA share clients into one seam** (3–4 h, **opus @ xhigh**, `parallel-safe=false`). Startable now: its only dependency (010) is complete. **Then 061 immediately after.** |
-| **🔴 The goal both serve** | **Task 061 — the explicit share for Secure Projects.** Task 021 shipped the isolation (memberless owner team + BU) but *not* the share, so a secure project is currently **isolated and unreachable by any human** — a locked box. Owner-directed 2026-09-07 to fix it. ⚠️ **061 CANNOT go first**: its mechanism is "issue shares via the 060 seam", and doing it before 060 means writing a THIRD POA client, which 060's constraints and root §11 both forbid. Verified chain: `010 ✅ → 060 🔲 → 061 🔲`, with `008 ✅` also satisfied. |
+| **Branch** | `work/unified-access-control-r2` @ `10acd5345` · clean · **0 behind** master (merged `origin/master` 2026-09-08) |
+| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · was **ALL-GREEN** at `ae035b41f` (Router, Tier 1 blocking, ArchTests, Trivy) · **re-check `gh pr checks 950`** after the task-060 pushes |
+| **Task status** | **54 completed · 2 completed-with-escalation (012, 071) · 1 blocked-shipped (034) · 35 open · 92 total.** Task **060 closed 2026-09-08**. 57 terminal / 35 open. Drift gate green: 92 POMLs = 92 index rows. ⚠️ **Python was NOT available in session 4** (only Microsoft Store stubs) — the "use python, not grep" advice below assumes an interpreter that may not be there. **PowerShell is the reliable UTF-8-safe fallback**; `grep -cF '[open]'` on the ASCII status tokens also works and is unaffected by G-16. |
+| **Next Action** | **Task 061 — the explicit share for Secure Projects** (`061-secure-project-provisioning-rework.poml`, sonnet @ high, 3–4 h). **Its blocker is gone**: 060 shipped the seam it consumes. Issue shares through `IDataverseRecordShareService` (`src/server/api/Sprk.Bff.Api/Services/Access/`) — it now has **revoke** as well as grant, and takes `DataversePrincipalRef.User(id)` / `.Team(id)`. **Do not write a POA client**: `PoaShareClientSingletonGuardTests` fails the build if a second `GrantAccess`/`RevokeAccess` payload site appears. |
+| **🔴 Why 061 matters** | Task 021 shipped the isolation (memberless owner team + named BU) but *not* the share, so a secure project is **isolated and unreachable by any human** — a locked box. Owner-directed 2026-09-07 to fix it. As of 2026-09-08 the seam it needs exists; 061 is now unblocked and is the priority. |
+| **Task 060 outcome** | Two POA clients → **one** (`IDataverseRecordShareService`, renamed from `IDataverseAccessGrantService` and moved out of `Communication/Access/` because it is cross-cutting). Grant + **Revoke** + `GetPrincipalAccessAsync`, parameterized by principal kind. `PlaybookSharingService`'s private helpers deleted (525 → 479 lines). Escalation trigger did **not** fire — both clients already sent the same AccessMask CSV. Build 0 warnings · ArchTests **194/194** · BFF unit **12,178 pass / 0 fail / 58 skipped** · 0 vulnerable packages · publish delta **+0.00 MB**. Record: [`notes/phase4-poa-consolidation.md`](notes/phase4-poa-consolidation.md). |
+| **⚠️ New measurement hazard (§10)** | A publish measured from **this worktree** reported **+4.95 MB** — one rounding from §10's escalation threshold — and was **false**. The entire delta was the PDB (7,349 KB in-place vs 2,303 KB fresh) against a DLL that moved 48 KB: accumulated incremental-build state. CLAUDE.md §10 names two hazards (ageing baseline, zip tool); **this is a third — the build environment**. Build **both** sides in fresh worktrees, not just master. An `obj`/`bin` clean that prints nothing may have matched nothing. Full write-up: notes §8. **Recommended (not done — needs owner sign-off since it edits root CLAUDE.md + requires a `.claude/CHANGELOG.md` entry): add this third hazard to §10.** |
 | **Also done 2026-09-07** | **uuid CVE-2026-41907 closed in LegalWorkspace** (`16b75e97f`) — `overrides: uuid ^14.0.0`, resolves 14.0.2, build green (3,874 modules, artifact marginally smaller). Ours by causation: `9edbb011c` on this branch declared the Tiptap deps that brought uuid@10 in. **The other two instances of this CVE (`src/solutions/SpaarkeAi`, `src/client/shared/Spaarke.Compose.Components`) are master-resident since 2026-07-17/21, are NOT this project's surface, and are deliberately untouched.** |
 
 ### ⚠️ Status is stored in THREE places, not two — the drift checker covers only two
@@ -62,7 +64,7 @@ returns **0**. No code path lets a caller name the container its bytes land in.
   **master 45.46 → branch 45.48 MB (+0.02)** vs a *fresh* master build @ `91cecb07d` · **0 vulnerable
   packages**. Guard perturbation-checked both ways, residue-checked clean.
 
-### 🚀 COLD START: how to begin task 060 (everything needed; nothing to re-derive)
+### 🗄️ HISTORICAL — cold start for task 060 (COMPLETED 2026-09-08; kept for the diff table only)
 
 **First three commands**, in order:
 
