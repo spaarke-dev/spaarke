@@ -113,3 +113,46 @@ When it closes: `071 cutover → 075 soak (7d) → 077 retire sdap-ci.yml → 07
   "unreadable".
 - **`rg-spaarke-platform-dev` and `rg-spaarke-platform-prod` differ by one word.** The dev pair is
   live (the provisioning control-plane). Check which one you are pointed at.
+
+---
+
+## UPDATE — end of 2026-08-31 session: NOTHING IS BLOCKED ON THE OPERATOR
+
+Two more gate defects were found and fixed after the sections below were written.
+**No action is required from the owner. The cutover is now waiting on a clock, not on work.**
+
+### Fixed after the fact
+
+- **PR #921 — Compose Client Gate had NEVER been green** (0 green runs in 40+ master builds).
+  Root cause was NOT Compose: `.gitattributes` has `*.docx filter=lfs` and `actions/checkout`
+  does not smudge LFS by default, so CI read a 128-byte pointer as a Word document. Three sibling
+  jobs already had `lfs: true`; this one was missed. After: 104 suites / 1336 tests pass.
+  It stayed invisible because the job is `continue-on-error: true` — SDAP CI reported success
+  while the job failed.
+- **PR #944 — Tier 1 `compile` now builds `Spaarke.sln`, not one csproj.** This closes the shadow
+  window's single false green (#934: a test project stopped compiling; legacy caught it, Tier 1
+  did not). Proven by re-seeding the break: old scope "Build succeeded", new scope `CS1503`.
+  Also added **`Spaarke.Core.Tests` to the solution** — 46 tests (64 at runtime) that no CI job
+  had ever built or run. They pass. Tier 1 Compile cost: 98s -> 2m37s.
+
+### The honest finding from this session
+
+**Zero product defects were found or fixed.** Every dark test that was switched on passed. The
+work was entirely in the detection apparatus. Test-to-production ratio is **1.06:1**
+(63,181 vs 59,774 lines), ~10,204 test attributes, and only **11** known flaky tests (0.1%).
+
+Flakiness is NOT this repo's problem. **65% of skips are test-INFRASTRUCTURE gaps** — and they
+are concentrated in endpoint/integration suites (`ChatActionsEndpointTests`,
+`OfficeEndpointsContractTests`, `EmailAnalysisIntegrationTests`, ...). The cheap unit tests all
+run and pass; the expensive ones most likely to find a real defect are the ones that never run.
+
+**Highest-value next work (if any test work is done at all): finish `CustomWebAppFactory`.**
+It is the single blocker behind ~44 skipped integration tests. Everything else in the CI area is
+at diminishing returns.
+
+### Operator decisions — OPTIONAL, none blocking
+
+1. Prod-subscription split — only matters when the RG restructure starts.
+2. Orphaned Entra app reg `spaarke-bff-api-prod` (cred valid to 2027-03-13, **SP disabled**, so
+   not exploitable).
+3. Sweep for other hidden `continue-on-error` reds — two were found this session BY ACCIDENT.
