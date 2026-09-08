@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Project wrap-up — verify the nine success criteria, run /test-diet, archive</title>
+    <phase>Wrap-up</phase>
+    <gate>all phases complete or explicitly stopped</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Closeout documentation plus the mandatory /test-diet gate; no new implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Verification against a closed set of nine stated criteria plus standard closeout steps.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Updates projects/INDEX.md and project artifacts; closeout must be a single serialized operation.</parallel-reason>
+    <deps>045,058</deps>
+    <tags>wrapup,docs,quality</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: verify each of the nine success criteria by EXERCISING its mechanism rather than asserting it, run /test-diet per the binding project-close gate, write lessons-learned, and update the portfolio and registry.</prompt>
+  <role>SPAARKE platform developer closing a project. Verify by running things; a criterion marked met without evidence is the failure mode this project exists to address.</role>
+  <goal>Every success criterion has recorded evidence, /test-diet has run, and the project is archived with an honest record of what shipped and what did not.</goal>
+
+  <context>
+    <background>spec.md Success Criteria (nine) and CLAUDE.md §7's binding project-close test-diet gate. r4 may legitimately stop after any phase per NFR-01, so this task must handle a partial close honestly — recording which phases shipped and which were deliberately not started, without presenting an incomplete project as complete.</background>
+    <relevant-files>
+      <file role="modify">projects/code-quality-and-assurance-r4/README.md</file>
+      <file role="new">projects/code-quality-and-assurance-r4/notes/lessons-learned.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="045" status="pending">P4 complete — or explicitly recorded as not started.</dependency>
+      <dependency task="058" status="pending">P5 complete — or explicitly recorded as not started.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (CLAUDE.md §7): /test-diet MUST run before the project is marked complete. Skipping is a HARD WARNING and the wrap-up PR must cite the report or document the skip rationale.</constraint>
+    <constraint source="spec">Scope (verification method): each of the nine criteria is verified by EXERCISING the mechanism — add the synthetic 16th package, read the audit issue body, introduce a phantom yml reference, seed a known-equivalent symbol. An asserted criterion is not a verified one.</constraint>
+    <constraint source="spec">Scope (criterion 7): verify with git diff --stat .github/workflows/ that exactly ONE workflow was added across the entire project.</constraint>
+    <constraint source="spec">Scope (criterion 9): verify each phase declared its net new concepts and none exceeded one (P1=0, P2=1, P3=1, P4=1, P5=1).</constraint>
+    <constraint source="project">Scope (partial close): if the project stops after an early phase, record exactly which phases shipped and which were not started. Do NOT mark unshipped phases as complete or deferred-without-reason.</constraint>
+    <constraint source="project">Scope (spec reconciliation): confirm spec.md FR-10 was updated to the revision-header standard (plan.md risk R4). If not, record the divergence explicitly rather than letting spec and implementation disagree silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project closeout</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>projects/code-quality-and-assurance-r4/plan.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read the nine success criteria.</step>
+    <step order="1">Verify criteria 1–6 by exercising each mechanism; record the evidence for each.</step>
+    <step order="2">Verify criterion 7: git diff --stat .github/workflows/ shows exactly one addition.</step>
+    <step order="3">Verify criterion 8: each shipped phase merged as its own PR and delivered its capability standalone.</step>
+    <step order="4">Verify criterion 9: net new concepts per phase, none exceeding one.</step>
+    <step order="5">Confirm the spec.md FR-10 reconciliation (risk R4); record the outcome.</step>
+    <step order="6">Run /test-diet and cite the report.</step>
+    <step order="7">Write lessons-learned, including which phases shipped and which did not.</step>
+    <step order="8">Update README status, projects/INDEX.md, and the portfolio Project Issue.</step>
+    <step order="9">Reset current-task.md to none.</step>
+    <step order="10">Update TASK-INDEX.md: set task 090 status to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any success criterion cannot be verified by exercising its mechanism, record it as UNVERIFIED with the reason. Do NOT mark it met on the strength of the code looking correct — this project's entire premise is that unexercised claims decay, and closing it with unexercised claims would be self-refuting.</trigger>
+    <trigger>If criterion 7 shows more than one added workflow, STOP and escalate. NFR-04 was a hard project constraint and a second workflow means it was violated somewhere.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No closeout record exists for this project. Every completed Spaarke project carries a notes/lessons-learned.md and, since 2026-06-26, a notes/test-diet-report.md — see projects/code-quality-and-assurance-r3/notes/ for the shape.</existing>
+    <extension>No, and it is not a new component: both files are mandated closeout artifacts (CLAUDE.md §7 and the binding project-close test-diet gate), one per project by convention. Folding them into an existing project's notes would misattribute r4's record to another project.</extension>
+    <cost-of-doing-nothing>The project closes with no record of which phases shipped, which were deliberately not started, and which success criteria were verified versus asserted — and the §7 test-diet gate goes unrun, which is a HARD WARNING.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/lessons-learned.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/README.md</output>
+    <output type="doc">projects/INDEX.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the nine success criteria, evidence from exercising its mechanism is recorded — or it is explicitly marked UNVERIFIED with a reason.</criterion>
+    <criterion testable="true">Given criterion 7, git diff --stat .github/workflows/ shows exactly one addition.</criterion>
+    <criterion testable="true">Given /test-diet, it has run and its report is cited.</criterion>
+    <criterion testable="true">Given lessons-learned, it records which phases shipped and which were not started.</criterion>
+    <criterion testable="true">Given the FR-10 reconciliation, its outcome is recorded.</criterion>
+    <criterion testable="true">Given README, INDEX.md, and the Project Issue, all reflect the final state.</criterion>
+    <criterion testable="true">Negative: no criterion is marked met without recorded evidence.</criterion>
+    <criterion testable="true">Negative: no unshipped phase is presented as complete.</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandatory per CLAUDE.md §7. r4 may stop cleanly after any phase per NFR-01, so a partial close is a legitimate outcome — as long as it is recorded honestly.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

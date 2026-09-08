@@ -1,8 +1,8 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Amended 2026-07-12)
+> **Status**: Accepted (Amended 2026-07-12, 2026-09-04)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-07-12 (Amendment: `@spaarke/visuals` presentational sibling — see below)
+> **Last Updated**: 2026-09-04 (Amendment: closed 15-package enumeration + the three promotion-evaluation questions — see below)
 
 ---
 
@@ -42,7 +42,55 @@ Adding another shared package is a high bar. **All three** MUST hold — otherwi
 
 Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reuse test applies: extend the existing package.
 
-**Sanctioned shared packages (as of this amendment)**: `@spaarke/ui-components` (UX components + abstracted-I/O services), `@spaarke/visuals` (presentational data-viz), `@spaarke/auth` (auth), plus the domain component libraries (`@spaarke/events-components`, etc.). New siblings require an ADR amendment.
+**Sanctioned shared packages**: see the **closed enumeration** in the 2026-09-04 amendment below. New siblings require an ADR amendment.
+
+---
+
+## Amendment (2026-09-04): closed enumeration + promotion questions
+
+> **Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md#65-adr-conflict-resolution-protocol-binding--added-2026-06-29-by-spaarkeai-compose-r1).** Introduced by `code-quality-and-assurance-r4` (spec FR-01 + FR-03), **pre-declared in that project's `spec.md` ADR Tensions table** — not a silent edit.
+>
+> - **Rule challenged**: the 2026-07-12 amendment's sanctioned-set sentence — *"…plus the domain component libraries (`@spaarke/events-components`, **etc.**). New siblings require an ADR amendment."*
+> - **Conflict**: the two halves of that sentence contradict each other. "etc." leaves the sanctioned set **unbounded**, so any new sibling can be claimed as already covered — which makes the amendment requirement in the very next clause **unenforceable**, and unenforceable by construction rather than by neglect. An ADR cannot require an amendment to join a set whose membership it declines to state.
+> - **Path**: **B (amend)** — the rule is no longer correct as written. Path C (comply) is not available: there is nothing to comply *with* while the set is open. Path A (project exception) would leave the defect in place for everyone else.
+> - **Rationale**: a closed set is what makes the existing amendment rule mean something, and it is what `SharedPackageCensusTests` (FR-02) asserts against. Enumeration is also the cheaper half of the fix — the set is small and already exists on disk.
+> - **Scope of the amendment**: enumeration + evaluation questions **only**. No package is added, removed, deprecated, or regressed; the 2+ consumer trigger is **unchanged**; the three-part bar for a new sibling package (above) is unchanged.
+
+### Sanctioned shared packages — closed enumeration
+
+**Exactly 15**, one per directory under `src/client/shared/` (enumerated from the filesystem 2026-09-04). This list is **closed**: a directory that is not on it is not sanctioned, and adding one requires an amendment to this ADR. There is deliberately no "etc."
+
+| # | Directory | Package | Why it is in the shared library |
+|---|---|---|---|
+| 1 | `Spaarke.UI.Components` | `@spaarke/ui-components` | The primary library — Fluent v9 UX components, hooks, and abstracted-I/O services consumed across PCF, Code Pages, and the SPA. The default destination; every other package needs a reason not to be this one. |
+| 2 | `Spaarke.Visuals` | `@spaarke/visuals` | Presentational data-viz primitives, quarantining the heavyweight `@fluentui/react-charting` dependency from every `ui-components` consumer (2026-07-12 amendment). |
+| 3 | `Spaarke.Auth` | `@spaarke/auth` | Token acquisition, authenticated fetch, and the token bridge — the one auth path every surface shares (ADR-028). |
+| 4 | `Spaarke.SdapClient` | `@spaarke/sdap-client` | The typed BFF/SDAP API client. Shared so request shapes and error handling cannot drift per surface. |
+| 5 | `Spaarke.Events.Components` | `@spaarke/events-components` | Events/Tasks surfaces — dual-use (Pattern D): the standalone EventsPage code page **and** the SpaarkeAi Calendar workspace widget. The canonical dual-use precedent. |
+| 6 | `Spaarke.SmartTodo.Components` | `@spaarke/smart-todo-components` | Smart To Do — dual-use across the LegalWorkspace section shim and SpaarkeAi widget registration. |
+| 7 | `Spaarke.DailyBriefing.Components` | `@spaarke/daily-briefing-components` | Daily Briefing — dual-use across the standalone code page and the SpaarkeAi workspace widget. |
+| 8 | `Spaarke.Communication.Components` | `@spaarke/communication-components` | Communications — dual-use across the `communications-list` workspace widget and the standalone `sprk_communicationspage`. |
+| 9 | `Spaarke.Compose.Components` | `@spaarke/compose-components` | The TipTap-based Compose drafting workspace (editor, toolbar, workspace), mounted by the LegalWorkspace section shim. React 19; not PCF-safe. |
+| 10 | `Spaarke.DocumentOperations` | `@spaarke/document-operations` | Cross-surface document verbs — Open-in-Word web/desktop, download, delete, email-link, send-to-index — shared by SemanticSearch and Compose so the verbs behave identically in both. |
+| 11 | `Spaarke.AI.Context` | `@spaarke/ai-context` | AI context providers, service clients, and hooks — the shared entry to AI features for React 19 surfaces. |
+| 12 | `Spaarke.AI.Widgets` | `@spaarke/ai-widgets` | Workspace and context widgets for the three-pane shell. |
+| 13 | `Spaarke.AI.Outputs` | `@spaarke/ai-outputs` | Output-pane and source-pane widgets plus their component registries — the render half of the AI surface, kept separate from the context half. |
+| 14 | `Spaarke.Notifications` | `@spaarke/notifications` | The host-agnostic notification-spine client: SignalR negotiate/connect, envelope routing by kind, poll fallback on disconnect. |
+| 15 | `Spaarke.LegalWorkspace` | `@spaarke/legal-workspace` | A **package boundary**, not a component set — it exists to eliminate the SpaarkeAi ← LegalWorkspace source-alias trap by re-exporting a barrel over files that stay under `src/solutions/LegalWorkspace/src/`. Source-only; excluded from the build orchestrator by design (peer deps are unresolvable standalone; consumers type-check it). |
+
+**Anticipatory promotion is legitimate and no package here is a removal candidate.** `@spaarke/visuals` was promoted ahead of broad demand and today has **one** declared consumer (the VisualHost PCF); that is a normal state for a package promoted on the strength of its contract, not a defect and not grounds for un-promotion. Likewise `@spaarke/legal-workspace` and `@spaarke/ai-context` each have a single declared consumer today. **This enumeration is not a cleanup list** — nothing on it is deprecated, regressed, or marked for removal.
+
+### The 2+ consumer trigger is a trigger to EVALUATE, not a mandate
+
+Two or more consumers is the point at which you **stop and ask** whether something belongs in the shared library. It is **not** a threshold that promotes automatically, and it is **not** a bar that must be cleared before promoting — anticipatory promotion at zero or one consumer remains legitimate (see `@spaarke/visuals`).
+
+When the trigger fires, answer three questions in writing:
+
+1. **Is the API stable across the consumers, or would each need its own branching?** Branch-per-consumer inside a shared component is a sign the commonality is shallower than it looks.
+2. **Is it testable in isolation, without standing up consumer fixtures?** If the only way to test it is through a host, it is probably still host code.
+3. **Is the commonality semantic or coincidental?** Two surfaces that render similar markup for unrelated reasons will diverge on the next requirement; two that express the same domain concept will not.
+
+> **None of these three is a gate.** They are prompts for a written judgment, not criteria to clear. **A component that answers badly on any or all of them may still be promoted, provided the reason is stated.** Conversely, a component that answers well on all three is not thereby *required* to be promoted. Anyone reading this list as a checklist to pass has misread it — the output of this evaluation is a sentence of reasoning, not a score.
 
 ---
 
@@ -222,9 +270,11 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ## When to Add to Shared Library
 
+> The left column lists **triggers to evaluate**, not conditions that promote automatically. When one fires, answer the [three promotion-evaluation questions](#the-2-consumer-trigger-is-a-trigger-to-evaluate-not-a-mandate) in writing — none of which is a gate.
+
 | Add to Shared Library | Keep in Consumer |
 |----------------------|------------------|
-| Used by 2+ modules/surfaces | Truly module-specific rendering logic |
+| Used by 2+ modules/surfaces (**a trigger to evaluate — not a mandate, and not a bar to clear**) | Truly module-specific rendering logic |
 | Core Spaarke UX pattern (wizard, shell, grid) | Platform bootstrap code (`main.tsx`, PCF `index.ts`) |
 | Service with abstracted dependencies (`IDataService`) | Concrete platform API calls (`Xrm.WebApi`) |
 | Entity-specific wizard content (steps, forms) | One-off experimental UI |

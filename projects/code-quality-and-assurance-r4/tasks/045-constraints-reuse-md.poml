@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Document shipped reality — .claude/constraints/reuse.md, written last</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>040 complete, 041 complete, 042 complete, 043 complete, 044 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New constraint document; no code, no tests. Writes to .claude/, so the write boundary applies.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documenting mechanisms that already exist by the time this runs; the content is determined by what shipped.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/constraints/reuse.md and edits CLAUDE.md §11 — main-session only per root CLAUDE.md §3.</parallel-reason>
+    <deps>040,041,042,043,044</deps>
+    <tags>docs,constraints,reuse,governance</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write .claude/constraints/reuse.md LAST in this phase, documenting the reuse mechanisms as they actually shipped — 100 to 200 lines per the constraints/INDEX.md convention, POINTING AT CLAUDE.md §11 and ADR-012 rather than restating them. Add the pointer from CLAUDE.md §11.</prompt>
+  <role>SPAARKE platform developer authoring a constraint document. Describe what exists; do not design anything here.</role>
+  <goal>One home for the reuse procedure, pointing rather than duplicating, describing only mechanisms that actually shipped.</goal>
+
+  <context>
+    <background>spec.md FR-20. The ordering is deliberate: written last so it documents shipped reality rather than intent. A constraint document written first becomes a specification that the implementation then diverges from — which is the documentation-drift failure mode this project exists to address, and it would be an embarrassing one to commit inside the project that fixes it. It points rather than restates because CLAUDE.md §11 loads every turn and must stay short, while the ladder itself is procedure that belongs in a constraint.</background>
+    <relevant-files>
+      <file role="new">.claude/constraints/reuse.md</file>
+      <file role="modify">CLAUDE.md</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="canonical-reference">.claude/constraints/INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">The export index — a mechanism this documents.</dependency>
+      <dependency task="041" status="pending">Nightly regeneration.</dependency>
+      <dependency task="042" status="pending">The escalation ladder.</dependency>
+      <dependency task="043" status="pending">The equivalence check.</dependency>
+      <dependency task="044" status="pending">The divergence register.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (ordering): this task runs LAST in P4. It documents what shipped. If a described mechanism differs from what was built, the document is wrong — not the code.</constraint>
+    <constraint source="spec">Scope (length): 100–200 lines per the constraints/INDEX.md convention.</constraint>
+    <constraint source="spec">Scope (pointing not restating): POINT AT CLAUDE.md §11 and ADR-012. MUST NOT restate their content — a second copy of §11's three-question gate would drift from the original.</constraint>
+    <constraint source="spec">Scope (NFR-04, no second home): this is the ONE home for reuse rules. MUST NOT duplicate the ladder into task-create and code-review as prose; those skills reference this document.</constraint>
+    <constraint source="project">Scope (CLAUDE.md §11): add a pointer to this constraint and to the ADR-012 amendment. Keep the §11 addition to a sentence — it loads every turn.</constraint>
+    <constraint source="project">Scope (header): the new file carries a conformant revision header per task 030's standard, or task 033's census fails.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Constraint document authoring</topic>
+    <files>
+      <file>.claude/constraints/INDEX.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+      <file>docs/standards/FILE-REVISION-HEADER.md</file>
+    </files>
+    <patterns>
+      <pattern name="Constraint document" location=".claude/constraints/bff-extensions.md">Topic-scoped binding rules with pointers to the authoritative sources rather than copies of them.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Confirm tasks 040–044 are complete and read what actually shipped.</step>
+    <step order="1">Inventory the shipped mechanisms: index, regeneration, ladder, equivalence check, register.</step>
+    <step order="2">Write the constraint describing each as it exists, with pointers to CLAUDE.md §11 and ADR-012 rather than restatements.</step>
+    <step order="3">Add the revision header per task 030's standard.</step>
+    <step order="4">Add the one-sentence pointer in CLAUDE.md §11.</step>
+    <step order="5">Register in .claude/constraints/INDEX.md.</step>
+    <step order="6">Verify length is 100–200 lines and that no §11 or ADR-012 content is restated.</step>
+    <step order="7">Verify every mechanism described actually exists — no aspirational content.</step>
+    <step order="8">Update TASK-INDEX.md: set task 045 status to ✅.</step>
+    <step order="9">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of tasks 040–044 did not ship as designed, document what actually shipped and flag the divergence — do NOT describe the intended design. Writing this document last is precisely what makes that possible, and describing intent would recreate the drift the project exists to eliminate.</trigger>
+    <trigger>If the document cannot stay under 200 lines without restating §11 or ADR-012, STOP and escalate. The length limit and the no-restatement rule are both load-bearing, and trading one for the other needs an owner decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CLAUDE.md §11 states the reuse principle; ADR-012 governs shared components; bff-extensions.md is the analogous BFF-scoped constraint.</existing>
+    <extension>No. §11 is the principle and must stay short because it loads every turn; the FR-17 ladder is procedure. Without a constraint home, the ladder gets duplicated into task-create and code-review and drifts between them — which is exactly what NFR-04's no-second-home rule forbids.</extension>
+    <cost-of-doing-nothing>The ladder lives in two skill files with no canonical source. They drift, and a reader cannot tell which is authoritative.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">.claude/constraints/reuse.md</output>
+    <output type="doc">CLAUDE.md</output>
+    <output type="doc">.claude/constraints/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the constraint, it is between 100 and 200 lines.</criterion>
+    <criterion testable="true">Given the constraint, every mechanism it describes exists in the shipped code.</criterion>
+    <criterion testable="true">Given the constraint, it points at CLAUDE.md §11 and ADR-012 without restating them.</criterion>
+    <criterion testable="true">Given CLAUDE.md §11, it carries a one-sentence pointer to this constraint and the ADR-012 amendment.</criterion>
+    <criterion testable="true">Given the file, it carries a conformant revision header and passes task 033's census.</criterion>
+    <criterion testable="true">Given constraints/INDEX.md, the new constraint is registered.</criterion>
+    <criterion testable="true">Negative: no reuse rule is duplicated into task-create or code-review as prose.</criterion>
+    <criterion testable="true">Negative: no aspirational or not-yet-built mechanism is described.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-20. Completes P4, which is independently mergeable here per NFR-01. Written last by design — the ordering is the point.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

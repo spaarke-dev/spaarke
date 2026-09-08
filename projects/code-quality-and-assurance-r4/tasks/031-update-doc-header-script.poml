@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Build Update-DocHeader.ps1 — idempotent header application, zero LLM authoring</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>030 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A script that rewrites 230 governance files. A defect here corrupts the governance surface at scale, and the damage is spread across every primitive rather than isolated to one file.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Regex and file-rewriting work against a contract fully specified by task 030's standard; mechanical, with a named reference for every behaviour.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>scripts,automation,governance,tooling</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build scripts/quality/Update-DocHeader.ps1, which applies the task-030 header standard to markdown files mechanically — preserving every date that already exists, deriving what it can from git, and seeding only what it must. The owner's requirement is explicit: this runs by script and regex, not by LLM authoring, so 230 files cost one command rather than 230 edits.</prompt>
+  <role>SPAARKE platform developer writing repository tooling. Idempotence and non-destructiveness are the two properties that matter; a second run must produce no diff.</role>
+  <goal>An idempotent PowerShell script with -Path and -Check modes that migrates blockquote stamps to frontmatter without inventing a single date, and exits non-zero in -Check mode when a file is missing or malformed.</goal>
+
+  <context>
+    <background>spec.md FR-10 as amended. 87 of 94 patterns and 15 of 16 constraints carry a "> **Last Reviewed**:" blockquote; 63 of 71 skills carry frontmatter last-reviewed. The migration must PRESERVE those existing dates — a script that stamps everything with today's date destroys the very signal FR-12 ranks on, converting a real staleness measure into a uniform lie. Verified 2026-09-04: no script under scripts/** parses these headers, so changing the format breaks no existing consumer.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/Update-DocHeader.ps1</file>
+      <file role="canonical-reference">docs/standards/FILE-REVISION-HEADER.md</file>
+      <file role="canonical-reference">scripts/quality/post-edit-lint.sh</file>
+      <file role="canonical-reference">scripts/Validate-TaskPoml.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Defines the six fields, allowed values, and bump rules the script implements.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (preservation): parse existing blockquote values for Last Reviewed, Reviewed By, Status, and Last Updated and carry them into frontmatter unchanged. MUST NOT invent, overwrite, or default any date that already exists.</constraint>
+    <constraint source="project">Scope (derivation): where last-updated is absent, derive it from git log -1 --format=%as -- &lt;file&gt;. Do not use today's date as a fallback for a file with git history.</constraint>
+    <constraint source="project">Scope (seeding): seed version 1.0 and revision-type baseline for retroactive application. baseline is the honest value — it records that history predates versioning rather than claiming the file is newly authored.</constraint>
+    <constraint source="project">Scope (skills): for .claude/skills/*/SKILL.md, ADD the new keys to existing frontmatter only. MUST NOT modify or reorder description, tags, techStack, appliesTo, alwaysApply, or exemplar.</constraint>
+    <constraint source="project">Scope (cleanup): remove the migrated blockquote lines so there is one source of truth. Domain-specific blockquotes — Domain, Source ADR, See Also, Purpose — stay as prose and MUST NOT be removed.</constraint>
+    <constraint source="project">Scope (idempotence): a second run on an already-migrated tree MUST produce zero diff. This is the property that makes re-running after a merge free, which matters because ~17 worktrees are active.</constraint>
+    <constraint source="project">Scope (-Check mode): exits non-zero listing files missing or malformed. This is what task 033's census and CI call; it MUST NOT modify files in -Check mode.</constraint>
+    <constraint source="project">Scope (worktrees): MUST NOT walk .claude/worktrees/ or sibling worktree directories under any -Path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Repository tooling and mechanical migration</topic>
+    <files>
+      <file>docs/standards/FILE-REVISION-HEADER.md</file>
+      <file>projects/code-quality-and-assurance-r4/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Check-mode script" location="scripts/Validate-TaskPoml.ps1">Read-only lint with per-file findings and an exit code; the model for -Check.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read the task-030 standard.</step>
+    <step order="1">Implement blockquote parsing for the four migratable keys, tolerant of the formatting variations actually present in the tree.</step>
+    <step order="2">Implement frontmatter detection and merge for files that already have frontmatter (the skills case).</step>
+    <step order="3">Implement git-derived last-updated for files lacking it.</step>
+    <step order="4">Implement seeding of version and revision-type.</step>
+    <step order="5">Implement blockquote cleanup limited to the migrated keys, leaving domain-specific blockquotes intact.</step>
+    <step order="6">Implement -Check mode: read-only, per-file findings, non-zero exit on any missing or malformed header.</step>
+    <step order="7">Implement worktree exclusion.</step>
+    <step order="8">Test on a COPY of a representative sample — at least one skill (frontmatter present), one constraint (blockquote), one pattern (blockquote, no Last Updated), one ADR, and one genuinely undated file. Verify dates are preserved exactly.</step>
+    <step order="9">Verify idempotence: run twice on the sample copy; the second run must produce no diff.</step>
+    <step order="10">Update TASK-INDEX.md: set task 031 status to ✅.</step>
+    <step order="11">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any test-sample file would lose a date, a blockquote that is not one of the four migratable keys, or any body content, STOP. Do not proceed to task 032's live run. Non-destructiveness is the property the 230-file backfill depends on.</trigger>
+    <trigger>If a skill's existing frontmatter cannot be merged without reordering or rewriting its existing keys, STOP and escalate. Claude Code parses that frontmatter, and a reformat could change skill discovery behaviour repo-wide.</trigger>
+    <trigger>If idempotence cannot be achieved for some file shape, STOP and report which shape. A non-idempotent script cannot be safely re-run after a merge, which removes the mitigation for the worktree-collision risk.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>scripts/quality/ holds post-edit-lint.sh and task-quality-gate.sh (hooks, not migrators); scripts/Validate-TaskPoml.ps1 is a read-only linter. No script rewrites document headers.</existing>
+    <extension>No. Validate-TaskPoml.ps1 is deliberately read-only over POML task files; adding a write path over markdown governance files to it would give one script two subjects and two risk profiles. This script does reuse its -Check output shape.</extension>
+    <cost-of-doing-nothing>The 230-file backfill becomes LLM authoring — slow, expensive, non-idempotent, and impossible to re-run cleanly after a merge. The owner's explicit direction was that this must be scriptable.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="pwsh">Run and test the script</tool><tool name="git">Derive last-updated from history</tool></tools>
+
+  <outputs>
+    <output type="code">scripts/quality/Update-DocHeader.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a file with a blockquote Last Reviewed date, the script produces frontmatter carrying that exact date.</criterion>
+    <criterion testable="true">Given a file with no last-updated anywhere, the script derives it from git log and does not use today's date.</criterion>
+    <criterion testable="true">Given a SKILL.md with existing frontmatter, the script adds the new keys and leaves description/tags/techStack/appliesTo/alwaysApply/exemplar byte-identical.</criterion>
+    <criterion testable="true">Given an already-migrated file, a second run produces zero diff.</criterion>
+    <criterion testable="true">Given -Check mode over a tree with one unstamped file, the script exits non-zero, names that file, and modifies nothing.</criterion>
+    <criterion testable="true">Negative: no domain-specific blockquote (Domain, Source ADR, See Also, Purpose) is removed.</criterion>
+    <criterion testable="true">Negative: no path under .claude/worktrees/ or a sibling worktree is visited.</criterion>
+    <criterion testable="true">Negative: no date present before the run differs after it.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-10 as amended. Task 032 runs this against the live tree; task 033's census calls -Check. The same script serves the deferred docs/** backfill via -Path, which is why -Path is a parameter rather than a hardcoded root.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

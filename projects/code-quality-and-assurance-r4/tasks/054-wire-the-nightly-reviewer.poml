@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Wire the reviewer that already exists — as a section, not a workflow</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>035 complete, 051 complete, 052 complete, 053 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds CI execution over active branches with credentialed access on a contended hot path; scoping errors here run a reviewer across ~17 worktrees.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an existing prompt and an existing runner into an existing workflow; every component is already proven by this point.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows/nightly-governance.yml — contended hot path; main-session only.</parallel-reason>
+    <deps>035,051,052,053</deps>
+    <tags>ci-cd,code-review,governance,automation</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the nightly reviewer as a SECOND SECTION of the task-035 workflow — not a second workflow — scoped to the diff since last run plus PRs on active branches, covering the judgment-only checkable-by-reading ADRs, with findings landing in a rolling GitHub issue per active project. Non-blocking.</prompt>
+  <role>SPAARKE platform developer wiring CI. Every component already exists; this is plumbing, and the scope fence is the load-bearing part.</role>
+  <goal>The reviewer written in March finally runs, scoped tightly, reporting per project, blocking nothing.</goal>
+
+  <context>
+    <background>spec.md FR-23 (closed set a–e). A complete reviewer has sat unwired for six months while three documents claimed it ran nightly. The scoping constraint is what makes it useful rather than noise: run across the whole repo over ~17 worktrees, it produces thousands of findings about code nobody is currently touching. Scoped to the diff since last run plus PRs on active branches, and armed with each project's own checklist, its findings are about work in flight.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/nightly-governance.yml</file>
+      <file role="canonical-reference">scripts/quality/nightly-review-prompt.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/headless-runner-spike.md</file>
+      <file role="canonical-reference">.github/workflows/adr-audit.yml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">The workflow this becomes a section of.</dependency>
+      <dependency task="051" status="pending">The checklist path convention for per-project scope.</dependency>
+      <dependency task="052" status="pending">Proves the headless runner works. If it does not, this task does not proceed as designed.</dependency>
+      <dependency task="053" status="pending">The refreshed prompt.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (NFR-04): a SECTION of the task-035 workflow. MUST NOT create a second workflow file.</constraint>
+    <constraint source="spec">Scope (review scope): the diff since last run plus PRs on active branches. MUST NEVER review the whole repo, and MUST NEVER walk the ~17 sibling worktrees.</constraint>
+    <constraint source="spec">Scope (ADR coverage): the judgment-only + checkable-by-reading set from task 011's routing. Do not review what arch tests already assert.</constraint>
+    <constraint source="spec">Scope (output): a rolling GitHub issue per active project, updated idempotently — not one issue per finding and not one per night.</constraint>
+    <constraint source="spec">Scope (NFR-05): non-blocking. Exits 0 regardless of findings; gates no PR.</constraint>
+    <constraint source="project">Scope (no sub-agent): the owner rejected reviewer sub-agents. This runs the existing prompt.</constraint>
+    <constraint source="project">Scope (cost): bound the run using task 052's measured figures. An unbounded nightly review is a budget risk.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check before starting and before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Automated review wiring</topic>
+    <files>
+      <file>scripts/quality/nightly-review-prompt.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent per-subject issue" location=".github/workflows/adr-audit.yml">Find-or-create then update. The model for per-project rolling issues.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Confirm task 052 returned a positive result. Run /conflict-check.</step>
+    <step order="1">Add the reviewer section to the existing workflow.</step>
+    <step order="2">Implement scoping: diff since last run, plus PRs on active branches. Verify no sibling worktree is reachable.</step>
+    <step order="3">Feed each active project's checklist as scope input, using task 051's path convention.</step>
+    <step order="4">Restrict ADR coverage to the routed judgment-only + checkable-by-reading set.</step>
+    <step order="5">Implement per-project rolling issues, idempotently updated.</step>
+    <step order="6">Apply the cost bound from task 052.</step>
+    <step order="7">Test via manual dispatch on a small real diff. Confirm findings are scoped and the job exits 0.</step>
+    <step order="8">Verify two consecutive runs update rather than duplicate the per-project issues.</step>
+    <step order="9">Update TASK-INDEX.md: set task 054 status to ✅.</step>
+    <step order="10">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 052 returned a negative result, STOP. Do not build an alternative reviewer mechanism — that is a scope change the owner has not approved, and FR-23 explicitly forbids a sub-agent. Report and let P5 drop this requirement.</trigger>
+    <trigger>If the run cannot be scoped to the diff plus active PRs — if it can only run repo-wide — STOP and escalate. Repo-wide review across 17 worktrees produces findings nobody acts on, which is the failure this requirement is designed to avoid.</trigger>
+    <trigger>If measured cost at nightly cadence materially exceeds task 052's projection, STOP and report before merging.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="config">.github/workflows/nightly-governance.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a nightly run, the reviewer executes as a section of the existing workflow.</criterion>
+    <criterion testable="true">Given the scope, only the diff since last run and PRs on active branches are reviewed.</criterion>
+    <criterion testable="true">Given the ADR coverage, only judgment-only + checkable-by-reading ADRs are reviewed.</criterion>
+    <criterion testable="true">Given findings, they land in a rolling issue per active project.</criterion>
+    <criterion testable="true">Given two consecutive runs, per-project issues are updated rather than duplicated.</criterion>
+    <criterion testable="true">Given findings, the job exits 0 and gates no PR.</criterion>
+    <criterion testable="true">Negative: no second workflow file exists — git diff --stat .github/workflows/ still shows exactly one addition project-wide.</criterion>
+    <criterion testable="true">Negative: no sibling worktree is reviewed.</criterion>
+    <criterion testable="true">Negative: no reviewer sub-agent was introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-23 (closed set a–e). This is the six-months-unwired reviewer finally running — and the thing three docs falsely claimed was already happening (task 055 corrects those claims).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

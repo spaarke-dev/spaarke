@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Correct the four docs claiming a workflow that does not exist</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>054 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation corrections; no code, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Replacing false descriptions with what actually shipped; the true state is known by this point.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P5-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>054</deps>
+    <tags>docs,ci-cd,governance</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Correct the four documents that describe a nightly-quality.yml with five jobs, SonarCloud, and a sub-15-minute target — a workflow that does not exist. Replace the fiction with what actually shipped in P3 and P5.</prompt>
+  <role>SPAARKE platform developer correcting documentation. Describe what exists; delete what never did.</role>
+  <goal>No document describes a nonexistent workflow, and each instead describes the real nightly governance job.</goal>
+
+  <context>
+    <background>spec.md FR-24. The spec names three documents; a fourth was found during pipeline discovery on 2026-09-04 — docs/procedures/DEPENDENCY-MANAGEMENT.md also references nightly-quality.yml. This is the project's own evidence base in miniature: a document described a mechanism, nobody built it, and the description survived for months because prose has no compiler. Task 035's mechanism-claim check now catches recurrence, which is why this correction is durable rather than another point-in-time cleanup.</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/ci-cd-architecture.md</file>
+      <file role="modify">docs/procedures/ci-cd-workflow.md</file>
+      <file role="modify">docs/procedures/testing-and-code-quality.md</file>
+      <file role="modify">docs/procedures/DEPENDENCY-MANAGEMENT.md</file>
+      <file role="canonical-reference">.github/workflows/nightly-governance.yml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="054" status="pending">The real workflow must be complete so the corrections describe shipped reality rather than intent.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (four documents): the three named in FR-24 plus docs/procedures/DEPENDENCY-MANAGEMENT.md, found 2026-09-04.</constraint>
+    <constraint source="spec">Scope (remove the fiction): no document may describe nightly-quality.yml, its five jobs, SonarCloud integration, or the sub-15-minute target. None of it exists.</constraint>
+    <constraint source="project">Scope (describe reality): replace with an accurate description of the shipped nightly governance workflow. Do NOT describe planned or future capability.</constraint>
+    <constraint source="project">Scope (verify exhaustively): grep the whole repo for nightly-quality and SonarCloud. Four documents are known; confirm there is no fifth.</constraint>
+    <constraint source="project">Scope (minimal edits): correct the false claims. Do not restructure the documents.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Documentation accuracy</topic>
+    <files>
+      <file>docs/architecture/ci-cd-architecture.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read the shipped workflow so corrections describe it accurately.</step>
+    <step order="1">Grep the whole repo for nightly-quality and SonarCloud; confirm the full set of affected files.</step>
+    <step order="2">Correct each document: remove the nonexistent workflow's description, replace with the real one.</step>
+    <step order="3">Check each document for other stale CI claims encountered while editing, and correct or flag them.</step>
+    <step order="4">Re-grep to confirm no reference to the phantom workflow remains.</step>
+    <step order="5">Verify task 035's mechanism-claim check now passes clean on these documents.</step>
+    <step order="6">Update TASK-INDEX.md: set task 055 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a fifth document is found describing the phantom workflow, correct it too and record the finding — the spec said three, discovery found four, and a fifth would mean the phantom propagated further than anyone measured.</trigger>
+    <trigger>If SonarCloud turns out to be genuinely configured somewhere, STOP and report before removing its description. The claim was that it does not exist; if it does, the correction would introduce a new inaccuracy in the opposite direction.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">docs/architecture/ci-cd-architecture.md</output>
+    <output type="doc">docs/procedures/ci-cd-workflow.md</output>
+    <output type="doc">docs/procedures/testing-and-code-quality.md</output>
+    <output type="doc">docs/procedures/DEPENDENCY-MANAGEMENT.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a repo-wide grep, no document references nightly-quality.yml.</criterion>
+    <criterion testable="true">Given each of the four documents, it accurately describes the shipped nightly governance workflow.</criterion>
+    <criterion testable="true">Given task 035's mechanism-claim check, it reports no findings for these documents.</criterion>
+    <criterion testable="true">Negative: no document describes five jobs, SonarCloud, or a sub-15-minute target that does not exist.</criterion>
+    <criterion testable="true">Negative: no document describes planned rather than shipped capability.</criterion>
+    <criterion testable="true">Negative: no document was restructured beyond the corrections.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-24, with the fourth document added from pipeline discovery 2026-09-04. Serves success criterion 4 — docs cannot claim mechanisms that do not exist.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

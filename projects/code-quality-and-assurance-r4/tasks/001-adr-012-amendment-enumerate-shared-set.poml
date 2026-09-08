@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Amend ADR-012 — enumerate the 15 shared packages and record the three evaluation questions</title>
+    <phase>1 The shared surface is knowable</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>ADR amendment (documentation), no code or tests. Not a FULL trigger, but it is an architectural-record change under CLAUDE.md §6.5 path B, so it carries a declared amendment obligation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The 15 packages and the three questions are both fully specified by spec FR-01/FR-03; this is careful literal authoring against a closed set, not open architectural reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/adr/ADR-012-shared-components.md — sub-agents cannot write to .claude/ paths (root CLAUDE.md §3). Main-session only.</parallel-reason>
+    <deps>none</deps>
+    <tags>docs,adr,governance,shared-components</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend .claude/adr/ADR-012-shared-components.md so the sanctioned shared set is a closed, enumerated list of exactly the 15 directories under src/client/shared/, one line of reason each, and so the 2+ consumer rule is recorded as a trigger to EVALUATE with three written questions rather than a mandate to promote or a bar to clear. This is a CLAUDE.md §6.5 path-B amendment, pre-declared in spec.md's ADR Tensions table.</prompt>
+  <role>SPAARKE platform developer maintaining architectural decision records. Precise, literal, conservative — an ADR amendment changes a rule that other work depends on.</role>
+  <goal>ADR-012 names all 15 shared packages with a reason each, contains no "etc." in its sanctioned-set definition, records the three promotion-evaluation questions explicitly as non-gates, and states the amendment under §6.5 path B.</goal>
+
+  <context>
+    <background>spec.md FR-01 + FR-03. ADR-012 today says the sanctioned set is "the domain component libraries (…, etc.)" while simultaneously requiring an ADR amendment for new siblings — the "etc." makes the set unbounded and the amendment rule unenforceable, which is self-defeating. The 2+ consumer promotion trigger also has no written evaluation criteria, so "2+ consumers" reads as a mandate. This task closes both gaps. Owner position, recorded in spec.md Owner Clarifications: the 2+ trigger is NOT raised to three, anticipatory promotion is legitimate, and NO existing package is retroactively justified or un-promoted.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-012-shared-components.md</file>
+      <file role="canonical-reference">src/client/shared/</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites — P1 is the entry phase and touches nothing hot.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Scope (this amendment only): enumerate the sanctioned set and record the evaluation questions. Do NOT change the 2+ consumer trigger to any other number — the owner explicitly rejected raising it to three.</constraint>
+    <constraint source="spec">Scope (all 15 packages): MUST NOT un-package, regress, deprecate, or mark for removal any existing shared component. FR-01 is enumeration, not cleanup. @spaarke/visuals has 0 current consumers and MUST be recorded as legitimately anticipatory, not as a candidate for removal.</constraint>
+    <constraint source="spec">Scope (the three questions): none of them is a gate. Anything failing any of the three may still be promoted with a stated reason. Wording MUST make this explicit — a reader must not be able to mistake them for criteria to clear.</constraint>
+    <constraint source="project">Scope (CLAUDE.md §6.5): this is a path-B amendment pre-declared in spec.md's ADR Tensions table. State that in the ADR's amendment note. Do NOT treat it as a silent edit.</constraint>
+    <constraint source="project">Scope (.claude/ only): edit the concise ADR at .claude/adr/. If docs/adr/ carries a fuller ADR-012 history, note the amendment there too, but do not restate the concise content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared component library governance</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>projects/code-quality-and-assurance-r4/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR amendment under §6.5" location="CLAUDE.md §6.5">Path B — context changed, the prior decision is no longer correct as written. Record ADR in question, the specific rule challenged, the conflict, the chosen path, and the rationale.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read ADR-012, spec.md FR-01/FR-03, and spec.md's ADR Tensions row for ADR-012.</step>
+    <step order="1">Enumerate the 15 directories under src/client/shared/ directly from the filesystem — do not copy a list from any document, which may be stale. Confirm the count is exactly 15.</step>
+    <step order="2">For each package, write one line of reason it is in the shared library. Record @spaarke/visuals as legitimately anticipatory (0 current consumers is not a defect).</step>
+    <step order="3">Replace the "…, etc." sanctioned-set language with the closed enumeration. Verify no "etc." remains anywhere in the sanctioned-set definition.</step>
+    <step order="4">Record the three promotion-evaluation questions: (1) is the API stable across consumers or does each need branching; (2) is it testable in isolation without consumer fixtures; (3) is the commonality semantic or coincidental. State explicitly that none is a gate and that a package failing any of them may still be promoted with a stated reason.</step>
+    <step order="5">Add the §6.5 path-B amendment note: rule challenged, conflict, path, rationale, and that it was pre-declared in spec.md's ADR Tensions.</step>
+    <step order="6">Update TASK-INDEX.md: set task 001 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the filesystem shows a count other than 15 directories under src/client/shared/, STOP and escalate per CLAUDE.md §6 rather than amending to whatever count you find. The count is load-bearing for task 002's census, and a change since 2026-09-04 means either a package landed without an amendment (which is the violation this ADR exists to catch) or the spec's baseline is wrong.</trigger>
+    <trigger>If amending ADR-012 would require changing the 2+ consumer trigger to make the text coherent, STOP — the owner explicitly rejected that change. Escalate rather than adjusting the trigger.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/adr/ADR-012-shared-components.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given ADR-012, all 15 directories under src/client/shared/ are named, each with one line of reason.</criterion>
+    <criterion testable="true">Given ADR-012, no "etc." remains in the sanctioned-set definition.</criterion>
+    <criterion testable="true">Given ADR-012, the three evaluation questions are recorded and explicitly stated as non-gates.</criterion>
+    <criterion testable="true">Given ADR-012, the §6.5 path-B amendment note names the rule challenged, the conflict, the path, and the rationale.</criterion>
+    <criterion testable="true">Negative: no existing package is marked deprecated, un-promoted, regressed, or as a removal candidate; @spaarke/visuals is present and recorded as anticipatory.</criterion>
+    <criterion testable="true">Negative: the 2+ consumer trigger is unchanged — it is not raised, lowered, or converted into a gate.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-01 + FR-03. The enumeration this task produces is the input to task 002's census — if the two disagree, the census is wrong, not the ADR. Measured 2026-09-04: exactly 15 directories.
+
+CORRECTION (applied on completion 2026-09-04): this note previously claimed "including Spaarke.LegalWorkspace (which has no package.json — see task 002)". That is WRONG — all 15 of 15 directories carry a package.json, LegalWorkspace included (@spaarke/legal-workspace). Task 002's census may key on package.json uniformly across all 15 and MUST NOT special-case LegalWorkspace. The real distinction the note was reaching for is build-orchestrator exclusion: Spaarke.LegalWorkspace is excluded from Build-AllClientComponents.ps1 by design (source-only re-export barrel; peer deps unresolvable standalone), while Spaarke.DailyBriefing.Components was excluded on the same basis but restored 2026-07-08. "Builds standalone" is therefore NOT a uniform property and must not be asserted by the census without that exclusion list.
+
+Second correction: the spec constraint's "@spaarke/visuals has 0 current consumers" is stale — measured 1 (the VisualHost PCF). The constraint's substance (record as legitimately anticipatory, never a removal candidate) was honored; the count was corrected rather than copied, to avoid writing a checkable falsehood into a governance doc. Full record: notes/task-001-deviations.md.</notes>
+
+  <completion>
+    <date>2026-09-04</date>
+    <summary>ADR-012 amended under CLAUDE.md §6.5 path B. The sanctioned set is now a closed 15-package enumeration with one line of reason each, replacing "…plus the domain component libraries (…, etc.)" — an open set that made the ADR's own new-sibling amendment requirement unenforceable by construction. The 2+ consumer rule is recorded as a trigger to EVALUATE with three written questions, each explicitly a non-gate, and the duplicate statement of the rule in the "When to Add to Shared Library" table was annotated to match. Full ADR history (docs/adr/) gained a v2.2 revision row pointing at the concise ADR rather than restating it. No package added, removed, deprecated, or regressed; 2+ trigger unchanged. Both escalation triggers evaluated and neither fired.</summary>
+    <files-modified>.claude/adr/ADR-012-shared-components.md; docs/adr/ADR-012-shared-component-library.md; projects/code-quality-and-assurance-r4/notes/task-001-deviations.md</files-modified>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
