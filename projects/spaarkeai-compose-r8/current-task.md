@@ -36,7 +36,26 @@ directly.
 | 2 — `afterText` (D2: ship without) | ✅ resolved, no code by design | — |
 | 3 — the write call | ✅ | `4134b7fda` |
 | 4 — rename to "Review Summary" (ran BEFORE 3) | ✅ | `117e9d83d` |
-| **5 — retire `summaryPage`** | 🔲 **OPEN — owner sign-off** | — |
+| **5 — `summaryPage`** | ✅ **WIRED, not retired** (owner decision 2026-09-07) | `c52bfba2d` |
+
+**Phase 5 flipped from "retire" to "wire".** The owner confirmed users want the option, and that
+end-of-document is the right shape because it cannot disturb layout — both of which hold up: the
+generator emits only plain paragraphs with a literal bullet (never `w:numPr`, never a named style), and a
+corpus-wide test asserts the numbering and styles parts are byte-identical after the append. My earlier
+"retire" lean had a condition attached — *"unless the owner specifically wants the NDA digest inside the
+document"* — and I restated the lean without re-reading the condition. The condition was met.
+
+**🔴 A live defect fell out of wiring it, affecting ALREADY-SHIPPED work.** `triggerSave`'s dependency
+array omitted `includeRevisionReport` and `revisionReportResult`, both of which the save body reads.
+Ticking an appendix toggle re-renders but does not recreate the memoized callback, so the save still saw
+`false`. **R8 item 8's "Include revision report" shipped with this defect** — the toggle appears to work
+and the appendix never rides the request. Fixed for both. **Item 8 needs re-UAT**: it was signed off on a
+toggle that could not have worked.
+
+The Summary Page is mapped on **both** save routes, unlike `RevisionReport` (replace-only). A revision
+report reads tracked changes from a STORED document; a Summary Page derives from the ledgered review
+result, which exists as soon as the review ran — and "upload an NDA, review it, save it for the first
+time" is arguably its most common flow.
 
 **Phase 1 fixed a live bug bigger than "a dropped field".** The panel derives its per-finding takeaway
 by hunting a "Judgment —" marker in the fused `explanation`. Post-split payloads compose that string
@@ -44,9 +63,9 @@ from the discrete fields with NO markers, so the hunt failed and the fallback re
 sentence — the grounded FACT. **Every post-split finding rendered the wrong half of itself**, with no
 error and no empty state. `resolveTakeaway` now reads `assessment` directly.
 
-**Why Phase 5 is the one thing left**: D1 (Option A) has two halves — complete `reviewMemo`, and retire
-`summaryPage`. The owner's §0 naming decision presupposes the feature ships, which settles the *build*
-half. It does not authorise *deleting* another project's surface, so that half waits.
+**The dead-wire class is now CLOSED.** `summaryPage` was its last open instance; the record-keeping test
+that held it open was deleted per its own instructions, and the live guard assertion now covers the
+property like any other (control-run: removing either mapping makes the guard fail).
 
 **Two plan claims corrected during the build** (both recorded in the plan's §7):
 1. "The rename is free because nothing POSTs" was an inference; it is now a measurement —
@@ -77,7 +96,7 @@ NFR-05) and UAT.** Verify the built artifact by string literal before upload —
 |---|---|
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`4134b7fda`** — **23 ahead of master, 5 BEHIND** (master moved after #938; merge master in before any PR — never rebase). **PR #924 and #938 are both MERGED.** The 23 commits since #938 have **NO open PR** — one is needed to reach master. |
-| **🎯 NEXT ACTION** | **Redeploy + UAT.** Phases 1/3/4 are built and committed; nothing has run against a live Dataverse row yet (until this change none could exist). Deploy BFF + `sprk_spaarkeai` **together** (NFR-05), verify the artifact by string literal first, then walk generate → download → email. **Then decide Phase 5** (retire `summaryPage`) — the only open item, held for owner sign-off because it deletes another project's surface. |
+| **🎯 NEXT ACTION** | **Redeploy + UAT.** All of §GAPS-5 is built, plus the Summary Page appendix. Nothing has run against a live environment. Deploy BFF + `sprk_spaarkeai` **together** (NFR-05), verify the artifact by string literal first (`grep -c 'Review Summary document' dist/spaarkeai.html`), then walk: generate → download → email, and tick **both** appendix toggles on a save. **Re-UAT item 8's revision report** — its toggle could not have worked before the closure fix. |
 | **Ordering trap (RESOLVED)** | Phase 4 (rename) ran BEFORE Phase 3 (write call), as required — the persisted row is found by matching its display name, so a later rename would orphan rows silently. Verified free by querying `sprk_analysisoutput` first: zero rows. Re-run that query before any future rename; `ReviewMemoOutputNameGuardTests` carries the recipe. |
 | **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
 | **Session 2026-09-04** | Dead-wire audit CLOSED (4th instance `Style` deleted + repo-wide guard). `organziation` typo fixed. **`DocumentLinkFieldMap`** unifies the `sprk_document` link vocabulary — it was declared twice and knew 6 of 17 columns, so Compose silently dropped ten link types. See §SESSION at the end of this file. |
