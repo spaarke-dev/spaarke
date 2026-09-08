@@ -16,7 +16,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 |---|---|---|---|---|---|---|
 | 001 | Worktree bootstrap and true typecheck baseline | ✅ | MINIMAL | sonnet / medium | — | none |
 | 002 | **Spike-1**: `document.url` shape for SPE files in Word desktop | 🔲 | STANDARD | opus / high | P0-spikes | none |
-| 003 | **Spike-2**: Office Dialog API for opening a record | 🔲 | STANDARD | sonnet / high | P0-spikes | none |
+| 003 | **Spike-2**: Office Dialog API for opening a record | ✅ | STANDARD | sonnet / high | P0-spikes | none |
 | 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | ✅ | MINIMAL | sonnet / medium | P0-spikes | none |
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | 🔄 | STANDARD | opus / high | P0-spikes | none |
 | 006 | FR-18: clear typecheck debt in `shared/taskpane` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
@@ -50,12 +50,21 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 010 | FR-04: consolidate onto one Word adapter via `HostAdapterFactory` | 🔲 | FULL | opus / xhigh | P1-a | 006, 007, 008 |
-| 011 | FR-05: migrate Word to the unified JSON manifest | 🔲 | STANDARD | sonnet / high | P1-a | none |
+| 011 | FR-05: migrate Word to the unified JSON manifest | 🔄 | STANDARD | sonnet / high | P1-a | none |
 | 012 | FR-01 server: document-identity resolver extending `/api/documents` | 🔲 | FULL | opus / high | — | 002 |
 | 013 | FR-01 client: `getDocumentUrl` capability and identity threading | 🔲 | FULL | sonnet / high | — | 010, 012 |
 | 014 | FR-02: server-side custom XML part GUID stamp (forward-only) | 🔲 | FULL | opus / high | P1-b | 012 |
 | 015 | FR-03: Save\|Find tab shell, enable navigation in Word | 🔲 | FULL | sonnet / high | P1-b | 010 |
 | 016 | Un-skip `/api/office/save` contract tests + cover the identity route | 🔲 | FULL | sonnet / high | — | 012 |
+
+> 🔄 **011 is build-verified but NOT formally closed.** `word/manifest.json` is authored, `webpack.config.js`
+> parameterizes it (id/resource/base-URL, mirroring Outlook's mechanism exactly), the WordApi 1.1→1.3
+> mismatch is reconciled with cited evidence (`Word.DocumentProperties` is WordApi 1.3, forced by
+> `WordAdapter.getItemId()`/`getSubject()`), both manifests are version-bumped, and `npm run build` /
+> `npm run typecheck` are clean. **Acceptance criteria 6/7 (sideload verify on Word desktop + Word on the
+> web) are UNVERIFIED** — this agent had no interactive Office host or browser tool available. `word-manifest.xml`
+> is retained unchanged in behavior pending that verification. See
+> [`notes/011-word-manifest-migration.md`](../notes/011-word-manifest-migration.md).
 
 **Gate**: a Spaarke-sourced document is identified end-to-end · both hosts render both tabs · `/api/office/save` has executing tests.
 

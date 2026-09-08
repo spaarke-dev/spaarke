@@ -4,7 +4,7 @@
     <title>FR-05: migrate Word to the unified JSON manifest</title>
     <phase>1 Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (`word/manifest.json`) plus a build-config edit, with explicit constraints. No .cs/.ts service logic; the risk is deployment/registration, not code correctness. Quality gates skipped per the Step 3.5.5 decision tree.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -125,6 +125,34 @@
     spec.md FR-05. plan.md §4 Phase 1 task 011. `src/client/office-addins/CLAUDE.md:44` records the manifest-change rules (bump the 4-part version, M365 re-register); the architecture doc holds the full manifest rule set (no `FunctionFile`, single VersionOverrides, icons 200).
     Parallel with task 010 in wave P1-a: 010 touches adapters, taskpane entry points, adapter tests and the module CLAUDE.md; this task touches only the two manifests and `webpack.config.js`. No shared file — the pair is disjoint by construction.
     Task 037 (Phase 3) later adds the `quickSave`/`shareDocument` ribbon commands to this manifest; author the ribbon section so an additional control is a clean addition, but do NOT add those controls here.
+
+    2026-09-08 EXECUTION SUMMARY (rigor STANDARD, sonnet @ high, directional):
+    Steps 0-5 and 8 done and build-verified: `word/manifest.json` authored mirroring `outlook/manifest.json`
+    (added `webApplicationInfo`, one `TaskpaneRuntime`, one `SaveButton` ribbon control); `webpack.config.js`
+    extended with a second CopyWebpackPlugin pattern reusing Outlook's exact id/resource/base-URL substitution
+    mechanism; `word-manifest.xml`'s `WordApi MinVersion` corrected 1.1 to 1.3 (forcing API: the whole
+    `Word.DocumentProperties` class — `.title`/`.author`/`.creationDate`, used in `WordAdapter.getItemId()` and
+    `getSubject()` — is WordApi 1.3 per `@types/office-js`; every other adapter call is 1.1). Both manifests'
+    versions bumped above 1.0.6.0 (JSON `1.0.7` 3-part per the unified-manifest schema matching Outlook's own
+    `1.0.22` precedent; XML `1.0.7.0` 4-part per its own schema) — see notes/011-word-manifest-migration.md
+    "Version reconciliation" for why the POML's literal "4-part" phrasing was not applied to the JSON artifact.
+    `word/taskpane/index.tsx` APP_VERSION synced to 1.0.7 (touched outside the declared `&lt;outputs&gt;` list,
+    per the architecture doc's version-bump rule for "the Word equivalents" — see notes doc).
+    `npm run build` exits 0, zero errors; emitted `dist/word/manifest.json` is valid JSON with client id, BFF
+    resource, and base URL all substituted correctly (verified twice, including a non-default ADDIN_BASE_URL
+    rebuild); `npm run typecheck` shows zero new errors in the one .tsx file touched.
+
+    STEPS 6/7 NOT PERFORMED — BLOCKED: no interactive Office host or browser tool available to this agent
+    to sideload `word/manifest.json` onto Word desktop or Word on the web. Acceptance criteria 6 and 7
+    (desktop/web sideload: install, ribbon button, task pane, auth) are UNVERIFIED, not failed — this is an
+    environment capability gap, not a manifest defect found and dismissed. `word-manifest.xml` is retained
+    unchanged in behavior (version/WordApi fix + a header comment only) since its removal decision (step 7)
+    is gated on that verification, which did not happen. Full detail, evidence, and the exact build commands
+    run: projects/spaarkeai-word-add-in-r1/notes/011-word-manifest-migration.md.
+
+    Status left as in-progress (not completed) because acceptance criteria 6/7 are not genuinely met. An
+    operator (or a `--chrome`-enabled session with a live dev/deployed add-in) must perform the two sideloads
+    per step 6, then this task can close with the word-manifest.xml disposition decision made.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

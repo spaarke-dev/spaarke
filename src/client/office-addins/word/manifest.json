@@ -1,0 +1,122 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams-manifest/MicrosoftTeams.schema.json",
+  "manifestVersion": "devPreview",
+  "id": "b3965ea0-6942-4f17-81b3-2c645bd05ebf",
+  "version": "1.0.7",
+  "name": {
+    "short": "Spaarke Word",
+    "full": "Spaarke Document Management for Word"
+  },
+  "description": {
+    "short": "Save and share documents in Spaarke DMS",
+    "full": "Spaarke Office Add-in for Word enables users to save documents to Spaarke Document Management System directly from the ribbon."
+  },
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com",
+    "privacyUrl": "https://spaarke.com/privacy",
+    "termsOfUseUrl": "https://spaarke.com/terms"
+  },
+  "icons": {
+    "outline": "assets/icon-outline.png",
+    "color": "assets/icon-color.png"
+  },
+  "accentColor": "#0078D4",
+  "localizationInfo": {
+    "defaultLanguageTag": "en-US"
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": []
+    }
+  },
+  "extensions": [
+    {
+      "requirements": {
+        "scopes": ["document"],
+        "capabilities": [
+          {
+            "name": "WordApi",
+            "minVersion": "1.3"
+          }
+        ]
+      },
+      "runtimes": [
+        {
+          "id": "TaskpaneRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/word/taskpane.html"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openTaskPane",
+              "type": "openPage"
+            }
+          ]
+        }
+      ],
+      "ribbons": [
+        {
+          "contexts": ["default"],
+          "tabs": [
+            {
+              "builtInTabId": "TabHome",
+              "groups": [
+                {
+                  "id": "SpaarkeGroup",
+                  "label": "Spaarke",
+                  "icons": [
+                    {
+                      "size": 16,
+                      "url": "https://localhost:3000/assets/icon-16.png"
+                    },
+                    {
+                      "size": 32,
+                      "url": "https://localhost:3000/assets/icon-32.png"
+                    },
+                    {
+                      "size": 80,
+                      "url": "https://localhost:3000/assets/icon-80.png"
+                    }
+                  ],
+                  "controls": [
+                    {
+                      "id": "SaveButton",
+                      "type": "button",
+                      "label": "Save to Spaarke",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Save to Spaarke",
+                        "description": "Save this document to Spaarke Document Management System"
+                      },
+                      "actionId": "openTaskPane"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "webApplicationInfo": {
+    "id": "b3965ea0-6942-4f17-81b3-2c645bd05ebf",
+    "resource": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
+  }
+}

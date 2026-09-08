@@ -4,9 +4,13 @@ import { App } from '@shared/taskpane';
 import { WordHostAdapter } from '../WordHostAdapter';
 import { authService, apiClient } from '@shared/services';
 
-// Version information - synced with word-manifest.xml's <Version> element
-// (task 040 / FR-B0: was stale at 1.0.3 vs manifest's 1.0.4.0).
-const APP_VERSION = '1.0.6';
+// Version information - synced with word/manifest.json's "version" field
+// (task 011 / FR-05: the unified JSON manifest is now the versioning source
+// of truth, mirroring outlook/taskpane/index.tsx's convention; the retained
+// word-manifest.xml's 4-part <Version> is kept in step but is not this
+// constant's source — XML requires 4-part, the unified manifest requires
+// SemVer-style 1-3 part).
+const APP_VERSION = '1.0.7';
 const BUILD_DATE = process.env.BUILD_DATE || 'unknown';
 
 // Configuration from environment or build-time injection
