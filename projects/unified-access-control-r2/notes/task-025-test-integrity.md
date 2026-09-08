@@ -145,3 +145,45 @@ builds (no compile break), the 782 external-access / access-control tests pass, 
 194/194 — which includes `Adr038TestBanGuardTests`, the guard that scans test source for banned
 shapes. A full-suite run adds nothing here: a deletion cannot break a test in an unrelated area, and
 the compile is what proves nothing referenced it.
+
+## 8. H6 seams closed — before/after perturbation counts
+
+| Seam | Perturbation | Before | After | Test |
+|---|---|---|---|---|
+| 1 `FindPermissionByEmail` | `string.Equals(...)` → `false` | **0** | **3** | `SpePermissionMatcherTests` (new, 6 tests) |
+| 2 central gate | return `Read \| Write` | **9** | 9 | already covered by task 045 — nothing written |
+| 3 task-007 call sites | inline the pre-fix filter | **0** | **1** | `ExternalAccessQueryIntegrityGuardTests` (new) |
+| 4 `ListExternalMembersAsync` | `try { } catch { return []; }` | **0** | **1** | `ExternalAccessQueryIntegrityGuardTests` (new) |
+
+### Levels chosen, and why
+
+- **Seam 1 — behavioural.** The matcher is a pure function over Graph models, so it is called directly.
+  `FindPermissionByEmail` was widened `private` → `internal` rather than reached by reflection
+  (ADR-038 ban B8), following the `ExpiryPredicate` precedent. No transport, no `Mock<HttpMessageHandler>`.
+  `SpeRevokeMatcherTests` is untouched: it proves the ENDPOINT reacts correctly to each outcome, which
+  is the right level for that and is exactly why the matcher itself stayed invisible.
+- **Seams 3 and 4 — structural fitness functions** in `tests/Spaarke.ArchTests/**` (a KEEP path). Both
+  are transport-bound: the grant query is a raw `$filter` string on the service's own `HttpClient`, the
+  member list a Graph SDK fluent chain. A behavioural test needs a transport mock the ADR bans, so the
+  honest instrument is a source invariant — "the call site must keep using the builder", "this call must
+  not swallow its error". The alternative on offer was nothing, which is what there was.
+
+### ⚠️ The seam-3 guard caught a false positive on its first run — worth recording
+
+Its first draft keyed on `_sprk_contact_value`, and immediately failed on
+`ExternalParticipationService.cs:1068`. That line is **correct**: it queries the
+`sprk_contactorganizations` **junction**, which has no expiry column because expiry is a property of a
+GRANT, not of a membership. The rule now keys on the `sprk_externalrecordaccesses` entity set.
+
+Had that not been chased down, the guard would have been "fixed" by loosening it — or a real query
+would have been edited to satisfy a rule that was wrong. A fitness function that fires on correct code
+teaches people to disable it.
+
+## 9. Verification economy (operator direction, 2026-09-08)
+
+*"We do not want to run 16 minute verification if not useful."* Applied as follows: the full suite ran
+**twice**, and only for the two measurements that genuinely need whole-suite scope — the perturbation
+baselines, where the claim IS "fails zero tests anywhere". Everything after that was verified at its
+own level: targeted class filters (seconds), the ArchTests project (~2 min), and a compile for the
+deletion. A full run cannot tell you anything a targeted run cannot about a change that is confined to
+one class — and the compile is what proves the deleted file had no dependants.

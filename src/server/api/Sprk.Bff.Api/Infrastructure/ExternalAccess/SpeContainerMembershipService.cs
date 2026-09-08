@@ -353,7 +353,24 @@ public class SpeContainerMembershipService
     /// <summary>
     /// Finds a permission entry by matching the grantedTo user's UPN from AdditionalData.
     /// </summary>
-    private static Permission? FindPermissionByEmail(IList<Permission>? permissions, string email)
+    /// <summary>
+    /// Finds the container permission belonging to <paramref name="email"/>, matching on the SAME key
+    /// membership is written with — <c>userPrincipalName</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b><c>internal</c> for testability (task 025, finding H6).</b> This matcher IS finding
+    /// A-13: the defect was that it compared against the contact's GUID, an email never contains a
+    /// GUID, so it matched nothing and <c>/revoke</c> reported success while the ACL entry stayed.
+    /// It was nonetheless executed by NO test — <c>SpeRevokeMatcherTests</c> substitutes
+    /// <see cref="SpeContainerMembershipService"/> wholesale, which proves the CALLER and never the
+    /// callee, so replacing this body with <c>return false</c> failed zero tests.</para>
+    ///
+    /// <para>Widened from <c>private</c> rather than reached by reflection (ADR-038 bans B8), matching
+    /// the <c>ExternalParticipationService.ExpiryPredicate</c> precedent — the same "the predicate is
+    /// the thing that broke, so test the predicate" shape. It is a pure function over a Graph model
+    /// list, so testing it needs no transport and no <c>Mock&lt;HttpMessageHandler&gt;</c> (ban B1).</para>
+    /// </remarks>
+    internal static Permission? FindPermissionByEmail(IList<Permission>? permissions, string email)
     {
         if (permissions == null) return null;
 
