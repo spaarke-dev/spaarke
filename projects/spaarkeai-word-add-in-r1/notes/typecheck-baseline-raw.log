@@ -527,31 +527,31 @@ shared/taskpane/utils/errorMessages.ts(218,12): error TS2532: Object is possibly
   Types of property 'where' are incompatible.
     Type 'string | undefined' is not assignable to type 'string'.
       Type 'undefined' is not assignable to type 'string'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(289,17): error TS2379: Argument of type '{ targetName: string; recordNumber: string | undefined; matchReason: string; confidence: number; candidates: ProvenanceCandidate[]; }' is not assignable to parameter of type 'CandidateGroup' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(300,17): error TS2379: Argument of type '{ targetName: string; recordNumber: string | undefined; matchReason: string; confidence: number; candidates: ProvenanceCandidate[]; }' is not assignable to parameter of type 'CandidateGroup' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
   Types of property 'recordNumber' are incompatible.
     Type 'string | undefined' is not assignable to type 'string'.
       Type 'undefined' is not assignable to type 'string'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(330,59): error TS2532: Object is possibly 'undefined'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(342,14): error TS2379: Argument of type '{ field: string; entity: string; slotLabel: string; targetName: string; targetId: string; confidence: number; status: "confirmed" | "suggested" | "ambiguous"; alternatives: ProvenanceCandidate[] | undefined; otherCandidates: ProvenanceCandidate[] | undefined; matchReason: string; recordNumber: string | undefined; or...' is not assignable to parameter of type 'Connection' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(341,59): error TS2532: Object is possibly 'undefined'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(353,14): error TS2379: Argument of type '{ field: string; entity: string; slotLabel: string; targetName: string; targetId: string; confidence: number; status: "confirmed" | "suggested" | "ambiguous"; alternatives: ProvenanceCandidate[] | undefined; otherCandidates: ProvenanceCandidate[] | undefined; matchReason: string; recordNumber: string | undefined; or...' is not assignable to parameter of type 'Connection' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
   Types of property 'alternatives' are incompatible.
     Type 'ProvenanceCandidate[] | undefined' is not assignable to type 'ProvenanceCandidate[]'.
       Type 'undefined' is not assignable to type 'ProvenanceCandidate[]'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(406,7): error TS2412: Type 'undefined' is not assignable to type 'ProvenanceCandidate[]' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(407,7): error TS2412: Type 'undefined' is not assignable to type 'ProvenanceCandidate[]' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(452,19): error TS2532: Object is possibly 'undefined'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(737,11): error TS2375: Type '{ entity: string; targetName: string; targetId: string; recordNumber: string | undefined; confidence: number; matchReason: string; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(417,7): error TS2412: Type 'undefined' is not assignable to type 'ProvenanceCandidate[]' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(418,7): error TS2412: Type 'undefined' is not assignable to type 'ProvenanceCandidate[]' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the type of the target.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(463,19): error TS2532: Object is possibly 'undefined'.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(756,11): error TS2375: Type '{ entity: string; targetName: string; targetId: string; recordNumber: string | undefined; confidence: number; matchReason: string; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
   Types of property 'recordNumber' are incompatible.
     Type 'string | undefined' is not assignable to type 'string'.
       Type 'undefined' is not assignable to type 'string'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(763,5): error TS2375: Type '{ entity: string; targetId: string; targetName: string; recordNumber: string | undefined; confidence: number; matchReason: string | undefined; typeLabel: string | undefined; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(782,5): error TS2375: Type '{ entity: string; targetId: string; targetName: string; recordNumber: string | undefined; confidence: number; matchReason: string | undefined; typeLabel: string | undefined; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
   Types of property 'recordNumber' are incompatible.
     Type 'string | undefined' is not assignable to type 'string'.
       Type 'undefined' is not assignable to type 'string'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(774,5): error TS2375: Type '{ entity: string; targetId: string; targetName: string; recordNumber: string | undefined; confidence: number; typeLabel: string | undefined; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(793,5): error TS2375: Type '{ entity: string; targetId: string; targetName: string; recordNumber: string | undefined; confidence: number; typeLabel: string | undefined; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
   Types of property 'recordNumber' are incompatible.
     Type 'string | undefined' is not assignable to type 'string'.
       Type 'undefined' is not assignable to type 'string'.
-../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(816,11): error TS2375: Type '{ recordNumber: string | undefined; entity: string; targetId: string; targetName: string; confidence: number; matchReason?: string; typeLabel?: string; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts(837,11): error TS2375: Type '{ recordNumber: string | undefined; entity: string; targetId: string; targetName: string; confidence: number; matchReason?: string; typeLabel?: string; }' is not assignable to type 'PrimaryCandidate' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
   Types of property 'recordNumber' are incompatible.
     Type 'string | undefined' is not assignable to type 'string'.
       Type 'undefined' is not assignable to type 'string'.

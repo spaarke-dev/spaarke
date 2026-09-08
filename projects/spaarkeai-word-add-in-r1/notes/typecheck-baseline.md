@@ -1,6 +1,6 @@
 # Typecheck baseline — `src/client/office-addins`
 
-> **Task**: 001 (Phase 0) · **Measured**: 2026-09-04 · **Branch**: `work/spaarkeai-word-add-in-r1`
+> **Task**: 001 (Phase 0) · **Measured**: 2026-09-04 · **Re-verified**: 2026-09-05 after merging `origin/master` (13 commits) · **Branch**: `work/spaarkeai-word-add-in-r1`
 > **Raw artifact**: [`typecheck-baseline-raw.log`](typecheck-baseline-raw.log) — untruncated `npm run typecheck` stdout+stderr
 > **Purpose**: replace the unverified "~397" figure with a measurement, and size tasks 006/007/008.
 
@@ -16,6 +16,24 @@
 | `npm run lint` | 🔴 **errors out** (exit 2) — globs a directory that doesn't exist |
 
 **These are two different numbers and conflating them is how "~397" lost its meaning**: 395 is the diagnostic count; 32 is the file count.
+
+---
+
+## ✅ Re-verified after merging master (2026-09-05)
+
+Master advanced 13 commits between the measurement and the push, and **two of them touched the very file that drove the escalation** — `provenance.ts` (+26/−5, `2de7a006d` and `a5d2ae216`, the email-r2 R3-CARD-1/2 work). The baseline was re-run against the merged tree to check whether the finding was an artifact of a stale branch.
+
+**It was not. The finding is durable:**
+
+| | Before merge | After merge |
+|---|---|---|
+| Total diagnostics | 395 | **395** |
+| `provenance.ts` errors | 11 | **11** |
+| UNASSIGNED bucket | 11 + 26 | **11 + 26** |
+
+The 11 errors are the **same errors** — identical codes, identical messages. Only line numbers shifted (+11 to +21) because master inserted lines above them: `(289,17)→(300,17)`, `(330,59)→(341,59)`, `(816,11)→(837,11)`, and so on. Every other diagnostic in the log is byte-identical.
+
+Master's changes to that file did not touch this debt, so **the ownership question stands unchanged** and the escalation remains valid. The committed raw log is the post-merge capture.
 
 ---
 
