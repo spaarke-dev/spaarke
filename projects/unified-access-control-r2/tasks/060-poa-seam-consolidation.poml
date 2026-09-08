@@ -32,7 +32,7 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (seam tests; existing DirectThreadAccessService no-leak negatives must stay green)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="010" status="pending">FR-09 idempotency/deactivate-all semantics on the grant lifecycle the seam must not contradict.</dependency>
+      <dependency task="010" status="completed">FR-09 idempotency/deactivate-all semantics on the grant lifecycle the seam must not contradict. ✅ Status corrected 2026-09-07 — it read "pending" while 010 had been completed for weeks. This `status` attribute is a THIRD hand-maintained copy of a task's state (after the task's own `<status>` and its TASK-INDEX marker), and `scripts/check-task-status-drift.ps1` does NOT reconcile it — the checker compares `<status>` to the index only. Do not trust a `<dependency status>` attribute; re-derive from the dependency's own POML.</dependency>
     </dependencies>
   </context>
 

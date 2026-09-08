@@ -18,8 +18,22 @@
 | **Branch** | `work/unified-access-control-r2` @ `8047cca15` · clean · **1 unpushed** · **47 ahead** of master · 0 behind (merged `origin/master` this session) |
 | **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · `Router` was GREEN at `d4b3b6720`; **re-check after this push** |
 | **Task status** | **54 completed** · 1 completed-with-escalation (012) · 1 blocked-shipped (034) · **36 open** · 92 total. Drift gate green: 92 POMLs = 92 index rows |
-| **Next Action** | **Task 082 — caller-identity primitive census** (`parallel-safe=false`). Then 035/036 → 042/043/044 → 054–058 → 060–069 → 090. |
-| **🔴 Do FIRST, ahead of order** | **Task 061 — the explicit share for Secure Projects.** Task 021 shipped the isolation (memberless owner team + BU) but *not* the share, so a secure project is currently **isolated and unreachable by any human**. Any sequence that leaves 061 late ships a locked box. This is a correctness gap, not a feature. |
+| **Next Action** | **Task 060 — consolidate the two POA share clients into one seam** (3–4 h, **opus @ xhigh**, `parallel-safe=false`). Startable now: its only dependency (010) is complete. **Then 061 immediately after.** |
+| **🔴 The goal both serve** | **Task 061 — the explicit share for Secure Projects.** Task 021 shipped the isolation (memberless owner team + BU) but *not* the share, so a secure project is currently **isolated and unreachable by any human** — a locked box. Owner-directed 2026-09-07 to fix it. ⚠️ **061 CANNOT go first**: its mechanism is "issue shares via the 060 seam", and doing it before 060 means writing a THIRD POA client, which 060's constraints and root §11 both forbid. Verified chain: `010 ✅ → 060 🔲 → 061 🔲`, with `008 ✅` also satisfied. |
+| **Also done 2026-09-07** | **uuid CVE-2026-41907 closed in LegalWorkspace** (`16b75e97f`) — `overrides: uuid ^14.0.0`, resolves 14.0.2, build green (3,874 modules, artifact marginally smaller). Ours by causation: `9edbb011c` on this branch declared the Tiptap deps that brought uuid@10 in. **The other two instances of this CVE (`src/solutions/SpaarkeAi`, `src/client/shared/Spaarke.Compose.Components`) are master-resident since 2026-07-17/21, are NOT this project's surface, and are deliberately untouched.** |
+
+### ⚠️ Status is stored in THREE places, not two — the drift checker covers only two
+
+Found 2026-09-07 while verifying 061's gate. Besides a task's own `<status>` and its `TASK-INDEX.md`
+marker, each POML also carries `<dependency task="NNN" status="…">` annotations — a **third**
+hand-maintained copy. `scripts/check-task-status-drift.ps1` does **not** reconcile these; it compares
+`<status>` to the index only.
+
+Both of 061's were stale (`008` and `010` read `pending` while both were completed weeks earlier),
+which made 061 look blocked on two dependencies when only 060 remains. **Never trust a
+`<dependency status>` attribute — re-derive from the dependency's own POML.** Corrected in 060 and 061;
+the other 90 POMLs are unaudited for this. Extending the checker to cover dependency annotations is the
+obvious follow-up and is **not** done.
 | **SCOPE** | 🔴 **NO CUT. Owner-directed 2026-09-07: "we cannot cut scope."** All 36 open tasks are in. The ~106 h / spin-out-82 h split proposed in § COMPLETION PLAN is **VOID** — do not resurrect it as an approved plan; it was a recommendation the owner rejected. |
 | **Still open (owner)** | The **uuid CVE disposition** (see the Trivy entry) — GHAS-high, introduced by this PR, not reachable (Tiptap uses `v4`), not simply patchable. Unapproved; I proposed accept-with-rationale + a follow-up `overrides` bump and did not assume it. |
 

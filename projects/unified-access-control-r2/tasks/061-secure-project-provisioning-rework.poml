@@ -32,8 +32,8 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (provisioning tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="060" status="pending">Consolidated POA seam (grant + revoke, systemuser principal).</dependency>
-      <dependency task="008" status="pending">FR-07 delegation rule on provision-project (Write-on-record OBO check) — this endpoint must already be delegation-gated.</dependency>
+      <dependency task="060" status="pending">Consolidated POA seam (grant + revoke, systemuser principal). ⚠️ GENUINELY still pending as of 2026-09-07 — verified, not inherited. This is the ONE thing blocking 061: the task's whole mechanism is "issue explicit shares via the 060 seam", and building 061 first would mean writing a share client, i.e. the THIRD POA client that both 060's constraints and root CLAUDE.md §11 forbid. 060's own dependency (010) is complete, so 060 is startable immediately.</dependency>
+      <dependency task="008" status="completed">FR-07 delegation rule on provision-project (Write-on-record OBO check) — this endpoint must already be delegation-gated. ✅ Status corrected 2026-09-07 — it read "pending" while 008 had been completed for weeks, which made 061 look blocked on two dependencies when only 060 remains. See the note on 060's `<dependency task="010">` for why these attributes are unreliable: they are a third hand-maintained copy of task state that `scripts/check-task-status-drift.ps1` does not reconcile.</dependency>
     </dependencies>
   </context>
 
