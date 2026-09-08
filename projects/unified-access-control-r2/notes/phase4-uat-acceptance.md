@@ -45,3 +45,21 @@ UAT/runbook item**, per the POML's escalation trigger and CLAUDE.md §6.
   at one call site rather than a rewrite. See `notes/phase4-061-provisioning-inventory.md` §4 D4.
 - **Wizard copy for the reverse path** — task 068 owns the UI; 061 ships the server capability so 068
   has something to call.
+
+---
+
+## Publish size (task 061)
+
+Both sides built in **fresh worktrees** and zipped with PowerShell `Compress-Archive -Optimal` — the
+method `scripts/Deploy-BffApi.ps1` uses, and the discipline task 060's notes §8 established after an
+in-place rebuild produced a false +4.95 MB.
+
+| Build | Size | PDB |
+|---|---|---|
+| pre-061 `196d60d40` | 45.38 MB | 2,302.6 KB |
+| post-061 `01f0996cc` | 45.38 MB | 2,306.2 KB |
+
+**Task 061 delta: +0.01 MB.** Headroom to the 60 MB ceiling: **14.62 MB**. No new NuGet packages;
+`dotnet list package --vulnerable --include-transitive` reports **0 vulnerable**. The PDBs agreeing to
+within 4 KB is the corroboration that the measurement method is stable — the 3× PDB divergence that
+produced task 060's false reading does not appear when both sides are fresh.
