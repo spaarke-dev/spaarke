@@ -154,6 +154,9 @@ public static class ExternalAccessEndpoints
 
         // POST /api/v1/external-access/provision-project — Provision infrastructure for Secure Project
         adminGroup.MapProvisionProjectEndpoint();
+
+        // POST /api/v1/external-access/unsecure-project — reverse the Secure Project designation (task 061)
+        adminGroup.MapUnsecureProjectEndpoint();
     }
 
 }

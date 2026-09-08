@@ -629,7 +629,19 @@ public class RouteAuthorizationGuardTests
     // FAILS on, so in this direction the census and the governed set cannot silently disagree. That is
     // the opposite of the ComposeEndpoints case, where the count could have gone green while the guarded
     // surface escaped; worth recording that the two directions have different failure modes.
-    private const int ExpectedEndpointFileCount = 116;
+    //   061  +1  Api/ExternalAccess/UnsecureProjectEndpoint.cs ADDED — POST /unsecure-project, the
+    //            reverse of secure-project provisioning (design §5.1 "the designation is reversible").
+    //            Classified per the maintenance procedure: it serves NEITHER document metadata nor file
+    //            bytes. It mutates a Dataverse sprk_project's ownership, POA shares and sprk_issecure
+    //            flag, so there is no GovernedFiles entry to add — the count alone moves.
+    //
+    //            Its authorization is NOT weaker for being outside GovernedFiles: the route sits in the
+    //            external-access admin group, so it inherits AddDelegationRuleFilter() — the FR-07
+    //            Write-on-the-target check evaluated as the CALLER over OBO — exactly as
+    //            /provision-project does. DelegationRuleFilter's target map gained the matching
+    //            UnsecureProjectRequest case in the same change; without it the filter would resolve no
+    //            target and deny every call, which is fail-closed but reads as a bug.
+    private const int ExpectedEndpointFileCount = 117;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

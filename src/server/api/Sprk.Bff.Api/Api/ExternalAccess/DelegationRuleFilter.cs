@@ -236,6 +236,14 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // ── /provision-project ────────────────────────────────────────
                 case ProvisionProjectRequest provision:
                     return FromProjectId(provision.ProjectId);
+
+                // ── /unsecure-project (task 061) ──────────────────────────────
+                // Removing the secure designation is at least as consequential as applying it, so it
+                // is gated by the same Write-on-the-project check, evaluated as the caller. Omitting
+                // this case would not have opened a hole — an unresolved target denies — but it would
+                // have made the route permanently 403, which reads as a bug rather than a gate.
+                case UnsecureProjectRequest unsecure:
+                    return FromProjectId(unsecure.ProjectId);
             }
         }
 

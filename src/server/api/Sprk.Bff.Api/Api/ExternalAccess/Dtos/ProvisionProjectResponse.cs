@@ -42,9 +42,21 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <c>sprk_containerid</c>. A response containing this id means the write succeeded — if it could not
 /// be written the endpoint returns a non-2xx that carries the id instead (ADR-003).
 /// </param>
+/// <param name="SharedToCreatorSystemUserId">
+/// The creating user the project was explicitly shared to (task 061). Because the owner team has no
+/// members, this share is what makes the project reachable at all — a successful response always
+/// carries it, and provisioning fails rather than returning without it.
+/// </param>
+/// <param name="AdditionalPrincipalsShared">
+/// How many of the request's optional <c>SharePrincipalIds</c> were also shared to. Shares to named
+/// colleagues are best-effort, so this can be lower than the number requested; the log names any that
+/// failed, and they can be added afterwards through the Manage Access surface.
+/// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
     Guid OwnerTeamId,
     string OwnerTeamName,
-    string SpeContainerId);
+    string SpeContainerId,
+    Guid SharedToCreatorSystemUserId,
+    int AdditionalPrincipalsShared);

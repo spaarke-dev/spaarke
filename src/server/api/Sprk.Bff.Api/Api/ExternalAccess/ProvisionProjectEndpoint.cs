@@ -1,8 +1,11 @@
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Access;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -18,6 +21,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   3. Resolve that BU's default owner team
 ///   4. Refuse if the project is already provisioned (see <see cref="ProjectRow"/>)
 ///   5. Assign the project's owner to that team, and verify the assignment took effect
+///   5.5 Share the project explicitly to its creator (and any named colleagues) — the ONLY way a
+///       human can reach it, since the owner team has no members (task 061)
 ///   6. Create the project's own SPE container
 ///   7. Record the container on the project — and FAIL if that record cannot be written
 ///
@@ -127,6 +132,31 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonAlreadyProvisioned = "sdap.provision.already_provisioned";
     internal const string ReasonLegacyPerProjectBu = "sdap.provision.legacy_per_project_bu";
 
+    // Task 061 — the share plane. Both are provisioning FAILURES, not warnings: a secure project whose
+    // creator was not shared to is a record no human can open.
+    internal const string ReasonCreatorUnresolved = "sdap.provision.creator_unresolved";
+    internal const string ReasonCreatorShareFailed = "sdap.provision.creator_share_failed";
+
+    // ── Share rights (task 061) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Rights the creating user receives on their own secure project.
+    /// </summary>
+    /// <remarks>
+    /// Read/Write/Append/AppendTo is "can actually work the matter"; <c>ShareAccess</c> is what lets
+    /// them bring colleagues in through the FR-29 "+ User" surface without an administrator. Delete
+    /// and Assign are deliberately absent — a secure project leaves the secure business unit only
+    /// through the explicit unsecure path, not by being reassigned out of it.
+    /// </remarks>
+    internal const string CreatorAccessRights = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
+
+    /// <summary>
+    /// Rights a named colleague receives at provisioning time: the same working access as the creator,
+    /// WITHOUT <c>ShareAccess</c> — re-sharing stays with the creator so the access list cannot widen
+    /// through a chain nobody reviewed.
+    /// </summary>
+    internal const string CollaboratorAccessRights = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+
     /// <summary>
     /// The columns Step 1 reads from <c>sprk_project</c>.
     /// </summary>
@@ -178,6 +208,8 @@ public static class ProvisionProjectEndpoint
         ProvisionProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeFileStore speFileStore,
+        IDataverseRecordShareService recordShare,
+        CallerRecordAccessProbe callerAccessProbe,
         IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -452,6 +484,19 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, reason), ("ownerTeamId", ownerTeamId));
         }
 
+        // ── Step 5.5: Share the project to its creator (and any named colleagues) ──
+        //
+        // Ordering is deliberate: this runs AFTER ownership is verified and BEFORE the SPE container
+        // is created. Ownership must land first or the share would be issued on a record still in the
+        // caller's own business unit; and running before container creation means a share failure
+        // leaves NOTHING orphaned to reconcile — the state it fails into is "not provisioned", which
+        // a retry resolves cleanly.
+        var shareOutcome = await ShareToCreatorAndPrincipalsAsync(
+            recordShare, callerAccessProbe, httpContext, request, logger, traceId, ct);
+
+        if (shareOutcome.Error != null)
+            return shareOutcome.Error;
+
         // ── Step 6: Create the project's own SPE container ───────────────────
         var containerResult = await CreateSpeContainerAsync(
             speFileStore, configuration, projectName, request.ProjectId, logger, traceId, ct);
@@ -501,7 +546,9 @@ public static class ProvisionProjectEndpoint
             BusinessUnitName: secureBuName,
             OwnerTeamId: ownerTeamId,
             OwnerTeamName: ownerTeamName,
-            SpeContainerId: speContainerId));
+            SpeContainerId: speContainerId,
+            SharedToCreatorSystemUserId: shareOutcome.CreatorSystemUserId!.Value,
+            AdditionalPrincipalsShared: shareOutcome.AdditionalPrincipalsShared));
     }
 
     // =========================================================================
@@ -590,6 +637,122 @@ public static class ProvisionProjectEndpoint
             "(verified by read-back)", projectId, ownerTeamId);
 
         return OwnerAssignmentOutcome.Assigned;
+    }
+
+    /// <summary>
+    /// Issues the explicit POA shares that are the ONLY way a human reaches a secure project.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this exists (task 061).</b> A provisioned secure project is owned by the Secure
+    /// Project business unit's default owner team, which has no members — so ownership grants nobody
+    /// access, by design. design.md §5.1: <i>"All human access is by explicit Dataverse share,
+    /// including the creating attorney's."</i> Before this step existed, provisioning completed and
+    /// left a record **no human could open** — isolated and unreachable, a locked box. Task 021
+    /// shipped the isolation; this ships the way back in.</para>
+    ///
+    /// <para><b>The creator is identified from their own token</b>, via <c>WhoAmI()</c> on the OBO
+    /// exchange (<see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/>) — never from the
+    /// request body. A caller cannot nominate someone else as "the creator", so the mandatory share
+    /// cannot be aimed at a third party.</para>
+    ///
+    /// <para><b>Fail closed, and loudly (ADR-003).</b> If the creator's identity cannot be established
+    /// or their share cannot be issued, provisioning FAILS. Returning 200 here would report success
+    /// over exactly the locked-box outcome this step exists to prevent. Shares to the optional named
+    /// principals are best-effort by contrast: they are a convenience, their absence is visible and
+    /// fixable through the FR-29 "+ User" path, and failing the whole provision because one colleague
+    /// id was mistyped would be the wrong trade. Any that fail are named in the log and counted in the
+    /// response.</para>
+    ///
+    /// <para><b>Access teams are the eventual mechanism</b>, not per-user shares (design §5.1b — one
+    /// POA row per record, revocation by membership delete). They need an entity team template
+    /// configured on <c>sprk_project</c>, which is environment setup and out of this task's scope for
+    /// the same reason the BU restructure is. Because the seam takes a
+    /// <see cref="DataversePrincipalRef"/>, that migration is a change of principal at this one call
+    /// site — not a rewrite.</para>
+    /// </remarks>
+    private static async Task<ShareOutcome> ShareToCreatorAndPrincipalsAsync(
+        IDataverseRecordShareService recordShare,
+        CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
+        ProvisionProjectRequest request,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+
+        var creatorId = await callerAccessProbe.GetCallerSystemUserIdAsync(callerToken, ct);
+        if (creatorId is null || creatorId == Guid.Empty)
+        {
+            logger.LogError(
+                "[PROVISION] Could not resolve the calling user's systemuserid, so the creator's share " +
+                "cannot be issued for project {ProjectId}. Refusing to complete provisioning: the " +
+                "project is owned by a memberless team, so finishing here would leave a record no " +
+                "human can open. TraceId={TraceId}", request.ProjectId, traceId);
+
+            return new ShareOutcome(null, 0, Problem(
+                StatusCodes.Status403Forbidden, "Forbidden",
+                "The calling user's Dataverse identity could not be established, so the project could " +
+                "not be shared back to its creator. Provisioning was stopped rather than leaving a " +
+                "secure project that nobody can open.",
+                traceId, (ReasonKey, ReasonCreatorUnresolved)));
+        }
+
+        try
+        {
+            await recordShare.GrantAccessAsync(
+                ProjectEntitySet,
+                request.ProjectId,
+                DataversePrincipalRef.User(creatorId.Value),
+                CreatorAccessRights,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[PROVISION] The creator's share could not be issued on project {ProjectId} for user " +
+                "{CreatorId}. Provisioning stopped — the record would otherwise be unreachable. " +
+                "TraceId={TraceId}", request.ProjectId, creatorId, traceId);
+
+            return new ShareOutcome(creatorId, 0, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                "The project could not be shared back to its creator, so provisioning was stopped. " +
+                "No SPE container was created; retry once the share path is healthy.",
+                traceId, (ReasonKey, ReasonCreatorShareFailed)));
+        }
+
+        var additionalShared = 0;
+        foreach (var principalId in (request.SharePrincipalIds ?? Array.Empty<Guid>())
+                     .Where(id => id != Guid.Empty && id != creatorId.Value)
+                     .Distinct())
+        {
+            try
+            {
+                await recordShare.GrantAccessAsync(
+                    ProjectEntitySet,
+                    request.ProjectId,
+                    DataversePrincipalRef.User(principalId),
+                    CollaboratorAccessRights,
+                    ct);
+
+                additionalShared++;
+            }
+            catch (Exception ex)
+            {
+                // Best-effort, per the remarks: named colleagues can be added afterwards, the creator
+                // cannot. Logged with the id so an operator can see exactly who was missed.
+                logger.LogWarning(ex,
+                    "[PROVISION] Could not share project {ProjectId} with named principal {PrincipalId}. " +
+                    "Provisioning continues; add them via the Manage Access surface. TraceId={TraceId}",
+                    request.ProjectId, principalId, traceId);
+            }
+        }
+
+        logger.LogInformation(
+            "[PROVISION] Project {ProjectId} shared to creator {CreatorId} and {Count} named principal(s).",
+            request.ProjectId, creatorId, additionalShared);
+
+        return new ShareOutcome(creatorId, additionalShared, null);
     }
 
     /// <summary>
@@ -753,6 +916,12 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>Internal result wrapper for SPE container creation with optional error result.</summary>
     private sealed record SpeContainerCreationResult(string? ContainerId, IResult? Error);
+
+    /// <summary>
+    /// Result of the task-061 share step: who the creator turned out to be, how many named principals
+    /// were also shared to, and the error that stopped provisioning (null when it succeeded).
+    /// </summary>
+    private sealed record ShareOutcome(Guid? CreatorSystemUserId, int AdditionalPrincipalsShared, IResult? Error);
 
     // ── Dataverse row DTOs ────────────────────────────────────────────────
 
