@@ -110,7 +110,8 @@ Two latent bugs fixed as a consequence: the playbook POA read reported USER shar
 0 warnings, ArchTests 194/194 (191 + 3 new guards, perturbation-checked both ways), BFF unit
 12,178 pass / 0 fail / 58 skipped, 0 vulnerable packages. Publish delta measured against a FRESH
 build of the pre-task commit in a clean worktree (see notes §8 — an in-place rebuild inflated the
-PDB by 5 MB and nearly produced a false +4.95 MB regression report). Full record:
+PDB by 5 MB and nearly produced a false +4.95 MB regression report). Task 060 delta: +0.00 MB
+(45.37 -> 45.38 MB; master 45.35). Full record:
 notes/phase4-poa-consolidation.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

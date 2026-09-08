@@ -109,3 +109,48 @@ options were a live test or none. Live it is, following the `DataverseWebApiFiel
 3. **`GetParticipantSystemUserIdsAsync` now filters to systemusers** — strictly tightens no-leak.
 4. **Errors still propagate on the write path, unchanged**: both grant and revoke
    `EnsureSuccessStatusCode()`; both POA reads still fail soft to empty, as before.
+
+## 8. Publish size — and a THIRD way to get the number wrong
+
+**Result (all three built in FRESH worktrees, zipped with PowerShell `Compress-Archive -Optimal`,
+the method `scripts/Deploy-BffApi.ps1` uses, PDBs included):**
+
+| Build | Size |
+|---|---|
+| `origin/master` @ `e0a6f87c4` | **45.35 MB** |
+| pre-task branch @ `ae035b41f` | **45.37 MB** |
+| task 060 @ `196d60d40` | **45.38 MB** |
+
+- **Task 060's own delta: +0.00 MB.** (Measured against the pre-task commit, which is what isolates
+  THIS task — the branch already carries 51 commits of other work.)
+- Whole-project delta vs master: **+0.02 MB**. Ceiling is 60 MB; headroom **14.62 MB**.
+- No new NuGet packages. `dotnet list package --vulnerable --include-transitive`: **0 vulnerable**.
+
+### ⚠️ The near-miss: an in-place rebuild reported +4.95 MB
+
+The first measurement compared a fresh-worktree master publish against a publish from **this
+worktree**, and reported **+4.95 MB** — one rounding away from §10's "≥+5 MB single-task delta →
+explicit justification required" escalation.
+
+It was false. The entire difference was `Sprk.Bff.Api.pdb`: **7,349 KB in-place vs 2,303 KB fresh**,
+against a `Sprk.Bff.Api.dll` that differed by only 48 KB. A PDB tripling while the IL barely moves is
+not a code change — it is accumulated incremental-build state in `obj/`, from having built this
+worktree repeatedly (Debug and Release) during the task.
+
+Two things nearly let it through, and both are worth naming:
+1. **A cleanup that silently did nothing.** The `find … -name obj -o -name bin -prune -exec rm -rf`
+   used to "clean" matched nothing and removed nothing. It printed no paths, which looked like
+   "already clean" rather than "the command is wrong". Re-measuring after it produced the *identical*
+   +4.95 MB — which should have been the tell, and initially was not.
+2. **The number was plausible.** +4.95 MB on a task touching the BFF is exactly the shape of a real
+   regression, so it invites investigation of the code rather than of the measurement.
+
+**CLAUDE.md §10 documents two hazards — the ageing baseline and the zip tool. This is a third:
+the BUILD ENVIRONMENT.** A publish from a worktree you have been iterating in is not comparable to
+one from a fresh worktree, even at the same commit, even after an apparent clean. **Build all sides
+in fresh worktrees.** The §10 procedure already prescribes that for master; the same discipline has
+to apply to the branch side, which the worked example does not currently spell out.
+
+Corroboration that it is environmental and not code: the pre-task commit `ae035b41f` — which contains
+every one of this project's 51 commits and none of task 060 — publishes at 45.37 MB with a 2,303 KB
+PDB from a fresh worktree, and the task 060 commit publishes at 45.38 MB with a 2,302 KB PDB.
