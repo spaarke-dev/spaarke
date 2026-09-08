@@ -11,7 +11,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **012 — escalated, awaiting owner sign-off.** P1 complete (001–003 ✅). P2a: 010 ✅ 011 ✅ 012 🔄 013 🔲 |
-| **Progress** | **6 of 34 tasks complete** |
+| **Progress** | **5 of 34 complete** (001, 002, 003, 010, 011) · 1 blocked (012) |
 | **Status** | blocked on a decision, **not** on work |
 | **Execution** | **AUTONOMOUS** — resume without per-wave confirmation |
 | **Next Action** | **(1)** Owner answers the **4 decisions detailed in the section below** (also in [`notes/decisions/012-ESCALATION-security-adrs.md`](notes/decisions/012-ESCALATION-security-adrs.md)). **(2)** Meanwhile **task 013 is unblocked** (deps=011 ✅) — run it. **(3)** Task 020 / all of P2b stays parked until 012 closes. **(4)** P3 (030+) is independent of P2 and can run in parallel if desired. |
