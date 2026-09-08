@@ -17,7 +17,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 001 | Worktree bootstrap and true typecheck baseline | ✅ | MINIMAL | sonnet / medium | — | none |
 | 002 | **Spike-1**: `document.url` shape for SPE files in Word desktop | 🔲 | STANDARD | opus / high | P0-spikes | none |
 | 003 | **Spike-2**: Office Dialog API for opening a record | 🔲 | STANDARD | sonnet / high | P0-spikes | none |
-| 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | 🔲 | MINIMAL | sonnet / medium | P0-spikes | none |
+| 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | ✅ | MINIMAL | sonnet / medium | P0-spikes | none |
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | 🔲 | STANDARD | opus / high | P0-spikes | none |
 | 006 | FR-18: clear typecheck debt in `shared/taskpane` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
 | 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |

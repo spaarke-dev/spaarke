@@ -4,7 +4,7 @@
     <title>Spike-3: can a task pane open the Copilot pane or a named agent (timeboxed)</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Timeboxed documentation search producing a single notes artifact. No .ts/.tsx/.cs file is modified and no design is committed to — the most likely outcome (a negative) closes FR-20 outright. The Step 9.5 gates have no code surface to inspect.</rigor-reason>
     <model-tier>sonnet</model-tier>
