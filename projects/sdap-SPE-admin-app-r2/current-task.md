@@ -1,7 +1,7 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-28 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §1 (the two live threads). Everything else is reference.
+> **Last Updated**: 2026-08-31 (by `context-handoff`)
+> **Recovery**: read Quick Recovery, then §1 (the live threads). Everything else is reference.
 
 ---
 
@@ -10,265 +10,196 @@
 | Field | Value |
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
-| **Status** | **All code complete and DEPLOYED to Spaarke Dev.** Tree clean, branch pushed, PR [#859](https://github.com/spaarke-dev/spaarke/pull/859) open |
-| **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX, not from memory |
-| **Master** | ✅ Merged + verified green 2026-08-28 (see Repo state below). Re-merge before the 090 PR |
-| **Next Action** | **(a)** Re-run `scratchpad/probe050_optedin.py` on/after **2026-08-29** — the 24 h replication retry (§1.1). **(b)** Operator runs [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) (§1.2) |
-| **Blocked?** | Nothing is code-blocked. Both open threads are *waiting*, not stuck |
-| **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** when it runs |
+| **Status** | **All code complete, merged to master, and deployed.** Nothing is unmerged |
+| **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX rows, not from memory |
+| **Next Action** | **UAT §1A.2b — create a container type.** The operator has a test ready. This is the ONLY way to verify the create fix (see §1.1) |
+| **Blocked?** | Nothing is code-blocked. Every open thread waits on the operator or on elapsed time |
 
-### Deployed right now (2026-08-28)
+### ✅ Starting a NEW / REMOTE session? Read this
 
-| Surface | State |
+**You do NOT need the local worktree.** The branch is **0 commits ahead of master** — every line of this
+project's work is on `origin/master`. A fresh clone of master has all of it.
+
+| | |
 |---|---|
-| BFF `spaarke-bff-dev` | 45.12 MB, **SHA-256 hash-verified on-server**, `/healthz` **200**, CORS OK |
-| New 052 routes | **401** (registered + protected); a fake route still **404**, proving the 401s are real registrations and not a blanket auth wall |
-| Code page `sprk_speadmin` | Published, 2335 KB, byte-identical to the artifact whose strings I verified |
+| Branch `work/sdap-SPE-admin-app-r2` | `7a2727620` · **0 ahead / 235 behind** `origin/master` |
+| Open PRs | **0** — #859, #907, #918 all MERGED 2026-08-30/31 |
+| Uncommitted | none |
 
-### ✅ Repo state — master merged 2026-08-28, verified green
+⚠️ **235 behind.** Master moves fast (other worktrees merge constantly). **Re-merge master before any
+new PR** and re-run the build — do not trust a day-old sync.
 
-Branch is **16 ahead / 0 behind** `origin/master` (@ `c86ed1b35`). Two merges, both **zero-conflict**
-(zero file overlap with master's 86 changed files).
+⚠️ **If you use the LOCAL worktree**: `node_modules` is **absent everywhere** (0 directories). The
+worktree was wiped and recreated 2026-08-31, and node_modules is gitignored. **Any client build fails
+until** `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci` — it fails on most
+solutions here). Shared libs first (`Spaarke.UI.Components`, `Spaarke.Auth`), then the code pages.
+The .NET side is fine.
 
-| Check | Result |
+ℹ️ VS Code may show root files with a red **`D`** badge in that worktree. **Cosmetic** — git is clean
+(verified: 0 status entries, 19,057 tracked files all present). It is stale editor cache from the
+midnight wipe; **Developer: Reload Window** clears it.
+
+---
+
+## 1. The live threads
+
+### 1.1 🔴 UAT §1A.2b — create a container type (THE NEXT ACTION)
+
+The operator has a container-type create ready to test. **This is the highest-value open item**, because
+the fix behind it is **reasoned, not proven**.
+
+**What was wrong** (UAT 2026-08-28): `invalidRequest: One of the provided arguments is not acceptable`
+— an error naming no argument. Three defects on one path:
+
+1. **`owningAppId` was never sent**, and Graph requires it (beta CSDL: `Nullable="false"`).
+2. **The billing allow-list was `{standard, premium}`** — "premium" has never existed in Graph, and
+   `trial` + `directToCustomer` were rejected by our own validator.
+3. **An unparseable classification silently became `standard`** — and the classification is
+   **permanent**, so that substitution was unrecoverable.
+
+⚠️ **SCOPE OF PROOF.** Container-type create is **delegated-only**; an app-only token gets **403**, so
+the failure is **unreachable from a probe** (recorded in `notes/probe_containertype_create.py`). The fix
+rests on the Graph beta CSDL + Microsoft's documented body. **A delegated session is the only
+verification.**
+
+**If it still fails → the next hypothesis is a tenant/licensing precondition, NOT the payload.**
+Capture the full message.
+
+**Trial-type limits** (so a legitimate platform refusal isn't mistaken for our bug): one trial container
+type per tenant · 5 containers · 1 GB each · 30 days · cannot be registered in another tenant.
+
+### 1.2 ⏳ The rest of UAT
+
+[`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) §1A:
+
+- **§1A.1 Security tab** — one "Secure Score" header (not two), donut chart, and the corrected
+  access-denied message. Toggle **dark mode** — the donut arc uses Fluent palette tokens.
+- **§1A.2 Add Property** — 🔴 **(c) is the one to watch**: add a second property and confirm the
+  **first survives**. Graph merges partial writes; if the first disappears that is silent data loss.
+- **§1A.3 `Add Permission`** — ⚠️ **SKIPPED, NOT PASSED.** The probe identity could not resolve a grant
+  subject. **No evidence either way** — exercise it deliberately.
+
+### 1.3 ⏳ Task 050 — archival probe, overdue
+
+`python scratchpad/probe050_optedin.py` (also `notes/probe050_optedin.py`). The 24 h replication retry
+was due **2026-08-29** and has not been run. Provisions and tears down its own container.
+
+The opt-in **is** set (`IsArchiveEnabled : True`) but Graph returned a byte-identical 403 naming
+*"this **APPLICATION**"*, not the container type. 🔴 **Do NOT conclude an app-level capability from that
+sentence** — reading a vendor error string as precise system state is how a nonexistent PowerShell
+command got into five documents.
+
+### 1.4 ⏳ `SearchItemsTests` — the one real test action
+
+7 HTTP contract tests at `tests/unit/Sprk.Bff.Api.Tests/SpeAdmin/` — **not a KEEP path**. Content is
+maintain-class; only the location is wrong. **But one method makes a real outbound Dataverse call**
+(~100 s timeout, intermittently), so a plain `git mv` would relocate a network dependency **into** a
+KEEP path — worse than leaving it. Needs an offline Dataverse double, or deletion of that one method.
+**Not acceptable**: adding it to `tests/.reliability-registry.json` for retries.
+
+---
+
+## 2. What this session (2026-08-30/31) shipped
+
+| | |
 |---|---|
-| `dotnet build -c Release` | **0 errors / 0 warnings** — survives master deleting `AccessibleRecordSetAuthorizationFilter` + `OfficeDocumentAccessFilter` and adding `CallerIdentity` |
-| SpeAdmin tests (258) | **257 pass**. The 1 failure is `SearchItemsTests`, the known pre-existing real-outbound-Dataverse test — failed at **1 m 41 s**, the same timeout signature already recorded below |
-| ArchTests | **5 fail — ALL pre-existing on master**, proven by running plain `origin/master` in a throwaway worktree. None are SpeAdmin; all are provisioning / DI / ServiceBus |
+| **PR #859** | SPE Admin R2 code complete — merged |
+| **PR #907** | `owningAppId` validation fix + test-diet report — merged |
+| **PR #918** | r3 project seed — merged |
 
-⚠️ **ArchTest baseline caveat.** The throwaway-worktree baseline reported **6** failures, not 5. The
-extra one (`FR-27 positive`) is an **artifact of the method, not a master defect** — a fresh worktree
-has never built the provisioning DLLs, and that ArchTest inspects compiled L2 assemblies. It says so
-in its own failure message. Build the L2 projects first, or expect a phantom 6th failure.
+### Defects found and fixed
 
-**Re-merge master immediately before the 090 PR** — it moved twice during this session's test runs
-(the `.git` is shared across ~80 worktrees, so `origin/master` advances under you).
+- 🔴 **5th fabrication defect — a fabricated CAUSE, not a value.** Security said *"most common cause is
+  a missing SecurityEvents.Read.All grant"* on every denial, while Graph said **"Account is not
+  provisioned"** and that grant was **already made**. `AccessDeniedSummary` now branches on Graph's own
+  words and says **"cannot tell"** when the cause is genuinely ambiguous.
+- 🔴 **6th — `Add Property` had NEVER worked.** PATCHed the *container* with a `{customProperties:{…}}`
+  wrapper → `400 Unsupported request body property`. Belongs at
+  `PATCH /containers/{id}/customProperties` with the map as the **body root**. Proven live, both shapes
+  back to back. **Why it hid: reads use a different, valid shape** — a working read beside a broken
+  write survives inspection indefinitely.
+- 🔴 **7th/8th/9th** — the three container-type create defects (§1.1).
+- 🔴 **10th, found by `/code-review` on my own changes** — the fix for §1.1 put GUID validation in the
+  *endpoint*, but `CreateContainerTypeForConfigAsync` resolves `owningAppId` from a Dataverse **text**
+  column and passed it to a bare `Guid.Parse`, throwing `FormatException` that its `ODataError`-only
+  catch doesn't map → raw 500. **Validation now sits with the parse.** The same "error doesn't say
+  which argument" failure, reintroduced one layer down by its own fix.
 
----
+### Docs produced (all on master)
 
-## 1. The two live threads
-
-### 1.1 🔴 Task 050 — the opt-in IS set, and Graph still refuses
-
-The operator ran the corrected command against the right tenant and it took:
-`IsArchiveEnabled : True`, confirmed on an independent `Get-SPOContainerTypeConfiguration`.
-
-**Graph is unchanged.** Probed 2026-08-28 on a fresh throwaway container:
-
-```
-POST /beta/storage/fileStorage/containers/{id}/archive
-  → 403 notAllowed: "Archival operation cannot proceed because this
-                     application does not currently support archiving."
-```
-
-Byte-identical to the pre-opt-in response.
-
-**The wording is the clue, and it is not the one we assumed.** It names *"this **APPLICATION**"* — the
-owning app `170c98e1` — **not** the container type. Task 050's original reading ("the container type
-has not opted in") is now **unproven**.
-
-| # | Hypothesis | Test |
-|---|---|---|
-| **1** ⭐ | **Replication lag** — SPE container-type settings propagate up to **24 h**. Spec FR-C08 exists for exactly this | Re-probe on/after 2026-08-29 |
-| **2** | A separate **application-level** capability | Only if (1) is ruled out |
-
-🔴 **Do NOT conclude (2) from the sentence alone.** Reading a vendor error string as a precise
-statement of system state is how `Set-SPOContainerType -IsArchiveEnabled` — a command that does not
-exist — got into five documents.
-
-**Re-run**: `python scratchpad/probe050_optedin.py` — provisions and tears down its own container and
-checks archive, `archivalDetails`, and unarchive end to end.
-
-⚠️ **`archivalDetails` has still never been seen on the wire.** An active container returns exactly
-`containerTypeId, createdDateTime, description, displayName, id, lockState, ownershipType, settings,
-status`. If it stays absent after a successful archive, the grid must source archive state from the
-**action outcome**, not the property — isolated in one mapper (`ReadArchiveStatus`).
-
-### 1.2 ⏳ UAT — the gate on 090
-
-[`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md). Two items are acceptance criteria, not polish:
-
-- **029 AC-1** — does Spaarke Dev actually return `billingStatus`? All-"Unknown" is correct NFR-06
-  behaviour but satisfies AC-1 only degenerately; **record it either way**.
-- **025 AC-2** — do all nine settings persist? A **502 naming `unwrittenFields` is a PASS** — that is
-  the read-back verification catching Graph accepting and silently discarding.
-
-Section 3 (archival) is still testable today: while Graph refuses, Archive must produce a **409 with
-remediation**, not a crash or a false success.
+- [`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md)
+  — five binding rules, app-registration topology, create + registration procedures.
+  Artifact: <https://claude.ai/code/artifact/07b17fb1-a9d1-42bf-8165-758002704f43>
+- [`notes/test-diet-report.md`](notes/test-diet-report.md) — the BINDING 090 gate, **already satisfied**.
+- `projects/sdap-SPE-admin-app-r3/` — the decomposition project (§4).
 
 ---
 
-## 2. What this session shipped
+## 3. `/test-diet` — DONE. Two corrections that change 090
 
-| Task | Outcome |
-|---|---|
-| **052** ✅ | Per-container **item** recycle bin (FR-E03). Live-verified 18/18 on a throwaway container |
-| **025** ✅ | The deferred **settings form** — all nine settings render, bound to Graph |
-| **026** ✅ | Complete **as amended** — cross-tenant override display dropped (operator decision) |
-| **042** 🔄 | Security escalation **resolved** (11 contract tests); ~104 scaffolding methods held for `/test-diet` |
+**The gate is satisfied**; 090 can cite [`notes/test-diet-report.md`](notes/test-diet-report.md).
 
-### Four decisions worth keeping
-
-1. **Restore and permanent delete fail in OPPOSITE ways.** Restore → 207 listing only successes,
-   atomic on rejection; delete → 204 regardless of what it did, non-atomic. So delete **lists the bin
-   BEFORE and AFTER and diffs**. The *before* list is load-bearing: without it an id that was never in
-   the bin reads as "purged" — a fabricated success on an irreversible operation.
-2. **Unverifiable delete → 207 + `verified:false`**, never 5xx. The delete *was* issued and data may
-   be gone; an error status asserts the opposite unestablished thing.
-3. **Graph's error CODE for a rejected restore is NOT stable** — `badArgument` and `invalidRequest`
-   hours apart for the identical condition. The detector keys on the **400 status**; the contract test
-   is a `[Theory]` over both payloads.
-4. **`undefined` stays `undefined` in the settings form.** `<Switch checked={undefined}>` renders
-   identically to `false`, so unreported settings get a "Not reported" badge **and are omitted from
-   the save**. An unknown must not become a write.
-
-### UAT round 1 (2026-08-28) — fixed and redeployed
-
-- 🔴 **5th fabrication defect — a fabricated CAUSE, not a value.** The Security screen said *"The most
-  common cause is a missing `SecurityEvents.Read.All` grant"* on **every** denial. Graph's actual
-  words were *"Account is not provisioned"*, and task 013 had **already granted** that permission. The
-  screen sent the operator to re-check something demonstrably correct, to fix a condition no grant can
-  fix. `AccessDeniedSummary` now branches on what Graph reported; when the cause is genuinely
-  ambiguous it says **"cannot tell"** and names both candidates.
-- 🔴 **6th — `Add Property` was aimed at the wrong URL and had NEVER worked.** It PATCHed the
-  **container** with a `{customProperties:{…}}` wrapper → `400 Unsupported request body property`.
-  The write belongs at `PATCH /containers/{id}/customProperties` with the map as the **body root**.
-  Probed both shapes back to back: ours 400, correct shape 200.
-  **Why it hid**: reads use `GET ?$select=customProperties`, a different valid shape that works. A
-  working read beside a broken write survives inspection indefinitely.
-- **Semantics established by probe** (now in the code comments): partial writes **MERGE** — an
-  untouched property survives, which is what makes the PUT-shaped endpoint non-destructive; a `null`
-  value **removes** a property.
-- **UI**: duplicate "Secure Score" header removed; the bar + badge + caption (three renderings of one
-  number) collapsed into a donut. Hand-rolled ~30-line SVG — no chart library in this app.
-
-### UAT round 2 (2026-08-28) — container-type create
-
-Creating `Spaarke Model 1 Trial PAYGO` failed with `invalidRequest: One of the provided arguments is
-not acceptable` — an error that names no argument. **Three** defects on one path:
-
-- 🔴 **7th — `owningAppId` was never sent, and Graph requires it.** Beta CSDL marks
-  `fileStorageContainerType.owningAppId` `Nullable="false"`; the documented create body carries it.
-  Now resolved as request → `config.OwningAppId` → `config.ClientId`, with a **400 naming the field**
-  when none resolves rather than relaying Graph's anonymous rejection.
-- 🔴 **8th — the billing allow-list was wrong in BOTH directions.** It was `{standard, premium}`.
-  Graph's enum is `standard · trial · directToCustomer · unknownFutureValue`. **"premium" has never
-  existed**, and **`trial` + `directToCustomer` were rejected by our own validator** while the client
-  offers exactly those three. The documented path for a new environment was closed by our own code.
-- 🔴 **9th — an unparseable classification silently became `standard`.** A request for a **trial**
-  type would have created a **standard** one and reported success. The classification is
-  **permanent**, so that substitution is unrecoverable. Now throws before anything reaches Graph.
-
-⚠️ **SCOPE OF PROOF — this fix is REASONED, NOT PROVEN.** Container-type create is delegated-only and
-an app-only token gets **403** (consistent with task 010 on the sibling LIST endpoint), so the
-argument error is **unreachable from a probe**. Recorded in
-[`notes/probe_containertype_create.py`](notes/probe_containertype_create.py). Evidence is the beta
-CSDL + Microsoft's documented body; **UAT with a delegated token is the verification.** If it still
-fails, the next hypothesis is a tenant/licensing precondition — not the payload.
-
-**Trial-type platform limits** (Microsoft docs, relevant to this attempt): one trial container type
-per tenant at a time · 5 containers · 1 GB each · expires after 30 days · cannot be deployed to other
-consuming tenants. A failure saying a trial type already exists is correct behaviour, not our bug.
-
-### `+ Add` evidence status (answers the UAT question directly)
-
-| Surface | Contract test | Real Graph |
-|---|---|---|
-| Add Column | ❌ | ✅ **201, reads back** |
-| Add Property | ✅ 3 new | ✅ after fix |
-| Add Permission | ❌ | ⚠️ **SKIPPED, not passed** — probe identity lacks `User.Read.All` so no grant subject could be resolved |
-| Add Owner | ✅ 6 | ⚠️ negative path only (operator decision — no grant sent at the real container type) |
-
-⚠️ **Do not read "skipped" as "works".** Add Permission has **no evidence of either kind**.
-⚠️ The bogus-UPN lookup returned **403**, not the **404** `AddOwner_WhenTheUpnResolvesToNobody` stubs.
-That may be an artifact of probing as the owning app rather than the BFF identity — **flagged, not
-concluded.** Worth resolving before trusting Add Owner's error path.
-
-### Defects found in passing
-
-- 🔴 **4th fabrication defect** — `extractSettingsFromConfig` invented every missing settings value
-  (`?? "disabled"`, `?? false`, `?? 100`, `?? 1 GB`, `isSearchEnabled: true` hard-coded). A container
-  type with search **off** showed the switch **on**. Fixed.
-- 🔴 **Caught before shipping** — `setContainerType(updated)` after a save would have blanked
-  `owningAppId`/`expiryDateTime`/`region`, making a *successful save* look like data loss. Merged instead.
-- 🔴 **Stale caveat** — 025's note said *"every PATCH returns 400, nothing is writable"*, superseded
-  2026-08-25 (`etag` is a REQUIRED **body** property; 023 proved the write live 499→499). Two notes
-  disagreed for two days. **A stale caveat is indistinguishable from a live blocker.**
-- 🔴 **My own error** — I derived the SPO admin URL from the **Dataverse** org name. The SharePoint
-  tenant is **`spaarke`**, not `spaarkedev1`; verified from a container's drive `webUrl`. Corrected in
-  both docs with an inline note. ⚠️ Containers therefore live on the **production** SharePoint tenant.
-- ⚠️ **`SearchItemsTests`** makes a **real outbound Dataverse call from `tests/unit/**`** and timed out
-  after ~100 s having passed twice the same session. Stash-proven pre-existing. For `/test-diet` the
-  choice is an offline Dataverse double or removal — **not** merely tightening the assertion.
-- ⚠️ SPO exposes **`CopilotEmbeddedChatHosts`** — so FR-C07's `agent.chatEmbedAllowedHosts` concept is
-  real but **PowerShell-only**, not a Graph settings property. FR-C07 looked in the wrong API.
+1. 🔴 **The old "~104 scaffolding methods held for /test-diet" claim is STALE.** All four files
+   (`SecurityEndpointTests`, `ContainerTypeEndpointsTests`, `SpeAdminGraphServiceTests`,
+   `ContainerEndpointsTests`) were **already deleted** by `ci-cd-unit-test-remediation-r1` and arrived
+   via a master merge. **Do not carry that number into the wrap-up PR.**
+2. ⚠️ **The skill's default scope is wrong for this branch.** `{start-commit}..HEAD` returns **354 test
+   files**, because this branch merged master three times and that range sweeps in other projects'
+   tests. Scoped against master the real delta is **6 files / 41 methods**, **zero scaffolding**.
 
 ---
 
-## 3. Held for 090's `/test-diet` (BINDING) — do not action early
+## 4. Successor: `sdap-SPE-admin-app-r3` (seeded, not started)
 
-~104 classified scaffolding methods across 6 files · the 20 `SecurityEndpointTests` (replacement now
-exists, so the hold reason is gone) · `SearchItemsTests` · **DEF-001** (3 owning-app methods with zero
-callers, still DI-registered) · every `// AMBIGUOUS (task 042):` marker.
+`projects/sdap-SPE-admin-app-r3/` — decompose `SpeAdminGraphService.cs`. `/design-to-spec` **not run**.
 
-**ISS-002** ([#839](https://github.com/spaarke-dev/spaarke/issues/839)) — PR **#847** is another session acting on it.
+**The god file grew during r2**: **4,320 → 6,545 lines (+52%)**, 168 public methods, 111 public async
+across **nine** domains. r2's deferral pointed at `speadmingraphservice-decomposition-r1`, **which was
+never created** — r3 is the correction.
+
+🔴 **Operator constraint (binding)**: **CI must NOT gate on this file.** No LOC gate, no re-instated
+`GodClassGuardTests`, no wiring `report-large-server-files.ps1` into CI. Verified: nothing gates on size
+today, and the three ArchTests referencing the file check *content*, not size, and pass.
 
 ---
 
-## 4. Recipes that earned their keep
+## 5. Recipes that earned their keep
 
-- **Prove a failure is pre-existing**: `git stash -u` → run → `git stash pop`. Used for both the
-  ArchTest baseline and `SearchItemsTests`. **Once the work is committed, stash no longer works** —
-  use a throwaway worktree instead: `git worktree add -f --detach /c/tmp/base origin/master`, run,
-  then `git worktree remove --force`. ⚠️ **Build the projects the test inspects first.** ArchTests
-  that load compiled assemblies (the provisioning L2 guards) fail spuriously in a fresh worktree and
-  the failure looks exactly like a real violation. Read the failure MESSAGE before believing the
-  count — it names the missing assembly.
-- **`git diff --name-only A..B` is a two-dot DIFF, not a range.** For "what changed on master since we
-  diverged" you need three dots: `A...B`. The two-dot form lists your own files as differences and
-  manufactures a false conflict report.
-- **Read Graph's own CSDL before believing a doc**: `curl https://graph.microsoft.com/{v1.0,beta}/$metadata`, no token.
-- **Publish size is measured COMPRESSED.** Uncompressed is ~138 MB and looks catastrophic;
-  `Compress-Archive -CompressionLevel Optimal` reproduces the ~45 MB gated figure.
-- **Don't derive one system's hostname from another's.** Read it off the wire.
-- **`gh pr view --json files` caps at 100** — use `gh api --paginate .../pulls/{n}/files`.
-- **Emoji `grep` on TASK-INDEX silently returns nothing** — the shell mangles it, and an empty result
-  reads exactly like "no tasks remain". Enumerate with Python + `PYTHONIOENCODING=utf-8`. This produced
-  a wrong "all tasks complete" reading once already.
+- **Scope a project's test delta against MASTER**, not `start..HEAD` — see §3.2.
+- **A working READ beside a broken WRITE is invisible.** Never let a read stand in for a write; they are
+  frequently different URLs.
+- **Probe BOTH shapes before declaring code broken.** When our payload 400'd, testing the alternative on
+  the same container is what turned "something's wrong" into a specific, fixable defect.
+- **Verify a deploy by reading bytes back from Dataverse** — the deploy script reported the same
+  "2335 KB" for two different builds, so size proves nothing. `notes/verify_deployed_page.py`.
+- 🔴 **`git stash pop` in a shared-`.git` worktree can pop ANOTHER project's stash.** A failed `cd` meant
+  my stash never ran, but the `&&`-chained `pop` fired and applied another project's WIP here.
+  **Never chain `stash`/`pop` behind a `cd`; check `git stash list` first.** For baselines prefer a
+  throwaway worktree.
+- ⚠️ **A throwaway-worktree baseline gives phantom ArchTest failures** — a fresh worktree has never built
+  the provisioning DLLs those tests inspect. **Read the failure message before believing the count.**
+- **`git diff --name-only A..B` is a two-dot DIFF, not a range.** Use `A...B`.
+- **Emoji counting**: PowerShell chokes on surrogate pairs (`[char]0x1F501` throws). Use Python with
+  `PYTHONIOENCODING=utf-8`. Counting the raw ✅ character over-counts — it appears in prose; enumerate
+  table ROWS.
 - **Live probing**: app-only as owning app `170c98e1` via `spe-owning-app-secret` in `sprk-prod-kv`.
-  Recipe in [`notes/live-verification-credential.md`](notes/live-verification-credential.md).
-- **Throwaway teardown uses `DELETE /storage/fileStorage/deletedContainers/{id}`** — an earlier probe
-  used a `permanentDelete` action, got 400, and leaked a container.
-- **Verify a client build actually contains the change**: `grep` the built bundle for a known string
-  **and** a negative control for a string that should be gone. Better still, read the bytes back
-  **out of Dataverse** — the deploy script reported the same "2335 KB" for two different builds, so
-  size proves nothing. Recipe: `scratchpad/verify_deployed_page.py`.
-- **A working READ beside a broken WRITE is invisible.** `Add Property` read correctly and wrote
-  nothing for the life of the project. When verifying a CRUD surface, never let the read stand in for
-  the write — they are frequently different URLs.
-- **Probe BOTH shapes before declaring code broken.** When our payload got a 400, the next step was
-  testing the alternative shape on the same container, not writing up a defect. Had the alternative
-  also failed, the finding would have been "Graph rejects this operation", which is a different
-  conclusion with a different fix.
-- 🔴 **`git stash pop` in a shared-`.git` worktree can pop ANOTHER project's stash.** A failed `cd`
-  meant my `git stash` never ran, but the `&&`-chained `pop` still fired and applied
-  `customer-provisioning-orchestration-r1`'s WIP into this tree — removing it from their stash list.
-  Recovered by re-stashing with a provenance message and diffing to prove it byte-identical.
-  **Never chain `stash`/`pop` behind a `cd`, and check `git stash list` before popping.** For
-  baselines, prefer a throwaway worktree — it cannot touch shared state.
+  ⚠️ App-only gets **403 on all container-type endpoints** — delegated-only.
+- **Throwaway teardown**: `DELETE /containers/{id}` **then** `DELETE /deletedContainers/{id}`. Both.
 
 ---
 
-## 5. Reference
+## 6. Reference
 
 | Item | Where |
 |---|---|
-| Task 052 full record | [`notes/task-052-findings.md`](notes/task-052-findings.md) §5 |
-| Task 050 archival + the still-403 result | [`notes/task-050-findings.md`](notes/task-050-findings.md) §8 |
-| Task 025 form + stale-caveat correction | [`notes/task-025-schema-verification.md`](notes/task-025-schema-verification.md) §6 |
-| Task 026 escalation + amendment | [`notes/task-026-findings.md`](notes/task-026-findings.md) §6 |
-| Test retirement + Security resolution | [`notes/test-retirement-inventory.md`](notes/test-retirement-inventory.md) |
-| **UAT checklist** | [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) |
+| **UAT checklist** (§1A is the live part) | [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) |
+| Test diet report (090's gate) | [`notes/test-diet-report.md`](notes/test-diet-report.md) |
+| Container-type topology | [`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) |
+| Task 050 archival + still-403 | [`notes/task-050-findings.md`](notes/task-050-findings.md) §8 |
+| Task 052 recycle bin | [`notes/task-052-findings.md`](notes/task-052-findings.md) §5 |
+| Probes (reproducible) | `notes/probe_add_paths.py` · `notes/probe_customprops_shape.py` · `notes/probe_containertype_create.py` |
 
-**Not in the POML backlog**: the client typecheck+vitest gap (124-error pre-existing baseline) ·
-I2 cross-tenant search bleed (waived on the deployment, not fixed) · container-type DELETE does not exist.
+**Known, not in the backlog**: client typecheck 124-error pre-existing baseline · I2 cross-tenant search
+bleed (waived, not fixed) · container-type DELETE does not exist · **21 stray `check-*`/`search-*`/
+`read-logs*` debug scripts committed at repo ROOT** (replicate into ~80 worktrees; `check-deadletter.ps1`
+is broken — undefined `$deadletterqueue`, and greps a log path that doesn't exist).
