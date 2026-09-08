@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-07, session 3** (task 083 complete) — reflects through commit `8047cca15`. ⚠️ **Refresh this line every time you write here.** It once read 2026-09-04 while the file's last commit was 2026-09-07; a gap between this stamp and `git log -1 --format=%ci current-task.md` is the signal this skill's Failure Modes table says means the handoff was incomplete.
+> **Last Updated**: **2026-09-07, session 3 END** (by `context-handoff`) — reflects through commit `c17c4e730`. ⚠️ **Refresh this line every time you write here.** It once read 2026-09-04 while the file's last commit was 2026-09-07; a gap between this stamp and `git log -1 --format=%ci current-task.md` is the signal this skill's Failure Modes table says means the handoff was incomplete.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
 > ⚠️ **This project's notes have now been WRONG FIFTEEN times.** Verify before believing —
 > counts, route names, schema claims, "already done" claims, open-vs-answered questions.
@@ -15,9 +15,9 @@
 
 | Field | Value |
 |---|---|
-| **Branch** | `work/unified-access-control-r2` @ `8047cca15` · clean · **1 unpushed** · **47 ahead** of master · 0 behind (merged `origin/master` this session) |
-| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · `Router` was GREEN at `d4b3b6720`; **re-check after this push** |
-| **Task status** | **54 completed** · 1 completed-with-escalation (012) · 1 blocked-shipped (034) · **36 open** · 92 total. Drift gate green: 92 POMLs = 92 index rows |
+| **Branch** | `work/unified-access-control-r2` @ `c17c4e730` · clean · 0 unpushed · **50 ahead** of master · ⚠️ **6 BEHIND** — merge `origin/master` before starting 060 |
+| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · `Router` was GREEN at `d4b3b6720`; **re-check `gh pr checks 950`** after the latest pushes |
+| **Task status** | **53 completed · 2 completed-with-escalation (012, 071) · 1 blocked-shipped (034) · 36 open · 92 total.** Machine-counted 2026-09-07 with **python, not grep** (see G-16). ⚠️ The long-standing "53 completed / 1 escalation / 37 open" figure was **wrong** — it counted **071** as plain `completed`. 56 terminal / 36 open. Drift gate green: 92 POMLs = 92 index rows |
 | **Next Action** | **Task 060 — consolidate the two POA share clients into one seam** (3–4 h, **opus @ xhigh**, `parallel-safe=false`). Startable now: its only dependency (010) is complete. **Then 061 immediately after.** |
 | **🔴 The goal both serve** | **Task 061 — the explicit share for Secure Projects.** Task 021 shipped the isolation (memberless owner team + BU) but *not* the share, so a secure project is currently **isolated and unreachable by any human** — a locked box. Owner-directed 2026-09-07 to fix it. ⚠️ **061 CANNOT go first**: its mechanism is "issue shares via the 060 seam", and doing it before 060 means writing a THIRD POA client, which 060's constraints and root §11 both forbid. Verified chain: `010 ✅ → 060 🔲 → 061 🔲`, with `008 ✅` also satisfied. |
 | **Also done 2026-09-07** | **uuid CVE-2026-41907 closed in LegalWorkspace** (`16b75e97f`) — `overrides: uuid ^14.0.0`, resolves 14.0.2, build green (3,874 modules, artifact marginally smaller). Ours by causation: `9edbb011c` on this branch declared the Tiptap deps that brought uuid@10 in. **The other two instances of this CVE (`src/solutions/SpaarkeAi`, `src/client/shared/Spaarke.Compose.Components`) are master-resident since 2026-07-17/21, are NOT this project's surface, and are deliberately untouched.** |
@@ -61,6 +61,88 @@ returns **0**. No code path lets a caller name the container its bytes land in.
 - Verified: build 0 warnings · ArchTests **191/191** · BFF **12,166 pass / 0 fail** · publish
   **master 45.46 → branch 45.48 MB (+0.02)** vs a *fresh* master build @ `91cecb07d` · **0 vulnerable
   packages**. Guard perturbation-checked both ways, residue-checked clean.
+
+### 🚀 COLD START: how to begin task 060 (everything needed; nothing to re-derive)
+
+**First three commands**, in order:
+
+```bash
+git -C c:/code_files/spaarke-wt-unified-access-control-r2 merge origin/master --no-edit   # 6 behind
+pwsh -NoProfile -File scripts/check-task-status-drift.ps1                                 # expect green
+gh pr checks 950                                                                          # Router must be green
+```
+
+**Then invoke `task-execute` on** `projects/unified-access-control-r2/tasks/060-poa-seam-consolidation.poml`
+(`FULL` rigor · **opus @ xhigh** · `parallel-safe=false` · 3–4 h est.).
+
+**What 060 is, in one sentence**: Spaarke has **two** `principalobjectaccess` (POA) share clients;
+merge them into **ONE** seam parameterized by principal kind, and add revoke. This is a CLAUDE.md §11
+consolidation — *two into one*. **Building a third client is a task failure.**
+
+| The two clients | What it has | What it lacks |
+|---|---|---|
+| `Services/Communication/Access/IDataverseAccessGrantService.cs` | `GrantAccess`, systemuser only | **no revoke**, no team principal |
+| `Services/Ai/PlaybookSharingService.cs` **:302-350** | Grant **+ Revoke**, **teams** | it is a private duplicate |
+
+`PlaybookSharingService.cs:302-350` is the **complete reference implementation** — the target seam is
+essentially that, lifted and parameterized. Target shape (state the naming decision in the PR):
+`GrantAccessAsync(entitySet, recordId, principalRef(kind,id), accessMask)` ·
+`RevokeAccessAsync(same key shape)` · `GetPrincipalAccessAsync`.
+
+**Definition of done for 060**: `PlaybookSharingService`'s private POA helpers **DELETED** and
+delegating to the seam · `DirectThreadAccessService` behaviour **unchanged** (its no-leak negatives must
+stay green) · all existing consumers pass their current tests **unmodified in behaviour**.
+
+**Then 061 immediately** (`061-secure-project-provisioning-rework.poml`, sonnet @ high, 3–4 h) — it
+consumes the 060 seam to issue the explicit shares. **That pair is the whole point**: 061 is what makes
+a Secure Project reachable by a human at all.
+
+⚠️ `060` may extend `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs`, a **declared
+exclusive file**, and touches DI registrations consumed across the BFF. Run `/conflict-check` first.
+
+---
+
+### 📋 SESSION 3 RECORD (2026-09-07) — what happened, and the owner decisions made
+
+**Work completed** — 4 commits, all pushed:
+
+| Commit | What |
+|---|---|
+| `8047cca15` | **Task 083 CLOSED** — `ClientSupplied` sink count reaches **0** |
+| `3219fad29` | Handoff; scope-cut proposal **voided** |
+| `16b75e97f` | **uuid CVE-2026-41907 closed** in LegalWorkspace |
+| `c17c4e730` | 061-blocked-on-060-only; the third-status-home finding |
+
+**🔴 OWNER DECISIONS THIS SESSION — binding, do not re-litigate:**
+
+1. **"We cannot cut scope."** All 36 open tasks stay in. The `§ COMPLETION PLAN` ~106 h / spin-out-82 h
+   split is **VOID** — it was my recommendation and the owner **rejected** it. Do not resurrect it.
+2. **The 27-unbuilt-solutions build gap** → *"we will address this build issue as the surface not with a
+   CI change."* **Do NOT add a CI workflow for it.** No gate, no matrix build. Addressed per-surface.
+3. **`code-quality-and-assurance-r4` is MID-EXECUTION, not planning.** I mis-read PR #935 ("r4 design +
+   assessment") as design-phase and proposed handing the build gap to it. **Wrong** — handing work to a
+   mid-execution project forces exactly the context rebuild the owner objects to. Do not hand off.
+4. **Task 061 is the priority** among open work (owner-directed), which is why 060 leads.
+
+**Two surfaces I wrongly tried to absorb into this project** — the owner caught both. Do not repeat:
+- **Compose / Tiptap**: I proposed a Tiptap v2→v3 migration across `Spaarke.Compose.Components` to fix a
+  CVE. That is a Compose decision, not an authorization one.
+- **CI**: I proposed adding a 30-solution build gate. Not this project's surface.
+The rule that applies inbound as well as outbound: *"trying to offload to other projects is very risky
+because they lack the context."* It is equally wrong to adopt another surface's work.
+
+**Still-open, NOT blocking 060/061:**
+- The **27 solutions with a build script that nothing builds** (3 of 30 covered: `CreateMatterWizard`,
+  `SpaarkeAi`, `LegalWorkspace`). Root cause: no "does this solution build?" gate exists as a concept;
+  `client-tests.yml` runs **jest**, never a build; bundling happens only at operator deploy time; and
+  `tsc --noEmit` (tsconfig paths) vs Rollup (Vite aliases) diverge, producing a **false green**. That is
+  how LegalWorkspace stayed broken 2026-07-02 → 2026-09-04. **Per owner decision #2: surface-level, no CI.**
+- The **other two instances of CVE-2026-41907** — `src/solutions/SpaarkeAi/package-lock.json` and
+  `src/client/shared/Spaarke.Compose.Components/package-lock.json`. **Master-resident since 2026-07-17
+  and 2026-07-21. NOT this project's surface. Deliberately untouched.**
+- Extending the drift checker to the **third** status home (see below). Not done.
+
+**Nothing is awaiting an owner answer.** Every decision listed above is settled.
 
 ### 🔧 TOOLING CONVENTIONS CHANGED 2026-09-07 — read before measuring anything
 
