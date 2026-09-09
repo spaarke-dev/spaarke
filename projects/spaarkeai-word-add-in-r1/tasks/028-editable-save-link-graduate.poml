@@ -4,7 +4,7 @@
     <title>F-h/NFR-08: editable Office saves must link/graduate, never immutable-suppress</title>
     <phase>2 Save flow</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared BFF save/dedup spine with a SILENT data-loss failure mode: a distinct draft's document record is discarded with no error surfaced. Tags include bff-api + data-integrity. Blast radius covers both Office hosts and neighbours the Compose dedup contract.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -77,4 +77,31 @@
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Office/</output>
   </outputs>
+
+  <notes>
+    <completed date="2026-09-08">
+      **Implemented in `OfficeDocumentPersistence.cs` only.** No Compose file and no `ContentDedupDetector`
+      change was needed — the detector already exposed the editable seam (`ResolveContentIdentityAsync` +
+      `NotifyLinkedCopyAsync`) that Compose consumes; this task makes the Office path consume the same two.
+      No escalation trigger fired: `SaveContentType` has exactly three members, so the editable/immutable axis
+      is derivable from it alone.
+
+      Three additions: `IsEditableContent(SaveContentType)` (host-neutral classifier, fail-safe default =
+      editable), `LinkEditableCopyToCanonicalAsync` (link half — writes `sprk_canonicaldocument` via the
+      generic seam, then notifies), and `GraduateLinkedCopyIfDivergedAsync` (graduate half — resolves the row
+      for this SPE drive-item via `sprk_graphitemid_uk`, severs the link with the `DBNull` clear-sentinel and
+      stamps the diverged hash). Email/Attachment keep the untouched `ReconcileAsync` suppress path.
+
+      Verified: `dotnet build src/server/api/Sprk.Bff.Api/` = 0 warnings / 0 errors; 20/20
+      `OfficeDocumentPersistence*` tests pass; 2245 passed / 0 failed across the whole Office + Dedup + Compose
+      neighbourhood. The new tests were proven to be real coverage by flipping the classifier to the pre-fix
+      "everything suppresses" behavior — 10 of them failed, and the 2 immutable pins correctly kept passing.
+      Publish size 45.36 MB vs a FRESH `origin/master` (`e0a6f87c4`) build at 45.35 MB = +0.01 MB
+      (PowerShell `Compress-Archive -CompressionLevel Optimal`). No vulnerable packages.
+
+      Residual, out of scope: a re-save under a DIFFERENT filename mints a new SPE drive-item, so the prior
+      linked copy is not resolved and keeps a stale link. FR-11 identity→version-save (task 023) is what closes
+      that; this task deliberately did not build a second resolution path for it.
+    </completed>
+  </notes>
 </task>
