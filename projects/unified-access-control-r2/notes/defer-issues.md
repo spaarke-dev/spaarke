@@ -73,6 +73,40 @@ and the notification-heartbeat design are the risk, not the code.
 - Interacts with task **007** (`ExpiryPredicate`, the read-side enforcement this relies on) and task **010** (grant lifecycle / idempotency).
 - ADR-003 (fail closed — a grant that confers nothing must not report success), ADR-004 (`IScheduledJob`).
 
+### ISS-001 — PrivilegeGroupResolver double-counts the first page of Graph group memberships
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-09-09 |
+| **Source** | Uncovered while designing task 024 (SPE Graph paging) — it is the canonical in-repo `PageIterator` example, so it will get copied |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/962 |
+
+**Description**
+
+`PrivilegeGroupResolver.ResolveGroupMembershipsAsync` collects page 1 in a `foreach` over
+`memberOfResponse.Value`, then hands **that same response** to `PageIterator.CreatePageIterator`.
+The iterator iterates the page it is given before following `@odata.nextLink`, so every page-1 group
+id lands in `groupIds` **twice**.
+
+**Concrete failure mode**: `groupIds` is a `List<string>`, so duplicates reach the caller. Today
+likely harmless — the result appears to be used as a membership test, where a duplicate changes no
+decision. It is filed because any future consumer that COUNTS, pages or logs groups gets wrong
+numbers, and because this is the file task 024 must copy for its own paging. **NOT this project's
+surface** (`Services/Ai/Security/` is AI-owned); two-line fix.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeGroupResolver.cs:190` — the pre-loop
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeGroupResolver.cs:202` — `CreatePageIterator` over the same response
+
+**Suggested fix**: delete the pre-loop; let the iterator callback be the single collection point.
+
+**Estimated effort**: <1h
+**Blockers**: none
+**Related**: task 024 design note §2.2 — `notes/decisions/spe-paging-and-revoke-honesty-design.md`
+
 ---
 
 ## Closed

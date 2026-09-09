@@ -90,7 +90,43 @@
     <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Review findings M1 and M2. Finishes the observability work task 017 started.</notes>
+  <notes>Review findings M1 and M2. Finishes the observability work task 017 started.
+
+🔴 DESIGN COMPLETED 2026-09-09 — READ IT BEFORE STARTING:
+notes/decisions/spe-paging-and-revoke-honesty-design.md
+
+It supersedes task 020's one-line sketch ("one paged read + local email match + delete-by-
+permission-id"), which is a direction, not a design. Four things in it change how this task
+should be executed:
+
+1. STEP 0 IS A VERIFICATION SPIKE, NOT CODING. The finding's load-bearing claim -- that SPE
+   container permissions actually PAGE -- has never been verified. The CODE defect (single
+   GetAsync, no nextLink follow) is verified; the EXPLOITABILITY is not. If permissions do not
+   page, this is defensive robustness, not a live hole, and should be re-ranked. Establish it
+   before writing code.
+
+2. THE PRECEDENT TO COPY IS PrivilegeGroupResolver.cs:202 (Graph SDK v6 PageIterator) --
+   NOT DriveItemOperations.cs:392, which only DETECTS OdataNextLink and builds a client
+   skip-token URL; it never follows it. Copying that file would produce no paging at all.
+   ⚠️ PrivilegeGroupResolver has its own double-count bug (it collects page 1 in a foreach AND
+   hands the same response to CreatePageIterator) -- filed as ISS-001; do not replicate it.
+
+3. NO ENUM CHANGE IS NEEDED. SpeContainerRevokeOutcome.NoPermissionFound already promises
+   "read successfully ... genuinely absent". Single-page reads make that sentence FALSE. This
+   task makes the code honest to a contract that already exists. The binding rule: incomplete
+   enumeration + target not found => RemovalFailed, NEVER NoPermissionFound. Same for the
+   closure guard: an unverified set is never "clean". See design section 3.
+
+4. M2 ALONE ACHIEVES NOTHING OBSERVABLE, so the recommendation is to SPLIT. AccessGrantModal
+   .postJson (AccessGrantModal.tsx:327-335) does `return (await res.json()) as T` with NO res.ok
+   check, so changing 200 to 500 trades one silent wrong answer for another -- possibly a
+   runtime throw on ProblemDetails cast to RevokeAccessResponse. M2 must land WITH the M8 client
+   fix (task 065). Suggested split: 024a verification spike, 024b paging + honesty semantics
+   (self-contained), 024c status parity gated on the client. See design section 4 and 6.
+
+Test design is section 5 -- three layers with what each does and does NOT prove. The structural
+guard (layer 2) is the one that defends the fix over time and is proven technology here: the
+equivalent guard in task 025 was perturbation-checked and fires.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
