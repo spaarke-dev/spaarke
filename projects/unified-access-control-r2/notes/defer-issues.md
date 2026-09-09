@@ -151,6 +151,49 @@ paging) is the real work, and these call sites feed shipped SPA views.
 **Blockers**: none technical; needs the contract decision.
 **Related**: task 024 (same honesty class, different plane) · ISS-001 (#962, the precedent's bug).
 
+### ISS-003 — Workforce caller cannot PATCH a to-do parented to their own service request
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday (latent — zero service requests exist in dev) |
+| **Filed** | 2026-09-09 |
+| **Source** | Task 028, after the owner ruled service requests internal-only |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/964 |
+
+**Description**
+
+`PATCH /api/v1/external/todos/{id}` serves BOTH planes. `GetTodoRootAsync` projects only project,
+matter and work assignment, so a to-do parented via `sprk_regardingservicerequest` resolves to
+`None` and is denied for **everyone** — including the workforce user who submitted that service
+request and can see it in their own Service Requests widget.
+
+**Concrete failure mode**: correct for partners (service requests are never externally grantable),
+wrong for the requester, who legitimately holds the record — the `service-requests` module already
+scopes exactly that (`sprk_requestedby == caller`, workforce plane only).
+
+**Why 028 did not fix it**: (1) it needs a different rights shape — the other three roots answer
+*"is this id in my set?"* synchronously from `CallerPrincipal`; a service request answers *"is
+`sprk_requestedby` me?"*, a Dataverse read, and putting I/O behind `RightsForRoot` would quietly
+change a contract that is pure for every other root. (2) **What a requester may DO to their own
+service request's to-dos is an unanswered product question**, and inventing one to close a task is
+how the level asymmetry entered task 009.
+
+**Entry-points**
+
+- `ExternalDataService.GetTodoRootAsync` + `TodoRootBinding`/`RootBindings` (task 029)
+- `ExternalProjectDataEndpoints.RightsForRoot` — shared by list/create/update since 029
+- `ExternalAccessModule.cs:270-279` — the `service-requests` requester predicate to reuse
+- [`notes/task-028-service-request-root.md`](task-028-service-request-root.md) §6
+
+**Suggested fix**: answer the product question first, then decide whether the requester check belongs
+inside `RightsForRoot` or as a branch resolving before it. 🔴 **Do NOT add
+`AccessibleServiceRequestIds` to `CallerPrincipal`** — note §5 explains why that is actively wrong.
+
+**Estimated effort**: small once the product question is answered; the question is the work.
+**Blockers**: the product question (owner).
+**Related**: task 028 (this decision) · task 029 (the three-root parity it completes).
+
 ---
 
 ## Closed
