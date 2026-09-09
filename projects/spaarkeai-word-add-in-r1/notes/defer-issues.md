@@ -67,6 +67,43 @@ Either add a direct `sprk_event` column to `sprk_document`, or repoint `EventLoo
 
 ## Deferrals
 
+### ⚠️ D-032-1 — WITHDRAWN AS A FINDING 2026-09-09; reduced to a one-question verification
+
+**Operator challenge, 2026-09-09** — and it was correct. The entry below rests on the premise
+*"Read on a document does not imply Read on its matter."* That premise contradicts Spaarke's actual
+access model: **access flows from the parent record → container → documents**. If a caller can read
+the source document, that is normally *because* they hold the matter, so the hub node's matter name
+discloses nothing they did not already have.
+
+The codebase says the same thing in its own words. `Spaarke.Core/Auth/AuthorizationService.cs:246-249`
+(written by `unified-access-control-r2` task 070) describes the parent check as *"what makes 'access
+flows from the parent' an enforced property rather than a **stated intention**"*.
+
+**What is genuinely unresolved** is narrow, and it is a Dataverse configuration question, not a code
+defect: `DataverseAccessDataSource` hard-codes `sprk_documents({id})`, so it asks Dataverse about the
+**document row itself** — it does not derive the answer from the matter. Whether matter access
+therefore implies document Read depends on the `sprk_document` → `sprk_matter` relationship's cascade
+configuration. The ERD records that lookup as **optional** (`sprk_document }o--o| sprk_matter`), and a
+document may have no matter at all.
+
+**The single question to close this**: is `sprk_document` → `sprk_matter` **Parental / cascading-share**,
+or **Referential** (no cascade)?
+- **Parental/cascading** → the operator's model holds, there is no disclosure, **delete this entry.**
+- **Referential** → document Read can exist without matter Read, and the model is a stated intention
+  rather than an enforced one. That is UAC-r2's Amendment 1 territory and would then warrant an
+  ACTIVE hand-off (a note they are instructed to read — not a GitHub issue nobody opens).
+
+Checkable in two minutes in the maker portal (Tables → sprk_document → Relationships → the
+`sprk_matter` lookup → Advanced/cascade behavior). Dataverse MCP was down 2026-09-09 so it could not
+be queried live.
+
+**Do NOT hand this to another project until that question is answered.** Handing over a finding whose
+premise is unverified is exactly the burial-by-deferral the project policy forbids, and it would
+create a cross-project dependency for something that may not exist.
+
+<details>
+<summary>Original entry as filed by task 032 (premise now disputed — retained for the record)</summary>
+
 ### D-032-1 — Visualization parent HUB nodes are not authorized against their parent record
 
 **Found by** task 032 while closing finding F-b. **Owner: `unified-access-control-r2`** (its surface).
@@ -87,6 +124,29 @@ UAC-r2's mechanism, not a second one built here.
 it — when Read is absent. Task 032's `AuthorizeRowsAsync` already drops hubs left with no surviving
 document, so the hook exists.
 
+*(end of retained original D-032-1 entry)*
+
+</details>
+
+---
+
+### ✅ D-032-2 — NOT DEFERRED. Folded into task 033 by operator decision 2026-09-09
+
+This is **not** a hand-off and **not** a deferral. It has no external owner, and the parties it would
+mislead — tasks **033** and **034** — are in this project. Per the project deferral policy (defer only
+for a good technical reason *or* a clear hand-off; never bury), it becomes an acceptance criterion of
+**task 033**, which renders this surface.
+
+The original reasoning for not fixing it *inside task 032* still stands and is unchanged: a
+response-contract change does not belong inside a security fix. That justified deferring it out of
+**032**; it never justified deferring it out of the **project**.
+
+Scope when 033 runs: add a warnings channel to `GraphMetadata` mirroring cross-record document
+search's existing `PARTIAL_RESULTS` warning, and surface it in the Find view.
+
+<details>
+<summary>Original entry as filed by task 032 (retained for the record)</summary>
+
 ### D-032-2 — Rows dropped past the authorization budget are not announced to the client
 
 **Found by** task 032. Same shape as the limitation `RecordSearchEndpoints.AuthorizeRowsAsync` recorded.
@@ -102,3 +162,5 @@ change does not belong inside a security fix — the same call `RecordSearchEndp
 **Relevant to task 033/034**, which render this surface: a short result page may mean "withheld", not
 "nothing matched". See `notes/032-authorization-hardening.md` §5 for the counts that make this reachable
 (five hardcoded relationship queries at `TopCount = 50` each).
+
+</details>

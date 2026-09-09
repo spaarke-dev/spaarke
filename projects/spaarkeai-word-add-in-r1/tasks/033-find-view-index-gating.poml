@@ -191,6 +191,12 @@
     <criterion testable="true">All six `&lt;ui-tests&gt;` pass, including the dark-mode and keyboard/announcement checks.</criterion>
     <criterion testable="true">`npm run typecheck` is clean and `npm run build` succeeds in `src/client/office-addins`; `dotnet build` and `dotnet test` are green.</criterion>
     <criterion testable="true">BFF publish size was measured against a fresh `origin/master` build with PowerShell `Compress-Archive`; both absolute sizes, delta and tool are recorded; delta &lt;+5 MB and absolute &lt;60 MB.</criterion>
+    <!-- ADDED 2026-09-09 by operator decision: D-032-2 is folded into this task rather than deferred.
+         It had no external owner, and THIS task is the surface it would mislead. Deferral policy:
+         defer only for a good technical reason OR a clear hand-off — never bury. Task 032 was right
+         not to make a response-contract change inside a security fix; that justified keeping it out
+         of 032, never out of the project. -->
+    <criterion testable="true">D-032-2 — `VisualizationEndpoints.AuthorizeRowsAsync` drops rows past `MaxDocumentAuthorizationChecks` (100) and says nothing, so a truncated Find page is indistinguishable from "nothing matched". Given a result set exceeding that budget, `GraphMetadata` MUST carry a warning mirroring cross-record document search's existing `PARTIAL_RESULTS`, and the Find view MUST surface it. Reachable, not theoretical: five hardcoded relationship queries at `TopCount = 50` each is up to 250 candidates against a 100 budget (`notes/032-authorization-hardening.md` §5). Do NOT change the fail-closed drop itself — dropping unevaluated rows is correct; only the silence is the defect.</criterion>
   </acceptance-criteria>
 
   <notes>

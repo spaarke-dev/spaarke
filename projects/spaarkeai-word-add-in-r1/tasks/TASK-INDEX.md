@@ -19,11 +19,28 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 003 | **Spike-2**: Office Dialog API for opening a record | ✅ | STANDARD | sonnet / high | P0-spikes | none |
 | 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | ✅ | MINIMAL | sonnet / medium | P0-spikes | none |
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | ✅ | STANDARD | opus / high | P0-spikes | none |
-| 006 | FR-18: clear typecheck debt in `shared/taskpane` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
-| 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
-| 008 | FR-18: clear typecheck debt in `word/` + `outlook/` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
+| 006 | FR-18: clear typecheck debt in `shared/taskpane` — ⚠️ re-scope to production types (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 008 | FR-18: clear typecheck debt in `word/` + `outlook/` — ⚠️ re-scope (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
 
-> ⛔ **006/007/008 are BLOCKED pending an operator decision.** Task 001's escalation trigger 3 fired: the UNASSIGNED bucket contains 11 errors in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` — **outside the `office-addins` package**, pulled in by the `@spaarke/communication-components` path alias. FR-18's "typecheck clean" cannot be met by 006+007+008 alone. Two further findings change the decomposition: the split measures **309 / 45 / 4** (not balanced), and **75% of the debt (296/395) is in test files** whose suite is already red (13/21 suites failing on a missing `jest-dom` registration). See [`notes/typecheck-baseline.md`](../notes/typecheck-baseline.md) § Recommendations.
+> ✅ **UNBLOCKED 2026-09-09 by operator decision — A1 + B1.**
+> **(A1)** The 11 foreign `Spaarke.Communication.Components/provenance.ts` errors are fixed by commit
+> `6b987bb31`, already on this branch and already building. **FR-18's acceptance narrows to the
+> `office-addins` package** — `npm run typecheck` need not be clean for foreign files pulled in by the
+> `@spaarke/communication-components` path alias.
+> **(B1)** **FR-18 means production types only (~99 errors), NOT all 395.** 296 of 395 (75%) sit in test
+> files whose suite is already red (13/21 suites failing on a missing `jest-dom` registration) — a
+> separate defect that must NOT be entangled with FR-18.
+> **Consequence**: 006/007/008 must be RE-SCOPED before dispatch. The authored 309/45/4 directory split
+> was sized against all 395; against ~99 production errors it is the wrong division and the three tasks
+> may collapse into one or two. The jest-dom harness gap needs its own task — leaving it unowned would
+> be exactly the burial the deferral policy forbids.
+>
+> <details><summary>Original block reason (resolved — retained for the record)</summary>
+>
+> ⛔ **006/007/008 were BLOCKED pending an operator decision.** Task 001's escalation trigger 3 fired: the UNASSIGNED bucket contains 11 errors in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` — **outside the `office-addins` package**, pulled in by the `@spaarke/communication-components` path alias. FR-18's "typecheck clean" cannot be met by 006+007+008 alone. Two further findings change the decomposition: the split measures **309 / 45 / 4** (not balanced), and **75% of the debt (296/395) is in test files** whose suite is already red (13/21 suites failing on a missing `jest-dom` registration). See [`notes/typecheck-baseline.md`](../notes/typecheck-baseline.md) § Recommendations.
+>
+> </details>
 
 > ✅ **005 is CLOSED** (core findings gathered as a review repair 2026-09-08; sections 8-18 — client
 > side, full 9-hop server trace, small-vs-large payload, expanded comparison table, task 094 overlap
