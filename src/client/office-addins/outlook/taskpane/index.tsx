@@ -173,7 +173,14 @@ async function init() {
     bffApiBaseUrl: CONFIG.bffApiBaseUrl,
   });
 
-  // Stage 1: Wait for Office.js to be ready
+  // Stage 1: Wait for Office.js to be ready.
+  // Task 010 option B (operator decision 2026-09-09): capture the host Office hands us HERE and
+  // pass it to the factory at Stage 4. THIS PANE IS WHERE THE RISK ACTUALLY LIVES —
+  // `Office.context.host` is unpopulated in some Outlook desktop builds, and this is a bootstrap
+  // with no fallback: an empty global would throw INVALID_HOST and leave a working Outlook surface
+  // dark. `Office.onReady`'s info.host is reported by the host at ready time and does not have that
+  // failure mode.
+  let readyHost: Office.HostType | undefined;
   console.log('[Spaarke] Stage 1: Waiting for Office.js...');
   try {
     await new Promise<void>((resolve, reject) => {
@@ -183,6 +190,7 @@ async function init() {
 
       Office.onReady(info => {
         clearTimeout(timeout);
+        readyHost = info?.host ?? undefined;
         console.log('[Spaarke] Office.js ready:', info);
         resolve();
       });
@@ -243,8 +251,14 @@ async function init() {
   let hostAdapter: IHostAdapter;
   try {
     HostAdapterFactory.registerAdapter('outlook', OutlookAdapter);
-    // No explicit host argument — see the equivalent note in word/taskpane/index.tsx.
-    hostAdapter = await HostAdapterFactory.createAndInitialize();
+    // Option B (operator decision 2026-09-09) — see the equivalent note in word/taskpane/index.tsx.
+    // Hand the factory the Stage-1 host instead of letting it re-derive one from
+    // `Office.context.host`, which is unpopulated in some Outlook desktop builds. If Office.onReady
+    // reported no host, detectHostType() still runs and a real failure still surfaces as a typed
+    // INVALID_HOST rendered by the catch below.
+    hostAdapter = await HostAdapterFactory.createAndInitialize(
+      readyHost === Office.HostType.Outlook ? 'outlook' : undefined
+    );
     console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');

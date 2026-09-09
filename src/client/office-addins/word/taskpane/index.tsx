@@ -87,7 +87,15 @@ async function init() {
     bffApiBaseUrl: CONFIG.bffApiBaseUrl,
   });
 
-  // Stage 1: Wait for Office.js to be ready
+  // Stage 1: Wait for Office.js to be ready.
+  // Task 010 option B (operator decision 2026-09-09): capture the host Office hands us HERE and
+  // pass it to the factory at Stage 4. `Office.onReady`'s info.host is populated by the host itself
+  // at ready time; `Office.context.host` — which the factory's detectHostType() reads when given no
+  // argument — is unpopulated in some Outlook desktop builds. Depending on the latter when the
+  // former is already in hand means a bootstrap with no fallback can throw INVALID_HOST and leave
+  // the pane never rendering. This does not dodge detection: detectHostType() still runs whenever
+  // no host is supplied, and the factory still rejects an unsupported host.
+  let readyHost: Office.HostType | undefined;
   console.log('[Spaarke] Stage 1: Waiting for Office.js...');
   try {
     await new Promise<void>((resolve, reject) => {
@@ -97,6 +105,7 @@ async function init() {
 
       Office.onReady(info => {
         clearTimeout(timeout);
+        readyHost = info?.host ?? undefined;
         console.log('[Spaarke] Office.js ready:', info);
         resolve();
       });
@@ -148,11 +157,16 @@ async function init() {
   let hostAdapter: IHostAdapter;
   try {
     HostAdapterFactory.registerAdapter('word', WordAdapter);
-    // No explicit host argument: the factory's own `detectHostType()` runs. Passing 'word' here
-    // would work, but it would leave detection dead in production and silently dodge the very
-    // host-detection risk this activation exists to surface (plan.md R-4). A detection failure
-    // raises a typed INVALID_HOST / API_NOT_AVAILABLE that the catch below renders visibly.
-    hostAdapter = await HostAdapterFactory.createAndInitialize();
+    // Option B (operator decision 2026-09-09, task 010 escalation trigger 3): hand the factory the
+    // host Office reported at Stage 1 rather than making it re-derive one from
+    // `Office.context.host`. Both quality gates flagged the no-arg form independently: this is the
+    // bootstrap path with NO fallback, so an unpopulated global means the pane never renders.
+    // `readyHost` is undefined only if Office.onReady itself reported no host, in which case
+    // detectHostType() still runs and a genuine detection failure still surfaces as a typed
+    // INVALID_HOST / API_NOT_AVAILABLE rendered by the catch below.
+    hostAdapter = await HostAdapterFactory.createAndInitialize(
+      readyHost === Office.HostType.Word ? 'word' : undefined
+    );
     console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
