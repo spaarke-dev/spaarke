@@ -168,6 +168,25 @@ public static class ExternalAccessModule
         services.AddScoped<ICallerPrincipalStrategy, WorkforcePrincipalStrategy>();
         services.AddScoped<ICallerPrincipalResolver, CallerPrincipalResolver>();
 
+        // FR-20 / task 035 — the impersonated root-set source. Asks Dataverse which root records a
+        // systemuser can actually read (one impersonated id-only query per root type) instead of
+        // pattern-matching its rules in C#, which gets it wrong in BOTH directions: a business-unit
+        // column match over-grants past the user's role depth, and it misses records reachable only
+        // through a POA share.
+        //
+        // ADR-010: ONE interface, and it is a genuine seam — task 036 swaps this source into the
+        // evaluator behind a flag, so the swap point must be substitutable. It deliberately does NOT
+        // introduce a second impersonated-query interface: IImpersonatedCommunicationQuery
+        // (CommunicationModule, registered UNCONDITIONALLY per ADR-032) already wraps
+        // RetrieveMultipleImpersonatedAsync with a fully generic (entitySet, odataQuery, callerId)
+        // contract — communication-specific in NAME only. Declaring an identical second interface is
+        // the duplication CLAUDE.md §11 exists to prevent.
+        //
+        // ⚠️ NOT consumed by AccessibleRecordSetService yet — that swap is task 036's obligation, and
+        // it is gated on the NFR-04 negative canary (task 034). Registering it here is inert until then.
+        // Scoped: it reads the caller's tenant claim off IHttpContextAccessor for the cache key.
+        services.AddScoped<IImpersonatedRootSetSource, ImpersonatedRootSetSource>();
+
         // Module-host registration framework (spaarke-SPA-external-access-platform-r2 task 015 · FR-22 ·
         // ADR-028 A3). Generalizes the resolver seam into a per-module registry: each module registers a
         // Tier-2 record predicate (over the plane-agnostic CallerPrincipal) that the BffDataverseClient
