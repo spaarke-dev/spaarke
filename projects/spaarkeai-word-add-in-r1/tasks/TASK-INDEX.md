@@ -18,15 +18,17 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 002 | **Spike-1**: `document.url` shape for SPE files in Word desktop | 🔲 | STANDARD | opus / high | P0-spikes | none |
 | 003 | **Spike-2**: Office Dialog API for opening a record | ✅ | STANDARD | sonnet / high | P0-spikes | none |
 | 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | ✅ | MINIMAL | sonnet / medium | P0-spikes | none |
-| 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | 🔄 | STANDARD | opus / high | P0-spikes | none |
+| 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | ✅ | STANDARD | opus / high | P0-spikes | none |
 | 006 | FR-18: clear typecheck debt in `shared/taskpane` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
 | 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
 | 008 | FR-18: clear typecheck debt in `word/` + `outlook/` | ⛔ | FULL | sonnet / high | P0-typecheck | 001 |
 
 > ⛔ **006/007/008 are BLOCKED pending an operator decision.** Task 001's escalation trigger 3 fired: the UNASSIGNED bucket contains 11 errors in `../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` — **outside the `office-addins` package**, pulled in by the `@spaarke/communication-components` path alias. FR-18's "typecheck clean" cannot be met by 006+007+008 alone. Two further findings change the decomposition: the split measures **309 / 45 / 4** (not balanced), and **75% of the debt (296/395) is in test files** whose suite is already red (13/21 suites failing on a missing `jest-dom` registration). See [`notes/typecheck-baseline.md`](../notes/typecheck-baseline.md) § Recommendations.
 
-> 🔄 **005 has its evidence but is NOT formally closed** (gathered as a review repair, not a `task-execute` run;
-> the POML's "small vs large payload", "implementation sketch" and "open questions" sections are still owed).
+> ✅ **005 is CLOSED** (core findings gathered as a review repair 2026-09-08; sections 8-18 — client
+> side, full 9-hop server trace, small-vs-large payload, expanded comparison table, task 094 overlap
+> boundary, task 025 implementation sketch, open questions — added and every citation independently
+> re-verified under formal `task-execute` closure, 2026-09-08).
 > [`notes/spikes/spike-4-collision-path.md`](../notes/spikes/spike-4-collision-path.md) confirms finding **F-a**:
 > the add-in rides `POST /api/office/save` → the **no-policy** `UploadSmallAsync` overload, which hard-codes
 > `ConflictBehavior.Replace` ([`UploadSessionManager.cs:103`](../../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs#L103)).
@@ -195,7 +197,7 @@ Six discovery findings modify spec assumptions. Full detail in [`../plan.md`](..
 
 | ID | One-line | Owning task |
 |---|---|---|
-| **F-a** | The shipped collision handling is on an upload path the add-in does not use — ✅ **CONFIRMED** 2026-09-08, [spike-4 report](../notes/spikes/spike-4-addin-collision-path.md) | 005 → 025 |
+| **F-a** | The shipped collision handling is on an upload path the add-in does not use — ✅ **CONFIRMED** 2026-09-08, [spike-4 report](../notes/spikes/spike-4-collision-path.md) | 005 → 025 |
 | **F-h** | 🔴 Editable Office saves (**both hosts**) run the *immutable suppress* dedup path, which NFR-08 / `DEDUP-AND-SAVE-BACK-IDENTITY.md` §3 forbid; two distinct drafts that are momentarily byte-identical collapse into one record | **028** — owned by r1 per operator decision 2026-09-08; host-neutral, keyed on `SaveContentType` ([spike-4 §3 D2](../notes/spikes/spike-4-collision-path.md)) |
 | **F-b** | FR-16's similarity engine has **no per-row authorization** | 032 (gates 033) |
 | **F-c** | No single endpoint returns similar documents *and* records | 034 |

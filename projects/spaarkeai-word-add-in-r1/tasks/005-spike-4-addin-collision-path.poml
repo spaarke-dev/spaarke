@@ -4,7 +4,7 @@
     <title>Spike-4: does the add-in save path share the shipped collision semantics</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only code trace producing a decision record, not code. No .cs/.ts file is modified, so the Step 9.5 gates have no code surface to inspect. STANDARD rather than MINIMAL because the output is a CLAUDE.md section 6.5 path recommendation that binds task 025's scope, and because the trace may surface a live data-loss defect.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -126,4 +126,43 @@ No `&lt;justification&gt;` block is present: this task creates no new code surfa
 Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and modify no source. Safe to run all four concurrently. This task reads BFF code that `spaarkeai-compose-r8` and `unified-access-control-r2` are actively changing — read-only, so no conflict, but re-verify line numbers at execution time rather than trusting this file.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <notes-completion>
+    Closed 2026-09-08 under formal `task-execute`. The investigation's core findings (F-a confirmed
+    false premise, D1 filename-collision overwrite, D2/F-h immutable-suppress-on-editable defect,
+    D3 inert version-save hooks, the §5 CLAUDE.md §6.5 Path C→B recommendation, and the 2026-09-08
+    operator decisions) had already been produced and committed ahead of this run, during a review
+    repair — that work is preserved verbatim in the report's §1-§7 (including §5's operator
+    decisions, per this task's explicit constraint).
+
+    This run added report sections 8-18 to close the remaining acceptance-criteria gaps: §8 Client
+    side (file:line), §9 full hop-by-hop server trace (9 hops, file:line at every hop — corrects the
+    prior framing that the upload happens via the job queue; it is synchronous, inline in the
+    `SaveAsync` request, and the queue is finalization-only), §10 where conflict behaviour is decided
+    and the effective value, §11 small-vs-large payload (finding: uniform, because no large-payload
+    route exists on this path — the app-only chunked-upload pair was deleted 2026-08-27), §12 the
+    expanded side-by-side comparison table, §13 the one-sentence same-name-save finding, §14 the
+    dedup/filename-collision interaction under NFR-08 (both can fire on one save), §15 the UAC-r2
+    task 094 overlap boundary, §16 a pointer to the §5 recommendation (unchanged by the new
+    evidence), §17 a provisional facade-level implementation sketch for task 025 (explicitly not
+    startable until FR-11/023-024 land and the residual is re-measured, per §5's Path C), and §18
+    open questions.
+
+    Every file:line citation added in §8-§18 was independently verified by reading the cited file at
+    closure time (not copied forward from plan.md's authoring-time observations). One correction
+    surfaced during verification: the authoring-time framing implied the SPE upload happens inside
+    the async job-queue worker; tracing `OfficeService.SaveAsync` (`OfficeService.cs:421`) and
+    `OfficeJobQueue.QueueUploadFinalizationAsync`'s payload (`OfficeJobQueue.cs:63`,
+    `TempFileLocation = $"spe://{driveId}/{itemId}"`) shows the upload is synchronous and completes
+    before the finalization job is even queued — the queue never touches conflict behaviour. This
+    does not change any existing finding or the §5 recommendation; it sharpens hop 4 of the trace.
+
+    Deviation from `<steps>`: steps were executed out of strict numeric order (built the trace and
+    comparison content in one pass rather than 9 discrete edits) — permitted under `mode="directional"`
+    since the goal/acceptance-criteria/constraints bound, not the step sequence. No source file under
+    `src/server/**` or `src/client/**` was modified (verified via `git status` before and after — the
+    only diff introduced by this task is to the report itself and to TASK-INDEX.md/this POML).
+    Step 9.5 quality gates were not run: no `.cs`/`.ts`/`.tsx` file was touched, per STANDARD rigor
+    and the POML's own `<rigor-reason>`.
+  </notes-completion>
 </task>
