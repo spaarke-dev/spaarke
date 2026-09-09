@@ -23,11 +23,13 @@ export { ProjectService, type ICreateProjectResult } from './projectService';
 
 export {
   provisionSecureProject,
+  classifyProvisioningFailure,
   PROVISIONING_STEPS,
   type IProvisionProjectRequest,
   type IProvisionProjectResponse,
   type IProvisionProjectResult,
   type ProvisioningStepKey,
+  type ProvisioningFailureKind,
 } from './provisioningService';
 
 export {
