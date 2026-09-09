@@ -15,7 +15,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 001 | Worktree bootstrap and true typecheck baseline | ✅ | MINIMAL | sonnet / medium | — | none |
-| 002 | **Spike-1**: `document.url` shape for SPE files in Word desktop | 🔲 | STANDARD | opus / high | P0-spikes | none |
+| 002 | **Spike-1**: `document.url` shape for SPE files in Word desktop | ✅ | STANDARD | opus / high | P0-spikes | none |
 | 003 | **Spike-2**: Office Dialog API for opening a record | ✅ | STANDARD | sonnet / high | P0-spikes | none |
 | 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | ✅ | MINIMAL | sonnet / medium | P0-spikes | none |
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | ✅ | STANDARD | opus / high | P0-spikes | none |
@@ -119,7 +119,56 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 > (`Email`/`Attachment` immutable, `Document` editable), never on Word-vs-Outlook. Host divergence belongs in the
 > client adapters, never in save or dedup semantics.
 
+> 🟠 **002 CLOSED 2026-09-09 — Spike-1 verdict AMBER. Link 4 GREEN; links 1–2 need an operator pass.**
+> Full record: [`notes/spikes/spike-1-document-url.md`](../notes/spikes/spike-1-document-url.md).
+>
+> **The link the POML called most dangerous is fine.** `sprk_graphitemid` stores Graph's `driveItem.id`
+> **verbatim** — traced with no transformation at any hop (`UploadSessionManager.cs:151` →
+> `OfficeStorageUploader.cs:71` → `OfficeService.cs:455` → `OfficeDocumentPersistence.cs:190` →
+> `DataverseServiceClientImpl.cs:787`), and the alt-key read uses the raw string
+> (`ComposeRecordResolution.cs:181`). **Formats match; no key change needed or proposed — NFR-07 intact.**
+> One finding: `sprk_graphitemid_uk` is keyed on the **item alone**, leaving `driveId` unvalidated
+> (`DocumentVersionEndpoints.cs:59-61`) → **task 012 must add a caller-side `driveId` comparison** (one
+> `string.Equals`; the column already rides along on the same retrieve).
+>
+> **Links 1–2 are AMBER, not RED — nothing was disproven.** No live Office host, and sideloading is gone
+> (same wall task 011 hit), so the empirical half is an operator pass (report §8). Verdict deliberately
+> **not** softened to GREEN, per the POML's own constraint.
+>
+> **Three things the POML did not anticipate:**
+> 1. 🔴 **Spaarke's own open flow is a hazard to Link 1.** `DesktopUrlBuilder.cs:37-47` hands Word an
+>    **abbreviated** `ms-word:{webDavUrl}` (the full `ofe|u|` verb is Restricted-Sites-blocked for SPE
+>    `contentstorage` paths) and the file opens in **Protected View**. If Word treats it as a downloaded
+>    copy, `document.url` may report a local path and Link 2 has nothing to encode. Microsoft's SPE docs
+>    (2026-08-27) independently confirm the repo's `webUrl`-is-a-`doc2.aspx`-viewer-URL /
+>    `webDavUrl`-is-canonical finding.
+> 2. 🔴 **A live manifest defect, fixable today with no host.** `Word.Document.customXmlParts` **and**
+>    `.settings` require **WordApi 1.4**; `word-manifest.xml:45` and `manifest.json:40` both declare
+>    **1.3** — the same class of mismatch task 011 caught at 1.1-vs-1.3. **Recommended fix: use the
+>    COMMON API** `Office.context.document.customXmlParts` + declare the `CustomXmlParts` requirement
+>    set — no WordApi bump, a *lower* floor (perpetual Office 2016), and confirmed Word web/Mac/iPad
+>    support. **Owned by task 014.**
+> 3. 🟢 **Stamp-as-primary — an operator decision now on the table.** With the dev-only/legacy-irrelevant
+>    decision removing its only stated disqualifier, FR-02's custom-XML stamp is the architecturally
+>    better **primary** identity mechanism (identity-by-content; written server-side with no host API;
+>    **one** hop to the **primary** key vs **three** unverified hops to an alternate key). Two honest
+>    costs recorded: Document Inspector can strip a custom XML part, and the custom-XML
+>    **markup-vs-parts** distinction is an unconfirmed premise FR-02 entirely rests on (a ten-minute
+>    check, report §8.1 step 8). **If accepted, 014 moves ahead of 012/013 and both are re-scoped.**
+>
+> **Before task 012 builds**, run report §8: the four `document.url` cases · the Protected-View
+> observation · the abbreviated-vs-`ofe|u|` A/B · the `/shares` SPE call (docs are **completely silent**
+> on SPE, offer **no read-only scope**, don't document the no-access status code, and omit
+> `parentReference` from the default projection — `$select` it) · the markup-vs-parts confirmation.
+> A negative on Link 1 or 2 fires **escalation trigger 1 or 2**.
+>
+> Also recorded: `Word.Document.path`/`.fullName` (`WordApiDesktop 1.4`, desktop-only, Windows 2508+,
+> **N/A on web**) as a *diagnostic* for the Protected-View question; and SPE container-type
+> **`urlTemplate`** (`{drive-id}`/`{item-id}` tokens) as Microsoft's own documented alternative to the
+> entire `/shares` route — **open question 10, owner decision** (container types are permanent, 25/tenant).
+
 **Gate**: typecheck clean · four spike reports in `notes/spikes/` · FR-01, FR-12 and FR-20 scope decided.
+⚠️ **FR-01's scope is decided only once the operator answers report §7 (stamp-as-primary) and runs §8.**
 
 ---
 
@@ -129,9 +178,9 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 |---|---|---|---|---|---|---|
 | 010 | FR-04: consolidate onto one Word adapter via `HostAdapterFactory` | 🔲 | FULL | opus / xhigh | P1-a | 006, 007, 008 |
 | 011 | FR-05: migrate Word to the unified JSON manifest | 🔄 | STANDARD | sonnet / high | P1-a | none |
-| 012 | FR-01 server: document-identity resolver extending `/api/documents` | 🔲 | FULL | opus / high | — | 002 |
+| 012 | FR-01 server: document-identity resolver extending `/api/documents` — ⚠️ **gated on the Spike-1 §8 operator pass; re-scoped or optional if §7 is accepted** | 🔲 | FULL | opus / high | — | 002 |
 | 013 | FR-01 client: `getDocumentUrl` capability and identity threading | 🔲 | FULL | sonnet / high | — | 010, 012 |
-| 014 | FR-02: server-side custom XML part GUID stamp (forward-only) | 🔲 | FULL | opus / high | P1-b | 012 |
+| 014 | FR-02: server-side custom XML part GUID stamp (forward-only) — ⚠️ **owns the WordApi 1.4-vs-1.3 manifest fix (Spike-1 §6.5) + the markup-vs-parts precondition (§8.1 step 8); MOVES AHEAD of 012/013 if §7 accepted** | 🔲 | FULL | opus / high | P1-b | 012 |
 | 015 | FR-03: Save\|Find tab shell, enable navigation in Word | 🔲 | FULL | sonnet / high | P1-b | 010 |
 | 016 | Un-skip `/api/office/save` contract tests + cover the identity route | 🔲 | FULL | sonnet / high | — | 012 |
 
@@ -204,7 +253,7 @@ Dispatch each subagent at its POML's `<model-tier>` and `<effort>`. **Max 6 conc
 | W1 | 002, 003, 004, 005 | — | 4 independent spikes. Can run alongside W0. |
 | W2 | 006, 007, 008 | 001 | Disjoint directories. |
 | W3 | 010, 011 | W2 · (011 needs nothing) | Disjoint: adapters vs manifest+webpack. |
-| W4 | 012 | 002 | Serial — gated on Spike-1. |
+| W4 | 012 | 002 | Serial — gated on Spike-1. ⚠️ **Spike-1 closed AMBER**: run its §8 operator pass and answer its §7 before starting 012. |
 | W5 | 013, 016 | 010, 012 | Disjoint: client wiring vs tests. |
 | W6 | 014, 015 | 012 / 010 | Disjoint: server stamp vs tab shell. ⚠️ **014 appends to the same contract-test file as 016** — the W5→W6 ordering keeps them apart; do not co-schedule 014 and 016. |
 | W7 | 020, 021, 022 | 013, 015 | Disjoint views. |

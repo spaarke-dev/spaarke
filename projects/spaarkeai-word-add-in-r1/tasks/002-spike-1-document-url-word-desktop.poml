@@ -4,7 +4,7 @@
     <title>Spike-1: Office.context.document.url shape for SPE files in Word desktop</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Research and decision-record task producing a new notes artifact, not code. No .ts/.tsx/.cs file is modified, so the Step 9.5 code-review and adr-check gates have no code surface to inspect. STANDARD rather than MINIMAL because the output gates FR-01 and, through it, FR-07/09/10/11 — the report's rigor is the deliverable.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -121,6 +121,56 @@ No `&lt;justification&gt;` block is present: this task creates no new code surfa
 Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and read disjoint code areas; none modifies source. Safe to run all four concurrently, and concurrently with 001.
 
 Downstream consumers of this report, so write for them: task 012 (FR-01 server — the identity resolver extending /api/documents), task 013 (FR-01 client — the `canGetDocumentUrl` capability and `getDocumentUrl()` on IHostAdapter), and task 014 (FR-02 stamp), whose scope changes materially on an AMBER or RED verdict.</notes>
+
+  <completion date="2026-09-09">
+    <verdict>AMBER</verdict>
+    <deliverable>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-1-document-url.md</deliverable>
+    <summary>All twelve acceptance criteria met. Report carries a per-link verdict, a provenance label on
+    every claim, the four desktop cases, the sprk_graphitemid format trace, five evaluated fallbacks, a
+    not-to-be-committed operator recipe, one verdict, per-FR consequences, and an ADR-007/ADR-044-compliant
+    task-012 sketch. Zero source files modified.
+
+    LINK 4 (the POML's "most dangerous link") is GREEN and CLOSED. sprk_graphitemid stores Graph's
+    driveItem.id VERBATIM — traced UploadSessionManager.cs:151 -> OfficeStorageUploader.cs:71 ->
+    OfficeService.cs:455 -> OfficeDocumentPersistence.cs:190 -> DataverseServiceClientImpl.cs:787 with no
+    transformation at any hop. The read (ComposeRecordResolution.cs:181) uses the raw string. Formats match;
+    no key change proposed or needed (NFR-07 intact). The single finding is that sprk_graphitemid_uk is
+    keyed on the ITEM ALONE, leaving driveId unvalidated (DocumentVersionEndpoints.cs:59-61) — task 012 must
+    add a defensive driveId comparison caller-side. Link 3 GREEN conditional on Link 2.
+
+    LINKS 1-2 are AMBER: no live Office host and sideloading is gone, so the empirical half is an operator
+    pass (report section 8). Verdict deliberately NOT softened to GREEN per this POML's own constraint.
+
+    THREE FINDINGS THIS POML DID NOT ANTICIPATE:
+    (1) Spaarke's own open flow is a hazard to Link 1 — DesktopUrlBuilder.cs:37-47 hands Word an ABBREVIATED
+        ms-word:{webDavUrl} because the full ofe|u| verb is Restricted-Sites-blocked for SPE contentstorage
+        paths, and the file opens in PROTECTED VIEW. A document Word treats as a downloaded copy may report
+        a local path, leaving Link 2 nothing to encode. Corroborated by MS SPE docs (2026-08-27), which
+        independently confirm webUrl is a doc2.aspx VIEWER url and webDavUrl is the canonical file url.
+    (2) LIVE MANIFEST DEFECT, fixable today with no host: Word.Document.customXmlParts AND .settings both
+        require WordApi 1.4; word-manifest.xml:45 and manifest.json:40 both declare 1.3 — the same class of
+        mismatch task 011 caught at 1.1-vs-1.3. Recommended fix is the COMMON API
+        Office.context.document.customXmlParts + a CustomXmlParts requirement-set declaration, which needs
+        no WordApi bump and has a LOWER floor (perpetual Office 2016) and confirmed web/Mac/iPad support.
+    (3) STAMP-AS-PRIMARY recommendation (report section 7): with the operator's dev-only/legacy-irrelevant
+        decision removing its only stated disqualifier, FR-02's custom-XML stamp is the architecturally
+        better PRIMARY identity mechanism — identity-by-content, written server-side with no host API,
+        one resolution hop to the PRIMARY key instead of three unverified hops to an alternate key.
+        Operator decision, not taken here. Two honest costs recorded: Document Inspector can strip a custom
+        XML part (Remove All), and the custom-XML MARKUP-vs-PARTS distinction is an unconfirmed premise that
+        FR-02 entirely rests on — a ten-minute check, report section 8.1 step 8.
+
+    ALSO: Word.Document.path/.fullName exist (WordApiDesktop 1.4, desktop-only, Windows 2508+, N/A on web)
+    as a DIAGNOSTIC for the Protected-View question. SPE container-type urlTemplate ({drive-id}/{item-id}
+    tokens) is Microsoft's own documented alternative to the whole /shares route — recorded as open
+    question 10 for the owner. Graph /shares docs are COMPLETELY SILENT on SPE, offer no read-only scope in
+    either permission mode, do not document the no-access status code, and omit parentReference from the
+    documented default projection (task 012 must $select it).
+
+    REMAINING BEFORE TASK 012 BUILDS: run report section 8 (operator pass) — the four document.url cases,
+    the Protected-View observation, the abbreviated-vs-ofe|u| A/B, the /shares SPE call, and the
+    markup-vs-parts confirmation. A negative on Link 1 or 2 fires escalation trigger 1 or 2.</summary>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
