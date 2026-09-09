@@ -12,7 +12,7 @@ import { authService, apiClient } from '@shared/services';
 // word-manifest.xml's 4-part <Version> is kept in step but is not this
 // constant's source — XML requires 4-part, the unified manifest requires
 // SemVer-style 1-3 part).
-const APP_VERSION = '1.0.7';
+const APP_VERSION = '1.0.8';
 const BUILD_DATE = process.env.BUILD_DATE || 'unknown';
 
 // Configuration from environment or build-time injection

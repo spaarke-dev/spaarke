@@ -25,7 +25,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 017 | Align `@testing-library/react` to v16 (React 19) + re-measure suite | ✅ | FULL | sonnet / high | — | 009 |
 | 018 | 🔴 **NFR-11**: fix `useAnnounce` out-of-tree DOM lifecycle (React 19 unmount) | 🔲 | FULL | sonnet / high | — | 017 |
-| 019 | 🔴 **FR-02 pre-flight**: custom-XML premise + WordApi 1.4 manifest gap | 🔲 | FULL | opus / high | — | 002 |
+| 019 | 🔴 **FR-02 pre-flight**: custom-XML premise + WordApi 1.4 manifest gap | ✅ | FULL | opus / high | — | 002 |
 
 > ✅ **Operator decisions 2026-09-09 (post-wave).** **(1) FR-18 is MET** — production typecheck 88 → **0**
 > (006 = 73, 007 = 11, 008 = 4). **(2) The 289 test-file errors are CONSCIOUSLY ACCEPTED**, trigger to
@@ -182,7 +182,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 011 | FR-05: migrate Word to the unified JSON manifest | 🔄 | STANDARD | sonnet / high | P1-a | none |
 | 012 | FR-01 server: document-identity resolver extending `/api/documents` — ⚠️ **gated on the Spike-1 §8 operator pass; re-scoped or optional if §7 is accepted** | 🔲 | FULL | opus / high | — | 002 |
 | 013 | FR-01 client: `getDocumentUrl` capability and identity threading | 🔲 | FULL | sonnet / high | — | 010, 012 |
-| 014 | FR-02: server-side custom XML part GUID stamp — **the two preconditions moved to 019**; MOVES AHEAD of 012/013 if Spike-1 §7 accepted | ⛔ | FULL | opus / high | P1-b | 012, **019** |
+| 014 | FR-02: server-side custom XML part GUID stamp — **019 CLEARED BOTH PRECONDITIONS 2026-09-09: premise CONFIRMED; manifest now declares CustomXmlParts. GO** — inherits 4 conditions, see notes/019-customxml-premise-and-manifest.md §6 (use the COMMON API not Word.Document.customXmlParts; explicit xmlns on the stamp root; missing stamp = normal + re-stampable; runtime isSetSupported guard). MOVES AHEAD of 012/013 if Spike-1 §7 accepted | 🔲 | FULL | opus / high | P1-b | 012, ~~019~~ ✅ |
 | 015 | FR-03: Save\|Find tab shell, enable navigation in Word | 🔲 | FULL | sonnet / high | P1-b | 010 |
 | 016 | Un-skip `/api/office/save` contract tests + cover the identity route | 🔲 | FULL | sonnet / high | — | 012 |
 

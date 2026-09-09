@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-02: server-side custom XML part GUID stamp (forward-only)</title>
     <phase>1 Foundation</phase>
-    <gate>012 complete — the identity resolver must exist so the stamp has a fallback to complement, not replace</gate>
+    <gate>012 complete — the identity resolver must exist so the stamp has a fallback to complement, not replace. (Task 019 pre-flight: CLEARED 2026-09-09 — premise CONFIRMED + manifest fixed; see the 019 dependency below for the 4 conditions this task inherits.)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface modifying .cs in `Sprk.Bff.Api`, on the save path, writing into .docx bytes. Tags include bff-api. Code-review plus adr-check run at Step 9.5.</rigor-reason>
@@ -41,6 +41,42 @@
     </relevant-files>
     <dependencies>
       <dependency task="012" status="pending">The document-identity resolver — the stamp is the round-trip fallback for the Graph path 012 establishes, and the two must agree on what identity means</dependency>
+      <dependency task="019" status="complete">PRE-FLIGHT CLEARED 2026-09-09 — BOTH of this task's blocking preconditions are resolved. GREEN LIGHT.
+
+        (a) The custom-XML markup-vs-parts premise this task's whole design rests on is CONFIRMED, settled
+            without a live host. Word's removal of "custom XML markup" covers in-body w:customXml ELEMENTS
+            only, NOT /customXml/itemN.xml package PARTS. Evidence: Microsoft's own i4i explainer (Gray
+            Knowlton, ms.date 2009-12-23) plus in-repo forensics showing a THIRD-PARTY
+            http://customooxmlschemas.google.com/ part surviving FOUR modern-Word save cycles intact,
+            against 0 occurrences of w:customXml markup in all 48 Word files in the repo.
+
+        (b) The manifest gap is closed. Both Word manifests now declare the Common API requirement set
+            CustomXmlParts (1.1) alongside WordApi 1.3. WordApi was deliberately NOT bumped to 1.4.
+
+        FOUR BINDING CONDITIONS THIS TASK INHERITS (full reasoning in
+        notes/019-customxml-premise-and-manifest.md section 6):
+
+        1. Use the COMMON API — Office.context.document.customXmlParts (getByNamespaceAsync then
+           getXmlAsync). DO NOT use Word.Document.customXmlParts or Word.Document.settings: both are
+           WordApi 1.4, and the manifest deliberately stays at 1.3 because a 1.4 bump would drop
+           Office 2019 AND Office 2021 LTSC — the volume-licensed tier enterprise legal departments run.
+           Promisify the callback API the way WordAdapter.getCompressedFile() already does (task 010).
+        2. The server-side writer MUST emit an explicit xmlns on the stamp's root element. Microsoft:
+           "CustomXMLPart.namespaceUri is only populated if the top-level custom XML element contains the
+           xmlns attribute." Since the read is by namespace, omitting it is a SILENT total failure with
+           no error — the client never finds the part it just wrote.
+        3. Treat a MISSING stamp as a normal, recoverable state and re-stamp — never as corruption. The
+           Document Inspector's "Custom XML Data / Remove All" module is a real, user-reachable
+           un-stamping path, and Inspect-before-sending is common practice in legal work.
+        4. Guard the read at runtime with Office.context.requirements.isSetSupported('CustomXmlParts')
+           (minVersion is optional in the signature, so the bare one-arg call is correct for an
+           unversioned set). EXTEND the existing helper WordAdapter.checkRequirementSet()
+           (shared/adapters/WordAdapter.ts:490) by making its version parameter optional — do not add a
+           new helper (root CLAUDE.md section 11: extend, don't duplicate).
+
+        Also: this task's WRITE path is server-side and needs no Office host, so the round-trip risk it
+        was carrying is retired.
+      </dependency>
     </dependencies>
   </context>
 

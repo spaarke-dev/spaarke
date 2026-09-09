@@ -767,10 +767,17 @@ Save-As to a **non**-OOXML format (`.txt`, `.rtf`, `.odt`) is undocumented and s
 > name. **But the support page itself does not draw that distinction**, and this reading was not
 > independently confirmed in this session.
 >
-> **This is load-bearing: if the reading is wrong, FR-02 collapses entirely**, and with it §7's
-> recommendation. It is ten minutes of empirical work to confirm (stamp a part, close, reopen, check it
-> is still there) and it is **step 6b of the §8 operator pass**. Do not build task 014 on the assumption
-> before that check runs.
+> **This was load-bearing: if the reading were wrong, FR-02 would collapse entirely**, and with it §7's
+> recommendation.
+>
+> ##### ✅ RESOLVED 2026-09-09 — THE READING IS CORRECT. Premise CONFIRMED; task 014 is unblocked.
+> Task 019 settled it **without a live host**, on two independent lines: (a) Microsoft's own i4i
+> explainer (Gray Knowlton, GM Office PM, ms.date 2009-12-23) says what was removed is the *markup tags*
+> and that *"Content Controls and XML data stored within DOCX or DOCM files will not be affected by this
+> change"*; (b) in-repo forensics — a **third-party `http://customooxmlschemas.google.com/`** custom XML
+> part survives **four** modern-Word save cycles intact in `commonpaper-cloud-service-agreement.docx`,
+> while `w:customXml` markup occurs **0 times in all 48** Word files in the repo. §8 step 6b is retired.
+> Evidence, limits, and the residual Document-Inspector risk: `notes/019-customxml-premise-and-manifest.md` §1.
 
 **One implementation note** `DESK-RESEARCHED (Learn)`, same persisting-state page: *"`CustomXMLPart.namespaceUri`
 is only populated if the top-level custom XML element contains the `xmlns` attribute"* and *"The XML
@@ -852,10 +859,13 @@ this spike could not close.
    None of these is silent-to-the-user, and all of them are narrower than `document.url`'s failure
    surface (which loses identity on *every* download). But "narrower" is not "zero", and **the pane must
    degrade honestly when the stamp is absent** — treat as unidentified, never guess.
-4. 🔴 **The markup-vs-parts premise is unconfirmed (§6.5 caveat 2).** If Word's documented removal of
-   "custom XML markup" turns out to cover package parts too, FR-02 collapses and this recommendation
-   with it. **This is a precondition to accepting §7, not a footnote** — §8 step 6b confirms it in
-   minutes.
+4. ~~🔴 **The markup-vs-parts premise is unconfirmed (§6.5 caveat 2).**~~ **✅ RESOLVED 2026-09-09 by
+   task 019 — CONFIRMED, and this objection to §7 is withdrawn.** Word's removal covers in-body
+   `w:customXml` markup only, not `/customXml/itemN.xml` package parts. §8 step 6b is retired; see
+   `notes/019-customxml-premise-and-manifest.md` §1. **One residual, and it is a design obligation
+   rather than a blocker**: the Document Inspector's "Custom XML Data → Remove All" module can strip
+   the stamp at any time, so a missing stamp must be treated as a normal re-stampable state, never as
+   corruption.
 5. **Server-side OOXML writing is not free.** It must not corrupt the package, and it interacts with
    ADR-049's Compose write path, which already owns `.docx` byte manipulation. Task 014 should reuse
    that machinery rather than introduce a second OOXML writer (root CLAUDE.md §11). It must also emit an
@@ -911,11 +921,24 @@ this spike could not close.
    predicts, and confirming it is itself a result). **If it opens, compare `document.url` between the two
    opens.** A difference here means Link 1 is a zone-policy problem with a fix, not a platform dead end —
    the single most valuable thing this pass can discover.
-8. 🆕 **Step 6b — the §6.5 caveat-2 check (10 minutes, gates §7).** With any `.docx`: use the §8.3
-   snippet's `addAsync` line (commented out — uncomment it) to write a custom XML part with an explicit
-   `xmlns`, save, **close Word completely**, reopen the file, and re-run the read. If the part is still
-   there, the markup-vs-parts reading holds and FR-02 is sound. If Word stripped it, **stop and escalate**
-   — §7 is void and FR-02 needs rethinking. Then repeat once through a **download → re-upload** cycle.
+8. ~~🆕 **Step 6b — the §6.5 caveat-2 check (10 minutes, gates §7).**~~ **✅ RESOLVED 2026-09-09 by
+   task 019 — DO NOT RUN. The premise is CONFIRMED; this step is retired from the operator pass.**
+   It was settled without a host, and more strongly than this step could have: a custom XML part in the
+   **third-party namespace `http://customooxmlschemas.google.com/`** was found intact in
+   `tests/unit/Sprk.Bff.Api.Tests/Fixtures/Compose/RealTemplates/commonpaper-cloud-service-agreement.docx`
+   after **four** modern-Word save cycles (`cp:revision 4`, 1,820 `w:rsid` attributes, `w15:docId`,
+   `mc:Ignorable="w14 w15 w16se w16cid w16 w16cex w16sdtdh wp14"` — Word is provably the last writer),
+   while `w:customXml` **markup** elements occur **0 times across all 48** Word files in the repo.
+   Corroborated by Microsoft's own i4i explainer (Gray Knowlton, ms.date 2009-12-23), which states that
+   what was removed is the *markup tags*, and that *"Content Controls and XML data stored within DOCX or
+   DOCM files will not be affected by this change."* Full evidence + limits:
+   `notes/019-customxml-premise-and-manifest.md` §1.
+
+   > **Replaced by a different, cheaper item**: run the unified manifest through the Teams manifest
+   > validator or an M365 admin-center upload and confirm the `CustomXmlParts` capability name is
+   > accepted — Microsoft publishes no allow-list of requirement-set names nameable in the unified
+   > manifest, so that one point rests on construction + Microsoft's own Common-set examples. See
+   > `notes/019-customxml-premise-and-manifest.md` §5.
 
 ### 8.2 How to reach a task pane now that sideload is gone
 
@@ -1010,7 +1033,8 @@ It prints every candidate value and the derived sharing token, and it never thro
     } catch (e) { res({ threw: String(e) }); }
   });
 
-  // ---- 4b. §8.1 step 6b — WRITE a part, to confirm parts survive close/reopen (§6.5 caveat 2).
+  // ---- 4b. [RETIRED — step 6b was resolved 2026-09-09 by task 019; the premise is CONFIRMED and this
+  //      write-probe is no longer needed. Kept only as a usage example of addAsync.]
   //      UNCOMMENT ONLY for the caveat-2 check, and only on a THROWAWAY .docx. The xmlns is
   //      MANDATORY — without it namespaceUri is not populated and getByNamespaceAsync never finds it.
   // Office.context.document.customXmlParts.addAsync(
@@ -1260,11 +1284,12 @@ unauthorized-caller path. Service registration must be unconditional if the endp
    **Yes — both, plus iPad, plus perpetual Office 2016 on Windows.** `DESK-RESEARCHED (Learn)`, Common API
    requirement sets (2025-10-10). FR-19 parity is not at risk from this mechanism, and the common API's
    floor is *lower* than `WordApi 1.4`'s — which is what settles §6.5 on option 1.
-6. 🔴 **[Task 014, §6.5 caveat 2 — PRECONDITION, not a question]** Does Word's documented removal of
-   *"custom XML markup"* apply only to in-body `w:customXml` elements, or also to `/customXml/itemN.xml`
-   package **parts**? The standard reading is the former, but the support page does not say so and this
-   was **not independently confirmed**. **If it is the latter, FR-02 collapses and §7 is void.** §8.1
-   step 6b/8 is the ten-minute check. Do not build task 014 before it runs.
+6. ✅ ~~🔴 **[Task 014, §6.5 caveat 2 — PRECONDITION, not a question]**~~ **CLOSED 2026-09-09 by task 019.**
+   Word's removal of *"custom XML markup"* applies **only to in-body `w:customXml` elements**, NOT to
+   `/customXml/itemN.xml` package **parts**. Confirmed on two independent lines (Microsoft's i4i
+   explainer + in-repo corpus forensics showing a foreign-namespace part surviving four Word save
+   cycles). **FR-02 stands and §7 is not void.** Task 014 is GO. §8.1 step 6b is retired — do not run it.
+   See `notes/019-customxml-premise-and-manifest.md` §1 and §6.
 7. **[Task 011 follow-up, §6.4]** Does `word/manifest.json`'s empty
    `authorization.permissions.resourceSpecific` need a document-access entry to match the XML manifest's
    `ReadWriteDocument`? Not established here; not this spike's file to change.
