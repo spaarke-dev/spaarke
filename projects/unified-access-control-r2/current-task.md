@@ -13,8 +13,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** |
-| **Status** | Clean stopping point. Tree clean, 0 unpushed, 0 behind master. |
+| **Task** | **024** — SPE paging (M1) + `/revoke` status parity (M2) · **IN PROGRESS** (session 6, 2026-09-09) |
+| **Step** | 4 of 7: service code done + builds; **next = tests** (fake `IRequestAdapter` + pure classifier + ArchTest guard) |
+| **Status** | in-progress. Service compiles clean; **no tests written yet**; nothing committed. |
+| **Next Action** | Write `SpeContainerPagingTests` using a fake `Microsoft.Kiota.Abstractions.IRequestAdapter` (9 members) feeding two `PermissionCollectionResponse` pages, then extend `ExternalAccessQueryIntegrityGuardTests` with the layer-2 structural guard. |
 | **Branch** | `work/unified-access-control-r2` @ `f8e652f54` · PR **#950** |
 | **Next Action** | **Owner's call.** Ready and unblocked: **042** (standing-grant baseline levels — chain-C head, no environment dependency, **best next task**), **063** (internal share endpoints — chain-B head), **024** (SPE paging — *has a completed design, read it first*), **082**, **093/094/095**. ⚠️ **036 is NOT safe to start** — see § THE ONE THING THAT BLOCKS THE CRITICAL PATH. |
 | **Task status** | **63 done · 3 escalated (012, 071, 023 — plus 062) · 1 blocked-shipped (034) · 25 open · 92 total.** Drift gate green (92 POMLs = 92 index rows). |

@@ -367,7 +367,7 @@ public static class RevokeExternalAccessEndpoint
 
         // The service distinguishes "nobody matched" from "Graph refused". Only the former is benign:
         // under the broker-only model most contacts have no container ACL at all.
-        if (result.Error?.StartsWith("No permission found", StringComparison.OrdinalIgnoreCase) == true)
+        if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError, StringComparison.OrdinalIgnoreCase) == true)
         {
             logger.LogInformation(
                 "[EXT-REVOKE] No SPE container permission exists for Contact {ContactId} on {ContainerId} " +
@@ -487,7 +487,7 @@ public static class RevokeExternalAccessEndpoint
                         "{ContactId} of Organization {OrganizationId} on {ContainerId}",
                         result.PermissionId, memberContactId, organizationId, containerId);
                 }
-                else if (result.Error?.StartsWith("No permission found", StringComparison.OrdinalIgnoreCase) == true)
+                else if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError, StringComparison.OrdinalIgnoreCase) == true)
                 {
                     notFound++;
                 }

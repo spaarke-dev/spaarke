@@ -127,4 +127,69 @@ public class ExternalAccessQueryIntegrityGuardTests
             + "cascade then reports '0 removed — clean' while external members keep file access. "
             + "'Empty' and 'could not read' must stay distinguishable to the caller.");
     }
+
+    /// <summary>
+    /// Seam 5 — every container-permission read goes through the ONE paged reader.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The defect this pins (finding M1, review 2026-08-24; fixed by task 024).</b> Both reads in
+    /// <c>SpeContainerMembershipService</c> issued a single <c>.GetAsync()</c> and used
+    /// <c>permissions?.Value</c> directly, following <c>@odata.nextLink</c> nowhere. Anything past the
+    /// first page was invisible, so a partially cleared container could report clean — defeating the exact
+    /// guard tasks 016 and 017 were built to provide.</para>
+    ///
+    /// <para><b>Why structural.</b> The behavioural proof lives in <c>SpeContainerPagingTests</c>, which
+    /// drives the real Graph request builders over a fake Kiota <c>IRequestAdapter</c>. But that proves
+    /// the reader; it cannot stop a FUTURE call site from going around it. Re-adding a bare
+    /// <c>.Permissions.GetAsync(...)</c> somewhere else in this class would restore the single-page defect
+    /// while every one of those tests stayed green — the same invisibility that made seams 3 and 4
+    /// necessary. This is the rule that survives the next edit.</para>
+    ///
+    /// <para><b>Not vacuous:</b> the reader must exist AND must itself contain the pattern, so deleting or
+    /// renaming it fails here rather than silently satisfying an empty scan.</para>
+    /// </remarks>
+    [Fact(DisplayName = "Task 024 seam 5: container permissions are read only through the paged reader")]
+    public void ContainerPermissionReadsAllGoThroughThePagedReader()
+    {
+        var source = ReadSource(MembershipServiceRelativePath);
+
+        const string ReaderSignature =
+            "private async Task<PermissionReadResult> ReadPermissionsAsync";
+
+        var start = source.IndexOf(ReaderSignature, StringComparison.Ordinal);
+
+        Assert.True(start >= 0,
+            "ReadPermissionsAsync was not found — the guard cannot pass vacuously. It is the single paged "
+            + "reader every container-permission read must go through (task 024, finding M1). If it was "
+            + "renamed, update this guard; the invariant still holds.");
+
+        var end = source.IndexOf("\n    /// <summary>", start, StringComparison.Ordinal);
+        var readerBody = end > start ? source[start..end] : source[start..];
+
+        // The reader must actually page: fetch, then follow the server's link.
+        Assert.Contains("OdataNextLink", readerBody, StringComparison.Ordinal);
+        Assert.Contains("WithUrl", readerBody, StringComparison.Ordinal);
+        Assert.True(
+            Normalize(readerBody).Contains(".Permissions .GetAsync(", StringComparison.Ordinal),
+            "ReadPermissionsAsync must be the place the permission collection is actually fetched. If the "
+            + "fetch moved, this guard is pointed at the wrong method and would pass vacuously.");
+
+        // …and it must be the ONLY place. Excise the reader, then scan what is left.
+        var everywhereElse = Normalize(source.Remove(start, readerBody.Length));
+
+        Assert.False(
+            everywhereElse.Contains(".Permissions .GetAsync(", StringComparison.Ordinal),
+            "A container-permission collection is being read outside ReadPermissionsAsync. That is the "
+            + "task-024 defect (finding M1) returning: a bare .Permissions.GetAsync() sees only page one, "
+            + "so a member past it is invisible — the revoke reports 'no permission found' for a "
+            + "permission that is right there, and the closure guard reports a container cleared that is "
+            + "not. Route the read through ReadPermissionsAsync and honour its EnumerationComplete flag.");
+    }
+
+    /// <summary>
+    /// Collapses runs of whitespace so a fluent Graph chain broken across lines matches regardless of how
+    /// it happens to be wrapped — the invariant is about the CALL, not its formatting.
+    /// </summary>
+    private static string Normalize(string source) =>
+        System.Text.RegularExpressions.Regex.Replace(source, @"\s+", " ");
 }
