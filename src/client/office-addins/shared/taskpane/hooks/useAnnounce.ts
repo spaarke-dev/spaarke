@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, createElement, Fragment, type ReactElement } from 'react';
 
 /**
  * useAnnounce - Hook for screen reader announcements.
@@ -14,15 +14,36 @@ import { useCallback, useEffect, useRef } from 'react';
  * WCAG 2.1 AA Compliance:
  * - 4.1.3 Status Messages (Level AA)
  *
+ * ## React ownership (task 018 / NFR-11)
+ *
+ * The live regions are now rendered as ordinary React elements (`liveRegion`)
+ * rather than created with `document.createElement` and appended to
+ * `document.body` by hand. **The calling component MUST render `liveRegion`
+ * somewhere in its own JSX output** (placement doesn't matter visually --
+ * the regions are `sr-only` -- but it must be mounted for announcements to
+ * reach assistive technology). This fixes a React 19 defect where nodes
+ * created and removed entirely outside React's tracked tree collided with
+ * React's own unmount bookkeeping (`NotFoundError: The node to be removed
+ * is not a child of this node.`). Guarding the old `removeChild` call would
+ * only have silenced the symptom while leaving the nodes outside React's
+ * ownership -- rendering them declaratively is the actual fix.
+ *
  * @example
  * ```tsx
- * const { announce } = useAnnounce();
+ * const { announce, liveRegion } = useAnnounce();
  *
  * // Polite announcement (default) - waits for current speech to finish
  * announce('Document saved successfully');
  *
  * // Assertive announcement - interrupts current speech
  * announce('Error: Connection lost', 'assertive');
+ *
+ * return (
+ *   <>
+ *     {liveRegion}
+ *     ...rest of the component's JSX...
+ *   </>
+ * );
  * ```
  */
 
@@ -38,74 +59,76 @@ export interface UseAnnounceResult {
   announce: (message: string, mode?: AnnounceMode) => void;
   /** Function to clear any pending announcement */
   clear: () => void;
+  /**
+   * The polite + assertive live region markup. The calling component MUST
+   * render this (e.g. `return <>{liveRegion}{...}</>`) so the regions are
+   * mounted through React's own tree instead of being attached to
+   * `document.body` outside it (task 018 / NFR-11).
+   */
+  liveRegion: ReactElement;
 }
+
+const SR_ONLY_STYLE = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: '0',
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: '0',
+} as const;
 
 /**
  * Creates and returns an announce function for screen reader announcements.
  *
  * @param options - Configuration options
- * @returns Object with announce and clear functions
+ * @returns Object with announce, clear, and the liveRegion element to render
  */
 export function useAnnounce(options: UseAnnounceOptions = {}): UseAnnounceResult {
   const { clearDelay = 1000 } = options;
 
-  // Refs for the live region elements
+  // Refs for the live region elements. React creates/attaches/detaches the
+  // underlying DOM nodes (via the `liveRegion` JSX below); these refs are
+  // only used to imperatively write `textContent` for announcements, which
+  // is safe because render never also supplies `children` for these nodes.
   const politeRegionRef = useRef<HTMLDivElement | null>(null);
   const assertiveRegionRef = useRef<HTMLDivElement | null>(null);
   const clearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Create live region elements on mount
+  const liveRegion = useMemo(
+    () =>
+      createElement(
+        Fragment,
+        null,
+        createElement('div', {
+          key: 'polite',
+          ref: politeRegionRef,
+          role: 'status',
+          'aria-live': 'polite',
+          'aria-atomic': 'true',
+          className: 'sr-only',
+          style: SR_ONLY_STYLE,
+        }),
+        createElement('div', {
+          key: 'assertive',
+          ref: assertiveRegionRef,
+          role: 'alert',
+          'aria-live': 'assertive',
+          'aria-atomic': 'true',
+          className: 'sr-only',
+          style: SR_ONLY_STYLE,
+        })
+      ),
+    []
+  );
+
+  // Only timer bookkeeping remains here -- the live region DOM nodes
+  // themselves are owned by React via `liveRegion` above, so there is
+  // nothing DOM-related left to clean up on unmount.
   useEffect(() => {
-    // Create polite live region
-    const politeRegion = document.createElement('div');
-    politeRegion.setAttribute('role', 'status');
-    politeRegion.setAttribute('aria-live', 'polite');
-    politeRegion.setAttribute('aria-atomic', 'true');
-    politeRegion.className = 'sr-only';
-    Object.assign(politeRegion.style, {
-      position: 'absolute',
-      width: '1px',
-      height: '1px',
-      padding: '0',
-      margin: '-1px',
-      overflow: 'hidden',
-      clip: 'rect(0, 0, 0, 0)',
-      whiteSpace: 'nowrap',
-      border: '0',
-    });
-    document.body.appendChild(politeRegion);
-    politeRegionRef.current = politeRegion;
-
-    // Create assertive live region
-    const assertiveRegion = document.createElement('div');
-    assertiveRegion.setAttribute('role', 'alert');
-    assertiveRegion.setAttribute('aria-live', 'assertive');
-    assertiveRegion.setAttribute('aria-atomic', 'true');
-    assertiveRegion.className = 'sr-only';
-    Object.assign(assertiveRegion.style, {
-      position: 'absolute',
-      width: '1px',
-      height: '1px',
-      padding: '0',
-      margin: '-1px',
-      overflow: 'hidden',
-      clip: 'rect(0, 0, 0, 0)',
-      whiteSpace: 'nowrap',
-      border: '0',
-    });
-    document.body.appendChild(assertiveRegion);
-    assertiveRegionRef.current = assertiveRegion;
-
-    // Cleanup on unmount
     return () => {
-      if (politeRegionRef.current) {
-        document.body.removeChild(politeRegionRef.current);
-        politeRegionRef.current = null;
-      }
-      if (assertiveRegionRef.current) {
-        document.body.removeChild(assertiveRegionRef.current);
-        assertiveRegionRef.current = null;
-      }
       if (clearTimeoutRef.current) {
         clearTimeout(clearTimeoutRef.current);
       }
@@ -157,7 +180,7 @@ export function useAnnounce(options: UseAnnounceOptions = {}): UseAnnounceResult
     [clearDelay]
   );
 
-  return { announce, clear };
+  return { announce, clear, liveRegion };
 }
 
 /**
@@ -173,13 +196,17 @@ export function useAnnounce(options: UseAnnounceOptions = {}): UseAnnounceResult
  * // Announce job status changes
  * useAnnounceOnChange(`Job ${job.status}`, [job.status]);
  * ```
+ *
+ * @returns The live region element -- like `useAnnounce`, the calling
+ * component MUST render the returned element for announcements to reach
+ * assistive technology (task 018 / NFR-11).
  */
 export function useAnnounceOnChange(
   message: string | null | undefined,
   deps: React.DependencyList,
   mode: AnnounceMode = 'polite'
-): void {
-  const { announce } = useAnnounce();
+): ReactElement {
+  const { announce, liveRegion } = useAnnounce();
   const isFirstRender = useRef(true);
 
   useEffect(() => {
@@ -194,4 +221,6 @@ export function useAnnounceOnChange(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
+
+  return liveRegion;
 }

@@ -24,7 +24,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 017 | Align `@testing-library/react` to v16 (React 19) + re-measure suite | ✅ | FULL | sonnet / high | — | 009 |
-| 018 | 🔴 **NFR-11**: fix `useAnnounce` out-of-tree DOM lifecycle (React 19 unmount) | 🔲 | FULL | sonnet / high | — | 017 |
+| 018 | 🔴 **NFR-11**: fix `useAnnounce` out-of-tree DOM lifecycle (React 19 unmount) | ✅ | FULL | sonnet / high | — | 017 |
 | 019 | 🔴 **FR-02 pre-flight**: custom-XML premise + WordApi 1.4 manifest gap | ✅ | FULL | opus / high | — | 002 |
 
 > ✅ **Operator decisions 2026-09-09 (post-wave).** **(1) FR-18 is MET** — production typecheck 88 → **0**

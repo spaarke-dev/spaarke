@@ -360,7 +360,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   } = props;
 
   const styles = useStyles();
-  const { announce } = useAnnounce();
+  const { announce, liveRegion } = useAnnounce();
 
   // Initialize save flow hook
   const saveFlowOptions: UseSaveFlowOptions = useMemo(
@@ -878,6 +878,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   return (
     <div className={mergeClasses(styles.container, className)} role="form" aria-label="Save to Spaarke">
+      {/* React-owned ARIA live regions (task 018 / NFR-11) -- must be rendered
+          by this component per useAnnounce's contract; placement doesn't
+          matter visually since the regions are sr-only. */}
+      {liveRegion}
       {renderContent()}
     </div>
   );

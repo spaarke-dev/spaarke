@@ -4,7 +4,7 @@
     <title>NFR-11: fix useAnnounce's out-of-tree DOM lifecycle (React 19 unmount collision)</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a production `.ts` hook that IS the NFR-11 accessibility mechanism, and touches component lifecycle. Tags include `frontend` + `accessibility`.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -69,4 +69,49 @@
     <output type="code">src/client/office-addins/shared/taskpane/hooks/useAnnounce.ts</output>
     <output type="test">src/client/office-addins/shared/taskpane/hooks/__tests__/useAnnounce.test.ts</output>
   </outputs>
+
+  <notes>
+    <completed date="2026-09-09">
+      Root cause confirmed as diagnosed (out-of-tree `document.body.appendChild`/`removeChild` in
+      `useAnnounce.ts` lines 76/96/102/106), plus TWO independent pre-existing test-harness defects that
+      also had to be fixed to reach 16/16 (empirically proven each is unrelated to the DOM-ownership bug;
+      full reasoning is in the file-level comments): (1) the module-level `requestAnimationFrame` mock's
+      implementation was silently wiped by the repo-wide jest `restoreMocks: true` before every test
+      (proven moot anyway — see next point); (2) `jest.useFakeTimers()` (modern/@sinonjs) fakes
+      `requestAnimationFrame` itself, so the custom mock was dead code the whole time — removed it, use
+      Jest's own faked rAF via `jest.advanceTimersByTime`; (3) the suite's own `afterEach` manually did
+      `document.querySelectorAll('.sr-only').forEach(el => el.remove())`, which used to be a harmless
+      belt-and-suspenders line for the OLD non-React-owned nodes but, once the nodes became React-owned,
+      ran BEFORE RTL's own cleanup (afterEach hooks run innermost-first) and rebroke unmount with the
+      SAME `NotFoundError` this task exists to fix -- self-inflicted by the test file. Confirmed via a
+      minimal repro (render-only, no announce/timers) that reproduced the error with the line present and
+      passed with it removed.
+
+      FIX SHAPE CHOSEN: "regions rendered directly in the tree" (no portal) -- `useAnnounce()` now returns
+      `liveRegion: ReactElement` (both `<div>`s built via `createElement`, refs preserved for imperative
+      `textContent` writes) that the CALLING component must render. `useAnnounceOnChange()`'s return type
+      changed `void` -> `ReactElement` for the same reason. The one production consumer, `SaveFlow.tsx`,
+      was updated to render `{liveRegion}` (2-line change: destructure + render). No portal was needed --
+      a portal was considered but rejected because these regions are `sr-only` (no visual/stacking-context
+      reason to escape the local DOM subtree) and a portal would have required a manually-created,
+      manually-appended container anyway, reintroducing exactly the kind of imperative-node-with-manual-
+      lifecycle pattern this task is fixing.
+
+      RESULT: `useAnnounce.test.ts` 19/19 passing (0 assertions weakened; +2 new tests pin distinct-region
+      announcement and double-unmount safety per the acceptance criteria; 0 tests deleted/skipped -
+      ADR-038). No production `document.body.appendChild`/`removeChild` remains in `useAnnounce.ts`.
+      Production typecheck unchanged at 0 (per the established repo convention that excludes
+      `shared/__mocks__/`, `__tests__/`, `*.test.ts(x)` -- confirmed against task 017's own methodology).
+      Full details, before/after numbers, and the flakiness caveat: main-session task report.
+
+      Neither escalation trigger fired formally as a STOP: trigger 1 (structural/shared-provider fix
+      needed) did not apply -- the fix stayed local to the hook + its one caller. Trigger 2 (a wrong test
+      expectation) came close for the `clearDelay`-adjacent tests' use of `jest.runAllTimers()` (which
+      drains the full timer queue including the far-future clear delay, contradicting the test's own
+      intent to observe the intermediate "message visible" state) -- judged as a broken TEST MECHANIC
+      (wrong flushing tool) rather than a wrong ASSERTION VALUE (every expected value was left exactly as
+      authored), so it was fixed with full disclosure in the test file's own comments rather than treated
+      as a stop-and-confirm case; reported prominently for operator review rather than silently changed.
+    </completed>
+  </notes>
 </task>
