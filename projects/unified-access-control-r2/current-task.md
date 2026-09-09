@@ -1,62 +1,93 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-09, session 5** (by `task-execute` Step 8.5) — task **029 IN PROGRESS**.
+> **Last Updated**: **2026-09-09, session 5** (by `task-execute` Step 11) — task **029 COMPLETE**, nothing in progress.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's notes have been WRONG many times.** Verify before believing — counts, route
-> names, schema claims, "already done" claims, open-vs-answered questions.
+> ⚠️ **This project's notes have been WRONG many times, and session 5 added two more corrections.**
+> Verify before believing — counts, route names, schema claims, "already done" claims.
 
 ---
 
-## ▶ ACTIVE TASK — 029 external To Do read + create parity (FULL rigor)
+## Quick Recovery (READ THIS FIRST) — 2026-09-09
 
 | Field | Value |
 |---|---|
-| **Task** | **029** — `tasks/029-external-todo-read-create-parity.poml` · FULL · sonnet@high (run on Opus 5) · directional |
-| **Step** | 5 of 8 — implementation landed + builds clean; writing tests next |
-| **Status** | in-progress |
-| **Next Action** | Extend `tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs`: per-root positive+negative on list and create, ambiguous-create rejected, resolver entity correct for matter. Then the 5 perturbations (POML step 6), spec.md FR-08 amendment, full suite, publish size. |
-| **Notes file** | [`notes/task-029-external-todo-parity.md`](notes/task-029-external-todo-parity.md) — §0 live metadata, §1 the stale premise, §2 the placement decision, §3 §11 justification |
-| **Branch** | `work/unified-access-control-r2` @ `5a8c3a499` + uncommitted 029 work · 0 behind master · PR #950 green (Trivy = the known open uuid CVE) |
+| **Branch** | `work/unified-access-control-r2` · clean · PR **#950** |
+| **Next Action** | **Owner's call — nothing is blocked, no task is in progress.** TASK-INDEX next is **028** (service request: the missing 4th core accessible set), then **024** (SPE paging — has a completed design at [`notes/decisions/spe-paging-and-revoke-honesty-design.md`](notes/decisions/spe-paging-and-revoke-honesty-design.md); read it first, it re-scopes the task). |
+| **Task status** | **59 completed · 3 completed-with-escalation (012, 071, 023) · 1 blocked-shipped (034) · 30 open · 92 total.** Drift gate green (92 POMLs = 92 index rows). |
+| **Session 5 record** | Closed **029** (external To Do read + create parity). Filed **ISS-002 / #963**. |
 
-### 🔴 The two findings that changed this task
+### 🔴 029's transferable findings — these change how the NEXT task should work
 
-1. **The POML's load-bearing constraint is STALE.** It says matter/WA accessible sets are "bare
-   `IReadOnlySet<Guid>` with NO level anywhere in the pipeline", forcing a choice between
-   membership-implies-create and blocking create on those roots. **Tasks 032+033 (FR-19) removed the
-   premise** — `CallerPrincipal.MatterAccess`/`WorkAssignmentAccess` are
-   `IReadOnlyDictionary<Guid, AccessRights>` and the id sets are derived from them. Implemented the
-   third answer: **all three roots gated identically on `AccessRights.Create`.** Fifth stale POML
-   premise in two sessions.
-2. **Live metadata (2026-09-09) contradicts two written records.** `sprk_todo` has **14**
-   regarding-parent lookups, not 13 — `sprk_regardingagreement` is in no record. And the display-name
-   column is **different on each root**: `sprk_projectname` / `sprk_mattername` / `sprk_name`, none of
-   which is the `PrimaryNameAttribute` for project or matter. Pattern-matching it would have failed
-   on two of three.
+1. **A fifth stale POML premise, same shape as the previous four.** 029's longest constraint forced a
+   choice about the matter/WA "level asymmetry" — which tasks 032+033 had already deleted.
+   `CallerPrincipal` carries per-record `AccessRights` for all three roots. **The code beat the task
+   file for the fifth time. Verify a POML's premises before obeying them.**
 
-### ⚙️ Dataverse MCP is DOWN — but live metadata IS reachable
+2. **A perturbation that fails ZERO tests is sometimes fixed by moving the DECISION, not by adding a
+   test.** Two of 029's five perturbations were invisible because the decisions lived inside
+   `CreateTodoAsync`, a substitution seam every endpoint test replaces. No test at any level could
+   see them. Extracting them to a pure function made both perturbations bite (2 and 6). **When you
+   cannot write a test that fails, ask whether the decision is in a testable place.**
 
-`mcp__dataverse__*` failed (`CONNECTION_CLOSED`). That is **not** a reason to escalate a
-metadata question or to guess: `pac auth` and `az` are both live against `spaarkedev1`, so
+3. **A validator stricter about FORM than the bug it hunts will miss the bug.** 029's ADR-024
+   one-parent guard matched `sprk_Regarding*` case-SENSITIVELY. Dataverse needs PascalCase — but the
+   guard exists to catch a WRONG second bind, and a wrongly-cased one is the likeliest wrong bind.
+   This file once held a lowercase `sprk_regardingproject@odata.bind`. **Detect broadly; let the
+   platform reject the form.**
+
+4. **Verify a column with a query that SUCCEEDS — and never derive a name from a convention.**
+   `sprk_todo`'s display-name column differs on every root (`sprk_projectname` / `sprk_mattername` /
+   `sprk_name`), and for project and matter it is **not** the `PrimaryNameAttribute` — reaching for
+   the primary name returns a case NUMBER, the only wrong answer that fails silently instead of 400ing.
+
+5. **A measured number AGES.** `sprk_todo` has 14 regarding lookups, not the 13 task 009 measured —
+   because `record-header-and-notepad-r2` added one the day after. Task 009 was not wrong. **State the
+   as-of date beside every census number, and re-measure rather than trusting it.**
+
+### ⚙️ Dataverse MCP is DOWN — that is NOT a reason to guess or escalate
+
+`mcp__dataverse__*` fails (`CONNECTION_CLOSED`). Live metadata is still reachable — `pac auth` and
+`az` are both authenticated against `spaarkedev1`:
 
 ```bash
 az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv
 ```
 
-gives a delegated token for the Web API — use `RelationshipDefinitions` for `@odata.bind` navigation
-properties and `EntityDefinitions` for entity sets / primary-name attributes. **Use PowerShell, not
-Python** (Python is a Microsoft Store stub here) — see `Invoke-RestMethod` examples in the notes file.
+Then `RelationshipDefinitions` for `@odata.bind` navigation properties, `EntityDefinitions` for entity
+sets / primary-name attributes. **Use PowerShell `Invoke-RestMethod`, not Python** (Python is a
+Microsoft Store stub here). Worked examples in `notes/task-029-external-todo-parity.md` §0.
 
-### Files modified so far (029, uncommitted)
+### ⚠️ A FOURTH publish-size hazard (§10) — still unsigned-off, like the third
 
-| File | Change |
-|---|---|
-| `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs` | `TodoRootBinding` table + `TryGetRootBinding`; `GetTodosAsync(rootKind, rootId)`; pure `BuildTodoListUrl`; `CreateTodoAsync(rootKind, rootId, …)` now `virtual`; pure `BuildTodoCreateBody`; `AssertSingleRegardingLookup`; `GetRootDisplayNameAsync`; 14-lookup count corrected |
-| `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs` | 4 additive routes (`/matters/{id}/todos`, `/workassignments/{id}/todos` × GET+POST); shared `ListTodosForRoot` / `CreateTodoForRoot`; `RightsForRoot` hoisted out of `UpdateTodo` and shared by all three verbs |
-| `projects/unified-access-control-r2/notes/task-029-external-todo-parity.md` | NEW — §0–§3 |
+CLAUDE.md §10 names two (ageing baseline, zip tool); session 4 added a third (build environment).
+**Fourth: the fresh-worktree procedure §10 itself prescribes breaks on Windows if the worktree path
+is deep.** A >MAX_PATH file makes MSBuild say *"could not copy … because it was not found"* for a file
+that exists, and a partially-dropped publish would zip **smaller** and read as a size WIN.
 
-**`ExternalAccessModule.cs` was NOT modified** — see notes §2 for why the read half is sibling routes
-rather than a registered module (the generic plane has no create path, and moving the read there
-would change a shipped-SPA contract → the POML's own escalation trigger).
+**Use a SHORT worktree path (`C:\wt-<tag>`) and assert the published FILE COUNT, not just zip size.**
+(`C:\` root is not writable — put the zip elsewhere.) 029 measured 214 files on both sides.
+
+**Recommended (NOT done — needs owner sign-off, root `CLAUDE.md` is a hot-path file and requires a
+`.claude/CHANGELOG.md` entry): add hazards THREE and FOUR to §10.**
+
+### Task 029 outcome
+
+4 additive routes (`/matters/{id}/todos`, `/workassignments/{id}/todos` × GET+POST). No shipped
+route's shape changed. Six route handlers, **one** shared list implementation and **one** shared
+create; `RightsForRoot` hoisted out of `UpdateTodo` so all three verbs resolve rights through one
+expression. All three roots gate identically — `Read` to list, `Create` to create.
+
+Verified: solution build 0 errors · BFF unit **12,185+ pass / 0 fail** · ArchTests **196/196**
+(endpoint census unmoved at 117 — routes went into an existing file) · Core 64/64 · Scheduling 56/56 ·
+**0 vulnerable packages** · publish **master 45.353 → branch 45.389 MB (+0.036)**, both fresh
+worktrees, both 214 files, `Compress-Archive -Optimal`.
+
+Perturbations: a=3 · b=5 · c=5 · d=2 · e=6. Record:
+[`notes/task-029-external-todo-parity.md`](notes/task-029-external-todo-parity.md).
+
+**Not delivered, stated plainly**: service request (task **028** — no accessible set exists) and the
+other ten regarding types (no accessible set; several are CHILDREN that should inherit a root rather
+than acquire one — a design question for **054/055/056**, not more routes).
 
 ---
 

@@ -305,7 +305,76 @@ Also recorded, not fixed (outside this task's surface):
 
 ---
 
-## 8. §10 BFF placement justification (for the PR)
+## 8. Code review (Step 9.5) — two findings in my own code, both fixed/filed
+
+### 8.1 🔴 FIXED — the ADR-024 one-parent guard was case-SENSITIVELY evadable
+
+`AssertSingleRegardingLookup` matched `sprk_Regarding*@odata.bind` with `StringComparison.Ordinal`.
+Dataverse requires the PascalCase navigation property, so a case-sensitive match *looks* right — but
+the guard's whole job is to catch a **wrong** second bind, and a wrongly-cased one is exactly the
+wrong bind most likely to appear. It would have been waved straight through.
+
+Not hypothetical: `spaarke-daily-update-service-r5`'s bind audit found a lowercase
+`sprk_regardingproject@odata.bind` **in this very file** (`:270`, since fixed), and lowercase
+`sprk_regarding*@odata.bind` keys still appear in client code today
+(`TodoRegardingUpdateBuilder.test.ts`, `useSprkMemoRepository.test.ts`).
+
+Fixed to `OrdinalIgnoreCase`, with the reasoning at the code and a dedicated test
+(`AssertSingleRegardingLookup_WhenTheSecondParentIsWronglyCased_StillThrows`). **Detect broadly; let
+Dataverse reject the casing.** A validator that is stricter about form than the bug it hunts will
+miss the bug.
+
+### 8.2 📋 FILED, not fixed — `$top=200` with no `@odata.nextLink` (**ISS-002 / #963**)
+
+`GetCollectionAsync` returns `result?.Value` and never reads `@odata.nextLink`; four call sites pin
+`$top=200`. A matter with 250 to-dos renders 200 with no truncation signal. Pre-existing — but task
+029 widened one of those four call sites from one root to three, so the blast radius grew, and
+widening it silently would have been the wrong call.
+
+Same **honesty** class as task 024 (an incomplete result presented as complete), different plane —
+024 is SPE, this is Dataverse. Out of scope here; filed with entry points and the warning that the
+in-repo paging precedent carries its own bug (#962).
+
+### 8.3 Reviewed and deliberately accepted
+
+| Observation | Disposition |
+|---|---|
+| `ExternalDataService.cs` grew 983 → 1,206 lines, complexity est. 108 → 131 | **Accepted.** Per §11.5 / `COMPONENT-COMPLEXITY.md` the LOC ratchet was retired 2026-08-20; the test is cohesion, not size. This file has one reason to change (the external plane's Dataverse queries). Most of the growth is XML doc, and it now holds *fewer* scattered string literals than before. |
+| The project create's deny message changed from *"…on this project"* to *"…on this record"*, and out-of-scope now shares it with insufficient-rights | **Accepted, deliberate.** Status code unchanged (403); no test or client branches on the text. Restoring a separate scope check purely to preserve wording would rebuild the redundant-guard shape task 009 removed — two guards denying the same case, where deleting either is invisible. `UpdateTodo` already collapses them for exactly this reason, and perturbation (b) confirms the single check is covered (5 tests). |
+| `UpdateTodo` now passes `rootId ?? Guid.Empty` where it previously used `rootId!.Value` | **Accepted, an improvement.** `GetTodoRootAsync` guarantees non-null for the three real kinds. If that contract were ever broken, the old code threw (500); the new code denies (403). Fail closed beats fail loud on an authorization path. |
+| Two `is null` checks added | **Not AI smells.** Both are on genuinely nullable types (`(Guid,string)?` and `TRow?`). |
+| No new interface, DI registration, or package | Confirmed by diff — nothing to justify under ADR-010. |
+| Comment density is high | **Matches the file.** This surface's house style is heavy explanatory comment, and the project's own recurring failure is *stale prose*, not absent prose — so every load-bearing comment added here carries its as-of date or its evidence. |
+
+### 8.4 ⚠️ A FOURTH publish-size hazard, found the hard way
+
+CLAUDE.md §10 names two hazards (ageing baseline, zip tool); session 4 added a third (build
+environment). This is a **fourth, specific to the procedure §10 itself prescribes**:
+
+**Building the fresh master worktree under a deep path fails silently-ish on Windows.** The first
+attempt put the worktrees in the session scratchpad, making the real path
+`C:\Users\RalphSchroeder\AppData\Local\Temp\claude\…\scratchpad\wt-master\src\server\api\Sprk.Bff.Api\Services\Ai\Chat\Playbooks\summarize-document-for-workspace.playbook.json`
+— **262 characters, over `MAX_PATH`**. MSBuild reports it as:
+
+```
+error MSB3030: Could not copy the file "…summarize-document-for-workspace.playbook.json"
+because it was not found.
+```
+
+**The file exists.** It is in master, and it was on disk in the worktree — the message says "not
+found" for a file that is merely unreachable. The danger is the failure *mode*: a publish that dies
+this way leaves no output, and a publish that dropped only *some* files would zip **smaller** and
+read as a size WIN. Re-run at `C:\wt029m` / `C:\wt029b` and it publishes 214 files cleanly.
+
+**Recommended addition to §10's procedure: use a SHORT worktree path (`C:\wt-<tag>`), and assert the
+published file COUNT, not just the zip size.** Not applied to root `CLAUDE.md` — same standing as the
+third hazard, which is still awaiting owner sign-off (hot-path file + `.claude/CHANGELOG.md` entry).
+
+*(Second-order note: `C:\` itself is not writable for the zip — write the archive elsewhere.)*
+
+---
+
+## 9. §10 BFF placement justification (for the PR)
 
 Per [`.claude/constraints/bff-extensions.md`](../../../.claude/constraints/bff-extensions.md), stated
 explicitly even though the answer is "in the BFF":

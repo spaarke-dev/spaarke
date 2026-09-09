@@ -784,13 +784,21 @@ public class ExternalDataService
     ///
     /// <para><c>sprk_RegardingRecordType</c> is excluded: it is the resolver's type reference, not a
     /// parent. It is the only <c>sprk_Regarding*</c> bind that legitimately coexists with a parent.</para>
+    ///
+    /// <para>🔴 <b>The match is deliberately case-INSENSITIVE.</b> Dataverse requires the
+    /// PascalCase navigation property, but a wrongly-cased bind key is a real and observed mistake
+    /// in this codebase — <c>spaarke-daily-update-service-r5</c>'s bind audit found a lowercase
+    /// <c>sprk_regardingproject@odata.bind</c> in THIS FILE, and lowercase keys still appear in
+    /// client code today. A case-SENSITIVE guard would wave through the second parent whose casing
+    /// was wrong, i.e. it would miss precisely the buggy write it exists to catch. Detect broadly;
+    /// let Dataverse reject the casing.</para>
     /// </remarks>
     internal static void AssertSingleRegardingLookup(IDictionary<string, object?> body)
     {
         var parentBinds = body.Keys
-            .Where(k => k.StartsWith("sprk_Regarding", StringComparison.Ordinal)
-                     && k.EndsWith("@odata.bind", StringComparison.Ordinal)
-                     && !k.StartsWith("sprk_RegardingRecordType", StringComparison.Ordinal))
+            .Where(k => k.StartsWith("sprk_Regarding", StringComparison.OrdinalIgnoreCase)
+                     && k.EndsWith("@odata.bind", StringComparison.OrdinalIgnoreCase)
+                     && !k.StartsWith("sprk_RegardingRecordType", StringComparison.OrdinalIgnoreCase))
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToArray();
 

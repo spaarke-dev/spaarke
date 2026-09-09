@@ -880,6 +880,31 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         act.Should().Throw<InvalidOperationException>().WithMessage("*ADR-024*");
     }
 
+    /// <summary>
+    /// 🔴 A WRONGLY-CASED second parent must still be caught.
+    ///
+    /// <para>Found in code review. Dataverse requires the PascalCase navigation property, so a
+    /// case-sensitive guard looks correct — but it would wave through the second parent whose casing
+    /// was wrong, which is exactly the buggy write the guard exists to catch. This is not
+    /// hypothetical: <c>spaarke-daily-update-service-r5</c>'s bind audit found a lowercase
+    /// <c>sprk_regardingproject@odata.bind</c> in THIS FILE, and lowercase keys still appear in
+    /// client code today.</para>
+    /// </summary>
+    [Fact]
+    public void AssertSingleRegardingLookup_WhenTheSecondParentIsWronglyCased_StillThrows()
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_RegardingMatter@odata.bind"] = "/sprk_matters(44444444-4444-4444-4444-444444444444)",
+            ["sprk_regardingproject@odata.bind"] = "/sprk_projects(11111111-1111-1111-1111-111111111111)",
+        };
+
+        var act = () => ExternalDataService.AssertSingleRegardingLookup(body);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ADR-024*", "casing must not be a way past the one-parent rule");
+    }
+
     [Fact]
     public void AssertSingleRegardingLookup_WhenNoParentIsBound_Throws()
     {

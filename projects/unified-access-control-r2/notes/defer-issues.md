@@ -3,7 +3,12 @@
 > **Source of truth** for deferred work + newly-discovered issues in this project.
 > Each entry has a paired GitHub Issue. See `/project-defer-issue-tracking` skill for the protocol.
 >
-> **Rollup view**: `gh issue list --label unified-access-control-r2`
+> **Rollup view**: ~~`gh issue list --label unified-access-control-r2`~~ ⚠️ **That label does not
+> exist in this repo**, so the command silently returns nothing — and every issue this file has filed
+> (#961, #962, #963) was created unlabelled, so it would find none of them even if it did. Use the
+> explicit list instead: `gh issue view 961 962 963`. Creating the label and back-applying it is a
+> two-minute fix nobody has done; recorded 2026-09-09 by task 029 rather than left as a command that
+> looks like it works.
 > **CLAUDE.md §11 rule**: every entry MUST name a concrete behavior or contract that fails without it.
 
 ---
@@ -106,6 +111,45 @@ surface** (`Services/Ai/Security/` is AI-owned); two-line fix.
 **Estimated effort**: <1h
 **Blockers**: none
 **Related**: task 024 design note §2.2 — `notes/decisions/spe-paging-and-revoke-honesty-design.md`
+
+### ISS-002 — The external data plane silently truncates at `$top=200` (no `@odata.nextLink`)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-09 |
+| **Source** | Task 029 code review (Step 9.5). Pre-existing; 029 widened one of the four call sites to two more roots and declined to widen it silently. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/963 |
+
+**Description**
+
+`ExternalDataService.GetCollectionAsync` returns `result?.Value` and never reads `@odata.nextLink`.
+Four call sites pin `$top=200` — `sprk_documents` (`:213`), `sprk_todos` (`:545`), `sprk_events`
+(`:564`), `sprk_externalrecordaccesses` (`:1034`). A root with more than 200 children returns exactly
+200 and the caller cannot distinguish that from a complete list.
+
+**Concrete failure mode**: a matter with 250 to-dos renders 200 in the external SPA with no "load
+more" and no truncation signal — a list that looks complete and is not. Not a disclosure; the mirror
+image of one. Same **honesty** class as task 024 (`container_not_cleared` on a multi-page container),
+but a different plane — 024 is SPE, this is Dataverse, and fixing one does not touch the other.
+
+⚠️ `:1034` first: it feeds an authorization-adjacent read, where a truncated set can mean a
+participant is not seen.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs` — `GetCollectionAsync` (~`:1040`) + the four call sites
+- [`notes/decisions/spe-paging-and-revoke-honesty-design.md`](decisions/spe-paging-and-revoke-honesty-design.md) — the honesty rule to reuse: an unverified set is never reported as clean
+- `Services/Ai/Security/PrivilegeGroupResolver.cs:202` — the in-repo paging precedent, **which carries its own double-count bug** (ISS-001 / #962). Read that first.
+
+**Suggested fix**: follow `@odata.nextLink` behind an explicit max-pages cap, OR return a truncation
+flag the caller must handle. **Do not just raise `$top`** — that moves the cliff without removing it.
+
+**Estimated effort**: unknown — the code is small; the client-contract decision (flag vs transparent
+paging) is the real work, and these call sites feed shipped SPA views.
+**Blockers**: none technical; needs the contract decision.
+**Related**: task 024 (same honesty class, different plane) · ISS-001 (#962, the precedent's bug).
 
 ---
 

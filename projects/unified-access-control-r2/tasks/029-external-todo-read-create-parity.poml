@@ -3,7 +3,7 @@
   <metadata>
     <title>External To Do read + create parity with PATCH -- matter and work assignment, per the owner's regarding decision</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the external-access read AND write path; adds a Dataverse write shape (new @odata.bind nav props) and changes a client-visible contract.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -128,5 +128,29 @@ Also read `Services/Workspace/TodoRegardingBuilder.cs` -- its `RegardingLookupBy
     <criterion>All 7 test projects pass; publish size reported and &lt;=60 MB compressed incl. PDBs.</criterion>
   </acceptance-criteria>
 
-  <notes>Filed 2026-08-24 by owner decision from the task-009 asymmetry. Read notes/task-009-external-todo-scope.md first -- it records the level asymmetry, the two zero-failure perturbations this file pair produced, and the GetTodoRootAsync fail-closed contract. Task 028 (service request accessible set) is the natural follow-on for the fourth root; do not fold it in here.</notes>
+  <notes>✅ **COMPLETED 2026-09-09.** Record: `projects/unified-access-control-r2/notes/task-029-external-todo-parity.md`.
+
+🔴 **TWO OF THIS FILE'S OWN PREMISES WERE STALE — do not re-derive from them.**
+
+(1) **The level constraint is obsolete.** It says matter/WA accessible sets are "bare IReadOnlySet&lt;Guid&gt; with NO level anywhere in the pipeline", forcing a choice between membership-implies-create and blocking create on those roots. Tasks 032+033 (FR-19) killed that premise: CallerPrincipal carries per-record AccessRights for all three roots and the id sets are DERIVED from the rights maps. Implemented the third answer — all three gated identically on AccessRights.Create.
+
+(2) **Step 0's metadata warning aimed at the wrong hazard.** The @odata.bind nav props ARE uniform (`sprk_Regarding{Entity}`, all three live-verified). The non-uniformity is one layer over, where nothing warned: the DISPLAY-name column differs per root — `sprk_projectname` / `sprk_mattername` / `sprk_name` — and is NOT the PrimaryNameAttribute for project or matter. Reaching for the primary name returns a case NUMBER: the only wrong answer that fails silently rather than 400ing.
+
+**Read-half placement**: sibling routes, NOT a registered module (this file's stated default). The generic scoped-fetch plane serves READS only, so a module could carry the list half and never the create half; and moving the read there changes what the shipped SPA must call — this file's own second escalation trigger. Reasoning written before implementing, per the acceptance criteria.
+
+**The perturbation constraint earned its keep, twice.** (d) and (e) initially failed ZERO tests, because the resolver-entity choice and the ADR-024 one-parent guard both ran inside CreateTodoAsync — a substitution seam every endpoint test replaces. No test at any level could see them. Fixed **structurally** (moved onto the pure BuildTodoCreatePayload), not by adding tests. Final counts: a=3, b=5, c=5, d=2, e=6. (b) needed reshaping to compile — `if (false)` is unreachable code under warnaserror.
+
+**Code review** found the one-parent guard was case-SENSITIVELY evadable; a lowercase second bind would have passed. Not hypothetical — this very file once held a lowercase `sprk_regardingproject@odata.bind`. Fixed + tested + perturbation-verified (1 failure).
+
+**Filed, not fixed**: ISS-002 / #963 — `$top=200` with no `@odata.nextLink` across four call sites; 029 widened one of them to three roots and declined to widen it silently.
+
+**Still unimplemented of the owner's "any regarding entity" intent**: service request (task 028 — no accessible set exists) and the other ten types (no accessible set; several are CHILDREN that should inherit a root rather than acquire one — a question for 054/055/056, not for more routes).
+
+Verified: solution build 0 errors · BFF unit 12,185+ pass / 0 fail · ArchTests 196/196 (endpoint census unmoved at 117) · Spaarke.Core 64/64 · Scheduling 56/56 · 0 vulnerable packages · publish master 45.353 → branch 45.389 MB (**+0.036 MB**, both fresh worktrees, both 214 files, Compress-Archive Optimal).
+
+⚠️ **A fourth publish-size hazard found**: building the fresh worktree under a DEEP path breaks the §10 procedure on Windows — a &gt;MAX_PATH file is reported by MSBuild as "could not copy … because it was not found", and a partially-dropped publish would zip SMALLER and read as a size win. Use a short worktree path (`C:\wt-&lt;tag&gt;`) and assert the published FILE COUNT, not just the zip size.
+
+---
+
+Filed 2026-08-24 by owner decision from the task-009 asymmetry. Read notes/task-009-external-todo-scope.md first -- it records the level asymmetry, the two zero-failure perturbations this file pair produced, and the GetTodoRootAsync fail-closed contract. Task 028 (service request accessible set) is the natural follow-on for the fourth root; do not fold it in here.</notes>
 </task>
