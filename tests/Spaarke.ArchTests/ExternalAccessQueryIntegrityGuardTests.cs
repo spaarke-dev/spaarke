@@ -104,28 +104,46 @@ public class ExternalAccessQueryIntegrityGuardTests
     /// be reintroduced in one line, invisibly. The method must let the exception propagate; its
     /// <c>&lt;exception&gt;</c> doc already promises exactly that.</para>
     /// </remarks>
-    [Fact(DisplayName = "Task 025 seam 4: ListExternalMembersAsync propagates a Graph failure")]
+    [Fact(DisplayName = "Task 025 seam 4: the member-listing path propagates a Graph failure")]
     public void ListExternalMembersDoesNotSwallowItsGraphError()
     {
         var source = ReadSource(MembershipServiceRelativePath);
 
-        var start = source.IndexOf("public virtual async Task<IReadOnlyList<SpeContainerMember>> ListExternalMembersAsync",
-            StringComparison.Ordinal);
+        // ⚠️ WIDENED BY TASK 024. This guard used to scan ListExternalMembersAsync alone, which was the
+        // whole listing path at the time. Task 024 split the read into a worker
+        // (ReadExternalMembersAsync) over a paged reader (ReadPermissionsAsync) — so a swallowing catch
+        // could now be added one or two frames DOWN and the original single-method scan would not see
+        // it. Every frame on the listing path is scanned, or the guard silently narrows as the code
+        // moves under it.
+        string[] listingPathSignatures =
+        [
+            "public virtual async Task<IReadOnlyList<SpeContainerMember>> ListExternalMembersAsync",
+            "ReadExternalMembersAsync(string containerId, CancellationToken ct)",
+            "private async Task<PermissionReadResult> ReadPermissionsAsync",
+        ];
 
-        Assert.True(start >= 0,
-            "ListExternalMembersAsync was not found — the guard cannot pass vacuously. If the method was "
-            + "renamed or moved, update this guard; the invariant still holds.");
+        foreach (var signature in listingPathSignatures)
+        {
+            var start = source.IndexOf(signature, StringComparison.Ordinal);
 
-        // Bound the scan to this method: from its signature to the start of the next member.
-        var end = source.IndexOf("\n    /// <summary>", start, StringComparison.Ordinal);
-        var body = end > start ? source[start..end] : source[start..];
+            Assert.True(start >= 0,
+                $"'{signature}' was not found — the guard cannot pass vacuously. It is one frame of the "
+                + "member-listing path (task 025 seam 4, widened by task 024). If it was renamed or "
+                + "moved, update this list; the invariant still holds.");
 
-        Assert.False(
-            body.Contains("catch", StringComparison.Ordinal),
-            "ListExternalMembersAsync must let a Graph failure propagate. A catch here is the original "
-            + "task-016 defect: a container that could not be READ reports 'no members', and the closure "
-            + "cascade then reports '0 removed — clean' while external members keep file access. "
-            + "'Empty' and 'could not read' must stay distinguishable to the caller.");
+            // Bound the scan to this method: from its signature to the start of the next member.
+            var end = source.IndexOf("\n    /// <summary>", start, StringComparison.Ordinal);
+            var body = end > start ? source[start..end] : source[start..];
+
+            Assert.False(
+                body.Contains("catch", StringComparison.Ordinal),
+                $"'{signature}' must let a Graph failure propagate. A catch anywhere on the listing path "
+                + "is the original task-016 defect: a container that could not be READ reports 'no "
+                + "members', and the closure cascade then reports '0 removed — clean' while external "
+                + "members keep file access. 'Empty' and 'could not read' must stay distinguishable to "
+                + "the caller. (RevokeMembershipAsync is deliberately NOT on this list — it catches by "
+                + "contract, returning a result instead of throwing.)");
+        }
     }
 
     /// <summary>

@@ -13,13 +13,14 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **024** — SPE paging (M1) + `/revoke` status parity (M2) · **IN PROGRESS** (session 6, 2026-09-09) |
-| **Step** | 4 of 7: service code done + builds; **next = tests** (fake `IRequestAdapter` + pure classifier + ArchTest guard) |
-| **Status** | in-progress. Service compiles clean; **no tests written yet**; nothing committed. |
-| **Next Action** | Write `SpeContainerPagingTests` using a fake `Microsoft.Kiota.Abstractions.IRequestAdapter` (9 members) feeding two `PermissionCollectionResponse` pages, then extend `ExternalAccessQueryIntegrityGuardTests` with the layer-2 structural guard. |
-| **Branch** | `work/unified-access-control-r2` @ `f8e652f54` · PR **#950** |
+| **Task** | **024** ✅ **CLOSED for M1** (session 6, 2026-09-09). M2 → task **065**. |
+| **Step** | 7 of 7 — awaiting the full-suite green + the widened seam-4 ArchTest re-run, then push. |
+| **Status** | Code + tests + docs committed (`322513399`, `ffc6f856d`). Publish **+0.05 MB** (master 45.35 → branch 45.40, both measured fresh, `Compress-Archive`). No vulnerable packages. Drift gate green. |
+| **Next Action** | Confirm full suite green, run `dotnet test tests/Spaarke.ArchTests/`, commit the widened seam-4 guard, then `/push-to-github`. |
+| **Branch** | `work/unified-access-control-r2` @ `ffc6f856d` · PR **#950** |
 | **Next Action** | **Owner's call.** Ready and unblocked: **042** (standing-grant baseline levels — chain-C head, no environment dependency, **best next task**), **063** (internal share endpoints — chain-B head), **024** (SPE paging — *has a completed design, read it first*), **082**, **093/094/095**. ⚠️ **036 is NOT safe to start** — see § THE ONE THING THAT BLOCKS THE CRITICAL PATH. |
-| **Task status** | **63 done · 3 escalated (012, 071, 023 — plus 062) · 1 blocked-shipped (034) · 25 open · 92 total.** Drift gate green (92 POMLs = 92 index rows). |
+| **Session 6** | Closed **024** (M1 half). Filed **ISS-004/#968**. 🔴 **Two things worth carrying**: (1) the step-0 spike found the M1 *exploit* is **unproven** — SPE docs list `$skip`/`$top`, not `$skiptoken`, and the sample response has no `nextLink`; the fix stands on the OData *protocol* argument instead, and live confirmation went to **047**. (2) `SpeAdminGraphService:3097` **already paged this exact collection** — the repo was internally inconsistent, and the design's named precedent was superseded by better in-repo code. **Look for the working example before copying the one a doc names.** |
+| **Task status** | **64 done · 3 escalated (012, 071, 023 — plus 062) · 1 blocked-shipped (034) · 24 open · 92 total.** Drift gate green (92 POMLs = 92 index rows), re-verified after 024. |
 | **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963, #964, #965, #966, #967**. |
 
 ### Commits this session — ALL PUSHED, nothing at risk
