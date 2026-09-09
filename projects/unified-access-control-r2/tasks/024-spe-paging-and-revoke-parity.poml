@@ -3,7 +3,7 @@
   <metadata>
     <title>SPE honesty: Graph paging (M1) + /revoke status parity with closure (M2)</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the SPE membership read path that task 016's closure guard depends on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,7 +90,41 @@
     <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Review findings M1 and M2. Finishes the observability work task 017 started.
+  <notes>✅ CLOSED 2026-09-09 — **M1 only. M2 was deliberately NOT done and is now task 065's.**
+See notes/task-024-spe-paging-parity.md. Four things worth carrying forward:
+
+1. STEP 0 RE-RANKED THE FINDING. The code defect is verified (single GetAsync, no nextLink, 3 sites).
+   The EXPLOITABILITY is not: the SPE docs list $skip/$top and NOT $skiptoken, and the sample response
+   carries no @odata.nextLink — evidence LEANING AGAINST this endpoint paging at all. A live probe 403s
+   on the CLI token (needs the BFF app identity → task 047). Fixed anyway, on a better argument than
+   "it might page": ignoring @odata.nextLink is an OData PROTOCOL violation independent of current
+   server behaviour, and a service may begin server-driven paging at any time without that being a
+   breaking change. Severity: live false-assurance → latent protocol + real honesty defect.
+
+2. THE DESIGN'S NAMED PRECEDENT WAS SUPERSEDED. SpeAdminGraphService.ListContainerPermissionsAsync
+   (:3097) ALREADY pages this exact collection correctly (while + WithUrl(OdataNextLink)) — better than
+   the PrivilegeGroupResolver PageIterator the design named, which double-counts page 1 (ISS-001). The
+   repo was internally INCONSISTENT: SpeAdmin paged container permissions, ExternalAccess did not.
+   Deviation from POML step 1 / design §2.2 ("use PageIterator") recorded: a page BOUND is far more
+   directly expressible in a plain loop.
+
+3. NO ENUM CHANGE, as the design predicted. NoPermissionFound already promised "read successfully …
+   genuinely absent"; a single-page read made that sentence false. The rule is now the pure function
+   ClassifyRevokeResult, and SpeBulkRemovalResult.IsComplete gained the EnumerationComplete conjunct —
+   Failed == 0 alone was a false clean, because members nobody enumerated cannot FAIL to be removed.
+   ProjectClosureEndpoint needed ZERO change.
+
+4. Mock&lt;HttpMessageHandler&gt; is banned, but a fake Kiota IRequestAdapter is NOT the same thing — it is
+   the SDK's own published seam, and GraphServiceClient is built from it. That turned design §5's
+   live-gated layer 3 into 14 tests that ALWAYS RUN and actually prove the loop follows the link.
+   Perturbations: page-1-only → 8 · re-swallow → 2 · bypass the reader → 7 (1 ArchTest + 6 behavioural,
+   caught independently) · drop the enumeration conjunct → 2. None failed zero.
+
+⚠️ ACCEPTANCE CRITERION 3 (/revoke status parity) IS OPEN, NOT MET — transferred to task 065 as a
+binding constraint IN ITS POML, because M2 before the M8 client fix trades one silent wrong answer for
+another. ISS-004 (#968) filed: task 020's org-revoke N+1 is AMPLIFIED by this paging (N reads → N×pages).
+
+Review findings M1 and M2. Finishes the observability work task 017 started.
 
 🔴 DESIGN COMPLETED 2026-09-09 — READ IT BEFORE STARTING:
 notes/decisions/spe-paging-and-revoke-honesty-design.md

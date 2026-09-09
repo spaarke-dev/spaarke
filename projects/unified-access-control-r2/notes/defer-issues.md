@@ -196,6 +196,45 @@ inside `RightsForRoot` or as a branch resolving before it. 🔴 **Do NOT add
 
 ---
 
+### ISS-004 — Org-revoke N+1 on container permissions, amplified by task 024's paging
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-09 |
+| **Source** | Task 024. Introduced by task 020, which deliberately declined it; 024's paging made it worse. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/968 |
+
+**Description**
+
+`RevokeExternalAccessEndpoint`'s organization sweep calls `RevokeMembershipAsync` once per member, and
+each call reads the container's **entire** permission collection. N members = N full reads.
+
+**Concrete failure mode**: task 024 made each of those reads **paged**, so the cost went from N reads to
+**N × pages**. Negligible at today's 1 member/org; real at the 200-member `MaxMembersPerSweep` bound.
+
+🔴 **This is a COST defect, not a correctness one.** Each member's read is individually paged and
+individually honest, and an incomplete enumeration correctly yields `Failed` for that member. The answer
+is right; the number of round trips producing it is not.
+
+**Entry-points**
+
+- `RevokeExternalAccessEndpoint.RemoveOrganizationSpePermissionsAsync` — the sweep loop
+- `SpeContainerMembershipService.ReadPermissionsAsync` / `PermissionReadResult` (new in 024) — the primitive to reuse
+
+**Suggested fix**: ONE paged read → match all member emails locally → delete by permission id.
+⚠️ **Do NOT use `RemoveAllExternalMembersAsync` as the paged primitive** — it removes EVERY external
+member, not just the target org's (task 020's warning, still binding). A new service method is needed:
+the endpoint reports per-member arithmetic (`SpeOrgMemberCleanupSummary`) that `SpeBulkRemovalResult`
+cannot express.
+
+**Estimated effort**: small–medium.
+**Blockers**: none — deferred on regression risk, not on a dependency.
+**Related**: task 020 (introduced) · task 024 (amplified, filed) · design §2.1 row 3.
+
+---
+
 ## Closed
 
 *(none yet)*
