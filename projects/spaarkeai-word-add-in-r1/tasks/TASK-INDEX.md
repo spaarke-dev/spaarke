@@ -1,7 +1,7 @@
 # Task Index — `spaarkeai-word-add-in-r1`
 
 > **Generated**: 2026-09-04 by `/project-pipeline` (initialize-only)
-> **Total**: 37 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 added 2026-09-09 — jest harness)
+> **Total**: 38 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment)
 > **Status legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked · ⏭️ deferred
 
 **Execute via `task-execute` only.** Never read a POML and implement manually (root CLAUDE.md §4).
@@ -23,6 +23,18 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
 | 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
+| 017 | Align `@testing-library/react` to v16 (React 19) + re-measure suite | 🔲 | FULL | sonnet / high | — | 009 |
+
+> ✅ **Operator decisions 2026-09-09 (post-wave).** **(1) FR-18 is MET** — production typecheck 88 → **0**
+> (006 = 73, 007 = 11, 008 = 4). **(2) The 289 test-file errors are CONSCIOUSLY ACCEPTED**, trigger to
+> revisit = *when a build surfaces them*. Verified inert: no CI job typechecks `office-addins`
+> (`sdap-ci.yml` runs `tsc --noEmit` for `Spaarke.AI.Widgets` only), test files are not in webpack's
+> graph (which is why the build is green today WITH all 289 present), and `ts-jest isolatedModules` is
+> transpile-only so they cannot fail a test run. They surface only on a manual `npm run typecheck`.
+> **(3) React 19 stays; `@testing-library/react` aligns to it** — PlaybookBuilder (^16.0.0) and
+> SemanticSearch (^16.1.0) already run RTL 16 against React 19; `office-addins` on ^14.2.1 was the sole
+> outlier. PCF (React 16.14 / RTL 12.1.5) is a separate correct lane. Task **017** executes the
+> alignment; it resolves 009's escalation trigger 2.
 
 > ✅ **UNBLOCKED 2026-09-09 by operator decision — A1 + B1.**
 > **(A1)** The 11 foreign `Spaarke.Communication.Components/provenance.ts` errors are fixed by commit
