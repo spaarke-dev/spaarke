@@ -1,9 +1,62 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-08, session 4 END** (by `context-handoff`) — reflects through commit `80ad8643e`. ⚠️ **Refresh this line every time you write here.** A gap between this stamp and `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
+> **Last Updated**: **2026-09-09, session 5** (by `task-execute` Step 8.5) — task **029 IN PROGRESS**.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's notes have been WRONG many times, and session 4 added four more corrections.** Verify before believing — counts, route names, schema claims, "already done" claims, open-vs-answered questions. **Two POML premises and two review-finding details were stale in session 4 alone** (see § SESSION 4 below).
-> counts, route names, schema claims, "already done" claims, open-vs-answered questions.
+> ⚠️ **This project's notes have been WRONG many times.** Verify before believing — counts, route
+> names, schema claims, "already done" claims, open-vs-answered questions.
+
+---
+
+## ▶ ACTIVE TASK — 029 external To Do read + create parity (FULL rigor)
+
+| Field | Value |
+|---|---|
+| **Task** | **029** — `tasks/029-external-todo-read-create-parity.poml` · FULL · sonnet@high (run on Opus 5) · directional |
+| **Step** | 5 of 8 — implementation landed + builds clean; writing tests next |
+| **Status** | in-progress |
+| **Next Action** | Extend `tests/integration/auth/UnifiedAccessControl/ExternalTodoScopeTests.cs`: per-root positive+negative on list and create, ambiguous-create rejected, resolver entity correct for matter. Then the 5 perturbations (POML step 6), spec.md FR-08 amendment, full suite, publish size. |
+| **Notes file** | [`notes/task-029-external-todo-parity.md`](notes/task-029-external-todo-parity.md) — §0 live metadata, §1 the stale premise, §2 the placement decision, §3 §11 justification |
+| **Branch** | `work/unified-access-control-r2` @ `5a8c3a499` + uncommitted 029 work · 0 behind master · PR #950 green (Trivy = the known open uuid CVE) |
+
+### 🔴 The two findings that changed this task
+
+1. **The POML's load-bearing constraint is STALE.** It says matter/WA accessible sets are "bare
+   `IReadOnlySet<Guid>` with NO level anywhere in the pipeline", forcing a choice between
+   membership-implies-create and blocking create on those roots. **Tasks 032+033 (FR-19) removed the
+   premise** — `CallerPrincipal.MatterAccess`/`WorkAssignmentAccess` are
+   `IReadOnlyDictionary<Guid, AccessRights>` and the id sets are derived from them. Implemented the
+   third answer: **all three roots gated identically on `AccessRights.Create`.** Fifth stale POML
+   premise in two sessions.
+2. **Live metadata (2026-09-09) contradicts two written records.** `sprk_todo` has **14**
+   regarding-parent lookups, not 13 — `sprk_regardingagreement` is in no record. And the display-name
+   column is **different on each root**: `sprk_projectname` / `sprk_mattername` / `sprk_name`, none of
+   which is the `PrimaryNameAttribute` for project or matter. Pattern-matching it would have failed
+   on two of three.
+
+### ⚙️ Dataverse MCP is DOWN — but live metadata IS reachable
+
+`mcp__dataverse__*` failed (`CONNECTION_CLOSED`). That is **not** a reason to escalate a
+metadata question or to guess: `pac auth` and `az` are both live against `spaarkedev1`, so
+
+```bash
+az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv
+```
+
+gives a delegated token for the Web API — use `RelationshipDefinitions` for `@odata.bind` navigation
+properties and `EntityDefinitions` for entity sets / primary-name attributes. **Use PowerShell, not
+Python** (Python is a Microsoft Store stub here) — see `Invoke-RestMethod` examples in the notes file.
+
+### Files modified so far (029, uncommitted)
+
+| File | Change |
+|---|---|
+| `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs` | `TodoRootBinding` table + `TryGetRootBinding`; `GetTodosAsync(rootKind, rootId)`; pure `BuildTodoListUrl`; `CreateTodoAsync(rootKind, rootId, …)` now `virtual`; pure `BuildTodoCreateBody`; `AssertSingleRegardingLookup`; `GetRootDisplayNameAsync`; 14-lookup count corrected |
+| `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs` | 4 additive routes (`/matters/{id}/todos`, `/workassignments/{id}/todos` × GET+POST); shared `ListTodosForRoot` / `CreateTodoForRoot`; `RightsForRoot` hoisted out of `UpdateTodo` and shared by all three verbs |
+| `projects/unified-access-control-r2/notes/task-029-external-todo-parity.md` | NEW — §0–§3 |
+
+**`ExternalAccessModule.cs` was NOT modified** — see notes §2 for why the read half is sibling routes
+rather than a registered module (the generic plane has no create path, and moving the read there
+would change a shipped-SPA contract → the POML's own escalation trigger).
 
 ---
 

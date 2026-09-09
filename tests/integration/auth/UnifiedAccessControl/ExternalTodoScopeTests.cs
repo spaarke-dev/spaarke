@@ -492,6 +492,464 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             "the statecode/statuscode the caller sent must NOT be honoured — re-opening or closing "
             + "a to-do is not part of the fields this PATCH accepts implicitly");
     }
+
+    // =====================================================================
+    // Task 029 — LIST + CREATE parity across the three accessible roots.
+    //
+    // Task 009 widened PATCH to matter- and work-assignment-parented to-dos and left list and create
+    // project-only, so the plane's WRITE surface was wider than its READ surface. These tests pin the
+    // symmetry in both directions: every root can be listed and created by a caller who holds it, and
+    // by no one else.
+    //
+    // The load-bearing assertions are ListCallCount / CreateCallCount, not the status code — the
+    // task-009 lesson. A 403 alone would pass even if the read or the write had already been issued.
+    // =====================================================================
+
+    private static object ValidCreate() => new { sprk_name = "new to-do" };
+
+    public static TheoryData<string, ExternalDataService.TodoRootKind, Guid> InScopeRoots() => new()
+    {
+        { "projects", ExternalDataService.TodoRootKind.Project, InScopeProject },
+        { "matters", ExternalDataService.TodoRootKind.Matter, InScopeMatter },
+        { "workassignments", ExternalDataService.TodoRootKind.WorkAssignment, InScopeWorkAssignment },
+    };
+
+    public static TheoryData<string, Guid> OutOfScopeRoots() => new()
+    {
+        { "projects", OtherProject },
+        { "matters", OtherMatter },
+        { "workassignments", OtherWorkAssignment },
+    };
+
+    /// <summary>A caller holding all three roots at Collaborate.</summary>
+    private static CallerPrincipal PrincipalHoldingAllRoots() =>
+        PrincipalWithRoots(
+            projects: new[] { (InScopeProject, ExternalAccessLevel.Collaborate) },
+            matters: new[] { InScopeMatter },
+            workAssignments: new[] { InScopeWorkAssignment });
+
+    // ---- LIST: positive, one per root ----
+
+    [Theory]
+    [MemberData(nameof(InScopeRoots))]
+    public async Task ListExternalTodos_WhenRootIsInCallerAccessibleSet_ListsThatRoot(
+        string segment, ExternalDataService.TodoRootKind expectedKind, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalHoldingAllRoots();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/v1/external/{segment}/{rootId}/todos");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Not just "it was called" — called for the RIGHT root. A handler that cross-wired matter to
+        // the project kind would still return 200 with an empty list.
+        _fixture.Data.ListCallCount.Should().Be(1);
+        _fixture.Data.LastListArgs.Should().Be((expectedKind, rootId));
+    }
+
+    // ---- LIST: negative, one per root ----
+
+    [Theory]
+    [MemberData(nameof(OutOfScopeRoots))]
+    public async Task ListExternalTodos_WhenRootIsOutsideAccessibleSet_IsDeniedAndDoesNotRead(
+        string segment, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalHoldingAllRoots();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/v1/external/{segment}/{rootId}/todos");
+
+        // ADR-003: the denial is a DENIAL. An empty 200 would be indistinguishable from "this record
+        // has no to-dos" — the denial would be invisible to the caller and to any auditor.
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "an out-of-scope root must deny, never return an empty collection");
+        _fixture.Data.ListCallCount.Should().Be(0,
+            "the scope check must run BEFORE the Dataverse read, not filter its results");
+    }
+
+    /// <summary>
+    /// The negative counterpart that the empty-collection failure mode most needs: the deny path is
+    /// asserted on the BODY, not only the status. If a future change made a denied list return 200
+    /// with <c>[]</c>, the status assertion above would fail — but if it returned 403 while still
+    /// having read Dataverse, only the call count catches it. Both are pinned.
+    /// </summary>
+    [Fact]
+    public async Task ListExternalTodos_WhenDenied_ReturnsNoTodoCollectionAtAll()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalHoldingAllRoots();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/v1/external/matters/{OtherMatter}/todos");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("\"value\"",
+            "a denied list must not shape-match a successful empty collection");
+    }
+
+    // ---- CREATE: positive, one per root ----
+
+    [Theory]
+    [MemberData(nameof(InScopeRoots))]
+    public async Task CreateExternalTodo_WhenRootIsInCallerAccessibleSet_CreatesAgainstThatRoot(
+        string segment, ExternalDataService.TodoRootKind expectedKind, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalHoldingAllRoots();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        _fixture.Data.CreateCallCount.Should().Be(1);
+        _fixture.Data.LastCreateArgs.Should().Be((expectedKind, rootId),
+            "the parent flows from the ROUTE — the root gated must be the root written");
+    }
+
+    // ---- CREATE: negative (out of scope), one per root ----
+
+    [Theory]
+    [MemberData(nameof(OutOfScopeRoots))]
+    public async Task CreateExternalTodo_WhenRootIsOutsideAccessibleSet_IsDeniedAndDoesNotWrite(
+        string segment, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalHoldingAllRoots();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0,
+            "no Dataverse write may be issued for a root the caller cannot reach");
+    }
+
+    // ---- CREATE: the level decision, one per levelled root ----
+
+    /// <summary>
+    /// 🔴 The create-side level decision (task 029), pinned as behaviour.
+    ///
+    /// <para>The task file assumed matter and work-assignment access carried NO level, forcing a choice
+    /// between "membership implies create" and blocking create on those roots. Tasks 032+033 removed
+    /// that premise — <see cref="CallerPrincipal"/> carries per-record <c>AccessRights</c> for all
+    /// three roots. So a ViewOnly matter participant is denied create, exactly as a ViewOnly project
+    /// participant always was. If anyone later restores membership-implies-create for the levelless
+    /// roots, these two fail.</para>
+    /// </summary>
+    [Fact]
+    public async Task CreateExternalTodo_WhenCallerHoldsTheMatterViewOnly_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            matterRights: new[] { (InScopeMatter, ExternalAccessLevel.ViewOnly) });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/matters/{InScopeMatter}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "membership in a matter must not by itself confer Create — the level is carried now");
+        _fixture.Data.CreateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateExternalTodo_WhenCallerHoldsTheWorkAssignmentViewOnly_IsDeniedAndDoesNotWrite()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            workAssignmentRights: new[] { (InScopeWorkAssignment, ExternalAccessLevel.ViewOnly) });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/external/workassignments/{InScopeWorkAssignment}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// A ViewOnly holder can still LIST — the level gates the write, not the read. Without this, the
+    /// two tests above would also pass if Read had been required for create by accident.
+    /// </summary>
+    [Fact]
+    public async Task ListExternalTodos_WhenCallerHoldsTheMatterViewOnly_IsAllowed()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            matterRights: new[] { (InScopeMatter, ExternalAccessLevel.ViewOnly) });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.GetAsync($"/api/v1/external/matters/{InScopeMatter}/todos");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Data.ListCallCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Cross-wiring guard: holding a MATTER must not admit the same GUID as a work assignment. The
+    /// three root sets are separate namespaces; a handler that consulted the wrong one would pass
+    /// every single-root test above.
+    /// </summary>
+    [Fact]
+    public async Task ListExternalTodos_WhenTheHeldIdIsAskedForUnderTheWrongRootType_IsDenied()
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWithRootRights(
+            matterRights: new[] { (InScopeMatter, ExternalAccessLevel.Collaborate) });
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        // Same GUID the caller holds AS A MATTER, asked for as a work assignment.
+        var response = await client.GetAsync($"/api/v1/external/workassignments/{InScopeMatter}/todos");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.ListCallCount.Should().Be(0);
+    }
+
+    // =====================================================================
+    // Task 029 — the OData and the payload, asserted where they are BUILT.
+    //
+    // The review constraint, restated: mocking at a seam proves the CALLER, never the CALLEE. Every
+    // test above substitutes GetTodosAsync / CreateTodoAsync, so NONE of them can see which column
+    // the filter names or which navigation property the body binds. Those live in pure functions and
+    // are asserted directly here — otherwise the widening ships untested (the task-017 shape).
+    // =====================================================================
+
+    private const string ApiUrl = "https://example.crm.dynamics.com/api/data/v9.2";
+
+    [Theory]
+    [InlineData(ExternalDataService.TodoRootKind.Project, "_sprk_regardingproject_value")]
+    [InlineData(ExternalDataService.TodoRootKind.Matter, "_sprk_regardingmatter_value")]
+    [InlineData(ExternalDataService.TodoRootKind.WorkAssignment, "_sprk_regardingworkassignment_value")]
+    public void BuildTodoListUrl_FiltersOnTheRootsOwnLookupColumn(
+        ExternalDataService.TodoRootKind kind, string expectedAttribute)
+    {
+        var rootId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+        var url = ExternalDataService.BuildTodoListUrl(ApiUrl, kind, rootId);
+
+        // The $filter is URL-escaped in the emitted URL, so assert on the decoded form.
+        Uri.UnescapeDataString(url).Should().Contain($"$filter={expectedAttribute} eq {rootId}");
+
+        // ...and on nothing else: a filter naming two columns would satisfy a Contain on either.
+        FilterOf(url).Should().Be($"{expectedAttribute} eq {rootId}");
+    }
+
+    /// <summary>Decodes the single <c>$filter</c> clause out of an emitted query URL.</summary>
+    private static string FilterOf(string url)
+    {
+        var decoded = Uri.UnescapeDataString(url);
+        var start = decoded.IndexOf("$filter=", StringComparison.Ordinal) + "$filter=".Length;
+        var end = decoded.IndexOf('&', start);
+        return end < 0 ? decoded[start..] : decoded[start..end];
+    }
+
+    [Fact]
+    public void BuildTodoListUrl_NamesADifferentColumnForEveryRoot()
+    {
+        var rootId = Guid.NewGuid();
+
+        var filters = new[]
+            {
+                ExternalDataService.TodoRootKind.Project,
+                ExternalDataService.TodoRootKind.Matter,
+                ExternalDataService.TodoRootKind.WorkAssignment,
+            }
+            .Select(k => FilterOf(ExternalDataService.BuildTodoListUrl(ApiUrl, k, rootId)))
+            .ToArray();
+
+        filters.Should().OnlyHaveUniqueItems(
+            "two roots sharing a filter column means one of them is silently listing the other's to-dos");
+    }
+
+    [Theory]
+    [InlineData(ExternalDataService.TodoRootKind.None)]
+    [InlineData(ExternalDataService.TodoRootKind.Ambiguous)]
+    public void BuildTodoListUrl_ForADenyState_Throws(ExternalDataService.TodoRootKind kind)
+    {
+        // None and Ambiguous are deny states, not roots. Reaching the data layer with one means a
+        // gate was skipped; failing loudly beats emitting a query with an empty or wrong filter.
+        var act = () => ExternalDataService.BuildTodoListUrl(ApiUrl, kind, Guid.NewGuid());
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(ExternalDataService.TodoRootKind.Project, "sprk_RegardingProject@odata.bind", "/sprk_projects(")]
+    [InlineData(ExternalDataService.TodoRootKind.Matter, "sprk_RegardingMatter@odata.bind", "/sprk_matters(")]
+    [InlineData(ExternalDataService.TodoRootKind.WorkAssignment, "sprk_RegardingWorkAssignment@odata.bind", "/sprk_workassignments(")]
+    public void BuildTodoCreatePayload_BindsExactlyTheRootsOwnNavigationProperty(
+        ExternalDataService.TodoRootKind kind, string expectedBindKey, string expectedEntitySetPrefix)
+    {
+        var rootId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var binding = ExternalDataService.TryGetRootBinding(kind)!;
+
+        var body = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "Display Name", null);
+
+        body.Should().ContainKey(expectedBindKey);
+        body[expectedBindKey].Should().Be($"{expectedEntitySetPrefix}{rootId})");
+
+        // And NO other root's lookup — the ADR-024 one-parent rule at the point of construction.
+        var otherBinds = body.Keys
+            .Where(k => k.StartsWith("sprk_Regarding", StringComparison.Ordinal) && k != expectedBindKey)
+            .ToArray();
+        otherBinds.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 🔴 The resolver fields must carry the PARENT's entity, not <c>sprk_project</c>.
+    ///
+    /// <para>This is the assertion that was impossible before task 029 moved the resolver-field
+    /// construction onto the pure path. While it lived inside <c>CreateTodoAsync</c> — a substitution
+    /// seam every endpoint test replaces — stamping <c>sprk_project</c> into a matter-parented create
+    /// would have failed ZERO tests. A matter to-do carrying a project resolver renders a broken
+    /// cross-entity link and mis-reports its own parent type to every consumer.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ExternalDataService.TodoRootKind.Project, "sprk_project")]
+    [InlineData(ExternalDataService.TodoRootKind.Matter, "sprk_matter")]
+    [InlineData(ExternalDataService.TodoRootKind.WorkAssignment, "sprk_workassignment")]
+    public void BuildTodoCreatePayload_StampsTheParentsOwnEntityIntoTheResolverFields(
+        ExternalDataService.TodoRootKind kind, string expectedEntity)
+    {
+        var rootId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var binding = ExternalDataService.TryGetRootBinding(kind)!;
+
+        var body = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "The Parent", null);
+
+        body["sprk_regardingrecordid"].Should().Be(rootId.ToString("D").ToLowerInvariant());
+        body["sprk_regardingrecordname"].Should().Be("The Parent");
+        body["sprk_regardingrecordurl"].As<string>().Should().Contain($"etn={expectedEntity}",
+            "the resolver URL must point at the PARENT's entity");
+        body["sprk_regardingrecordurl"].As<string>().Should()
+            .Contain(rootId.ToString("D").ToLowerInvariant());
+    }
+
+    [Fact]
+    public void BuildTodoCreatePayload_WhenTheRecordTypeRefResolves_BindsItAlongsideTheParent()
+    {
+        var rootId = Guid.NewGuid();
+        var recordTypeRefId = Guid.NewGuid();
+        var binding = ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Matter)!;
+
+        var body = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "M", recordTypeRefId);
+
+        body["sprk_RegardingRecordType@odata.bind"].Should()
+            .Be($"/sprk_recordtype_refs({recordTypeRefId})");
+        // ADR-024 atomicity: all four resolver fields ride in the SAME payload as the lookup.
+        body.Should().ContainKeys(
+            "sprk_regardingrecordid", "sprk_regardingrecordname",
+            "sprk_regardingrecordurl", "sprk_RegardingRecordType@odata.bind",
+            binding.BindKey);
+    }
+
+    [Fact]
+    public void BuildTodoCreatePayload_WhenTheRecordTypeRefIsUnresolved_StillWritesTheParentAndTheOtherThree()
+    {
+        // Non-fatal by design (mirrors the SDK path): a missing sprk_recordtype_ref row costs the
+        // cross-entity-view icon, not the association. Failing the create instead would be worse.
+        var binding = ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.WorkAssignment)!;
+
+        var body = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, Guid.NewGuid(), "W", null);
+
+        body.Should().NotContainKey("sprk_RegardingRecordType@odata.bind");
+        body.Should().ContainKey(binding.BindKey);
+        body.Should().ContainKeys(
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl");
+    }
+
+    [Fact]
+    public void AssertSingleRegardingLookup_WhenTwoParentsAreBound_Throws()
+    {
+        // A two-parent row is classified Ambiguous by GetTodoRootAsync and then denied to EVERY
+        // caller on EVERY route, forever. This surface must not be able to mint one.
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_RegardingProject@odata.bind"] = "/sprk_projects(11111111-1111-1111-1111-111111111111)",
+            ["sprk_RegardingMatter@odata.bind"] = "/sprk_matters(44444444-4444-4444-4444-444444444444)",
+        };
+
+        var act = () => ExternalDataService.AssertSingleRegardingLookup(body);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ADR-024*");
+    }
+
+    [Fact]
+    public void AssertSingleRegardingLookup_WhenNoParentIsBound_Throws()
+    {
+        // The other half of "exactly one". A to-do created with resolver fields but no parent lookup
+        // resolves to TodoRootKind.None — also permanently unreachable.
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_regardingrecordid"] = "11111111-1111-1111-1111-111111111111",
+            ["sprk_RegardingRecordType@odata.bind"] = "/sprk_recordtype_refs(22222222-2222-2222-2222-222222222222)",
+        };
+
+        var act = () => ExternalDataService.AssertSingleRegardingLookup(body);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void AssertSingleRegardingLookup_TreatsTheResolverTypeBindAsNotAParent()
+    {
+        // sprk_RegardingRecordType is the resolver's type reference and legitimately coexists with a
+        // parent. If the guard counted it, every real create would throw.
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_RegardingMatter@odata.bind"] = "/sprk_matters(44444444-4444-4444-4444-444444444444)",
+            ["sprk_RegardingRecordType@odata.bind"] = "/sprk_recordtype_refs(22222222-2222-2222-2222-222222222222)",
+        };
+
+        var act = () => ExternalDataService.AssertSingleRegardingLookup(body);
+
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// 🔴 Pins the live-metadata-verified names (queried 2026-09-09 against spaarkedev1 via
+    /// <c>RelationshipDefinitions</c> + <c>EntityDefinitions</c>).
+    ///
+    /// <para>Every one of these is a name that CANNOT be derived: the navigation property is
+    /// PascalCase and differs from the attribute; the display-name column is a different name on each
+    /// root (<c>sprk_projectname</c> / <c>sprk_mattername</c> / <c>sprk_name</c>) and is NOT the
+    /// primary-name attribute for project or matter. This project has found SIX stale-column defects;
+    /// a silent edit here is how the seventh arrives.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ExternalDataService.TodoRootKind.Project, "sprk_project", "sprk_projects",
+        "sprk_RegardingProject", "sprk_regardingproject", "sprk_projectname")]
+    [InlineData(ExternalDataService.TodoRootKind.Matter, "sprk_matter", "sprk_matters",
+        "sprk_RegardingMatter", "sprk_regardingmatter", "sprk_mattername")]
+    [InlineData(ExternalDataService.TodoRootKind.WorkAssignment, "sprk_workassignment", "sprk_workassignments",
+        "sprk_RegardingWorkAssignment", "sprk_regardingworkassignment", "sprk_name")]
+    public void TodoRootBinding_PinsTheLiveMetadataNames(
+        ExternalDataService.TodoRootKind kind, string entity, string entitySet,
+        string navProperty, string lookupAttribute, string displayNameAttribute)
+    {
+        var binding = ExternalDataService.TryGetRootBinding(kind);
+
+        binding.Should().NotBeNull();
+        binding!.EntityLogicalName.Should().Be(entity);
+        binding.EntitySet.Should().Be(entitySet);
+        binding.NavigationProperty.Should().Be(navProperty);
+        binding.LookupAttribute.Should().Be(lookupAttribute);
+        binding.DisplayNameAttribute.Should().Be(displayNameAttribute);
+        binding.LookupValueAttribute.Should().Be($"_{lookupAttribute}_value");
+        binding.BindKey.Should().Be($"{navProperty}@odata.bind");
+    }
+
+    [Theory]
+    [InlineData(ExternalDataService.TodoRootKind.None)]
+    [InlineData(ExternalDataService.TodoRootKind.Ambiguous)]
+    public void TryGetRootBinding_ForADenyState_ReturnsNull(ExternalDataService.TodoRootKind kind) =>
+        ExternalDataService.TryGetRootBinding(kind).Should().BeNull();
 }
 
 /// <summary>
@@ -572,6 +1030,16 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         public Guid? LastUpdatedTodoId { get; private set; }
         public UpdateExternalTodoRequest? LastRequest { get; private set; }
 
+        // Task 029 — list + create seams. The call COUNTS are the load-bearing assertions on the deny
+        // paths, exactly as UpdateCallCount is for the PATCH: a 403 alone would pass even if the read
+        // or the write had already been issued.
+        public int ListCallCount { get; private set; }
+        public (ExternalDataService.TodoRootKind Kind, Guid RootId)? LastListArgs { get; private set; }
+
+        public int CreateCallCount { get; private set; }
+        public (ExternalDataService.TodoRootKind Kind, Guid RootId)? LastCreateArgs { get; private set; }
+        public CreateExternalTodoRequest? LastCreateRequest { get; private set; }
+
         public void Reset()
         {
             TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, null);
@@ -579,6 +1047,33 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             UpdateCallCount = 0;
             LastUpdatedTodoId = null;
             LastRequest = null;
+            ListCallCount = 0;
+            LastListArgs = null;
+            CreateCallCount = 0;
+            LastCreateArgs = null;
+            LastCreateRequest = null;
+        }
+
+        public override Task<IReadOnlyList<ExternalTodoDto>> GetTodosAsync(
+            ExternalDataService.TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+        {
+            ListCallCount++;
+            LastListArgs = (rootKind, rootId);
+            return Task.FromResult<IReadOnlyList<ExternalTodoDto>>(Array.Empty<ExternalTodoDto>());
+        }
+
+        public override Task<ExternalTodoDto> CreateTodoAsync(
+            ExternalDataService.TodoRootKind rootKind, Guid rootId,
+            CreateExternalTodoRequest request, CancellationToken ct = default)
+        {
+            CreateCallCount++;
+            LastCreateArgs = (rootKind, rootId);
+            LastCreateRequest = request;
+            return Task.FromResult(new ExternalTodoDto
+            {
+                SprkTodoid = Guid.NewGuid().ToString(),
+                SprkName = request.SprkName,
+            });
         }
 
         public override Task<(ExternalDataService.TodoRootKind Kind, Guid? RootId, string? TodoName)> GetTodoRootAsync(
