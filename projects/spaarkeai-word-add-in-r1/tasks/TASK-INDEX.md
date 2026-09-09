@@ -21,7 +21,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | ✅ | STANDARD | opus / high | P0-spikes | none |
 | 006 | FR-18: clear typecheck debt in `shared/taskpane` — ⚠️ re-scope to production types (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
-| 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 017 | Align `@testing-library/react` to v16 (React 19) + re-measure suite | 🔲 | FULL | sonnet / high | — | 009 |
 
