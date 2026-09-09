@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Make the office-addins jest suite gate a PR (it runs nightly and can never block)</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies CI workflow configuration. Tags include `ci-workflows`, a hot-path surface per root CLAUDE.md §17 — `/conflict-check` applies, and the tier files are under an active freeze.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires reasoning about which workflow may legitimately be touched under an active shadow-comparison freeze that currently holds a DISQUALIFYING false green, and about whether to extend a deliberately-non-blocking baseline or add a narrow gate. Getting this wrong either breaks a live measurement or ships another advisory check that gates nothing.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.github/workflows/**`, a hot-path surface shared with every other active project.</parallel-reason>
+    <deps>010, 018</deps>
+    <tags>ci-workflows, office-addins, testing, tooling</tags>
+    <estimated-effort>3-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the `src/client/office-addins` jest suite a CI gate that can actually fail a pull request, without disturbing the frozen tier workflows or the deliberately-non-blocking 40-package nightly baseline.</prompt>
+
+  <role>SPAARKE platform developer. GitHub Actions, and the repo's CI tier architecture. Read the freeze rules before touching anything under `.github/workflows/`.</role>
+
+  <goal>A change to `src/client/office-addins/**` that breaks the jest suite fails a check on the pull request that introduced it — and the `.docx` byte-identicality guard and `useAnnounce` regression tests built in tasks 010 and 018 are protected by automation rather than by someone remembering to run them.</goal>
+
+  <context>
+    <background>
+      **The original finding was WRONG and was corrected 2026-09-09 in the main session.** Task 010 reported "no CI job runs this suite at all". That is not true, and the truth is a different problem.
+
+      `.github/workflows/client-tests.yml` **auto-discovers** every package declaring a real jest `test` script by scanning `package.json` files. `src/client/office-addins/package.json` declares `"test": "jest"`, so it IS discovered and IS executed. Two facts make that execution unable to protect anything:
+
+      1. Its ONLY triggers are `schedule` (nightly, 07:00 UTC) and `workflow_dispatch`. There is **no `push` and no `pull_request` trigger** — so it never runs on the PR that breaks something.
+      2. Every matrix leg is `continue-on-error: true`, and the file's own header says it "appears in no blocking" path. It is a **baseline observation report by construction**, not a gate. A red package is recorded, not enforced.
+
+      So the accurate problem statement is: **the suite runs nightly and can never fail a PR.** What tasks 010 and 018 built — the `.docx` byte-identicality differential (36 cases including 7 synthetic multi-slice ones covering the 2026-09-03 UAT defect's actual failure mode) and 19 `useAnnounce` tests pinning a real accessibility regression — is currently protected by nothing that runs at the moment of breakage.
+
+      **Ownership**: this was going to be routed to `ci-cd-unit-test-remediation-r1`, which owns CI-tier work. The operator confirmed 2026-09-09 that that project is **CLOSED**, so it is owned here.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">.github/workflows/client-tests.yml</file>
+      <file role="canonical-reference">docs/procedures/ci-cd-workflow.md</file>
+      <file role="canonical-reference">scripts/ci/shadow-window-status.ps1</file>
+      <file role="modify">.github/workflows/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="complete">Built the .docx byte-identicality differential this gate must protect.</dependency>
+      <dependency task="018" status="complete">Built the useAnnounce regression tests this gate must protect.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project" binding="true">🔴 DO NOT EDIT `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml`. They are FROZEN under the shadow-comparison window (opened 2026-08-27). Editing them invalidates what has been observed and restarts the cutover clock.</constraint>
+    <constraint source="project" binding="true">🔴 The freeze is currently in a WORSE state than "just frozen": `scripts/ci/shadow-window-status.ps1` reports **1 FALSE GREEN**, which the tool itself calls DISQUALIFYING — the new tier passed a commit the legacy system failed (PR #934, an Outlook/Word add-in PR). Its own guidance is "diagnose before continuing". Do NOT do anything that perturbs that measurement. Diagnosing the false green is NOT this task — surface it, do not absorb it.</constraint>
+    <constraint source="project">Do NOT add the gate to `sdap-ci.yml`. It is the legacy system pending retirement; work added there is work that has to be moved again.</constraint>
+    <constraint source="project">Do NOT simply flip `client-tests.yml`'s `continue-on-error` to false. That file is a deliberate 40-package non-blocking baseline; making it blocking would turn every other package's pre-existing red into a merge blocker for unrelated PRs. If you extend that file, the office-addins leg must be able to fail WITHOUT the other 39 becoming gates — and if that cannot be done cleanly, prefer a narrow separate workflow.</constraint>
+    <constraint source="project">Root CLAUDE.md §11 — prefer extending over adding. Evaluate extending `client-tests.yml` (it already has a `package_filter` input) against a narrow new workflow scoped to `src/client/office-addins/**`, and justify the choice. A new workflow is acceptable here IF extending would force the non-blocking baseline to change character.</constraint>
+    <constraint source="project">The gate MUST be path-filtered to `src/client/office-addins/**` plus `src/client/shared/Spaarke.Auth/**` — the add-ins consume `@spaarke/auth` as a `file:` dependency and build it from source, so a change there changes what ships. `deploy-office-addins.yml` already carries exactly this path pair; copy it rather than inventing one.</constraint>
+    <constraint source="project">Installs use `npm install --legacy-peer-deps --no-audit --no-fund`; NEVER `npm ci` (root CLAUDE.md §12). `npm run build` IS the production build — there is no `build:prod` in this package — and it hard-aborts at `webpack.config.js:24` without ADDIN_CLIENT_ID / TENANT_ID / BFF_API_CLIENT_ID / BFF_API_BASE_URL (non-secret values are in `deploy-office-addins.yml`).</constraint>
+    <constraint source="project">⚠️ THE SUITE IS NOT GREEN. As of 2026-09-09 it is 10 of 21 suites failing on pre-existing mock/assertion defects, and its AGGREGATE test counts have documented run-to-run flakiness (two runs on identical code differed by 3 tests — task 018). A gate that requires a fully green suite would block every PR on day one. Decide explicitly how to handle that: a scoped gate over specific suites, a recorded allowed-failure list, or fixing the 10 first — and justify it. Do NOT make a gate that is red from the moment it is created.</constraint>
+    <constraint source="adr">ADR-038 — do not delete or skip tests to make the gate green.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The only clean way to gate requires touching a frozen tier file. STOP — that is an operator decision against an active, already-compromised measurement window.</trigger>
+    <trigger>Making the gate meaningful requires first fixing the 10 failing suites. That is a larger piece of work than this task; report the scope rather than absorbing it.</trigger>
+    <trigger>The aggregate-count flakiness turns out to affect the specific suites you gate on. A flaky gate is worse than no gate — report it instead of shipping intermittent red.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">A PR touching `src/client/office-addins/**` runs the jest suite as a check that CAN fail; demonstrated by the workflow's trigger and job configuration, not asserted.</criterion>
+    <criterion testable="true">`ci-router.yml`, `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml` and `sdap-ci.yml` are unmodified — verified by `git diff --name-only`.</criterion>
+    <criterion testable="true">`client-tests.yml`'s other 39 packages remain non-blocking; no unrelated package became a merge gate.</criterion>
+    <criterion testable="true">The gate is path-filtered to `src/client/office-addins/**` + `src/client/shared/Spaarke.Auth/**`, matching `deploy-office-addins.yml`.</criterion>
+    <criterion testable="true">The handling of the 10 pre-existing failing suites is explicit and justified in notes; the gate is GREEN on the current branch at creation time.</criterion>
+    <criterion testable="true">`actionlint` passes on any workflow file added or changed.</criterion>
+    <criterion testable="false">The shadow-window false green is recorded as a separate finding with its PR number, NOT diagnosed or fixed here.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="config">.github/workflows/</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/043-office-addins-ci-gate.md</output>
+  </outputs>
+</task>

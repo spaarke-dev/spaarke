@@ -65,6 +65,45 @@ Either add a direct `sprk_event` column to `sprk_document`, or repoint `EventLoo
 
 ---
 
+## ISS-002 — 🔴 CI shadow window holds a DISQUALIFYING false green, and it is on an add-in PR
+
+| Field | Value |
+|---|---|
+| **Type** | Issue (blocks a repo-wide CI cutover) |
+| **Found** | 2026-09-09, while scoping task 043 |
+| **Owner** | ⚠️ **UNASSIGNED.** `ci-cd-unit-test-remediation-r1` owned this area and is **CLOSED** (operator, 2026-09-09) |
+| **Severity** | `sdap-ci.yml` cannot retire; the new tier is unproven against a case it already got wrong |
+| **GitHub Issue** | ➖ not filed — needs an owner decision first |
+
+`scripts/ci/shadow-window-status.ps1` reports, as of 2026-09-09:
+
+```
+Window opened           : 2026-08-27 20:47 UTC
+Comparable PRs examined : 44
+Agreeing                : 11 / 20
+Calendar-day span       : 4.1 / 5
+False reds (logged)     : 0
+FALSE GREENS            : 1
+```
+
+The tool's own words: *"A false green is DISQUALIFYING — the new tier passed a commit the legacy system
+failed. Diagnose before continuing; the count above restarts from the most recent one."*
+
+The offending merge is **PR #934 — `feat(email-intelligence-r2): Outlook/Word add-in — Create To Do
+(sprk_todo)`**: legacy `failure`, Router `success`. That it is an **add-in PR** is why this project
+found it, and is a reason r1 should care — the new tier passed something on our own surface that the
+old one caught.
+
+**Deliberately NOT absorbed by task 043.** 043 adds a jest gate for `office-addins`; diagnosing a
+false green in the tier-cutover measurement is a different problem on a frozen surface, and merging
+the two would put a project-scoped CI task in charge of a repo-wide cutover decision. 043 is
+constrained to surface this and leave it alone.
+
+**What it needs**: an owner, then a diagnosis of why Router passed `934` where legacy failed. Until
+then the shadow window cannot close and `sdap-ci.yml` cannot retire.
+
+---
+
 ## Deferrals
 
 ### ⚠️ D-032-1 — WITHDRAWN AS A FINDING 2026-09-09; reduced to a one-question verification

@@ -1,7 +1,7 @@
 # Task Index — `spaarkeai-word-add-in-r1`
 
 > **Generated**: 2026-09-04 by `/project-pipeline` (initialize-only)
-> **Total**: 38 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment)
+> **Total**: 41 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment)
 > **Status legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked · ⏭️ deferred
 
 **Execute via `task-execute` only.** Never read a POML and implement manually (root CLAUDE.md §4).
@@ -241,6 +241,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 040 | FR-19: Outlook parity pass and capability-gating audit | 🔲 | FULL | sonnet / high | — | 033, 035, 036 |
 | 041 | NFR-09: per-env Entra SPA redirects + deploy-workflow trigger | 🔲 | STANDARD | opus / high | — | 011 |
 | 042 | Deploy the add-in and BFF; run UAT against the acceptance set | 🔲 | STANDARD | sonnet / high | — | 040, 041 |
+| 043 | CI gate for the office-addins jest suite (runs nightly, **cannot fail a PR**) | 🔲 | FULL | opus / high | — | 010, 018 |
 | 090 | Project wrap-up, lessons learned, `/test-diet` gate | 🔲 | MINIMAL | sonnet / medium | — | 042 |
 
 ---
