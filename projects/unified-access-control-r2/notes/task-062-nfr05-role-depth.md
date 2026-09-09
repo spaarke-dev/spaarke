@@ -212,3 +212,61 @@ from `tests/integration/auth/README.md` § "What is NOT yet wired" — (A) a sch
 credentials to dev, or (B) standing Dataverse secrets in GitHub Actions — and choosing between them is
 an owner decision that task 062 may not make unilaterally. Whichever is chosen covers **both** standing
 live assertions (NFR-04 canary and NFR-05 role depth), which is an argument for doing it once.
+
+---
+
+## ✅ REMEDIATED 2026-09-09 — owner fix, main-session verified
+
+The owner removed `System Administrator` from the root BU's default owner team. Re-verified live:
+
+```
+default owner teams, after the fix
+  Spaarke (root)            roles=[]                       ← was [System Administrator]
+  Spaarke Business Unit 1   roles=[Reporting Viewer, Basic User, AI Analysis, Office Add-In]
+  Secure Project            roles=[Secure Project Owner]
+  Spaarke Demo              roles=[System Administrator]   ← still armed, see below
+  Spaarke Dev 1             roles=[]
+  Spaarke Test 1            roles=[]
+
+impersonated re-test
+  jake.schroeder@demo.spaarke.com  →  403 Forbidden (no read privilege at all)
+  (before the fix: 19/19 projects, INCLUDING the secure one)
+```
+
+**The live exposure is closed**, and it was closed by a role change on one team — not by relocating
+anyone. Owner direction 2026-09-09: *"let's not focus on relocating users — we have test users that
+are in the correct BU."* Fix A's relocation is **not** the remediation path for this finding and
+should not be re-raised as one.
+
+### What the mechanism actually was (my first write-up stated it imprecisely)
+
+Security role assignment does **not** follow business-unit assignment. What follows BU assignment is
+**default owner team membership**, which is system-managed — every user whose `businessunitid` is
+that BU is a member and cannot be removed (the root BU's default team had **168** members against 7
+enabled interactive users). Someone had explicitly assigned `System Administrator` to that team, and
+team roles are inherited by members. So the path was:
+
+> BU assignment → *automatic* default-team membership → a role someone *explicitly* put on that team.
+
+Only the middle step is automatic. That distinction is why the fix is one unassignment rather than a
+data migration — and why the design's census missed it entirely: the census read `systemuserroles`
+(DIRECT assignment), and this privilege never appears there.
+
+### Two residuals — neither is a relocation question
+
+1. **`Spaarke Demo`'s default team still holds `System Administrator`.** No enabled interactive users
+   are in that BU today, so it is not a live exposure. But it is the identical trap armed in a second
+   BU, and **new users land in the ROOT BU by default** in Dataverse — so this class recurs at
+   onboarding time unless the root BU's default team is kept role-free. Cheap to check, cheap to fix.
+2. **Criterion 5 remains unmet**: the live half of this assertion cannot run in CI because no pipeline
+   holds a Dataverse credential — the same blocker as task 034's NFR-04 canary. One credential
+   decision arms both standing assertions. Until then this assertion only runs by hand, which is
+   precisely how the finding above went unnoticed.
+
+### Consequence for task 036
+
+036's gate was recorded as untrustworthy while every root-BU user inherited `System Administrator`
+(the impersonated and app-only sets would be EQUAL, and NFR-04 requires strictly smaller — equality
+means impersonation is inert and must fail the build). **That blocker is now lifted in principle.**
+⚠️ It has NOT been re-measured: run the NFR-04 canary against the fixed environment before trusting
+036's swap, rather than assuming the fix restored a meaningful inequality.
