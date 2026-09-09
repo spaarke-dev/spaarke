@@ -86,6 +86,22 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("statecode")]
     public int? StateCode { get; set; }
 
+    /// <summary>
+    /// The row's current expiry, or <c>null</c> for an unbounded grant.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Added by task 023 (finding H1).</b> The upsert's match path could not read this column —
+    /// it was not in <c>RowSelect</c> — so it could neither write a new expiry nor notice that the row it
+    /// was "re-granting" had already expired. Both are silent wrong answers: the caller gets a 200 and a
+    /// record id either way.</para>
+    ///
+    /// <para><c>sprk_expiresdate</c> is <b>Date Only</b> in live metadata, which is why this is
+    /// <see cref="DateOnly"/> and not <see cref="DateTime"/> — and why the expiry read filter compares
+    /// with bare <c>yyyy-MM-dd</c> (task 007's <c>ExpiryPredicate</c>).</para>
+    /// </remarks>
+    [JsonPropertyName("sprk_expiresdate")]
+    public DateOnly? ExpiresDate { get; set; }
+
     [JsonPropertyName("_sprk_contact_value")]
     public Guid? ContactId { get; set; }
 
@@ -129,8 +145,11 @@ internal static class ExternalGrantLifecycle
 {
     internal const string EntitySet = "sprk_externalrecordaccesses";
 
+    // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
+    // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
+    // that had already expired. Verified DATE ONLY in live metadata (task 007).
     private const string RowSelect =
-        "sprk_externalrecordaccessid,sprk_accesslevel,statecode," +
+        "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
         "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value";
 

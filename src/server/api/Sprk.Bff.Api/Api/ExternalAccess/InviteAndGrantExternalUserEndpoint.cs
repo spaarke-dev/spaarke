@@ -117,8 +117,22 @@ public static class InviteAndGrantExternalUserEndpoint
         Guid accessRecordId;
         try
         {
-            accessRecordId = await GrantExternalAccessEndpoint.CreateGrantAsync(
+            var grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+
+            accessRecordId = grantOutcome.AccessRecordId;
+
+            // Task 023: the upsert can succeed structurally while conferring no access — it matched an
+            // EXPIRED row and this request carried no new expiry. On the invite path that is logged
+            // rather than failed: the Contact WAS provisioned, so failing here would strand a real
+            // onboarding over a grant the operator can fix by re-granting with an expiry date.
+            if (grantOutcome.Warning is { } warning)
+            {
+                logger.LogWarning(
+                    "[INVITE-GRANT] Contact {ContactId} was onboarded and the grant row {AccessRecordId} " +
+                    "exists, but it confers no access: {Warning}",
+                    grantRequest.ContactId, accessRecordId, warning);
+            }
         }
         catch (Exception ex)
         {

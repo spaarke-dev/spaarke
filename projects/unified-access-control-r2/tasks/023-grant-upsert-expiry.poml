@@ -3,7 +3,7 @@
   <metadata>
     <title>Grant upsert must write sprk_expiresdate on the match path (H1) + amend FR-09 acceptance</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the grant write path; interacts with task 007's read filter.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,7 +93,35 @@
     <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Review finding H1. Interacts with tasks 007 and 010 -- read their notes first.</notes>
+  <notes>Review finding H1. Interacts with tasks 007 and 010 -- read their notes first.
+
+COMPLETED-WITH-ESCALATION 2026-09-08 (session 4). The code half is DONE and verified; ONE
+contract decision is open, which is why this is not plain "completed".
+
+DELIVERED: the upsert match path now writes sprk_expiresdate (add + extend); level and expiry
+are INDEPENDENT reasons to write (an expiry change at an unchanged level previously hit the
+idempotent branch and was discarded); sprk_expiresdate added to RowSelect and ExternalGrantRow;
+re-granting over an EXPIRED row with no new expiry returns 409 + sdap.grant.expired_not_restored
+instead of a bare 200 (ADR-003); both date columns write DATE ONLY, closing the recorded
+sprk_granteddate timestamp LOW finding. CreateGrantAsync returns
+GrantUpsertOutcome(AccessRecordId, Warning) -- a bare Guid could not carry the one thing the
+caller most needs to know. FR-09 acceptance criteria amended in spec.md, because the gap existed
+BECAUSE they never named expiry.
+
+PERTURBATION: dropping the expiry write fails 4 tests; dropping it ONLY on the extend path fails
+exactly the 2 extend-path tests. Before this task ExpiryDate appeared once in the whole
+grant-lifecycle suite, as null.
+
+ESCALATION OPEN -- clearing an expiry (date to null). The trigger fired, verified not assumed:
+ExpiryDate is DateOnly?, so an omitted field and an explicit null are indistinguishable, and no
+tri-state convention exists in Api/ to borrow. Shipped the SAFE reading (null = leave unchanged,
+pinned by a test) because the alternative silently unbounds a bounded grant whenever a caller
+re-grants without restating the date -- H1 in reverse. Whether clearing should be expressible,
+and how, is the owner's call. See notes/task-023-grant-upsert-expiry.md section 4 and spec.md
+FR-09.
+
+Verified: build 0 errors 0 warnings, grant-lifecycle 29/29, access-control 794/794, ArchTests
+196/196, no new packages.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
