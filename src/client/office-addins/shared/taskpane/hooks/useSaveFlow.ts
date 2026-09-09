@@ -1,9 +1,8 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { EntitySearchResult } from './useEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import {
-  type ProblemDetails,
   mapProblemDetailsToMessage,
   isProblemDetails,
   createErrorFromException,
@@ -85,11 +84,14 @@ export interface JobErrorResponse {
 export interface JobStatus {
   jobId: string;
   status: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'PartialSuccess' | 'Cancelled';
-  jobType: string;
-  progress: number;
+  /** Absent on the client-constructed initial "Queued" state; present once the first server poll response lands. */
+  jobType?: string;
+  /** Absent on the client-constructed initial "Queued" state; present once the first server poll response lands. */
+  progress?: number;
   currentPhase?: string;
   completedPhases?: CompletedPhase[];
-  createdAt: string;
+  /** Absent on the client-constructed initial "Queued" state; present once the first server poll response lands. */
+  createdAt?: string;
   createdBy?: string;
   startedAt?: string;
   completedAt?: string;
@@ -318,6 +320,27 @@ async function computeIdempotencyKey(request: SaveRequest): Promise<string> {
 }
 
 /**
+ * Shape of the `/api/office/save` response body when the server reports a duplicate
+ * (`response.status === 200 && duplicate === true`). Narrows the parsed JSON body — typed
+ * `unknown` on purpose, since it comes straight off the wire — via a real runtime discriminant
+ * rather than a cast.
+ */
+interface DuplicateSaveResponse {
+  duplicate: true;
+  documentId: string;
+  message?: string;
+}
+
+function isDuplicateSaveResponse(value: unknown): value is DuplicateSaveResponse {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<string, unknown>).duplicate === true &&
+    typeof (value as Record<string, unknown>).documentId === 'string'
+  );
+}
+
+/**
  * React hook for managing the save flow state and operations.
  *
  * Handles:
@@ -467,7 +490,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             return s;
           });
 
-          return { ...prev, progress, currentPhase, stages };
+          return {
+            ...prev,
+            ...(progress !== undefined ? { progress } : {}),
+            ...(currentPhase !== undefined ? { currentPhase } : {}),
+            ...(stages !== undefined ? { stages } : {}),
+          };
         });
       } else if (eventType === 'stage') {
         // Stage update: { stage: string, status: string, timestamp: string }
@@ -486,7 +514,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
                 }
               : s
           );
-          return { ...prev, stages };
+          return { ...prev, ...(stages !== undefined ? { stages } : {}) };
         });
       } else if (eventType === 'complete') {
         // Completion: { jobId: string, documentId?: string, documentUrl?: string }
@@ -591,7 +619,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             mappedStages.push({
               name: phaseName,
               status: 'Completed',
-              completedAt: phase?.completedAt,
+              ...(phase?.completedAt !== undefined ? { completedAt: phase.completedAt } : {}),
             });
           } else if (rawStatus.currentPhase === phaseName) {
             mappedStages.push({
@@ -614,8 +642,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         const status: JobStatus = {
           ...rawStatus,
           stages: mappedStages,
-          documentId,
-          documentUrl,
+          ...(documentId !== undefined ? { documentId } : {}),
+          ...(documentUrl !== undefined ? { documentUrl } : {}),
         };
 
         setJobStatus(status);
@@ -757,7 +785,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // closes over `getAccessToken` so polls + SSE always pull a fresh token.
 
         // Determine content type for server API
-        let contentType: 'Email' | 'Attachment' | 'Document';
+        // Note: only 'Email' and 'Document' are ever assigned below — Outlook always saves as Email
+        // (selectedAttachmentFileNames controls which attachments become Documents server-side); there
+        // is no client-side 'Attachment' content type. The type reflects that (finding recorded in
+        // notes/typecheck-fix-patterns.md — a stale 'Attachment'-only branch was removed as unreachable).
+        let contentType: 'Email' | 'Document';
         if (context.hostType === 'outlook') {
           // Always save as Email when in Outlook
           // The selectedAttachmentFileNames array controls which attachments become Documents
@@ -831,16 +863,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             internetMessageId: context.itemId, // Server uses this to fetch email via Graph
             selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
           };
-        } else if (contentType === 'Attachment') {
-          const attachmentId = Array.from(selectedAttachmentIds)[0];
-          const attachment = context.attachments.find(a => a.id === attachmentId);
-          serverRequest.attachment = {
-            attachmentId: attachmentId,
-            fileName: attachment?.name || 'attachment',
-            contentType: attachment?.contentType,
-            size: attachment?.size,
-            parentEmailId: context.itemId, // Parent email's internetMessageId - server uses this to fetch attachment via Graph API
-          };
         } else if (contentType === 'Document') {
           // Document content is required for Word documents
           if (!context.documentContentBase64) {
@@ -870,18 +892,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           associationType: selectedEntity?.entityType || '',
           associationId: selectedEntity?.id || '',
           content: {
-            emailId: context.itemId,
+            ...(context.itemId !== undefined ? { emailId: context.itemId } : {}),
             includeBody: includeBody && context.hostType === 'outlook',
             attachmentIds: Array.from(selectedAttachmentIds),
-            documentUrl: context.documentUrl,
-            documentName: effectiveDocumentName,
+            ...(context.documentUrl !== undefined ? { documentUrl: context.documentUrl } : {}),
+            ...(effectiveDocumentName !== undefined ? { documentName: effectiveDocumentName } : {}),
           },
           processing: processingOptions,
-          metadata: context.documentDescription
-            ? {
-                description: context.documentDescription,
-              }
-            : undefined,
+          ...(context.documentDescription
+            ? { metadata: { description: context.documentDescription } }
+            : {}),
         };
 
         // Compute idempotency key from legacy format for consistency
@@ -931,14 +951,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
 
         // Handle different responses
-        if (response.status === 200 && responseData.duplicate) {
+        if (response.status === 200 && isDuplicateSaveResponse(responseData)) {
           // Duplicate detected
+          const duplicateMessage = responseData.message || 'This item was previously saved.';
           setDuplicateInfo({
             documentId: responseData.documentId,
-            message: responseData.message || 'This item was previously saved.',
+            message: duplicateMessage,
           });
           setFlowState('duplicate');
-          onDuplicate?.(responseData.documentId, responseData.message);
+          onDuplicate?.(responseData.documentId, duplicateMessage);
           return;
         }
 

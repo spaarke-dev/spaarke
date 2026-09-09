@@ -4,7 +4,7 @@
     <title>FR-18: clear typecheck debt in shared/taskpane</title>
     <phase>0 De-risk and baseline</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts and .tsx source files across the largest directory in the package (56 files), and the fix patterns chosen here set the precedent that 007 and 008 follow. Root CLAUDE.md section 8 makes code implementation touching .ts/.tsx a FULL-rigor trigger; the Step 9.5 code-review and adr-check gates run because the primary risk is a type "fix" that silently changes runtime behaviour.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -183,7 +183,9 @@ No `&lt;justification&gt;` block is present: this is a modify-only task. It adds
 
 Parallel-safety within the P0-typecheck wave: 006 owns shared/taskpane/**, 007 owns shared/adapters/** plus shared/services/** (and shared/__mocks__/** if task 001 reports it as the only UNASSIGNED residue), 008 owns word/** plus outlook/**. The three directory sets are disjoint, so the three tasks can run concurrently without touching the same file. The shared risks are (a) all three run `npm run build` and `npm test` against the same node_modules, and (b) all three may edit projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md — this task CREATES that file and 007/008 append to it, so write it early and keep sections clearly headed by task id. tsconfig.json is out of scope for all three, which removes the one file they would otherwise contend for.
 
-Sizing note: shared/taskpane contained 56 .ts/.tsx files at authoring time — the largest of the three buckets by file count. The task 001 rollup, not this note, is the authority on the error count.</notes>
+Sizing note: shared/taskpane contained 56 .ts/.tsx files at authoring time — the largest of the three buckets by file count. The task 001 rollup, not this note, is the authority on the error count.
+
+**Completion note (2026-09-09, per RE-SCOPE B1)**: cleared all 73 production diagnostics under shared/taskpane/** (verified: 384 → 289 total; 73 → 0 in-scope; 0 increase in shared/adapters, shared/services, shared/__mocks__, word/, outlook/ — several decreased as a side-effect of concurrent tasks 007/008 and this task's own barrel-defect removals). The three barrel defects were resolved by removal (neither `ViewType` nor `SaveOptions` exist anywhere in the package; verified via repo-wide grep). `npm run build` passes clean. `npm test` was explicitly NOT run per the re-scope block. Full fix-shape catalogue and the `ViewType`-for-task-015 finding are in notes/typecheck-fix-patterns.md § "Task 006". Step 9.5 quality gates (code-review + adr-check) ran clean; code-review's own review of this task's diff flagged one minor edge-case behavior nuance (the `onDuplicate` message-fallback consistency fix in useSaveFlow.ts) as an in-bounds judgment call, documented in the fix-patterns notes. The two-component `forwardRef` → plain-function-component conversion (AttachmentSelector, EntityPicker) — needed because this package's React 19 + Fluent v9 combination makes every `forwardRef`-to-Fluent-slot-component pattern untypeable via `Ref&lt;never&gt;` — is the one deviation closest to the escalation trigger's spirit; verified zero-behavior-change (no caller anywhere passes a ref) and flagged prominently rather than applied silently.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

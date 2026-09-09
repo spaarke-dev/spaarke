@@ -19,10 +19,10 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 003 | **Spike-2**: Office Dialog API for opening a record | ✅ | STANDARD | sonnet / high | P0-spikes | none |
 | 004 | **Spike-3**: can a task pane open the Copilot pane (timeboxed) | ✅ | MINIMAL | sonnet / medium | P0-spikes | none |
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | ✅ | STANDARD | opus / high | P0-spikes | none |
-| 006 | FR-18: clear typecheck debt in `shared/taskpane` — ⚠️ re-scope to production types (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
-| 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 006 | FR-18: clear typecheck debt in `shared/taskpane` — ⚠️ re-scope to production types (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
+| 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
-| 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 
 > ✅ **UNBLOCKED 2026-09-09 by operator decision — A1 + B1.**
 > **(A1)** The 11 foreign `Spaarke.Communication.Components/provenance.ts` errors are fixed by commit
@@ -42,6 +42,25 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 > **New task 009** owns the jest-dom harness gap and re-measures the 296 test-file residual — leaving it
 > unowned would have been exactly the burial the deferral policy forbids. 006/007/008/009 are mutually
 > disjoint and dispatch in parallel.
+>
+> ✅ **009 CLOSED 2026-09-09 — hypothesis PARTIALLY confirmed, materially incomplete.** Task 001's
+> "missing jest-dom registration" hypothesis was correct in kind but wrong in size: `@testing-library/jest-dom`
+> was never installed at all (not just unregistered), and fixing it alone moved suites 13→12 and tests
+> 57→41 failed (of 226) — 28%, not "a large share" — with **zero** effect on the typecheck count (jest
+> runs tests transpile-only via `ts-jest isolatedModules`, decoupled from `tsc`). A **second, previously
+> unknown harness gap of the identical class** (`@testing-library/user-event` imported by 4 suites, never
+> installed) had to be found and fixed to unblock those suites structurally. Even with both installed,
+> **12 of 21 suites remain red** — dominant cause is a **React 19 / `@testing-library/react@14`
+> peer-declared-for-React-18 mismatch** (`useAnnounce.test.ts`, 16/16 tests, `NotFoundError: The node to
+> be removed is not a child of this node.`) — **escalation trigger 2 fired**; a testing-library major
+> bump was NOT performed (package-graph decision, outside this task's authority). Re-measured test-file
+> typecheck: **289** (was 296) — the -7 is **-4 confirmed (user-event TS2307s)** + **-3 concurrent drift**
+> from 006/007/008 editing `OutlookAdapter.ts`/`office-js.ts` live in the shared worktree during this
+> task's window, not this task's effect. **Recommendation: the residual needs its own task(s)** — a
+> React-19/testing-library major-version decision, a separate test-suite repair task for the ~12 failing
+> suites' genuine mock/assertion defects, and an explicit operator decision on the still-unowned 289-error
+> test-file typecheck debt (not folded into 006/007/008, which are forbidden from touching test files).
+> Full record: [`notes/009-jest-harness-repair.md`](../notes/009-jest-harness-repair.md).
 >
 > <details><summary>Original block reason (resolved — retained for the record)</summary>
 >

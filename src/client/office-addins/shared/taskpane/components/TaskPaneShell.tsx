@@ -124,7 +124,6 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
 }
 
 export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
-  title = 'Spaarke',
   hostType = 'outlook',
   userName,
   userEmail,
@@ -203,7 +202,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Main Content with Error Boundary */}
       <main className={contentClassName}>
         <ErrorBoundary
-          onError={onError}
+          {...(onError ? { onError } : {})}
           showDetails={showErrorDetails}
           onReset={() => {
             // Optionally navigate back to default tab on error reset
@@ -217,9 +216,9 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Footer */}
       <TaskPaneFooter
         version={version}
-        buildDate={buildDate}
+        {...(buildDate !== undefined ? { buildDate } : {})}
         appName={appName}
-        connectionStatus={connectionStatus}
+        {...(connectionStatus !== undefined ? { connectionStatus } : {})}
         showHelpLink={true}
         compact={isCompact}
       />

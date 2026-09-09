@@ -4,59 +4,84 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none — 032 complete |
+| **Task** | none — 006 complete |
 | **Task File** | — |
-| **Phase** | 3 Surfacing Spaarke |
+| **Phase** | 0 De-risk and baseline |
 | **Status** | not-started |
 | **Started** | — |
-| **Next Action** | Operator picks the next task. **033 is NOT yet startable**: 032 (its security gate) is ✅, but 033 also depends on **015** and **013**, both 🔲. |
+| **Next Action** | Operator picks next. **008** (FR-18 production typecheck in `outlook/`; `word/` has zero) is the last 🔲 item in the P0-typecheck wave (006, 007, 009 all ✅) and may be running concurrently in another session against this same worktree — check `git status` / TASK-INDEX before starting new work here. |
 
 ## Critical Context
 
-Task **032 closed on outcome (a) — hardened, not descoped.** The visualization similarity surface now
-authorizes every result row against its own `sprk_document` record, both routes refuse (500) without the
-published per-row obligation, and `Api/Ai/VisualizationEndpoints.cs` is in the `RouteAuthorizationGuardTests`
-governed-file census. The NFR-02 negative test passes and was verified to FAIL (7 of 11) with the row check
-disabled. **The Find gate is met — 033 may be built on this surface.**
+Task **006 closed 2026-09-09 (per RE-SCOPE operator decision B1).** Cleared all 73 production typecheck
+diagnostics under `shared/taskpane/**` (384 → 289 total; 73 → 0 in-scope; zero increase in any directory
+this task does not own — several actually decreased as a side-effect of concurrent tasks 007/008/009 and
+this task's own barrel-defect removals). The three known barrel defects (`ViewType`, `SaveOptions` × 2)
+were resolved by **removal**, not repointing — neither type exists anywhere in the package (verified via
+repo-wide grep); `ViewType` finding recorded for task 015 (FR-03) to pick up when it builds the real tab
+type system. `npm run build` passes clean. `npm test` was explicitly NOT attempted (re-scope block removes
+it as this task's acceptance criterion — the suite's jest-dom/react19 issues are task 009's territory, now
+also closed but not fully green — see task 009's notes).
 
-Nothing is committed or pushed. Full record: `notes/032-authorization-hardening.md`.
+**Notable judgment call**: `AttachmentSelector` and `EntityPicker` were converted from `React.forwardRef`
+to plain function components — this package's `React 19` + `@fluentui/react-components@^9.54.0` combo
+makes `forwardRef`-to-any-Fluent-slot-component untypeable (`Ref<never>`, a real library/React-19 typing
+gap, not app-code strictness debt). Verified zero behavior change (no caller anywhere passes a `ref` to
+either component) before converting. Flagged prominently rather than applied silently — see
+`notes/typecheck-fix-patterns.md` § "Task 006" pattern 9 for the full root-cause trace and the note that
+any *future* component wanting real ref-forwarding to a Fluent v9 component in this package hits the same
+wall (needs a `@fluentui/react-components` version bump, outside a typecheck task's authority).
 
-## For whoever picks up 033/034
+Full record: `notes/typecheck-fix-patterns.md` § "Task 006" (11 canonical fix-shape patterns, displacement
+check, deviations). Files touched: 14, all under `shared/taskpane/**` — no file under `shared/adapters/`,
+`shared/services/`, `shared/__mocks__/`, `word/`, or `outlook/` was edited. `tsconfig.json`,
+`package.json`, `package-lock.json` untouched by this task (those DID change in the shared worktree, but
+from concurrent tasks 007/009 — verified not this task's doing).
 
-- Size the Find view against **~1–3 s** for a first uncached similarity call at the default limit, near-instant
-  inside the 60 s access cache. Authorization is **not** the dominant latency term — `GetDocumentMetadataAsync`
-  already does an unbounded sequential Dataverse fetch per document. Arithmetic in `notes/032-…` §5.
-- `?countOnly=true` is no longer a cheap call: its service-side fast path was a count side channel and is
-  closed, so a count query now costs the same as a full one.
-- **A short result page may mean "withheld", not "nothing matched"** — rows past the 100-check budget are
-  dropped with no warning to the client, because `GraphMetadata` has no warnings channel (deferral D-032-2).
-- Orphan-file nodes (indexed SPE files with no Dataverse row) are never served. If the Find UI expected them,
-  that is a product decision to raise, not a filter to relax.
+## Completed Steps (task 006)
 
-## Completed Steps (task 032)
-
-- [x] 0 context + rigor declaration + conflict check
-- [x] 1 fail-closed forcing function on both handlers
-- [x] 2 per-row trimming, dedup memo, 100-check budget, edge + orphaned-hub pruning, counts recomputed
-- [x] 3 authorization filter on `POST /related-from-content`, publishing the same obligation
-- [x] 4 ArchTests `GovernedFiles` census entry (191/191 pass; validated by detaching the filter → Rule A FAIL)
-- [x] 5 NFR-02 negative test (11 pass; verified to fail 7/11 with the row check disabled)
-- [x] 6 contract coverage for both routes incl. the forcing-function 500 case
-- [x] 7 publish size vs fresh `origin/master`: 45.35 → 45.36 MB (+0.01), Compress-Archive Optimal
-- [x] 8 `dotnet build` clean (`-warnaserror` too); full BFF suite 12,078 passed / 0 failed / 58 skipped
-- [x] 9 TASK-INDEX 032 → ✅
-- [x] 9.5 quality gates — `code-review` + `adr-check`: 0 critical, 0 ADR violations, 2 warnings fixed (Path C)
-- [x] 10 `notes/032-authorization-hardening.md`; 2 findings filed in `notes/defer-issues.md`
+- [x] 0 Rigor declared: FULL. Loaded typecheck-baseline.md, project CLAUDE.md, POML.
+- [x] 1 Verified `node_modules` + `@spaarke/auth` dist already present (no fresh install needed)
+- [x] 2 Resolved the three barrel defects (index.ts × 2, components/views/index.ts × 1) by removal
+- [x] 3 Worked remaining 70 errors file-by-file, highest count first (SaveFlow.tsx 19 → useSaveFlow.ts
+      14 → App.tsx 10 → AttachmentSelector.tsx 8 → EntityPicker.tsx 6 → SaveView.tsx 3 → TaskPaneShell.tsx
+      3 → errorMessages.ts 3 → index.ts (already 0) → TaskPaneNavigation.tsx 1 → TaskPaneHeader.tsx 1 →
+      ErrorBoundary.tsx 1 → SseClient.ts 1)
+- [x] 4 Re-ran `npx tsc --noEmit -p .`, filtered to `shared/taskpane/**` production files: 0 remaining
+- [x] 5 Displacement check: `shared/adapters` 44→33, `shared/services` 1→0, `shared/__mocks__` 26→24,
+      `word/` 0→0, `outlook/` 4→0 — all decreased or held, none increased
+- [x] 6 `npm run build` — exit 0 (env vars supplied from `deploy-office-addins.yml`'s non-secret values)
+- [x] 7 `npm test` — explicitly not attempted per re-scope
+- [x] 8 UI tests — not run live (no `--chrome` session / deployed host in this execution); build-clean is
+      the recorded evidence for this pass
+- [x] 9 Wrote `notes/typecheck-fix-patterns.md` § "Task 006" (11 fix-shape patterns + `ViewType` finding)
+- [x] 9.5 Quality gates — `code-review` + `adr-check`: 0 critical, 0 ADR violations. code-review's own
+      pass flagged one minor edge-case behavior nuance (see Decisions Made below), judged in-bounds.
+- [x] 10 TASK-INDEX 006 → ✅, POML status → completed with full `<notes>`
 
 ## Decisions Made
 
-- **Trim in the ENDPOINT, not `VisualizationService`** — mirrors `RecordSearchEndpoints`; keeps `HttpContext`
-  and claims out of the service layer (ADR-008). `VisualizationService.cs` is unmodified despite being listed
-  `role="modify"` in the POML. Deviation recorded in `notes/032-…` §7.
-- **`countOnly` does not take the service fast path** — that path computes a total from unauthorized rows with
-  no nodes to trim. Latency cost accepted and recorded rather than traded for a leak.
-- **Orphan-file nodes dropped; hubs with no surviving document dropped** — "no record to evaluate" must not
-  resolve to "serve it", and a hub's bare existence is itself a count.
-- **`tests/integration/tenant/Ai/TenantSelectionByRequestTests.cs` updated** (outside the POML file list) —
-  the new forcing function correctly broke two pre-existing tests that call these handlers directly.
-- **No §6.5 ADR conflict arose.** Both Step 9.5 findings resolved on Path C.
+- **Barrel defects resolved by removal, not repointing** — neither `ViewType` nor `SaveOptions` exist
+  anywhere in the package (production or test). `ViewType` finding recorded for task 015 (FR-03).
+- **`forwardRef` → plain function component for `AttachmentSelector`/`EntityPicker`** — see Critical
+  Context above. Zero-behavior-change verified; documented inline at each component export.
+- **Removed a compiler-proven-unreachable `'Attachment'` content-type branch in `useSaveFlow.ts`** —
+  `contentType` is only ever assigned `'Email'` or `'Document'`; TS's own exhaustiveness check flagged the
+  dead `else if (contentType === 'Attachment')` arm (TS2367). Recoverable from git history if a future task
+  revives client-initiated Attachment-type saves.
+- **Removed two whole dead code blocks**: `SaveFlow.tsx`'s `renderProcessingOptions` (never called — AI
+  processing is always-on per a 2026-09-02 product decision) and `App.tsx`'s entire "Save operation state"
+  placeholder (`handleSave` + 4 `useState`s, never wired to any button — the real save path is
+  `SaveView`/`useSaveFlow`). Verified self-contained/unreferenced before deleting each.
+- **Widened `JobStatus.jobType`/`.progress`/`.createdAt` from required to optional** — the hook's own
+  client-constructed "Queued" initial state genuinely omits all three; no code anywhere reads them
+  unconditionally. Reflects reality rather than fabricating placeholder values at the call site.
+- **Minor edge-case behavior nuance (flagged by my own code-review pass, judged in-bounds)**: in
+  `useSaveFlow.ts`'s duplicate-response handling, the `onDuplicate` callback now receives the SAME
+  fallback-applied message (`'This item was previously saved.'`) that `setDuplicateInfo` already used one
+  line above, instead of the raw (possibly-`undefined`) `responseData.message`. This only differs from the
+  pre-existing behavior when the server sends a duplicate response with no `message` field — a real
+  behavior-preserving fix was not possible here without widening `onDuplicate`'s `message` parameter to
+  `string | undefined` (which would just push the same ambiguity downstream to every consumer). Judged the
+  more honest fix since it reuses an already-established fallback in the same function.
+- **No §6.5 ADR conflict arose.** adr-check found 0 violations across ADR-021, ADR-012 (Path A), ADR-028.

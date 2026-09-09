@@ -245,7 +245,8 @@ export class OutlookHostAdapter implements IHostAdapter {
    * Insert a link into the email body (compose mode only).
    */
   async insertLink(url: string, displayText?: string): Promise<InsertLinkResult> {
-    if (!this.isComposeMode()) {
+    const composeItem = this.getComposeItem();
+    if (!composeItem) {
       return {
         success: false,
         errorMessage: 'Link insertion is only available in compose mode',
@@ -253,7 +254,6 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
 
     return new Promise(resolve => {
-      const composeItem = this.currentItem as Office.MessageCompose;
       const linkHtml = `<a href="${url}">${displayText || url}</a>`;
 
       composeItem.body.setSelectedDataAsync(linkHtml, { coercionType: Office.CoercionType.Html }, result => {
@@ -270,7 +270,8 @@ export class OutlookHostAdapter implements IHostAdapter {
    * Attach a file to the email (compose mode only).
    */
   async attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult> {
-    if (!this.isComposeMode()) {
+    const composeItem = this.getComposeItem();
+    if (!composeItem) {
       return {
         success: false,
         errorMessage: 'File attachment is only available in compose mode',
@@ -278,15 +279,18 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
 
     return new Promise(resolve => {
-      const composeItem = this.currentItem as Office.MessageCompose;
-
-      composeItem.addFileAttachmentFromBase64Async(content, fileName, { asyncContext: { contentType } }, result => {
-        if (result.status === Office.AsyncResultStatus.Succeeded) {
-          resolve({ success: true, attachmentId: result.value });
-        } else {
-          resolve({ success: false, errorMessage: result.error.message });
+      composeItem.addFileAttachmentFromBase64Async(
+        content,
+        fileName,
+        { asyncContext: { contentType }, isInline: false },
+        result => {
+          if (result.status === Office.AsyncResultStatus.Succeeded) {
+            resolve({ success: true, attachmentId: result.value });
+          } else {
+            resolve({ success: false, errorMessage: result.error.message });
+          }
         }
-      });
+      );
     });
   }
 
@@ -387,12 +391,31 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
   }
 
+  /**
+   * Get the current item narrowed to its compose-mode shape, or null when the host is not in
+   * compose mode.
+   *
+   * `this.currentItem` is deliberately typed `MessageRead | AppointmentRead | null` because
+   * every other method on this adapter is read-mode-only, and Office.js types the shared
+   * `body` member identically for read and compose items — there is no structural cast from
+   * that narrowed type to `MessageCompose` that isn't unsound (TS2352 is correct to reject it).
+   * `Office.Mailbox.item`, read fresh off the already-cached `this.mailbox` handle, is instead
+   * typed as the intersection of every possible item shape, so narrowing it down to one member
+   * is a sound narrowing rather than a cast. It is still gated on a real runtime discriminant —
+   * the presence of the compose-only `body.setSelectedDataAsync` member — because Office.js
+   * does not otherwise distinguish read vs. compose mode at the type level.
+   */
+  private getComposeItem(): Office.MessageCompose | Office.AppointmentCompose | null {
+    const item = this.mailbox?.item;
+    if (!item || typeof item.body?.setSelectedDataAsync !== 'function') {
+      return null;
+    }
+
+    return item;
+  }
+
   private isComposeMode(): boolean {
-    return (
-      this.currentItem !== null &&
-      'body' in this.currentItem &&
-      typeof (this.currentItem as Office.MessageCompose).body?.setSelectedDataAsync === 'function'
-    );
+    return this.getComposeItem() !== null;
   }
 
   private sanitizeFileName(name: string): string {

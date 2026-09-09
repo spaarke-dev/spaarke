@@ -1,5 +1,5 @@
 export { SaveView } from './SaveView';
-export type { SaveViewProps, SaveOptions } from './SaveView';
+export type { SaveViewProps } from './SaveView';
 
 export { ShareView } from './ShareView';
 export type { ShareViewProps, DocumentSearchResult, SharePermissions } from './ShareView';

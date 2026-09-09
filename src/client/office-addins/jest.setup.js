@@ -4,6 +4,13 @@
  * This file runs before each test file and sets up global mocks.
  */
 
+// Registers the jest-dom custom matchers (toBeInTheDocument, toHaveTextContent,
+// etc.) used throughout this package's component tests. The matchers were
+// referenced but the package was never installed — task 009 (2026-09-09)
+// added the dependency and this import to close the gap identified in task
+// 001's baseline (notes/typecheck-baseline.md).
+require('@testing-library/jest-dom');
+
 // TextEncoder/TextDecoder are not exposed by jsdom's test environment (Node's
 // implementations exist, but jsdom doesn't put them on `global`). Required by
 // `computeIdempotencyKey` (useSaveFlow.ts) and any other code path that

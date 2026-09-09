@@ -4,7 +4,7 @@
     <title>FR-18: clear typecheck debt in shared/adapters and shared/services</title>
     <phase>0 De-risk and baseline</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts source files, and the files in scope are the load-bearing seams of the add-in: the host abstraction (IHostAdapter, WordAdapter, OutlookAdapter, HostAdapterFactory) and the auth and API clients. Root CLAUDE.md section 8 makes .ts modification a FULL-rigor trigger; the Step 9.5 gates matter here because ADR-028 is arch-test enforced on this exact surface and because task 010 will rewrite WordAdapter on top of whatever this task leaves behind.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -193,4 +193,21 @@ Sizing note: shared/adapters contained 8 .ts files and shared/services 5 at auth
 Downstream: task 010 (FR-04 adapter consolidation, prescriptive mode) and task 013 (FR-01 client — adds `canGetDocumentUrl` and `getDocumentUrl()` to IHostAdapter) both build directly on this directory. Leaving it compiling but structurally untouched is the deliverable.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <notes-completion>
+Completed 2026-09-09 under the RE-SCOPE 2026-09-09 (operator decision B1) binding block: scope was the
+11 production errors in shared/adapters/OutlookAdapter.ts (9), shared/adapters/HostAdapterFactory.ts (1)
+and shared/services/ApiClient.ts (1). Test files and npm test-green were explicitly out of scope.
+
+Before: 11/11 target errors present. After: 0/11 — verified by `npm run typecheck` filtered to the three
+files. Displacement check: no directory outside scope increased (shared/taskpane, word, outlook, mocks
+all decreased or held steady, driven by concurrent tasks 006/008/009 in the same worktree, not by this
+task). `npm run build` exits 0. Adapter seam left structurally identical for task 010 (no
+registerAdapter() call site, no getCompressedFile() port, no taskpane-construction change, WordAdapter.ts
+untouched). No `any`/`as any`/`as unknown as`/`@ts-ignore`/`@ts-expect-error`, no MSAL construction, no
+tsconfig/package.json/package-lock.json edits by this task. One genuine (behaviour-neutral) code deletion
+as a deviation: ApiClient.ts's write-only, never-read `bffApiClientId` private field — recorded in
+projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md fix #5. Full fix-shape record in that
+file's "Task 007" section. Not committed per operator instruction.
+  </notes-completion>
 </task>

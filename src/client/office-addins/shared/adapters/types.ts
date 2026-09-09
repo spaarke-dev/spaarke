@@ -98,7 +98,7 @@ export interface HostAdapterError {
   /** Human-readable error message */
   message: string;
   /** Original error if wrapping another error */
-  innerError?: Error;
+  innerError?: Error | undefined;
 }
 
 /**

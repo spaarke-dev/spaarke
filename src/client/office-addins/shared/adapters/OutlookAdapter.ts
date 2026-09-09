@@ -42,6 +42,29 @@ import type {
 } from './types';
 
 /**
+ * Type augmentation: `MessageRead.importance` and `MailboxEnums.Importance` are part of the real
+ * Outlook Mailbox 1.1+ JS API surface (see Microsoft Learn's `office.mailboxenums.importance` enum),
+ * but are absent from the installed `@types/office-js` (1.0.568) ambient declarations. This block is
+ * `declare global` — an ambient declaration, erased entirely at compile time — so it adds ONLY type
+ * information for the type checker; `getImportance()` below still reads the exact same runtime
+ * `Office.MailboxEnums.Importance` object office.js supplies, unchanged.
+ */
+declare global {
+  namespace Office {
+    namespace MailboxEnums {
+      enum Importance {
+        Low = 'low',
+        Normal = 'normal',
+        High = 'high',
+      }
+    }
+    interface MessageRead {
+      importance: MailboxEnums.Importance;
+    }
+  }
+}
+
+/**
  * Represents the mode the Outlook item is in.
  */
 type ItemMode = 'read' | 'compose' | 'unknown';
@@ -261,7 +284,10 @@ export class OutlookAdapter implements IHostAdapter {
    * @inheritdoc
    */
   async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
-    const item = this.getCurrentItem();
+    // `.body` is declared individually on Office.MessageRead and Office.MessageCompose (both expose
+    // an identical `body: Body`), not lifted onto the base Office.Item type. getBody() is valid in
+    // either mode, so narrow to that union rather than a single mode — same runtime object either way.
+    const item = this.getCurrentItem() as Office.MessageRead | Office.MessageCompose;
 
     const coercionType = preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
 
@@ -423,9 +449,13 @@ export class OutlookAdapter implements IHostAdapter {
         }
       }
 
-      // BCC recipients (if available - may not be for received emails)
-      if (item.bcc) {
-        for (const bcc of item.bcc) {
+      // BCC recipients (if available - may not be for received emails). `bcc` is not part of the
+      // officially typed Office.MessageRead surface (Outlook generally hides BCC on read items),
+      // but it is present at runtime for some contexts (e.g. viewing a Sent item). Narrow via an
+      // explicit extension type rather than an untyped/`any` access so this stays a real type check.
+      const itemWithBcc = item as Office.MessageRead & { bcc?: Office.EmailAddressDetails[] };
+      if (itemWithBcc.bcc) {
+        for (const bcc of itemWithBcc.bcc) {
           recipients.push({
             email: bcc.emailAddress,
             displayName: bcc.displayName,
@@ -594,8 +624,17 @@ export class OutlookAdapter implements IHostAdapter {
 
     const item = this.getComposeItem();
 
+    // `addFileAttachmentFromBase64Async`'s typed options are `AsyncContextOptions & { isInline: boolean }`
+    // only — `contentType` is not part of the declared shape. Passing it through an explicitly-typed
+    // variable (rather than a fresh object literal) keeps the exact same runtime object we always sent,
+    // without tripping the object-literal excess-property check.
+    const attachmentOptions: Office.AsyncContextOptions & { isInline: boolean; contentType?: string } = {
+      isInline: false,
+      contentType,
+    };
+
     return new Promise(resolve => {
-      item.addFileAttachmentFromBase64Async(content, fileName, { isInline: false, contentType }, result => {
+      item.addFileAttachmentFromBase64Async(content, fileName, attachmentOptions, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           resolve({
             success: true,

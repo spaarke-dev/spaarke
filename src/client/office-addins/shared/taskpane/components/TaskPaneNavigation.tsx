@@ -145,6 +145,6 @@ export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
 /**
  * Gets the default tab for a host type.
  */
-export function getDefaultTab(hostType: HostType): NavigationTab {
+export function getDefaultTab(_hostType: HostType): NavigationTab {
   return 'save';
 }

@@ -3,7 +3,7 @@ import { FluentProvider, Spinner, makeStyles, tokens } from '@fluentui/react-com
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
-import { useOfficeTheme, useLinkedTodosForCommunication } from './hooks';
+import { useLinkedTodosForCommunication } from './hooks';
 import { TaskPaneShell, type NavigationTab, type HostType } from './components/TaskPaneShell';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
@@ -105,13 +105,13 @@ export const App: React.FC<AppProps> = ({
   const styles = useStyles();
 
   // Theme management - combines Office detection with user preference
-  const { theme, preference, setPreference, isDarkMode } = useTheme();
+  const { theme, preference, setPreference } = useTheme();
 
   // State
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [hostContext, setHostContext] = useState<IHostContext | null>(null);
+  const [, setHostContext] = useState<IHostContext | null>(null);
   const [currentTab, setCurrentTab] = useState<NavigationTab>(
     initialAction === 'createTodo' ? 'createTodo' : initialTab
   );
@@ -130,12 +130,6 @@ export const App: React.FC<AppProps> = ({
       ...(entity.name ? { regardingName: entity.name } : {}),
     });
   }, []);
-
-  // Save operation state
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveProgress, setSaveProgress] = useState(0);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -199,28 +193,6 @@ export const App: React.FC<AppProps> = ({
     await authService.signOut();
     setIsAuthenticated(false);
     setCurrentTab('save'); // Reset to default tab
-  };
-
-  // Save handler (placeholder - will connect to API in later tasks)
-  const handleSave = async () => {
-    setIsSaving(true);
-    setSaveError(null);
-    setSaveSuccess(null);
-    setSaveProgress(0);
-
-    try {
-      // Simulate save progress
-      for (let i = 0; i <= 100; i += 20) {
-        setSaveProgress(i);
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      setSaveSuccess('Document saved successfully to Spaarke');
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed');
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   // Inline "Create To Do" — POST the human-authored form to the BFF `POST /api/office/todo`
@@ -373,7 +345,7 @@ export const App: React.FC<AppProps> = ({
           hostType={hostType}
           isAuthenticated={false}
           version={version}
-          buildDate={buildDate}
+          {...(buildDate !== undefined ? { buildDate } : {})}
           connectionStatus={connectionStatus}
           showNavigation={false}
           themePreference={preference}
@@ -393,13 +365,13 @@ export const App: React.FC<AppProps> = ({
       <TaskPaneShell
         title={displayTitle}
         hostType={hostType}
-        userName={userName}
-        userEmail={userEmail}
+        {...(userName !== undefined ? { userName } : {})}
+        {...(userEmail !== undefined ? { userEmail } : {})}
         isAuthenticated={true}
         onSignOut={handleSignOut}
         onSettings={handleSettings}
         version={version}
-        buildDate={buildDate}
+        {...(buildDate !== undefined ? { buildDate } : {})}
         connectionStatus={connectionStatus}
         showNavigation={hostType === 'outlook'}
         selectedTab={currentTab}
