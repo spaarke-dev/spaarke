@@ -1,7 +1,7 @@
 # Task Index — `spaarkeai-word-add-in-r1`
 
 > **Generated**: 2026-09-04 by `/project-pipeline` (initialize-only)
-> **Total**: 36 tasks across 5 phases (028 added 2026-09-08 — finding F-h)
+> **Total**: 37 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 added 2026-09-09 — jest harness)
 > **Status legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked · ⏭️ deferred
 
 **Execute via `task-execute` only.** Never read a POML and implement manually (root CLAUDE.md §4).
@@ -21,7 +21,8 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 005 | **Spike-4**: does the add-in save path share the shipped collision semantics | ✅ | STANDARD | opus / high | P0-spikes | none |
 | 006 | FR-18: clear typecheck debt in `shared/taskpane` — ⚠️ re-scope to production types (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
 | 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
-| 008 | FR-18: clear typecheck debt in `word/` + `outlook/` — ⚠️ re-scope (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
+| 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | 🔲 | FULL | sonnet / high | P0-typecheck | 001 |
 
 > ✅ **UNBLOCKED 2026-09-09 by operator decision — A1 + B1.**
 > **(A1)** The 11 foreign `Spaarke.Communication.Components/provenance.ts` errors are fixed by commit
@@ -31,10 +32,16 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 > **(B1)** **FR-18 means production types only (~99 errors), NOT all 395.** 296 of 395 (75%) sit in test
 > files whose suite is already red (13/21 suites failing on a missing `jest-dom` registration) — a
 > separate defect that must NOT be entangled with FR-18.
-> **Consequence**: 006/007/008 must be RE-SCOPED before dispatch. The authored 309/45/4 directory split
-> was sized against all 395; against ~99 production errors it is the wrong division and the three tasks
-> may collapse into one or two. The jest-dom harness gap needs its own task — leaving it unowned would
-> be exactly the burial the deferral policy forbids.
+> **RE-SCOPED + re-measured 2026-09-09.** Post-`6b987bb31` the package measures **384** errors (not 395 —
+> the 11 foreign ones are gone, confirming A1): **296 test-file · 88 production**. FR-18 now owns the 88.
+> Directory boundaries were KEPT rather than merged, because each task carries a protection worth
+> preserving (008 guards `WordHostAdapter.getCompressedFile()` for task 010; 007 guards the dead
+> `HostAdapterFactory` for F-e). Production split: **006 = 73 · 007 = 11 · 008 = 4**.
+> ⚠️ **`word/` now has ZERO production errors** — 008 is outlook-only and must not manufacture scope.
+> All three are forbidden from touching test files or trying to make the jest suite pass.
+> **New task 009** owns the jest-dom harness gap and re-measures the 296 test-file residual — leaving it
+> unowned would have been exactly the burial the deferral policy forbids. 006/007/008/009 are mutually
+> disjoint and dispatch in parallel.
 >
 > <details><summary>Original block reason (resolved — retained for the record)</summary>
 >

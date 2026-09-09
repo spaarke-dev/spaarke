@@ -21,6 +21,20 @@
 
   <role>SPAARKE platform developer. TypeScript strict-mode remediation (exactOptionalPropertyTypes, noUncheckedIndexedAccess, noUnusedLocals/Parameters) in a React 19 plus Fluent UI v9 Office add-in. You are correcting types, not refactoring components. Follow ADRs strictly.</role>
 
+  <!-- 🔴 RE-SCOPE 2026-09-09 (operator decision B1) — THIS BLOCK BINDS OVER THE GOAL BELOW.
+       FR-18 means PRODUCTION types only. Test files are OUT OF SCOPE for this task.
+       Re-measured 2026-09-09 (after 6b987bb31 removed the 11 foreign errors): 384 total, of which
+       296 are in test files and 88 are production. YOUR SCOPE is the 73 PRODUCTION errors under
+       shared/taskpane/** — every file NOT matching __tests__ / __mocks__ / *.test.* / *.spec.*.
+       Distribution: SaveFlow.tsx 19 · useSaveFlow.ts 14 · App.tsx 10 · AttachmentSelector.tsx 8 ·
+       EntityPicker.tsx 6 · SaveView.tsx 3 · TaskPaneShell.tsx 3 · errorMessages.ts 3 · index.ts 2 ·
+       TaskPaneNavigation.tsx 1 · TaskPaneHeader.tsx 1 · ErrorBoundary.tsx 1 · views/index.ts 1 ·
+       SseClient.ts 1.
+       You still own the three barrel defects (TS2305 ViewType from ./App; TS2614 SaveOptions from
+       SaveView, twice) — they are production-side and are likely the highest-leverage fix.
+       DO NOT fix test-file type errors, and DO NOT try to make the jest suite pass: the suite is
+       red on a missing jest-dom registration, which is task 009's job. "npm test is green" is NOT
+       achievable and is NOT your acceptance criterion. -->
   <goal>`npm run typecheck` in src/client/office-addins reports zero errors for every file under shared/taskpane/**; the three known barrel defects are resolved correctly rather than papered over; `npm run build` and `npm test` are green; the error counts in the two directories this task does NOT own are unchanged from the task 001 baseline; and the fix patterns used are recorded in projects/spaarkeai-word-add-in-r1/notes/ for tasks 007 and 008 to follow.</goal>
 
   <context>

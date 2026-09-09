@@ -21,6 +21,21 @@
 
   <role>SPAARKE platform developer. TypeScript strict-mode remediation at Office.js host mount points and ribbon command entry points, in Word and Outlook. You are correcting types, not restructuring hosts. Follow ADRs strictly.</role>
 
+  <!-- 🔴 RE-SCOPE 2026-09-09 (operator decision B1) — THIS BLOCK BINDS OVER THE GOAL BELOW.
+       FR-18 means PRODUCTION types only. Test files are OUT OF SCOPE.
+       Re-measured 2026-09-09: your scope is 4 PRODUCTION errors, ALL in
+       outlook/OutlookHostAdapter.ts — lines 256, 281, 283, 394. Three are TS2352 casts of
+       `MessageRead | AppointmentRead` to `MessageCompose`; one is TS2345 on an
+       `AsyncContextOptions & { isInline: boolean }` argument. Fix them as TYPE NARROWING (a proper
+       runtime discriminant such as an item-type check), NOT by widening through `unknown` — casting
+       through `unknown` silences the compiler while preserving the very unsoundness the error is
+       reporting, and this adapter is the Outlook compose path.
+       ⚠️ word/** now has ZERO production typecheck errors. Do NOT go looking for work there, and do
+       NOT refactor to manufacture scope. word/WordHostAdapter.ts MUST remain untouched with its
+       `getCompressedFile()` .docx extraction semantics intact — task 010 ports that before deleting
+       the file, and it is the UAT-correct path.
+       DO NOT fix test-file errors and DO NOT try to make the jest suite pass (task 009 owns the
+       jest-dom registration). "npm test is green" is NOT your criterion. -->
   <goal>`npm run typecheck` in src/client/office-addins reports zero errors for every file under word/** and outlook/**; `npm run build` and `npm test` are green; the error counts in the directories this task does NOT own are unchanged from the task 001 baseline; word/WordHostAdapter.ts still exists with its `.docx` extraction semantics intact for task 010; and the fix patterns used are appended to projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md.</goal>
 
   <context>

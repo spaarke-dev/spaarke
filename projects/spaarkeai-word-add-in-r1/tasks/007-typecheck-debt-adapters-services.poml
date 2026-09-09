@@ -21,6 +21,17 @@
 
   <role>SPAARKE platform developer. TypeScript strict-mode remediation across an Office.js host-adapter abstraction and an NAA-based auth/API client layer. You are correcting types, not restructuring the adapter seam. Follow ADRs strictly.</role>
 
+  <!-- 🔴 RE-SCOPE 2026-09-09 (operator decision B1) — THIS BLOCK BINDS OVER THE GOAL BELOW.
+       FR-18 means PRODUCTION types only. Test files are OUT OF SCOPE.
+       Re-measured 2026-09-09: your scope is 11 PRODUCTION errors —
+       shared/adapters/OutlookAdapter.ts 9 · shared/adapters/HostAdapterFactory.ts 1 ·
+       shared/services/ApiClient.ts 1. That is the whole job; it is much smaller than the authored
+       estimate, which was sized against all 395.
+       The type-level-only rule stays STRICT here: task 010 (FR-04) will restructure the adapter seam
+       and must inherit exactly the code plan.md finding F-e describes. HostAdapterFactory is DEAD
+       code per F-e — fix its type, do not revive, wire, or delete it.
+       DO NOT fix test-file errors and DO NOT try to make the jest suite pass (red on a missing
+       jest-dom registration — task 009 owns that). "npm test is green" is NOT your criterion. -->
   <goal>`npm run typecheck` in src/client/office-addins reports zero errors for every file under shared/adapters/** and shared/services/**; `npm run build` and `npm test` are green; the error counts in the directories this task does NOT own are unchanged from the task 001 baseline; the adapter seam is structurally unchanged so task 010 inherits exactly the code plan.md finding F-e describes; and the fix patterns used are appended to projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md.</goal>
 
   <context>
