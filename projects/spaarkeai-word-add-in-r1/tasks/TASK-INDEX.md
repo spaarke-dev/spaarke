@@ -23,7 +23,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 007 | FR-18: clear typecheck debt in `shared/adapters` + `shared/services` — ⚠️ re-scope (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 008 | FR-18: clear typecheck debt in `outlook/` (**`word/` has zero**) — re-scoped (B1) | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
 | 009 | Repair the jest harness (jest-dom) + re-measure test-file debt | ✅ | FULL | sonnet / high | P0-typecheck | 001 |
-| 017 | Align `@testing-library/react` to v16 (React 19) + re-measure suite | 🔲 | FULL | sonnet / high | — | 009 |
+| 017 | Align `@testing-library/react` to v16 (React 19) + re-measure suite | ✅ | FULL | sonnet / high | — | 009 |
 
 > ✅ **Operator decisions 2026-09-09 (post-wave).** **(1) FR-18 is MET** — production typecheck 88 → **0**
 > (006 = 73, 007 = 11, 008 = 4). **(2) The 289 test-file errors are CONSCIOUSLY ACCEPTED**, trigger to
@@ -73,6 +73,27 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 > suites' genuine mock/assertion defects, and an explicit operator decision on the still-unowned 289-error
 > test-file typecheck debt (not folded into 006/007/008, which are forbidden from touching test files).
 > Full record: [`notes/009-jest-harness-repair.md`](../notes/009-jest-harness-repair.md).
+>
+> ✅ **017 CLOSED 2026-09-09 — alignment done, suite outcome unchanged.** Bumped `@testing-library/react`
+> `^14.2.1` → `^16.1.0` (matching `SemanticSearch`'s pin, the higher of the two sibling precedents) and
+> discovered a second required change mid-task: RTL 16 demotes `@testing-library/dom` from a bundled
+> dependency to a peer dependency, so it had to be added explicitly (`^10.4.1`, the exact pin both sibling
+> packages already carry) — without it, 17 of 21 suites failed to *load* entirely (escalation trigger 3
+> fired transiently, then resolved within the task). **Final state is suite-for-suite identical to 009's
+> baseline**: 12 failed / 9 passed / 21 total suites, 92 failed / 237 passed / 329 total tests (within
+> 009's 92-94 range). Critically, **`useAnnounce.test.ts` — the "signature failure" this task existed to
+> fix — still fails 16/16 with the identical `NotFoundError`, unchanged by the RTL bump.** Root-cause
+> investigation found the true cause is NOT an RTL-version peer mismatch (009's working hypothesis): the
+> production hook (`useAnnounce.ts`) appends/removes DOM nodes directly on `document.body`, outside
+> React's own tracked tree, which collides with React 19's unmount bookkeeping regardless of testing-
+> library major version. A version bump cannot fix it; a production-code change (e.g. a React-owned
+> portal target) would, and that is out of this task's scope. All 12 failing suites were individually
+> categorized: 0 harness/config, 0 mechanical-RTL-16-migration-owed, all 12 (92 tests) genuine
+> product/test defects, unchanged before/after. Production typecheck confirmed still **0**; test-file
+> bucket re-measured at **289**, unchanged (not this task's job to clear). No test deleted/skipped
+> (ADR-038). Quality gates (code-review + adr-check, mandatory per CLAUDE.md §8 TEST-MODIFYING override):
+> 0 critical / 0 warnings / 0 violations both. Full record:
+> [`notes/017-testing-library-alignment.md`](../notes/017-testing-library-alignment.md).
 >
 > <details><summary>Original block reason (resolved — retained for the record)</summary>
 >

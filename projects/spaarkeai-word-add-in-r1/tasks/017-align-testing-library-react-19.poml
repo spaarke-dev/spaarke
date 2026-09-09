@@ -4,7 +4,7 @@
     <title>Align @testing-library/react to v16 (React 19) and re-measure the suite</title>
     <phase>0 De-risk and baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies test dependencies and will change the behavior of every React component test in the package. CLAUDE.md §8 TEST-MODIFYING override applies: Step 9.5 code-review + adr-check run UNCONDITIONALLY.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -75,4 +75,36 @@
     <output type="config">src/client/office-addins/package.json</output>
     <output type="doc">projects/spaarkeai-word-add-in-r1/notes/017-testing-library-alignment.md</output>
   </outputs>
+
+  <notes>
+    Completed 2026-09-09. `@testing-library/react` bumped `^14.2.1` → `^16.1.0` (matches SemanticSearch's
+    pin, the higher of the two sibling precedents). Mid-task discovery: RTL 16 demotes
+    `@testing-library/dom` from bundled dependency to peer dependency — added explicitly as `^10.4.1`
+    (exact pin both siblings already carry); without it, 17/21 suites failed to load (transient
+    escalation-trigger-3 condition, resolved within this task, not a final-state regression).
+
+    Final suite state is IDENTICAL to 009's baseline: 12 failed / 9 passed / 21 total suites; 92 failed /
+    237 passed / 329 total tests (within 009's 92-94 range). `useAnnounce.test.ts` — the suite this task
+    existed to fix — still fails 16/16 with the same `NotFoundError`. Root-caused: the failure is a
+    production-code defect (`useAnnounce.ts` manipulates `document.body` directly, outside React's
+    tracked tree), not an RTL-version peer mismatch as 009 hypothesized. A version bump cannot fix it;
+    fixing it needs a production-source change, out of this task's scope.
+
+    All 12 failing suites individually categorized: 0 harness/config, 0 mechanical-RTL-16-migration-owed,
+    12 suites (92 tests) genuine product/test defects — all unchanged before/after this task's bump.
+
+    Production typecheck: 0 (unchanged, verified — protects tasks 006/007/008's clearance). Test-file
+    bucket: 289 (unchanged, re-measured only, not cleared per constraint). No test deleted/skipped
+    (ADR-038). git diff scope: exactly `package.json` + `package-lock.json`, no test/production source
+    touched.
+
+    Quality gates (CLAUDE.md §8 TEST-MODIFYING override — mandatory): code-review 0 critical/0
+    warning/0 suggestion; adr-check 0 violations. No §6.5 ADR conflict.
+
+    Escalation triggers: none fired in the final state (trigger 3 fired transiently mid-task, self-
+    resolved by adding the missing peer-turned-explicit dependency; reported for honesty in
+    notes/017-testing-library-alignment.md rather than smoothed over).
+
+    Full record: projects/spaarkeai-word-add-in-r1/notes/017-testing-library-alignment.md
+  </notes>
 </task>

@@ -4,14 +4,42 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none — 006 complete |
+| **Task** | none — 017 complete |
 | **Task File** | — |
-| **Phase** | 0 De-risk and baseline |
+| **Phase** | 0 De-risk and baseline (closing out) |
 | **Status** | not-started |
 | **Started** | — |
-| **Next Action** | Operator picks next. **008** (FR-18 production typecheck in `outlook/`; `word/` has zero) is the last 🔲 item in the P0-typecheck wave (006, 007, 009 all ✅) and may be running concurrently in another session against this same worktree — check `git status` / TASK-INDEX before starting new work here. |
+| **Next Action** | Operator picks next. Two independently-startable tasks are now ready: **002** (Spike-1, `document.url` shape for SPE files in Word desktop — deps: none) and **010** (FR-04 consolidate onto one Word adapter via `HostAdapterFactory` — deps: 006, 007, 008, all ✅). 010 gates most of Phase 1 (`parallel-group P1-a`, opus/xhigh, `<steps mode="prescriptive">` per project CLAUDE.md). Phase 0's remaining spikes/typecheck/harness work (001, 003-009, 017) are now all ✅ except 002. |
 
-## Critical Context
+## Critical Context (task 017, complete 2026-09-09)
+
+Resolved task 009's escalation trigger 2 with the 2026-09-09 operator decision: React 19 stays; RTL aligns
+to it. Bumped `@testing-library/react` `^14.2.1` → `^16.1.0` in `src/client/office-addins` (matching
+SemanticSearch's pin, the higher of the two sibling precedents: PlaybookBuilder `^16.0.0`, SemanticSearch
+`^16.1.0`). Mid-task discovery: RTL 16 demotes `@testing-library/dom` from a bundled dependency to a peer
+dependency — added explicitly as `^10.4.1` (the exact pin both siblings already carry); without it 17/21
+suites failed to load entirely (a transient trigger-3 condition, self-resolved within the task).
+
+**Final suite state is IDENTICAL to 009's baseline**: 12 failed / 9 passed / 21 total suites; 92 failed /
+237 passed / 329 total tests (within 009's 92-94 range). `useAnnounce.test.ts` — the suite this task
+existed to fix — still fails 16/16 with the same `NotFoundError`, **unchanged by the RTL bump**.
+Root-caused: the real cause is a production-code defect (`useAnnounce.ts` appends/removes DOM nodes
+directly on `document.body`, outside React's own tracked tree), not an RTL-version peer mismatch as 009
+hypothesized — a version bump cannot fix it. All 12 failing suites individually categorized: 0
+harness/config, 0 mechanical-RTL-16-migration-owed, 12 suites (92 tests) genuine product/test defects,
+unchanged before/after. Production typecheck confirmed still **0** (protects 006/007/008's clearance);
+test-file bucket re-measured at **289**, unchanged (not this task's job to clear). No test
+deleted/skipped (ADR-038). Quality gates: code-review + adr-check both 0 critical/0 violations (CLAUDE.md
+§8 TEST-MODIFYING override — mandatory, ran clean). Full record:
+`notes/017-testing-library-alignment.md`.
+
+**The 12 failing suites / 92 failing tests remain unowned** — this task sharpened the diagnosis (a
+production-code fix for `useAnnounce`, ~50 accessible-name/role-query mismatches across `SaveView`/
+`SaveFlow`/`TaskPaneShell`/`TaskPaneNavigation`/`useSaveFlow`, a `ShareView` timeout cluster, and two
+Office.js mock gaps) but did not fix any of it — out of scope by design. Recommendation section in the
+notes doc sizes three follow-on tasks; none currently exist in TASK-INDEX.
+
+## Critical Context (task 006, prior — preserved for history)
 
 Task **006 closed 2026-09-09 (per RE-SCOPE operator decision B1).** Cleared all 73 production typecheck
 diagnostics under `shared/taskpane/**` (384 → 289 total; 73 → 0 in-scope; zero increase in any directory
