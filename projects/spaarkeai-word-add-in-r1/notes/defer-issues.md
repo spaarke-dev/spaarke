@@ -67,4 +67,38 @@ Either add a direct `sprk_event` column to `sprk_document`, or repoint `EventLoo
 
 ## Deferrals
 
-*None yet.*
+### D-032-1 — Visualization parent HUB nodes are not authorized against their parent record
+
+**Found by** task 032 while closing finding F-b. **Owner: `unified-access-control-r2`** (its surface).
+
+`VisualizationService.CreateParentHubNode` builds a hub node carrying the SOURCE document's own matter /
+project / invoice name (`sourceDoc.MatterName`, `BuildParentRecordUrl("sprk_matter", …)`). The caller is
+authorized on the source document, but **Read on a document does not formally imply Read on its matter** —
+so a matter's NAME, and a deep link to its record, can reach a caller holding no rights on the matter itself.
+On a secure matter the name is frequently the sensitive fact (a matter named for a counterparty discloses the
+engagement's existence), which is the same argument `RecordSearchAuthorizationFilter`'s remarks make.
+
+**Not fixed in task 032, deliberately.** F-b is about RESULT ROWS; hub nodes are pre-existing and are the
+source's own information. Widening a security task's scope silently is what CLAUDE.md §11 forbids, and the
+correct check (`GetCallerRecordAccessAsync` against `sprk_matters`/`sprk_projects`/`sprk_invoices`) is
+UAC-r2's mechanism, not a second one built here.
+
+**Suggested fix**: authorize each hub against its parent record and drop the hub — and the source's edge to
+it — when Read is absent. Task 032's `AuthorizeRowsAsync` already drops hubs left with no surviving
+document, so the hook exists.
+
+### D-032-2 — Rows dropped past the authorization budget are not announced to the client
+
+**Found by** task 032. Same shape as the limitation `RecordSearchEndpoints.AuthorizeRowsAsync` recorded.
+
+`VisualizationEndpoints.AuthorizeRowsAsync` bounds its work at `MaxDocumentAuthorizationChecks = 100` and
+**drops** everything past it (fail closed). The caller sees a short graph that is indistinguishable from
+"there simply are not many related documents". Cross-record document search announces exactly this with a
+`PARTIAL_RESULTS` warning; `GraphMetadata` has no warnings channel.
+
+**Not fixed in task 032, deliberately**: adding one is a response-contract change, and a response-contract
+change does not belong inside a security fix — the same call `RecordSearchEndpoints` made and recorded.
+
+**Relevant to task 033/034**, which render this surface: a short result page may mean "withheld", not
+"nothing matched". See `notes/032-authorization-hardening.md` §5 for the counts that make this reachable
+(five hardcoded relationship queries at `TopCount = 50` each).

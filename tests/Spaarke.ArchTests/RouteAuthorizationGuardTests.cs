@@ -171,6 +171,20 @@ public class RouteAuthorizationGuardTests
         new GovernedFile("Api/Ai/RecordSearchEndpoints.cs", Scope.RouteLevelGate,
             "/api/ai/search/records — Dataverse record content over the same AI search surface."),
 
+        new GovernedFile("Api/Ai/VisualizationEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/visualization/* — document names, types, keywords, SPE file ids and record URLs for "
+            + "every NEIGHBOUR of a source document, returned as graph nodes. Added 2026-09-08 by "
+            + "spaarkeai-word-add-in-r1 task 032 (plan.md finding F-b). The file was ABSENT from this "
+            + "census while carrying the exact shape the census exists to find: the cosine-KNN search in "
+            + "VisualizationService trimmed its rows by tenantId and self-exclusion alone, and "
+            + "VisualizationAuthorizationFilter authorized only the SOURCE document — so Read on one "
+            + "document served its neighbours from anywhere in the tenant. POST /related-from-content "
+            + "carried no filter at all, which is also WHY the file could not be listed here before: a "
+            + "file cannot be classified RouteLevelGate while one of its routes has no gate, so the gap "
+            + "kept itself out of the guard. Both routes now publish VisualizationAuthorization and both "
+            + "handlers refuse (500) without it; rows are authorized per document in the endpoint, the "
+            + "filter/endpoint PAIR shape Rule B was widened for in task 077."),
+
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
             "THE reference implementation per the Wave-3 build plan: each handler checks project access AND "

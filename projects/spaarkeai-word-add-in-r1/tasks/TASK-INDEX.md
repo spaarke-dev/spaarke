@@ -84,7 +84,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 025 | FR-12: surface collision handling per the Spike-4 outcome — ⚠️ **needs re-scope**, premise falsified | ⛔ | FULL | sonnet / high | — | **005**, 023, 024 |
 | 026 | FR-09: related-to record card honoring the two-slot model | 🔲 | FULL | sonnet / high | P2-b | 013 |
 | 027 | FR-10: open the related record and the Document record | 🔲 | FULL | sonnet / high | P2-b | 003, 026 |
-| 028 | 🔴 **F-h/NFR-08**: editable Office saves must link/graduate, never immutable-suppress | 🔲 | FULL | **opus / xhigh** | — | none |
+| 028 | 🔴 **F-h/NFR-08**: editable Office saves must link/graduate, never immutable-suppress | ✅ | FULL | **opus / xhigh** | — | none |
 
 **Gate**: identified document saves as a version, not a duplicate row · override creates a linked copy · profile displays · record card opens the record.
 
@@ -96,7 +96,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 |---|---|---|---|---|---|---|
 | 030 | FR-13: shared server-side creation service (**Matter**) | 🔲 | FULL | opus / xhigh | — | 012 |
 | 031 | FR-13: Project creation completeness + QuickCreate routing | 🔲 | FULL | opus / high | — | 030 |
-| 032 | **FR-16a: per-row authorization on the similarity surface** | 🔲 | FULL | opus / xhigh | — | none |
+| 032 | **FR-16a: per-row authorization on the similarity surface** | ✅ | FULL | opus / xhigh | — | none |
 | 033 | FR-16b: Find view three-state gating and Run Index | 🔲 | FULL | sonnet / high | — | 032, 015, 013 |
 | 034 | FR-16c: Find results, lazy-scroll, records bridge decision | 🔲 | FULL | sonnet / high | — | 033 |
 | 035 | FR-14: Add To Do carrying document **and** related record | 🔲 | FULL | sonnet / high | P3-c | 013, 026 |
@@ -172,7 +172,7 @@ Dispatch each subagent at its POML's `<model-tier>` and `<effort>`. **Max 6 conc
 | **005** | May reveal the add-in save path has no collision protection at all — a live data-loss finding, not a UX gap. |
 | **010** | `HostAdapterFactory` has zero call sites and the "tested" `WordAdapter` uses the broken `body.getOoxml()` path. **Prescriptive order is load-bearing**: port `getCompressedFile()` first, verify Outlook, delete last. |
 | **023 / 024** | Data integrity. NFR-08: editable documents MUST use link/graduate, never the immutable suppress path — suppress-forever collapses two distinct drafts into one record. |
-| **032** | Security. The similarity engine currently trims by `tenantId` alone. Gates 033 structurally; if hardening proves large, cut Find from r1 rather than ship it unsafe. |
+| **032** | ✅ **RESOLVED 2026-09-08 — hardened, NOT descoped.** The descope valve ("if hardening proves large, cut Find from r1") was evaluated and not needed: every primitive already existed, including `IAiAuthorizationService`, which was already a dependency of the under-authorizing filter. Rows are now authorized per document, both routes refuse without the published obligation, and `VisualizationEndpoints.cs` is in the `RouteAuthorizationGuardTests` census. The NFR-02 negative test passes and was verified to FAIL (7 of 11) with the row check disabled. Gate for 033 is met. Latency to size 033 against, plus 3 deferred findings, in [`notes/032-authorization-hardening.md`](../notes/032-authorization-hardening.md). |
 | **030** | New server-side creation service; blast radius beyond the add-in. Existing `Create*Wizard` components MUST NOT be modified. |
 
 ---
