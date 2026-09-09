@@ -49,7 +49,7 @@
     <constraint source="project">Scope: the WordApi requirement declaration. Reconcile the `WordApi MinVersion="1.1"` (`word-manifest.xml:34`) against what `shared/adapters/WordAdapter.ts` actually calls. Determine the true minimum from the adapter's Office.js usage and declare THAT. Do not silently copy 1.1 forward, and do not raise it beyond what the adapter needs (an over-declared requirement set blocks otherwise-capable hosts).</constraint>
     <constraint source="ADR-028">Scope: the `webApplicationInfo` block being added to Word. It must carry the same app id / resource shape Outlook uses, sourced from the same build-time parameterization — never a hardcoded client id or secret. Auth v2 is secret-free; `.WithClientSecret` and any embedded credential are forbidden.</constraint>
     <constraint source="project">Scope: `webpack.config.js:205-215` (the Word manifest branch). Extend it so the Word JSON manifest receives the same client-id/resource substitution Outlook's gets at `:178-204`. Reuse the existing substitution mechanism; do not add a second templating approach.</constraint>
-    <constraint source="project">Scope: file retention. Keep `word/word-manifest.xml` in the repo until the JSON manifest is verified installing AND running on BOTH Word desktop and Word on the web. Deleting the XML manifest before that verification leaves no rollback path for a sideload failure.</constraint>
+    <constraint source="project">Scope: file retention. Keep `word/word-manifest.xml` in the repo until the JSON manifest is verified installing AND running on BOTH Word desktop and Word on the web. Deleting the XML manifest before that verification leaves no rollback path. NOTE (operator correction 2026-09-08): rollback is now MORE important, not less — with sideload gone, a bad manifest cannot be swapped locally; recovering means another build + deploy cycle. Retain the XML.</constraint>
     <constraint source="project">Scope: versioning. Bump the 4-part version (currently `1.0.6.0`). Any manifest change requires an M365 Admin Center re-registration — note this in the outputs so the deploy task (042) picks it up.</constraint>
     <constraint source="project">Scope: CI files. Do NOT edit `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml` — they are frozen under the shadow-comparison window opened 2026-08-27.</constraint>
     <constraint source="project">Scope: deploy execution. Deploy is CI-only via `deploy-office-addins.yml`; never run the workflow as an agent. This task produces the manifest; it does not deploy it.</constraint>
@@ -112,8 +112,17 @@
     <criterion testable="true">Given the new manifest, when inspecting the Word requirement-set declaration, then the declared minimum matches the highest WordApi version actually called by `shared/adapters/WordAdapter.ts`, with the forcing API named in notes/.</criterion>
     <criterion testable="true">Given the manifest version, when compared to the previous `1.0.6.0`, then it is a bumped 4-part version.</criterion>
     <criterion testable="true">Given a `npm run build`, when inspecting the emitted Word manifest, then no unsubstituted placeholder tokens remain (client id and resource are parameterized exactly as Outlook's are).</criterion>
-    <criterion testable="true">Given Word DESKTOP, when the unified manifest is sideloaded, then the add-in installs, the ribbon control appears, the task pane opens, and auth completes.</criterion>
-    <criterion testable="true">Given Word on the WEB, when the unified manifest is sideloaded, then the same four outcomes hold.</criterion>
+    <!-- CORRECTED 2026-09-08 by operator: SIDELOAD IS NO LONGER AVAILABLE. Shipping a new
+         add-in version now requires a BUILD + DEPLOY, so these two criteria cannot be met the
+         way they were authored. The verification path is: run `deploy-office-addins.yml` via
+         `workflow_dispatch` (that trigger EXISTS today — see the workflow's `on:` block), then
+         verify against the DEPLOYED add-in on each surface.
+         NOTE — this does NOT create a circular dependency on task 041. 041 (which adds this
+         branch to the workflow's push triggers) `deps` on 011, so if 011 needed 041 the two
+         would deadlock. `workflow_dispatch` is the break: 011 can be verified from this branch
+         today without 041 landing first. -->
+    <criterion testable="true">Given Word DESKTOP, when the add-in is DEPLOYED (via `deploy-office-addins.yml` `workflow_dispatch`) and installed from that deployment, then the add-in installs, the ribbon control appears, the task pane opens, and auth completes.</criterion>
+    <criterion testable="true">Given Word on the WEB, when verified against the same deployment, then the same four outcomes hold.</criterion>
     <criterion testable="true">Given the repo after this task, when checking `word/word-manifest.xml`, then it is retained (or removed only with an explicit recorded decision made AFTER both desktop and web verification passed).</criterion>
     <criterion testable="true">Negative: no client secret, hardcoded client id, or other credential is embedded in `word/manifest.json` (ADR-028 secret-free).</criterion>
     <criterion testable="true">Negative: `ci-router.yml`, `ci-tier1-blocking.yml`, and `ci-tier2-advisory.yml` are unmodified.</criterion>
