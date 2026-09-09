@@ -1,97 +1,223 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-09, session 5** (by `task-execute` Step 11) — task **029 COMPLETE**, nothing in progress.
+> **Last Updated**: **2026-09-09, session 5 END** (by `context-handoff`) — reflects through commit `f8e652f54`.
+> ⚠️ Refresh this stamp every time you write here. A gap between it and
+> `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's notes have been WRONG many times, and session 5 added two more corrections.**
-> Verify before believing — counts, route names, schema claims, "already done" claims.
+> ⚠️ **This project's task files have been WRONG SEVEN times now.** Session 5 alone found four stale
+> POML premises. **Verify a POML's premises before obeying them — the code has won every time.**
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-09
+## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Branch** | `work/unified-access-control-r2` · clean · PR **#950** |
-| **Next Action** | **Owner's call — nothing is blocked, no task is in progress.** TASK-INDEX next is **028** (service request: the missing 4th core accessible set), then **024** (SPE paging — has a completed design at [`notes/decisions/spe-paging-and-revoke-honesty-design.md`](notes/decisions/spe-paging-and-revoke-honesty-design.md); read it first, it re-scopes the task). |
-| **Task status** | **59 completed · 3 completed-with-escalation (012, 071, 023) · 1 blocked-shipped (034) · 30 open · 92 total.** Drift gate green (92 POMLs = 92 index rows). |
-| **Session 5 record** | Closed **029** (external To Do read + create parity). Filed **ISS-002 / #963**. |
+| **Task** | **none in progress** |
+| **Status** | Clean stopping point. Tree clean, 0 unpushed, 0 behind master. |
+| **Branch** | `work/unified-access-control-r2` @ `f8e652f54` · PR **#950** |
+| **Next Action** | **Owner's call.** Ready and unblocked: **042** (standing-grant baseline levels — chain-C head, no environment dependency, **best next task**), **063** (internal share endpoints — chain-B head), **024** (SPE paging — *has a completed design, read it first*), **082**, **093/094/095**. ⚠️ **036 is NOT safe to start** — see § THE ONE THING THAT BLOCKS THE CRITICAL PATH. |
+| **Task status** | **63 done · 3 escalated (012, 071, 023 — plus 062) · 1 blocked-shipped (034) · 25 open · 92 total.** Drift gate green (92 POMLs = 92 index rows). |
+| **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963, #964, #965, #966, #967**. |
 
-### 🔴 029's transferable findings — these change how the NEXT task should work
+### Commits this session — ALL PUSHED, nothing at risk
 
-1. **A fifth stale POML premise, same shape as the previous four.** 029's longest constraint forced a
-   choice about the matter/WA "level asymmetry" — which tasks 032+033 had already deleted.
-   `CallerPrincipal` carries per-record `AccessRights` for all three roots. **The code beat the task
-   file for the fifth time. Verify a POML's premises before obeying them.**
+| Commit | What |
+|---|---|
+| `c35721e35` | 029 — external To Do read+create parity across all three roots |
+| `fb9a8a070` | 029 review fix — the ADR-024 guard was case-sensitively evadable |
+| `0dba2a58d` | 028 — "core" is not "externally grantable" (doc correction; **no code**) |
+| `1c6eb1ed2` | 062 + 068 + 086 parallel wave |
+| `e38548ce5` | 035 — `ImpersonatedRootSetSource`, registered but **inert** |
+| `f8e652f54` | 062's live exposure recorded as **REMEDIATED** |
 
-2. **A perturbation that fails ZERO tests is sometimes fixed by moving the DECISION, not by adding a
-   test.** Two of 029's five perturbations were invisible because the decisions lived inside
-   `CreateTodoAsync`, a substitution seam every endpoint test replaces. No test at any level could
-   see them. Extracting them to a pure function made both perturbations bite (2 and 6). **When you
-   cannot write a test that fails, ask whether the decision is in a testable place.**
+---
 
-3. **A validator stricter about FORM than the bug it hunts will miss the bug.** 029's ADR-024
-   one-parent guard matched `sprk_Regarding*` case-SENSITIVELY. Dataverse needs PascalCase — but the
-   guard exists to catch a WRONG second bind, and a wrongly-cased one is the likeliest wrong bind.
-   This file once held a lowercase `sprk_regardingproject@odata.bind`. **Detect broadly; let the
-   platform reject the form.**
+## 🔴 THE ONE THING THAT BLOCKS THE CRITICAL PATH
 
-4. **Verify a column with a query that SUCCEEDS — and never derive a name from a convention.**
-   `sprk_todo`'s display-name column differs on every root (`sprk_projectname` / `sprk_mattername` /
-   `sprk_name`), and for project and matter it is **not** the `PrimaryNameAttribute` — reaching for
-   the primary name returns a case NUMBER, the only wrong answer that fails silently instead of 400ing.
+The chain **035 ✅ → 036 → 054 → 055 → 056 → 057/058** is the longest in the project and nothing else
+unblocks it. 035 is done. **036 is the next link and its gate is not yet proven.**
 
-5. **A measured number AGES.** `sprk_todo` has 14 regarding lookups, not the 13 task 009 measured —
-   because `record-header-and-notepad-r2` added one the day after. Task 009 was not wrong. **State the
-   as-of date beside every census number, and re-measure rather than trusting it.**
+**Why.** 036 flips impersonation live behind a flag, gated on task 034's NFR-04 negative canary, which
+requires the impersonated read to return a **strictly smaller** set than app-only. **Equality means
+impersonation is inert and MUST fail the build.**
 
-### ⚙️ Dataverse MCP is DOWN — that is NOT a reason to guess or escalate
+Until 2026-09-09 that gate was guaranteed to lie: every root-BU user inherited `System Administrator`,
+so both reads returned everything and they would have been equal — a confident false pass. **The owner
+fixed that** (below) and the main session verified it. **But the canary has NOT been re-measured.**
 
-`mcp__dataverse__*` fails (`CONNECTION_CLOSED`). Live metadata is still reachable — `pac auth` and
-`az` are both authenticated against `spaarkedev1`:
+**➡️ Before starting 036: run the NFR-04 canary against the fixed environment and confirm the
+impersonated set is strictly smaller. Do not assume the fix restored a meaningful inequality.**
+
+---
+
+## ✅ The live exposure found and fixed this session
+
+**Found (task 062):** a user with **zero directly-assigned roles** read every project including the
+secure one. **Fixed by the owner the same day; main-session verified:**
+
+```
+root BU 'Spaarke' default team : roles=[]  (was [System Administrator])
+jake.schroeder@demo.spaarke.com -> 403 Forbidden   (before: 19/19 projects incl. the secure one)
+```
+
+**The mechanism, stated correctly** (my first write-up got this wrong and the owner corrected it):
+security role assignment does **NOT** follow business-unit assignment. What follows BU assignment is
+**default owner team membership**, which is system-managed and cannot be curated — the root BU's
+default team had **168 members** against 7 enabled interactive users. Someone had explicitly assigned
+`System Administrator` to that team, and team roles are inherited by members:
+
+> BU assignment → **automatic** default-team membership → a role someone **explicitly** put on that team.
+
+Only the middle step is automatic. That is why the fix was one unassignment, **not** a data migration —
+and why the design's census missed it entirely: the census read `systemuserroles` (**direct**
+assignment), where this privilege never appears.
+
+🔴 **OWNER DIRECTION 2026-09-09 — do not re-raise:** *"let's not focus on relocating users — we have
+test users that are in the correct BU."* Fix A's user relocation is **NOT** the remediation path for
+this finding. 7 of 8 users remaining in the root BU is **fine**; the role is gone.
+
+**Residual, low priority:** `Spaarke Demo`'s default team still holds `System Administrator`. No
+enabled interactive users are in that BU, so it is not a live exposure — but it is the same trap armed
+in a second BU, and **new users land in the ROOT BU by default**, so the class recurs at onboarding
+unless root's default team is kept role-free.
+
+---
+
+## 🔔 OPEN OWNER DECISIONS — nothing else is blocked on you
+
+| # | Decision | Cost | Why it matters |
+|---|---|---|---|
+| **1** | **Turn on audit for `sprk_externalrecordaccess` + `sprk_noaccessentry`** (entity-level; both `False` while the org switch is ON), and `sprk_workassignment.sprk_accesspermission` | Minutes | 🔴 **Time-sensitive.** Task **088**'s point-in-time replay would report a revoked grant as **still live** — a confidently wrong answer to a compliance question. **Audit does not backfill**, so every day of UAT before this is a day 088 can never replay. Main-session verified. |
+| **2** | **A Dataverse credential for CI** | One-time | Unblocks BOTH standing live assertions at once — 034's NFR-04 canary and 062's NFR-05 role-depth. Today they only run by hand, which is exactly how the BU exposure went unnoticed. Options: scheduled job with federated credentials to dev, or standing secrets in Actions. |
+| **3** | **§10 publish-size hazards THREE and FOUR** | Small | Both recorded in project notes; root `CLAUDE.md` untouched because it is hot-path and needs sign-off plus a `.claude/CHANGELOG.md` entry. (3) stale build state faked a **+4.95 MB** delta; (4) a deep worktree path makes §10's *own* procedure fail — MSBuild says *"not found"* for a file that exists, and a partial publish zips **smaller**, reading as a win. |
+| **4** | **FR-33's five scoping questions** | — | Cap default · external-only vs internal POA shares · backfill strategy · renewal authority · notification lead time. See `notes/decisions/external-grant-expiry-mandatory.md` §7. |
+| **5** | **#967 — secure-project owner team is a DEFAULT team** | Design | **Downgraded** after owner clarification; guarded by 062's NFR-05 clause 2. Not blocking. |
+| ~~6~~ | ~~uuid CVE~~ | — | Still the one red check on PR #950. Unchanged, not ours by surface. |
+
+---
+
+## ⚙️ ENVIRONMENT — read before any Dataverse work
+
+🔴 **The Dataverse MCP is DOWN (`CONNECTION_CLOSED`). That is NOT a reason to guess or to escalate a
+metadata question.** Live metadata is reachable directly — `pac auth` and `az` are both authenticated
+against `spaarkedev1`:
 
 ```bash
 az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv
 ```
 
-Then `RelationshipDefinitions` for `@odata.bind` navigation properties, `EntityDefinitions` for entity
-sets / primary-name attributes. **Use PowerShell `Invoke-RestMethod`, not Python** (Python is a
-Microsoft Store stub here). Worked examples in `notes/task-029-external-todo-parity.md` §0.
+Then `EntityDefinitions` / `RelationshipDefinitions` / `Attributes` over the Web API, and
+`MSCRMCallerID` for impersonated reads. **Use PowerShell `Invoke-RestMethod` — Python is a Microsoft
+Store stub here and dies immediately.** Worked examples in `notes/task-029-external-todo-parity.md` §0
+and `notes/task-062-nfr05-role-depth.md`.
 
-### ⚠️ A FOURTH publish-size hazard (§10) — still unsigned-off, like the third
-
-CLAUDE.md §10 names two (ageing baseline, zip tool); session 4 added a third (build environment).
-**Fourth: the fresh-worktree procedure §10 itself prescribes breaks on Windows if the worktree path
-is deep.** A >MAX_PATH file makes MSBuild say *"could not copy … because it was not found"* for a file
-that exists, and a partially-dropped publish would zip **smaller** and read as a size WIN.
-
-**Use a SHORT worktree path (`C:\wt-<tag>`) and assert the published FILE COUNT, not just zip size.**
-(`C:\` root is not writable — put the zip elsewhere.) 029 measured 214 files on both sides.
-
-**Recommended (NOT done — needs owner sign-off, root `CLAUDE.md` is a hot-path file and requires a
-`.claude/CHANGELOG.md` entry): add hazards THREE and FOUR to §10.**
-
-### Task 029 outcome
-
-4 additive routes (`/matters/{id}/todos`, `/workassignments/{id}/todos` × GET+POST). No shipped
-route's shape changed. Six route handlers, **one** shared list implementation and **one** shared
-create; `RightsForRoot` hoisted out of `UpdateTodo` so all three verbs resolve rights through one
-expression. All three roots gate identically — `Read` to list, `Create` to create.
-
-Verified: solution build 0 errors · BFF unit **12,185+ pass / 0 fail** · ArchTests **196/196**
-(endpoint census unmoved at 117 — routes went into an existing file) · Core 64/64 · Scheduling 56/56 ·
-**0 vulnerable packages** · publish **master 45.353 → branch 45.389 MB (+0.036)**, both fresh
-worktrees, both 214 files, `Compress-Archive -Optimal`.
-
-Perturbations: a=3 · b=5 · c=5 · d=2 · e=6. Record:
-[`notes/task-029-external-todo-parity.md`](notes/task-029-external-todo-parity.md).
-
-**Not delivered, stated plainly**: service request (task **028** — no accessible set exists) and the
-other ten regarding types (no accessible set; several are CHILDREN that should inherit a root rather
-than acquire one — a design question for **054/055/056**, not more routes).
+⚠️ **Azure.Identity 1.16**: `DefaultAzureCredential` no longer falls through to the CLI credential. Set
+`AZURE_TOKEN_CREDENTIALS=dev` or it dies with *"EnvironmentCredential authentication unavailable"*
+despite a valid `az login` — **and it reads like a permissions problem.** Affects task 034 identically.
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-07
+## 🧠 THE FIVE LESSONS FROM SESSION 5 — these change how the next task should be done
+
+1. **Verify a POML's premises before obeying them. Four were stale in this session alone**, and the
+   code was right every time: 029's entire level constraint (tasks 032+033 had deleted the asymmetry),
+   028's central deliverable (inverted by the owner), 068's "service account" owner and its "4xx"
+   refusals (they are 500s), 035's dependency annotation. **Seven instances across the project now.**
+
+2. **A perturbation that fails ZERO tests is sometimes a PLACEMENT problem, not a coverage problem.**
+   Two of 029's five were invisible because the decisions lived inside `CreateTodoAsync`, a
+   substitution seam every endpoint test replaces. No test at any level could see them. Moving the
+   decisions onto a pure path made both bite (2 and 6). **When you cannot write a test that fails, ask
+   whether the decision is in a testable place.**
+
+3. **A validator stricter about FORM than the bug it hunts will miss the bug.** 029's ADR-024
+   one-parent guard matched `sprk_Regarding*` case-**sensitively**. Dataverse requires PascalCase — but
+   the guard exists to catch a *wrong* second bind, and a wrongly-cased one is the likeliest wrong
+   bind. This very file once held a lowercase `sprk_regardingproject@odata.bind`.
+
+4. **Never derive a schema name from a convention; verify with a query that SUCCEEDS.** `sprk_todo`'s
+   display-name column differs on every root (`sprk_projectname` / `sprk_mattername` / `sprk_name`) and
+   for two of three is **not** the `PrimaryNameAttribute` — reaching for the primary name returns a
+   case NUMBER, the only wrong answer that fails **silently** instead of 400ing.
+
+5. **A measured number AGES.** `sprk_todo` has 14 regarding lookups, not the 13 task 009 measured —
+   because another project added one the day after. **Task 009 was not wrong.** State the as-of date
+   beside every census number and re-measure rather than trusting it. Same hazard class as §10's
+   publish-size baseline.
+
+**Bonus, cheap and repeatedly useful:** a perturbation that does not compile (`if (false)`, a bare
+`throw;` orphaning `ex` under `--warnaserror`) must be **reshaped until it compiles, then counted** —
+three times this session. The compiler enforcing part of a contract is worth knowing and is **not**
+test coverage.
+
+---
+
+## ▶ NEXT SESSION — the efficient path through 25 open tasks
+
+**Reality check, stated plainly**: 25 tasks at the POMLs' own estimates is **~95–130 hours**, and
+**22 are `parallel-safe: false`** because they touch shared authorization paths. Parallelism cannot
+compress this much — session 5's wave found only **3 of 13** ready tasks were parallel-safe. Expect
+multiple sessions.
+
+**Chains** (nothing else unblocks a chain head):
+
+| Chain | Order | Note |
+|---|---|---|
+| **A — critical path** | 035 ✅ → **036** → 054 → 055 → 056 → 057/058 | ⚠️ **036 gated** — re-measure the NFR-04 canary first |
+| **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready now |
+| **C** | **042** → 043 → 044 | 042 ready now, **no environment dependency — best next task** |
+| Independent | **082** (6–10 h) · **093** (2–3 d) · **094** (1 d) · **095** (2–3 d) | |
+| Operator-gated | **047** — cannot complete without a live deploy (`Deploy BFF API` is `disabled_manually`) | |
+| Last | **090** wrap-up — runs `/test-diet` per CLAUDE.md §7 | |
+
+**The parallel-wave recipe that worked** (3 agents, 1 worktree, zero conflicts): verify **declared
+`<outputs>` do not overlap** — group labels are not enough — then forbid in EVERY agent prompt:
+`TASK-INDEX.md` / `current-task.md` edits, any `git` command, and solution-wide `dotnet build`/`test`.
+The main session does the authoritative build + suite + **ONE** commit. Tell agents MSB3026/3027 is
+contention, not a code error. **Both agents correctly refused to write their own status** — the drift
+checker gates POML-vs-index agreement, so an agent writing one side while the main session owns the
+other manufactures exactly the drift it detects.
+
+---
+
+## ⚠️ Residual risk carried forward (push-to-github gate 1.7)
+
+This branch changes **Dataverse query-path code** — 029's matter/work-assignment to-do list + create
+(new `@odata.bind` navigation properties, new `$filter` columns) and 035's impersonated root-set reads.
+**Every column and navigation property was verified against LIVE metadata**, and impersonated reads
+were exercised by hand against `spaarkedev1`.
+
+🔴 **But no real create+read smoke has been run through the new code paths.** No matter-parented to-do
+has actually been created against Dataverse. That is precisely the R4 `sprk_contact`-vs-OOB-`contact`
+failure class this gate exists for: metadata verification proves the names exist, not that the code
+composes them correctly end to end. **Recommend a real create+read against dev before merging #950.**
+
+---
+
+## Filed this session (all have GitHub Issues — `defer-issues.md` is current)
+
+| ID | Issue | What |
+|---|---|---|
+| ISS-002 | **#963** | External data plane truncates at `$top=200`, no `@odata.nextLink`, 4 call sites |
+| ISS-003 | **#964** | Workforce caller cannot PATCH a to-do on their own service request |
+| — | **#965** | ADR-044 raw GUIDs without `cleanGuid` in `CreateProjectWizard` (2 prior outages cited) |
+| — | **#966** | Hoist `IImpersonatedCommunicationQuery` to a neutral name (auth path imports a Communication type) |
+| — | **#967** | Secure-project owner team is a DEFAULT team (**downgraded**; guarded by NFR-05 clause 2) |
+
+⚠️ `defer-issues.md`'s rollup command `gh issue list --label unified-access-control-r2` **returns
+nothing** — that label does not exist and none of the issues carry it. Use
+`gh issue view 961 962 963 964 965 966 967`. Noted in the file rather than left looking functional.
+
+---
+---
+
+## 🗄️ HISTORICAL — superseded Quick Recovery (2026-09-07). NOT CURRENT — the live one is at the top of this file.
+
+> ⚠️ Demoted 2026-09-09 by `context-handoff`. This file has stacked stale "Quick Recovery" blocks
+> before — three of them at one point, and the **top** one was the stale one, which cost real work.
+> **There is exactly ONE current block and it is the first heading in this file.** Everything below
+> here is history, kept for its diff tables and decision records, not for its status claims.
 
 > ⚠️ **This file had THREE stacked "Quick Recovery" blocks**, and the top one was stale — it said
 > "Task 042 next" (it is 083) and "43 completed / 46 pending" (it is 53 / 37). Consolidated
