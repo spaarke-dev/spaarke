@@ -56,9 +56,11 @@ src/client/office-addins/
 │   ├── manifest.json                # Unified manifest (icons.color/outline)
 │   ├── taskpane/index.tsx           # mounts <App> with the Outlook adapter
 │   └── commands/                    # ribbon command surface (e.g. ?action=createTodo)
-├── word/
-│   ├── WordHostAdapter.ts           # document access + getFileAsync(Compressed) → .docx
+├── word/                            # no host adapter here: task 010 / FR-04 deleted the duplicate
+│   │                                # word/WordHostAdapter.ts; the single Word adapter now lives in
+│   │                                # shared/adapters/ and is reached via HostAdapterFactory
 │   ├── word-manifest.xml
+│   ├── manifest.json                # Unified manifest (task 011 / FR-05)
 │   └── taskpane/index.tsx           # mounts <App>, save-only (no nav)
 ├── shared/
 │   ├── adapters/                    # IHostAdapter contract + HostAdapterFactory + Outlook/Word impls
@@ -102,7 +104,7 @@ Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'
 - Assignee is a **Contact** typeahead via `GET /api/office/search/entities?type=Contact`. Priority/Effort choice→score mapping is mirrored add-in-side in `todoChoices.ts` (sanctioned duplicate of the wizard's score tables).
 
 ### Word real `.docx` save
-- `WordHostAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation).
+- `WordAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation). (Task 010 / FR-04 consolidated the two Word adapters onto `shared/adapters/WordAdapter.ts`, reached via `HostAdapterFactory`; `word/WordHostAdapter.ts` is deleted.)
 
 ### Save flow + "Related to" filing
 - `SaveFlow` / `RelatedToPicker` present auto-matched Matter/Project/Invoice candidates (with confidence) + inline "create new record" (`POST /api/office/quickcreate/{type}`) + green-check select; the chosen record becomes the `sprk_document` regarding.

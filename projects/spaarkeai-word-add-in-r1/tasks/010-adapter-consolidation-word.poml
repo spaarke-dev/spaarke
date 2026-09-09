@@ -4,7 +4,7 @@
     <title>FR-04: consolidate onto one Word adapter reached via HostAdapterFactory</title>
     <phase>1 Foundation</phase>
     <gate>006,007,008 complete — typecheck debt cleared in shared/adapters and word/** so a new error is visible</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx on the host-abstraction spine, activates dead infrastructure, and deletes a live adapter. Tags include frontend. A wrong ordering silently reintroduces the 2026-09-03 UAT defect.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -161,6 +161,41 @@
   </acceptance-criteria>
 
   <notes>
+    ---
+    **COMPLETED 2026-09-09.** Full record: `projects/spaarkeai-word-add-in-r1/notes/010-adapter-consolidation.md`.
+
+    Prescriptive order held: ported `getCompressedFile()` into `WordAdapter` -> registered both hosts ->
+    routed both panes through `createAndInitialize()` -> verified Outlook -> deleted `word/WordHostAdapter.ts`.
+
+    BYTE-IDENTICALITY PROVEN BY EXECUTION (not asserted): a throwaway differential harness ran BOTH
+    implementations in one process over the same byte source while the reference still existed. 36/36 pass.
+    26 real .docx from the corpus (all < 64 KB, so all single-slice) PLUS 7 synthetic PK-prefixed multi-slice
+    payloads (2, 5, 64, 65 slices; boundary +/-1) — the corpus alone would have left multi-slice assembly,
+    the actual risk, untested. Every case: Buffer.equals(reference)=true, equal to source bytes, SHA-256
+    equal, head 50 4b 03 04, identical ascending slice order, identical getFileAsync args, handle closed once.
+    A negative control records that equal LENGTH is not a proof — the full byte compare is what carries it.
+
+    Outlook gate PASSED before the deletion: OutlookAdapter.ts + its test file byte-untouched; the Outlook
+    suite is bit-identical before/after activation (18F/11P/29); a standing equivalence test asserts the
+    factory bootstrap yields the same constructor/host/item-type/initialized-state/capabilities as the old
+    direct construction. No escalation trigger fired.
+
+    Verification: production typecheck 0 and total 289 — BOTH exactly the pre-task baseline (net zero added);
+    `npm run build` (production) exit 0; WordAdapter 36/36; new HostAdapterFactory suite 14/14; zero
+    `WordHostAdapter` code references; zero `getOoxml` in WordAdapter; no MSAL added.
+
+    OPEN, CANNOT BE CLOSED BY THIS TASK: both panes now depend on `Office.context.host` via
+    `detectHostType()` — a property never previously exercised in production (the factory was dead). Chosen
+    deliberately over passing an explicit host type, which would have dodged the very risk R-4/trigger-3
+    names. Unit tests can only pin the failure SHAPE (undefined host -> typed INVALID_HOST). Must be closed
+    at deploy/UAT (task 042) on both hosts, desktop and web. If Outlook fails there, the fix is NOT a
+    host-sniffing fallback — see notes §6 for the two ADR-clean options.
+
+    Also surfaced, deliberately not fixed: OutlookAdapter.test.ts has 18 pre-existing failures that were
+    invisible until this task added `Office.MailboxEnums` to jest.setup.js (the suite previously crashed at
+    import and contributed 0 tests); and `outlook/OutlookHostAdapter.ts` is now the last dead adapter — the
+    same duplication shape this task just removed for Word (task 040 is the natural owner).
+
     spec.md FR-04. plan.md §3 finding F-e and §7 risk R-4 ("HostAdapterFactory activation surfaces latent breakage in Outlook").
     Parallel with task 011 in wave P1-a: 011 touches only `word/word-manifest.xml`, a new `word/manifest.json`, and `webpack.config.js`; this task touches adapters, taskpane entry points, tests and the module CLAUDE.md. The file sets are disjoint — no shared file, no shared symbol.
     This task is modify-only (it removes a component rather than adding one), so no `justification` block is required per CLAUDE.md §11.

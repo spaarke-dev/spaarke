@@ -176,7 +176,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 010 | FR-04: consolidate onto one Word adapter via `HostAdapterFactory` | 🔲 | FULL | opus / xhigh | P1-a | 006, 007, 008 |
+| 010 | FR-04: consolidate onto one Word adapter via `HostAdapterFactory` — ⚠️ **implementation complete + verified; ONE operator decision open (host-detection, notes §6c)** | ✅ | FULL | opus / xhigh | P1-a | 006, 007, 008 |
 | 011 | FR-05: migrate Word to the unified JSON manifest | 🔄 | STANDARD | sonnet / high | P1-a | none |
 | 012 | FR-01 server: document-identity resolver extending `/api/documents` — ⚠️ **gated on the Spike-1 §8 operator pass; re-scoped or optional if §7 is accepted** | 🔲 | FULL | opus / high | — | 002 |
 | 013 | FR-01 client: `getDocumentUrl` capability and identity threading | 🔲 | FULL | sonnet / high | — | 010, 012 |

@@ -7,10 +7,10 @@
 | **Task** | 010 — FR-04: consolidate onto one Word adapter reached via HostAdapterFactory |
 | **Task File** | `tasks/010-adapter-consolidation-word.poml` |
 | **Phase** | 1 Foundation |
-| **Status** | in-progress |
+| **Status** | complete — pending one operator decision (notes §6c) |
 | **Started** | 2026-09-09 |
 | **Rigor** | FULL · model-tier opus · effort xhigh · steps mode **PRESCRIPTIVE** |
-| **Next Action** | POML step 2 — permanent unit tests in WordAdapter.test.ts. (was: step 1 — port `getCompressedFile()` from `word/WordHostAdapter.ts:171-220` into `shared/adapters/WordAdapter.ts`, replacing the `body.getOoxml()` path at `:221-270`.) |
+| **Next Action** | 🔔 **OPERATOR DECISION REQUIRED** — host-detection option A / B / C, see `notes/010-adapter-consolidation.md` §6c. Implementation is complete and verified; both Step 9.5 gates passed (0 ADR violations) with this as the one open item. |
 
 ## Critical Context
 
@@ -58,3 +58,37 @@ Deleting before the Outlook verification is FORBIDDEN (removes the reference imp
 ## Decisions Made
 
 (none yet)
+
+## Steps 2-8 complete (2026-09-09)
+
+- [x] 2 Permanent .docx tests in `WordAdapter.test.ts` (8 new) + `setupWordCompressedFile` /
+      `createMockDocxBytes` in `shared/__mocks__/office-js.ts` + `Office.FileType` and
+      `Office.MailboxEnums` added to `jest.setup.js`. Also repaired two harness defects in
+      `WordAdapter.test.ts` (the `Word.run` mock discarded the callback's return value; the
+      `insertLink` escape test asserted an entity for a character absent from the input).
+- [x] 3 `registerAdapter('word', WordAdapter)` / `registerAdapter('outlook', OutlookAdapter)` at the
+      two entry points, before any `create()` call.
+- [x] 4 Both panes now `await HostAdapterFactory.createAndInitialize()` with NO host argument, so
+      `detectHostType()` is genuinely live (see Decisions).
+- [x] 5 OUTLOOK VERIFIED UNREGRESSED -> gate passed, proceeded to delete.
+- [x] 6 DELETED `word/WordHostAdapter.ts` + the throwaway parity harness. Zero code references remain.
+- [x] 7 `src/client/office-addins/CLAUDE.md` "Host abstraction" row updated; plus stale pointers in the
+      architecture doc, two e2e page objects, and `knowledge/sharepoint-embedded/NOTES.md`.
+- [x] 8 typecheck 289 total / 0 production (EXACTLY baseline); `npm run build` (production, with the 4
+      required env vars from `deploy-office-addins.yml`) exit 0; full jest run recorded.
+
+## Result deltas vs baseline
+
+| Metric | Baseline | After | Note |
+|---|---|---|---|
+| typecheck total | 289 | 289 | unchanged |
+| typecheck production | 0 | 0 | unchanged |
+| jest suites | 12F / 9P / 21 | 11F / 11P / 22 | WordAdapter F->P; +1 new factory suite (P) |
+| jest tests | 92F / 237P / 329 | 100F / 279P / 379 | decomposed below |
+
+Test delta fully decomposed (no unexplained movement):
+- WordAdapter suite: 29 -> 36 tests (+7 new .docx tests), 10 failures -> 0 (-10).
+- HostAdapterFactory suite: new, +14 tests, all passing.
+- OutlookAdapter suite: +29 tests newly REACHABLE (18F / 11P). That suite previously crashed at import
+  ("Cannot read properties of undefined (reading 'Importance')") and contributed 0 tests to the total.
+- Failures: -10 + 18 = +8. Tests: +7 + 14 + 29 = +50. Both match the observed numbers exactly.

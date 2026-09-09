@@ -1,7 +1,9 @@
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { App } from '@shared/taskpane';
-import { WordHostAdapter } from '../WordHostAdapter';
+import { HostAdapterFactory, isHostAdapterError } from '@shared/adapters';
+import type { IHostAdapter } from '@shared/adapters';
+import { WordAdapter } from '@shared/adapters/WordAdapter';
 import { authService, apiClient } from '@shared/services';
 
 // Version information - synced with word/manifest.json's "version" field
@@ -34,7 +36,16 @@ function renderError(error: Error | string, stage: string) {
   const container = document.getElementById('root');
   if (!container) return;
 
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  // Task 010 / FR-04: Stage 4 can now reject with a typed `HostAdapterError` — a PLAIN OBJECT
+  // `{ code, message }`, not an Error. Without this branch every factory failure (INVALID_HOST,
+  // API_NOT_AVAILABLE, unregistered host) rendered as the literal string "[object Object]", i.e. the
+  // one failure this change introduces would have been the one nobody could diagnose from the pane.
+  // (code-review W-1, 2026-09-09.)
+  const errorMessage = isHostAdapterError(error)
+    ? `${error.code}: ${error.message}`
+    : error instanceof Error
+      ? error.message
+      : String(error);
 
   container.innerHTML = `
     <div style="padding: 20px; font-family: 'Segoe UI', sans-serif; height: 100%; box-sizing: border-box;">
@@ -123,12 +134,26 @@ async function init() {
     throw error;
   }
 
-  // Stage 4: Create host adapter
+  // Stage 4: Create host adapter via the factory (task 010 / FR-04).
+  //
+  // The adapter is no longer `new`ed here. `HostAdapterFactory` was dead infrastructure —
+  // `registerAdapter()` had zero call sites, so the registry was empty and `create()` always threw
+  // INVALID_HOST while both task panes bypassed it. Registration MUST happen before any
+  // `create()`/`createAndInitialize()` call in this entry point.
+  //
+  // There is now exactly ONE Word adapter: `shared/adapters/WordAdapter`, carrying the
+  // `getFileAsync(Compressed)` .docx extraction that UAT proved correct on 2026-09-03. The duplicate
+  // `word/WordHostAdapter.ts` is deleted.
   console.log('[Spaarke] Stage 4: Creating host adapter...');
-  let hostAdapter: WordHostAdapter;
+  let hostAdapter: IHostAdapter;
   try {
-    hostAdapter = new WordHostAdapter();
-    console.log('[Spaarke] Host adapter created');
+    HostAdapterFactory.registerAdapter('word', WordAdapter);
+    // No explicit host argument: the factory's own `detectHostType()` runs. Passing 'word' here
+    // would work, but it would leave detection dead in production and silently dodge the very
+    // host-detection risk this activation exists to surface (plan.md R-4). A detection failure
+    // raises a typed INVALID_HOST / API_NOT_AVAILABLE that the catch below renders visibly.
+    hostAdapter = await HostAdapterFactory.createAndInitialize();
+    console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
     throw error;

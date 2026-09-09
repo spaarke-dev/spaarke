@@ -375,6 +375,133 @@ export function createMockWordContext(): MockWordContext {
 }
 
 /**
+ * Observations recorded by {@link setupWordCompressedFile} so a test can assert HOW the .docx was read,
+ * not just what came back.
+ */
+export interface MockWordFileHandle {
+  /** Slice indexes in the order `getSliceAsync` was actually called. */
+  sliceOrder: number[];
+  /** How many times `closeAsync` ran. Must be exactly 1 on both success and failure. */
+  closeCount: number;
+  /** The `(fileType, options)` pairs `getFileAsync` was invoked with. */
+  getFileAsyncCalls: Array<{ fileType: unknown; options: unknown }>;
+  /** Slice count the mocked handle advertises. */
+  sliceCount: number;
+}
+
+/**
+ * Mock `Office.context.document.getFileAsync(Office.FileType.Compressed, ...)` over a byte payload,
+ * chunked exactly the way Office chunks a real file.
+ *
+ * Task 010 / FR-04: the Word save path extracts the real .docx binary through this Common API rather
+ * than `body.getOoxml()` (which returned flat OOXML XML and broke SPE preview + AI extraction — UAT
+ * 2026-09-03). Tests of that path need the slice protocol, not a `Word.run` mock.
+ *
+ * @param bytes - The payload the mocked document should yield.
+ * @param options.sliceSize - Bytes per slice. Defaults to 65536, matching the adapter's request.
+ * @param options.failSliceIndex - When set, that slice read reports `Failed` instead of succeeding.
+ * @param options.failGetFile - When true, `getFileAsync` itself reports `Failed`.
+ * @param options.dataAsNumberArray - Serve each slice as a plain `number[]` instead of a
+ *   `Uint8Array`. Some Office hosts do exactly this, which is why the adapter carries a
+ *   `data instanceof Uint8Array ? data : Uint8Array.from(data)` coercion. Without this option that
+ *   branch is never exercised. (code-review S-1, 2026-09-09.)
+ * @returns A handle recording slice order, close count, and the getFileAsync arguments.
+ *
+ * NOTE: this REPLACES `global.Office.context` wholesale and does not restore it. jest's
+ * `clearMocks`/`restoreMocks` do not undo a replaced global object, so a suite that calls this should
+ * snapshot and restore `Office.context` in `afterEach` (see `HostAdapterFactory.test.ts`) or call it in
+ * every test that depends on the context. (adr-check W-7, 2026-09-09.)
+ */
+export function setupWordCompressedFile(
+  bytes: Uint8Array,
+  options: {
+    sliceSize?: number;
+    failSliceIndex?: number;
+    failGetFile?: boolean;
+    dataAsNumberArray?: boolean;
+  } = {}
+): MockWordFileHandle {
+  const sliceSize = options.sliceSize ?? 65536;
+  const sliceCount = Math.max(1, Math.ceil(bytes.length / sliceSize));
+
+  const handle: MockWordFileHandle = {
+    sliceOrder: [],
+    closeCount: 0,
+    getFileAsyncCalls: [],
+    sliceCount,
+  };
+
+  const file = {
+    size: bytes.length,
+    sliceCount,
+    getSliceAsync: (index: number, callback: (result: unknown) => void) => {
+      handle.sliceOrder.push(index);
+      if (options.failSliceIndex === index) {
+        callback({
+          status: Office.AsyncResultStatus.Failed,
+          error: { message: `Mocked failure reading slice ${index}.` },
+          value: undefined,
+        });
+        return;
+      }
+      const start = index * sliceSize;
+      const data = bytes.slice(start, Math.min(start + sliceSize, bytes.length));
+      const payload = options.dataAsNumberArray ? Array.from(data) : data;
+      callback({
+        status: Office.AsyncResultStatus.Succeeded,
+        value: { index, size: data.length, data: payload },
+        error: null,
+      });
+    },
+    closeAsync: (callback: () => void) => {
+      handle.closeCount += 1;
+      callback();
+    },
+  };
+
+  (global.Office as unknown as Record<string, unknown>).context = {
+    ...global.Office.context,
+    requirements: { isSetSupported: jest.fn().mockReturnValue(true) },
+    document: {
+      getFileAsync: (fileType: unknown, opts: unknown, callback: (result: unknown) => void) => {
+        handle.getFileAsyncCalls.push({ fileType, options: opts });
+        if (options.failGetFile) {
+          callback({
+            status: Office.AsyncResultStatus.Failed,
+            error: { message: 'Mocked getFileAsync failure.' },
+            value: undefined,
+          });
+          return;
+        }
+        callback({ status: Office.AsyncResultStatus.Succeeded, value: file, error: null });
+      },
+    },
+  };
+
+  return handle;
+}
+
+/**
+ * Build a deterministic payload that begins with the PK local-file-header signature
+ * (0x50 0x4B 0x03 0x04) — the shape a real .docx has on the wire. Content past the signature is a
+ * fixed LCG sequence so every byte position is distinguishable and an out-of-order assembly cannot
+ * accidentally compare equal.
+ */
+export function createMockDocxBytes(length: number): Uint8Array {
+  const out = new Uint8Array(length);
+  out[0] = 0x50;
+  out[1] = 0x4b;
+  out[2] = 0x03;
+  out[3] = 0x04;
+  let x = 0x12345678;
+  for (let i = 4; i < length; i++) {
+    x = (x * 1103515245 + 12345) & 0x7fffffff;
+    out[i] = (x >>> 16) & 0xff;
+  }
+  return out;
+}
+
+/**
  * Setup mock dialog display.
  */
 export function setupMockDialog(onDisplayDialog?: (result: { value: MockDialog }) => void): MockDialog {

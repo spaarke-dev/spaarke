@@ -16,7 +16,7 @@ React 18 + Fluent UI v9 **task-pane add-ins** for **Outlook** and **Word**, host
 |---|---|
 | The shell composition (tabs, auth gate, save→createTodo wiring) | `shared/taskpane/App.tsx` |
 | Host mounts | `outlook/taskpane/index.tsx` · `word/taskpane/index.tsx` |
-| Host abstraction (Outlook vs Word) | `shared/adapters/IHostAdapter.ts` + `HostAdapterFactory.ts`; `outlook/OutlookHostAdapter.ts`, `word/WordHostAdapter.ts` |
+| Host abstraction (Outlook vs Word) | `shared/adapters/IHostAdapter.ts` + `HostAdapterFactory.ts`; the two live adapters are `shared/adapters/WordAdapter.ts` and `shared/adapters/OutlookAdapter.ts`, each **registered with and constructed by the factory** at its task-pane entry point (task 010 / FR-04) |
 | **Auth** | `shared/services/AuthService.ts` (thin wrapper) → `@spaarke/auth` `OfficeNaaStrategy` (`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`) |
 | Save flow | `components/views/SaveView.tsx` + `hooks/useSaveFlow.ts` + `components/SaveFlow.tsx` + `components/RelatedToPicker.tsx` |
 | Create To Do | `components/views/CreateTodoView.tsx` (form) + `App.tsx` `handleCreateTodo` (`POST /api/office/todo`) + `services/todoChoices.ts` |

@@ -5,6 +5,7 @@
  */
 
 import { WordAdapter } from '../WordAdapter';
+import { setupWordCompressedFile, createMockDocxBytes } from '@shared/__mocks__/office-js';
 
 // Mock Word.run
 const mockWordBody = {
@@ -38,9 +39,13 @@ const mockWordContext = {
 };
 
 // Set up global Word mock
+// NOTE (task 010): this mock previously did `await callback(ctx);` and returned `undefined`, so
+// every `Word.run`-based adapter method resolved `undefined` and 9 tests in this file failed for a
+// harness reason rather than a product reason. `Word.run` resolves with whatever its callback
+// returns, so the mock must too.
 (global as unknown as Record<string, unknown>).Word = {
-  run: jest.fn(async (callback: (context: typeof mockWordContext) => Promise<void>) => {
-    await callback(mockWordContext);
+  run: jest.fn(async (callback: (context: typeof mockWordContext) => Promise<unknown>) => {
+    return await callback(mockWordContext);
   }),
   InsertLocation: {
     replace: 'Replace',
@@ -183,14 +188,108 @@ describe('WordAdapter', () => {
       });
     });
 
-    describe('getDocumentContent', () => {
-      it('should return OOXML by default', async () => {
-        const content = await adapter.getDocumentContent();
+    describe('getDocumentContent — .docx binary path (FR-04)', () => {
+      // The default/'ooxml' format returns the REAL .docx package via
+      // Office.context.document.getFileAsync(Compressed) slice assembly. It must NOT go through
+      // body.getOoxml(), which yields flat OOXML XML: not a valid .docx, so SPE could not preview it
+      // and AI profiling reported "unsupported file type" (UAT 2026-09-03).
 
-        expect(content.byteLength).toBeGreaterThan(0);
-        expect(mockWordBody.getOoxml).toHaveBeenCalled();
+      it('assembles multiple slices in order into the concatenated buffer', async () => {
+        const source = createMockDocxBytes(65536 * 2 + 1234); // 3 slices, partial tail
+        const handle = setupWordCompressedFile(source);
+
+        const content = await adapter.getDocumentContent();
+        const out = new Uint8Array(content);
+
+        expect(handle.sliceOrder).toEqual([0, 1, 2]);
+        expect(out.byteLength).toBe(source.byteLength);
+        expect(Array.from(out)).toEqual(Array.from(source));
       });
 
+      it('handles a single-slice document', async () => {
+        const source = createMockDocxBytes(4096);
+        const handle = setupWordCompressedFile(source);
+
+        const out = new Uint8Array(await adapter.getDocumentContent());
+
+        expect(handle.sliceCount).toBe(1);
+        expect(handle.sliceOrder).toEqual([0]);
+        expect(out.byteLength).toBe(4096);
+        expect(Array.from(out)).toEqual(Array.from(source));
+      });
+
+      it('returns a buffer beginning with the PK zip signature 0x50 0x4B 0x03 0x04', async () => {
+        setupWordCompressedFile(createMockDocxBytes(65536 * 2));
+
+        const out = new Uint8Array(await adapter.getDocumentContent());
+
+        expect(Array.from(out.subarray(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+      });
+
+      it('requests Compressed with a 65536-byte slice size', async () => {
+        const handle = setupWordCompressedFile(createMockDocxBytes(1024));
+
+        await adapter.getDocumentContent();
+
+        expect(handle.getFileAsyncCalls).toHaveLength(1);
+        // Assert against the Office enum itself, not the mock's string constant — otherwise this
+        // couples to jest.setup.js rather than to Office. (code-review S-2, 2026-09-09.)
+        expect(handle.getFileAsyncCalls[0]).toEqual({
+          fileType: Office.FileType.Compressed,
+          options: { sliceSize: 65536 },
+        });
+      });
+
+      it('never falls back to body.getOoxml() for the default format', async () => {
+        setupWordCompressedFile(createMockDocxBytes(2048));
+
+        await adapter.getDocumentContent();
+
+        expect(mockWordBody.getOoxml).not.toHaveBeenCalled();
+      });
+
+      it('surfaces CONTENT_RETRIEVAL_FAILED and still closes the handle when a slice read fails', async () => {
+        const handle = setupWordCompressedFile(createMockDocxBytes(65536 * 3), { failSliceIndex: 1 });
+
+        await expect(adapter.getDocumentContent()).rejects.toMatchObject({
+          code: 'CONTENT_RETRIEVAL_FAILED',
+        });
+
+        expect(handle.closeCount).toBe(1);
+        expect(handle.sliceOrder).toEqual([0, 1]); // stopped at the failure, did not read slice 2
+      });
+
+      it('surfaces CONTENT_RETRIEVAL_FAILED when getFileAsync itself fails', async () => {
+        const handle = setupWordCompressedFile(createMockDocxBytes(1024), { failGetFile: true });
+
+        await expect(adapter.getDocumentContent()).rejects.toMatchObject({
+          code: 'CONTENT_RETRIEVAL_FAILED',
+        });
+
+        expect(handle.sliceOrder).toEqual([]);
+      });
+
+      it('coerces slices delivered as a plain number[] (some hosts do this)', async () => {
+        const source = createMockDocxBytes(65536 + 512); // 2 slices, partial tail
+        setupWordCompressedFile(source, { dataAsNumberArray: true });
+
+        const out = new Uint8Array(await adapter.getDocumentContent());
+
+        expect(out.byteLength).toBe(source.byteLength);
+        expect(Array.from(out)).toEqual(Array.from(source));
+        expect(Array.from(out.subarray(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+      });
+
+      it('closes the handle on the success path too', async () => {
+        const handle = setupWordCompressedFile(createMockDocxBytes(65536 + 1));
+
+        await adapter.getDocumentContent();
+
+        expect(handle.closeCount).toBe(1);
+      });
+    });
+
+    describe('getDocumentContent — body-scoped formats', () => {
       it('should return HTML when requested', async () => {
         const content = await adapter.getDocumentContent({ format: 'html' });
 
@@ -225,13 +324,15 @@ describe('WordAdapter', () => {
       });
 
       it('should escape HTML in URL and display text', async () => {
-        await adapter.insertLink('https://example.com?a=1&b=2', 'Test <script>');
+        await adapter.insertLink('https://example.com?a=1&b=2', "Test <script> 'quoted'");
 
         const callArgs = mockWordSelection.insertHtml.mock.calls[0];
         const htmlContent = callArgs[0];
 
-        expect(htmlContent).toContain('&amp;');
-        expect(htmlContent).toContain('&#39;');
+        expect(htmlContent).toContain('&amp;'); // & in the URL
+        expect(htmlContent).toContain('&lt;script&gt;'); // angle brackets in the display text
+        expect(htmlContent).toContain('&#39;'); // apostrophes in the display text
+        expect(htmlContent).not.toContain('<script>');
       });
 
       it('should use URL as display text when not provided', async () => {

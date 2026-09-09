@@ -3,6 +3,8 @@ import { createRoot, Root } from 'react-dom/client';
 import type { AccountInfo } from '@azure/msal-browser';
 import { App } from '@shared/taskpane';
 import type { SavedTodoContext } from '@shared/taskpane/components/views/CreateTodoView';
+import { HostAdapterFactory, isHostAdapterError } from '@shared/adapters';
+import type { IHostAdapter } from '@shared/adapters';
 import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
@@ -120,7 +122,16 @@ function renderError(error: Error | string, stage: string) {
   const container = document.getElementById('root');
   if (!container) return;
 
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  // Task 010 / FR-04: Stage 4 can now reject with a typed `HostAdapterError` — a PLAIN OBJECT
+  // `{ code, message }`, not an Error. Without this branch every factory failure (INVALID_HOST,
+  // API_NOT_AVAILABLE, unregistered host) rendered as the literal string "[object Object]", i.e. the
+  // one failure this change introduces would have been the one nobody could diagnose from the pane.
+  // (code-review W-1, 2026-09-09.)
+  const errorMessage = isHostAdapterError(error)
+    ? `${error.code}: ${error.message}`
+    : error instanceof Error
+      ? error.message
+      : String(error);
 
   container.innerHTML = `
     <div style="padding: 20px; font-family: 'Segoe UI', sans-serif; height: 100%; box-sizing: border-box;">
@@ -214,13 +225,26 @@ async function init() {
     throw error;
   }
 
-  // Stage 4: Create host adapter
+  // Stage 4: Create host adapter via the factory (task 010 / FR-04).
+  //
+  // `createAndInitialize()` constructs the registered class and awaits `initialize()`, so the ADAPTER
+  // it hands back is the same `OutlookAdapter`, initialized the same way, as the previous
+  // `new OutlookAdapter()` + `await initialize()` (pinned by the equivalence test in
+  // `shared/adapters/__tests__/HostAdapterFactory.test.ts`).
+  //
+  // It is NOT behaviourally identical END TO END: the factory runs `detectHostType()` and a registry
+  // lookup BEFORE construction, adding two pre-initialize failure modes this pane did not have before
+  // (INVALID_HOST from an unrecognized/absent `Office.context.host`, and INVALID_HOST from an
+  // unregistered host). Both are typed and rendered by `renderError` above. See
+  // `projects/spaarkeai-word-add-in-r1/notes/010-adapter-consolidation.md` §6. (code-review C-2.)
+  //
+  // Registration MUST happen before any `create()`/`createAndInitialize()` call in this entry point.
   console.log('[Spaarke] Stage 4: Creating host adapter...');
-  let hostAdapter: OutlookAdapter;
+  let hostAdapter: IHostAdapter;
   try {
-    hostAdapter = new OutlookAdapter();
-    // Initialize the adapter (connects to Office.js)
-    await hostAdapter.initialize();
+    HostAdapterFactory.registerAdapter('outlook', OutlookAdapter);
+    // No explicit host argument — see the equivalent note in word/taskpane/index.tsx.
+    hostAdapter = await HostAdapterFactory.createAndInitialize();
     console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
