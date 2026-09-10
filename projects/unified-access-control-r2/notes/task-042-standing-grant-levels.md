@@ -233,3 +233,56 @@ to matter.
 
 Effect here was limited to log wording (an absent org attribute means "not set", not "FLS stripped it")
 and nothing about the fail direction.
+
+---
+
+## 7. ✅ The §6.6 FLS finding — CLOSED as mitigated, with the evidence
+
+**Owner, 2026-09-10:** *"users will not have edit rights to the Org entity (or Account or Contact), can
+not change access rights."*
+
+That is a claim about a security control, so it was verified against live role privileges rather than
+accepted. **It holds for organizations, and is more nuanced for contact — in a way that is still safe.**
+
+### What the live roles actually grant
+
+8 enabled interactive users. Roles directly assigned across them: `System Administrator` (the owner),
+`Spaarke Basic User`, `Spaarke AI Analysis User`, `Spaarke Office Add In User`,
+`Spaarke Reporting Access Viewer`.
+
+| Role | `sprk_organization` | `account` | `contact` |
+|---|---|---|---|
+| Spaarke Basic User | **none** | Write + Create (depth 1) | **Write + Create (depth 1)** |
+| Spaarke Office Add In User | **none** | Write + Create (depth 1) | **Write + Create (depth 1)** |
+| Spaarke AI Analysis User | none | none | none |
+| Spaarke Reporting Access Viewer | none | none | none |
+
+### Verdict
+
+**Organizations: the finding is mitigated.** No non-admin role holds `prvWritesprk_organization` at
+all, so the missing FLS on `sprk_organization.sprk_standinggrant` is moot — nobody can write the entity
+to reach the field. Entity-level security is doing the job field-level security does on contact.
+
+**Contact: entity Write DOES exist for ordinary users** (own records, depth 1) — so the owner's
+statement is too strong there. It does not matter, because the protection on contact is the FLS on the
+**flag**:
+
+- `contact.sprk_standinggrant` — **`IsSecured = True`**. An ordinary user cannot set it without the
+  Field Security Profile (register E-7).
+- `contact.sprk_accesspermissiongrant` — `IsSecured = False`, so a user with Write on their own contact
+  *can* set the baseline. **This confers nothing**, because the flag is the gate and the baseline is
+  only its magnitude.
+
+That last sentence is not an assumption — it is asserted by
+`ReadForContactAsync_WhenBaselineSetButFlagFalse_ConfersNothing`, written as a "load-bearing negative"
+before this verification happened. It turns out to be the test that makes the unprotected baseline
+safe, which is a good argument for writing that class of negative even when it looks obvious.
+
+### The durable residual
+
+The org mitigation is **entity-level, not field-level**, so it is only as strong as the role
+configuration. If any role ever gains write on `sprk_organization` for a legitimate reason, the
+standing-grant flag becomes writable **with no field-level guard** — unlike contact, which would still
+be protected. Task **043** consumes that field, so the cheap hedge is to add FLS to
+`sprk_organization.sprk_standinggrant` and match contact's posture. Not doing it now; recorded so the
+decision is deliberate rather than forgotten.
