@@ -241,7 +241,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 040 | FR-19: Outlook parity pass and capability-gating audit | 🔲 | FULL | sonnet / high | — | 033, 035, 036 |
 | 041 | NFR-09: per-env Entra SPA redirects + deploy-workflow trigger | 🔲 | STANDARD | opus / high | — | 011 |
 | 042 | Deploy the add-in and BFF; run UAT against the acceptance set | 🔲 | STANDARD | sonnet / high | — | 040, 041 |
-| 043 | CI gate for the office-addins jest suite (runs nightly, **cannot fail a PR**) | 🔲 | FULL | opus / high | — | 010, 018 |
+| 043 | CI gate for the office-addins jest suite (runs nightly, **cannot fail a PR**) | ✅ | FULL | opus / high | `notes/043-office-addins-ci-gate.md` | 010, 018 |
 | 044 | 🔴 **ISS-002**: diagnose the shadow-window FALSE GREEN (PR #934) | ✅ | FULL | **opus / xhigh** | `notes/044-false-green-diagnosis.md` | none |
 | 090 | Project wrap-up, lessons learned, `/test-diet` gate | 🔲 | MINIMAL | sonnet / medium | — | 042 |
 

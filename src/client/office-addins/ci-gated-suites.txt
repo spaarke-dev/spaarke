@@ -1,0 +1,79 @@
+# ============================================================================
+# Gated jest suites — office-addins PR gate
+# ============================================================================
+# Consumed by: .github/workflows/office-addins-tests.yml
+#
+# WHAT THIS FILE IS
+# -----------------
+# The ALLOW-LIST of jest suites in this package that a pull request MUST keep
+# green. Every path below is run by `npm test -- --runTestsByPath` on any PR
+# that touches this package. If one of them goes red, the PR is blocked.
+#
+# WHY AN ALLOW-LIST AND NOT THE WHOLE SUITE
+# -----------------------------------------
+# As of 2026-09-10 this package is 12 of 22 suites green (164 of 380 tests).
+# The other 10 fail on pre-existing mock/assertion defects that predate this
+# gate and are nobody's PR to fix. Gating the whole suite would have been red
+# on the day it was created, which trains people to ignore it — strictly worse
+# than no gate. So the gate starts at the green line and ratchets upward.
+#
+# NOTHING IS SKIPPED OR DELETED TO ACHIEVE THIS (ADR-038). The 10 red suites
+# still run, unchanged, every night in `.github/workflows/client-tests.yml`,
+# which reports this package's full pass/fail table. This file only decides
+# what BLOCKS A MERGE; it does not decide what runs.
+#
+# HOW TO PROMOTE A SUITE INTO THE GATE (the ratchet)
+# --------------------------------------------------
+# When the nightly Client Tests (Jest) baseline shows one of the 10 green,
+# add its path here in the same PR that fixed it. The list only grows. The
+# end state is every suite in this package listed here, at which point this
+# file can be replaced by a plain full-suite run.
+#
+# The gate FAILS if any path below no longer exists. That is deliberate: it
+# means a gated test file cannot be renamed away or deleted silently, and it
+# is the mechanism that stops "make the gate green by removing the test".
+#
+# Paths are relative to this package root. `#` comments and blank lines OK.
+#
+# STABILITY EVIDENCE (2026-09-10, projects/spaarkeai-word-add-in-r1/notes/
+# 043-office-addins-ci-gate.md): three consecutive runs of exactly this list
+# produced byte-identical per-test results (12/12 suites, 164/164 tests), and
+# a fourth run on a from-scratch `npm install` tree also passed 164/164. The
+# documented run-to-run count drift in this package lives in the 10 red RTL
+# suites, which bail at different points under load; none of it is here.
+# ============================================================================
+
+# --- the .docx binary save path (task 010 / the 2026-09-03 UAT defect) ------
+# WordAdapter.test.ts holds the guards that keep `getDocumentContent()` on
+# `getFileAsync(Office.FileType.Compressed)` slice assembly and OFF
+# `body.getOoxml()`: multi-slice ordering, the 50 4b 03 04 zip signature, the
+# 65536-byte sliceSize, "never falls back to body.getOoxml()", and handle
+# close on both the success and failure paths.
+shared/adapters/__tests__/WordAdapter.test.ts
+shared/adapters/__tests__/HostAdapterFactory.test.ts
+
+# --- accessibility regression (task 018) ------------------------------------
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts
+
+# --- remaining green suites -------------------------------------------------
+shared/taskpane/components/__tests__/LinkedTodosBanner.test.tsx
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx
+shared/taskpane/hooks/__tests__/useCreateTodoFromEmail.test.ts
+shared/taskpane/hooks/__tests__/useLinkedTodosForCommunication.test.ts
+shared/taskpane/hooks/__tests__/useTheme.test.ts
+shared/taskpane/services/__tests__/communicationLookupService.test.ts
+shared/taskpane/services/__tests__/communicationSuggestionsService.test.ts
+shared/taskpane/services/__tests__/createTodoLauncher.test.ts
+shared/taskpane/services/__tests__/quickSaveHelpers.test.ts
+
+# --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
+# shared/adapters/__tests__/OutlookAdapter.test.ts               11/29
+# shared/services/__tests__/ApiClient.test.ts                    19/20
+# shared/taskpane/components/__tests__/EntityPicker.test.tsx      28/32
+# shared/taskpane/components/__tests__/SaveFlow.test.tsx          16/25
+# shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx 6/7
+# shared/taskpane/components/__tests__/TaskPaneShell.test.tsx      5/10
+# shared/taskpane/components/views/__tests__/SaveView.test.tsx     4/26
+# shared/taskpane/components/views/__tests__/ShareView.test.tsx    4/20
+# shared/taskpane/hooks/__tests__/useEntitySearch.test.ts         20/21
+# shared/taskpane/hooks/__tests__/useSaveFlow.test.ts             19/26

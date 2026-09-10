@@ -4,7 +4,7 @@
     <title>Make the office-addins jest suite gate a PR (it runs nightly and can never block)</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies CI workflow configuration. Tags include `ci-workflows`, a hot-path surface per root CLAUDE.md §17 — `/conflict-check` applies, and the tier files are under an active freeze.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,4 +81,32 @@
     <output type="config">.github/workflows/</output>
     <output type="doc">projects/spaarkeai-word-add-in-r1/notes/043-office-addins-ci-gate.md</output>
   </outputs>
+  <notes>
+    Completed 2026-09-10. Added `.github/workflows/office-addins-tests.yml` (narrow, path-filtered,
+    PR-blocking) + `src/client/office-addins/ci-gated-suites.txt` (the ratcheting allow-list).
+    No existing file modified: the three frozen tier files, `sdap-ci.yml` and `client-tests.yml` are
+    byte-identical to HEAD and origin/master. Shadow-window cost: 0 PRs, 0 days.
+
+    EXTEND-vs-NEW: new workflow. Extending `client-tests.yml` would have required a `pull_request`
+    trigger (fires all 40 packages per PR — the exact contention its header rejects) or per-leg
+    conditional blocking (falsifies its "advisory by construction" invariant), and its header names a
+    promotion gate — shadow window closed AND baseline green — that is not met. `css-reset-gate.yml`
+    is the existing narrow-gate pattern this follows.
+
+    THE 10 RED SUITES: not absorbed (escalation trigger 2 handled per its own instruction — scope
+    reported in notes §8 F-2). The gate is an ALLOW-LIST of the 12 green suites (164 tests), including
+    both target surfaces — WordAdapter 37/37 (the .docx binary path) and useAnnounce 19/19. Nothing is
+    deleted or skipped (ADR-038); all 22 still run nightly in `client-tests.yml`, which is now the
+    promotion signal. The manifest step FAILS if a gated test file disappears.
+
+    PROVEN: green in 5 runs incl. a from-scratch `npm install` tree (12/12, 164/164, exit 0), per-test
+    identical across 3 runs (no flakiness — trigger 3 did not fire; the documented drift lives in the
+    ungated RTL suites). Proven able to FAIL: re-seeding the 2026-09-03 UAT defect gives exit 1 with 9
+    failures incl. "never falls back to body.getOoxml()"; renaming a gated test gives manifest exit 1.
+    actionlint 1.7.7 clean on the new file and repo-wide.
+
+    Escalation triggers 1, 2, 3: none fired. Findings surfaced not absorbed — notes §8 F-1..F-6,
+    including a path-filter hole in `deploy-office-addins.yml` (provenance.ts ships but does not
+    trigger a deploy).
+  </notes>
 </task>

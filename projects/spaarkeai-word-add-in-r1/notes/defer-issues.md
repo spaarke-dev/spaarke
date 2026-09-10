@@ -262,3 +262,49 @@ change does not belong inside a security fix — the same call `RecordSearchEndp
 (five hardcoded relationship queries at `TopCount = 50` each).
 
 </details>
+
+---
+
+### D-043-1 — `deploy-office-addins.yml` path filter misses a file the add-ins ship
+
+**Found by** task 043 while path-filtering the new office-addins CI gate.
+**Owner**: whoever next touches `.github/workflows/deploy-office-addins.yml`. One-line change.
+
+`src/client/office-addins/webpack.config.js:101` aliases
+`@spaarke/communication-components/logic/connections/provenance` at
+`src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts`, and
+`shared/taskpane/services/communicationSuggestionsService.ts:7` imports it. So that file is
+**bundled into the shipped add-ins**.
+
+`deploy-office-addins.yml` triggers only on `src/client/office-addins/**` and
+`src/client/shared/Spaarke.Auth/**`. Editing `provenance.ts` alone therefore changes the add-in's
+behaviour **without redeploying it** — the identical failure mode the `Spaarke.Auth` path was added
+to prevent, and its comment says so in as many words: *"Without this path the add-ins would keep
+deploying against a stale auth lib."*
+
+**Fix**: add `- 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'`
+to that workflow's `paths:`. `provenance.ts` has no imports of its own, so the exact file is the
+precise filter; no wildcard needed.
+
+**Not fixed in task 043, deliberately**: it is a different workflow with different blast radius
+(a deploy trigger, not a test gate), and widening someone else's deploy trigger is not a change to
+make as a side effect. The new gate `.github/workflows/office-addins-tests.yml` **does** carry the
+path, so the test side is already covered.
+
+Detail: `notes/043-office-addins-ci-gate.md` §8 F-1.
+
+---
+
+### D-043-2 — `identity-obj-proxy` is mapped by `jest.config.js` but is not a dependency
+
+**Found by** task 043 on a from-scratch `npm install` of `src/client/office-addins`.
+**Owner**: next person editing that package's test setup. One `devDependencies` line.
+
+`src/client/office-addins/jest.config.js` maps `\.(css|less|scss|sass)$` → `identity-obj-proxy`,
+which appears in neither `package.json` nor `package-lock.json`, and is not installed.
+
+Latent, not currently breaking: jest resolves `moduleNameMapper` targets lazily, and no suite in
+this package imports a stylesheet today — confirmed on a clean tree. The first CSS import added to
+the test graph will fail with a "could not locate module" error that says nothing about CSS.
+
+Detail: `notes/043-office-addins-ci-gate.md` §8 F-4.
