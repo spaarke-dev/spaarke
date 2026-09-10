@@ -1417,3 +1417,35 @@ question §19 raises for the `/shares` token, now visible inside the BFF's own c
 
 Every route above is **identity-by-location** and breaks when a file is renamed or moved. The FR-02 custom-XML
 stamp is identity-by-content and does not. Treat FR-01's URL path as the fast path and the stamp as primary.
+
+---
+
+## 21. Shape check result — 2026-09-10 (EMPIRICALLY VERIFIED)
+
+The operator ran the §20 shape check: the URL the **BFF itself** produces for the probed document via
+open-links (`ms-word:` prefix removed) —
+
+```
+https://spaarke.sharepoint.com/contentstorage/CSP_585db4c8-8043-4676-965e-c92e45f07221/Document%20Library/Examiner%20report%20draft.docx
+```
+
+against the §19 probe value from `Office.context.document.url` —
+
+```
+https://spaarke.sharepoint.com/contentstorage/CSP_585db4c8-8043-4676-965e-c92e45f07221/Document Library/Examiner report draft.docx
+```
+
+**Result: MATCH after percent-decoding.** Host, `contentstorage`, the `CSP_{guid}` container segment,
+`Document Library` and the filename are identical. The only difference is space encoding: the BFF emits
+`%20`, the host API returns raw spaces.
+
+What this proves:
+- `document.url` is exactly the canonical URL the BFF already resolves for that item, through the BFF's
+  own registered identity — so link 1's value is the right input for link 2, with no false-negative risk.
+- The §19 encoding question is real and has now been observed on both sides of the same item. Task 012
+  must normalise before building the `/shares` token and test both forms (see its SPIKE-1 criteria).
+
+**Host caveat — still open:** the §19 capture came from **Word on the web**. Spike-1's criterion is
+Word **desktop**, which has not yet been captured. Links 2 and 3 plus the desktop capture are moved into
+task 012 as its first acceptance criteria (2026-09-10); when they pass, this report's verdict moves from
+AMBER to GREEN.

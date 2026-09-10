@@ -135,6 +135,17 @@
     <criterion testable="true">Given a publish of this branch and a fresh publish of `origin/master`, when both are zipped with PowerShell `Compress-Archive`, then the delta is recorded in notes/ with both absolute sizes and the tool named, and the delta is under +5 MB.</criterion>
     <criterion testable="true">`dotnet build` succeeds, `dotnet test` passes for affected projects, and `dotnet list package --vulnerable --include-transitive` reports no new HIGH-severity CVE.</criterion>
     <criterion testable="true">The PR description contains an explicit Placement Justification citing `.claude/constraints/bff-extensions.md` decision criteria.</criterion>
+    <!-- ADDED 2026-09-10 — Spike-1's links 2 and 3 are moved into this task as its FIRST acceptance
+         criteria, by operator decision. They cannot be tested outside the BFF: only the owning app or an
+         app REGISTERED on the SPE container type can read container files
+         (docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md lines 115-116). So the spike proved what
+         it could without the BFF (link 1 live, link 4 from code) and hands the rest to the task that builds
+         the resolver. Evidence: notes/spikes/spike-1-document-url.md §19, §20, §21. -->
+    <criterion testable="true">SPIKE-1 LINK 2 — ENCODING. Using the URL `Office.context.document.url` returned live on 2026-09-10 — `https://spaarke.sharepoint.com/contentstorage/CSP_585db4c8-8043-4676-965e-c92e45f07221/Document Library/Examiner report draft.docx` (RAW spaces) — the sharing token is built and resolved BOTH from the raw form AND from the percent-encoded form (`Document%20Library/Examiner%20report%20draft.docx`, which is what the BFF's own open-links returns for the same item). Which form(s) Graph `/shares` resolves is recorded with the actual HTTP status and body, and the resolver normalises to a form that resolves. A 400/404 on one form is a finding about ENCODING, not evidence that SPE is unsupported.</criterion>
+    <criterion testable="true">SPIKE-1 LINK 2 — IDENTITY. The resolution above is exercised through the BFF's own app registration (the app registered on the SPE container type), never via `az` CLI or Graph Explorer. A 403 from an unregistered client is NOT evidence against the route and must not be recorded as one.</criterion>
+    <criterion testable="true">SPIKE-1 LINK 3. For the probed document, the resolved driveItem's `id` equals the stored `sprk_graphitemid` AND its `parentReference.driveId` equals the stored `sprk_graphdriveid`. Because the `sprk_graphitemid_uk` alternate key covers the item id ALONE (Spike-1 link 4; `DocumentVersionEndpoints.cs:59-61`), the drive id is compared caller-side with an explicit string comparison — a match on item id with a mismatched drive id is treated as NOT resolved.</criterion>
+    <criterion testable="true">SPIKE-1 DESKTOP. The resolver is proven against a `document.url` captured on Word DESKTOP as well as Word on the web (the 2026-09-10 capture was Word on the web). Both captured values are recorded in the spike report; any difference between them is handled, not assumed away.</criterion>
+    <criterion testable="false">When the four SPIKE-1 criteria above pass, task 002 / Spike-1's verdict in `notes/spikes/spike-1-document-url.md` is updated from AMBER to GREEN with the evidence cited.</criterion>
   </acceptance-criteria>
 
   <notes>
