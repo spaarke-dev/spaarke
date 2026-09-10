@@ -263,7 +263,7 @@ cannot express.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | ✅ **Closed 2026-09-10** — fixed by task 096 (`3570d24e4` + review follow-up); #970 closed |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-10 |
 | **Source** | FR-33 redesign (record-level expiry). Pre-existing; found while choosing an atomic write for it. |
@@ -302,6 +302,72 @@ system-wide, and have FR-33 **reuse** it via the `IDataverseService` ExternalAcc
 existing callers want all-or-nothing, so the change helps them too. Runs `/conflict-check` first —
 `Spaarke.Dataverse` is a shared hot-path surface. See `notes/decisions/external-grant-expiry-mandatory.md` §12.2.
 **Related**: FR-33 redesign — `notes/decisions/external-grant-expiry-mandatory.md` §11.
+
+✅ **RESOLVED 2026-09-10 by task 096** (`3570d24e4` + its review follow-up). `BulkUpdateAsync` now sends ONE
+`ExecuteTransactionRequest`; signature unchanged; the failure message states only what is known. The review
+surfaced two adjacent defects, filed below as **ISS-006 (#971)** and **ISS-007 (#972)**. Details:
+`notes/task-096-bulkupdate-transactional.md`.
+
+---
+
+### ISS-006 — Singleton `ServiceClient` throws the client-wide `LastException` (concurrent requests can surface each other's errors)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-10 |
+| **Source** | Task 096 code review; verified against the `Microsoft.PowerPlatform.Dataverse.Client` 1.1.32 source. Not reproduced live. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/971 |
+
+**Description**
+
+`ServiceClient`'s async request paths end with `if (resp == null) throw LastException;`. `LastException`
+is a plain property on the client's single logger (not thread- or async-local), set by any failed call and
+cleared at the start of every call. The BFF registers `IDataverseService` as a **singleton**
+(`Infrastructure/DI/GraphModule.cs:47`), so a failed call can throw a **different concurrent request's
+exception**, or `throw null`.
+
+**Concrete failure mode**: wherever `DataverseServiceClientImpl` branches on exception text, a foreign
+exception changes behaviour. `AssociateAsync` treats "duplicate" / "already exists" as **idempotent
+success** — another request's duplicate error can turn a genuine association failure into a silent success.
+
+**Entry-points**
+
+- Every `DataverseServiceClientImpl` method; most acute at `AssociateAsync` (the duplicate/already-exists
+  filter) and `IsAlternateKeyDuplicate`.
+
+**Suggested fix**: check whether a later SDK release stores the failure per call (then bump); otherwise use
+a per-call client for paths that branch on exception content, or stop branching on exception text.
+
+**Estimated effort**: medium. **Blockers**: none.
+**Related**: ISS-005 / task 096 — worked around for `BulkUpdateAsync` only (it claims "no update was
+applied" only for an `ExecuteTransactionFault` naming an in-range request).
+
+---
+
+### ISS-007 — `WorkspaceLayoutService` writes a new default layout even when clearing the old defaults failed
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | low |
+| **Filed** | 2026-09-10 |
+| **Source** | Task 096 code review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/972 |
+
+**Description**
+
+`ClearUserDefaultsAsync` (`Services/Workspace/WorkspaceLayoutService.cs:944-953`) catches any exception
+from `BulkUpdateAsync`, logs it, and proceeds to write the new default. Since task 096 the clear is
+all-or-nothing, so a failure leaves **every** old default set — and the new default is written anyway:
+the user still has two defaults. Atomicity fixed the helper, not this caller's policy. (The FR-33 decision
+note §12.2 had cited "two defaults" as something the fix would resolve — corrected there.)
+
+**Suggested fix**: do not write the new default when the clear fails (propagate the error), or perform the
+clear and the new default in one transaction.
+
+**Estimated effort**: small. **Blockers**: none. **Related**: ISS-005 / task 096.
 
 ---
 

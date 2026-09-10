@@ -54,7 +54,7 @@ public class BulkUpdateTransactionTests
             "every row is an update inside the ONE transaction — nothing is sent outside it");
 
         var targets = transaction.Requests.Cast<UpdateRequest>().Select(r => r.Target).ToList();
-        targets.Select(t => t.Id).Should().ContainInOrder(FirstId, SecondId, ThirdId);
+        targets.Select(t => t.Id).Should().Equal(FirstId, SecondId, ThirdId);
         targets.Should().OnlyContain(t => t.LogicalName == Table);
         targets.Should().OnlyContain(t => (bool)t["sprk_isdefault"] == false);
     }
@@ -72,6 +72,22 @@ public class BulkUpdateTransactionTests
         var target = transaction.Requests.Cast<UpdateRequest>().Single().Target;
         target.Attributes.Keys.Should().BeEquivalentTo(["sprk_sendstoday"],
             "a null value is skipped, so the column it names is left untouched rather than cleared");
+    }
+
+    [Fact]
+    public void BuildBulkUpdateTransaction_WhenAFieldValueIsDBNull_ThrowsBeforeAnythingIsSent()
+    {
+        var updates = new List<(Guid id, Dictionary<string, object> fields)>
+        {
+            (FirstId, new Dictionary<string, object> { ["sprk_isdefault"] = false }),
+            (SecondId, new Dictionary<string, object> { ["sprk_name"] = DBNull.Value }),
+        };
+
+        var act = () => DataverseServiceClientImpl.BuildBulkUpdateTransaction(Table, updates);
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*index 1*sprk_name*UpdateAsync*",
+                "DBNull cannot be serialized here; failing fast avoids a misleading 'outcome unknown' error for a request never sent");
     }
 
     [Fact]
@@ -102,6 +118,24 @@ public class BulkUpdateTransactionTests
         message.Should().Contain("request index 2");
         message.Should().Contain(ThirdId.ToString());
         message.Should().Contain("NO updates were applied");
+    }
+
+    [Fact]
+    public void DescribeBulkUpdateFailure_WhenTheFaultDoesNotIdentifyARequest_SaysAllOrNoneWithoutClaimingNothingWasApplied()
+    {
+        // A plain OrganizationServiceFault (e.g. throttling, or the batch-size limit) names no request. The
+        // SDK throws the client-wide last error, so under concurrency it may even belong to another request —
+        // only the atomicity guarantee is safe to state.
+        var fault = new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { Message = "Number of requests exceeded the limit" },
+            new FaultReason("Number of requests exceeded the limit"));
+
+        var message = DataverseServiceClientImpl.DescribeBulkUpdateFailure(Table, ThreeRows(), fault);
+
+        message.Should().Contain("did not identify");
+        message.Should().Contain("Number of requests exceeded the limit");
+        message.Should().Contain("never a partial set");
+        message.Should().NotContain("NO updates were applied");
     }
 
     [Fact]

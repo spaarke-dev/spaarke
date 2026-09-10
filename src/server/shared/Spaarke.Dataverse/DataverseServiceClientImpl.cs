@@ -2309,15 +2309,20 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     }
 
     /// <summary>
-    /// Updates N records of ONE table in ONE round trip, <b>all-or-nothing</b> — see
+    /// Updates N records of ONE table in one request, <b>all-or-nothing</b> — see
     /// <see cref="IGenericEntityService.BulkUpdateAsync"/> for the full contract.
     /// </summary>
     /// <remarks>
-    /// Sends the single <c>ExecuteTransactionRequest</c> built by <see cref="BuildBulkUpdateTransaction"/>;
-    /// Dataverse rolls the whole transaction back if any update faults. Limits: at most 1,000 updates per
-    /// call, and the transaction cannot be nested inside an <c>ExecuteMultipleRequest</c>. Failures are
-    /// worded by <see cref="DescribeBulkUpdateFailure"/>. (Until 2026-09-10 this sent an
-    /// <c>ExecuteMultipleRequest</c>, which is NOT transactional — task 096, ISS-005 / #970.)
+    /// <para><b>Mechanism.</b> Sends the single <c>ExecuteTransactionRequest</c> built by
+    /// <see cref="BuildBulkUpdateTransaction"/> — one <c>UpdateRequest</c> per row, in input order. Dataverse
+    /// rolls the whole transaction back if any update faults. The SDK may retry the request on throttling.</para>
+    /// <para><b>Limits.</b> Keep each call to at most 1,000 updates (<c>ExecuteMultiple</c>'s documented batch
+    /// size; the transaction documentation states no figure of its own). An <c>ExecuteTransactionRequest</c>
+    /// cannot CONTAIN an <c>ExecuteMultiple</c> or another <c>ExecuteTransaction</c>.</para>
+    /// <para><b>Failure.</b> Worded by <see cref="DescribeBulkUpdateFailure"/>. Cancellation propagates as
+    /// <see cref="OperationCanceledException"/> rather than being wrapped.</para>
+    /// <para>Until 2026-09-10 this sent an <c>ExecuteMultipleRequest</c>, which is NOT transactional
+    /// (task 096, ISS-005 / #970).</para>
     /// </remarks>
     public async Task BulkUpdateAsync(
         string entityLogicalName,
@@ -2331,10 +2336,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         {
             await _serviceClient.ExecuteAsync(transaction, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var failure = DescribeBulkUpdateFailure(entityLogicalName, updates, ex);
-            _logger.LogError(ex, "[DATAVERSE] {BulkUpdateFailure}", failure);
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
+                updates.Count,
+                entityLogicalName,
+                failure);
             throw new InvalidOperationException(failure, ex);
         }
 
@@ -2347,7 +2357,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// <summary>
     /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
     /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
-    /// the fields supplied are written.
+    /// the fields supplied are written. <see cref="DBNull.Value"/> is rejected: it cannot be serialized here,
+    /// and failing before anything is sent avoids an "outcome unknown" error for a request that never left.
     ///
     /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
     /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
@@ -2370,12 +2381,24 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             ReturnResponses = false // no caller reads per-update responses
         };
 
-        foreach (var (id, fields) in updates)
+        for (var index = 0; index < updates.Count; index++)
         {
+            var (id, fields) = updates[index];
+            if (fields is null)
+                throw new ArgumentException($"The update at index {index} has no fields dictionary.", nameof(updates));
+
             var entity = new Entity(entityLogicalName, id);
 
             foreach (var field in fields)
             {
+                if (field.Value is DBNull)
+                {
+                    throw new ArgumentException(
+                        $"The update at index {index} sets '{field.Key}' to DBNull. BulkUpdateAsync cannot clear a " +
+                        "column; use UpdateAsync with DBNull.Value instead.",
+                        nameof(updates));
+                }
+
                 if (field.Value != null)
                 {
                     entity[field.Key] = field.Value;
@@ -2391,14 +2414,18 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// <summary>
     /// Pure wording of a <see cref="BulkUpdateAsync"/> failure. It states only what is actually known:
     /// <list type="bullet">
-    /// <item>A Dataverse fault means the transaction did not commit, so NO update was applied. When the
-    /// fault is an <see cref="ExecuteTransactionFault"/> it also names the failing request index and the
-    /// record at that index.</item>
-    /// <item>A failure with no Dataverse fault anywhere in the exception chain (e.g. a timeout) may have
-    /// happened after the commit, so the outcome is unknown — all or none, but not partial.</item>
+    /// <item>An <see cref="ExecuteTransactionFault"/> naming an in-range request can only come from a
+    /// transaction that rolled back, so the message names that request's index and record and states that
+    /// NO update was applied.</item>
+    /// <item>Any other Dataverse fault is reported with the atomicity guarantee alone — all or none, never
+    /// partial. The SDK throws the client-wide last error, and with the singleton <c>ServiceClient</c> a
+    /// concurrent request's fault can surface here (GitHub #971), so claiming more would be unsafe.</item>
+    /// <item>No Dataverse fault anywhere in the exception chain (e.g. a timeout, which can land after the
+    /// commit): the outcome is unknown — all or none, never partial.</item>
     /// </list>
-    /// The fault is looked for through <see cref="Exception.InnerException"/> because the SDK may surface it
-    /// wrapped.
+    /// Residual (#971): if two bulk updates fail concurrently, one could be handed the other's transaction
+    /// fault. The fault is looked for through <see cref="Exception.InnerException"/> because the SDK may
+    /// surface it wrapped.
     /// </summary>
     public static string DescribeBulkUpdateFailure(
         string entityLogicalName,
@@ -2417,18 +2444,23 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (fault is null)
         {
             return $"Bulk update of {updates.Count} {entityLogicalName} record(s) did not complete: {failure.Message}. " +
-                   "Dataverse returned no fault, so the outcome is unknown — the updates ran as ONE transaction, " +
-                   "so either all of them were applied or none were, never a partial set.";
+                   "Dataverse returned no fault, so the outcome is unknown — the updates were sent (if at all) as ONE " +
+                   "transaction, so either all of them were applied or none were, never a partial set.";
         }
 
-        var failingRequest = fault is ExecuteTransactionFault transactionFault
-                             && transactionFault.FaultedRequestIndex >= 0
-                             && transactionFault.FaultedRequestIndex < updates.Count
-            ? $"request index {transactionFault.FaultedRequestIndex} ({entityLogicalName} {updates[transactionFault.FaultedRequestIndex].id})"
-            : "a request Dataverse did not identify";
+        if (fault is ExecuteTransactionFault transactionFault
+            && transactionFault.FaultedRequestIndex >= 0
+            && transactionFault.FaultedRequestIndex < updates.Count)
+        {
+            var index = transactionFault.FaultedRequestIndex;
+            return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed at request index {index} " +
+                   $"({entityLogicalName} {updates[index].id}): {fault.Message}. " +
+                   "The transaction was rolled back — NO updates were applied.";
+        }
 
-        return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed at {failingRequest}: {fault.Message}. " +
-               "The transaction was rolled back — NO updates were applied.";
+        return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed: {fault.Message}. " +
+               "Dataverse did not identify which request faulted. The updates were sent as ONE transaction, so " +
+               "either all of them were applied or none were, never a partial set.";
     }
 
     public async Task<Entity> RetrieveByAlternateKeyAsync(

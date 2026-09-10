@@ -382,7 +382,7 @@ Verified facts that settle it:
 |---|---|
 | `BulkUpdateAsync` updates N records of ONE table in ONE round trip (a performance helper) | `DataverseServiceClientImpl.cs` |
 | Its defect is ONE word of mechanism: `ExecuteMultipleRequest` instead of `ExecuteTransactionRequest` | same |
-| Both existing callers **want** all-or-nothing | daily reset of `sprk_sendstoday` across accounts; clearing `sprk_isdefault` on a user's other layouts (a partial run leaves TWO defaults) |
+| Both existing callers **want** all-or-nothing | daily reset of `sprk_sendstoday` across accounts; clearing `sprk_isdefault` on a user's other layouts (a partial run leaves TWO defaults — ⚠️ **corrected at task 096**: atomicity alone does not prevent this, because `WorkspaceLayoutService.ClearUserDefaultsAsync` catches the failure and writes the new default anyway; filed separately, see `notes/defer-issues.md`) |
 | ExternalAccess **already injects** the interface that exposes it | `SubjectStandingGrantReader` uses `IDataverseService` → `IGenericEntityService` |
 | The Web API client ExternalAccess otherwise uses has **no** batch method | `DataverseWebApiClient.cs` |
 
@@ -400,5 +400,9 @@ task**. `Spaarke.Dataverse` is a shared hot-path surface, so that task runs `/co
 - **Date Only through the SDK.** `sprk_expiresdate` is Date Only (task 007 spent real effort on this —
   the `ge` semantics and the "30 June means 30 June works" rule). Writing it via an SDK `UpdateRequest`
   rather than the Web API needs the value shaped so no time-zone shift moves the date by a day.
-- **`ExecuteTransactionRequest` limits** — max 1,000 requests, cannot be nested inside `ExecuteMultiple`.
-  Same 1,000 ceiling as today, so no regression for either caller; grant counts per record are far below it.
+- **`ExecuteTransactionRequest` limits** — an `ExecuteTransactionRequest` cannot **contain** an
+  `ExecuteMultiple` or another `ExecuteTransaction` (it *can* sit inside an `ExecuteMultiple`). ⚠️
+  **Corrected at task 096** — this line originally said the reverse, and task 096's docs copied it until
+  its review caught it against Microsoft Learn. **1,000** is `ExecuteMultiple`'s documented batch size;
+  the transaction page states no figure of its own, so treat 1,000 as the ceiling. Grant counts per record
+  are far below it.
