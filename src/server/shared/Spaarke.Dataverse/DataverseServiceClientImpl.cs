@@ -2308,85 +2308,127 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Updates N records of ONE table in ONE round trip, <b>all-or-nothing</b> — see
+    /// <see cref="IGenericEntityService.BulkUpdateAsync"/> for the full contract.
+    /// </summary>
+    /// <remarks>
+    /// Sends the single <c>ExecuteTransactionRequest</c> built by <see cref="BuildBulkUpdateTransaction"/>;
+    /// Dataverse rolls the whole transaction back if any update faults. Limits: at most 1,000 updates per
+    /// call, and the transaction cannot be nested inside an <c>ExecuteMultipleRequest</c>. Failures are
+    /// worded by <see cref="DescribeBulkUpdateFailure"/>. (Until 2026-09-10 this sent an
+    /// <c>ExecuteMultipleRequest</c>, which is NOT transactional — task 096, ISS-005 / #970.)
+    /// </remarks>
     public async Task BulkUpdateAsync(
         string entityLogicalName,
         List<(Guid id, Dictionary<string, object> fields)> updates,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(entityLogicalName))
-            throw new ArgumentNullException(nameof(entityLogicalName));
-
-        if (updates == null || updates.Count == 0)
-            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+        // Argument validation lives in the builder and throws before any I/O, unwrapped — as it did before.
+        var transaction = BuildBulkUpdateTransaction(entityLogicalName, updates);
 
         try
         {
-            // Use ExecuteMultipleRequest for batch operations
-            var executeMultipleRequest = new Microsoft.Xrm.Sdk.Messages.ExecuteMultipleRequest
-            {
-                Settings = new Microsoft.Xrm.Sdk.ExecuteMultipleSettings
-                {
-                    ContinueOnError = false, // Stop on first error for transactional behavior
-                    ReturnResponses = false  // Don't need individual responses for updates
-                },
-                Requests = new Microsoft.Xrm.Sdk.OrganizationRequestCollection()
-            };
-
-            // Build update requests
-            foreach (var (id, fields) in updates)
-            {
-                var entity = new Entity(entityLogicalName, id);
-
-                foreach (var field in fields)
-                {
-                    if (field.Value != null)
-                    {
-                        entity[field.Key] = field.Value;
-                    }
-                }
-
-                var updateRequest = new Microsoft.Xrm.Sdk.Messages.UpdateRequest
-                {
-                    Target = entity
-                };
-
-                executeMultipleRequest.Requests.Add(updateRequest);
-            }
-
-            // Execute batch
-            var response = (Microsoft.Xrm.Sdk.Messages.ExecuteMultipleResponse)
-                await Task.Run(() => _serviceClient.Execute(executeMultipleRequest), ct);
-
-            _logger.LogInformation(
-                "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records",
-                updates.Count,
-                entityLogicalName);
-
-            // Check for errors if ContinueOnError was true (currently false)
-            if (response.Responses.Any(r => r.Fault != null))
-            {
-                var faultCount = response.Responses.Count(r => r.Fault != null);
-                _logger.LogError(
-                    "[DATAVERSE] Bulk update had {FaultCount} failures out of {TotalCount} requests",
-                    faultCount,
-                    updates.Count);
-
-                var firstFault = response.Responses.First(r => r.Fault != null).Fault;
-                throw new InvalidOperationException(
-                    $"Bulk update failed: {firstFault.Message}");
-            }
+            await _serviceClient.ExecuteAsync(transaction, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                exception: ex,
-                message: "[DATAVERSE] Error in bulk update for {EntityLogicalName}. RecordCount: {RecordCount}",
-                entityLogicalName,
-                updates.Count);
-
-            throw new InvalidOperationException(
-                $"Failed to bulk update {entityLogicalName} records: {ex.Message}", ex);
+            var failure = DescribeBulkUpdateFailure(entityLogicalName, updates, ex);
+            _logger.LogError(ex, "[DATAVERSE] {BulkUpdateFailure}", failure);
+            throw new InvalidOperationException(failure, ex);
         }
+
+        _logger.LogInformation(
+            "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records in one transaction",
+            updates.Count,
+            entityLogicalName);
+    }
+
+    /// <summary>
+    /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
+    /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
+    /// the fields supplied are written.
+    ///
+    /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
+    /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
+    /// cannot be captured at a seam without reflection or transport mocking (ADR-038 B8 / B1). Same precedent
+    /// as <see cref="StageAnalysisRegardingFields"/>; the owner chose this approach at task 096.</para>
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildBulkUpdateTransaction(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (updates is null || updates.Count == 0)
+            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+
+        var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
+        {
+            Requests = new OrganizationRequestCollection(),
+            ReturnResponses = false // no caller reads per-update responses
+        };
+
+        foreach (var (id, fields) in updates)
+        {
+            var entity = new Entity(entityLogicalName, id);
+
+            foreach (var field in fields)
+            {
+                if (field.Value != null)
+                {
+                    entity[field.Key] = field.Value;
+                }
+            }
+
+            transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
+        }
+
+        return transaction;
+    }
+
+    /// <summary>
+    /// Pure wording of a <see cref="BulkUpdateAsync"/> failure. It states only what is actually known:
+    /// <list type="bullet">
+    /// <item>A Dataverse fault means the transaction did not commit, so NO update was applied. When the
+    /// fault is an <see cref="ExecuteTransactionFault"/> it also names the failing request index and the
+    /// record at that index.</item>
+    /// <item>A failure with no Dataverse fault anywhere in the exception chain (e.g. a timeout) may have
+    /// happened after the commit, so the outcome is unknown — all or none, but not partial.</item>
+    /// </list>
+    /// The fault is looked for through <see cref="Exception.InnerException"/> because the SDK may surface it
+    /// wrapped.
+    /// </summary>
+    public static string DescribeBulkUpdateFailure(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        Exception failure)
+    {
+        OrganizationServiceFault? fault = null;
+        for (var current = failure; current is not null && fault is null; current = current.InnerException)
+        {
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                fault = faultException.Detail;
+            }
+        }
+
+        if (fault is null)
+        {
+            return $"Bulk update of {updates.Count} {entityLogicalName} record(s) did not complete: {failure.Message}. " +
+                   "Dataverse returned no fault, so the outcome is unknown — the updates ran as ONE transaction, " +
+                   "so either all of them were applied or none were, never a partial set.";
+        }
+
+        var failingRequest = fault is ExecuteTransactionFault transactionFault
+                             && transactionFault.FaultedRequestIndex >= 0
+                             && transactionFault.FaultedRequestIndex < updates.Count
+            ? $"request index {transactionFault.FaultedRequestIndex} ({entityLogicalName} {updates[transactionFault.FaultedRequestIndex].id})"
+            : "a request Dataverse did not identify";
+
+        return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed at {failingRequest}: {fault.Message}. " +
+               "The transaction was rolled back — NO updates were applied.";
     }
 
     public async Task<Entity> RetrieveByAlternateKeyAsync(
