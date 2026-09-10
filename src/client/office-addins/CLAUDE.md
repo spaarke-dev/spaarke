@@ -1,6 +1,6 @@
 # CLAUDE.md — Office Add-ins Module
 
-> **Last Updated**: 2026-09-04 (created by email-communication-intelligence-r2 — first module pointer for the add-ins)
+> **Last Updated**: 2026-09-10 — corrected: React 19 (was stated as React 18); `npm run build` is the production build (no `build:prod` script); re-measured typecheck errors (0 production, 284 test-file only); added `office-addins-tests.yml` PR-check note. Originally created 2026-09-04 (email-communication-intelligence-r2 — first module pointer for the add-ins)
 > **Purpose**: Where to start reading when working in `src/client/office-addins/**`. Code is the source of truth; the architecture doc explains *why*.
 > **Full architecture**: [`docs/architecture/office-outlook-teams-integration-architecture.md`](../../../docs/architecture/office-outlook-teams-integration-architecture.md) — read it before extending the add-ins.
 
@@ -8,7 +8,7 @@
 
 ## What this is
 
-React 18 + Fluent UI v9 **task-pane add-ins** for **Outlook** and **Word**, hosted on Azure Static Web Apps. They save emails/attachments/documents to SharePoint Embedded, file them against a Dataverse record (Matter/Project/Invoice), create first-class To Dos from an email, and (Outlook) surface AI association + linked to-dos. Every backend call goes to the BFF's `/api/office/*` surface.
+React 19 + Fluent UI v9 **task-pane add-ins** for **Outlook** and **Word**, hosted on Azure Static Web Apps. They save emails/attachments/documents to SharePoint Embedded, file them against a Dataverse record (Matter/Project/Invoice), create first-class To Dos from an email, and (Outlook) surface AI association + linked to-dos. Every backend call goes to the BFF's `/api/office/*` surface.
 
 ## Entry points (start here)
 
@@ -36,8 +36,11 @@ React 18 + Fluent UI v9 **task-pane add-ins** for **Outlook** and **Word**, host
 ```bash
 cd src/client/office-addins
 npm install --legacy-peer-deps --no-audit --no-fund
-npm run build:dev          # or build:prod
-npm run typecheck          # ~397 PRE-EXISTING exactOptional errors — filter to files you changed
+npm run build:dev          # dev build; `npm run build` IS the production build — there is no `build:prod` script
+npm run typecheck          # production code is clean (0 errors); errors remaining (284 as of 2026-09-10,
+                            # 289 when consciously accepted 2026-09-09) are ALL in test files
+                            # (__tests__ / __mocks__ / *.test.* / *.spec.*) — see the 2026-09-09 "CONSCIOUSLY
+                            # ACCEPTED" decision in projects/spaarkeai-word-add-in-r1/CLAUDE.md § Decisions Made
 ```
 
 - **Deploy is CI-only**: push the branch → GitHub Actions **`deploy-office-addins.yml`** (holds SWA secrets) deploys to the live SWA. It is **not** an agent-run script. Confirm green via `gh run list --workflow=deploy-office-addins.yml`.
@@ -53,6 +56,8 @@ npm run typecheck          # ~397 PRE-EXISTING exactOptional errors — filter t
 ## Tests
 
 Component/unit tests colocate under `shared/taskpane/**`. BFF Office endpoints are covered by contract tests under `tests/integration/contract/Api/Office/` (e.g. `OfficeEndpointsContractTests`). Per the repo test policy, a new endpoint → a contract test; a fixed bug → a regression test.
+
+**`.github/workflows/office-addins-tests.yml`** runs this package's jest suite on every PR touching `src/client/office-addins/**` and REPORTS a real pass/fail (it is not in master's required-status-check list — `Router` is the only required check per ruleset 21824191 — so it does not block a merge). The suite allow-list is `ci-gated-suites.txt` in this package.
 
 ---
 

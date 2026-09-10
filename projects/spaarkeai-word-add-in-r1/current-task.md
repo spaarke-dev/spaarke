@@ -12,17 +12,22 @@
 | **Task** | none active — between tasks. Phase 0 COMPLETE. |
 | **Next startable** | **012** (FR-01 server identity resolver) — deps 002 ✅. Carries Spike-1 links 2-3 as its FIRST acceptance criteria. OR **014** first, if the operator accepts Spike-1 §7 (stamp-as-primary) — see Pending Decisions. |
 | **Status** | Waiting on operator items below before 012's Spike-1 criteria can be proven |
-| **Next Action** | (1) Check whether the background doc-fix agent finished — `git status`; if docs are modified, REVIEW its report then commit them (see "In flight"). (2) Ask the operator for the pending items. (3) Then run task 012 via `task-execute`. |
+| **Next Action** | (1) Ask the operator for the pending items below. (2) Then run task 012 via `task-execute`. Nothing is in flight; the tree is clean. |
 
-### In flight at handoff (⚠️ may complete during/after compaction)
+### Completed after the handoff — doc accuracy pass (committed with this update)
 
-- **Doc-accuracy agent** (general-purpose, sonnet) correcting 6 stale docs the operator asked to be made
-  accurate: `docs/guides/office-addins-admin-guide.md` (+ deployment checklist), `docs/architecture/uac-access-control.md`,
-  `.github/WORKFLOWS.md` + `docs/procedures/workflow-incident-response.md`, `src/client/office-addins/CLAUDE.md`,
-  `docs/architecture/office-outlook-teams-integration-architecture.md`, and ONE comment in
-  `Api/Ai/ChatWordExportEndpoints.cs:~277`. Told: verify each claim before editing, docs + that comment only,
-  do NOT commit. **Its edits land UNCOMMITTED — verify its report, then commit.** If its notification is lost
-  to compaction, `git status` shows what it changed.
+The background doc-accuracy agent finished and its edits were verified in the main session before commit:
+8 files, no workflow YAML touched, the one C# change comment-only. It corrected the admin guide + deployment
+checklist (non-existent `manifest-working.xml`, `build:prod`, the `localhost` trap), `uac-access-control.md`
+(the stale app-only claim), `.github/WORKFLOWS.md` + the incident runbook (only `Router` is required; three
+undocumented workflows added), `src/client/office-addins/CLAUDE.md` and the architecture doc (React 19, build
+command, typecheck count), and the `ChatWordExportEndpoints.cs` URL-shape comment.
+
+**It caught two errors in the main session's own brief — keep these:**
+- **Outlook's production XML is `/outlook/outlook-manifest.xml`, NOT `/outlook/manifest.xml`** (404 vs 200,
+  verified). Only Word's XML output is named `manifest.xml`. Word URL: `/word/manifest.xml` (200, serves 1.0.8.0).
+- The Word adapter consolidation (task 010) was already documented correctly; the brief over-claimed that.
+- Typecheck: 289 test-file errors at the 2026-09-09 accept decision; 284 on re-measure 2026-09-10; 0 production.
 
 ### Operator pending (none can be done by an agent)
 
