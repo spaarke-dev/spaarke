@@ -218,13 +218,48 @@ the exception ratifies the *decision*, not the disappearance of the risk.
 
 1. [ ] All 22 Phase 0 findings closed — Verify: regression test per finding
 2. [ ] One evaluator; `AuthorizationService` path repaired or retired — Verify: no caller-scoped path passes `userAccessToken: null`
-3. [ ] Negative canary green — Verify: NFR-04 test in CI
-4. [ ] Role-depth assertion green — Verify: NFR-05 test in CI
+3. [ ] Negative canary green — Verify: **NFR-04 test run BY HAND against dev, and re-run as a manual pre-merge gate on task 036** *(was "test in CI" — changed 2026-09-10 by owner decision, see below)*
+4. [ ] Role-depth assertion green — Verify: **NFR-05 test run BY HAND against dev** *(was "test in CI" — same decision)*
 5. [ ] A user in the Operations subtree cannot read a `Secure Project`-owned record — Verify: live dev test
 6. [ ] A shared user reads a secure project in both MDA and SPA — Verify: live dev test
 7. [ ] Manage Access answers "who can see this and why" with provenance per row — Verify: UAT
 8. [ ] Contact with Project access sees its invoices, events, communications and To Dos — Verify: live dev test
 9. [ ] Point-in-time attestation answerable — Verify: replay a historical date
+
+### 🔴 No Dataverse credential in CI — owner decision 2026-09-10
+
+> *"we do not need to have this dataverse test; this seems like overkill and introduce too much
+> complexity to the CI"*
+
+**Accepted.** The two live assertions — **NFR-04**'s impersonation canary (034) and **NFR-05**'s
+role-depth check (062) — will **not** run in CI. Success criteria 3 and 4 above were reworded because
+they said *"Verify: NFR-04/NFR-05 test in CI"*, which this decision makes permanently unmeetable; left
+as written, the project could never be marked complete.
+
+**The consequence, stated once and then managed by process rather than re-argued:**
+
+NFR-04 is not a regression test — it is the gate that proves impersonation is **not inert**. Its failure
+mode is that the impersonated read returns the *same* rows as app-only, i.e. **an org-wide disclosure
+that looks exactly like success**. `TASK-INDEX.md` calls 034 "a blocking merge gate for 036" for that
+reason. NFR-05 is the assertion that would have caught the root-BU `System Administrator` exposure
+automatically instead of it being found by hand on 2026-09-09.
+
+So both are now **point-in-time** checks: true when someone runs them, unknown afterwards.
+
+**Mitigation that respects the decision** (no CI, no credential, no new complexity):
+
+1. **Task 036 carries a MANUAL pre-merge gate.** Re-run the NFR-04 canary against dev and confirm the
+   impersonated set is *strictly smaller* than app-only **before** 036 merges. Equality = STOP. This is
+   recorded in 036's POML, not in anyone's memory — it is the one place the check cannot be skipped
+   without someone overriding a written gate.
+2. **Both assertions stay in the suite, runnable on demand.** They are not deleted — deleting them would
+   turn "unknown" into "unknowable". They are skipped by default and documented as operator checks.
+3. **Re-run both at UAT.** UAT is already where this project's live security topology is validated
+   (see below), so the natural home for a live assertion is the live validation phase.
+
+This is a legitimate trade: CI complexity and a standing credential, against two checks that run on a
+human cadence. The risk it accepts is that a *future* change silently re-inerts impersonation between
+manual runs. Point 1 is what keeps that from landing unnoticed on the one task where it matters most.
 
 ## UAT & Environment Setup
 

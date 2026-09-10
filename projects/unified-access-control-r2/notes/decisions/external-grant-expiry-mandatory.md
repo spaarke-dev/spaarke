@@ -196,3 +196,90 @@ cap only bites for roots that **never** close — which are precisely the stale 
 
 ⚠️ **Not yet ratified** — this is a recommendation answering a clarifying question, so the number itself
 still needs the owner's yes.
+
+---
+
+## 10. 🔴 OWNER REDESIGN — 2026-09-10. The tenant cap is REPLACED by a per-record Expiration.
+
+> *"the record (matter, project, etc.) does not have a real expiry; the status may change but the record
+> does not expire; instead of setting a default cap can we instead make this a configuration at the time
+> of the grant; it does not need to be at the individual contact access permission but for the entire
+> record's access setting; e.g., add to the toolbar a field 'Expiration' and a date picker so the write
+> user can set it (and it applies to all sharing)"*
+
+### 10.1 This invalidates §4.1's premise, and the owner is right
+
+§4.1 says expiry is **"matter-bound first, calendar-capped second"** — most grants "dying naturally at
+closure", with the cap as a mere backstop. **That premise does not hold.** A matter or project has a
+*status*, not a lifecycle end: the status may change and the record persists. There is no reliable
+closure event to reap grants.
+
+So the "backstop" was in fact carrying the **entire** load, while §4.1 described it as secondary. The cap
+length was therefore doing all the work and being reasoned about as if it were doing almost none —
+which is exactly why the "what should the default be?" question felt unanswerable. **The question was
+malformed, not hard.**
+
+The owner's design removes the guesswork: **a human with Write sets an explicit date, per record.** That
+is strictly more honest than a tenant-wide number standing in for a decision nobody made.
+
+### 10.2 What replaces §4.2 (the tenant-configurable cap)
+
+**One `Expiration` date per ROOT RECORD, set on the Manage Access toolbar, applying to every grant on
+that record.** The tenant cap is dropped: it existed to bound grants nobody had decided about, and
+under this design somebody always has.
+
+**Recommended shape** (answering "build the best technical solution"):
+
+| Question | Recommendation | Why |
+|---|---|---|
+| Where does the date live? | A new **Date Only** column on each grantable root — `sprk_project`, `sprk_matter`, `sprk_workassignment`. NOT `sprk_servicerequest` (task 028: service requests are never externally grantable) | Matches `sprk_expiresdate`'s existing Date-Only type, so the `ge` comparison semantics are identical |
+| How does the evaluator see it? | **Fold it into `GetRootRecordFlagsAsync`** — the existing ONE batched per-root read that already fetches `sprk_issecure` + `sprk_accesspermission` | Zero new round trips (NFR-02). The infrastructure for "read a per-root policy field for every candidate id" already exists and is already on the composition path |
+| Does it replace per-grant `sprk_expiresdate`? | **No — keep both; take the MOST RESTRICTIVE.** A grant is live only if *both* the record's Expiration and its own `sprk_expiresdate` are in the future | Preserves task 023's shipped write path; lets a single contact be given a *shorter* window than the record; and "most restrictive wins" is the fail-closed composition this project already uses for vetoes. The owner said per-contact is *not required*, not that it must be removed |
+| Can it be blank? | 🔴 **No. Required to grant, and the picker DEFAULTS to +90 days.** | This is what preserves FR-33's actual point — expiry **mandatory and bounded**. A blank-means-never field would silently restore unbounded access and undo the whole FR. Defaulting the picker means the path of least resistance is bounded; requiring it means nobody grants by accident |
+| Does changing it affect existing grants? | **Yes, immediately** — it is read at evaluation time, not copied to grant rows | Avoids an N-row rewrite that can partially fail. That partial-failure shape is precisely the defect class tasks 016/017/020/024 kept fixing |
+
+⚠️ **Schema is an operator step** (binding directive 2026-09-04): this project delivers the column
+*design* and the code that reads it; **creating the columns on the three root tables is the owner's
+action**, like the audit flags.
+
+### 10.3 Notifications — IN, at 30 / 14 / 7 / 3 / 1 days
+
+> *"the report suggestion was an attempt to remove complexity from the process; also there will still
+> need to be a view with external share expiration; but if notification does not introduce complexity
+> then it can be included; should be 30 / 14 / 7 / 3 / 1 day reminder"*
+
+**It does not introduce meaningful complexity — the machinery already exists.** Verified: the BFF has
+`Api/Notifications/NotificationsEndpoints.cs` and a `sprk_notification` surface, plus a full background
+job framework (`Services/Jobs/` with `IJobHandler`, handlers, idempotency, dead-letter). A reminder job
+is a **new handler over existing infrastructure**, not new infrastructure.
+
+So §9.1's residual is **closed**: this is push, not pull, and §3's precondition is satisfied as written
+rather than by substitution.
+
+**Both are needed, and they are not redundant:**
+- **Notifications** (30/14/7/3/1) — the push control. Per §4.3 they go to the **granting internal user /
+  matter owner, never the grantee**, because the external grantee cannot renew their own access.
+- **A view of external share expirations** — the owner confirmed this is still wanted. It answers "what
+  is about to lapse across the estate", which a per-grant reminder cannot.
+
+**Sequencing note**: with notifications in, the §9.2 argument for a *longer* cap evaporates — it existed
+only to compensate for pull-based renewal. And with the cap itself gone, the whole question is moot. The
++90-day **picker default** is now the only number, and 90 days sits comfortably inside a 30-day first
+reminder.
+
+### 10.4 What this changes in the plan
+
+| Item | Status |
+|---|---|
+| §4.1 "matter-bound first, calendar-capped second" | **Superseded** — the premise is false; there is no reliable closure event |
+| §4.2 tenant-configurable cap | **Dropped** — replaced by the per-record Expiration |
+| §9.2's 90-day cap recommendation | **Withdrawn as a cap**; survives only as the picker's **default** |
+| §9.1's report-only residual | **Closed** — notifications are in |
+| FR-33's "mandatory, bounded, renewable" | **Preserved**, by a required field with a defaulted picker rather than by a cap |
+| New: UI | `Expiration` + date picker on the Manage Access toolbar (see the owner's screenshot: the toolbar currently holds only `+ Contact` / `+ Organization`) |
+| New: schema | One Date-Only column on each of the 3 grantable roots — **operator action** |
+| New: job | Reminder handler at 30/14/7/3/1 days, to the granting internal user / matter owner |
+| New: view | External share expirations across the estate |
+
+**This is more work than the cap was, and it is better work.** It should be re-planned as tasks rather
+than absorbed into FR-33's existing shape.
