@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-10, session 6** — reflects through the FR-33 task-filing commit (tasks 096–101).
+> **Last Updated**: **2026-09-10, session 6 END** (by `context-handoff`) — reflects through commit `a492fb4d9` plus this handoff commit. Tree clean, 0 unpushed, 0 behind master.
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
 > ⚠️ This block had gone stale for two tasks (024 → 042) and held TWO contradictory "Next Action" rows
@@ -18,11 +18,175 @@
 |---|---|
 | **Task** | **none in progress** — clean stopping point. |
 | **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1` |
-| **Next Action** | **Owner's call.** Ready and unblocked, no environment dependency: **096** and **097** (FR-33 heads — can run in parallel), then **098** → **099**; **100** and **101** after 097. Also ready: **043** (chain C, next after 042) and **063** (chain B). ⚠️ **036 carries a MANUAL pre-merge canary gate** — the owner decided the Dataverse assertions will not run in CI; read 036's POML before starting it. |
+| **Next Action** | **Owner's call — two ready paths.** **(a) The C-items** — the owner's standing directive of 2026-09-10 (*"ensure these are resolved and following our objectives and consistent with the overall solution approach for our UAC"*); mostly verification and small edits, little or no code; listed in § NEXT SESSION. **(b) Tasks** — **096** ∥ **097** (FR-33 heads, no environment dependency) → **098** → **099**; **100** / **101** after 097; also **043** (chain C) and **063** (chain B). ⚠️ **036 carries a MANUAL pre-merge canary gate** — read its POML before starting it. |
 | **Task status** | **65 done · 29 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows). |
 | **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969** (CI ratchets unenforced) and **#970** (`BulkUpdateAsync` not transactional). CI: the **full ArchTests suite now runs blocking** in Tier 1. Owner decisions: audit enabled on all three gaps (verified live) · **FR-33 redesigned → tasks 096–101** · no Dataverse test in CI (036 manual gate; success criteria 3–4 reworded) · §10 hazards 3–4 added to root CLAUDE.md · path-A exceptions 012/023/062 ratified. |
 | **Session 6 lessons** | (1) **Look for the working in-repo example before copying the one a doc names** — `SpeAdminGraphService` already paged the collection a design told me to copy from elsewhere. (2) **Extend before you add** — twice this session the owner caught me building beside an existing component (a new root column instead of `sprk_expiresdate`; a new atomic write instead of fixing `BulkUpdateAsync`). Run CLAUDE.md §11's extension question *before* recommending, not after being asked. (3) **Commit (or copy) before you perturb** — a `git checkout` on an uncommitted file discarded a whole task's work once. |
 | **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963, #964, #965, #966, #967**. |
+
+### Commits this session (session 6, 2026-09-09 → 2026-09-10) — ALL 15 PUSHED, nothing at risk
+
+| Commit | What |
+|---|---|
+| `322513399` | 024 — SPE permission reads follow `@odata.nextLink` (M1) |
+| `ffc6f856d` | 024 closed for M1; M2 transferred to task 065 |
+| `954509a9b` | seam-4 guard widened to the split listing path; ADR-010 ceiling 156 → 157 (task 035's unpaid debt) |
+| `4d7dee9bd` | Tier 1: arm the ADR-010 ceiling + the ExternalAccess integrity guards |
+| `a1bd3a7e8` | ISS-004 — org revoke reads the container once, not once per member (#968 closed) |
+| `a46857d68` | owner directive — a failed revoke needs a user message, not just a 500 (→ 065) |
+| `4c9d7b74a` | 042 step 1 — schema verified; escalation trigger 2 fired |
+| `da18ad9c0` | 042 — the standing grant is level-bearing (FR-25) |
+| `7904e3637` | 042 closed — option B + the live backfill documented |
+| `3c74b010a` | Tier 1: the FULL ArchTests suite runs blocking; inclusion filter deleted (#969) |
+| `abfbbe450` | all three audit gaps closed by the owner, verified live |
+| `086348387` | FR-33 answered; root CLAUDE.md §10 hazards 3 + 4; path-A exceptions ratified |
+| `570ff108c` | FR-33 redesigned around a per-record Expiration; no Dataverse test in CI |
+| `77b2f6e43` | FR-33 reuses `sprk_expiresdate` (no new root columns); ISS-005 / #970 filed |
+| `a492fb4d9` | FR-33 filed as tasks 096–101; `BulkUpdateAsync` gets fixed, not bypassed |
+
+### Files modified this session — ALL COMMITTED AND PUSHED
+
+- **Code**: `SpeContainerMembershipService.cs` (paged reader, honesty rule, `RemoveMembershipsAsync`) · `RevokeExternalAccessEndpoint.cs` (shared constant; org sweep = one read) · `SubjectStandingGrantReader.cs` (**new** — renamed from `ContactStandingGrantReader`; level-bearing; contact + org) · `AccessibleRecordSetService.cs` (standing term contributes the mapped baseline; `None` ⇒ absent) · DI + doc-reference updates.
+- **Tests**: `SpeContainerPagingTests.cs` (**new**, fake Kiota `IRequestAdapter`) · `SubjectStandingGrantReaderTests.cs` (renamed + extended) · `ExternalAccessQueryIntegrityGuardTests.cs` (seam 5; seam 4 widened) · `ADR010_DITests.cs` (ceiling 157) · fixture updates in `SpeRevokeMatcherTests`, `StandingGrantRuntimeUnionSeamTests`, `MembershipPagingCharacterizationTests`, `AccessibleRecordSetServiceTests`.
+- **CI**: `.github/workflows/ci-tier1-blocking.yml` — full ArchTests suite blocking.
+- **Scripts**: `scripts/Test-SpeContainerPermissionPaging.ps1` (**new**, read-only probe) + `scripts/README.md`.
+- **Procedure surface**: root `CLAUDE.md` §10 (hazards 3 + 4) + `.claude/CHANGELOG.md`.
+- **Project docs**: `spec.md` (FR-33 rewrite; ADR Tensions path-A ratifications; success criteria 3–4; "No Dataverse credential in CI") · `TASK-INDEX.md` (024 + 042 closed; FR-33 section 096–101) · POMLs 024 / 036 / 042 / 047 / 065 + **new 096–101** · notes: task-024, task-042, task-086 (audit closure), FR-33 decision §9–§12, `defer-issues.md` (ISS-004, ISS-005).
+- **Live dev DATA (owner-authorised 2026-09-10)**: `sprk_accesspermissiongrant` = Collaborate (`100000001`) on contacts `8e9918a9-9021-f111-88b5-7c1e520aa4df` (Ralph Schroeder) and `8cb95c16-e974-f111-ab0e-7ced8ddc4a05` (Eyal Iffergan). **Revert** = PATCH the field back to `null` on both.
+
+---
+
+## 🔴 THE ONE THING THAT BLOCKS THE CRITICAL PATH (updated 2026-09-10)
+
+Chain A: 035 ✅ → **036** → 054 → 055 → 056 → 057/058 — the longest chain; nothing else unblocks it.
+
+**036 now carries a MANUAL pre-merge gate.** The owner decided on 2026-09-10 that the live Dataverse
+assertions will **not** run in CI. So task 034's NFR-04 canary is run **by hand, before 036 merges** —
+written into 036's POML. **PASS = the impersonated set is STRICTLY SMALLER than app-only. Equality =
+STOP**: it means impersonation is inert and the query is returning org-wide rows that look exactly like
+success.
+
+⚠️ **It has never been measured on the fixed environment.** Until 2026-09-09 it was guaranteed to lie —
+every root-BU user inherited System Administrator through the BU's default owner team, so both reads
+returned everything. The owner removed that role and it was verified (`roles=[]`; the previously exposed
+user now gets 403). **036's run is the first real measurement, not a re-confirmation.**
+
+---
+
+## 🔔 OWNER ITEMS — what is genuinely left
+
+**Resolved this session** (session 5's table is otherwise closed): audit enabled on all three gaps
+(verified live) · CI Dataverse credential → **not doing it** (manual gates instead) · §10 hazards 3 + 4 →
+in root CLAUDE.md · FR-33's five questions → answered, then **redesigned** (no cap; per-record
+Expiration reusing `sprk_expiresdate`; required, +90 default; reminders 30/14/7/3/1; "shares on this
+record end") · path-A exceptions 012 / 023 / 062 → ratified · #969 policy → full suite blocking · 042's
+empty-baseline default → option B.
+
+| # | Item | Why it is still open |
+|---|---|---|
+| 1 | **Ratify the +90-day picker default** | Adopted by tasks 097 / 099 on my recommendation (FR-33 note §9.2 / §10.3). The owner redesigned around it but never said "yes, 90". Cheap to confirm before 099 ships. |
+| 2 | **Operator: apply task 101's two views** | Live customization is an operator step (binding directive 2026-09-04). Only when 101 runs. |
+| 3 | **Operator: deploy for task 047** | `Deploy BFF API` is `disabled_manually`. 047 also settles the SPE paging question via `scripts/Test-SpeContainerPermissionPaging.ps1`. |
+| 4 | **#967** — secure-project owner team is a DEFAULT team | Downgraded; guarded by NFR-05 clause 2. Not blocking. On the C-item list. |
+| 5 | **Trivy `uuid` CVE** | Still the one red check on PR #950. Not this project's surface. On the C-item list. |
+
+**Standing owner directions — do NOT re-raise:**
+- (2026-09-09) *"let's not focus on relocating users — we have test users that are in the correct BU."*
+- (2026-09-04) Schema work is **CODE + DOCS ONLY**; live table / column / view creation is an operator step.
+- (2026-09-10) **No Dataverse test in CI.** Live assertions are manual gates (036) and UAT checks.
+- (2026-09-10) A failed revoke must give the user a **message**, not a bare 500 — in tasks 065 and 099.
+
+---
+
+## ▶ NEXT SESSION — owner's call between two ready paths
+
+### Path (a) — the C-items (owner directive 2026-09-10; mostly verification, little or no code)
+
+> *"C ok noted; ensure these are resolved and following our objectives and consistent with the overall
+> solution approach for our UAC"*
+
+| Item | What "resolved" means |
+|---|---|
+| **#967** | Re-verify NFR-05 clause 2 still guards the default-owner-team shape; close with evidence, or keep with a stated reason. |
+| **Org FLS residual** | `sprk_organization.sprk_standinggrant` has **no FLS**; mitigated today only by entity-level security (no non-admin role holds `prvWritesprk_organization` — verified live 2026-09-10). Add a constraint to **task 043** (which consumes the field) recommending FLS parity with contact — or record the owner's explicit acceptance of the entity-level-only posture. Evidence: `notes/task-042-standing-grant-levels.md` §7. |
+| **#969 residuals** | (1) `sdap-ci.yml:799` calls `listComments` unpaginated, so the ADR bot cannot find its own comment on long PRs; (2) whether the `createComment` branch is also broken; (3) whether to keep the two now-redundant `continue-on-error` full-suite runs. `sdap-ci.yml` is legacy (CICD-077) and **PR #806 has it open** — coordinate, do not edit blind. |
+| **Audit retention** | `organization.auditretentionperiodv2` read **empty**. Confirm what it resolves to (`-1` = forever) and state task 088's replay horizon. Evidence: `notes/task-086-access-event-schema.md`, final section. |
+| **B3 — Compose sixth residual-loss row** | The owner said **"ok"** (2026-09-10) to accepting `section-break-flattened`. It belongs to `spaarkeai-compose-r8`: record the acceptance **there** (their PR / issue), do not edit their doc from this worktree. **Not yet done.** |
+| **Trivy `uuid`** | Identify the owning surface / project and hand it over, or record why it stays red. |
+
+### Path (b) — tasks (29 open, ~105–145 h at the POMLs' own estimates; most are `parallel-safe: false`)
+
+| Chain | Order | Note |
+|---|---|---|
+| **FR-33** (new) | **096** ∥ **097** → **098** → **099**; **100**, **101** after 097 | No environment dependency. **099 ↔ 065** share `AccessGrantModal.tsx` and finding M8. **100 must be live within 60 days of 097's backfill.** |
+| **A — critical path** | **036** → 054 → 055 → 056 → 057/058 | 036 = manual canary pre-merge gate (above) |
+| **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready |
+| **C** | **043** → 044 | 043 ready — the natural home for the org-FLS hedge |
+| Independent | **082** · **093** · **094** · **095** | |
+| Operator-gated | **047** | needs a deploy |
+| Last | **090** wrap-up | runs `/test-diet` (CLAUDE.md §7) |
+
+**Parallel-wave recipe that worked** (session 5): verify the declared `<outputs>` do not overlap; forbid
+every agent from editing `TASK-INDEX.md` / `current-task.md`, running `git`, or running solution-wide
+`dotnet build` / `test`; the main session does the authoritative build + suite + ONE commit. **096 ∥ 097**
+is the obvious first candidate (different files) — both still run `/conflict-check`.
+
+---
+
+## ⚙️ ENVIRONMENT — read before any Dataverse or measurement work
+
+- 🔴 **Dataverse MCP is DOWN** (`CONNECTION_CLOSED`) — that is not a reason to guess or escalate a metadata question. Use `az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv` and the Web API through **PowerShell `Invoke-RestMethod`**.
+- 🔴 **Python is a Microsoft Store stub** and hangs — a `python - <<EOF` heredoc blocked a command for 120 s this session. Never pipe to python.
+- 🔴 **Don't embed large quoted content in a `bash -c` heredoc** — it failed to parse at the handoff (an apostrophe was read as an open quote). Write content with the Write tool, then assemble with a short script.
+- **Azure.Identity 1.16**: set `AZURE_TOKEN_CREDENTIALS=dev`, or `DefaultAzureCredential` fails in a way that reads like a permissions problem.
+- **Publish size**: publish + zip from **short paths** (`C:\wtNNNm` / `C:\wtNNNb`) and **compare file counts** on both sides (root CLAUDE.md §10 hazards 3 + 4). The `C:\` root is **not writable** — zip into the scratchpad.
+- 🔴 **`git checkout <file>` on UNCOMMITTED work discards the whole file**, not just your perturbation — it happened in task 024. **Commit or copy before you perturb.**
+- **Moq**: an un-stubbed virtual returning `Task<T>` yields `null`, and the SUT throws a `NullReferenceException` that *looks like a product defect*. Inspect the fixture first (CLAUDE.md §10 F.2).
+- **Web API**: `roleprivilegescollection` cannot `$expand=roleid` (not a navigation property) — query it with `$filter=roleid eq …` per role.
+- **Graph / SPE**: an `az` CLI Graph token **403s** on container permissions (no `FileStorageContainer.Selected`, no container-type grant). It needs the BFF's own app identity.
+
+---
+
+## 🧠 SESSION 6 LESSONS — these change how the next task should be done
+
+1. **Look for the working in-repo example before copying the one a doc names.** The 024 design named `PrivilegeGroupResolver` (which double-counts page 1); `SpeAdminGraphService:3097` already paged that exact collection correctly.
+2. **Extend before you add — ask CLAUDE.md §11's extension question BEFORE recommending.** The owner caught me twice in one conversation: a new root column instead of `sprk_expiresdate`, then a new atomic write instead of fixing `BulkUpdateAsync`.
+3. **Question an escalation's option set.** 042's POML offered "ViewOnly floor vs no contribution"; neither preserved behaviour, because today's constant was Collaborate. Naming the third option is what made the decision answerable.
+4. **Verify an owner's security claim against live state.** "Users cannot edit Org / Account / Contact" held for `sprk_organization` and was too strong for `contact`. It was still safe — because of a test written earlier as a "load-bearing negative" (`WhenBaselineSetButFlagFalse_ConfersNothing`). Write that class of negative even when it looks obvious.
+5. **A CI job that "runs" a test may not gate on it.** I claimed the ArchTests suite never ran in CI; it ran **twice**, both `continue-on-error`. Read the workflow before claiming coverage, and confirm from the artifact (`failed="1"` while the check was green).
+6. **The third status home drifted again** — 042's `<dependency status>` said 032 was pending. The drift checker still does not read dependency annotations. Re-derive every dependency from its own POML.
+
+---
+
+## ⚠️ Residual risk carried forward (push-to-github gate 1.7)
+
+| Change | Verified by | NOT verified |
+|---|---|---|
+| 029 matter / WA to-do list + create (session 5) | live metadata; unit + seam tests | 🔴 no real create+read of a matter-parented to-do against Dataverse |
+| 035 impersonated root-set reads (session 5) | hand-run impersonated reads | not exercised through the new code path |
+| 024 SPE paging (session 6) | 14 offline tests via a fake Kiota `IRequestAdapter`; ArchTest seam 5 | 🔴 **whether the endpoint pages at all** — the docs lean against it; probe script ready; task 047 owns it |
+| ISS-004 org-revoke convergence (session 6) | 19 paging tests + 8 org-revoke tests | never run against a real container |
+| 042 level-bearing standing term (session 6) | 18 reader, 55 composition, 3 seam tests; live data backfilled and read back | never exercised end to end through the BFF against live |
+
+**Recommend a real create+read smoke against dev before merging #950** — metadata verification proves
+the names exist, not that the code composes them correctly (the R4 `sprk_contact`-vs-`contact` class).
+
+---
+
+## Filed this session (session 6) — all have GitHub Issues; `defer-issues.md` is current
+
+| ID | Issue | What | State |
+|---|---|---|---|
+| ISS-004 | **#968** | Org-revoke N+1, amplified by 024's paging | ✅ **closed the same day** (`a1bd3a7e8`) |
+| — | **#969** | ArchTests ratchets unenforced in CI; stale "All ADR validations passed" comment | 🟡 partly fixed (`3c74b010a`); residuals on the C-item list |
+| ISS-005 | **#970** | `BulkUpdateAsync` claims transactional behaviour that `ExecuteMultiple` does not provide | 🔲 now **task 096** |
+
+⚠️ `defer-issues.md`'s rollup label still does not exist — use
+`gh issue view 961 962 963 964 965 966 967 968 969 970`.
+
+---
+
+## 🗄️ HISTORICAL — session 5 live block (superseded 2026-09-10 by session 6). NOT CURRENT — the live block is above.
 
 ### Commits this session — ALL PUSHED, nothing at risk
 
