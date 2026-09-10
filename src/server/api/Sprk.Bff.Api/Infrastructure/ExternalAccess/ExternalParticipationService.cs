@@ -206,7 +206,7 @@ public class ExternalParticipationService
     /// invalidates — an authorization DECISION (the yes/no record∈set outcome is recomputed live by
     /// <see cref="AccessibleRecordSetService"/> on every request per <c>.claude/constraints/auth.md</c>
     /// "MUST NOT cache authorization decisions"). The standing-grant flag itself is read live (never
-    /// cached) by <see cref="ContactStandingGrantReader"/>, so this invalidation is the defensive
+    /// cached) by <see cref="SubjectStandingGrantReader"/>, so this invalidation is the defensive
     /// belt-and-suspenders that also drops any co-cached per-contact grant data for the same subject.
     /// <para>
     /// <paramref name="tenantId"/> is explicit so an out-of-request caller (e.g. a future Dataverse

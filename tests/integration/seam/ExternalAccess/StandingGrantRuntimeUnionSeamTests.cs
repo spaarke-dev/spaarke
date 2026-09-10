@@ -2,7 +2,7 @@
 //
 // DEFINITION OF DONE for the standing-grant runtime union (design §5 / spec FR-06 / FR-12). A router- or
 // composition-unit test in isolation is NOT sufficient (ADR-043 seam-category governance): this drives
-// the REAL slice end-to-end — the production ContactStandingGrantReader (flag gate) composed by the
+// the REAL slice end-to-end — the production SubjectStandingGrantReader (flag gate) composed by the
 // production AccessibleRecordSetService (union + record∈set enforcement) — and asserts that toggling
 // contact.sprk_standinggrant ENABLE→grants LIVE access and DISABLE→REVOKES it, with NO
 // sprk_externalrecordaccess row ever materialized, plus the cache-invalidation that makes a toggle
@@ -70,7 +70,7 @@ public sealed class StandingGrantRuntimeUnionSeamTests
             .ReturnsAsync(MembershipOf(StandingOnlyProject)); // allowlist-filtered result (NFR-05, task 021)
 
         // ── production slice: real reader + real composer over the real compose surface ───────────
-        var reader = new ContactStandingGrantReader(dataverse.Object, NullLogger<ContactStandingGrantReader>.Instance);
+        var reader = new SubjectStandingGrantReader(dataverse.Object, NullLogger<SubjectStandingGrantReader>.Instance);
         var participations = new FakeParticipationService(new[] { GrantedProject });
         // Task 039: the deny-list reader is an external boundary this seam does not exercise — an
         // inert double keeps the seam's assertions about standing-grant union/revocation, not denial.
@@ -120,6 +120,59 @@ public sealed class StandingGrantRuntimeUnionSeamTests
     }
 
     /// <summary>
+    /// 🔴 Task 042 / FR-25, the owner's option-B decision, asserted at the SEAM — through the real
+    /// reader and the real composer, not just the reader's unit test.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the case that broke this file when the level-bearing term landed, and it deserves
+    /// its own assertion rather than a quiet fixture fix. A contact whose <c>sprk_standinggrant</c> is
+    /// set but whose <c>sprk_accesspermissiongrant</c> is NOT gets <b>no standing-derived access at
+    /// all</b> — the records are ABSENT from the set, not present with zero rights, because a record
+    /// the caller can see but cannot act on is a worse answer than one they cannot see.</para>
+    ///
+    /// <para>It was the live state of both real standing-grant contacts on 2026-09-10, which is why
+    /// they were backfilled before this shipped. The alternatives (a View Only floor, a Collaborate
+    /// floor) were rejected: a level nobody chose must not confer access.</para>
+    /// </remarks>
+    [Fact]
+    public async Task StandingGrant_WithNoBaseline_ConfersNoAccessEvenWhenTheFlagIsSet()
+    {
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Contact(held: true, baselineOptionValue: null)); // flag ON, baseline UNSET
+
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MembershipOf(StandingOnlyProject));
+
+        var reader = new SubjectStandingGrantReader(dataverse.Object, NullLogger<SubjectStandingGrantReader>.Instance);
+        var participations = new FakeParticipationService(new[] { GrantedProject });
+        var sut = new AccessibleRecordSetService(
+            membership.Object, participations, reader, NeverDeniesReader(),
+            NullLogger<AccessibleRecordSetService>.Instance);
+
+        var principal = ContactPrincipal();
+        var composed = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        composed.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
+            "only the EXPLICIT grant survives — the standing term contributes nothing without a baseline");
+        composed.RecordIds.Should().NotContain(StandingOnlyProject,
+            "absent, not present-with-zero-rights: a visible record the caller cannot act on is worse");
+        composed.RightsFor(StandingOnlyProject).Should().Be(AccessRights.None);
+        (await sut.IsRecordAccessibleAsync(principal, ProjectEntity, StandingOnlyProject, CancellationToken.None))
+            .Should().BeFalse("a standing grant with no chosen level is not a grant");
+
+        // And the membership walk is not even performed — a term that can contribute nothing has no
+        // records worth enumerating (NFR-02). Strict mock: an unexpected call would have thrown.
+        membership.Verify(
+            m => m.ResolveByContactAsync(ContactId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "short-circuiting on None rights avoids a pointless membership round trip");
+    }
+
+    /// <summary>
     /// The membership options the composer must pass per FR-14 (task 015): real paging options at
     /// the agreed page size, never <c>null</c>.
     /// </summary>
@@ -154,10 +207,30 @@ public sealed class StandingGrantRuntimeUnionSeamTests
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
-    private static Entity Contact(bool held)
+    /// <summary>
+    /// The contact as Dataverse would return it, with the standing-grant flag toggled.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>The baseline is REQUIRED as of task 042 (FR-25)</b> and its absence is why this seam broke
+    /// when the level-bearing term landed. A standing grant now confers
+    /// <c>ToAccessRights(sprk_accesspermissiongrant)</c>, and per the owner's 2026-09-10 decision an
+    /// UNSET baseline confers nothing — so this fixture, which set the flag alone, produced a contact
+    /// who was configured and yet had no access. That is not a fixture nit: it was the exact live state
+    /// of both real standing-grant contacts, and it is why they were backfilled to Collaborate before
+    /// the code shipped. Collaborate here keeps this seam asserting the UNION, which is its subject.
+    /// The no-baseline case has its own assertion — see
+    /// <c>StandingGrant_WithNoBaseline_ConfersNoAccessEvenWhenTheFlagIsSet</c>.
+    /// </remarks>
+    private static Entity Contact(bool held) => Contact(held, 100000001 /* Collaborate */);
+
+    private static Entity Contact(bool held, int? baselineOptionValue)
     {
         var e = new Entity(ContactEntity, ContactId);
         e[StandingGrantAttribute] = held;
+        if (baselineOptionValue is not null)
+        {
+            e["sprk_accesspermissiongrant"] = new OptionSetValue(baselineOptionValue.Value);
+        }
         return e;
     }
 

@@ -612,10 +612,15 @@ public class MembershipPagingCharacterizationTests
     private static AccessibleRecordSetService ComposerWith(
         IMembershipResolverService membership, bool standingGrant = false)
     {
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         standing
-            .Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(standingGrant);
+            .Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            // Task 042 (FR-25): the standing grant is now level-bearing. Collaborate is used
+            // deliberately — it is what MembershipTermRights contributed before, so this file keeps
+            // characterizing PAGING rather than accidentally re-characterizing the level arithmetic.
+            .ReturnsAsync(standingGrant
+                ? new StandingGrantState(true, ExternalAccessLevel.Collaborate)
+                : StandingGrantState.NotHeld);
 
         // Task 039: this file characterizes MEMBERSHIP PAGING — an inert deny-list double keeps that
         // scope, rather than letting the deny-veto's own subject/org resolution enter the picture.

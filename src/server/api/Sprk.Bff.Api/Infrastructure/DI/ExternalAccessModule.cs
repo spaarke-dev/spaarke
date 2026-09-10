@@ -125,14 +125,14 @@ public static class ExternalAccessModule
         // FLS-secured contact.sprk_standinggrant boolean app-only via the already-registered
         // IDataverseService; gates a contact principal's standing-grant runtime membership term.
         // Interface is the ADR-010 testing seam. Singleton is safe (IDataverseService is a singleton).
-        services.AddSingleton<IContactStandingGrantReader, ContactStandingGrantReader>();
+        services.AddSingleton<ISubjectStandingGrantReader, SubjectStandingGrantReader>();
 
         // Deny-list reader (unified-access-control-r2 task 038, FR-23) — the fail-closed reader
         // over sprk_noaccessentry (the ethical-wall / per-child-revocation VETO store; store +
         // reader only, task 039 wires the veto into AccessibleRecordSetService.ApplyVetoPipeline).
         // Typed HttpClient with its own app-only token management, matching the established
         // QUERY-shaped-reader style of this module (ExternalParticipationService,
-        // ModuleEntitlementResolver) rather than ContactStandingGrantReader's single
+        // ModuleEntitlementResolver) rather than SubjectStandingGrantReader's single
         // retrieve-by-id via the shared IDataverseService broker (no batched/filtered query
         // capability). Interface is the ADR-010 testing seam for task 039's future consumer; the
         // concrete type additionally exposes an internal-virtual query seam

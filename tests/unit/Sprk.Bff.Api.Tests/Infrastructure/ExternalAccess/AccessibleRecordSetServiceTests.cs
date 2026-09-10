@@ -12,7 +12,7 @@
 // Plus the load-bearing negative: a contact WITHOUT a standing grant gets ONLY explicit grants,
 // never automatic membership.
 //
-// Module-boundary substitutes only (IMembershipResolverService, IContactStandingGrantReader, and a
+// Module-boundary substitutes only (IMembershipResolverService, ISubjectStandingGrantReader, and a
 // thin ExternalParticipationService subclass overriding its virtual grant loader) per tests/CLAUDE.md.
 
 using System.Net.Http;
@@ -42,6 +42,7 @@ public class AccessibleRecordSetServiceTests
     private static readonly Guid MemberRecordB = Guid.Parse("a0000000-0000-0000-0000-000000000002");
     private static readonly Guid GrantedProject = Guid.Parse("b0000000-0000-0000-0000-000000000001");
     private static readonly Guid StandingMatter = Guid.Parse("c0000000-0000-0000-0000-000000000001");
+    private static readonly Guid StandingProject = Guid.Parse("c0000000-0000-0000-0000-000000000002");
     private static readonly Guid UnrelatedRecord = Guid.Parse("f0000000-0000-0000-0000-0000000000ff");
 
     // ─────────────────────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ public class AccessibleRecordSetServiceTests
             .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, MemberRecordA, MemberRecordB));
 
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         var sut = CreateSut(membership.Object, NoParticipations(), standing.Object);
 
         var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
@@ -70,7 +71,7 @@ public class AccessibleRecordSetServiceTests
         set.Sources.StandingGrantMembership.Should().BeFalse();
 
         // A systemuser NEVER consults the standing-grant flag (design §5 exact rule).
-        standing.Verify(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        standing.Verify(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         membership.Verify(
             m => m.ResolveByContactAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -184,10 +185,10 @@ public class AccessibleRecordSetServiceTests
     public async Task ComposeAsync_ContactWithGrantNoStanding_ReturnsExactlyGrantsAndNeverAutomaticMembership()
     {
         var membership = new Mock<IMembershipResolverService>();
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         standing
-            .Setup(s => s.HasStandingGrantAsync(ContactId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false); // NO standing grant
+            .Setup(s => s.ReadForContactAsync(ContactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld); // NO standing grant
 
         var participations = ParticipationsFor(GrantedProject);
         var sut = CreateSut(membership.Object, participations, standing.Object);
@@ -355,7 +356,7 @@ public class AccessibleRecordSetServiceTests
     {
         // The defect FR-19 removes: a deliberate ViewOnly grant used to arrive as Collaborate, because
         // the set carried no level and the workforce strategy stamped one over everything (register A-8).
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         var sut = CreateSut(
             new Mock<IMembershipResolverService>().Object,
             new FakeParticipationService(new[]
@@ -375,7 +376,7 @@ public class AccessibleRecordSetServiceTests
     {
         // FR-19 acceptance: levels are carried for matters and work assignments, not projects alone.
         // Before task 032 these root types were IReadOnlySet<Guid> and STRUCTURALLY could not carry one.
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         var sut = CreateSut(
             new Mock<IMembershipResolverService>().Object,
             new FakeParticipationService(
@@ -403,7 +404,7 @@ public class AccessibleRecordSetServiceTests
             .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity, GrantedProject));
 
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         var sut = CreateSut(
             membership.Object,
             new FakeParticipationService(
@@ -431,7 +432,7 @@ public class AccessibleRecordSetServiceTests
             .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, MemberRecordA));
 
-        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<IContactStandingGrantReader>().Object);
+        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<ISubjectStandingGrantReader>().Object);
 
         var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
 
@@ -448,7 +449,7 @@ public class AccessibleRecordSetServiceTests
             .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, MemberRecordA));
 
-        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<IContactStandingGrantReader>().Object);
+        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<ISubjectStandingGrantReader>().Object);
 
         var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
 
@@ -786,7 +787,7 @@ public class AccessibleRecordSetServiceTests
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "a Type 1 user must not derive access to a secure record via their linked contact — the Secure "
             + "BU covers the Dataverse half, this veto covers the grant half (design §5.1)");
-        standing.Verify(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+        standing.Verify(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "the systemuser plane must never consult the standing-grant flag");
     }
 
@@ -1224,18 +1225,18 @@ public class AccessibleRecordSetServiceTests
         return reader.Object;
     }
 
-    private static Mock<IContactStandingGrantReader> AlwaysStandingMock()
+    private static Mock<ISubjectStandingGrantReader> AlwaysStandingMock()
     {
-        var m = new Mock<IContactStandingGrantReader>();
-        m.Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        var m = new Mock<ISubjectStandingGrantReader>();
+        m.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(true, ExternalAccessLevel.Collaborate));
         return m;
     }
 
     private static AccessibleRecordSetService CreateSut(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
-        IContactStandingGrantReader standing,
+        ISubjectStandingGrantReader standing,
         INoAccessListReader? noAccessList = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
                NullLogger<AccessibleRecordSetService>.Instance);
@@ -1282,17 +1283,152 @@ public class AccessibleRecordSetServiceTests
         ids.Length,
         DateTimeOffset.UtcNow.AddMinutes(5));
 
-    private static IContactStandingGrantReader AlwaysStanding()
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Task 042 / FR-25 — the standing term is LEVEL-BEARING, asserted through COMPOSITION.
+    //
+    // The reader's own tests pin the read; these pin what the EVALUATOR does with it. Before task 042
+    // the standing term contributed the constant MembershipTermRights (Collaborate-equivalent) for
+    // every subject, so a View Only subject silently received Write and Create.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<ExternalAccessLevel, AccessRights> StandingLevelCases => new()
     {
-        var m = new Mock<IContactStandingGrantReader>();
-        m.Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        { ExternalAccessLevel.ViewOnly,    AccessRights.Read },
+        { ExternalAccessLevel.Collaborate, AccessRights.Read | AccessRights.Write | AccessRights.Create },
+        { ExternalAccessLevel.FullAccess,  AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete },
+    };
+
+    /// <summary>
+    /// FR-25 acceptance criteria 1 + 2: a standing-derived record carries EXACTLY the subject's
+    /// baseline rights — asserted by equality, so a stray bit fails.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(StandingLevelCases))]
+    public async Task ComposeAsync_StandingDerivedRecords_CarryExactlyTheSubjectsBaselineRights(
+        ExternalAccessLevel baseline, AccessRights expected)
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, StandingProject));
+
+        var sut = CreateSut(membership.Object, NoParticipations(), StandingAt(baseline));
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(StandingProject).Should().Be(expected,
+            "the standing term must contribute the subject's baseline, not a constant");
+        set.Sources.StandingGrantMembership.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// FR-25 acceptance criterion 3 — the max interaction. A record reached by BOTH a View Only
+    /// standing term AND an explicit Collaborate grant resolves to the HIGHER of the two.
+    /// </summary>
+    /// <remarks>
+    /// This is the composition property the whole rights-map design exists for: terms compose by
+    /// highest-wins union, so a low-level standing baseline must not cap a deliberately higher explicit
+    /// grant — and equally must not be overwritten by it. Both directions matter; asserting equality on
+    /// the union catches either mistake.
+    /// </remarks>
+    [Fact]
+    public async Task ComposeAsync_StandingViewOnlyPlusExplicitCollaborateGrant_ResolvesToTheMax()
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject)); // SAME record as the grant below
+
+        var sut = CreateSut(
+            membership.Object,
+            new FakeParticipationService(new[]
+            {
+                new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.Collaborate }
+            }),
+            StandingAt(ExternalAccessLevel.ViewOnly));
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create,
+            "the explicit Collaborate grant wins the max; a ViewOnly standing baseline must neither cap " +
+            "it nor be overwritten by it");
+    }
+
+    /// <summary>
+    /// 🔴 The owner's option-B decision (2026-09-10) at composition level: a standing grant with NO
+    /// baseline yields records that are ABSENT, not present-with-zero-rights.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_StandingGrantWithNoBaseline_ContributesNothingAndSkipsTheMembershipWalk()
+    {
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing
+            .Setup(s => s.ReadForContactAsync(ContactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: null));
+
+        var sut = CreateSut(membership.Object, ParticipationsFor(GrantedProject), standing.Object);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
+            "only the explicit grant survives — an unchosen level confers nothing");
+        set.RightsFor(StandingProject).Should().Be(AccessRights.None);
+        set.Sources.StandingGrantMembership.Should().BeFalse(
+            "provenance must not claim a term that contributed nothing");
+
+        // Strict mock with NO membership setup: the walk was never attempted. A term that can
+        // contribute nothing has no records worth enumerating (NFR-02).
+        membership.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// Task 042's scope boundary, asserted rather than assumed: the ORG baseline reader exists and is
+    /// unit-tested, but the evaluator must NOT consume it yet — the org expansion term is task 043's.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_NeverReadsTheOrganizationStandingGrant_OrgTermIsTask043()
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, StandingProject));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing
+            .Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(true, ExternalAccessLevel.Collaborate));
+
+        var sut = CreateSut(membership.Object, NoParticipations(), standing.Object);
+
+        await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        standing.Verify(
+            s => s.ReadForOrganizationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "wiring the org term here would ship an untested access path; task 043 owns it");
+    }
+
+    private static ISubjectStandingGrantReader StandingAt(ExternalAccessLevel baseline)
+    {
+        var m = new Mock<ISubjectStandingGrantReader>();
+        m.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: baseline));
         return m.Object;
     }
 
-    private static IContactStandingGrantReader NeverStanding()
+    private static ISubjectStandingGrantReader AlwaysStanding()
     {
-        var m = new Mock<IContactStandingGrantReader>();
-        m.Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var m = new Mock<ISubjectStandingGrantReader>();
+        m.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new StandingGrantState(true, ExternalAccessLevel.Collaborate));
+        return m.Object;
+    }
+
+    private static ISubjectStandingGrantReader NeverStanding()
+    {
+        var m = new Mock<ISubjectStandingGrantReader>();
+        m.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(StandingGrantState.NotHeld);
         return m.Object;
     }
 

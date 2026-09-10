@@ -80,7 +80,7 @@ public sealed class NoAccessListResult
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Fail direction is the mirror image of <see cref="ContactStandingGrantReader"/>, deliberately.</b>
+/// <b>Fail direction is the mirror image of <see cref="SubjectStandingGrantReader"/>, deliberately.</b>
 /// That reader answers a single yes/no ADDITIVE question and fails closed toward <c>false</c> ("no
 /// standing grant") — an unreadable term must contribute NOTHING, because it only ever widens
 /// access. THIS reader answers a VETO question, so its fail-closed direction is the opposite: an
@@ -107,7 +107,7 @@ public sealed class NoAccessListResult
 /// <b>Broker-only (ADR-010 / NFR-02).</b> Reads Dataverse app-only via its own typed
 /// <see cref="HttpClient"/> + <see cref="TokenCredential"/> — the established style of every OTHER
 /// QUERY-shaped reader in this module (<c>ExternalParticipationService</c>,
-/// <c>ModuleEntitlementResolver</c>), as opposed to <see cref="ContactStandingGrantReader"/>'s
+/// <c>ModuleEntitlementResolver</c>), as opposed to <see cref="SubjectStandingGrantReader"/>'s
 /// single retrieve-by-id via the shared <c>IDataverseService</c> broker (which has no
 /// batched/filtered query capability — <c>IGenericEntityService.RetrieveMultipleAsync</c> exists,
 /// but nothing in THIS module uses it; every filtered/batched read here is a hand-built OData

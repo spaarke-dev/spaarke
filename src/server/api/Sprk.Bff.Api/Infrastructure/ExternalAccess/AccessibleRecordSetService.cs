@@ -539,14 +539,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
     private readonly IMembershipResolverService _membership;
     private readonly ExternalParticipationService _participations;
-    private readonly IContactStandingGrantReader _standingGrant;
+    private readonly ISubjectStandingGrantReader _standingGrant;
     private readonly INoAccessListReader _noAccessList;
     private readonly ILogger<AccessibleRecordSetService> _logger;
 
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
-        IContactStandingGrantReader standingGrant,
+        ISubjectStandingGrantReader standingGrant,
         INoAccessListReader noAccessList,
         ILogger<AccessibleRecordSetService> logger)
     {
@@ -912,12 +912,27 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         // Standing-grant runtime membership, GATED on the subject-level policy flag. The negative case is
         // load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit grants — NEVER automatic
-        // membership. (task-051 seam: IContactStandingGrantReader.)
+        // membership. (task-051 seam: ISubjectStandingGrantReader.)
         var standingApplied = false;
         var capped = false;
         var membershipPages = 0;
         var standingIds = new HashSet<Guid>();
-        if (await _standingGrant.HasStandingGrantAsync(contactId, ct).ConfigureAwait(false))
+
+        // FR-25 (task 042): the standing grant is LEVEL-BEARING. One read returns both the flag and the
+        // subject's sprk_accesspermissiongrant baseline; `Rights` routes it through task 032's single
+        // ExternalAccessLevel→AccessRights mapping.
+        //
+        // 🔴 Rights == None short-circuits the whole term — the membership walk is not even performed.
+        // Two reasons: a term that can contribute nothing has no records worth enumerating (NFR-02), and
+        // per the owner's 2026-09-10 decision an EMPTY baseline contributes nothing, which must mean the
+        // records are ABSENT from the accessible set rather than present with zero rights. AccumulateTerm
+        // would have entered them at None, and "present but powerless" is a different — worse — answer
+        // than "not accessible": it is exactly the shape that makes a UI render a row the caller cannot
+        // act on. See notes/task-042-standing-grant-levels.md §4.
+        var standing = await _standingGrant.ReadForContactAsync(contactId, ct).ConfigureAwait(false);
+        var standingRights = standing.Rights;
+
+        if (standingRights != AccessRights.None)
         {
             // FR-14: same continuation-following fix as the systemuser plane — the pre-fix
             // `options: null` call silently capped a standing-grant contact at 500 records.
@@ -957,7 +972,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 composed,
                 standingIds
                     .Where(id => !IsSecure(id))
-                    .Select(id => KeyValuePair.Create(id, MembershipTermRights)));
+                    .Select(id => KeyValuePair.Create(id, standingRights)));
         }
 
         // ── VETOES, after the max, in order: deny-list (task 039) → Restricted (task 037) ──────────
