@@ -72,7 +72,9 @@ Either add a direct `sprk_event` column to `sprk_document`, or repoint `EventLoo
 | **Type** | Issue (blocks a repo-wide CI cutover) |
 | **Found** | 2026-09-09, while scoping task 043 |
 | **Diagnosed** | ✅ 2026-09-10 by task 044 — **ROUTER DEFECT, already remediated by PR #944**. See [`notes/044-false-green-diagnosis.md`](044-false-green-diagnosis.md). |
-| **Owner** | 🔴 **OPERATOR** — the CI defect is fixed; what remains is a §6.5 **path B** decision on the shadow-window exit criterion (see the DIAGNOSED block below). Task 044 is complete; it deliberately applied no fix to the criterion. |
+| **Owner** | ✅ **RESOLVED 2026-09-10.** Operator chose **Option 1** — advance `-Since` to `2026-09-04T22:13:10Z` (immediately after PR #944, the last change to the CI configuration under observation). Applied to `scripts/ci/shadow-window-status.ps1`. |
+| **Outcome** | Window re-measured live after the change: **0 false greens, 0 false reds, 5/20 agreeing, 3/5 days.** The banner flipped from "A false green is DISQUALIFYING" to "Window still open. Nothing to do — keep merging normally." The cutover is unblocked and simply needs merges to accumulate. Cost paid: 6 comparable PRs, 1.1 days. |
+| **⚠️ Residual** | The **latch itself was NOT repaired** — `$falseGreens` is still computed over the whole window while `$ready` gates on it unfiltered, so the NEXT false green will latch exactly the same way. Advancing `-Since` sidestepped #934; it did not fix the mechanism. Repairing it means deciding what the exit criterion MEANS — a hard stop, or a reset — which belongs to whoever owns the cutover. Documented in the script's own `.PARAMETER Since` block so it cannot be lost. |
 | **Severity** | ⬇️ Downgraded. The new tier is no longer unproven — the gap is closed and verified live. `sdap-ci.yml` still cannot retire, but now only because the *measurement* latches on a fixed defect. |
 | **GitHub Issue** | ➖ not filed. Diagnosed under r1 task 044 (operator, 2026-09-09), which carried explicit authorization to touch the frozen tier files — **authorization not exercised; no tier file changed**. |
 
