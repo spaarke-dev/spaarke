@@ -322,6 +322,30 @@ jobs:
   # ArchTests suite but carries continue-on-error at BOTH job and step level, so it can
   # never fail a build. A rule that cannot fail is documentation. (sdap-ci.yml is also
   # open in PR #806 and was deliberately not edited.)
+  #
+  # ───── +4 armed 2026-09-09 (unified-access-control-r2 task 024) ─────
+  # A worked demonstration of the sentence above. Task 035 added a 1:1 interface
+  # (IImpersonatedRootSetSource) WITHOUT raising ADR-010's ceiling. The full suite ran
+  # twice in CI on that push — sdap-ci code-quality and ci-tier2-advisory — and both
+  # carry continue-on-error, so the PR showed green everywhere and the miss survived a
+  # full session. The compensating control did not fire either: the newest ADR-validation
+  # comment on the PR predated the interface by two days and still reads "All ADR
+  # validations passed", which a reviewer reads as current.
+  #
+  #   ADR010_DITests.ServicesShouldBeConcreteUnlessSeamRequired
+  #     The ratchet that silently failed. It is a CEILING on 1:1 interface mappings; its
+  #     entire value is refusing to move without review, which requires that it can fail.
+  #
+  #   ExternalAccessQueryIntegrityGuardTests.* (3)
+  #     unified-access-control-r2's own source-level invariants (task 025 seams 3-4, task
+  #     024 seam 5). Each pins a defect that FAILED ZERO TESTS when reintroduced — that is
+  #     why they exist, and unarmed they reproduce the exact problem they were built for.
+  #     Source-scanning only, no assembly load, so they are cheap and CI-stable.
+  #
+  # Cost: ~0. This job is build-dominated (~2m of a 5m timeout); 4 more filtered tests do
+  # not move it. Precedent: PR #840 armed CallerIdentityGuardTests here the same way, was
+  # disclosed to ci-cd-unit-test-remediation-r1, and was adjudicated ACCEPTED — the CI
+  # freeze carries a GATE REPAIR carve-out, which is exactly what this is.
   # --------------------------------------------------------------------------
   arch-tests:
     name: Arch Tests (MUST-NOT subset)
@@ -362,7 +386,7 @@ jobs:
           dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
             -c Debug \
             --no-build \
-            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule2_NoOwnershipPredicateGatedOnAGuidTryParse|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_TheRuleActuallyMatchesTheDefect|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_CommentStrippingRespectsStringLiterals|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryCarriesAReason|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryStillExists|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.NoAuthorizationFilterIsDecorative|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.ScannerAccountsForEveryRegistrationInTheGovernedFiles|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.TheEndpointFileCensusIsPinned|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B4_NoConstructorNullGuardTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B1_NoHttpMessageHandlerMocks|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B3_NoDiRegistrationAssertions|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B12_NoTrivialSnapshotTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B16_NoAutoPropertyRoundTripTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.NegativeControl_DetectorsMatchTheDefect|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.PositiveControl_DetectorsIgnoreSanctionedShapes|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.Control_ScannerSeesTheTestTree" \
+            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule2_NoOwnershipPredicateGatedOnAGuidTryParse|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_TheRuleActuallyMatchesTheDefect|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_CommentStrippingRespectsStringLiterals|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryCarriesAReason|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryStillExists|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.NoAuthorizationFilterIsDecorative|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.ScannerAccountsForEveryRegistrationInTheGovernedFiles|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.TheEndpointFileCensusIsPinned|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B4_NoConstructorNullGuardTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B1_NoHttpMessageHandlerMocks|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B3_NoDiRegistrationAssertions|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B12_NoTrivialSnapshotTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B16_NoAutoPropertyRoundTripTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.NegativeControl_DetectorsMatchTheDefect|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.PositiveControl_DetectorsIgnoreSanctionedShapes|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.Control_ScannerSeesTheTestTree|FullyQualifiedName=Spaarke.ArchTests.ADR010_DITests.ServicesShouldBeConcreteUnlessSeamRequired|FullyQualifiedName=Spaarke.ArchTests.ExternalAccessQueryIntegrityGuardTests.GrantQueriesUseTheExpiryAwareFilterBuilders|FullyQualifiedName=Spaarke.ArchTests.ExternalAccessQueryIntegrityGuardTests.ListExternalMembersDoesNotSwallowItsGraphError|FullyQualifiedName=Spaarke.ArchTests.ExternalAccessQueryIntegrityGuardTests.ContainerPermissionReadsAllGoThroughThePagedReader" \
             --logger "trx;LogFileName=arch-must-not.trx" \
             --results-directory ./TestResults
         shell: bash
