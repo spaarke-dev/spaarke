@@ -5,12 +5,14 @@ import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
 import { useLinkedTodosForCommunication } from './hooks';
 import { TaskPaneShell, type NavigationTab, type HostType } from './components/TaskPaneShell';
+import { getAvailableTabs } from './components/TaskPaneNavigation';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
+import { FindView } from './components/views/FindView';
 import type {
   SavedTodoContext,
   CreateTodoInput,
@@ -373,7 +375,11 @@ export const App: React.FC<AppProps> = ({
         version={version}
         {...(buildDate !== undefined ? { buildDate } : {})}
         connectionStatus={connectionStatus}
-        showNavigation={hostType === 'outlook'}
+        // FR-03 / task 015: navigation is no longer Outlook-only. Visibility is derived
+        // from the shared tab-availability check (getAvailableTabs) rather than a
+        // hostType conditional (NFR-10) — Word now gets Save + Find; Outlook keeps
+        // Save + Create To Do + Find.
+        showNavigation={getAvailableTabs(hostType).length > 0}
         selectedTab={currentTab}
         onTabChange={setCurrentTab}
         themePreference={preference}
@@ -443,6 +449,11 @@ export const App: React.FC<AppProps> = ({
             }}
           />
         )}
+
+        {/* Find tab (task 015 / FR-03) — frame only, no similarity/search call. Phase 3
+            (tasks 032-034) mounts the real view here once task 032's authorization
+            hardening lands (plan.md finding F-b). */}
+        {currentTab === 'find' && <FindView />}
 
         {currentTab === 'share' && (
           <ShareView

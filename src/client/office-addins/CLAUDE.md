@@ -25,7 +25,7 @@ React 19 + Fluent UI v9 **task-pane add-ins** for **Outlook** and **Word**, host
 ## Load-bearing facts (get these wrong and you break the add-in)
 
 1. **Auth is NAA via `@spaarke/auth`, not a bespoke MSAL service.** `AuthService` wraps `SpaarkeAuthProvider` + `OfficeNaaStrategy`. **Never** `new PublicClientApplication` / `createNestablePublicClientApplication` here (ADR-028) — MSAL construction lives inside `OfficeNaaStrategy`. Desktop/modern-web = silent NAA (`brk-multihub://${hostname}`); Office-web fallback = popup to `${origin}/auth-callback.html`. Each env must register **both** URIs as **SPA** redirects (mismatch → AADSTS7000471).
-2. **Navigation is Outlook-only.** `App.tsx` sets `showNavigation={hostType === 'outlook'}` — **Word is Save-only**.
+2. **Navigation is available in both hosts (task 015 / FR-03).** `App.tsx` derives `showNavigation` from `getAvailableTabs(hostType).length > 0`, not a `hostType` conditional. Word: Save + Find. Outlook: Save + Create To Do + Find. `TaskPaneToolbar` is the one live tab-row renderer (mounted by `TaskPaneShell`); `TaskPaneNavigation`'s own tab-row component is an intentionally-unmounted helper/test surface — see its file header.
 3. **Share / Search / Recent tabs are placeholders.** Their handlers in `App.tsx` are stubs (`return []` / `console.log`). Do not assume they call the BFF.
 4. **Create To Do makes a first-class `sprk_todo`** — never an `sprk_event` type "to do", never the SmartTodo popup wizard. Its regarding = the record the email was filed to (`SaveView.onSaved` → `App.savedContext`).
 5. **Config is env-driven.** `BFF_API_BASE_URL` (default `spaarke-bff-dev`) and `ORG_URL` (Quick-Create deep-link; unset → safe no-op). **No hardcoded org URLs.**
