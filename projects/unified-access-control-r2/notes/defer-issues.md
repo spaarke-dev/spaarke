@@ -259,6 +259,46 @@ cannot express.
 
 ---
 
+### ISS-005 — `BulkUpdateAsync` claims transactional behaviour that `ExecuteMultiple` does not provide
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-10 |
+| **Source** | FR-33 redesign (record-level expiry). Pre-existing; found while choosing an atomic write for it. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/970 |
+
+**Description**
+
+`DataverseServiceClientImpl.BulkUpdateAsync` (`:2324-2329`) uses `ExecuteMultipleRequest` with
+`ContinueOnError = false` and the comment *"Stop on first error for transactional behavior"*.
+**`ExecuteMultiple` is not transactional** — stopping at the first failure leaves every earlier request
+committed, with no rollback. The all-or-nothing mechanism is `ExecuteTransactionRequest` (or a Web API
+`$batch` changeset).
+
+**Concrete failure mode**: the helper sits on the shared `IGenericEntityService` interface and its name
+plus comment make it look like the tool for "update these N rows together". This project nearly used it
+to set `sprk_expiresdate` across every grant on a record — where a partial failure while **shortening**
+an expiry leaves some grants at the later date: **fail-open on an access control**, behind a comment
+saying it cannot happen. Today's two callers (`CommunicationAccountService`, `WorkspaceLayoutService`)
+are low-stakes; the risk is the next reuse.
+
+**Entry-points**
+
+- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:2324` — the helper
+- `IGenericEntityService.cs:41` — the shared interface that exposes it
+
+**Suggested fix**: switch to `ExecuteTransactionRequest` (preferred — both callers very likely want
+all-or-nothing), or delete "transactional" from the comment and rename so it no longer reads as atomic.
+
+**Estimated effort**: small.
+**Blockers**: none. Out of scope here only because `Spaarke.Dataverse` is a shared hot-path surface;
+FR-33's own write will use an atomic changeset instead of this helper.
+**Related**: FR-33 redesign — `notes/decisions/external-grant-expiry-mandatory.md` §11.
+
+---
+
 ## Closed
 
 *(none yet)*

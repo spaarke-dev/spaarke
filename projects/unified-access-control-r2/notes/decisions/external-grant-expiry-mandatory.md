@@ -283,3 +283,76 @@ reminder.
 
 **This is more work than the cap was, and it is better work.** It should be re-planned as tasks rather
 than absorbed into FR-33's existing shape.
+
+---
+
+## 11. §10.2 REVISED — reuse `sprk_expiresdate`; do NOT add a column to the root records
+
+The owner asked: *"should this be on the record (sprk_project, sprk_matter, etc.)? why are we not using
+the sprk_externalrecordaccess field sprk_expiresdate?"*
+
+**The owner is right. §10.2's recommendation over-built it, and it failed CLAUDE.md §11's own
+extension test** — "Can I extend the existing instead?" The answer was yes and §10.2 said no.
+
+### What already exists (verified 2026-09-10)
+
+| Fact | Evidence |
+|---|---|
+| `sprk_externalrecordaccess.sprk_expiresdate` exists, **Date Only** | `ExternalGrantLifecycle.cs:98-103` |
+| It is **already enforced server-side** in the `$filter` (`ge`), so an expired row never crosses the wire | task 007 (A-5, read path) |
+| It is **already written** on the grant upsert | task 023 (H1, write path) |
+| The server **already accepts** an expiry on every grant | `GrantAccessRequest.ExpiryDate`, `InviteExternalUserRequest.ExpiryDate` — both `DateOnly?` |
+| Org grants use the **same table**, so one mechanism covers contacts AND organizations | `_sprk_organization_value` rows in `sprk_externalrecordaccess` |
+| The Manage Access UI sends **no** expiry today | `AccessGrantModal.tsx` — zero references |
+
+**So the enforcement — the riskiest part — is already built and tested.** A new root column needed
+schema on three tables *and* new evaluator logic. Reuse needs **neither**.
+
+### My two objections to reuse, re-examined honestly
+
+1. *"An N-row rewrite can partially fail."* **Real, but solvable** — with an atomic write. Changing the
+   toolbar date updates every active grant on the record in ONE all-or-nothing operation (Web API
+   `$batch` changeset, or `ExecuteTransactionRequest`). Per-record grant counts are small, far inside
+   batch limits. Atomicity matters specifically because **shortening** an expiry with a partial failure
+   leaves a row at the *later* date — fail-OPEN.
+   ⚠️ **Do NOT reuse `IGenericEntityService.BulkUpdateAsync` for this.** Its comment says
+   *"ContinueOnError = false — Stop on first error for transactional behavior"*, but `ExecuteMultiple`
+   **is not transactional**: stopping at the first error leaves every earlier request committed. That
+   is exactly the fail-open partial write above, behind a comment that says it cannot happen. Filed
+   separately (see §11 footer).
+2. *"New grants must pick up the record's date."* **Weak** — the server DTOs already accept
+   `ExpiryDate`; the toolbar value is simply sent with every add.
+
+### The revised design
+
+- **Toolbar `Expiration` date picker** on Manage Access (owner's screenshot: next to `+ Contact` /
+  `+ Organization`). It applies to **all** sharing on the record.
+- **Setting it** writes `sprk_expiresdate` onto every active grant row for the record, **atomically**.
+- **Adding a grant** sends the toolbar's current value as `ExpiryDate`.
+- **Displaying it** when Manage Access opens: read from the grants. They agree because the toolbar sets
+  all of them; if they ever disagree (a manual MDA edit, legacy data), show the **earliest** — it is the
+  one that governs the soonest lapse — and flag the divergence rather than hide it.
+- 🔴 **Mandatory**: today `ExpiryDate` is *optional* and blank means **never expires**. That is the
+  single change that actually delivers FR-33 — **reject a grant without an expiry at the endpoint**, and
+  default the picker to **+90 days** so the path of least resistance is bounded. Without this, reuse
+  changes nothing: the column already existed and grants were still unbounded.
+- No root columns. No evaluator change. No new schema.
+
+### The one thing reuse structurally cannot do — an open question
+
+**Standing grants (task 042) have no `sprk_externalrecordaccess` row.** They are a runtime membership
+term derived from the subject's `sprk_standinggrant` flag, so a per-grant date cannot govern them. A
+record-level column *could* have vetoed standing-derived access too.
+
+Whether that matters is a product question: does a record's **Expiration** mean *"explicit shares on
+this record end"* (reuse is complete), or *"ALL external access to this record ends, including
+standing access"* (reuse leaves a gap)? The toolbar sits inside **Add Access Permissions**, which
+manages explicit shares — which argues for the first reading. Standing access has its own on/off switch
+(the flag). **Recommendation: the first reading; revisit only if a standing-access firm needs to be cut
+off from one record while keeping the rest.**
+
+**§10.2 is superseded by this section.** §10.3 (notifications 30/14/7/3/1 + the expirations view)
+stands unchanged — both read `sprk_expiresdate`, which makes them simpler under reuse, not harder.
+
+> **§11 footer** — the `BulkUpdateAsync` finding is filed as **ISS-005 / GitHub #970**:
+> https://github.com/spaarke-dev/spaarke/issues/970
