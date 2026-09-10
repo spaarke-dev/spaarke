@@ -71,9 +71,9 @@ Either add a direct `sprk_event` column to `sprk_document`, or repoint `EventLoo
 |---|---|
 | **Type** | Issue (blocks a repo-wide CI cutover) |
 | **Found** | 2026-09-09, while scoping task 043 |
-| **Owner** | ⚠️ **UNASSIGNED.** `ci-cd-unit-test-remediation-r1` owned this area and is **CLOSED** (operator, 2026-09-09) |
+| **Owner** | ✅ **`spaarkeai-word-add-in-r1`, task 044** (operator, 2026-09-09). Its previous owner `ci-cd-unit-test-remediation-r1` is CLOSED. |
 | **Severity** | `sdap-ci.yml` cannot retire; the new tier is unproven against a case it already got wrong |
-| **GitHub Issue** | ➖ not filed — needs an owner decision first |
+| **GitHub Issue** | ➖ not filed. **OWNED BY r1 as task 044** (operator, 2026-09-09), which also carries explicit authorization to touch the frozen tier files. |
 
 `scripts/ci/shadow-window-status.ps1` reports, as of 2026-09-09:
 
