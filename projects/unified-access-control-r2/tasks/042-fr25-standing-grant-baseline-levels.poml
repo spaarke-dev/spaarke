@@ -32,7 +32,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">Rights-map evaluator + the single ExternalAccessLevel→AccessRights mapping.</dependency>
+      <dependency task="032" status="completed">Rights-map evaluator + the single ExternalAccessLevel→AccessRights mapping.</dependency>
     </dependencies>
   </context>
 
@@ -58,7 +58,7 @@
 
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the reader, the post-032 standing term, register C-3/E-7.</step>
-    <step order="1">Verify live schema: contact.sprk_accesspermissiongrant exists with the three option values; identify the ORGANIZATION-level standing fields (design §10 names sprk_standinggrant + sprk_accesspermissions on sprk_organization — confirm exact logical names + values against dev metadata). Record findings in notes/. If any field is absent, fire the escalation below.</step>
+    <step order="1" status="DONE 2026-09-10">✅ SCHEMA VERIFICATION COMPLETE — see notes/task-042-standing-grant-levels.md §1. Do NOT redo it. All four fields exist with the exact FR-25 option values (100000000 View Only / 100000001 Collaborate / 100000002 Full Access), so escalation trigger 1 does NOT fire and no schema work is needed. 🔴 TWO CORRECTIONS TO THIS POML'S OWN TEXT: (a) the org field is `sprk_accesspermissiongrant`, NOT `sprk_accesspermissions` as design §10 says — character-identical to the contact field, so ONE attribute constant serves both entities (9th docs-vs-metadata instance on this project); (b) design §10 needs correcting, listed in the note §5. ⚠️ ESCALATION TRIGGER 2 HAS FIRED AND IS UNANSWERED — 2 of 2 standing-grant contacts have an EMPTY baseline (0 of 9 contacts populated; 0 organizations hold a standing grant), and today the term contributes the CONSTANT Read|Write|Create, so all three candidate defaults change live behaviour for two active internal accounts. Note §4 states the options and the recommendation. DO NOT IMPLEMENT UNTIL ANSWERED.</step>
     <step order="2">Extend the reader: contact (held, baselineLevel) in one $select; org variant reading the org-level fields; both fail-closed per the constraint; FLS Field Security Profile prerequisite noted in the class header + runbook pointer.</step>
     <step order="3">Wire the contact standing-membership term to contribute at the mapped baseline rights; keep the flag-gate semantics (no standing flag ⇒ no term) unchanged.</step>
     <step order="4">Tests per the closed set.</step>
@@ -69,7 +69,7 @@
 
   <escalation>
     <trigger>If contact.sprk_accesspermissiongrant or the org-level standing fields do NOT exist in dev metadata, STOP and escalate per CLAUDE.md §6 (schema-creation decision + backfill obligation) — do not invent alternative columns.</trigger>
-    <trigger>If a subject holds sprk_standinggrant=true but the baseline field is EMPTY, STOP and escalate the default (ViewOnly floor vs no contribution) — spec FR-25 only defines populated-baseline behavior; do not pick silently (CLAUDE.md §6).</trigger>
+    <trigger status="FIRED 2026-09-10, AWAITING OWNER">If a subject holds sprk_standinggrant=true but the baseline field is EMPTY, STOP and escalate the default; spec FR-25 only defines populated-baseline behavior; do not pick silently (CLAUDE.md §6). ⚠️ THIS BINARY IS THE WRONG BINARY — corrected 2026-09-10. It offers "ViewOnly floor vs no contribution", but NEITHER preserves current behaviour: `AccessibleRecordSetService.MembershipTermRights` is the CONSTANT Read|Write|Create (Collaborate-equivalent), so a third option exists — a Collaborate floor, which changes nothing. Measured state: 2 of 2 standing-grant contacts have an EMPTY baseline, 0 of 9 contacts are populated, 0 organizations hold a standing grant, and both affected accounts are ACTIVE internal Spaarke addresses. So every option is a live behaviour change for real people. Options, effects and the recommendation (B paired with a backfill first, else C explicitly time-boxed) are in notes/task-042-standing-grant-levels.md §4.</trigger>
   </escalation>
 
   <outputs>
