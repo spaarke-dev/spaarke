@@ -242,7 +242,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 041 | NFR-09: per-env Entra SPA redirects + deploy-workflow trigger | 🔲 | STANDARD | opus / high | — | 011 |
 | 042 | Deploy the add-in and BFF; run UAT against the acceptance set | 🔲 | STANDARD | sonnet / high | — | 040, 041 |
 | 043 | CI gate for the office-addins jest suite (runs nightly, **cannot fail a PR**) | 🔲 | FULL | opus / high | — | 010, 018 |
-| 044 | 🔴 **ISS-002**: diagnose the shadow-window FALSE GREEN (PR #934) | 🔲 | FULL | **opus / xhigh** | — | none |
+| 044 | 🔴 **ISS-002**: diagnose the shadow-window FALSE GREEN (PR #934) | ✅ | FULL | **opus / xhigh** | `notes/044-false-green-diagnosis.md` | none |
 | 090 | Project wrap-up, lessons learned, `/test-diet` gate | 🔲 | MINIMAL | sonnet / medium | — | 042 |
 
 ---

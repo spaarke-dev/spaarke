@@ -65,15 +65,16 @@ Either add a direct `sprk_event` column to `sprk_document`, or repoint `EventLoo
 
 ---
 
-## ISS-002 — 🔴 CI shadow window holds a DISQUALIFYING false green, and it is on an add-in PR
+## ISS-002 — 🟡 CI shadow window false green — **DIAGNOSED**; residual is an operator decision
 
 | Field | Value |
 |---|---|
 | **Type** | Issue (blocks a repo-wide CI cutover) |
 | **Found** | 2026-09-09, while scoping task 043 |
-| **Owner** | ✅ **`spaarkeai-word-add-in-r1`, task 044** (operator, 2026-09-09). Its previous owner `ci-cd-unit-test-remediation-r1` is CLOSED. |
-| **Severity** | `sdap-ci.yml` cannot retire; the new tier is unproven against a case it already got wrong |
-| **GitHub Issue** | ➖ not filed. **OWNED BY r1 as task 044** (operator, 2026-09-09), which also carries explicit authorization to touch the frozen tier files. |
+| **Diagnosed** | ✅ 2026-09-10 by task 044 — **ROUTER DEFECT, already remediated by PR #944**. See [`notes/044-false-green-diagnosis.md`](044-false-green-diagnosis.md). |
+| **Owner** | 🔴 **OPERATOR** — the CI defect is fixed; what remains is a §6.5 **path B** decision on the shadow-window exit criterion (see the DIAGNOSED block below). Task 044 is complete; it deliberately applied no fix to the criterion. |
+| **Severity** | ⬇️ Downgraded. The new tier is no longer unproven — the gap is closed and verified live. `sdap-ci.yml` still cannot retire, but now only because the *measurement* latches on a fixed defect. |
+| **GitHub Issue** | ➖ not filed. Diagnosed under r1 task 044 (operator, 2026-09-09), which carried explicit authorization to touch the frozen tier files — **authorization not exercised; no tier file changed**. |
 
 `scripts/ci/shadow-window-status.ps1` reports, as of 2026-09-09:
 
@@ -99,8 +100,64 @@ false green in the tier-cutover measurement is a different problem on a frozen s
 the two would put a project-scoped CI task in charge of a repo-wide cutover decision. 043 is
 constrained to surface this and leave it alone.
 
-**What it needs**: an owner, then a diagnosis of why Router passed `934` where legacy failed. Until
-then the shadow window cannot close and `sdap-ci.yml` cannot retire.
+---
+
+### ✅ DIAGNOSED 2026-09-10 by task 044 — verdict: **ROUTER DEFECT, already remediated**
+
+Full report: [`notes/044-false-green-diagnosis.md`](044-false-green-diagnosis.md).
+**Task 044 changed no workflow file. Cost to the window: 0 PRs, 0 days.**
+
+**What legacy caught** — run `33775635122`, job `100716509606` `Build & Test (Debug)`, **step 7
+`Build`** (every test step `skipped`, so it is a **compile** failure, not a test failure):
+
+```
+Phase2EndToEndFixture.cs(443,17): error CS1503: Argument 4: cannot convert from
+  'System.Threading.CancellationToken' to 'string?'  [Sprk.Bff.Api.IntegrationTests.csproj]
+```
+
+#934 added a 4th argument to `IOfficeService.QuickCreateAsync` without updating the fixture.
+
+**Why Router passed** — Tier 1's `Compile (Debug)` (job `100716653033`) ran
+`dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj`: **the production BFF csproj only,
+no test project at all.** Tier 2's `Full Unit Tests` (job `100716654163`) hit the identical CS1503
+at its own `Build` step — but Tier 2 is excluded from Router by construction. Green `CI / Router`
+over a solution that does not build. **5 of 8 solution test projects had no blocking compile
+coverage**; `Spaarke.Core.Tests` (46 tests) was not even in `Spaarke.sln`.
+
+**Verdict — DEFECT, not DESIGNED-BEHAVIOR.** The failing *job* sat in Tier 2, but the failing
+*concern* is **compilation**, which is Tier 1's declared charter (the job is named `Compile
+(Debug)`). Tier 2 caught it only incidentally, as the build that precedes its tests. Per the tier
+design's own words: *"the gate is 'the solution builds', not 'the tests pass'."* Test **execution**
+staying advisory in Tier 2 remains correct and is not a gap.
+
+**Already fixed** — PR **#944** / `ce5c2c3d7`, merged 2026-09-04T22:13Z: Tier 1 now builds
+`Spaarke.sln`. Verified from a live recorded run (job `102698717302`, 2026-09-10) compiling
+`Sprk.Bff.Api.IntegrationTests.dll`. Compile coverage now **9/9** test projects.
+
+**🔴 STILL OPEN — the blocker moved, it did not clear. Owner: OPERATOR (§6.5 path B decision).**
+
+#944 fixed the CI defect but not the *measurement*. `shadow-window-status.ps1` computes
+`$falseGreens` over the whole window and gates on `$falseGreens.Count -eq 0`, never filtered by
+`$countingFrom` — so **#934 is a permanent latch** and `$ready` can never become true, however many
+PRs subsequently agree. This contradicts the script's own prose (*"the count restarts from the most
+recent one"*). Separately, its `-Since` docstring still claims PR #841 is *"the last change to the
+CI configuration under observation"* — false since #944.
+
+Decision required (details + rationale in §6 of the report):
+
+- **Option 1 (recommended)** — advance default `-Since` to `2026-09-04T22:13:10Z`. The script's own
+  doctrine; criterion semantics unchanged. **Costs 6 PRs / 1.1 days** (today: 5/20, 3.0/5 days,
+  **0 false greens, 0 false reds**).
+- **Option 2** — de-latch `$ready` to evaluate false greens over the counting run only. **0 PRs,
+  0 days** (keeps 11/20, 4.1/5) but relaxes a safety gate.
+
+Neither was applied — path B requires operator sign-off, not a unilateral rewrite. Note the marginal
+cost is **6 PRs / 1.1 days, not the 11 / 4.1 assumed at filing**: #934's own reset had already
+discarded everything before it.
+
+Minor, non-blocking: #944's comment in `ci-tier1-blocking.yml` says *"widened 2026-08-31"* — wrong
+and chronologically impossible (it predates the 09-03 failure). Actual: 2026-09-04. Fix in passing;
+not worth a dedicated edit of a frozen file.
 
 ---
 
