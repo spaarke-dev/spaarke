@@ -180,7 +180,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 |---|---|---|---|---|---|---|
 | 010 | FR-04: consolidate onto one Word adapter via `HostAdapterFactory` — ⚠️ **implementation complete + verified; ONE operator decision open (host-detection, notes §6c)** | ✅ | FULL | opus / xhigh | P1-a | 006, 007, 008 |
 | 011 | FR-05: migrate Word to the unified JSON manifest | 🔄 | STANDARD | sonnet / high | P1-a | none |
-| 012 | FR-01 server: document-identity resolver extending `/api/documents` — ⚠️ **gated on the Spike-1 §8 operator pass; re-scoped or optional if §7 is accepted** | 🔲 | FULL | opus / high | — | 002 |
+| 012 | FR-01 server: document-identity resolver extending `/api/documents` — **STARTABLE.** Spike-1 operator pass done 2026-09-10 (web capture + shape check MATCH, spike-1 §19/§21); **carries Spike-1 links 2-3 + a Word-desktop capture as its FIRST acceptance criteria** (cannot be tested outside the BFF). Optional/re-scoped if the operator accepts Spike-1 §7 (stamp-as-primary) | 🔲 | FULL | opus / high | — | 002 ✅ |
 | 013 | FR-01 client: `getDocumentUrl` capability and identity threading | 🔲 | FULL | sonnet / high | — | 010, 012 |
 | 014 | FR-02: server-side custom XML part GUID stamp — **019 CLEARED BOTH PRECONDITIONS 2026-09-09: premise CONFIRMED; manifest now declares CustomXmlParts. GO** — inherits 4 conditions, see notes/019-customxml-premise-and-manifest.md §6 (use the COMMON API not Word.Document.customXmlParts; explicit xmlns on the stamp root; missing stamp = normal + re-stampable; runtime isSetSupported guard). MOVES AHEAD of 012/013 if Spike-1 §7 accepted | 🔲 | FULL | opus / high | P1-b | 012, ~~019~~ ✅ |
 | 015 | FR-03: Save\|Find tab shell, enable navigation in Word | 🔲 | FULL | sonnet / high | P1-b | 010 |
