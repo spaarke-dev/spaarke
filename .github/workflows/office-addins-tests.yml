@@ -226,10 +226,41 @@ jobs:
         # `npm test --` rather than `npx jest`, so the gate goes through the
         # package's own declared entry point — the same one client-tests.yml
         # invokes. If that script changes, both move together.
+        env:
+          GATED_COUNT: ${{ steps.manifest.outputs.count }}
         run: |
           set -euo pipefail
           mapfile -t suites < "$RUNNER_TEMP/gated-suites.txt"
-          npm test -- --ci --reporters=default --passWithNoTests=false --runTestsByPath "${suites[@]}"
+          npm test -- --ci --reporters=default --passWithNoTests=false \
+            --json --outputFile "$RUNNER_TEMP/jest-result.json" \
+            --runTestsByPath "${suites[@]}"
+
+          # ── THE NO-VACUOUS-GREEN ASSERTION (added 2026-09-10 by code-review W-2/W-3)
+          # The manifest step proves every gated path EXISTS. It does not prove jest
+          # RAN it, and jest does not complain when it doesn't: passing a real file
+          # that jest does not treat as a test is silently ignored and the run still
+          # exits 0. Reproduced —
+          #     npx jest --runTestsByPath <a real test> jest.setup.js
+          #     -> "Test Suites: 1 passed, 1 total"   EXIT 0
+          #
+          # That is LIVE here, not theoretical: jest.config.js sets
+          # `roots: ['<rootDir>/shared']`, so the moment anyone promotes a suite
+          # under word/ or outlook/ — exactly the coverage gap notes/043 F-5 flags —
+          # the file exists, the manifest check passes, jest runs nothing for it, and
+          # this gate reports a green covering 12 of a claimed 13.
+          #
+          # It also closes a second, quieter hole: a manifest whose final line lacks
+          # a trailing newline is dropped by `while read` without a word, shrinking
+          # the gate silently. .editorconfig makes that latent, not impossible.
+          #
+          # Asserting that jest ran exactly as many suites as the manifest declared
+          # makes "no vacuous green" true BY CONSTRUCTION rather than by argument.
+          ACTUAL="$(node -e 'process.stdout.write(String(require(process.argv[1]).numTotalTestSuites))' "$RUNNER_TEMP/jest-result.json")"
+          if [ "$ACTUAL" != "$GATED_COUNT" ]; then
+            echo "::error file=src/client/office-addins/ci-gated-suites.txt::Vacuous green: the manifest declares $GATED_COUNT gated suite(s) but jest ran $ACTUAL. A gated path exists but jest did not treat it as a test — most likely it is outside jest.config.js \`roots\` (currently '<rootDir>/shared'), or excluded by testMatch/testPathIgnorePatterns. The gate is NOT covering what it claims."
+            exit 1
+          fi
+          echo "Suite-count assertion OK: jest ran $ACTUAL suite(s), manifest declares $GATED_COUNT."
 
       - name: Summary
         if: always()
