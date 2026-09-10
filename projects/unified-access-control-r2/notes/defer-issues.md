@@ -200,11 +200,35 @@ inside `RightsForRoot` or as a branch resolving before it. 🔴 **Do NOT add
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
-| **Urgency** | next-round |
+| **Status** | ✅ **CLOSED 2026-09-09** — same day, same task, at owner direction ("we need to fix all of these"). |
+| **Urgency** | ~~next-round~~ done |
 | **Filed** | 2026-09-09 |
 | **Source** | Task 024. Introduced by task 020, which deliberately declined it; 024's paging made it worse. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/968 |
+
+**Resolution**
+
+`SpeContainerMembershipService.RemoveMembershipsAsync(containerId, emails, ct)` — ONE paged read, then
+match every email locally and delete by permission id. Returns one `SpeContainerMembershipResult` per
+distinct email, keyed case-insensitively, so `RevokeExternalAccessEndpoint` classifies each member with
+the **same** logic it already used and the blast radius stays at the loop.
+
+The endpoint now resolves every member's email FIRST, then makes a single call. Read count is **1 per
+revoke** instead of 1 per member — and, since task 024 made reads paged, it no longer multiplies by
+page count either.
+
+Preserved deliberately: per-member failure never aborts the sweep (tasks 016/017 — stopping early
+leaves strictly MORE access in place); a read failure marks EVERY member failed rather than absent; an
+incomplete enumeration flows through `ClassifyRevokeResult`, so an unseen member is never reported
+"genuinely absent"; `RevokeMembershipAsync` is untouched because the per-CONTACT revoke still uses it.
+
+⚠️ **One behaviour change worth knowing**: results are keyed by EMAIL, so two contact rows sharing one
+address both report the outcome of the single permission that address owns. Previously the second call
+found it already deleted and reported `NoPermissionFound` — which read as "this person never had
+access". Keying by identity is the more truthful of the two.
+
+**Perturbation**: re-reading the container inside the per-member loop (i.e. restoring the N+1) fails
+**3** tests, one of which asserts the read count directly.
 
 **Description**
 

@@ -260,6 +260,126 @@ public class SpeContainerPagingTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // ISS-004 (#968) — the org sweep reads the container ONCE, not once per member.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 The whole point of the convergence. Three members used to mean three full permission reads —
+    /// and after task 024's paging, three × pages. It is now ONE read regardless of member count.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_ReadsTheContainerOnce_RegardlessOfMemberCount()
+    {
+        // Two pages, so a per-member read would cost 2 GETs each = 6; converged it is 2 total.
+        var adapter = new ScriptedPermissionAdapter(
+        [
+            Page(NextLink,
+                UserPermission("perm-a", "a@client-firm.com"),
+                UserPermission("perm-b", "b@client-firm.com")),
+            Page(null, UserPermission("perm-c", "c@client-firm.com"))
+        ]);
+        var factory = new Mock<IGraphClientFactory>();
+        factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
+        var service = new SpeContainerMembershipService(
+            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+
+        var results = await service.RemoveMembershipsAsync(
+            ContainerId, ["a@client-firm.com", "b@client-firm.com", "c@client-firm.com"]);
+
+        results.Should().HaveCount(3);
+        results.Values.Should().OnlyContain(r => r.Success);
+
+        // 2 page GETs + 3 permission DELETEs. The GET count is the invariant under test: it must not
+        // scale with the number of members.
+        adapter.GetRequestCount.Should().Be(2,
+            "the container is read ONCE (two pages); a per-member read would make this 6 and would grow "
+            + "with both member count AND page count (ISS-004)");
+    }
+
+    /// <summary>
+    /// Fan-out must be real: each member gets their OWN outcome, matched on their OWN address.
+    /// Identities are stated, never derived — task 020's double derived them from shared GUID prefixes
+    /// and tested "one email three times" while believing it tested three members.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_GivesEachMemberTheirOwnOutcome()
+    {
+        var service = ServiceOver(Page(null,
+            UserPermission("perm-a", "a@client-firm.com"),
+            UserPermission("perm-c", "c@client-firm.com")));
+
+        var results = await service.RemoveMembershipsAsync(
+            ContainerId, ["a@client-firm.com", "absent@client-firm.com", "c@client-firm.com"]);
+
+        results["a@client-firm.com"].PermissionId.Should().Be("perm-a");
+        results["c@client-firm.com"].PermissionId.Should().Be("perm-c");
+        results["absent@client-firm.com"].Success.Should().BeFalse();
+        results["absent@client-firm.com"].Error.Should()
+            .StartWith(SpeContainerMembershipService.NoPermissionFoundError,
+                "a COMPLETE read that did not find them is the genuine broker-only absence");
+    }
+
+    /// <summary>
+    /// The honesty rule survives the convergence: on an incomplete read, an unmatched member is a
+    /// failure, not an absence — for every member at once.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_OnAnIncompleteRead_ReportsUnmatchedMembersAsFailures()
+    {
+        var pages = Enumerable
+            .Range(0, SpeContainerMembershipService.MaxPermissionPages + 2)
+            .Select(i => Page(NextLink, UserPermission($"perm-{i}", $"member{i}@client-firm.com")))
+            .ToArray();
+
+        var results = await ServiceOver(pages)
+            .RemoveMembershipsAsync(ContainerId, ["ghost@client-firm.com"]);
+
+        results["ghost@client-firm.com"].Success.Should().BeFalse();
+        results["ghost@client-firm.com"].Error.Should()
+            .NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
+    }
+
+    /// <summary>
+    /// A read failure makes EVERY member unanswerable — nobody is reported absent, and the method does
+    /// not throw, because the caller's contract is "every member gets an outcome".
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_WhenTheReadFails_EveryMemberIsFailedAndNoneIsAbsent()
+    {
+        var factory = new Mock<IGraphClientFactory>();
+        factory.Setup(f => f.ForApp()).Throws(new InvalidOperationException("Graph unreachable"));
+        var service = new SpeContainerMembershipService(
+            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+
+        var results = await service.RemoveMembershipsAsync(
+            ContainerId, ["a@client-firm.com", "b@client-firm.com"]);
+
+        results.Should().HaveCount(2);
+        results.Values.Should().OnlyContain(r => !r.Success);
+        results.Values.Should().OnlyContain(
+            r => !r.Error!.StartsWith(SpeContainerMembershipService.NoPermissionFoundError));
+    }
+
+    /// <summary>
+    /// Empty input must not touch Graph at all — an org whose members all failed email resolution
+    /// should not cost a container read.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_WithNoEmails_IssuesNoRequest()
+    {
+        var adapter = new ScriptedPermissionAdapter([]);
+        var factory = new Mock<IGraphClientFactory>();
+        factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
+        var service = new SpeContainerMembershipService(
+            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+
+        var results = await service.RemoveMembershipsAsync(ContainerId, []);
+
+        results.Should().BeEmpty();
+        adapter.RequestCount.Should().Be(0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Layer 1 — the honesty rule as a pure, exhaustive truth table (design §3.2).
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -327,6 +447,12 @@ public class SpeContainerPagingTests
 
         public int RequestCount => RequestedUrls.Count;
 
+        /// <summary>
+        /// Collection READS only — deletes land on <see cref="SendNoContentAsync"/> and are excluded.
+        /// The ISS-004 invariant is about read count, which must not scale with member count.
+        /// </summary>
+        public int GetRequestCount { get; private set; }
+
         public ISerializationWriterFactory SerializationWriterFactory =>
             throw new NotSupportedException("Serialization is not exercised by these tests.");
 
@@ -342,6 +468,7 @@ public class SpeContainerPagingTests
             where ModelType : IParsable
         {
             RequestedUrls.Add(requestInfo.URI.ToString());
+            GetRequestCount++;
 
             if (_index >= _pages.Length)
             {

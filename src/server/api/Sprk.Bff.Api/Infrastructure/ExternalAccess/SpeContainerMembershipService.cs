@@ -412,6 +412,116 @@ public class SpeContainerMembershipService
         return new SpeBulkRemovalResult(removedCount, failedCount, enumerationComplete);
     }
 
+    /// <summary>
+    /// Removes MANY contacts' permissions from one container using a SINGLE paged read of the
+    /// permission collection.
+    /// </summary>
+    /// <param name="containerId">The SPE container ID.</param>
+    /// <param name="contactEmails">The emails to remove. Duplicates and casing are tolerated.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// One <see cref="SpeContainerMembershipResult"/> per DISTINCT email, keyed case-insensitively —
+    /// the same shape <see cref="RevokeMembershipAsync"/> returns, so callers classify it identically.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>ISS-004 (#968), closed by task 024.</b> The organization-grant revoke called
+    /// <see cref="RevokeMembershipAsync"/> once per member, and each of those calls read the container's
+    /// ENTIRE permission collection: N members = N full reads. Task 024's paging made that strictly
+    /// worse — N reads became N × pages — so consolidating went from a nicety to the thing that keeps
+    /// the sweep affordable at the 200-member bound.</para>
+    ///
+    /// <para><b>Why not <see cref="RemoveAllExternalMembersAsync"/></b> (task 020's warning, preserved):
+    /// that removes EVERY external member of the container, not just the target organization's. An
+    /// organization revoke must not evict the other organizations' people.</para>
+    ///
+    /// <para><b>Failure is per-caller-visible, not aggregated.</b> A failure to READ makes every email
+    /// unanswerable, so each one gets a failed result rather than the method throwing — that preserves
+    /// the caller's "every member gets an outcome, and the failures are counted" contract from tasks
+    /// 016/017. An incomplete enumeration flows through <see cref="ClassifyRevokeResult"/>, so a member
+    /// who is merely UNSEEN is never reported as genuinely absent.</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyDictionary<string, SpeContainerMembershipResult>>
+        RemoveMembershipsAsync(
+            string containerId,
+            IReadOnlyCollection<string> contactEmails,
+            CancellationToken ct = default)
+    {
+        var distinct = contactEmails
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var results = new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase);
+
+        if (distinct.Count == 0)
+        {
+            return results;
+        }
+
+        _logger.LogInformation(
+            "Removing {Count} contact permission(s) from container {ContainerId} via one paged read",
+            distinct.Count, containerId);
+
+        GraphServiceClient graphClient;
+        PermissionReadResult read;
+        try
+        {
+            graphClient = _graphClientFactory.ForApp();
+            read = await ReadPermissionsAsync(graphClient, containerId, ct);
+        }
+        catch (Exception ex)
+        {
+            // Nobody can be confirmed absent, so nobody is. One failure, reported N times, because the
+            // caller reports per member.
+            _logger.LogError(ex,
+                "Could not read permissions for container {ContainerId}; NONE of the {Count} contact(s) " +
+                "can be confirmed removed. They may RETAIN file access.",
+                containerId, distinct.Count);
+
+            foreach (var email in distinct)
+            {
+                results[email] = new SpeContainerMembershipResult(
+                    false, null, $"Container permissions could not be read: {ex.Message}");
+            }
+
+            return results;
+        }
+
+        foreach (var email in distinct)
+        {
+            var target = FindPermissionByEmail(read.Permissions, email);
+
+            if (target == null)
+            {
+                results[email] = ClassifyRevokeResult(read.EnumerationComplete, null, email);
+                continue;
+            }
+
+            try
+            {
+                await graphClient.Storage.FileStorage
+                    .Containers[containerId].Permissions[target.Id]
+                    .DeleteAsync(cancellationToken: ct);
+
+                results[email] = ClassifyRevokeResult(read.EnumerationComplete, target.Id, email);
+            }
+            catch (Exception ex)
+            {
+                // One member's delete failing must not abandon the rest — stopping early leaves
+                // strictly MORE access in place (tasks 016/017).
+                _logger.LogError(ex,
+                    "Failed to delete permission {PermissionId} for {Email} on container {ContainerId}. " +
+                    "They may RETAIN file access. Continuing with the rest.",
+                    target.Id, email, containerId);
+
+                results[email] = new SpeContainerMembershipResult(
+                    false, null, $"Graph error deleting permission: {ex.Message}");
+            }
+        }
+
+        return results;
+    }
+
     // =========================================================================
     // Paged reading (task 024, finding M1)
     // =========================================================================

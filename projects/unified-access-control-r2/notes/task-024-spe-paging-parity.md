@@ -34,6 +34,29 @@ Not "it might page". The stronger and actually correct reason:
 **Severity re-ranked**: from *"live false-assurance defect"* to *"latent protocol defect + a real honesty
 defect"*. The honesty half (§3) is worth having on its own merits and is **not** contingent on paging.
 
+### 🔴 How to CLOSE this question — and it is cheaper than the design assumed
+
+`scripts/Test-SpeContainerPermissionPaging.ps1` (added by this task, read-only) answers it in one
+command. **Record the verdict here when it runs.**
+
+The design assumed settling this needed *"a dev container seeded past one page"*, which is what made it
+look expensive — and possibly unachievable, since we do not know the page size. It does not.
+**`$top` is documented as supported on this endpoint**, and capping the page below the total is exactly
+the condition that produces a `nextLink` *if the service does server-driven paging at all*. So any
+container with **≥ 2 permissions** settles it.
+
+The only real prerequisite is a Graph token from an app holding `FileStorageContainer.Selected` plus the
+container-type grant — **the BFF's own registration already has both**. An `az` CLI token does not and
+403s.
+
+Three possible verdicts, each with its consequence already worked out:
+
+| Result | What it means |
+|---|---|
+| Unmodified GET returns a `nextLink` | M1 was a **live** defect; 047 should assert multi-page enumeration |
+| Only `$top=1` returns a `nextLink` | The service **does** page; today's containers are just small. M1 is genuinely latent and goes live as containers grow — the fix is load-bearing |
+| Neither returns one | **No evidence of paging.** Consistent with the docs. The fix stays as protocol compliance, is re-ranked defensive, and **047 need not assert live paging at all** |
+
 ---
 
 ## 2. 🔴 The design named the wrong precedent — there is a better one, in-repo, on this exact endpoint
@@ -153,7 +176,7 @@ Acceptance criterion 3 is therefore **open**, not met — recorded rather than q
 
 | Item | Why not here |
 |---|---|
-| **Task 020's N+1** (org revoke = N members × a full permission read) — design §2.1 row 3 wanted it converged into one paged read + local match | Not in the acceptance criteria; it touches the org-revoke path task 020 *just* built and tested, so the regression risk outweighs a cost fix. ⚠️ **Paging makes it strictly worse** — N reads becomes N × pages — so this is now *more* worth doing, not less. **Filed as ISS-004.** Behaviour is correct today (each member's read is individually paged and honest); it is a cost defect, not a correctness one. |
+| ~~**Task 020's N+1**~~ | ✅ **DONE — see §8.** Deferred first, then closed the same day at owner direction. |
 | **ISS-001** — `PrivilegeGroupResolver.cs:202` double-counts page 1 | Pre-existing, different subsystem, already filed. Not 024's. |
 | **Eventual consistency** — a deleted SPE permission may stay observable briefly | Not fixable by paging. Task 047. |
 | **Alias / proxy addresses** — the match is case-insensitive but not alias-aware | Not fixable by paging. Task 047. |
@@ -168,3 +191,60 @@ is a private method that *removes* a duplicated read from two call sites; `Permi
 `ClassifyRevokeResult` are `internal` members of the existing service. §11's three questions do not fire
 (the rule applies to NEW surface). The one contract change is a third parameter on `SpeBulkRemovalResult`,
 defaulted so existing construction keeps its meaning.
+
+---
+
+## 8. ISS-004 (#968) closed — the org-revoke N+1, converged
+
+Deferred in §6 on regression risk, then closed the same day at owner direction (*"we need to fix all of
+these"*). Recorded here rather than rewritten above, so the sequence stays visible.
+
+**The problem, restated.** `RevokeExternalAccessEndpoint`'s organization sweep called
+`RevokeMembershipAsync` once per member, and each call read the container's ENTIRE permission
+collection. N members = N full reads — and **task 024's own paging made that N × pages**. The fix I had
+deferred became more justified because of the fix I shipped.
+
+**The convergence.** New `SpeContainerMembershipService.RemoveMembershipsAsync(containerId, emails, ct)`:
+one paged read → match every email locally → delete by permission id. It returns one
+`SpeContainerMembershipResult` **per distinct email, keyed case-insensitively** — deliberately the same
+shape `RevokeMembershipAsync` returns, so the endpoint's existing classification (`Success` /
+`NoPermissionFound` prefix / other) works **unchanged**. The blast radius stays inside the loop.
+
+The endpoint now runs in two phases: resolve every member's email (Dataverse), then ONE Graph call.
+
+**What was preserved, and why each matters:**
+
+| Invariant | Source |
+|---|---|
+| A per-member delete failure never aborts the sweep | tasks 016/017 — stopping early leaves strictly MORE access in place |
+| A READ failure marks **every** member failed, and nobody absent | nobody can be confirmed absent off a read that did not happen |
+| An incomplete enumeration flows through `ClassifyRevokeResult` | an unseen member is never reported "genuinely absent" (§3) |
+| `RevokeMembershipAsync` untouched | the per-CONTACT revoke path still uses it |
+| ⚠️ **NOT** `RemoveAllExternalMembersAsync` | it removes EVERY external member, not the target org's — task 020's warning, still binding |
+
+**One behaviour change, stated rather than buried.** Results are keyed by EMAIL, so two contact rows
+sharing one address both report the outcome of the single permission that address owns. Previously the
+second call found it already deleted and reported `NoPermissionFound` — which reads as *"this person
+never had access"*. Keying by identity is the more truthful of the two, but it is a change.
+
+**Perturbation**: re-reading the container inside the per-member loop (restoring the N+1) fails **3**
+tests, one asserting the read count directly (`GetRequestCount` counts collection GETs only, so member
+deletes cannot mask it).
+
+### Two fixture gaps this exposed — both the same shape
+
+Changing which seam the endpoint uses broke **8** of task 020's org-revoke tests, because they
+substitute `RevokeMembershipAsync`. Both doubles (`SpeMemberStub`, `SpeServiceStub`) needed the new
+method modelled. `SpeServiceStub`'s omission surfaced as a **`NullReferenceException` from the
+endpoint** — an un-stubbed virtual returns a null `Task`, so a fixture gap presents as a product defect.
+Worth remembering: that stack trace points at `RemoveOrganizationMembersSpePermissionsAsync`, not at the
+test. Per CLAUDE.md §10 F.2 (Fixture-Config-FIRST), the fixture is the first place to look.
+
+`CapturedEmails` still receives one entry per member in order, so **every existing assertion about
+WHICH KEY was used — the whole of finding A-13 — is unchanged.** Extended, not restructured, per the
+POML's task-020 constraint.
+
+### Process note
+
+I perturbed this change against a **file backup**, not `git checkout` — after the earlier revert in this
+same task discarded uncommitted work. The rule stands: commit or copy before you break it.

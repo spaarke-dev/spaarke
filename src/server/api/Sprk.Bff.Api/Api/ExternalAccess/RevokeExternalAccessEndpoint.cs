@@ -453,10 +453,18 @@ public static class RevokeExternalAccessEndpoint
             return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
         }
 
-        // ── Sweep ────────────────────────────────────────────────────────────
+        // ── Resolve identities ───────────────────────────────────────────────
+        // Membership is written with userPrincipalName = the contact's email, so an email is the ONLY
+        // key that can match an ACL entry. Resolve them all first, then do ONE container read.
+        //
+        // ISS-004 (#968), closed by task 024: this loop used to call RevokeMembershipAsync per member,
+        // and each of those calls read the container's ENTIRE permission collection — N members = N
+        // full reads. Task 024's paging made that N × pages. The container is now read ONCE.
         var removed = 0;
         var notFound = 0;
         var failed = 0;
+
+        var resolved = new List<(Guid ContactId, string Email)>();
 
         foreach (var memberContactId in memberSet.ContactIds)
         {
@@ -477,37 +485,64 @@ public static class RevokeExternalAccessEndpoint
                     continue;
                 }
 
-                var result = await speContainerMembership.RevokeMembershipAsync(containerId, memberEmail, ct);
-
-                if (result.Success)
-                {
-                    removed++;
-                    logger.LogInformation(
-                        "[EXT-REVOKE] Removed SPE container permission {PermissionId} for member Contact " +
-                        "{ContactId} of Organization {OrganizationId} on {ContainerId}",
-                        result.PermissionId, memberContactId, organizationId, containerId);
-                }
-                else if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError, StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    notFound++;
-                }
-                else
-                {
-                    failed++;
-                    logger.LogError(
-                        "[EXT-REVOKE] Failed to remove the SPE container permission for member Contact " +
-                        "{ContactId} of Organization {OrganizationId} on {ContainerId}: {Error}. They may " +
-                        "RETAIN file access. Continuing with the rest.",
-                        memberContactId, organizationId, containerId, result.Error);
-                }
+                resolved.Add((memberContactId, memberEmail));
             }
             catch (Exception ex)
             {
                 failed++;
                 logger.LogError(ex,
-                    "[EXT-REVOKE] Unexpected error cleaning up member Contact {ContactId} of Organization " +
-                    "{OrganizationId} on {ContainerId}. They may RETAIN file access. Continuing with the rest.",
+                    "[EXT-REVOKE] Could not resolve the email for member Contact {ContactId} of " +
+                    "Organization {OrganizationId}; their permission on {ContainerId} cannot be matched " +
+                    "and may remain. Continuing with the rest.",
                     memberContactId, organizationId, containerId);
+            }
+        }
+
+        // ── Sweep: ONE paged read, then match every member against it ────────
+        // ⚠️ Behaviour note: results are keyed by EMAIL, so two contact rows sharing one address now
+        // both report the outcome of the single permission that address owns. Previously the second
+        // call found the permission already deleted and reported NoPermissionFound, which read as "this
+        // person never had access". Keying by identity is the more truthful of the two.
+        IReadOnlyDictionary<string, SpeContainerMembershipResult> speResults =
+            resolved.Count == 0
+                ? new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase)
+                : await speContainerMembership.RemoveMembershipsAsync(
+                    containerId, resolved.Select(r => r.Email).ToList(), ct);
+
+        foreach (var (memberContactId, memberEmail) in resolved)
+        {
+            if (!speResults.TryGetValue(memberEmail, out var result))
+            {
+                // A member we asked about but got no answer for is an unknown, not an absence.
+                failed++;
+                logger.LogError(
+                    "[EXT-REVOKE] No SPE outcome was returned for member Contact {ContactId} of " +
+                    "Organization {OrganizationId} on {ContainerId}. Treating as FAILED — they may " +
+                    "RETAIN file access.",
+                    memberContactId, organizationId, containerId);
+                continue;
+            }
+
+            if (result.Success)
+            {
+                removed++;
+                logger.LogInformation(
+                    "[EXT-REVOKE] Removed SPE container permission {PermissionId} for member Contact " +
+                    "{ContactId} of Organization {OrganizationId} on {ContainerId}",
+                    result.PermissionId, memberContactId, organizationId, containerId);
+            }
+            else if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                notFound++;
+            }
+            else
+            {
+                failed++;
+                logger.LogError(
+                    "[EXT-REVOKE] Failed to remove the SPE container permission for member Contact " +
+                    "{ContactId} of Organization {OrganizationId} on {ContainerId}: {Error}. They may " +
+                    "RETAIN file access. Continuing with the rest.",
+                    memberContactId, organizationId, containerId, result.Error);
             }
         }
 
