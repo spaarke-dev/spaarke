@@ -144,6 +144,7 @@ is the obvious first candidate (different files) — both still run `/conflict-c
 - **Moq**: an un-stubbed virtual returning `Task<T>` yields `null`, and the SUT throws a `NullReferenceException` that *looks like a product defect*. Inspect the fixture first (CLAUDE.md §10 F.2).
 - **Web API**: `roleprivilegescollection` cannot `$expand=roleid` (not a navigation property) — query it with `$filter=roleid eq …` per role.
 - **Graph / SPE**: an `az` CLI Graph token **403s** on container permissions (no `FileStorageContainer.Selected`, no container-type grant). It needs the BFF's own app identity.
+- **Portfolio sync (context-handoff hook)**: the `gh` token lacks the `read:project` scope (it holds gist, read:org, repo, workflow), so `/devops-project-sync` cannot read or update Board #2 / Issue #808 — it fails with INSUFFICIENT_SCOPES. Fix is the owner running `gh auth refresh -s read:project,project` (interactive). Until then the hook degrades to a warning, exactly as its contract requires. Last attempted 2026-09-10; board values NOT updated (local truth: 98 tasks, 65 done).
 
 ---
 
