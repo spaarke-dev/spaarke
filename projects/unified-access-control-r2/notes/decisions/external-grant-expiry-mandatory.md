@@ -134,3 +134,65 @@ scheduled, rather than being closed with a contract patch we would then remove.
 
 No code, no schema, no job. `spec.md` **FR-33** records the requirement; this file records the
 reasoning. Tracked as a deferred issue for scheduling.
+
+---
+
+## 9. ✅ OWNER ANSWERS — 2026-09-10. §7 is closed.
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Cap default | **Open → see §9.2.** The owner asked what the cap *is* before answering; recommendation recorded there. |
+| 2 | Scope | **External grants ONLY.** Internal POA shares (tasks 060/061) are out. |
+| 3 | Backfill | **Update whatever grants exist. Keep it simple — we are in dev. Build the best technical solution.** No staged force-expiry schedule, no grandfathering machinery. |
+| 4 | Renewal authority | **Anyone with Write** on the root. Not restricted to the original granter or matter owner. |
+| 5 | Lead time / notifications | 🔴 **NO notifications. Manage with a RENEWAL REPORT.** Proactive notifications are a deliberate future addition. |
+
+### 9.1 🔴 Answer 5 overrides §3's precondition — recorded, not glossed
+
+§3 says, in bold: ***"Do not ship the cap before the notification."*** The owner has substituted a
+**renewal report** for the notification. That is a legitimate substitution and the constraint is
+**satisfied conditionally**, not waived — because the *function* of the precondition was never "send an
+email", it was **"the internal user who can renew learns before access lapses."**
+
+- A **notification is push**: the information arrives whether or not anyone went looking.
+- A **report is pull**: it discharges the same duty *only if someone reads it on a cadence shorter than
+  the cap*.
+
+**So the report is not optional and not cosmetic — it IS the control.** Two obligations follow, and they
+are design constraints on FR-33's implementation, not nice-to-haves:
+
+1. **The report must live where someone actually looks** (a workspace widget / a view that is part of a
+   routine), not an endpoint nobody calls. A report that exists and is unread is exactly the silent
+   lockout §3 warns about, with an audit trail proving we knew.
+2. **The cap must be long relative to the report cadence.** This is the non-obvious consequence:
+   **choosing report-only argues for a LONGER cap, not a shorter one.** Under push notification a short
+   cap is tolerable because every expiry is announced. Under pull, every expiry is a surprise unless the
+   report was read in time, so a short cap multiplies the chance of a silent lockout.
+
+**Residual, stated for the record**: with report-only, an unread report means an external user is locked
+out with no warning — the precise failure §3 exists to prevent. Acceptable in **dev**. It should be
+re-examined before production, and the owner has already flagged notifications as the intended
+follow-on, so this is a sequencing decision rather than a gap.
+
+### 9.2 Cap default — recommendation (answering the owner's clarifying question)
+
+**What the "cap" is**: the maximum calendar lifetime an external grant may carry — the ceiling on its
+`sprk_expiresdate`. It is deliberately the **backstop, not the primary mechanism**: per §4.1 expiry is
+**matter-bound first, calendar-capped second**, so most grants die naturally when their root closes. The
+cap only bites for roots that **never** close — which are precisely the stale grants worth catching.
+
+**Recommended: 90 days, tenant-configurable, ONE dimension (tenant-level only).**
+
+- **Why 90 and not 30**: §9.1's consequence. Report-only means every lapse is unannounced; a 30-day cap
+  under pull-based renewal is a lockout generator. 90 days also keeps §5's toil sane — the toil figure
+  scales as (active grants × 1/cap), so 30 days would be ~4× the renewal decisions of 90.
+- **Why 90 and not a year**: a cap long enough to outlive most engagements does nothing at all, which is
+  the failure mode §4.2 names explicitly.
+- **Why NOT per-practice-area** (the owner's sub-question): that is a second configuration dimension with
+  no concrete failure attached to its absence today — CLAUDE.md §11 question 3 rejects exactly this
+  ("future flexibility"). §4.2's argument for tenant-configurability is real and stands; the
+  practice-area split is speculative until a specific practice area demands a different number. Add the
+  dimension when that happens; the config shape should not preclude it.
+
+⚠️ **Not yet ratified** — this is a recommendation answering a clarifying question, so the number itself
+still needs the owner's yes.

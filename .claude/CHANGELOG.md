@@ -7,6 +7,31 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-10 — `unified-access-control-r2`: root CLAUDE.md **§10 gains publish-size hazards THREE and FOUR**
+
+- **Root CLAUDE.md §10 only.** No skill, ADR, pattern or constraint changed. §10 already documented two
+  hazards that make a publish-size delta lie (the ageing baseline; the zip tool's ~1.3 MB spread on
+  byte-identical content). Two more were measured on this project and are now recorded there.
+- **Hazard 3 — the build environment.** A publish from a worktree you have been iterating in is not
+  comparable to one from a fresh worktree, **even at the same commit, even after an apparent clean**. It
+  produced a **+4.95 MB** delta that did not exist — plausible enough to send an agent auditing its code
+  instead of its measurement. §10 already prescribed a fresh worktree for *master*; the addition makes it
+  explicit that **the branch side needs the same discipline**, which the worked example had not said.
+- **Hazard 4 — deep paths break §10's own procedure.** Past `MAX_PATH`, MSBuild reports
+  `MSB3030: Could not copy … because it was not found` **for a file that exists**, and the resulting
+  partial publish **zips smaller** — so a broken measurement reads as a win. A 262-char scratchpad
+  worktree path triggered it; the `C:\` root is also not writable for the zip. The rule added: publish and
+  zip from a short path, and **sanity-check the FILE COUNT on both sides** — differing counts mean one
+  publish is incomplete and the delta is meaningless.
+- **Why this belongs in §10 rather than a note.** Both hazards make the measurement *silently wrong in the
+  direction of looking fine*, which is the same false-assurance class §10's existing two hazards guard
+  against. A hazard recorded only in a project note is a hazard the next project meets fresh.
+- Owner-directed 2026-09-10 ("follow the best practice"). Evidence:
+  `projects/unified-access-control-r2/notes/phase4-poa-consolidation.md` (hazard 3, with the
+  45.37/45.38 MB corroboration) and `notes/task-029-external-todo-parity.md` (hazard 4).
+
+---
+
 
 ###### 2026-09-04 — `unified-access-control-r2`: **ADR-034 Amendment A1** — the access-conferring allow-list becomes first-class and per-surface (path B)
 
