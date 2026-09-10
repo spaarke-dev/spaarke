@@ -1329,3 +1329,56 @@ FR-01's acceptance is written against **Word desktop**. These are recorded for F
 
 *Spike-1, task 002, project `spaarkeai-word-add-in-r1`. Executed 2026-09-09 under `task-execute`,
 rigor STANDARD, model tier opus, effort high. Verdict AMBER pending the §8 operator pass.*
+
+---
+
+## 19. 🟢 OPERATOR PROBE RESULT — 2026-09-10 (EMPIRICALLY VERIFIED)
+
+The first empirically-verified data in this report. Everything in §1–§18 is DESK-RESEARCHED; this
+section is not.
+
+**`Office.context.document.url` returned, for a Spaarke-sourced document opened via the add-in:**
+
+```
+https://spaarke.sharepoint.com/contentstorage/CSP_585db4c8-8043-4676-965e-c92e45f07221/Document Library/Examiner report draft.docx
+```
+
+### Link 1 — GREEN. And §5's stated hazard did not materialise.
+
+This is the **direct path form**, and it is NOT the `doc2.aspx` viewer URL. §2 recorded that Spaarke's
+own open flow hands Word an abbreviated `ms-word:` URL and that files open in Protected View, and
+predicted `document.url` might therefore report a local sandbox path. It does not. It returns a
+server path in exactly the canonical shape Graph `/shares/u!{base64url}` expects.
+
+A related worry raised in the main session — that the identifier would arrive as the viewer URL's
+braced-uppercase `sourcedoc` GUID (a SharePoint UniqueId, a different identifier space from Graph's
+`driveItem.id`, which §9 established is what `sprk_graphitemid` stores) — is also moot. That GUID
+does not appear in `document.url` at all.
+
+### 🔴 The finding this probe DID produce: raw spaces
+
+The URL contains **two unencoded spaces** — `Document Library` and `Examiner report draft.docx`. A raw
+space is not valid in a URL, and Graph's sharing-token construction is
+`u!` + base64url(the URL) with padding stripped. Base64url-encoding the string **as returned** encodes
+the spaces literally.
+
+**This is task 012's first real implementation question, and it now has a concrete input rather than a
+guess**: does `/shares/u!{token}` accept a token built over raw spaces, or must the URL be
+percent-encoded (`%20`) before encoding? Both must be tried against this exact URL. Getting it wrong
+produces a 400/404 that looks like "SPE is unsupported" rather than "the token was malformed" — which
+would falsely condemn the whole FR-01 primary path.
+
+### Still open
+
+- **Which host produced this?** The acceptance criterion is Word **DESKTOP** specifically. If this came
+  from Word on the web it is a valuable control but does not discharge §5 Link 1c.
+- Protected View state at capture time (before vs after "Enable Editing").
+- The abbreviated-vs-`ofe|u|` A/B (§8.1 step 7) — still the highest-value remaining comparison.
+- **Link 2 remains DESK-RESEARCHED**: no `/shares` call has been made against an SPE
+  `contentstorage` path. This probe supplies its input; it does not answer it.
+
+### Corroborated in passing
+
+The operator reports the document opens in Word for web, Word desktop, and as a download, and that a
+document saved through the add-in also opens. The **downloaded** copy opens in read mode — consistent
+with §2's Protected View prediction for that path.

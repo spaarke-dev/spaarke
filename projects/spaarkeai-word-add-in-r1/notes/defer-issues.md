@@ -165,6 +165,48 @@ not worth a dedicated edit of a frozen file.
 
 ## Deferrals
 
+### 🔴 D-032-1 — REINSTATED 2026-09-10. The verification came back REFERENTIAL: the finding is REAL.
+
+**Operator verified in the maker portal, 2026-09-10**: the `sprk_document` → `sprk_matter`
+relationship is **Referential**, with **Delete: Remove Link** and no cascade share.
+
+**So Dataverse does NOT automatically grant Read on a document when a caller is granted its matter.**
+The one question this entry was reduced to has been answered, and it answered against the withdrawal.
+
+**I withdrew this finding too readily on 2026-09-09** and should record why, because the mistake is
+reusable. The operator challenged the premise ("aren't we granting access at the container level, via
+the parent record?"), I checked, and I found the codebase describing exactly that model — so I treated
+a description of INTENT as evidence of MECHANISM and withdrew. The very sentence I quoted should have
+stopped me: `Spaarke.Core/Auth/AuthorizationService.cs:246-249` calls the parent check *"what makes
+'access flows from the parent' an **enforced property rather than a stated intention**"*. That phrasing
+only makes sense if, absent that check, it is NOT enforced. The cascade setting is the mechanism, and
+nobody had looked at it.
+
+**The precise position, which is narrower than either extreme:**
+- The model holds **wherever code enforces it** — `GetCallerRecordAccessAsync` exists precisely to make
+  it true on the paths that call it. `unified-access-control-r2` task 070 built it for that reason.
+- The **platform** does not enforce it. Referential means document ACLs are independent of the matter's.
+- `VisualizationService.CreateParentHubNode` is **not** one of the paths that enforces it.
+
+**Therefore the original finding below stands as written**: a hub node carries the source document's
+matter/project/invoice NAME and a deep link to that record, built without any check against the parent,
+and reaches any caller authorized on the document alone. On a secure matter the name is frequently the
+sensitive fact.
+
+**Owner: `unified-access-control-r2`.** It owns parent→child access (its Amendment 1) and it owns
+`GetCallerRecordAccessAsync`, the correct mechanism. This is NOT a second mechanism r1 should build —
+root CLAUDE.md §11. The hook already exists: task 032's `AuthorizeRowsAsync` drops hubs left with no
+surviving document, so the drop path is there; what is missing is authorizing the hub itself against
+its parent record.
+
+**⚠️ HAND-OFF OBLIGATION — a GitHub Issue is NOT a hand-off.** Per the operator's standing instruction
+(2026-09-09): *"filing a github issue also does not explicitly raise it to the project — we need to
+provide the note and actively instruct to read it."* This entry must be actively delivered to UAC-r2
+with an instruction to read it, not filed and forgotten. Until that happens this is not handed off.
+
+<details>
+<summary>Superseded 2026-09-09 withdrawal reasoning (retained — it is the record of the wrong call)</summary>
+
 ### ⚠️ D-032-1 — WITHDRAWN AS A FINDING 2026-09-09; reduced to a one-question verification
 
 **Operator challenge, 2026-09-09** — and it was correct. The entry below rests on the premise
@@ -198,6 +240,11 @@ be queried live.
 **Do NOT hand this to another project until that question is answered.** Handing over a finding whose
 premise is unverified is exactly the burial-by-deferral the project policy forbids, and it would
 create a cross-project dependency for something that may not exist.
+
+> **✅ ANSWERED 2026-09-10 — REFERENTIAL.** The condition above is met, so the hand-off is now
+> warranted rather than premature. See the reinstatement block at the top of this entry.
+
+</details>
 
 <details>
 <summary>Original entry as filed by task 032 (premise now disputed — retained for the record)</summary>
