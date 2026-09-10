@@ -1382,3 +1382,38 @@ would falsely condemn the whole FR-01 primary path.
 The operator reports the document opens in Word for web, Word desktop, and as a download, and that a
 document saved through the add-in also opens. The **downloaded** copy opens in read mode — consistent
 with §2's Protected View prediction for that path.
+
+---
+
+## 20. Link 2 — route analysis after the probe (2026-09-10, verified against code)
+
+Three candidate routes from `document.url` to a `sprk_document`, weighed against the actual code:
+
+| Route | Mechanism | Verdict |
+|---|---|---|
+| **A — `/shares`** | `GET /shares/u!{base64url(document.url)}/driveItem` — Graph resolves the URL for you | ✅ **The one to test.** Undocumented for SPE, and carries the raw-space encoding question (§19) |
+| **B — path addressing** | `GET drives/{driveId}/root:/{path}` — the BFF already addresses this way for writes (`ISpeFileOperations.cs:134,191`) | ❌ Needs `CSP_{guid}` → drive id, and **no code maps that**. Spaarke container ids are Graph's `b!…` form (test fixtures), not `CSP_{guid}`. `ChatWordExportEndpoints.cs:277`'s comment claiming the shape is `/contentstorage/{containerId}/Document/…` is wrong about the real URL |
+| **C — Dataverse match** | Match `document.url` against a stored column | ❌ `sprk_filepath` stores Graph's **`WebUrl`** (`UploadSessionManager.cs:160` → `OfficeStorageUploader.cs:71`) — the *viewer* form — not the path form `document.url` returns. No `webDavUrl` column exists. Would need a new column, is forward-only, and breaks on rename/move — strictly weaker than the FR-02 stamp |
+
+**Route A must run through a REGISTERED app.** Per `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`
+lines 115-116, only the owning app or a registered app reads container files. `az` CLI and Graph Explorer
+are neither, so a `/shares` call from them would fail **regardless of whether the URL is valid** — a false
+negative that would wrongly condemn FR-01's primary path. Link 2 is therefore effectively task 012's first
+deliverable, exercised through the BFF.
+
+### A shape check available today, through the BFF's own identity
+
+`GET /api/documents/{documentId}/open-links` for the probed document returns
+`DesktopUrl = ms-word:{directFileUrl}`, where `directFileUrl` is Graph's `webDavUrl` when present
+(`FileAccessEndpoints.cs:625-628`) and is otherwise rebuilt from `WebUrl` with
+`Uri.EscapeDataString(fileName)`. Strip `ms-word:` and compare against the probe's `document.url`.
+
+A match proves `document.url` is exactly the canonical URL the BFF itself resolves for that item — with none
+of the false-negative risk above. **Expect the normalisation points to surface right here**: the fallback
+percent-encodes the filename (`%20`) while `document.url` carries raw spaces. That is the same encoding
+question §19 raises for the `/shares` token, now visible inside the BFF's own code.
+
+### Standing recommendation — unchanged, and reinforced
+
+Every route above is **identity-by-location** and breaks when a file is renamed or moved. The FR-02 custom-XML
+stamp is identity-by-content and does not. Treat FR-01's URL path as the fast path and the stamp as primary.

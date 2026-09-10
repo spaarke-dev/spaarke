@@ -165,7 +165,52 @@ not worth a dedicated edit of a frozen file.
 
 ## Deferrals
 
-### 🔴 D-032-1 — REINSTATED 2026-09-10. The verification came back REFERENTIAL: the finding is REAL.
+### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.
+
+**Operator, 2026-09-10**, stating the model precisely: *if a user has access to a record they have
+access to its documents, and vice versa; SPE access is at the container level, not the file level;
+secure access grants the record + its documents + the files in the secure BU's container. There is no
+case where a user should hold a document but not its record.*
+
+**Verified against CODE — deliberately not docs, since three docs in this area were stale today:**
+- **Internal access is caller-scoped and fails closed.** `Spaarke.Core/Auth/AuthorizationService.cs:54`
+  denies when there is no caller token and "must never degrade to app-only evaluation" (task 004,
+  finding A-2; zero app-only consumers, verified 2026-08-21). `:79` passes the caller's token and
+  `:224-225` "queries Dataverse AS THE USER". So Read on a document is decided by Dataverse's native row
+  security for *that user* — BU ownership, role depth, teams — the same evaluation that decides Read on
+  the matter.
+- **External access is granted at the ROOT record only.** `GrantAccessRequest` targets exactly one
+  Project, Matter or Work Assignment — never a document. External document visibility is
+  `_sprk_project_value eq {projectId}` (`ExternalDataService.cs:209-213`): documents are visible
+  *because of* the root.
+- **SPE is broker-only for external users** — contacts are never added to containers.
+- **No code shares an individual document row.** The only Dataverse SDK message import in the BFF is
+  `UserPrivilegeChecker`'s `RetrieveUserPrivilegesRequest` — read-only.
+
+**Why the same-day reinstatement below was wrong.** I asked whether `sprk_document → sprk_matter`
+cascades. Cascade (Referential vs Parental) governs what happens during a *share / assign / delete of the
+matter* — whether that operation propagates to its documents. The model never grants document access by
+sharing the matter; it grants BOTH through the same BU/role evaluation (internal) or the same root grant
+(external). So "Referential" answered a question the model does not depend on. The finding assumed
+access can diverge; the model is built so it cannot, and the code enforces it.
+
+**One honest residual — configuration, not code, and the operator's to own:** the equivalence holds as
+long as each security role grants **aligned depth on `sprk_document` and `sprk_matter`** and documents
+are owned by the same BU as their record. A role granting Org-depth Read on documents but BU-depth on
+matters would reintroduce the divergence. (Dataverse MCP was down this session; role depths were not
+inspected.) Separately, `unified-access-control-r2` already records that the secure-BU model is
+currently non-functional in dev — `Spaarke` is the root BU and `Spaarke Basic User` holds Deep depth
+reaching the secure BU. That is a real secure-isolation risk, but it exposes the record AND its
+documents together — not one without the other — so it does not revive this finding.
+
+**No hand-off.** Nothing goes to UAC-r2 for this entry.
+
+**Doc drift found while verifying (not this entry's problem, recorded so it is not lost):**
+`docs/architecture/uac-access-control.md` (corrected 2026-08-20) still states `AuthorizationService`
+passes `userAccessToken: null` and runs app-only; the code was changed to fail-closed caller-scoped one
+day later (2026-08-21). Relying on it would have produced a false caveat here.
+
+#### ~~D-032-1 — REINSTATED 2026-09-10~~ (SUPERSEDED the same day — see the withdrawal above)
 
 **Operator verified in the maker portal, 2026-09-10**: the `sprk_document` → `sprk_matter`
 relationship is **Referential**, with **Delete: Remove Link** and no cascade share.
