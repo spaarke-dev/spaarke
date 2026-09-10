@@ -19,12 +19,50 @@
 # could not open it), and the `useAnnounce` accessibility regression tests.
 # A PR reverting either would have merged green.
 #
+# 🔴 WHAT THIS FILE DOES AND DOES NOT DO (corrected 2026-09-10 by adr-check)
+# --------------------------------------------------------------------------
+# It REPORTS a real pass/fail on every PR touching this package. It does NOT
+# block a merge, and earlier revisions of this header wrongly said it did.
+#
+# Master's ruleset (21824191) requires exactly ONE status check, by name:
+#
+#     gh api repos/spaarke-dev/spaarke/rules/branches/master
+#     -> required_status_checks: [ "Router" ]
+#
+# GitHub rulesets have no "require all checks" concept — only that named list.
+# This workflow is not in it, so a red here renders a red X and the PR can
+# still merge. `on: pull_request` plus no `continue-on-error` makes a check
+# that CAN REPORT FAILURE; it does not make a check that BLOCKS. Those are not
+# the same claim, and conflating them is FAILURE-MODES AP-12 (prose outliving
+# the mechanism it describes).
+#
+# PROMOTION IS NOT A SETTINGS FLIP. Adding a PATH-FILTERED workflow to the
+# required list deadlocks: on any PR outside its paths the check is "expected
+# but never reported" and blocks forever — observed on PR #322, and the reason
+# `workflows-validate.yml` and the router both classify paths INSIDE the job
+# rather than in `on:`. Promotion therefore needs BOTH:
+#   1. path classification hoisted into the job so the check always reports, and
+#   2. N consecutive green runs ON `ubuntu-latest`.
+#
+# (2) is a settled repo standard, stated independently in three places: this
+# package's originating filing (`record-header-and-notepad-r2/notes/
+# ci-gap-client-jest-never-runs.md` §4), `client-tests.yml`'s promotion header,
+# and `sdap-ci.yml`'s `compose-client-gate`, which landed advisory for exactly
+# this reason — "a blocking gate whose first red is an environment artifact
+# gets ignored, then disabled, and the surface silently reverts to having no
+# gate." This gate's evidence at landing was five green runs, ALL on a local
+# Windows box and NONE on `ubuntu-latest`.
+#
+# What the shadow window does and does not gate, since these were conflated:
+# it gates DELETING `sdap-ci.yml` (task 077). It does not gate HAVING a gate.
+# Adding this file now is correct; calling it blocking was not.
+#
 # THIS FILE IS THE GATE. `client-tests.yml` REMAINS THE BASELINE.
 # ---------------------------------------------------------------
 # The two are complements and neither replaces the other:
 #
 #   client-tests.yml   40 packages · nightly · advisory · reports everything
-#   this file           1 package  · per-PR  · BLOCKING · reports one subset
+#   this file           1 package  · per-PR  · REPORTS  · reports one subset
 #
 # `client-tests.yml` was NOT extended to do this job, deliberately. Its own
 # header states the reason it has no `pull_request` trigger — 40 packages with
@@ -48,7 +86,7 @@
 #
 # That leaves a standalone path-filtered gate — which is an established repo
 # pattern, not an invention: `css-reset-gate.yml` is the same shape (one
-# regression class, `pull_request` + `push: master`, path-filtered, blocking,
+# regression class, `pull_request` + `push: master`, path-filtered, standalone,
 # outside the tiers). This file follows it deliberately.
 #
 # IT GATES A SUBSET, AND THE SUBSET IS THE POINT
@@ -61,9 +99,8 @@
 # recorded in `src/client/office-addins/ci-gated-suites.txt`, and it ratchets
 # upward as suites are fixed.
 #
-# No test is deleted, skipped, or modified to achieve that (ADR-038). All 22
-# suites still run nightly in `client-tests.yml`. This file changes what BLOCKS
-# A MERGE, not what runs.
+# No test is deleted, skipped, or modified to achieve that. All 22 suites still
+# run nightly in `client-tests.yml`, which is the promotion signal for this list.
 #
 # The manifest step fails if a gated path no longer exists, so a gated test
 # cannot be renamed away or deleted to turn the gate green.
@@ -168,11 +205,11 @@ jobs:
 
           # A gated suite that no longer exists is either a rename that forgot
           # to update this list, or a deletion that would have quietly shrunk
-          # the gate. Both are failures, not warnings (ADR-038).
+          # the gate. Both are failures, not warnings.
           missing=0
           for s in "${suites[@]}"; do
             if [ ! -f "$s" ]; then
-              echo "::error file=src/client/office-addins/ci-gated-suites.txt::Gated suite '$s' does not exist. If it was renamed, update ci-gated-suites.txt in this PR. If it was deleted, ADR-038 requires a same-PR replacement."
+              echo "::error file=src/client/office-addins/ci-gated-suites.txt::Gated suite '$s' does not exist. If it was renamed, update ci-gated-suites.txt in this PR. If it was deleted, this gate requires a same-PR replacement."
               missing=1
             fi
           done

@@ -7,7 +7,7 @@
 # -----------------
 # The ALLOW-LIST of jest suites in this package that a pull request MUST keep
 # green. Every path below is run by `npm test -- --runTestsByPath` on any PR
-# that touches this package. If one of them goes red, the PR is blocked.
+# that touches this package. If one of them goes red, the PR's checks go red.
 #
 # WHY AN ALLOW-LIST AND NOT THE WHOLE SUITE
 # -----------------------------------------
@@ -17,10 +17,10 @@
 # on the day it was created, which trains people to ignore it — strictly worse
 # than no gate. So the gate starts at the green line and ratchets upward.
 #
-# NOTHING IS SKIPPED OR DELETED TO ACHIEVE THIS (ADR-038). The 10 red suites
+# NOTHING IS SKIPPED OR DELETED TO ACHIEVE THIS. The 10 red suites
 # still run, unchanged, every night in `.github/workflows/client-tests.yml`,
 # which reports this package's full pass/fail table. This file only decides
-# what BLOCKS A MERGE; it does not decide what runs.
+# what this gate REPORTS ON; it does not decide what runs.
 #
 # HOW TO PROMOTE A SUITE INTO THE GATE (the ratchet)
 # --------------------------------------------------
