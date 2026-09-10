@@ -177,3 +177,37 @@ Table creation is an explicit operator step (root directive; `.claude/FAILURE-MO
   so adding only this one would be inconsistent; flagged rather than done unilaterally.
 - No correction of the `sprk_externalrecordaccess` ownership-type defect (§3) — outside declared
   outputs.
+
+---
+
+## ✅ ALL THREE AUDIT GAPS CLOSED BY THE OWNER — 2026-09-10, verified live
+
+| Gap | Object | Before | After |
+|---|---|---|---|
+| 1 | `sprk_workassignment.sprk_accesspermission` | attribute audit **False** (entity already True) | **attribute audit True** |
+| 2 | `sprk_externalrecordaccess` | entity audit **False** (attribute flags inert) | **entity audit True** |
+| 3 | `sprk_noaccessentry` | entity audit **False** (attribute flags inert) | **entity audit True** |
+
+Org-level `isauditenabled` was already `True`, so all three now record. Verified by reading
+`EntityDefinitions` / `Attributes` metadata directly, not by assuming the portal save took.
+
+**What this unblocks**: task **088**'s point-in-time replay. The failure it prevents was specific and
+serious — a grant deactivated **directly in the MDA**, bypassing `RevokeExternalAccessEndpoint`, was
+invisible to *both* replay sources, so replay would have reported a revoked grant as **still live**. Not
+"unknown": confidently wrong, in answer to a compliance question.
+
+Timing mattered because **Dataverse audit does not backfill**. Every UAT day before this was a day 088
+could never replay. It is now closed *before* UAT, which is the whole point.
+
+`sprk_accesspermission` was the sharpest of the three: `Restricted` is a **veto** (evaluator slot 2,
+FR-21) that removes a principal from the accessible set entirely rather than lowering their level, and
+**no BFF writer exists for the column** — so the only way it ever changes is a human in the MDA or a
+data operation, exactly the case audit exists to capture. Live data at enablement: 22 work assignments,
+21 empty, 1 Standard, **0 Restricted** — so the entire future history is captured from a clean start.
+
+### ⚠️ One follow-up, small
+
+`organization.auditretentionperiodv2` reads **empty/null**. Retention governs how long this history
+survives, and 088's replay depends on the window. Worth confirming what it resolves to (in Dataverse,
+`-1` means retain forever); if it is a short window, replay has a horizon that should be stated rather
+than discovered.
