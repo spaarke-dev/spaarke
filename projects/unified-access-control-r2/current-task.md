@@ -1,11 +1,14 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-09, session 5 END** (by `context-handoff`) — reflects through commit `f8e652f54`.
+> **Last Updated**: **2026-09-10, session 6** — reflects through the FR-33 task-filing commit (tasks 096–101).
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
+> ⚠️ This block had gone stale for two tasks (024 → 042) and held TWO contradictory "Next Action" rows
+> before this rewrite — the stacked-recovery-block problem again. **One block. Replace it; never append.**
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's task files have been WRONG SEVEN times now.** Session 5 alone found four stale
-> POML premises. **Verify a POML's premises before obeying them — the code has won every time.**
+> ⚠️ **This project's task files have been WRONG EIGHT times now** (session 6: task 042's dependency
+> annotation said 032 was pending). **Verify a POML's premises before obeying them — the code has won
+> every time.** Docs-vs-live-metadata mismatches stand at **nine** (session 6: design §10's org field name).
 
 ---
 
@@ -13,14 +16,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **024** ✅ **CLOSED for M1** (session 6, 2026-09-09). M2 → task **065**. |
-| **Step** | 7 of 7 — awaiting the full-suite green + the widened seam-4 ArchTest re-run, then push. |
-| **Status** | Code + tests + docs committed (`322513399`, `ffc6f856d`). Publish **+0.05 MB** (master 45.35 → branch 45.40, both measured fresh, `Compress-Archive`). No vulnerable packages. Drift gate green. |
-| **Next Action** | Confirm full suite green, run `dotnet test tests/Spaarke.ArchTests/`, commit the widened seam-4 guard, then `/push-to-github`. |
-| **Branch** | `work/unified-access-control-r2` @ `ffc6f856d` · PR **#950** |
-| **Next Action** | **Owner's call.** Ready and unblocked: **042** (standing-grant baseline levels — chain-C head, no environment dependency, **best next task**), **063** (internal share endpoints — chain-B head), **024** (SPE paging — *has a completed design, read it first*), **082**, **093/094/095**. ⚠️ **036 is NOT safe to start** — see § THE ONE THING THAT BLOCKS THE CRITICAL PATH. |
-| **Session 6** | Closed **024** (M1 half). Filed **ISS-004/#968**. 🔴 **Two things worth carrying**: (1) the step-0 spike found the M1 *exploit* is **unproven** — SPE docs list `$skip`/`$top`, not `$skiptoken`, and the sample response has no `nextLink`; the fix stands on the OData *protocol* argument instead, and live confirmation went to **047**. (2) `SpeAdminGraphService:3097` **already paged this exact collection** — the repo was internally inconsistent, and the design's named precedent was superseded by better in-repo code. **Look for the working example before copying the one a doc names.** |
-| **Task status** | **64 done · 3 escalated (012, 071, 023 — plus 062) · 1 blocked-shipped (034) · 24 open · 92 total.** Drift gate green (92 POMLs = 92 index rows), re-verified after 024. |
+| **Task** | **none in progress** — clean stopping point. |
+| **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1` |
+| **Next Action** | **Owner's call.** Ready and unblocked, no environment dependency: **096** and **097** (FR-33 heads — can run in parallel), then **098** → **099**; **100** and **101** after 097. Also ready: **043** (chain C, next after 042) and **063** (chain B). ⚠️ **036 carries a MANUAL pre-merge canary gate** — the owner decided the Dataverse assertions will not run in CI; read 036's POML before starting it. |
+| **Task status** | **65 done · 29 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows). |
+| **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969** (CI ratchets unenforced) and **#970** (`BulkUpdateAsync` not transactional). CI: the **full ArchTests suite now runs blocking** in Tier 1. Owner decisions: audit enabled on all three gaps (verified live) · **FR-33 redesigned → tasks 096–101** · no Dataverse test in CI (036 manual gate; success criteria 3–4 reworded) · §10 hazards 3–4 added to root CLAUDE.md · path-A exceptions 012/023/062 ratified. |
+| **Session 6 lessons** | (1) **Look for the working in-repo example before copying the one a doc names** — `SpeAdminGraphService` already paged the collection a design told me to copy from elsewhere. (2) **Extend before you add** — twice this session the owner caught me building beside an existing component (a new root column instead of `sprk_expiresdate`; a new atomic write instead of fixing `BulkUpdateAsync`). Run CLAUDE.md §11's extension question *before* recommending, not after being asked. (3) **Commit (or copy) before you perturb** — a `git checkout` on an uncommitted file discarded a whole task's work once. |
 | **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963, #964, #965, #966, #967**. |
 
 ### Commits this session — ALL PUSHED, nothing at risk

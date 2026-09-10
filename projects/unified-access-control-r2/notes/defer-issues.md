@@ -293,8 +293,14 @@ are low-stakes; the risk is the next reuse.
 all-or-nothing), or delete "transactional" from the comment and rename so it no longer reads as atomic.
 
 **Estimated effort**: small.
-**Blockers**: none. Out of scope here only because `Spaarke.Dataverse` is a shared hot-path surface;
-FR-33's own write will use an atomic changeset instead of this helper.
+**Blockers**: none.
+
+🔴 **REVISED 2026-09-10 — this is no longer "filed for someone else".** The owner challenged the original
+plan (FR-33 building its own atomic changeset beside this helper) as a §11 violation, and was right. The
+fix is now **FR-33's first task**: switch `BulkUpdateAsync` to `ExecuteTransactionRequest` once,
+system-wide, and have FR-33 **reuse** it via the `IDataverseService` ExternalAccess already injects. Both
+existing callers want all-or-nothing, so the change helps them too. Runs `/conflict-check` first —
+`Spaarke.Dataverse` is a shared hot-path surface. See `notes/decisions/external-grant-expiry-mandatory.md` §12.2.
 **Related**: FR-33 redesign — `notes/decisions/external-grant-expiry-mandatory.md` §11.
 
 ---

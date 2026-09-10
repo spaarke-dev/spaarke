@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-33 — expiry reminders at 30 / 14 / 7 / 3 / 1 days, to the granting internal user (never the grantee)</title>
+    <phase>FR-33 External grant expiry</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New background work in the BFF; tags bff-api/background.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses an existing recurring-job pattern and the existing notification pipeline; the recipient-resolution judgment point is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a DI registration to a contended module file.</parallel-reason>
+    <deps>097</deps>
+    <tags>bff-api, background, worker, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Owner 2026-09-10: "should be 30 / 14 / 7 / 3 / 1 day reminder"</origin>
+  </metadata>
+
+  <prompt>Every external grant now expires (task 097). An expired human grant fails silently — the external user discovers it when they try to work — so the internal user who can renew must be told first. Send reminders at exactly 30, 14, 7, 3 and 1 days before sprk_expiresdate, using the recurring-job and notification machinery that already exists in the BFF. The owner confirmed these add no meaningful complexity because the infrastructure is already there.</prompt>
+  <role>SPAARKE platform developer, C#/.NET background services + the Spaarke notification pipeline.</role>
+  <goal>Before any external grant lapses, the internal user who can renew it has been reminded at 30/14/7/3/1 days, exactly once per threshold, and a job that has died is distinguishable from one with nothing to send.</goal>
+
+  <context>
+    <background>Spec FR-33 (d) and design §4.3: notify the GRANTING internal user / matter owner — NEVER the external grantee, who cannot renew their own access. Spec FR-33's known debt: "the notification job becomes load-bearing and its failure mode is silence, so it needs a heartbeat — 'nothing due' and 'the job died' must not look alike." Existing machinery to reuse: SessionFilesCleanupJob.cs (a recurring job — the scheduling pattern), OutboxService.cs + SignalRDeliveryService.cs (notification creation and delivery over sprk_notification), IIdempotencyService (already used by job handlers). sprk_expiresdate is Date Only. Task 097's backfill starts a 90-day clock on existing grants, so this job must be live within 60 days of that backfill.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/GrantExpiryReminderJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Notifications/OutboxService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IIdempotencyService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-10">Scope: thresholds. Exactly 30, 14, 7, 3 and 1 days before sprk_expiresdate, computed in DateOnly (no time-zone arithmetic).</constraint>
+    <constraint source="spec FR-33 (d)">Scope: recipient. The granting internal user / matter owner. NEVER the external grantee — they cannot renew their own access, so notifying them only creates pressure with no action available.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: machinery. Reuse SessionFilesCleanupJob's scheduling pattern, OutboxService for notifications and IIdempotencyService for de-duplication. Build no scheduler, no notification channel, no de-dup store.</constraint>
+    <constraint source="project">Scope: idempotency. Each (grant, threshold) pair is notified at most once, including across restarts and across multiple App Service instances.</constraint>
+    <constraint source="spec FR-33 known debt">Scope: heartbeat. Every run emits a structured log line / metric with its counts, INCLUDING runs where nothing is due, so "nothing due" and "the job died" are distinguishable.</constraint>
+    <constraint source="NFR-02">Scope: cost. ONE query per run for active grants expiring within 30 days — no per-grant query.</constraint>
+    <constraint source="ADR-010 / ADR-032">Scope: DI. Register the concrete type. If the job is feature-flagged, follow the ADR-032 null-object kill-switch with UNCONDITIONAL registration.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. State the Placement Justification citing .claude/constraints/bff-extensions.md; report publish size vs a fresh master (hazards 3 and 4).</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read SessionFilesCleanupJob, OutboxService and IIdempotencyService. Determine how the granting internal user is recorded on an sprk_externalrecordaccess row (createdby? a dedicated lookup?). If it is not reliable, fire the escalation below.</step>
+    <step order="1">Implement the job: one query, threshold matching, recipient resolution, idempotent notify, heartbeat.</step>
+    <step order="2">Register; tests per the closed set; perturbations.</step>
+    <step order="3">Build, full suite, publish size; update TASK-INDEX; write notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the granting internal user cannot be determined reliably from the grant row, STOP and escalate. Do NOT silently fall back to notifying nobody, or to notifying the grantee — "nobody was told" is exactly the silent failure this job exists to prevent.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SessionFilesCleanupJob (recurring scheduling), OutboxService (notifications), IIdempotencyService (de-dup) — all reused.</existing>
+    <extension>No existing job scans grant expiry, so one job class is required; it adds no scheduler, channel or store.</extension>
+    <cost-of-doing-nothing>Every external grant now expires, and nobody is told first: the external user is locked out mid-work and discovers it through a channel they may no longer have (spec FR-33 sequencing constraint).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/GrantExpiryReminderJob.cs</output>
+    <output type="test">tests/integration/ (KEEP path)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-100-expiry-reminders.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A grant expiring in exactly 30, 14, 7, 3 or 1 days produces exactly one notification for that threshold, to the granting internal user.</criterion>
+    <criterion testable="true">Negative: a grant expiring in 20 days produces no notification that run.</criterion>
+    <criterion testable="true">Negative: the external grantee never receives a notification.</criterion>
+    <criterion testable="true">Negative: an inactive or revoked grant produces no notification.</criterion>
+    <criterion testable="true">Running the job twice on the same day sends no duplicates.</criterion>
+    <criterion testable="true">A run with nothing due still emits the heartbeat, distinguishable from a run that did not happen.</criterion>
+    <criterion testable="true">One query per run, regardless of grant count.</criterion>
+    <criterion testable="true">Perturbation: removing idempotency fails at least one test; addressing the grantee fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10.3. Must be live within 60 days of task 097's backfill.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

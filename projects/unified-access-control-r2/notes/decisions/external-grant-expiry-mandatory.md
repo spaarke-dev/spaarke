@@ -356,3 +356,49 @@ stands unchanged — both read `sprk_expiresdate`, which makes them simpler unde
 
 > **§11 footer** — the `BulkUpdateAsync` finding is filed as **ISS-005 / GitHub #970**:
 > https://github.com/spaarke-dev/spaarke/issues/970
+
+---
+
+## 12. Owner decisions — 2026-09-10 (second round)
+
+### 12.1 Expiration means "shares on this record end" — §11's open question CLOSED
+
+> *"yes 'shares on this record end'"*
+
+Standing grants (task 042) are **out of scope** for the record Expiration. They have no
+`sprk_externalrecordaccess` row and keep their own on/off switch (the subject-level `sprk_standinggrant`
+flag). This confirms reuse of `sprk_expiresdate` is **complete** — there is no gap to close.
+
+### 12.2 🔴 CORRECTION to §11 — fix `BulkUpdateAsync` and REUSE it; do NOT build a parallel atomic write
+
+§11 said FR-33 *"will use an atomic changeset instead of this helper"*. **That was the wrong approach,
+and the owner caught it** (*"you are creating a new approach outside of this 'BulkUpdateAsync' function
+— is that the right approach?"*). It is the same §11 failure I had just been corrected on for the root
+columns: building alongside an existing component instead of fixing it.
+
+Verified facts that settle it:
+
+| Fact | Evidence |
+|---|---|
+| `BulkUpdateAsync` updates N records of ONE table in ONE round trip (a performance helper) | `DataverseServiceClientImpl.cs` |
+| Its defect is ONE word of mechanism: `ExecuteMultipleRequest` instead of `ExecuteTransactionRequest` | same |
+| Both existing callers **want** all-or-nothing | daily reset of `sprk_sendstoday` across accounts; clearing `sprk_isdefault` on a user's other layouts (a partial run leaves TWO defaults) |
+| ExternalAccess **already injects** the interface that exposes it | `SubjectStandingGrantReader` uses `IDataverseService` → `IGenericEntityService` |
+| The Web API client ExternalAccess otherwise uses has **no** batch method | `DataverseWebApiClient.cs` |
+
+So:
+
+1. **Fix `BulkUpdateAsync` once, system-wide** — switch to `ExecuteTransactionRequest`. Needed
+   regardless of FR-33: both current callers get the guarantee their comment already claims.
+2. **FR-33 reuses the fixed helper** through the `IDataverseService` ExternalAccess already has. No new
+   batch method, no changeset code, no parallel mechanism.
+
+Because FR-33 now **depends** on the fix, it moves from "filed for someone else" to **FR-33's first
+task**. `Spaarke.Dataverse` is a shared hot-path surface, so that task runs `/conflict-check` first.
+
+⚠️ **Two implementation gotchas for that task**, recorded so they are not rediscovered:
+- **Date Only through the SDK.** `sprk_expiresdate` is Date Only (task 007 spent real effort on this —
+  the `ge` semantics and the "30 June means 30 June works" rule). Writing it via an SDK `UpdateRequest`
+  rather than the Web API needs the value shaped so no time-zone shift moves the date by a day.
+- **`ExecuteTransactionRequest` limits** — max 1,000 requests, cannot be nested inside `ExecuteMultiple`.
+  Same 1,000 ceiling as today, so no regression for either caller; grant counts per record are far below it.

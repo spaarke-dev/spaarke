@@ -651,6 +651,33 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 | 🔲 [open] 088 | Evaluator versioning + point-in-time replay | FR-32 | 087,032 | — | ❌ | sonnet | **xhigh** |
 | 🔲 [open] 089 | Attestation seam tests + docs | FR-32 | 087,088 | — | ✅ | sonnet | medium |
 
+## FR-33 — External grant expiry (6 tasks, added 2026-09-10 by owner decision)
+
+Redesigned 2026-09-10 — see spec FR-33 and
+[`notes/decisions/external-grant-expiry-mandatory.md`](../notes/decisions/external-grant-expiry-mandatory.md) §9–§12.
+**No tenant cap.** One record-wide **Expiration** on the Manage Access toolbar, stored by **reusing
+`sprk_expiresdate`** on each grant row (no new column), required, defaulting to +90 days. Scope is
+explicit shares on the record — standing grants keep their own switch. Reminders at 30/14/7/3/1, plus an
+estate-wide view.
+
+| # | Task | FR | Deps | Group | Safe | Tier | Effort |
+|---|---|---|---|---|---|---|---|
+| 🔲 [open] 096 | `BulkUpdateAsync` → `ExecuteTransactionRequest` — genuinely all-or-nothing, system-wide (ISS-005 / #970) | FR-33 | — | — | ❌ | sonnet | high |
+| 🔲 [open] 097 | `ExpiryDate` **mandatory** on `/grant` · `/invite` · `/invite-and-grant`, + dev backfill of unbounded grants | FR-33 | — | — | ❌ | sonnet | high |
+| 🔲 [open] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) | FR-33 | 096,097 | — | ❌ | **opus** | high |
+| 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
+| 🔲 [open] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee | FR-33 | 097 | — | ❌ | sonnet | high |
+| 🔲 [open] 101 | "External shares by expiration" Dataverse views (operator-applied) | FR-33 | 097 | FR33-late | ✅ | sonnet | medium |
+
+> ⚠️ **Sequencing the Deps column cannot express:**
+> - **099 ↔ 065** both edit `AccessGrantModal.tsx`, and 099 needs finding **M8** (owned by 065) so that a
+>   failure actually reaches the user. Never run them concurrently. 099 carries an escalation trigger that
+>   fires if 065 has not landed M8 — M8 on its own is safe; it is M2-before-M8 that 065 forbids.
+> - **100 must be live within 60 days of 097's backfill.** The backfill sets existing grants to today + 90;
+>   the first reminder fires 30 days before expiry, so after day 60 those reminders are silently missed.
+> - **096 and 097 can run in parallel** — they touch different files (shared `Spaarke.Dataverse` vs the
+>   ExternalAccess endpoints). Both run `/conflict-check` first.
+
 ## Wrap-up
 
 | # | Task | Deps | Safe |
