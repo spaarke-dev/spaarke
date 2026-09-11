@@ -102,6 +102,17 @@ Both sides from **fresh worktrees at short paths** (`C:\wt096m` = `origin/master
 ≤ 60 MB ceiling ✅. No package added, so no new CVE surface. (The review follow-up changes only method
 bodies and docs; it cannot move the publish size measurably.)
 
+## Verification
+
+| Run | Result |
+|---|---|
+| Targeted (`BulkUpdateTransactionTests` + both callers + the precedent) @ `35dd301be` | 74 / 74 |
+| Full `Sprk.Bff.Api.Tests` @ `3570d24e4` | 12,265 passed / 0 failed / 58 skipped |
+| Full `Sprk.Bff.Api.Tests` @ `35dd301be` | **12,267 passed / 0 failed / 58 skipped** (+2 = the new tests) |
+| `Spaarke.ArchTests` (both commits) | 197 / 197 |
+| `Sprk.Bff.Api.IntegrationTests` (holds fakes implementing the interface) | builds |
+| `scripts/check-task-status-drift.ps1` | 98 POMLs = 98 index rows, no drift |
+
 ## Found in passing (not fixed — out of scope)
 
 - **A test helper's doc is wrong** — `tests/integration/.../Helpers/MockServiceClientFactory.cs` says

@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-33 prerequisite — make IGenericEntityService.BulkUpdateAsync genuinely all-or-nothing (ExecuteTransactionRequest), system-wide</title>
     <phase>FR-33 External grant expiry</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the shared Spaarke.Dataverse layer consumed by the BFF; changes the failure semantics of a shared write helper.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -75,7 +75,24 @@
     <criterion testable="true">Build green; full BFF suite and ArchTests green; publish size reported vs a fresh master and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>ISS-005 / #970. Design: notes/decisions/external-grant-expiry-mandatory.md §12.2. Consumed by task 098.</notes>
+  <notes>ISS-005 / #970. Design: notes/decisions/external-grant-expiry-mandatory.md §12.2. Consumed by task 098.
+
+COMPLETED 2026-09-10 (session 7) — commits 3570d24e4 (fix) + 35dd301be (review follow-up). Full record:
+notes/task-096-bulkupdate-transactional.md.
+- ESCALATION FIRED at step 1 (no substitutable seam: the ServiceClient is built from config inside the
+  class; ServiceClient.Execute is virtual final). OWNER CHOSE "pure builder": public static
+  BuildBulkUpdateTransaction + DescribeBulkUpdateFailure tested under tests/unit/domain/Dataverse/
+  (StageAnalysisRegardingFields precedent). Criterion 1 ("asserted at the service seam") is met through
+  that owner-accepted alternative; the build → ExecuteAsync → describe wiring is covered by review.
+- Perturbation: wording revert → 2 tests fail; builder → ExecuteMultipleRequest → test build fails (CS1061).
+- Publish: master 45.35 MB vs branch 45.40 MB, 214 = 214 files, fresh short-path worktrees, Compress-Archive.
+- ⚠️ CORRECTION to this POML's own constraint: it says the transaction "cannot be nested inside
+  ExecuteMultiple". That is BACKWARDS (Microsoft Learn): an ExecuteMultiple MAY contain transactions; a
+  transaction may not CONTAIN ExecuteMultiple/ExecuteTransaction. Caught at review; the docs shipped correct.
+- The "fault ⇒ nothing applied" claim is made only for an ExecuteTransactionFault naming an in-range
+  request: the SDK throws the client-wide LastException, so with the singleton client another request's
+  fault can surface (filed #971 / ISS-006, system-wide). Atomicity does NOT stop WorkspaceLayoutService
+  writing a second default layout — it catches and proceeds (filed #972 / ISS-007).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

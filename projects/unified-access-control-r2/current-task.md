@@ -1,14 +1,17 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-10, session 6 END** (by `context-handoff`) — reflects through commit `a492fb4d9` plus this handoff commit. Tree clean, 0 unpushed, 0 behind master.
+> **Last Updated**: **2026-09-10, session 7, task 096 closed** (by `task-execute` Step 11) — reflects through the 096 bookkeeping commit that follows `35dd301be`.
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
 > ⚠️ This block had gone stale for two tasks (024 → 042) and held TWO contradictory "Next Action" rows
 > before this rewrite — the stacked-recovery-block problem again. **One block. Replace it; never append.**
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's task files have been WRONG EIGHT times now** (session 6: task 042's dependency
-> annotation said 032 was pending). **Verify a POML's premises before obeying them — the code has won
-> every time.** Docs-vs-live-metadata mismatches stand at **nine** (session 6: design §10's org field name).
+> ⚠️ **This project's task files have been WRONG TEN times now** (session 7 ×2: task 097 never mentions that NO client sends an expiry — see
+> "⚠️ Before 097" below; and task 096's own constraint
+> had the `ExecuteTransaction` nesting rule backwards — copied from this project's design note; caught at
+> review against Microsoft Learn). **Verify a POML's premises before obeying them — the code has won
+> every time.** Docs-vs-reality mismatches stand at **ten** (session 7: a test helper calls
+> `ServiceClient` *sealed*; it is not — `Execute` is `virtual final`).
 
 ---
 
@@ -16,11 +19,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **096 — `BulkUpdateAsync` → `ExecuteTransactionRequest` (IN PROGRESS, session 7, 2026-09-10).** FULL rigor. Escalation trigger FIRED at step 1 (no substitutable seam: the impl builds its `ServiceClient` from config; `ServiceClient.Execute` is `virtual final`). **Owner chose "pure builder"**: public static no-I/O `BuildBulkUpdateTransaction` + `DescribeBulkUpdateFailure`, tested under `tests/unit/domain/Dataverse/` — the class's own `StageAnalysisRegardingFields` precedent. |
+| **Task** | **none in progress** — clean stopping point after **096** (closed session 7). |
 | **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1` |
-| **Next Action (096)** | ✅ Done: fix committed `3570d24e4`; perturbation P1 (2 tests fail) + P2 (compile fail); publish 45.35 → 45.40 MB (214 = 214 files); review ran — W1/W2/S1–S9/T1/T2 fixed **in the working tree (UNCOMMITTED)**, #971 + #972 filed, ISS-005 closed / ISS-006 / ISS-007 added, notes written. **Next**: build; run `BulkUpdateTransactionTests` + callers; full `Sprk.Bff.Api.Tests` + ArchTests; commit the follow-up; POML 096 → completed + TASK-INDEX ✅ + drift check; comment + close #970; `projects/INDEX.md` row (CI Workflows → Y, stale status); push. |
-| **Next Action (after 096)** | **Owner's call — two ready paths.** **(a) The C-items** — the owner's standing directive of 2026-09-10 (*"ensure these are resolved and following our objectives and consistent with the overall solution approach for our UAC"*); mostly verification and small edits, little or no code; listed in § NEXT SESSION. **(b) Tasks** — **096** ∥ **097** (FR-33 heads, no environment dependency) → **098** → **099**; **100** / **101** after 097; also **043** (chain C) and **063** (chain B). ⚠️ **036 carries a MANUAL pre-merge canary gate** — read its POML before starting it. |
-| **Task status** | **65 done · 29 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows). |
+| **⚠️ Before 097** | **Premise gap — needs an owner decision BEFORE 097 starts.** 097 makes `ExpiryDate` mandatory (400 when absent) on `/grant`, `/invite`, `/invite-and-grant`, but **no client sends an expiry today**: `AccessGrantModal` posts `{recordType, recordId, accessLevel, email}` to `/grant` + `/invite-and-grant`; the `TrackingFieldTrio` PCF calls the same two; the external SPA's `InviteUserDialog` calls `/invite` (`expiryDate?` is typed in `bff-client.ts` but never set). 099 adds the picker to the modal only — **nothing covers the PCF or the SPA**. 097 alone would break every sharing UI. |
+| **Next Action** | **Owner's call.** Recommended first: decide the 097 client gap above. Then two ready paths: **(a) The C-items** — the owner's standing directive of 2026-09-10 (*"ensure these are resolved and following our objectives and consistent with the overall solution approach for our UAC"*); mostly verification and small edits, little or no code; listed in § NEXT SESSION. **(b) Tasks** — **096** ∥ **097** (FR-33 heads, no environment dependency) → **098** → **099**; **100** / **101** after 097; also **043** (chain C) and **063** (chain B). ⚠️ **036 carries a MANUAL pre-merge canary gate** — read its POML before starting it. |
+| **Task status** | **66 done · 28 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows). |
+| **Session 7 record** | Closed **096** — `IGenericEntityService.BulkUpdateAsync` is genuinely all-or-nothing (`3570d24e4` fix + `35dd301be` review follow-up). Escalation fired at step 1 (no substitutable seam) → **owner chose the pure-builder test approach**. Full suite @ `35dd301be`: **12,267 passed / 0 failed** (58 skipped); ArchTests **197/197**; publish master 45.35 vs branch 45.40 MB (214 = 214 files). **#970 closed.** Filed **#971** (ISS-006 — the singleton `ServiceClient` throws the client-wide `LastException`, so concurrent requests can surface each other's errors; system-wide) and **#972** (ISS-007 — the layout caller writes a second default). `projects/INDEX.md` row refreshed (CI Workflows → Y). |
 | **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969** (CI ratchets unenforced) and **#970** (`BulkUpdateAsync` not transactional). CI: the **full ArchTests suite now runs blocking** in Tier 1. Owner decisions: audit enabled on all three gaps (verified live) · **FR-33 redesigned → tasks 096–101** · no Dataverse test in CI (036 manual gate; success criteria 3–4 reworded) · §10 hazards 3–4 added to root CLAUDE.md · path-A exceptions 012/023/062 ratified. |
 | **Session 6 lessons** | (1) **Look for the working in-repo example before copying the one a doc names** — `SpeAdminGraphService` already paged the collection a design told me to copy from elsewhere. (2) **Extend before you add** — twice this session the owner caught me building beside an existing component (a new root column instead of `sprk_expiresdate`; a new atomic write instead of fixing `BulkUpdateAsync`). Run CLAUDE.md §11's extension question *before* recommending, not after being asked. (3) **Commit (or copy) before you perturb** — a `git checkout` on an uncommitted file discarded a whole task's work once. |
 | **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963, #964, #965, #966, #967**. |
@@ -145,7 +149,7 @@ is the obvious first candidate (different files) — both still run `/conflict-c
 - **Moq**: an un-stubbed virtual returning `Task<T>` yields `null`, and the SUT throws a `NullReferenceException` that *looks like a product defect*. Inspect the fixture first (CLAUDE.md §10 F.2).
 - **Web API**: `roleprivilegescollection` cannot `$expand=roleid` (not a navigation property) — query it with `$filter=roleid eq …` per role.
 - **Graph / SPE**: an `az` CLI Graph token **403s** on container permissions (no `FileStorageContainer.Selected`, no container-type grant). It needs the BFF's own app identity.
-- **Portfolio sync (context-handoff hook)**: the `gh` token lacks the `read:project` scope (it holds gist, read:org, repo, workflow), so `/devops-project-sync` cannot read or update Board #2 / Issue #808 — it fails with INSUFFICIENT_SCOPES. Fix is the owner running `gh auth refresh -s read:project,project` (interactive). Until then the hook degrades to a warning, exactly as its contract requires. Last attempted 2026-09-10; board values NOT updated (local truth: 98 tasks, 65 done).
+- **Portfolio sync (context-handoff hook)**: the `gh` token lacks the `read:project` scope (it holds gist, read:org, repo, workflow), so `/devops-project-sync` cannot read or update Board #2 / Issue #808 — it fails with INSUFFICIENT_SCOPES. Fix is the owner running `gh auth refresh -s read:project,project` (interactive). Until then the hook degrades to a warning, exactly as its contract requires. Last attempted 2026-09-10; board values NOT updated (local truth after task 096: 98 tasks, 66 done). Not re-attempted at 096's completion — same token, same certain failure.
 
 ---
 

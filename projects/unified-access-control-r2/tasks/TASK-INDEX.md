@@ -662,7 +662,7 @@ estate-wide view.
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 [open] 096 | `BulkUpdateAsync` → `ExecuteTransactionRequest` — genuinely all-or-nothing, system-wide (ISS-005 / #970) | FR-33 | — | — | ❌ | sonnet | high |
+| ✅ [done] 096 | `BulkUpdateAsync` → `ExecuteTransactionRequest` — genuinely all-or-nothing, system-wide (ISS-005 / #970) | FR-33 | — | — | ❌ | sonnet | high |
 | 🔲 [open] 097 | `ExpiryDate` **mandatory** on `/grant` · `/invite` · `/invite-and-grant`, + dev backfill of unbounded grants | FR-33 | — | — | ❌ | sonnet | high |
 | 🔲 [open] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) | FR-33 | 096,097 | — | ❌ | **opus** | high |
 | 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
