@@ -12,9 +12,18 @@
  *   - any other 403 → 'denied'
  *   - network / 5xx / unexpected → 'error', never a thrown exception
  *   - empty / non-absolute documentUrl → 'new' (not_cloud_document) with NO network call
+ *
+ * Also covers `applyDocumentIdentityOutcome` — the pure merge-into-savedContext function App.tsx
+ * uses to thread a resolution outcome into state (acceptance criteria 6-8). App.tsx has no
+ * render-based test harness in this codebase (no App.test.tsx), so this is the only automated
+ * proof of that merge behavior.
  */
 
-import { resolveDocumentIdentity } from '../documentIdentityService';
+import {
+  resolveDocumentIdentity,
+  applyDocumentIdentityOutcome,
+  type DocumentIdentityContext,
+} from '../documentIdentityService';
 import { apiClient, ApiClientError } from '@shared/services';
 
 jest.mock('@shared/services', () => {
@@ -274,5 +283,112 @@ describe('resolveDocumentIdentity', () => {
 
       expect(outcome).toEqual({ kind: 'error', message: 'Document identity resolution failed.' });
     });
+  });
+});
+
+describe('applyDocumentIdentityOutcome', () => {
+  const toFriendlyRegardingType = (entity: string): string => {
+    const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
+    return map[entity] ?? entity;
+  };
+
+  it('merges a resolved outcome with a related record into prev (not a replace)', () => {
+    // App.savedContext is DocumentIdentityContext intersected with other fields (SavedTodoContext);
+    // this stands in for that wider shape to prove prev's OTHER fields survive the merge.
+    const prev: DocumentIdentityContext & { communicationId?: string } = { communicationId: 'demo-123' };
+
+    const next = applyDocumentIdentityOutcome(
+      prev,
+      {
+        kind: 'resolved',
+        documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        documentName: 'Examiner report draft',
+        fileName: 'Examiner report draft.docx',
+        relatedRecord: { entityType: 'sprk_matter', id: '11111111-2222-3333-4444-555555555555', name: 'PAT-191111' },
+      },
+      toFriendlyRegardingType
+    );
+
+    expect(next).toEqual({
+      communicationId: 'demo-123', // preserved from prev, not clobbered
+      documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      documentName: 'Examiner report draft',
+      fileName: 'Examiner report draft.docx',
+      relatedRecord: { entityType: 'sprk_matter', id: '11111111-2222-3333-4444-555555555555', name: 'PAT-191111' },
+      regardingEntity: 'Matter', // friendly type, seeded for Create To Do
+      regardingRecordId: '11111111-2222-3333-4444-555555555555',
+      regardingName: 'PAT-191111',
+    });
+  });
+
+  it('merges a resolved outcome with NO related record — no regarding fields are set', () => {
+    const next = applyDocumentIdentityOutcome(
+      undefined,
+      {
+        kind: 'resolved',
+        documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        documentName: 'Untitled memo',
+        fileName: 'memo.docx',
+        relatedRecord: null,
+      },
+      toFriendlyRegardingType
+    );
+
+    expect(next).toEqual({
+      documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      documentName: 'Untitled memo',
+      fileName: 'memo.docx',
+      relatedRecord: null,
+    });
+    expect(next).not.toHaveProperty('regardingEntity');
+    expect(next).not.toHaveProperty('regardingRecordId');
+  });
+
+  it('omits regardingName when the related record has no name', () => {
+    const next = applyDocumentIdentityOutcome(
+      undefined,
+      {
+        kind: 'resolved',
+        documentId: 'a',
+        documentName: 'doc',
+        fileName: 'doc.docx',
+        relatedRecord: { entityType: 'sprk_project', id: 'b', name: null },
+      },
+      toFriendlyRegardingType
+    );
+
+    expect(next?.regardingEntity).toBe('Project');
+    expect(next).not.toHaveProperty('regardingName');
+  });
+
+  it.each(['new', 'conflict', 'indeterminate', 'denied', 'error'] as const)(
+    "returns prev BY REFERENCE, unchanged, for a '%s' outcome",
+    kind => {
+      const prev = { regardingEntity: 'Matter', regardingRecordId: 'x' };
+      const outcome =
+        kind === 'new'
+          ? ({ kind: 'new', reason: 'not_cloud_document' } as const)
+          : kind === 'conflict'
+            ? ({ kind: 'conflict' } as const)
+            : kind === 'indeterminate'
+              ? ({ kind: 'indeterminate', reason: 'unavailable' } as const)
+              : kind === 'denied'
+                ? ({ kind: 'denied' } as const)
+                : ({ kind: 'error', message: 'x' } as const);
+
+      const next = applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType);
+
+      expect(next).toBe(prev); // same reference — a React setState updater can bail out
+    }
+  );
+
+  it('returns undefined, unchanged, when prev is undefined and the outcome is not resolved', () => {
+    const next = applyDocumentIdentityOutcome(
+      undefined,
+      { kind: 'new', reason: 'not_cloud_document' },
+      toFriendlyRegardingType
+    );
+
+    expect(next).toBeUndefined();
   });
 });

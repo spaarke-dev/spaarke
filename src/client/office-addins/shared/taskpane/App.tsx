@@ -20,26 +20,21 @@ import type {
   ContactOption,
 } from './components/views/CreateTodoView';
 import type { EntitySearchResult } from './hooks/useEntitySearch';
-import { resolveDocumentIdentity, type ResolvedRelatedRecord } from './services/documentIdentityService';
+import {
+  resolveDocumentIdentity,
+  applyDocumentIdentityOutcome,
+  type DocumentIdentityContext,
+} from './services/documentIdentityService';
 
 /**
  * `App.savedContext`'s actual shape (spaarkeai-word-add-in-r1 FR-01 / task 013). Extends the
  * Create-To-Do "filed to" shape (`SavedTodoContext`, still populated by `SaveView.onSaved`) with
- * the resolved document identity from task 012's resolver — the SAME state, not a parallel store
- * (task 013 step 6). `Partial<SavedTodoContext>` is deliberate: a resolved Word document may have
- * no related record at all (unassociated), in which case only the document fields are known and
- * the Create-To-Do "regarding" fields stay unset.
+ * the resolved document identity from task 012's resolver (`DocumentIdentityContext`) — the SAME
+ * state, not a parallel store (task 013 step 6). `Partial<SavedTodoContext>` is deliberate: a
+ * resolved Word document may have no related record at all (unassociated), in which case only the
+ * document fields are known and the Create-To-Do "regarding" fields stay unset.
  */
-type AppSavedContext = Partial<SavedTodoContext> & {
-  /** `sprk_documentid`, bare lowercase (ADR-044). */
-  documentId?: string;
-  /** `sprk_documentname`. */
-  documentName?: string;
-  /** `sprk_filename`. */
-  fileName?: string;
-  /** The record the resolved document belongs to, or `null` when unassociated. */
-  relatedRecord?: ResolvedRelatedRecord | null;
-};
+type AppSavedContext = Partial<SavedTodoContext> & DocumentIdentityContext;
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -263,22 +258,12 @@ export const App: React.FC<AppProps> = ({
 
         const outcome = await resolveDocumentIdentity(url);
 
-        if (outcome.kind === 'resolved') {
-          setSavedContext(prev => ({
-            ...prev,
-            documentId: outcome.documentId,
-            documentName: outcome.documentName,
-            fileName: outcome.fileName,
-            relatedRecord: outcome.relatedRecord,
-            ...(outcome.relatedRecord
-              ? {
-                  regardingEntity: toFriendlyRegardingType(outcome.relatedRecord.entityType),
-                  regardingRecordId: outcome.relatedRecord.id,
-                  ...(outcome.relatedRecord.name ? { regardingName: outcome.relatedRecord.name } : {}),
-                }
-              : {}),
-          }));
-        } else if (outcome.kind !== 'new') {
+        // applyDocumentIdentityOutcome is pure + independently unit-tested (documentIdentityService
+        // test suite) — it merges into the existing state (never replaces) and returns `prev`
+        // by reference, unchanged, for every non-'resolved' outcome.
+        setSavedContext(prev => applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType));
+
+        if (outcome.kind !== 'resolved' && outcome.kind !== 'new') {
           // 'conflict' | 'indeterminate' | 'denied' | 'error' — a handled, non-blocking diagnostic.
           // No UI surface owns these yet (Phase 2 tasks 021/024/026/027 do); the acceptance
           // criterion is that the save flow stays usable regardless, so this never touches

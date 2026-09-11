@@ -196,3 +196,66 @@ export async function resolveDocumentIdentity(
     };
   }
 }
+
+/**
+ * The identity-related subset of `App.savedContext` this service knows how to populate (task 013
+ * step 6). `App`'s actual saved-context type is a wider superset (it also carries the Create-To-Do
+ * "filed to" fields from `SaveView.onSaved`) — this is the slice `applyDocumentIdentityOutcome`
+ * reads and writes.
+ */
+export interface DocumentIdentityContext {
+  /** `sprk_documentid`, bare lowercase (ADR-044). */
+  documentId?: string;
+  /** `sprk_documentname`. */
+  documentName?: string;
+  /** `sprk_filename`. */
+  fileName?: string;
+  /** The record the resolved document belongs to, or `null` when unassociated. */
+  relatedRecord?: ResolvedRelatedRecord | null;
+  /** Create-To-Do "regarding" fields (see `SavedTodoContext` in `CreateTodoView.tsx`). */
+  regardingEntity?: string;
+  regardingRecordId?: string;
+  regardingName?: string;
+}
+
+/**
+ * Apply a {@link DocumentIdentityOutcome} to the pane's saved-context state.
+ *
+ * Merges document identity fields into whatever state already existed — it does NOT replace it
+ * (task 013 step 6: "joining the existing save-context shape rather than adding a parallel store").
+ * When the resolved document has a related record, it ALSO seeds the same Create-To-Do "regarding"
+ * fields `SaveView.onSaved` writes (`toFriendlyRegardingType` mirrors `App.tsx`'s own logical→
+ * friendly mapping so a resolved Word document's matter/project/invoice can drive Create To Do too).
+ *
+ * Every non-`'resolved'` outcome ('new' | 'conflict' | 'indeterminate' | 'denied' | 'error') returns
+ * `prev` **by reference, unchanged** — none of them carry a document to display, and returning the
+ * same reference lets a React `setState` updater bail out of a re-render for a no-op update.
+ *
+ * A pure function (no Office.js, no network, no React) so this merge is independently unit-testable
+ * — `App.tsx` has no render-based test harness in this codebase (no `App.test.tsx` exists), so this
+ * is the only automated proof of the merge behavior acceptance criteria 6-8 depend on.
+ */
+export function applyDocumentIdentityOutcome(
+  prev: DocumentIdentityContext | undefined,
+  outcome: DocumentIdentityOutcome,
+  toFriendlyRegardingType: (entityType: string) => string
+): DocumentIdentityContext | undefined {
+  if (outcome.kind !== 'resolved') {
+    return prev;
+  }
+
+  return {
+    ...prev,
+    documentId: outcome.documentId,
+    documentName: outcome.documentName,
+    fileName: outcome.fileName,
+    relatedRecord: outcome.relatedRecord,
+    ...(outcome.relatedRecord
+      ? {
+          regardingEntity: toFriendlyRegardingType(outcome.relatedRecord.entityType),
+          regardingRecordId: outcome.relatedRecord.id,
+          ...(outcome.relatedRecord.name ? { regardingName: outcome.relatedRecord.name } : {}),
+        }
+      : {}),
+  };
+}
