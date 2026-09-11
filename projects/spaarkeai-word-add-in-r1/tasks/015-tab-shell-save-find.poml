@@ -4,7 +4,7 @@
     <title>FR-03: Save|Find tab shell, enable navigation in Word</title>
     <phase>1 Foundation</phase>
     <gate>010 complete — the consolidated adapter reached via the factory must be in place before the shell branches on capabilities</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the pane shell consumed by both hosts, changes navigation visibility for a host that has never had tabs, and creates new view surface. Tags include frontend and fluent-ui.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -179,6 +179,15 @@
     The `search`-versus-`find` naming question is real: the union already contains `'search'` (commented out of `TAB_CONFIGS`), and spec.md calls the r1 tab "Find". Pick one, record why, and keep the union honest.
     Wave P1-b with task 014: 015 is client-side TypeScript/React in `shared/taskpane/**` plus the module CLAUDE.md; 014 is server-side C# in `Services/Office/**` plus contract tests. No shared file and no shared symbol — the pair is disjoint by construction.
     Downstream: Phase 3 tasks 032-034 build the real Find view into the frame this task creates; Phase 2 pane surfaces mount into the Save tab.
+    COMPLETED 2026-09-10 (commit aff1ca9e4, executed in an isolated worktree, fast-forwarded into the branch). Evidence and decisions: notes/015-tab-shell-decisions.md.
+    - Renderer: `TaskPaneToolbar` is the one live tab row. `TaskPaneNavigation` is kept as a documented, unmounted helper and test surface.
+    - Naming: a new `find` member; `search` stays a distinct job-status stub.
+    - Visibility: `showNavigation = getAvailableTabs(hostType).length > 0` (NFR-10).
+    - `FindView` is a static frame: no fetch, no list, no pager.
+    - Tab changes are announced via `useAnnounce`.
+    - Verification: production typecheck 0 → 0; build green with the deploy env vars; jest 10 failed / 12 passed suites (84/296 tests) is identical before and after in an A/B run; no suite was added.
+    - NOT-TESTABLE-HERE: live host clicks and the dark-mode and screen-reader ui-tests. These fold into task 042 UAT.
+    - Main-session correction: comments claiming Find waited on task 032 "landing" were stale (032 was already complete). They were fixed in FindView/App/TaskPaneNavigation and the notes. The real view is tasks 033-034.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

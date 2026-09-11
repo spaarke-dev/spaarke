@@ -450,9 +450,9 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {/* Find tab (task 015 / FR-03) — frame only, no similarity/search call. Phase 3
-            (tasks 032-034) mounts the real view here once task 032's authorization
-            hardening lands (plan.md finding F-b). */}
+        {/* Find tab (task 015 / FR-03) — frame only, no similarity/search call. Tasks
+            033-034 mount the real view here (task 032's per-row authorization, plan.md
+            finding F-b, is already in place). */}
         {currentTab === 'find' && <FindView />}
 
         {currentTab === 'share' && (

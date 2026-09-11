@@ -54,7 +54,7 @@ const useStyles = makeStyles({
  * Available navigation tabs.
  *
  * `find` is the r1 Find tab (FR-03 / task 015) — the frame only; the real view (three-state
- * gating, similarity results) is Phase 3 (tasks 032-034). `search` is a distinct, still-hidden
+ * gating, similarity results) is tasks 033-034. `search` is a distinct, still-hidden
  * legacy member wired to a job-status placeholder in App.tsx — do not conflate the two.
  */
 export type NavigationTab = 'save' | 'createTodo' | 'find' | 'share' | 'recent' | 'search';
@@ -91,7 +91,7 @@ const TAB_CONFIGS: TabConfig[] = [
   },
   {
     // Find frame (task 015 / FR-03) — both hosts. The Find VIEW (similarity results,
-    // authorization-gated) is Phase 3 (tasks 032-034); this entry only makes the tab
+    // per-row authorized by task 032) is tasks 033-034; this entry only makes the tab
     // selectable and routes to the placeholder mount point built in App.tsx.
     value: 'find',
     label: 'Find',

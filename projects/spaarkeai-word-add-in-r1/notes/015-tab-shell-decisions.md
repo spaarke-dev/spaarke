@@ -111,8 +111,14 @@ their `TAB_CONFIGS` entries stay commented out, per the "do not build placeholde
 share/recent" constraint, which does not apply to Find since Find explicitly IS this task's
 placeholder to build).
 
-Phase 3 (tasks 032-034) replaces `FindView`'s body once task 032's authorization hardening
-(plan.md finding F-b) lands — the mount point (`currentTab === 'find'`) does not change.
+Tasks 033-034 replace `FindView`'s body. The mount point (`currentTab === 'find'`) does not change.
+Their prerequisite, task 032's per-row authorization on the similarity surface (plan.md finding
+F-b), is already complete (`f892c8ada`).
+
+> Corrected 2026-09-10 in the main session. This section originally said the Find view waited on 032
+> "landing" and that the similarity engine had "no per-row authorization today". Both were stale:
+> 032 was done before 015 started. The same claim was fixed in `FindView.tsx`, `App.tsx` and
+> `TaskPaneNavigation.tsx`.
 
 ---
 
