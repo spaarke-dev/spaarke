@@ -181,10 +181,10 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 010 | FR-04: consolidate onto one Word adapter via `HostAdapterFactory` — ⚠️ **implementation complete + verified; ONE operator decision open (host-detection, notes §6c)** | ✅ | FULL | opus / xhigh | P1-a | 006, 007, 008 |
 | 011 | FR-05: migrate Word to the unified JSON manifest | 🔄 | STANDARD | sonnet / high | P1-a | none |
 | 012 | FR-01 server: document-identity resolver extending `/api/documents` — `POST /api/documents/resolve-identity`, deployed to dev. **Live-verified on Word for the web AND Word desktop** (the desktop capture, 2026-09-11, is byte-identical and resolves). **Spike-1 is GREEN** (spike-1 §23). Graph 403 → `not_resolvable` (notes/012 §4). Full suite 12,139/0; ArchTests 191; no CVE; publish +0.016 MB. Contract test → 016. Optional: a live check of a file that exists but has no Spaarke record. | ✅ | FULL | opus / high | — | 002 ✅ |
-| 013 | FR-01 client: `getDocumentUrl` capability and identity threading | 🔲 | FULL | sonnet / high | — | 010, 012 |
+| 013 | FR-01 client: `getDocumentUrl` capability and identity threading — agent dispatched 2026-09-11 (isolated worktree) | 🔄 | FULL | sonnet / high | — | 010, 012 |
 | 014 | FR-02: server-side custom XML part GUID stamp — **019 CLEARED BOTH PRECONDITIONS 2026-09-09: premise CONFIRMED; manifest now declares CustomXmlParts. GO** — inherits 4 conditions, see notes/019-customxml-premise-and-manifest.md §6 (use the COMMON API not Word.Document.customXmlParts; explicit xmlns on the stamp root; missing stamp = normal + re-stampable; runtime isSetSupported guard). MOVES AHEAD of 012/013 if Spike-1 §7 accepted | 🔲 | FULL | opus / high | P1-b | 012, ~~019~~ ✅ |
 | 015 | FR-03: Save\|Find tab shell, enable navigation in Word — `aff1ca9e4`: Word gets Save + Find; Outlook gets Save + Create To Do + Find; Find is a static frame (the real view is 033-034) | ✅ | FULL | sonnet / high | P1-b | 010 |
-| 016 | Un-skip `/api/office/save` contract tests + cover the identity route | 🔲 | FULL | sonnet / high | — | 012 |
+| 016 | Un-skip `/api/office/save` contract tests + cover the identity route — agent dispatched 2026-09-11 (isolated worktree) | 🔄 | FULL | sonnet / high | — | 012 |
 
 > 🔄 **011 is build-verified but NOT formally closed.** `word/manifest.json` is authored, `webpack.config.js`
 > parameterizes it (id/resource/base-URL, mirroring Outlook's mechanism exactly), the WordApi 1.1→1.3
@@ -221,7 +221,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 030 | FR-13: shared server-side creation service (**Matter**) | 🔲 | FULL | opus / xhigh | — | 012 |
+| 030 | FR-13: shared server-side creation service (**Matter**) — agent dispatched 2026-09-11 (isolated worktree) | 🔄 | FULL | opus / xhigh | — | 012 |
 | 031 | FR-13: Project creation completeness + QuickCreate routing | 🔲 | FULL | opus / high | — | 030 |
 | 032 | **FR-16a: per-row authorization on the similarity surface** | ✅ | FULL | opus / xhigh | — | none |
 | 033 | FR-16b: Find view three-state gating and Run Index | 🔲 | FULL | sonnet / high | — | 032, 015, 013 |

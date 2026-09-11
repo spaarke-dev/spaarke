@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **013** — FR-01 client: `getDocumentUrl` capability and identity threading (`tasks/013-*.poml`) — **not started** |
-| **Status** | none active. **012 ✅** (live-verified on Word web + desktop; Spike-1 GREEN). **015 ✅** (live on the add-in site). |
-| **State at handoff** | The tree is clean and in sync with origin. **PR #960 CI is all green** (every check terminal, 0 pending, 0 failed; the required `Router` check passes). **Nothing is in flight**: no agents, no background jobs, no stray worktrees. The dev BFF runs `9750b4968`; the add-in site runs `8fec97b2d` (015 tabs). |
-| **Next Action** | New session: **ask the operator which task to run**. The question was put at the end of the last session and has not been answered. Recommended: **013** via `task-execute` (critical path: 012 → 013 → 023/024). Also startable now: 014, 016 (do NOT co-schedule 014 and 016: same contract-test file), 020, 023, 030. |
+| **Task** | **Wave W5+ in flight (2026-09-11)** — **013** (client identity wiring, sonnet), **016** (office-save contract tests + identity-route coverage, sonnet), **030** (Matter creation service, opus) |
+| **Status** | 🔄 three background agents, each in its OWN isolated worktree (`isolation: worktree`, based on `62a59a029`). Operator said "continue"; dispatched per the standing "parallel + autonomous where safe" instruction. |
+| **State at dispatch** | Main tree clean, 0/0 with origin, PR #960 CI green. Agents were told: do NOT edit current-task.md / TASK-INDEX.md / project CLAUDE.md (main session owns them); do NOT push, PR, deploy or trigger workflows; commit on their worktree branch only; no `--no-verify`. File ownership: 013 = `src/client/office-addins/**`; 016 = `tests/integration/**` + owns any shared contract-fixture change; 030 = `Services/Office/*` QuickCreate path + `OfficeEndpoints.cs` + a NEW `OfficeQuickCreateContractTests.cs` (no shared-fixture edits). 030 may do READ-ONLY Dataverse GETs via an az token; never writes. |
+| **Next Action** | When each agent reports: review its diff in its worktree branch, then merge into `work/spaarkeai-word-add-in-r1`. After all three, run `dotnet build` + ArchTests + the affected BFF tests + office-addins typecheck/build/jest; update TASK-INDEX + this file; paste 030's Placement Justification (`notes/030-creation-service-decisions.md`) into the PR #960 body; `/conflict-check`; push. **Held back on purpose:** 014 and 023 both write 016's `OfficeEndpointsContractTests.cs` → start after 016 lands (023 is the critical path: 013 → 023 → 024). 020/021/022 (W7) wait on 013. |
 
 ### What 013 must honour from 012 (notes/012 §2, "Rules for task 013")
 - **503 = could not determine.** Retry or let the user choose; never treat it as a new document.
