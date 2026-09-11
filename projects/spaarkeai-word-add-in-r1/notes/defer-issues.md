@@ -163,6 +163,72 @@ not worth a dedicated edit of a frozen file.
 
 ---
 
+## ISS-003 — Global exception handler serves `application/json`, never `application/problem+json` (ADR-019, repo-wide)
+
+| Field | Value |
+|---|---|
+| **Type** | Issue (live defect in shipped code — ADR-019 contract violation) |
+| **Found** | 2026-09-11, task 016, while writing `DocumentIdentityContractTests.cs`'s malformed-URL contract test |
+| **Owner** | Whoever next touches `MiddlewarePipelineExtensions.cs` — a one-line fix, no design work |
+| **Severity** | Every `SdapProblemException`-driven HTTP error across the ENTIRE BFF API (400/404/409/503/…) is served with the wrong media type |
+| **GitHub Issue** | [spaarke-dev/spaarke#975](https://github.com/spaarke-dev/spaarke/issues/975) |
+
+**Description**
+
+`src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs` `UseSpaarkeMiddleware`'s
+global exception handler (the ONE place every `SdapProblemException` is rendered) does:
+
+```csharp
+ctx.Response.ContentType = "application/problem+json";
+...
+await ctx.Response.WriteAsJsonAsync(new { type, title, detail, status, correlationId, extensions });
+```
+
+`HttpResponseJsonExtensions.WriteAsJsonAsync` (no explicit `contentType` argument passed) unconditionally sets
+`response.ContentType = contentType ?? "application/json; charset=utf-8"` — it does not consult the header
+already set two lines above. **Every** `SdapProblemException`-driven response is therefore served as
+`application/json`, never `application/problem+json`, contrary to ADR-019 ("MUST return ProblemDetails for all
+HTTP failures" — RFC 7807 defines that media type as part of the contract).
+
+**Concrete failure mode**: any client (or contract test) that dispatches on `Content-Type:
+application/problem+json` to recognize an RFC-7807 error body — rather than sniffing the JSON shape — will not
+recognize a Spaarke BFF error as one. This is exactly the class of client-complexity ADR-019 exists to prevent
+("Consistent error shapes reduce client complexity, improve debuggability").
+
+**Confirmed NOT a fixture artifact.** The SAME test fixture's 403 response — a DIFFERENT code path
+(`DocumentAuthorizationFilter`'s `Results.Problem(...)`, which sets the header through ASP.NET Core's own
+`ProblemHttpResult` rather than a raw `WriteAsJsonAsync`) — gets the header right in the identical in-process
+host. Only the global-exception-handler path is affected.
+
+**Confirmed genuinely untested, not previously known-and-worked-around**: `grep -rln
+"application/problem\+json" tests/` returns zero hits anywhere in the repository before this task.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs:29-87` (the handler)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs:73` (the `WriteAsJsonAsync` call to fix)
+- Reproduction: `tests/integration/contract/Api/Documents/DocumentIdentityContractTests.cs`
+  `ResolveIdentity_ForAMalformedOrEmptyUrl_Returns400ProblemDetails_NotA500` — currently asserts the JSON body
+  shape rather than the header (working around the defect, not fixing it) with the full diagnosis inline as a
+  code comment.
+- Full diagnosis: `notes/016-fixture-diagnosis.md` §3 and §6.
+
+**Suggested fix**
+
+Pass the content type explicitly: `ctx.Response.WriteAsJsonAsync(payload, contentType: "application/problem+json")`
+(overload exists), or replace the raw `WriteAsJsonAsync` call with `Results.Problem(...)`/`TypedResults.Problem(...)`
+so ASP.NET Core's own `ProblemHttpResult` owns the header the way `DocumentAuthorizationFilter` already does.
+Either is a small, contained change to one file; add a regression test asserting
+`response.Content.Headers.ContentType?.MediaType == "application/problem+json"` for at least one
+`SdapProblemException` path once fixed (the KEEP path this file already uses,
+`tests/integration/contract/**`).
+
+**Estimated effort**: <1 hour (one-line fix + one regression test)
+**Blockers**: none
+**Related**: ADR-019 (concise: `.claude/adr/ADR-019-problemdetails.md`; full: `docs/adr/ADR-019-api-errors-and-problemdetails.md`)
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.
