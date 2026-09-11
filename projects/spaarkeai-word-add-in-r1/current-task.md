@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-11 (context-handoff at session end — the next session starts here)
+> **Last Updated**: 2026-09-11 (mid-session checkpoint — 021, 023 and the 030 rework in flight in isolated worktrees)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
@@ -10,7 +10,7 @@
 | Field | Value |
 |---|---|
 | **Task** | **In flight (2026-09-11), each agent in its own isolated worktree:** **023** (version-save server, opus — critical path), **021** (profile section display, sonnet — contract tests in a NEW file), **030 rework** (remove numbering; optional `matterTypeId`, never rejected). New task **038** created (required Matter Type on pane quick-create; after 030 + 021). |
-| **Status** | **013 ✅ and 016 ✅ merged** (`8b5d58a2b`, `c475ed764`); gates on the merged tree: office-addins prod typecheck 0, build green (needs the 4 env vars — CI supplies them; locally use placeholders), jest 10 failing suites = pre-existing baseline, 013's 2 new suites added to `ci-gated-suites.txt`. **030 🔄 rework** (agent resumed with context): owner moved matter numbering to a SEPARATE project (server-side, on record create, NO plugin) and made Matter Type required-but-never-rejected — see project CLAUDE.md Decisions 2026-09-11. **Needs a new client task**: required Matter Type field on pane quick-create (`SaveFlow.tsx` posts `{name}` only). |
+| **Status** | **013 ✅ and 016 ✅ merged** (`8b5d58a2b`, `c475ed764`); gates on the merged tree: office-addins prod typecheck 0, build green (needs the 4 env vars — CI supplies them; locally use placeholders), jest 10 failing suites = pre-existing baseline, 013's 2 new suites added to `ci-gated-suites.txt`. **030 🔄 rework** (agent resumed with context): owner moved matter numbering to a SEPARATE project (server-side, on record create, NO plugin) and made Matter Type required-but-never-rejected — see project CLAUDE.md Decisions 2026-09-11. The pane half is **task 038** (created; `SaveFlow.tsx` posts `{name}` only today). 030 rework status 2026-09-11: code applied (numbering removed; publish +0.03 MB vs fresh master 45.35 MB), agent told to rerun its lost Step 9.5 review + full suite, and to treat an unknown `matterTypeId` like a missing one (create without type + warning). All three agents were interrupted once by a network drop (ENOTFOUND) and resumed with context. |
 | **State at dispatch** | Main tree clean, 0/0 with origin, PR #960 CI green. Agents were told: do NOT edit current-task.md / TASK-INDEX.md / project CLAUDE.md (main session owns them); do NOT push, PR, deploy or trigger workflows; commit on their worktree branch only; no `--no-verify`. File ownership: 013 = `src/client/office-addins/**`; 016 = `tests/integration/**` + owns any shared contract-fixture change; 030 = `Services/Office/*` QuickCreate path + `OfficeEndpoints.cs` + a NEW `OfficeQuickCreateContractTests.cs` (no shared-fixture edits). 030 may do READ-ONLY Dataverse GETs via an az token; never writes. |
 | **Next Action** | As each agent reports: review its diff on its `worktree-agent-*` branch, `git merge --no-ff` into `work/spaarkeai-word-add-in-r1` (expect small hunk conflicts in `OfficeEndpoints.cs` — three branches touch different routes), then rerun gates on the merged tree (`dotnet build` BFF, ArchTests, Office contract/unit subsets; office-addins typecheck/build-with-placeholder-env/jest). Then: update TASK-INDEX + this file; paste the Placement Justifications (030, 023, and 021's if it touched the BFF) into the PR #960 body; `/conflict-check`; push. **After 023:** 024 (critical path) and 014 (both touch the save path — not together). **After 021:** 022 (edits 021's new files), then 020, 026, 038 one at a time (all edit `SaveFlow.tsx`). Worktree note: `isolation: worktree` now bases on `origin/master` — every agent prompt must say "rebase onto the LOCAL `work/spaarkeai-word-add-in-r1`" and never dispatch two at the same instant (one creation failed on a race). |
 
@@ -123,6 +123,10 @@ command, typecheck count), and the `ChatWordExportEndpoints.cs` URL-shape commen
   file in `src/client/office-addins` (source or test) imports a `.css/.less/.scss/.sass`, so the mapping is never
   resolved. Becomes live only when a stylesheet import is added. Fix after 013 lands (it owns office-addins this
   wave): install it as a devDependency, or drop the dead mapping.
+- 🟠 **`sprk_matternumber` is `sprk_matter`'s PRIMARY NAME column** (task 030 agent, verified live 2026-09-11 —
+  the main session has NOT independently re-verified). Consequence: a pane-created Matter shows a **blank name**
+  in lookups/views until the separate numbering project ships. Not a regression (the pane already sends no
+  number) — it raises that project's urgency. Recorded in `notes/030-numbering-handoff.md`; tell the owner.
 - **W-2 (043)** manifest-line deletion from `ci-gated-suites.txt` — mitigated by CODEOWNERS, not mechanically.
 - **W-7** CLAUDE.md §12 `npm ci` ban may not hold for office-addins (`npm ci --dry-run` exits 0) — §6.5 question.
 - 10 failing jest suites (84 tests) — genuine mock/assertion defects, unowned by a task.
