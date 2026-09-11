@@ -131,6 +131,10 @@ public static class ExternalAccessEndpoints
         // POST /api/v1/external-access/revoke — Revoke Contact access from a Secure Project
         adminGroup.MapRevokeExternalAccessEndpoint();
 
+        // POST /api/v1/external-access/set-record-share-expiry — one expiry on every active share of a
+        // record, all-or-nothing (spec FR-33, task 098: the Manage Access toolbar Expiration).
+        adminGroup.MapSetRecordShareExpiryEndpoint();
+
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();
 

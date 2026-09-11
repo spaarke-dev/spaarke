@@ -65,6 +65,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [InlineData("revoke")]
     [InlineData("close-project")]
     [InlineData("provision-project")]
+    [InlineData("set-record-share-expiry")]
     public async Task ExternalAccessMutation_ForCallerWithoutWriteOnTarget_DeniedForDelegationRule(string route)
     {
         // Arrange — a caller who can READ the record but not write it.
@@ -336,6 +337,74 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
         (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FR-33 / task 098 — the record-wide share expiry
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private const string SetRecordShareExpiryPath = "/api/v1/external-access/set-record-share-expiry";
+
+    /// <summary>
+    /// Changing when every share on a record ends is a change to who can access it — so it is gated on Write
+    /// on THAT record, at that record's own entity set. Without the filter's case for this request type the
+    /// route would deny everyone as "target unresolved"; asserting the probed target proves it is mapped.
+    /// </summary>
+    [Fact]
+    public async Task PostSetRecordShareExpiry_ForCallerWithoutWrite_IsDeniedAndChecksWriteOnThatRecord()
+    {
+        var matterId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadOnly);
+
+        var response = await client.PostAsJsonAsync(SetRecordShareExpiryPath, new
+        {
+            recordType = "matter",
+            recordId = matterId,
+            expiryDate = "2099-12-31"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+        _fixture.ProbedTargets.Should().Contain(("sprk_matters", matterId));
+    }
+
+    /// <summary>
+    /// The twin: the same route from a caller WITH Write passes the gate and is refused by the HANDLER's own
+    /// validation (a past date), which can only happen after authorization allowed it.
+    /// </summary>
+    [Fact]
+    public async Task PostSetRecordShareExpiry_WithWriteOnTheRecord_PassesTheGateAndIsRefusedByTheHandler()
+    {
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.PostAsJsonAsync(SetRecordShareExpiryPath, new
+        {
+            recordType = "matter",
+            recordId = Guid.NewGuid(),
+            expiryDate = "2000-01-01"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonCodeOf(response)).Should().Be(GrantExternalAccessEndpoint.ExpiryInPastReasonCode);
+    }
+
+    /// <summary>
+    /// This route has NO legacy <c>projectId</c> shorthand. A body naming only a project id is unresolvable, so
+    /// it is denied by authorization — a request can never be authorized against one record and written to another.
+    /// </summary>
+    [Fact]
+    public async Task PostSetRecordShareExpiry_WithOnlyALegacyProjectId_IsDeniedByAuthorization()
+    {
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.PostAsJsonAsync(SetRecordShareExpiryPath, new
+        {
+            projectId = Guid.NewGuid(),
+            expiryDate = "2099-12-31"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyTargetUnresolved);
+    }
+
     /// <summary>
     /// A body both /grant and /invite-and-grant accept (each ignores the other's fields), with an expiry
     /// that is in the past under any clock — so the test never reads the wall clock.
@@ -380,6 +449,12 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
         {
             projectId,
             projectRef = "P-TEST-0001"
+        }),
+        "set-record-share-expiry" => (SetRecordShareExpiryPath, new
+        {
+            recordType = "project",
+            recordId = projectId,
+            expiryDate = "2099-12-31"
         }),
         _ => throw new ArgumentOutOfRangeException(nameof(route), route, "Unmapped route in this test's helper.")
     };

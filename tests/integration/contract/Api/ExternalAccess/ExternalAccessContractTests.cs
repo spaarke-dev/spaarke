@@ -383,6 +383,59 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         WrittenGrant()["sprk_expiresdate"].Should().Be(FixtureToday.AddDays(90).ToString("yyyy-MM-dd"));
     }
+
+    // ================================================================================
+    // ===== (8) Record-wide share expiry — spec FR-33 / task 098 =====================
+    // ================================================================================
+    // One date for every active share of a record, written in one transaction (the Manage Access toolbar
+    // Expiration). The wire contract lives here: the route, 200 + { updatedCount, expiresDate }, and the two
+    // 400 reason codes, asserted as LITERALS. Which rows change, the single-transaction property and the stored
+    // value are owned by tests/integration/auth/UnifiedAccessControl/RecordShareExpiryTests.
+
+    private const string SetRecordShareExpiryPath = "/api/v1/external-access/set-record-share-expiry";
+
+    private static object ShareExpiryBody(DateOnly? expiry) => new
+    {
+        recordType = "project",
+        recordId = ProjectA,
+        expiryDate = expiry?.ToString("yyyy-MM-dd")
+    };
+
+    [Fact]
+    public async Task PostSetRecordShareExpiry_WithAnActiveShare_Returns200WithTheCountAndTheAppliedDate()
+    {
+        var shareId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+        _fixture.Dataverse.ContactQueryResult =
+            $$"""[{"sprk_externalrecordaccessid":"{{shareId}}","_sprk_contact_value":"{{GranteeContactId}}","statecode":0}]""";
+        var expiry = FixtureToday.AddDays(91);
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(SetRecordShareExpiryPath, ShareExpiryBody(expiry));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("updatedCount").GetInt32().Should().Be(1);
+        doc.RootElement.GetProperty("expiresDate").GetString().Should().Be(expiry.ToString("yyyy-MM-dd"));
+        _fixture.TenantCacheMock.Verify(
+            c => c.RemoveAsync(It.IsAny<string>(), "external-access-grant", GranteeContactId.ToString(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once(),
+            "the grantee's participation cache is cleared after the write (ADR-009)");
+    }
+
+    [Theory]
+    [InlineData(null, "sdap.access.share_expiry.expiry_required")]
+    [InlineData(-1, "sdap.access.grant.expiry_in_past")]
+    public async Task PostSetRecordShareExpiry_WithAMissingOrPastExpiry_Returns400WithReasonCode(int? offsetDays, string reasonCode)
+    {
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(
+            SetRecordShareExpiryPath, ShareExpiryBody(offsetDays is { } days ? FixtureToday.AddDays(days) : null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonCode(response)).Should().Be(reasonCode);
+    }
 }
 
 // ================================================================================

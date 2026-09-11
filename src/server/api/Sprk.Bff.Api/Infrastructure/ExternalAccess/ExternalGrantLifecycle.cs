@@ -145,6 +145,9 @@ internal static class ExternalGrantLifecycle
 {
     internal const string EntitySet = "sprk_externalrecordaccesses";
 
+    /// <summary>The table's logical name — what an SDK write (<c>IGenericEntityService</c>) addresses, as opposed to the Web API <see cref="EntitySet"/>.</summary>
+    internal const string EntityLogicalName = "sprk_externalrecordaccess";
+
     /// <summary>
     /// Days a grant lasts when the request names no expiry (spec FR-33; owner decision 2026-09-10,
     /// "Server fills +90").
@@ -204,6 +207,49 @@ internal static class ExternalGrantLifecycle
             .OrderBy(r => r.Id)
             .ToList();
     }
+
+    /// <summary>
+    /// The OData <c>$filter</c> selecting every ACTIVE row held at one root record — contact grants AND
+    /// organization grants alike, since the grantee is deliberately not constrained (task 098).
+    /// </summary>
+    /// <remarks>
+    /// The root half is the same value column <see cref="ExternalGrantKey.ToActiveRowsFilter"/> uses; the two
+    /// must never disagree about which rows belong to a record.
+    /// </remarks>
+    internal static string ActiveRowsForRootFilter(ExternalGrantRootType rootType, Guid rootId)
+        => $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
+
+    /// <summary>
+    /// Every ACTIVE row held at one root record, in the same shape as <see cref="QueryActiveRowsAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="QueryActiveRowsAsync"/>, rows without a usable id are NOT discarded here: a caller
+    /// updating every row of a record must refuse rather than silently skip one (task 098). Exceptions
+    /// propagate. <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads, so an over-bound
+    /// record is detectable instead of silently truncated.
+    /// </remarks>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsForRootAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveRowsForRootFilter(rootType, rootId),
+            select: RowSelect,
+            top: top,
+            cancellationToken: ct);
+
+    /// <summary>
+    /// Shapes a <see cref="DateOnly"/> for an SDK write to <c>sprk_expiresdate</c> / <c>sprk_granteddate</c>:
+    /// midnight, <see cref="DateTimeKind.Unspecified"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Both columns are <b>Format = DateOnly, Behavior = TimeZoneIndependent</b> (read from live metadata
+    /// 2026-09-11, task 098): Dataverse stores the value it is given with no time-zone conversion. An
+    /// UNSPECIFIED kind carries no offset for anything between here and Dataverse to act on — whereas a
+    /// <c>Local</c> value would be converted to UTC on a machine west or east of UTC, and midnight can land on
+    /// the neighbouring date. The Web API path writes the same column as a bare <c>yyyy-MM-dd</c> string
+    /// (<c>GrantExternalAccessEndpoint.FormatDateOnly</c>); this is the SDK equivalent.</para>
+    /// </remarks>
+    internal static DateTime ToSdkDateOnly(DateOnly value) => value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
 
     /// <summary>
     /// Reads one row by id, or <c>null</c> when it does not exist.
