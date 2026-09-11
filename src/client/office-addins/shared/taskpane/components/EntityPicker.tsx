@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect, forwardRef, type KeyboardEvent } from 'react';
+import React, { useState, useCallback, useRef, useEffect, type KeyboardEvent } from 'react';
 import {
   makeStyles,
   tokens,
@@ -236,7 +236,14 @@ export interface EntityPickerProps {
  * />
  * ```
  */
-export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(function EntityPicker(props, ref) {
+// Note (typecheck-debt task 006): previously `forwardRef<HTMLInputElement, ...>`, forwarding to the
+// internal Combobox's `ref`. No caller anywhere in the codebase (production or tests) ever passed a
+// `ref` to `<EntityPicker>`, and forwarding it no longer typechecks under this package's React 19 +
+// @fluentui/react-components@^9.54.0 combination — Fluent's `ForwardRefComponent<CardSlots-style
+// props>` ref-element inference resolves to `Ref<never>` for slot-based components under these React
+// 19 types (see notes/typecheck-fix-patterns.md). Converted to a plain function component: zero
+// behavior change for any existing caller, and removes an already-broken, unused capability.
+export const EntityPicker: React.FC<EntityPickerProps> = props => {
   const {
     value,
     onChange,
@@ -271,7 +278,6 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
     clearError,
     recentEntities,
     typeFilter,
-    setTypeFilter,
     toggleTypeFilter,
     addToRecent,
     clear,
@@ -333,9 +339,12 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
   }, [onChange, clear]);
 
   // Handle input change
+  // Fluent's Combobox `input` slot exposes the native `onInput` event (React 19's
+  // `InputEventHandler`, not `ChangeEventHandler`) — its `target` is an untyped `EventTarget`,
+  // but `currentTarget` is properly typed to the element the listener is attached to.
   const handleInputChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const newValue = event.target.value;
+    (event: React.InputEvent<HTMLInputElement>) => {
+      const newValue = event.currentTarget.value;
       setQuery(newValue);
       clearError();
       setHighlightedIndex(-1);
@@ -372,6 +381,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
           event.preventDefault();
           if (highlightedIndex >= 0 && highlightedIndex < optionsCount) {
             const selected = allOptions[highlightedIndex];
+            if (!selected) break;
             if ('type' in selected && selected.type === 'create') {
               handleQuickCreate(selected.entityType);
             } else {
@@ -547,7 +557,6 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
       {/* Search Combobox */}
       <div className={styles.comboboxWrapper}>
         <Combobox
-          ref={ref}
           id={id}
           className={styles.combobox}
           placeholder={placeholder}
@@ -569,7 +578,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
         >
           {/* Loading State */}
           {isLoading && (
-            <Option value="loading" disabled>
+            <Option value="loading" text="Searching..." disabled>
               <div
                 style={{
                   display: 'flex',
@@ -612,7 +621,7 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
 
           {/* Empty State */}
           {showEmptyState && (
-            <Option value="empty" disabled>
+            <Option value="empty" text={`No results found for "${query}"`} disabled>
               <div className={styles.emptyState}>
                 <SearchRegular />
                 <Body1>No results found for &quot;{query}&quot;</Body1>
@@ -650,6 +659,6 @@ export const EntityPicker = forwardRef<HTMLInputElement, EntityPickerProps>(func
       )}
     </div>
   );
-});
+};
 
 export default EntityPicker;

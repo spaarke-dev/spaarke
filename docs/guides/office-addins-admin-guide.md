@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Administrator Guide
 
-> **Version**: 1.2
-> **Last Updated**: January 24, 2026
+> **Version**: 1.3
+> **Last Updated**: 2026-09-10 — corrected: `manifest-working.xml` does not exist (upload the manifest served by the deployed SWA instead); `npm run build` IS the production build, there is no `build:prod` script
 > **Audience**: IT Administrators, System Administrators, DevOps Engineers
 
 ---
@@ -282,11 +282,11 @@ Complete the [Office Add-ins Deployment Checklist](office-addins-deployment-chec
 
 1. Click **Upload custom apps**
 2. Select **Office Add-in**
-3. Choose **Upload manifest file (.xml)**
-4. Browse to: `outlook/manifest-working.xml`
+3. Choose **Upload manifest file (.xml)** (or **Provide link to manifest file** and paste the URL)
+4. Point it at the manifest **served by the deployed Static Web App** — e.g. `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/outlook-manifest.xml` (dev) or the equivalent path on the production SWA host. Do **not** upload a locally built file.
 5. Click **Upload**
 
-> **CRITICAL**: Use the `manifest-working.xml` file. Other manifest files may fail validation. See [Manifest Format Requirements](#manifest-format-requirements) for what makes a manifest valid.
+> **CRITICAL** (corrected 2026-09-10 — no `manifest-working.xml` file exists in the repo): Upload the manifest **served by the SWA**, not a local build artifact. The source file `outlook/outlook-manifest.xml` has no localhost placeholders and is copied to the SWA verbatim, but the Word manifest and the unified JSON manifests DO contain `https://localhost:3000` placeholders that `webpack.config.js` (~lines 52-54, ~199, ~218) substitutes with the SWA host only when built with `NODE_ENV=production` (the CI deploy workflow sets this). A local non-production build (`npm run build:dev`) ships `localhost` URLs and must never be uploaded. See [Manifest Format Requirements](#manifest-format-requirements) for what makes a manifest valid.
 
 #### Step 3: Configure Deployment Scope
 
@@ -305,8 +305,8 @@ Complete the [Office Add-ins Deployment Checklist](office-addins-deployment-chec
 ### 5.3 Deploy Word Add-in (XML Manifest)
 
 Follow the same process as Outlook:
-- Upload the XML manifest file (`word/manifest-working.xml`)
-- Select **Upload manifest file (.xml)**
+- Upload the XML manifest **served by the deployed Static Web App** — e.g. `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.xml` (dev) or the equivalent path on the production SWA host. Not a local build (see the CRITICAL note in 5.2).
+- Select **Upload manifest file (.xml)** (or provide the link directly)
 
 ### Manifest Format Requirements
 
@@ -781,13 +781,13 @@ az webapp log tail --name spe-api-prod-* --resource-group rg-spaarke-prod-westus
 
 #### Minor Update (Bug fixes, UI changes)
 
-1. Build new version: `npm run build:prod`
+1. Build new version: `npm run build` (this IS the production build — there is no separate `build:prod` script)
 2. Deploy static assets to Azure Static Web Apps
 3. No manifest change needed if URLs unchanged
 
 #### Major Update (New features, manifest changes)
 
-1. Build new version: `npm run build:prod`
+1. Build new version: `npm run build` (this IS the production build — there is no separate `build:prod` script)
 2. Update manifest version number
 3. Deploy static assets
 4. Upload updated manifest to M365 Admin Center
@@ -855,7 +855,7 @@ curl https://spaarke-bff-dev.azurewebsites.net/healthz
 **Use when**: New version has bugs, previous version worked.
 
 1. Checkout previous release tag in git
-2. Build: `npm run build:prod`
+2. Build: `npm run build` (this IS the production build — there is no separate `build:prod` script)
 3. Deploy static assets
 4. If manifest changed, re-upload old manifest to M365 Admin Center
 
@@ -985,6 +985,7 @@ az webapp restart --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.3 | 2026-09-10 | AI-Assisted | Corrected: no `manifest-working.xml` exists (Section 5 now points to the SWA-served manifest); replaced `npm run build:prod` (nonexistent script) with `npm run build` (the actual production build) in Sections 10-11 |
 | 1.2 | January 24, 2026 | AI-Assisted | Added authorized client config section; CORS documentation; dev environment URLs; consolidated manifest file names |
 | 1.1 | January 22, 2026 | AI-Assisted | Updated auth to Dialog API; added Unified Manifest section |
 | 1.0 | January 2026 | Spaarke Team | Initial release |

@@ -75,6 +75,8 @@ export interface HostCapabilities {
   canGetSender: boolean;
   /** Whether document content can be retrieved as ArrayBuffer (Word only) */
   canGetDocumentContent: boolean;
+  /** Whether the open document's URL can be retrieved (Word only) */
+  canGetDocumentUrl: boolean;
   /** Whether document can be saved as PDF */
   canSaveAsPdf: boolean;
   /** Whether item can be saved as EML (Outlook emails) */
@@ -98,7 +100,7 @@ export interface HostAdapterError {
   /** Human-readable error message */
   message: string;
   /** Original error if wrapping another error */
-  innerError?: Error;
+  innerError?: Error | undefined;
 }
 
 /**

@@ -368,6 +368,21 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetContentStreamAsUserAsync(ctx, driveId, itemId, ct);
 
+    /// <summary>
+    /// FR-01 (task 012): resolves an absolute document URL to the SPE drive item it names, as the caller, via
+    /// Graph <c>/shares</c>. See <see cref="DriveItemOperations.ResolveSharedItemAsUserAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>virtual</c> so a test can substitute resolution at this facade — the seam ADR-007 designates for SPE
+    /// access — instead of faking Graph SDK internals (transport-shaped mocking, banned by ADR-038). Same
+    /// precedent as <see cref="CreateContainerAsync"/>.
+    /// </remarks>
+    public virtual Task<SpeSharedItemResolution> ResolveSharedItemAsUserAsync(
+        HttpContext ctx,
+        Uri documentUrl,
+        CancellationToken ct = default)
+        => _driveItemOps.ResolveSharedItemAsUserAsync(ctx, documentUrl, ct);
+
     // =========================================================================
     // SPE change-detection facade (spaarkeai-compose-r2 FR-26, task 052)
     //

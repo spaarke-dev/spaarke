@@ -1,7 +1,7 @@
 # Office Add-ins Integration Architecture
 
-> **Last Updated**: 2026-09-04
-> **Last Reviewed**: 2026-09-04
+> **Last Updated**: 2026-09-10 — corrected: React 19 (was stated as React 18); `npm run build` is the production build (no `build:prod` script); re-measured typecheck errors (0 production, 284 test-file only, was "~397")
+> **Last Reviewed**: 2026-09-10
 > **Reviewed By**: email-communication-intelligence-r2 (Pillar B add-in realignment — as-built refresh; supersedes the Apr-2026 "Dialog API" version, which predated the NAA auth cutover + the inline Create-To-Do + Word `.docx` save)
 > **Status**: Current
 > **Purpose**: Architecture of the SDAP Office Add-ins for Outlook and Word — how they are built and function today, as the entry point for any project extending them.
@@ -11,7 +11,7 @@
 
 ## Overview
 
-The SDAP Office Add-ins integrate **Outlook** and **Word** with the Spaarke platform: save emails / attachments / documents to SharePoint Embedded, file them against a Dataverse record (Matter / Project / Invoice), create first-class **To Dos** from an email, and (Outlook) surface AI triage + linked to-dos. They are **React 18 + Fluent UI v9** task-pane apps hosted on **Azure Static Web Apps**, calling the BFF's `/api/office/*` surface for every backend operation.
+The SDAP Office Add-ins integrate **Outlook** and **Word** with the Spaarke platform: save emails / attachments / documents to SharePoint Embedded, file them against a Dataverse record (Matter / Project / Invoice), create first-class **To Dos** from an email, and (Outlook) surface AI triage + linked to-dos. They are **React 19 + Fluent UI v9** task-pane apps hosted on **Azure Static Web Apps**, calling the BFF's `/api/office/*` surface for every backend operation.
 
 Two patterns make the code portable across hosts:
 - **`IHostAdapter`** (`shared/adapters/`) abstracts host differences — Outlook reads `Office.context.mailbox`, Word reads `Office.context.document` — so the UI components are host-agnostic.
@@ -56,9 +56,11 @@ src/client/office-addins/
 │   ├── manifest.json                # Unified manifest (icons.color/outline)
 │   ├── taskpane/index.tsx           # mounts <App> with the Outlook adapter
 │   └── commands/                    # ribbon command surface (e.g. ?action=createTodo)
-├── word/
-│   ├── WordHostAdapter.ts           # document access + getFileAsync(Compressed) → .docx
+├── word/                            # no host adapter here: task 010 / FR-04 deleted the duplicate
+│   │                                # word/WordHostAdapter.ts; the single Word adapter now lives in
+│   │                                # shared/adapters/ and is reached via HostAdapterFactory
 │   ├── word-manifest.xml
+│   ├── manifest.json                # Unified manifest (task 011 / FR-05)
 │   └── taskpane/index.tsx           # mounts <App>, save-only (no nav)
 ├── shared/
 │   ├── adapters/                    # IHostAdapter contract + HostAdapterFactory + Outlook/Word impls
@@ -102,7 +104,7 @@ Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'
 - Assignee is a **Contact** typeahead via `GET /api/office/search/entities?type=Contact`. Priority/Effort choice→score mapping is mirrored add-in-side in `todoChoices.ts` (sanctioned duplicate of the wizard's score tables).
 
 ### Word real `.docx` save
-- `WordHostAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation).
+- `WordAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation). (Task 010 / FR-04 consolidated the two Word adapters onto `shared/adapters/WordAdapter.ts`, reached via `HostAdapterFactory`; `word/WordHostAdapter.ts` is deleted.)
 
 ### Save flow + "Related to" filing
 - `SaveFlow` / `RelatedToPicker` present auto-matched Matter/Project/Invoice candidates (with confidence) + inline "create new record" (`POST /api/office/quickcreate/{type}`) + green-check select; the chosen record becomes the `sprk_document` regarding.
@@ -160,8 +162,10 @@ Auth: the caller's bearer token → BFF **OBO** → Graph/SPE + Dataverse (ADR-0
 ```bash
 cd src/client/office-addins
 npm install --legacy-peer-deps --no-audit --no-fund
-npm run build:dev          # (or build:prod)
-npm run typecheck          # NOTE: ~397 PRE-EXISTING exactOptional errors — filter to changed files
+npm run build:dev          # dev build; `npm run build` IS the production build — there is no `build:prod` script
+npm run typecheck          # production code is clean (0 errors); 284 errors remain, ALL in test files
+                            # (__tests__ / __mocks__ / *.test.* / *.spec.*), consciously accepted 2026-09-09
+                            # (see projects/spaarkeai-word-add-in-r1/CLAUDE.md § Decisions Made)
 ```
 
 - **Hosting**: Azure **Static Web App**. **Deploy runs in CI** — GitHub Actions **`deploy-office-addins.yml`** (holds the SWA secrets); it is **not** an agent-run script. Push the branch → confirm the run is green (`gh run list --workflow=deploy-office-addins.yml`).

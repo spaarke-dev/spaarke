@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Repair the office-addins jest harness (jest-dom registration) and re-measure the test-file debt</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies test configuration and `tests/`-adjacent files. The CLAUDE.md §8 TEST-MODIFYING override applies: code-review + adr-check at Step 9.5 run UNCONDITIONALLY regardless of rigor tier.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A configuration repair with a known cause and a measurable outcome. Escalate only if the missing registration turns out not to be the cause.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-typecheck</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches jest setup/config and test files only. Tasks 006/007/008 are re-scoped to PRODUCTION sources and are explicitly forbidden from touching test files, so the file sets are disjoint.</parallel-reason>
+    <deps>001</deps>
+    <tags>office-addins, testing, test-harness, tooling</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Repair the `src/client/office-addins` jest harness so the suite runs, then RE-MEASURE the test-file typecheck debt and report what remains. Do not fix test-file type errors in this task — measuring honestly is the deliverable.</prompt>
+
+  <role>SPAARKE frontend developer. Expertise in jest + ts-jest + React Testing Library configuration. Follow ADR-038; a test that asserts nothing is worse than no test.</role>
+
+  <goal>`npm test` in `src/client/office-addins` runs with the jest-dom matchers registered, the suite's pass/fail state is honestly reported, and `notes/009-jest-harness-repair.md` records the before/after suite counts plus a re-measured test-file typecheck count with a recommendation on whether the residual warrants its own task.</goal>
+
+  <context>
+    <background>
+      Created 2026-09-09 by operator decision B1. FR-18 was narrowed to PRODUCTION types (88 errors, owned by tasks 006/007/008). That decision deliberately left the test-side debt — 296 of 384 typecheck errors — without an owner. Leaving it unowned would be burial-by-omission, which this project's deferral policy forbids. This task owns it.
+
+      Task 001's baseline (`notes/typecheck-baseline.md`) recorded: `npm test` fails at baseline with **13 of 21 suites** and **57 of 226 tests** failing, attributed to a **missing `jest-dom` registration**. Its Recommendation 5 states the harness gap should be fixed SEPARATELY from FR-18 and predicts the single setup change "likely clears a large share of both the 57 test failures and some TS2339 count".
+
+      That prediction is a HYPOTHESIS, not a finding. This task's job is to test it and report the real number — not to assume it.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+      <file role="modify">src/client/office-addins/jest.config.js</file>
+      <file role="modify">src/client/office-addins/package.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="complete">Supplied the baseline suite and typecheck counts this task measures against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Build commands: `npm run build` IS the production build — there is no `build:prod` in this package. Installs use `npm install --legacy-peer-deps --no-audit --no-fund`; never `npm ci` (root CLAUDE.md §12).</constraint>
+    <constraint source="project">SCOPE — repair the HARNESS. Do NOT fix test-file type errors, and do NOT rewrite test bodies to make them pass. If a test fails on a real product defect after the harness is fixed, that is a FINDING to report, not something to edit away.</constraint>
+    <constraint source="project">MUST NOT touch any file under `shared/taskpane/**`, `shared/adapters/**`, `shared/services/**`, `word/**` or `outlook/**` that is NOT a test file — tasks 006/007/008 own those production sources and run concurrently with this task.</constraint>
+    <constraint source="adr">ADR-038 — never delete or skip a failing test to make a suite green. A `Skip` requires a recorded reason. Deleting coverage to reach a number is the exact anti-pattern the testing strategy bans.</constraint>
+    <constraint source="adr">CLAUDE.md §8 TEST-MODIFYING override — Step 9.5 code-review + adr-check run UNCONDITIONALLY for this task.</constraint>
+    <constraint source="project">Report the suite result HONESTLY. If the jest-dom registration is not the whole cause, say so and quantify what remains. A partial repair truthfully reported is a success; an overstated one is not.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The missing jest-dom registration turns out NOT to be the cause of the 13 failing suites. Stop, report the real cause with evidence, and do not begin an open-ended test-repair campaign under this task's name.</trigger>
+    <trigger>Fixing the harness requires a dependency bump that changes React or @testing-library major versions. That is a package-graph decision (the project is on React 19 with @testing-library/react@14 peer-requiring 18) — escalate rather than resolving it unilaterally.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm test` in `src/client/office-addins` runs to completion with jest-dom matchers registered; the before/after suite and test counts are recorded verbatim.</criterion>
+    <criterion testable="true">The test-file typecheck count is RE-MEASURED after the repair (baseline: 296 of 384 on 2026-09-09) and the new number is recorded.</criterion>
+    <criterion testable="true">`notes/009-jest-harness-repair.md` states whether task 001's hypothesis held, and recommends either (a) the residual test debt needs its own task, or (b) it is small enough to fold into an existing one — with the count that justifies the call.</criterion>
+    <criterion testable="true">No production source file was modified — verified by `git status` showing changes only to test files and jest/package configuration.</criterion>
+    <criterion testable="true">No test was deleted or newly skipped to reach a green number (ADR-038).</criterion>
+    <criterion testable="false">Any test failing on a genuine product defect after the repair is reported as a finding, not edited away.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="config">src/client/office-addins/jest.config.js</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/009-jest-harness-repair.md</output>
+  </outputs>
+
+  <notes>
+    Completed 2026-09-09. Hypothesis PARTIALLY confirmed, materially incomplete — see
+    notes/009-jest-harness-repair.md for full evidence.
+
+    Actual changes: `@testing-library/jest-dom` was not merely unregistered, it was never installed
+    (absent from package.json/lock/node_modules) — added `^6.9.1` (repo convention) + `require()` in
+    jest.setup.js. Discovered mid-task a SECOND identical-class gap: `@testing-library/user-event`
+    imported by 4 test files, also never installed — added `^14.6.1` (repo convention). Verified via its
+    package.json that user-event has no peer dependency on React/testing-library, so this did not trigger
+    escalation trigger 2.
+
+    Before: 13 failed/8 passed suites, 57 failed/169 passed/226 total tests (reproduces task 001 baseline
+    exactly). After jest-dom only: 12/9 suites, 41 failed/185 passed/226 total (typecheck test-file count
+    unchanged at 296 — jest runs isolatedModules/transpile-only, decoupled from tsc). After jest-dom +
+    user-event (final): 12/9 suites (stable across 2 runs), ~92-94 failed / ~235-237 passed / 329 total
+    (denominator grew +103 because 4 suites that previously failed to load at all now enumerate their
+    real tests; ~2-test flakiness in EntityPicker timing tests, unrelated to this task).
+
+    Escalation trigger 1 ("jest-dom NOT the cause of the 13 failing suites"): fires in substance — jest-dom
+    was A real, confirmed cause (16/57 tests, 1/13 suites) but not THE cause; 12 of 13 originally-failing
+    suites are still failing post-fix, for unrelated reasons (React 19 / @testing-library/react@14 peer
+    mismatch — dominant single cause, useAnnounce.test.ts 16/16 tests; assorted mock/assertion defects in
+    OutlookAdapter, WordAdapter, ApiClient, TaskPaneShell, TaskPaneNavigation, useEntitySearch,
+    useSaveFlow). Stopped there per the trigger's instruction — did not begin an open-ended repair
+    campaign.
+
+    Escalation trigger 2 ("dependency bump changes React or testing-library major version") FIRED:
+    `@testing-library/react@14.3.1` peer-declares React ^18; the package is on React ^19. Did NOT bump it
+    — reported as a package-graph decision outside this task's authority.
+
+    Re-measured test-file typecheck: 289 (baseline 296). Of the -7: -4 is this task's confirmed effect
+    (the 4 user-event TS2307 module-resolution errors), -3 is concurrent drift from tasks 006/007/008
+    live-editing shared/adapters/OutlookAdapter.ts and shared/__mocks__/office-js.ts in this shared
+    worktree during this task's execution window — not this task's effect, reported for honesty.
+
+    Recommendation: (a) residual needs its own task(s) — a React-19/testing-library major-version
+    decision, a separate test-suite repair task for the assorted mock/assertion defects, and an explicit
+    operator decision on the still-unowned 289-error test-file typecheck debt. NOT foldable into 006/007/008
+    (forbidden from touching test files).
+
+    Constraint verification: git diff isolated to exactly 3 files (jest.setup.js +7, package.json +2,
+    package-lock.json +104 from npm install) — no production source touched, confirmed against a shared
+    worktree where 006/007/008 are concurrently editing production files. No test deleted or skipped.
+
+    Quality gates (Step 9.5, CLAUDE.md §8 TEST-MODIFYING override): code-review clean (0
+    critical/warning/suggestion), adr-check clean (0 violations, ADR-038 compliant).
+  </notes>
+</task>

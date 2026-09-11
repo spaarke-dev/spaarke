@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-02 pre-flight: confirm the custom-XML markup-vs-parts premise and close the WordApi 1.4 manifest gap</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies both Word manifests (install-time contract) and settles a premise that FR-02's entire design rests on. A wrong answer here means task 014 builds an identity mechanism that cannot run.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Reconciling Office.js API-set semantics against manifest declarations, where the failure mode is a clean install followed by a runtime failure. This exact class has already bitten this project twice.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `word/manifest.json` and `word/word-manifest.xml`, which task 011 also owns and which is still open pending deploy verification.</parallel-reason>
+    <deps>002</deps>
+    <tags>office-addins, word, manifest, document-identity, spike, phase-0</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the two FR-02 blockers Spike-1 surfaced: the unconfirmed custom-XML markup-vs-parts premise, and the manifest declaring WordApi 1.3 while `customXmlParts` requires 1.4. Both must be settled BEFORE task 014 builds anything.</prompt>
+
+  <role>SPAARKE platform developer. Office.js requirement sets, the unified manifest, and Word custom XML parts. Follow ADRs strictly.</role>
+
+  <goal>The Word manifests declare what the stamp mechanism actually needs, the markup-vs-parts premise is confirmed or refuted with evidence, and task 014 either has a green light or a documented reason it cannot proceed as designed.</goal>
+
+  <context>
+    <background>
+      Both items were found by Spike-1 (task 002, 2026-09-09) — see `notes/spikes/spike-1-document-url.md`.
+
+      **(1) The manifest gap — verified, live, fixable with no host.** `Word.Document.customXmlParts` AND `Word.Document.settings` are both `[Api set: WordApi 1.4]` in `@types/office-js`, while BOTH `word/manifest.json` and `word/word-manifest.xml` declare WordApi **1.3**. A host at 1.3 installs the add-in cleanly and then fails at runtime when FR-02 tries to read or write the stamp.
+
+      This is the THIRD instance of one failure class in this project. Task 011 found the manifest advertising WordApi 1.1 while `WordAdapter.getItemId()` required 1.3. Task 010's escalation was the same shape on the bootstrap path (`Office.context.host` assumed populated). Treat the pattern as the finding, not just this instance.
+
+      Spike-1's recommended fix is better than a version bump: use the **common API** plus a `CustomXmlParts` declaration — no WordApi floor increase, a LOWER effective floor (perpetual Office 2016), and confirmed support on Word web, Mac and iPad. Evaluate that against a straight 1.3 → 1.4 bump and choose with reasoning.
+
+      **(2) The markup-vs-parts premise — unconfirmed, and FR-02 rests entirely on it.** Spike-1 flagged that the distinction between custom XML *markup* and custom XML *parts* is an assumption nobody has verified. If the stamp does not survive the round trip the way FR-02 assumes, the whole mechanism fails. Spike-1 sized it as a ten-minute check.
+
+      Weight: the operator decided 2026-09-09 that legacy documents do not matter (dev only), which removes the forward-only objection and makes the stamp a candidate PRIMARY identity mechanism rather than a fallback. So FR-02 now carries more load, and this premise carries more risk.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-1-document-url.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/011-word-manifest-migration.md</file>
+      <file role="modify">src/client/office-addins/word/manifest.json</file>
+      <file role="modify">src/client/office-addins/word/word-manifest.xml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="complete">Spike-1 surfaced both items and recommended the common-API fix shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Both manifests MUST stay in step. Task 011 established that `word-manifest.xml` is RETAINED as the rollback path — with sideload gone, a bad manifest cannot be swapped locally and recovery costs a full build + deploy cycle. Do not delete it, and do not let the two drift.</constraint>
+    <constraint source="project">Do NOT raise the WordApi floor unless you show that the common-API alternative genuinely cannot work. Raising the floor excludes hosts; Spike-1's recommendation LOWERS it. Justify whichever you pick.</constraint>
+    <constraint source="project">Verify the API-set requirement at its source — the `[Api set: ...]` annotation in `@types/office-js` and current Microsoft Learn — and cite both. Do not infer a requirement level from a sibling API or from a version number that "looks right". Inferring is how the previous two instances of this bug were introduced.</constraint>
+    <constraint source="project">Version-bump both manifests per the project's convention if you change them (JSON is 3-part SemVer, XML is 4-part), and keep `word/taskpane/index.tsx`'s `APP_VERSION` in step — task 011 established that linkage.</constraint>
+    <constraint source="project">This task does NOT implement FR-02. It clears the way for task 014. Do not write stamping code.</constraint>
+    <constraint source="project">Do NOT regress the production typecheck count (0 as of 2026-09-09) and do not touch `shared/taskpane/hooks/**` — task 018 owns that concurrently.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The markup-vs-parts premise turns out to be FALSE — the stamp cannot survive the round trip as FR-02 assumes. STOP. That invalidates FR-02's design and, with the operator's stamp-as-primary direction, re-opens the whole identity question. It is an operator decision, not something to engineer around.</trigger>
+    <trigger>Confirming the premise genuinely requires a live Word host and cannot be settled from documentation plus the type definitions. Report exactly what must be observed and add it to the operator probe from Spike-1 §8 rather than guessing.</trigger>
+    <trigger>Neither the common-API route nor a 1.4 bump covers all target hosts. That is a host-support scope decision — surface it rather than silently dropping a host.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both Word manifests declare exactly what the stamp mechanism requires, with the chosen approach (common API + `CustomXmlParts`, or a WordApi 1.4 bump) justified in notes against the alternative.</criterion>
+    <criterion testable="true">The requirement level is cited to BOTH the `@types/office-js` `[Api set: ...]` annotation and a dated Microsoft Learn page — no inferred versions.</criterion>
+    <criterion testable="true">The markup-vs-parts premise is recorded as CONFIRMED or REFUTED with evidence, or as REQUIRES-LIVE-HOST with the exact observation added to the Spike-1 §8 operator probe.</criterion>
+    <criterion testable="true">`word-manifest.xml` is retained and consistent with `manifest.json`; versions bumped per convention and `APP_VERSION` kept in step.</criterion>
+    <criterion testable="true">`npm run build` succeeds and the emitted Word manifest has no unsubstituted placeholders.</criterion>
+    <criterion testable="true">`npm run typecheck` shows production errors still at 0.</criterion>
+    <criterion testable="false">Task 014's status is annotated with the outcome — green light, or the blocker that stops it.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/manifest.json</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md</output>
+  </outputs>
+  <notes>
+    Completed 2026-09-09. Full record: projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md
+
+    (1) PREMISE: CONFIRMED, and settled WITHOUT a live host — the second escalation trigger did not need
+    to fire. Two independent lines. (a) Microsoft's own i4i explainer (Gray Knowlton, GM Office product
+    management, ms.date 2009-12-23, updated 2024-11-06) states that what was removed is the "Custom XML
+    markup tags" and that "Content Controls and XML data stored within DOCX or DOCM files will not be
+    affected by this change"; the Open XML SDK models the two as different classes in different
+    namespaces (Wordprocessing.CustomXmlBlock vs Packaging.CustomXmlPart); and Microsoft INTRODUCED
+    Word.Document.customXmlParts in WordApi 1.4 (Aug 2022), 12 years after the removal.
+    (b) EMPIRICAL, in-repo: across all 48 .docx/.dotx/.docm in the worktree, w:customXml MARKUP occurs
+    0 times, while /customXml/itemN.xml PARTS occur in 6 real documents — decisively including a
+    THIRD-PARTY http://customooxmlschemas.google.com/ part that survived FOUR modern-Word save cycles
+    intact (cp:revision 4, 1820 w:rsid attributes, w15:docId, mc:Ignorable "w14 w15 w16se w16cid w16
+    w16cex w16sdtdh wp14" — Word provably the last writer). A foreign-namespace part surviving Word
+    round-trips IS FR-02's scenario. Spike-1 section 8 step 6b is therefore RETIRED, not deferred.
+    Residual (design obligation, not a blocker): the Document Inspector's "Custom XML Data / Remove All"
+    module can strip the stamp, so a missing stamp must be treated as normal and re-stampable.
+
+    (2) MANIFEST: fixed WITHOUT raising the WordApi floor. Chose Spike-1's option 1 — the COMMON API plus
+    a CustomXmlParts (1.1) declaration — over a 1.3 to 1.4 bump. Verified at source that CustomXmlParts'
+    floor (perpetual Office 2016) is at or BELOW the already-declared WordApi 1.3 floor (Win 1612 / LTSC
+    Office 2019), so it excludes ZERO hosts; whereas WordApi 1.4 (Win 2208 / LTSC Office 2024 / Mac+iPad
+    16.64) would drop Office 2019 AND Office 2021 LTSC — the volume-licensed tier enterprise legal
+    departments run. The third escalation trigger did not fire: the chosen route covers every target
+    host. Requirement levels cited to BOTH the @types/office-js@1.0.568 [Api set: ...] / **Requirement
+    set**: annotations AND dated Microsoft Learn pages, per constraint. One residual doubt, recorded and
+    handed to the operator probe: Microsoft publishes no allow-list of requirement-set names nameable in
+    the unified JSON manifest, so run it through the Teams validator / admin-center upload before merge.
+
+    Changed: word/manifest.json (+CustomXmlParts, 1.0.7 to 1.0.8), word/word-manifest.xml (+Set,
+    1.0.7.0 to 1.0.8.0, reasoning comment; RETAINED per constraint and in step with the JSON),
+    word/taskpane/index.tsx (APP_VERSION 1.0.7 to 1.0.8). No FR-02 code written. shared/taskpane/hooks/**
+    untouched (task 018 owns it concurrently). Verified: npm run build exit 0; emitted manifests correct
+    with no unsubstituted placeholders; XML well-formedness validated via System.Xml.XmlDocument;
+    production typecheck 0 to 0 (total 289 to 284, the entire delta inside task 018's useAnnounce.test.ts);
+    eslint exit 0.
+
+    (3) TASK 014: GO, inheriting 4 conditions — see notes section 6.
+
+    (4) PATTERN-LEVEL FINDING (notes section 7): this is the THIRD instance of one failure class (011:
+    manifest 1.1 vs code 1.3; 010: Office.context.host assumed populated; 019: manifest 1.3 vs
+    customXmlParts AND settings at 1.4). Root cause each time: a capability level INFERRED rather than
+    read at source. Two structural mitigations recommended, neither implemented here (out of scope for a
+    pre-flight task): a uniform runtime capability guard, and — the durable fix — a build-time script
+    that extracts every [Api set: ...] annotation reachable from the add-in's Office.js call sites and
+    diffs it against both manifests, converting the whole bug class into a build failure.
+  </notes>
+</task>
+

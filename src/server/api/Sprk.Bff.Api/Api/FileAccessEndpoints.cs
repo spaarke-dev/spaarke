@@ -200,9 +200,67 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // POST /api/documents/resolve-identity — FR-01 (spaarkeai-word-add-in-r1 task 012). Turns the open document's
+        // URL (Office.context.document.url) into the sprk_document it came from, or into a clean "not a Spaarke
+        // document": 200 with resolved=false, never a 404 for that case.
+        //
+        // The first route in this group that PRODUCES a documentId instead of consuming one, so its authorization is
+        // two filters and their ORDER is the design (filters run in registration order):
+        //   1. DocumentUrlIdentityFilter — URL → drive item (Graph /shares, AS THE CALLER) → sprk_document
+        //      (sprk_graphitemid_uk). No identity: it returns 200 {resolved:false} itself. Otherwise it writes the
+        //      resolved id into the route values as `documentId` — the moment the id first exists.
+        //   2. DocumentAuthorizationFilter("read") — the same filter and operation as open-links — authorizes that id,
+        //      answering 403 with no metadata when the caller may not read the record.
+        // The handler runs only after (2) allows, and it is the only place document metadata enters a response.
+        //
+        // No rate-limit policy, matching the nine sibling routes in this group: the pane calls this once per open,
+        // the same cadence as open-links.
+        docs.MapPost("/resolve-identity", ResolveIdentity)
+            .AddEndpointFilter<DocumentUrlIdentityFilter>()
+            .AddDocumentAuthorizationFilter("read")
+            .WithName("ResolveDocumentIdentity")
+            .WithTags("File Access")
+            .WithDescription("Resolve an open Office document's URL to the Spaarke document it came from. " +
+                "resolved=false (200) means the file is not a Spaarke document; 503 means it could not be determined.")
+            .Produces<DocumentIdentityResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         return app;
 
         // Static local functions (method groups)
+
+        /// <summary>
+        /// POST /api/documents/resolve-identity (task 012). Reached only after <see cref="DocumentUrlIdentityFilter"/>
+        /// resolved an identity AND <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it. Both are
+        /// filter-enforced (ADR-008), so the handler performs no check of its own. <paramref name="request"/> is bound
+        /// here so the filter can read it from the invocation arguments.
+        /// </summary>
+        static IResult ResolveIdentity(
+            ResolveDocumentIdentityRequest? request,
+            HttpContext context)
+        {
+            if (context.Items[DocumentUrlIdentityFilter.ResolutionItemKey]
+                is not Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity)
+            {
+                // Reachable only if this route's filters were removed or reordered.
+                throw new InvalidOperationException(
+                    "resolve-identity reached its handler without a filter-resolved identity.");
+            }
+
+            var related = identity.RelatedRecord;
+            return TypedResults.Ok(new DocumentIdentityResponse(
+                Resolved: true,
+                DocumentId: identity.DocumentId.ToString("D"),
+                DocumentName: identity.DocumentName,
+                FileName: identity.FileName,
+                RelatedRecord: related is null
+                    ? null
+                    : new RelatedRecordIdentity(related.LogicalName, related.Id.ToString("D"), related.Name),
+                Reason: null));
+        }
 
         /// <summary>
         /// GET /api/documents/{documentId}/preview-url

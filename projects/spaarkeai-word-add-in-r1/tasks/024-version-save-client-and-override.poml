@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-11 client: default to version, override routes through link/graduate</title>
+    <phase>2 Save flow</phase>
+    <gate>023 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Save-path change with a named data-loss failure mode (NFR-08); modifies `.ts`/`.tsx` and touches the BFF dedup routing decision.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The override path carries the NFR-08 data-loss boundary: routing an editable document through the immutable suppress path collapses two distinct drafts into one record. Distinguishing link/graduate from suppress requires reading two dedup callers and judging which invariant applies.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>023,013</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addins, save-flow, dedup, data-integrity</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>When task 013 has resolved an existing `sprk_document` for the open Word document, the pane must DEFAULT to saving a new version of that record — sending `document.existingDocumentId` to the server hook task 023 made real. Offer an explicit "Save as new document" override, and route that override through the editable link/graduate dedup mode, never the immutable suppress path.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the Office add-in save flow (`useSaveFlow` / `SaveFlow`), Fluent UI v9 in a task pane, and the Spaarke content-identity layer — specifically the difference between the editable link/graduate mode and the immutable suppress mode. Follow ADRs strictly.</role>
+
+  <goal>An identified document saves as a version by default (one `sprk_document` row, incremented SPE version). An explicit "Save as new document" override creates a new record and, when its bytes are byte-identical to an existing canonical, the new record carries `sprk_canonicaldocument` linkage (link/graduate) rather than being suppressed into the canonical. Integration tests assert both, including the `sprk_canonicaldocument` linkage on the override path.</goal>
+
+  <context>
+    <background>
+      spec.md FR-11: when FR-01 resolves an existing `sprk_document`, DEFAULT to saving a new version of that record via `SaveRequest.ExistingDocumentId`; offer an explicit "Save as new document" override; the override path is routed through the editable link/graduate dedup mode.
+
+      NFR-08 is the data-loss invariant this task exists to honor. A Word document is EDITABLE. The byte-identical editable save MUST use the LINK/GRADUATE mode, mirroring `Services/Compose/ComposeCreateOnSavePromoter.cs` `PromoteIfEphemeralAsync` (`:76`) — especially `GraduateLinkedCopyIfDivergedAsync` (`:116`), which severs `sprk_canonicaldocument` on divergence. It MUST NOT use the immutable suppress path in `Services/Office/OfficeDocumentPersistence.cs` (`ReconcileAsync` at `:78`), which is correct ONLY for email attachments and Assistant persist. Suppress-forever on an editable document collapses two distinct drafts into one record — that is data loss, not deduplication.
+
+      Verified as-built (do not re-derive):
+      - Attribute constants live on `ComposeService.cs`: `:89` `sprk_canonicalhash`, `:90` `sprk_canonicaldocument`.
+      - `ContentDedupDetector` is at `Services/Documents/ContentDedupDetector.cs`: `ReconcileAsync:68` (suppress), `ResolveContentIdentityAsync:99` (pure), `FindCanonicalByHashAsync:127`. The add-in does NOT call it directly — `POST /api/office/save` already does. MUST NOT build a parallel check in the add-in.
+      - Client save assembly is `useSaveFlow.ts`: `:760-767` picks contentType Email vs Document; `:844-859` is the Document branch (throws if no `documentContentBase64` at `:846-848`, forces `.docx` at `:852-853`); `:900-913` POSTs to `${apiBaseUrl}/api/office/save` via `authenticatedJsonFetch` with an `X-Idempotency-Key` header; `:540` is the job poll and `:719` the SSE stream.
+      - `SaveFlow.tsx:895-903` is the footer action row (Cancel left, Save right) where the override affordance belongs.
+      - The idempotency key at `OfficeService.cs:611-625` already includes `ExistingDocumentId` in its canonical string, so version and non-version saves of the same filename hash differently. The client key computation at `useSaveFlow.ts:888` must stay consistent with that.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCreateOnSavePromoter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Documents/ContentDedupDetector.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/__tests__/useSaveFlow.test.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">FR-11 server — makes `ExistingDocumentId` / `IsNewVersion` / `VersionComment` real in `OfficeService.SaveAsync`. Without it the field this task sends is inert.</dependency>
+      <dependency task="013" status="pending">FR-01 client identity wiring — supplies the resolved `sprk_document` id that decides whether the default is version-save or create.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — NFR-08, the data-loss invariant: on the "Save as new document" override, a byte-identical editable document MUST be recorded via LINK/GRADUATE (a new row carrying `sprk_canonicaldocument` pointing at the canonical, graduating on divergence), mirroring `ComposeCreateOnSavePromoter.PromoteIfEphemeralAsync:76` and `GraduateLinkedCopyIfDivergedAsync:116`. It MUST NOT be routed through the immutable suppress path (`OfficeDocumentPersistence.ReconcileAsync:78`), which is correct only for email attachments and Assistant persist.</constraint>
+    <constraint source="project">SCOPE — the add-in MUST NOT call `ContentDedupDetector` directly and MUST NOT implement a parallel content check client-side. `POST /api/office/save` already invokes the detector; the add-in rides it.</constraint>
+    <constraint source="project">SCOPE — the default when an identity is resolved is VERSION-SAVE. The override is explicit and user-initiated. MUST NOT make "create a new document" the default for an identified document, and MUST NOT silently version when the user chose the override.</constraint>
+    <constraint source="project">SCOPE — NFR-07: `sprk_graphitemid_uk` MUST NOT be relaxed. The override creates a genuinely new SPE item, so the key is satisfied naturally; do not work around it.</constraint>
+    <constraint source="project">SCOPE — the client idempotency key computed at `useSaveFlow.ts:888` MUST stay consistent with the server canonical string at `OfficeService.cs:611-625`, which already includes `ExistingDocumentId`. A version save and a fresh save of the same filename must not collide on the key.</constraint>
+    <constraint source="ADR-044">SCOPE — the resolved document GUID sent as `existingDocumentId` MUST be canonicalized bare-lowercase via the shared `cleanGuid` before it leaves the client, and again at the server boundary.</constraint>
+    <constraint source="ADR-021">SCOPE — for the version/override affordance: Fluent UI v9 semantic tokens only, no hex literals; the control and any state text honor the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="ADR-050">SCOPE — if the override is presented as a modal rather than an inline control, it follows the canonical modal shell; per this project's Path C resolution, ADR-050 governs Spaarke-rendered modals. Prefer an inline control in the narrow pane; state the choice in the PR.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, keep the affordance a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components`.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT import any Xrm-bound component.</constraint>
+    <constraint source="ADR-038">SCOPE — this task changes save-path behavior, so it MUST add a data-mutation integration test asserting `sprk_canonicaldocument` linkage on the override path, plus contract coverage for the default version path. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for any BFF-side change per `.claude/constraints/bff-extensions.md`.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening this BFF PR. `spaarkeai-compose-r8` owns the link/graduate reference implementation this task mirrors, and `unified-access-control-r2` is live on the same hot path.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Editable vs immutable dedup, Office save client flow, content identity</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+      <file>docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. The version/override affordance must sit in the narrow pane footer without crowding Cancel and Save.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Any authorization on the target document stays on the save endpoint's filter, never in the client or the handler body.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-11 + NFR-07 + NFR-08, DEDUP-AND-SAVE-BACK-IDENTITY.md §3, and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">Read BOTH dedup callers side by side before writing code: `ComposeCreateOnSavePromoter.PromoteIfEphemeralAsync:76` (with `GraduateLinkedCopyIfDivergedAsync:116`) and `OfficeDocumentPersistence.ReconcileAsync` / `ContentDedupDetector.ReconcileAsync:68`. Write a one-paragraph statement of which mode this task's override path must take and why into projects/spaarkeai-word-add-in-r1/notes/024-dedup-mode-decision.md.</step>
+    <step order="2">Client: when task 013 resolved an identity, populate `document.existingDocumentId` (canonicalized via `cleanGuid`) and `document.isNewVersion` in the Document branch at `useSaveFlow.ts:844-859`, and carry a `versionComment` where the UI collects one.</step>
+    <step order="3">Client: verify the idempotency key computation at `useSaveFlow.ts:888` still matches the server canonical string now that `existingDocumentId` participates. Add a unit test pinning that a version save and a non-version save of the same filename produce different keys.</step>
+    <step order="4">Client UI: in the footer area of `SaveFlow.tsx`, show that the save will create a new version of the named existing record, plus an explicit "Save as new document" override. Announce the mode via `useAnnounce` (NFR-11).</step>
+    <step order="5">Server: make the override path route through link/graduate. The override sends no `existingDocumentId`, so it lands on the create path — ensure that for an EDITABLE document the byte-identical outcome is a linked copy carrying `sprk_canonicaldocument`, not the suppress short-circuit that deletes the blob and returns the canonical id.</step>
+    <step order="6">Add the data-mutation integration test: after an override save of byte-identical content, exactly one NEW `sprk_document` row exists and it carries `sprk_canonicaldocument` pointing at the canonical; after editing and re-saving, the link is severed (graduation).</step>
+    <step order="7">Add contract coverage for the default version path: an identified document's save carries `existingDocumentId` and produces no second row.</step>
+    <step order="8">Add client unit tests: default is version when identity resolved; default is create when not; the override forces create even when identity is resolved.</step>
+    <step order="9">Run `npm run typecheck`, `npm test`, `npm run build`; run `dotnet build` and the Office contract + integration tests. All green.</step>
+    <step order="10">Measure BFF publish size against a fresh `origin/master` build per the constraint above; record both absolute sizes, the delta, and the zip tool.</step>
+    <step order="11">Run `/conflict-check`, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="12">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="13">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the override path would route through the immutable suppress path rather than link/graduate, STOP and escalate per CLAUDE.md §6 — that is the NFR-08 data-loss failure mode, and no amount of downstream cleanup makes it acceptable.</trigger>
+    <trigger>If achieving link/graduate from the Office save path requires modifying `ContentDedupDetector.cs` itself, STOP and escalate rather than editing the shared detector — `email-communication-intelligence-r2` shipped it and the immutable callers depend on its current semantics.</trigger>
+    <trigger>If task 023 landed with different field semantics than this task assumes (for example `IsNewVersion` rather than `ExistingDocumentId` being the deciding field), STOP and reconcile with 023's implementation before sending anything, rather than sending both and hoping the server picks correctly.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Identified document defaults to version-save">
+      <steps>
+        <step>Open a Spaarke-sourced Word document that resolves to an existing `sprk_document`, edit a sentence, and open the Save tab.</step>
+        <step>Observe the save affordance before clicking anything, then Save.</step>
+      </steps>
+      <expected>The pane states that Save will create a new version of the named existing record; after saving, the record list shows ONE row for that document with an incremented version, not two rows.</expected>
+    </test>
+    <test name="Save as new document override">
+      <steps>
+        <step>On the same identified document, choose "Save as new document", pick a related record, and Save.</step>
+        <step>Inspect the resulting `sprk_document` rows.</step>
+      </steps>
+      <expected>A NEW `sprk_document` row is created; the original row is untouched; the new row carries `sprk_canonicaldocument` linkage when the bytes were identical.</expected>
+    </test>
+    <test name="Unidentified document has no version option">
+      <steps>
+        <step>Open a desktop-sourced document that resolves to no identity and view the Save tab.</step>
+      </steps>
+      <expected>No version-save affordance appears; the pane presents a plain create save, and no `existingDocumentId` is sent.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark and reload the pane; view the version/override affordance in both its default and selected states.</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens with legible contrast in dark mode; no hex literals; repeat in Light mode with the same result.</expected>
+    </test>
+    <test name="Mode change is announced (NFR-11)">
+      <steps>
+        <step>Using the keyboard only, toggle between version-save and "Save as new document".</step>
+      </steps>
+      <expected>Each mode change is announced via `useAnnounce`; both modes are reachable and operable by keyboard.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF; run the Office contract and integration tests.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="test">src/client/office-addins/shared/taskpane/hooks/__tests__/useSaveFlow.test.ts</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/024-dedup-mode-decision.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/024-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a resolved document identity, when the user saves without choosing an override, then the request carries `document.existingDocumentId` (bare-lowercase canonicalized) and exactly one `sprk_document` row exists afterwards.</criterion>
+    <criterion testable="true">Given the "Save as new document" override on an identified document with byte-identical content, when the save completes, then a NEW `sprk_document` row exists AND it carries `sprk_canonicaldocument` linkage to the canonical — asserted by a data-mutation integration test that reads the column.</criterion>
+    <criterion testable="true">Given a linked copy created by the override, when its content is subsequently edited and re-saved, then `sprk_canonicaldocument` is severed (graduation), matching `GraduateLinkedCopyIfDivergedAsync` behavior.</criterion>
+    <criterion testable="true">Given the override path, when the save runs, then it does NOT take the immutable suppress branch: the uploaded blob is not deleted and the response does not redirect the user to a different canonical record.</criterion>
+    <criterion testable="true">Negative: given NO resolved identity, when the user saves, then no `existingDocumentId` is sent and the save creates a new document exactly as before.</criterion>
+    <criterion testable="true">Negative: given a version save and a non-version save of the same filename, when both idempotency keys are computed, then they differ — asserted by a client unit test.</criterion>
+    <criterion testable="true">Negative: the add-in makes no direct call to `ContentDedupDetector` and contains no client-side content-hash comparison; verified by grep during code review.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the version/override affordance renders, then every color resolves from a Fluent v9 semantic token and no hex literal appears in the added styles.</criterion>
+    <criterion testable="true">`ContentDedupDetector.cs` is unmodified by this task; verified by `git diff --name-only`.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; `dotnet build` and the Office contract + integration tests pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-11 (client half) + NFR-08 + Success Criterion 5; plan.md §4 Phase 2 task 024. DEDUP-AND-SAVE-BACK-IDENTITY.md §3 is the short version of the invariant: "if you stay on the item-identity, version-save path for Spaarke-sourced documents, you sidestep this entirely" — which is exactly why the DEFAULT is version-save and the override is the only path where the link/graduate decision arises.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

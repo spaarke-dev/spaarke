@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>NFR-09: per-env Entra SPA redirects and deploy-workflow trigger</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>011 complete — the Word manifest determines the SWA host the redirects must match</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Configuration and workflow-trigger change; creates no application code. Modifies Entra app registrations and one CI workflow file. Quality gates are skipped per the STANDARD default, but the frozen-CI-file constraint and the confirmation-before-write ordering are hard rules.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches live Entra app registrations across environments. A wrong or deleted redirect URI locks every add-in user out of auth (AADSTS7000471) with no code-level recovery, and identity misconfiguration is security-sensitive per CLAUDE.md §6.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>deployment, auth, ci-cd, configuration</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Each environment's Entra app registration needs **two** SPA redirect URIs for the add-in to authenticate: `brk-multihub://&lt;swa-host&gt;` and `https://&lt;swa-host&gt;/auth-callback.html`. Register both per environment. Separately, `deploy-office-addins.yml` does not trigger on this branch — add the trigger or confirm `workflow_dispatch` is the intended path. Three CI tier files are frozen and MUST NOT be touched.</prompt>
+
+  <role>SPAARKE platform developer with Entra app-registration and GitHub Actions experience. Follow ADRs strictly. Treat every write against a live app registration as irreversible until verified.</role>
+
+  <goal>Every environment the add-in will be deployed to has both required SPA redirect URIs registered on its Entra app, verified by reading the registration back. `deploy-office-addins.yml` can be triggered for this branch — either by an added branch trigger or by a confirmed `workflow_dispatch` path. `ci-router.yml`, `ci-tier1-blocking.yml` and `ci-tier2-advisory.yml` are unmodified.</goal>
+
+  <context>
+    <background>
+      **NFR-09, verbatim from the spec:** "Each environment MUST register two SPA redirect URIs: `brk-multihub://&lt;swa-host&gt;` and `https://&lt;swa-host&gt;/auth-callback.html`." Missing either produces **AADSTS7000471** at sign-in. The registration script is `scripts/Register-EntraAppRegistrations.ps1`, and the procedure is documented in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3.
+
+      **The deploy workflow's triggers, verified as-built.** `.github/workflows/deploy-office-addins.yml` triggers on `push` to `master` and `work/SDAP-outlook-office-add-in` only — **not** on `work/spaarkeai-word-add-in-r1` — filtered to paths `src/client/office-addins/**`, `src/client/shared/Spaarke.Auth/**` and the workflow file itself. It **does** declare `workflow_dispatch`, so a manual run is already possible; adding this branch to the push triggers is the alternative. Either is acceptable; the choice must be explicit.
+
+      ⚠️ **Frozen files.** `ci-router.yml`, `ci-tier1-blocking.yml` and `ci-tier2-advisory.yml` are frozen under the shadow-comparison window opened 2026-08-27 and MUST NOT be edited by this or any task in this project.
+
+      **Deploy remains CI-only.** This task changes what can trigger the workflow; it does not run it. Task 042 owns the actual deployment.
+    </background>
+    <relevant-files>
+      <file role="modify">.github/workflows/deploy-office-addins.yml</file>
+      <file role="canonical-reference">scripts/Register-EntraAppRegistrations.ps1</file>
+      <file role="canonical-reference">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file role="canonical-reference">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/041-entra-redirects.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">The Word manifest, which fixes the SWA host the redirect URIs must match. Registering redirects against a host the manifest does not use produces AADSTS7000471 at first sign-in.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST NOT edit `.github/workflows/ci-router.yml`, `.github/workflows/ci-tier1-blocking.yml`, or `.github/workflows/ci-tier2-advisory.yml`. These are frozen under the shadow-comparison window opened 2026-08-27. Verify with `git diff --stat` that none appears in the change set.</constraint>
+    <constraint source="NFR-09">Scope: every environment the add-in will be deployed to. Each MUST have BOTH `brk-multihub://&lt;swa-host&gt;` and `https://&lt;swa-host&gt;/auth-callback.html` registered as **SPA** redirect URIs — not Web, not Public client. Registering one of the two is the documented cause of AADSTS7000471.</constraint>
+    <constraint source="project">MUST NOT delete or replace existing redirect URIs on any app registration. Redirects are additive — another surface may depend on one this task does not recognize. Read the current list, add what is missing, and verify the result contains both the old and the new entries.</constraint>
+    <constraint source="ADR-028">Auth stays secret-free. This task registers redirect URIs only. Do NOT create, rotate, or store a client secret, and never introduce `.WithClientSecret` anywhere. Do not delete the `Dataverse-ClientSecret` or `BFF-API-ClientSecret` Key Vault entries.</constraint>
+    <constraint source="project">Deploy is CI-only and never agent-run. This task may change what can trigger `deploy-office-addins.yml`; it MUST NOT execute the workflow. Task 042 owns deployment.</constraint>
+    <constraint source="project">The chosen trigger approach (added branch trigger vs. `workflow_dispatch`) MUST be stated explicitly in `notes/041-entra-redirects.md` and in the PR description, so task 042 knows how to launch the deploy.</constraint>
+    <constraint source="project">Record the SWA host and the exact two URIs registered per environment in `notes/041-entra-redirects.md`. An unrecorded registration cannot be verified or reproduced for the next environment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Entra SPA redirect registration for Office add-ins; GitHub Actions deploy triggers</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">INV-1..INV-8 — read before changing any auth-adjacent registration so the redirect additions do not violate an invariant the pattern pins.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` NFR-09, `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3, and `scripts/Register-EntraAppRegistrations.ps1`. Emit the mandatory rigor declaration (STANDARD / opus / high).</step>
+    <step order="1">Read the Word manifest as task 011 left it and extract the exact SWA host the add-in will load from. Every redirect URI in this task derives from that host — do not use a host from another environment or an older manifest.</step>
+    <step order="2">Enumerate the environments the add-in will be deployed to and, for each, read the CURRENT redirect-URI list on its Entra app registration. Record the pre-change state in `notes/041-entra-redirects.md` before writing anything.</step>
+    <step order="3">For each environment, add whichever of `brk-multihub://&lt;swa-host&gt;` and `https://&lt;swa-host&gt;/auth-callback.html` is missing, as **SPA** redirect URIs. Add only; delete nothing.</step>
+    <step order="4">Read each registration back and verify it now contains both required URIs plus every URI that was present before. Record the post-change state alongside the pre-change state.</step>
+    <step order="5">Decide the trigger approach for `deploy-office-addins.yml` — add `work/spaarkeai-word-add-in-r1` to the push branches, or rely on the already-declared `workflow_dispatch`. Implement the choice and state it in `notes/041-entra-redirects.md` and the PR description.</step>
+    <step order="6">Run `git diff --stat` and confirm that `ci-router.yml`, `ci-tier1-blocking.yml` and `ci-tier2-advisory.yml` do not appear in the change set, and that no Key Vault secret entry was touched.</step>
+    <step order="7">Verify the workflow file is still valid YAML and that no job definition was altered beyond the trigger block.</step>
+    <step order="8">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an environment's Entra app registration already contains a conflicting redirect URI — a different `brk-multihub://` host, or an `auth-callback.html` under another domain — STOP and escalate per CLAUDE.md §6 rather than replacing it. Another surface may depend on it, and removal is not recoverable from this task's information.</trigger>
+    <trigger>If registering the redirects requires a permission the operator identity does not hold, STOP and escalate. Do not fall back to a service principal or a client secret to complete the write — ADR-028 keeps this path secret-free and NFR-11 of the provisioning skill requires the operator's own identity.</trigger>
+    <trigger>If the SWA host in task 011's manifest does not match any environment's provisioned Static Web App, STOP and escalate — registering redirects for a host that does not exist yields AADSTS7000471 at first sign-in with no signal that the cause is the manifest.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">`scripts/Register-EntraAppRegistrations.ps1` for the redirect registration; read-back verification against each app registration.</tool>
+    <tool name="az">Read and verify app-registration redirect URIs using the operator's own identity.</tool>
+    <tool name="git">`git diff --stat` to confirm no frozen CI file was modified.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/deploy-office-addins.yml</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/041-entra-redirects.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For every environment the add-in will be deployed to, reading the Entra app registration back shows BOTH `brk-multihub://&lt;swa-host&gt;` and `https://&lt;swa-host&gt;/auth-callback.html` present as SPA redirect URIs.</criterion>
+    <criterion testable="true">Every redirect URI present before this task is still present after it — verified by comparing the recorded pre-change and post-change lists in `notes/041-entra-redirects.md`.</criterion>
+    <criterion testable="true">The `&lt;swa-host&gt;` used in both URIs matches the host in the Word manifest as task 011 left it.</criterion>
+    <criterion testable="true">`deploy-office-addins.yml` can be triggered for this branch, and `notes/041-entra-redirects.md` plus the PR description state which approach was chosen (added branch trigger vs. `workflow_dispatch`).</criterion>
+    <criterion testable="true">Negative: `git diff --stat` shows no change to `.github/workflows/ci-router.yml`, `.github/workflows/ci-tier1-blocking.yml`, or `.github/workflows/ci-tier2-advisory.yml`.</criterion>
+    <criterion testable="true">Negative: no client secret was created, rotated or stored; no `.WithClientSecret` was introduced; the `Dataverse-ClientSecret` and `BFF-API-ClientSecret` Key Vault entries are untouched.</criterion>
+    <criterion testable="true">Negative: the deploy workflow was NOT executed by this task — deployment belongs to task 042.</criterion>
+    <criterion testable="true">`deploy-office-addins.yml` remains valid YAML and no job definition was altered beyond the trigger block.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md NFR-09 and Dependencies ("Per-environment Entra SPA redirect registration — a provisioning step that must precede deployment to each environment"). plan.md §4 Phase 4 task 041. The frozen-CI-file rule comes from root CLAUDE.md and the project CLAUDE.md; the shadow-comparison window opened 2026-08-27.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

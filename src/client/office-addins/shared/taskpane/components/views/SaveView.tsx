@@ -161,8 +161,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
             setRecipients(
               recipientList.map(r => ({
                 email: r.email,
-                displayName: r.displayName,
                 type: r.type,
+                ...(r.displayName !== undefined ? { displayName: r.displayName } : {}),
               }))
             );
           }
@@ -190,7 +190,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
               const uint8Array = new Uint8Array(content);
               let binary = '';
               for (let i = 0; i < uint8Array.length; i++) {
-                binary += String.fromCharCode(uint8Array[i]);
+                binary += String.fromCharCode(uint8Array[i] ?? 0);
               }
               const base64 = btoa(binary);
               setDocumentContentBase64(base64);
@@ -256,24 +256,24 @@ export const SaveView: React.FC<SaveViewProps> = ({
     <div className={styles.container}>
       <SaveFlow
         hostType={hostType}
-        itemId={itemId}
-        itemName={itemName}
         attachments={attachments}
-        senderEmail={senderEmail}
-        senderDisplayName={senderDisplayName}
-        recipients={recipients}
-        sentDate={sentDate}
-        documentUrl={documentUrl}
-        documentContentBase64={documentContentBase64}
         getAccessToken={getAccessToken || defaultGetAccessToken}
-        apiBaseUrl={apiBaseUrl}
-        onComplete={onComplete}
-        {...(onSaved ? { onSaved } : {})}
-        onQuickCreate={onQuickCreate}
         onViewDocument={handleViewDocument}
-        onNavigate={onNavigate}
-        allowedEntityTypes={allowedEntityTypes}
         showDocumentInfo
+        {...(itemId !== undefined ? { itemId } : {})}
+        {...(itemName !== undefined ? { itemName } : {})}
+        {...(senderEmail !== undefined ? { senderEmail } : {})}
+        {...(senderDisplayName !== undefined ? { senderDisplayName } : {})}
+        {...(recipients !== undefined ? { recipients } : {})}
+        {...(sentDate !== undefined ? { sentDate } : {})}
+        {...(documentUrl !== undefined ? { documentUrl } : {})}
+        {...(documentContentBase64 !== undefined ? { documentContentBase64 } : {})}
+        {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
+        {...(onComplete ? { onComplete } : {})}
+        {...(onSaved ? { onSaved } : {})}
+        {...(onQuickCreate ? { onQuickCreate } : {})}
+        {...(onNavigate ? { onNavigate } : {})}
+        {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
       />
     </div>
   );

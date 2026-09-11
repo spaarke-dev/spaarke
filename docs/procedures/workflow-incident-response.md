@@ -1,6 +1,6 @@
 # Workflow Incident Response
 
-> **Last updated**: 2026-06-01 (github-actions-rationalization-r1)
+> **Last updated**: 2026-09-10 — corrected required-status-check claims (live ruleset 21824191 requires exactly ONE check, `Router`; the "4 contexts" classic-branch-protection description was stale); added `office-addins-tests.yml`, `client-tests.yml`, `css-reset-gate.yml` to the workflow-set table. Originally 2026-06-01 (github-actions-rationalization-r1)
 > **Purpose**: Runbook for responding to a failed GitHub Actions workflow run
 > **Audience**: On-call operator / Platform engineer
 > **Companion**: [`.github/WORKFLOWS.md`](../../.github/WORKFLOWS.md) (per-workflow purpose, owner, SLA, common failure modes)
@@ -15,13 +15,13 @@ Use this runbook when:
 - The **"CI Health Report" issue** posts a snapshot showing a workflow with declining success rate (created/updated weekly by `report-workflow-health.yml` — FR-11)
 - A **GitHub Actions notification** (email/in-app) reports a workflow failure
 - `gh run list --workflow={name} --status=failure` shows recurring failures
-- A **PR is blocked from merging** because a required status check (`Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`, or `actionlint`) failed
+- A **PR is blocked from merging** because the required status check (`Router`) failed
 
 This runbook is **specific to GitHub Actions workflow failures**. For broader production incidents (Azure outage, data corruption, BFF API down), see [`docs/guides/INCIDENT-RESPONSE.md`](../guides/INCIDENT-RESPONSE.md).
 
 ### Current workflow set (post-rationalization)
 
-The repo runs 8 workflows. Know which one alerted you before triaging:
+**Note (corrected 2026-09-10)**: this table is a curated subset, not a full inventory — `.github/workflows/` holds more files than are profiled here (e.g. `ci-router.yml`, `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml` implement the `Router` required check described under "PR block" below). Know which one alerted you before triaging:
 
 | Workflow | Purpose | Trigger |
 |---|---|---|
@@ -33,6 +33,9 @@ The repo runs 8 workflows. Know which one alerted you before triaging:
 | `deploy-promote.yml` | dev → staging → prod promotion | after-sdap-ci success + manual |
 | `workflows-validate.yml` | actionlint on `.github/workflows/**` | PR/push touching workflows |
 | `report-workflow-health.yml` | Weekly CI health snapshot issue | schedule (Mon 09:00 UTC) + manual |
+| `office-addins-tests.yml` (added 2026-09-10) | jest suite for `src/client/office-addins`; reports, does not block | PR touching `src/client/office-addins/**` |
+| `client-tests.yml` | Phase-1 visibility-only jest across 40 client packages; reports, does not block | schedule + manual |
+| `css-reset-gate.yml` | CSS box-sizing reset check for Code Page hosts | PR/push touching Code Page `index.html` |
 
 For per-workflow detail (owner, SLA, common failure modes), see [`.github/WORKFLOWS.md`](../../.github/WORKFLOWS.md).
 
@@ -58,7 +61,7 @@ For per-workflow detail (owner, SLA, common failure modes), see [`.github/WORKFL
   gh run view {run-id} --json jobs
   ```
 
-- **PR block**: GitHub's PR UI shows "Required checks failing" when a required status check fails. The 4 required contexts on `master` are `Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`, and `actionlint` (FR-08). A PR cannot merge until all 4 are green.
+- **PR block**: GitHub's PR UI shows "Required checks failing" when a required status check fails. **Corrected 2026-09-10** (classic branch protection listing 4 contexts was stale — verified via `gh api repos/spaarke-dev/spaarke/rules/branches/master` and `gh api repos/spaarke-dev/spaarke/rulesets/21824191`): master's enforcement mechanism is ruleset `21824191`, which requires exactly **ONE** status check, `Router` (emitted by `ci-router.yml`, which fans out to the tiered `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml` workflows and reports the aggregate as one check). A PR cannot merge until `Router` is green.
 
 ---
 
@@ -257,7 +260,7 @@ For per-workflow detail (owner, SLA, common failure modes), see [`.github/WORKFL
 | The failure blocks `master` and you cannot reproduce locally within 30 minutes | Notify owner |
 | The failure requires disabling `enforce_admins` to merge | Notify owner BEFORE acting (per NFR-03, each disable must be logged in `decisions/`) |
 | You are unsure whether a workflow should be deleted | Notify owner; the delete-by-default rule (D-03) places burden of proof on retention, but consult before pulling the trigger |
-| A required-status-check (`Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`, `actionlint`) needs to be removed or renamed | Notify owner FIRST; required-status-check changes touch branch protection |
+| The required-status-check (`Router`) needs to be removed, renamed, or the ruleset (`21824191`) otherwise modified | Notify owner FIRST; required-status-check changes touch branch protection |
 
 ### Contacts
 

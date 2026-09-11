@@ -6,7 +6,7 @@
  *
  * @see spec.md - Word save flow requirements (FR-09, FR-10)
  * @see SaveView.tsx - Component implementation
- * @see WordHostAdapter.ts - Word-specific host adapter
+ * @see shared/adapters/WordAdapter.ts - the single Word adapter (task 010 / FR-04; the duplicate word/WordHostAdapter.ts was deleted)
  */
 
 import { Page, Locator, expect } from '@playwright/test';

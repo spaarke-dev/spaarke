@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-07: Description becomes Profile, populated from the record</title>
+    <phase>2 Save flow</phase>
+    <gate>013+015 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts client code and reads a new field set across the BFF Office surface; tags include frontend + bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Closed, fully-enumerated requirement: four fields plus seven status states, all verified live. No architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>013,015</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addins, dataverse, ai-profile</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Rename the pane's "Description" section to "Profile" and populate it read-only from the identified `sprk_document` record: `sprk_filesummary`, `sprk_filetldr`, `sprk_filekeywords`, `sprk_documenttype`. When `sprk_filesummarystatus` is anything other than Completed, render that state explicitly instead of four blank fields.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in React 19 + Fluent UI v9 task-pane views, Dataverse choice-column semantics, and the BFF `/api/office` read surface. Follow ADRs strictly.</role>
+
+  <goal>The Save tab carries a "Profile" section that, for a document identity resolved by task 013, displays the four profile fields when profiling completed, and displays an honest state message for each of the other six `sprk_filesummarystatus` values. All fields are read-only in the pane. A contract test covers whatever read surface supplies the fields.</goal>
+
+  <context>
+    <background>
+      spec.md FR-07 requires: rename "Description" to "Profile"; populate `sprk_filesummary`, `sprk_filetldr`, `sprk_filekeywords`, `sprk_documenttype` from the record; and for a non-complete `sprk_filesummarystatus`, show that state rather than blank fields.
+
+      Verified as-built (do not re-derive):
+      - All four profile fields exist on `sprk_document`.
+      - `sprk_filesummarystatus` is a CHOICE with exactly SEVEN values: None (100000000), Pending (100000001), Completed (100000002), Opted Out (100000003), Failed (100000004), Not Supported (100000005), Skipped (100000006). The pane must render all seven, not just Completed.
+      - The pane's current "Description" section is a free-text `Textarea` at `SaveFlow.tsx:862-875` bound to `documentDescription` state at `:424`. That control is an INPUT for `sprk_documentdescription`, which is a different column from the profile fields. Decide and state in the PR whether the free-text description input is retained alongside the Profile section or removed; do not silently conflate the two.
+      - Per spec Assumptions, PROFILE FIELDS ARE READ-ONLY IN THE PANE. Editing happens in the record via FR-10 (task 027). Do not add edit affordances to the four profile fields.
+      - The BFF already knows these fields: `DocumentProfileFieldMapper` maps "summary"/"tl;dr"/"keywords" onto them, and `DataverseServiceClientImpl.cs:808-817` writes them. What does not yet exist is a pane-facing READ of them keyed by document id.
+      - Task 013 supplies the resolved document identity; without it there is nothing to read and the section must render its no-identity state.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/hooks/useDocumentProfile.ts</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileFieldMapper.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/services/todoChoices.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">FR-01 client identity wiring — supplies the resolved `sprk_document` id that this section reads its profile from.</dependency>
+      <dependency task="015" status="pending">FR-03 tab shell — the Save tab frame this section renders inside.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — within this task the four profile fields are strictly READ-ONLY in the pane (spec Assumptions). MUST NOT add inline editing, a pencil affordance, or a save-back for `sprk_filesummary`, `sprk_filetldr`, `sprk_filekeywords`, or `sprk_documenttype`.</constraint>
+    <constraint source="project">SCOPE — the status rendering must cover all SEVEN `sprk_filesummarystatus` values: None (100000000), Pending (100000001), Completed (100000002), Opted Out (100000003), Failed (100000004), Not Supported (100000005), Skipped (100000006). A `default` branch that lumps six states into one generic message does not satisfy FR-07.</constraint>
+    <constraint source="project">SCOPE — mirror the choice-value table locally in the add-in the way `shared/taskpane/services/todoChoices.ts` does. That file is the sanctioned duplicate precedent for exactly this reason (no Xrm in an Office host). MUST NOT introduce a second, divergent copy of a table this project already owns elsewhere in the add-in.</constraint>
+    <constraint source="ADR-044">SCOPE — the document GUID this section reads by MUST be canonicalized bare-lowercase via the shared `cleanGuid` before it crosses any boundary, and MUST NOT be interpolated raw into an OData key predicate.</constraint>
+    <constraint source="ADR-021">SCOPE — for all Profile-section UI: Fluent UI v9 semantic tokens only, no hex literals, and the section (including every status state) honors the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, the Profile section is a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components`.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT import any Xrm-bound component. Recreate the layout, per the r2 precedent.</constraint>
+    <constraint source="ADR-008">SCOPE — if this task adds or modifies a read route on `/api/office`, authorization goes on an endpoint filter on the group, never inside the handler body.</constraint>
+    <constraint source="ADR-038">SCOPE — any endpoint this task adds or modifies gets a contract test in `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs`. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for every BFF-side change, per `.claude/constraints/bff-extensions.md`.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening any BFF-touching PR. `spaarkeai-compose-r8` and `unified-access-control-r2` are live on this same hot path.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Document profile fields, Dataverse choice columns, Fluent v9 in an Office host</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. Long summary text must wrap and scroll inside the narrow pane rather than forcing horizontal overflow.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Read before adding any read route to `/api/office`; the group already carries `.RequireAuthorization()`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-07, and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">Determine the read surface. Grep the existing `/api/office` and `/api/documents` routes for one that already returns the four profile fields plus `sprk_filesummarystatus` for a document id. Extend an existing route if one is close; only add a route if none is. Record the decision and the grep evidence in the PR (CLAUDE.md §11).</step>
+    <step order="2">Build the seven-state status table in the add-in, mirroring the `todoChoices.ts` precedent, with an explicit user-facing message per state. Do not use a catch-all default.</step>
+    <step order="3">Build `DocumentProfileSection.tsx` and `useDocumentProfile.ts`: read-only rendering of summary, TL;DR, keywords, and document type, plus the per-status states, plus a no-identity state when task 013 resolved nothing.</step>
+    <step order="4">Rename the section heading from "Description" to "Profile" in `SaveFlow.tsx` and decide the fate of the free-text description input; state the decision in the PR.</step>
+    <step order="5">Wire the section into the Save tab through `SaveView.tsx`, threading the identity from task 013 rather than re-resolving it.</step>
+    <step order="6">Add or update the contract test in `OfficeEndpointsContractTests.cs` for the read surface, including the unauthorized case.</step>
+    <step order="7">Add unit tests covering all seven status renderings plus the no-identity state.</step>
+    <step order="8">Run `npm run typecheck`, `npm test`, `npm run build`; run `dotnet build` and the Office contract tests. All green.</step>
+    <step order="9">Measure BFF publish size against a fresh `origin/master` build per the constraint above; record both absolute sizes, the delta, and the zip tool.</step>
+    <step order="10">Run `/conflict-check`, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="11">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no existing route returns the profile fields and a NEW BFF route is required, STOP before writing it and escalate per CLAUDE.md §6 with the §11 three-question answers (existing / extension / cost-of-doing-nothing) and the grep evidence, so the placement decision is made explicitly rather than absorbed.</trigger>
+    <trigger>If `sprk_filesummarystatus` returns a value outside the seven enumerated options, STOP and escalate rather than adding a catch-all branch — the option set has changed and this task's closed acceptance set is no longer correct.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: the free-text "Description" Textarea at `src/client/office-addins/shared/taskpane/components/SaveFlow.tsx:862-875`, bound to `documentDescription` at `:424`. Grep run: `grep -rn "sprk_filesummary\b|sprk_filetldr|sprk_filekeywords|sprk_filesummarystatus" --include=*.cs src/server` returns writers (`DataverseServiceClientImpl.cs:808-817`) and a mapper (`Services/Ai/DocumentProfileFieldMapper.cs`) but NO pane-facing reader keyed by document id.</existing>
+    <extension>Partly. The section heading and layout extend the existing Document Details card rather than adding a new surface; the new `DocumentProfileSection` component exists because the existing control is a free-text INPUT bound to a different column (`sprk_documentdescription`) and cannot render seven read-only status states.</extension>
+    <cost-of-doing-nothing>Without this, a user who saved a document to Spaarke sees an empty "Description" box in the pane and has no way to tell whether the AI profile succeeded, is still pending, failed, or was skipped — the exact blank-fields complaint FR-07 names. The Generate Profile button (task 022) also has nothing to reflect its result into.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Completed profile renders all four fields">
+      <steps>
+        <step>Open a Spaarke-sourced Word document whose `sprk_filesummarystatus` is Completed (100000002).</step>
+        <step>Observe the Profile section on the Save tab.</step>
+      </steps>
+      <expected>Summary, TL;DR, keywords, and document type all display with their record values; the section heading reads "Profile", not "Description"; none of the four is editable.</expected>
+    </test>
+    <test name="All six non-Completed states render honestly">
+      <steps>
+        <step>For each of None, Pending, Opted Out, Failed, Not Supported, and Skipped, seed a document with that `sprk_filesummarystatus` value and open the pane.</step>
+      </steps>
+      <expected>Each state shows its own distinct message naming the state; none of the six renders four blank fields, and none falls through to a shared generic message.</expected>
+    </test>
+    <test name="No-identity state">
+      <steps>
+        <step>Open a document that did not originate from Spaarke, so task 013 resolves no identity, and view the Save tab.</step>
+      </steps>
+      <expected>The Profile section shows a no-identity state explaining that the document is not yet in Spaarke; it does not show empty profile fields and does not error.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark and reload the pane; view the Profile section in the Completed state and in the Failed state.</step>
+      </steps>
+      <expected>All text, dividers, keyword chips, and status indicators resolve from Fluent v9 semantic tokens with legible contrast in dark mode; no hex literals; repeat in Light mode with the same result.</expected>
+    </test>
+    <test name="Long summary does not break the pane layout">
+      <steps>
+        <step>Open a document whose `sprk_filesummary` is several paragraphs and narrow the pane to its minimum width.</step>
+      </steps>
+      <expected>The summary wraps and scrolls vertically inside the section; the pane never scrolls horizontally.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run the Office contract tests.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useDocumentProfile.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/DocumentProfileSection.test.tsx</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/021-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document with `sprk_filesummarystatus` = Completed (100000002), when the Save tab renders, then `sprk_filesummary`, `sprk_filetldr`, `sprk_filekeywords`, and `sprk_documenttype` all display their record values.</criterion>
+    <criterion testable="true">Given `sprk_filesummarystatus` = None (100000000), when the Save tab renders, then the pane shows a state message naming that state and does not show four blank fields.</criterion>
+    <criterion testable="true">Given `sprk_filesummarystatus` = Pending (100000001), when the Save tab renders, then the pane shows a distinct in-progress state message.</criterion>
+    <criterion testable="true">Given `sprk_filesummarystatus` = Opted Out (100000003), when the Save tab renders, then the pane shows a distinct opted-out state message.</criterion>
+    <criterion testable="true">Given `sprk_filesummarystatus` = Failed (100000004), when the Save tab renders, then the pane shows a distinct failure state message.</criterion>
+    <criterion testable="true">Given `sprk_filesummarystatus` = Not Supported (100000005), when the Save tab renders, then the pane shows a distinct not-supported state message.</criterion>
+    <criterion testable="true">Given `sprk_filesummarystatus` = Skipped (100000006), when the Save tab renders, then the pane shows a distinct skipped state message.</criterion>
+    <criterion testable="true">Given any status value, when the Profile section renders, then none of the four profile fields is editable and no save-back control for them exists in the pane.</criterion>
+    <criterion testable="true">Given the section heading, when the Save tab renders, then it reads "Profile"; the string "Description" no longer labels this section.</criterion>
+    <criterion testable="true">Negative: given a document with no resolved identity, when the Save tab renders, then the Profile section shows an explicit no-identity state and makes no profile read call.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated or unauthorized caller, when the profile read route is invoked, then it returns 401/403 as a ProblemDetails response, not an unhandled error — asserted by a contract test.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the Profile section renders in any state, then every color resolves from a Fluent v9 semantic token and no hex literal appears in the added styles.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; `dotnet build` and the Office contract tests pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-07 + Assumptions ("Profile fields are read-only in the pane"); plan.md §4 Phase 2 task 021. Profiling itself works — #919 was fixed on master (`f5c7687d8`) — so a Completed status is reachable in a seeded environment. Task 022 adds the Generate Profile trigger that moves a document between these states; keep the status rendering in this task the single place that maps a status value to a message so 022 does not fork it.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

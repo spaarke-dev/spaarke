@@ -180,8 +180,8 @@ const DEFAULT_ERROR: ErrorMessage = {
  */
 export function mapProblemDetailsToMessage(problem: ProblemDetails): ErrorMessage {
   // Check if we have a known error code
-  if (problem.errorCode && ERROR_CODE_MAP[problem.errorCode]) {
-    const mapped = ERROR_CODE_MAP[problem.errorCode];
+  const mapped = problem.errorCode ? ERROR_CODE_MAP[problem.errorCode] : undefined;
+  if (mapped) {
     // Prefer the API's detail if it's more specific
     return {
       ...mapped,
@@ -214,8 +214,9 @@ export function mapErrorCodeToMessage(errorCode: string): ErrorMessage {
  * @returns true if the user can retry the operation
  */
 export function isRecoverableError(problem: ProblemDetails): boolean {
-  if (problem.errorCode && ERROR_CODE_MAP[problem.errorCode]) {
-    return ERROR_CODE_MAP[problem.errorCode].recoverable;
+  const mapped = problem.errorCode ? ERROR_CODE_MAP[problem.errorCode] : undefined;
+  if (mapped) {
+    return mapped.recoverable;
   }
   // Default to recoverable for 5xx errors
   return problem.status >= 500;

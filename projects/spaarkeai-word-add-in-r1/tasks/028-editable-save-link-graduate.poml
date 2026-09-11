@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F-h/NFR-08: editable Office saves must link/graduate, never immutable-suppress</title>
+    <phase>2 Save flow</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared BFF save/dedup spine with a SILENT data-loss failure mode: a distinct draft's document record is discarded with no error surfaced. Tags include bff-api + data-integrity. Blast radius covers both Office hosts and neighbours the Compose dedup contract.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data-integrity change to a shipped path that Compose also depends on, where the failure mode is silent rather than an exception. Same profile as 023/024. Escalate to `fable` if the editable/immutable classification proves to need a new column or an ADR amendment rather than a branch on existing state.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `OfficeDocumentPersistence`, which 023 (FR-11 server version-save) also modifies, and reads the same `sprk_canonicalhash` / `sprk_canonicaldocument` contract Compose owns. Must not be co-scheduled with 023.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, office-addins, save-flow, spe, dedup, data-integrity, outlook, word</tags>
+    <estimated-effort>6-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the shared Office save path apply the editable **link/graduate** dedup mode to editable content, instead of the immutable **suppress** mode it applies to everything today. Mirror the shipped Compose implementation; do not invent a second dedup mechanism.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the BFF Office save spine, the content-identity/dedup layer (`sprk_canonicalhash`, `sprk_canonicaldocument`), and the Compose graduate-on-divergence pattern. Follow ADRs strictly; NFR-08 is binding.</role>
+
+  <goal>Two byte-identical-but-distinct editable saves produce TWO `sprk_document` records — the second linked to the first via `sprk_canonicaldocument`, graduating to its own canonical on first divergence — while immutable captures (email, attachment) keep their current suppress behavior unchanged. The behavior is identical for Word and Outlook because it is keyed on content type, not host.</goal>
+
+  <context>
+    <background>
+      Finding **F-h**, confirmed 2026-09-08 in `notes/spikes/spike-4-collision-path.md` §3 D2.
+
+      `Services/Office/OfficeDocumentPersistence.cs:78-85` runs the FR-C3 content-dedup gate after write. On a byte-identical `quickXorHash` hit it SKIPS the document create entirely and returns the existing canonical id; the caller then skips finalization and cleans up the transient blob. This is the **immutable suppress** path, and it runs for EVERY `SaveContentType` — including `Document`, which is editable.
+
+      `DEDUP-AND-SAVE-BACK-IDENTITY.md` §3 predicted and forbade exactly this: "if the save-back path ever treats it like an immutable copy (suppress-forever on a hash hit), two genuinely-different drafts that happen to be byte-identical right now would collapse into one record — data loss." That document's §5 already labels `OfficeDocumentPersistence.cs` the "immutable suppress caller" and names `ComposeService.PromoteIfEphemeralAsync` as the link/graduate pattern to mirror.
+
+      The shipped reference implementation is documented at `Services/Compose/ComposeService.cs:83-90`: a create-on-save stamps `sprk_canonicalhash`; on a byte-identical hit it ALSO links via `sprk_canonicaldocument` (this editable copy is byte-identical NOW); the link is CLEARED the moment content diverges on first edit, graduating the copy to its own canonical.
+
+      NOT in scope: the filename-collision defect (D1) and FR-12/task 025. Those are gated behind FR-11 (023/024) by the 2026-09-08 §6.5 path C decision. This task is about the CONTENT-dedup layer (Layer B) only, and is independent of that sequencing.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+      <file role="canonical-reference">docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Documents/ContentDedupDetector.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Office/</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="operator" binding="true">🔴 HOST-NEUTRAL — the remedy MUST apply to Outlook as well as Word and MUST NOT branch on which Office host called. The editable/immutable axis is `SaveContentType`, which is already host-neutral and already switched on in this same file at lines 94-96, 133 and 178. Any design that introduces a Word-vs-Outlook Office.js API divergence to solve this is out of contract; host divergence belongs in the client host adapters, never in save or dedup semantics. Satisfies spec.md:274 — fixed at the shared path, not patched per-host.</constraint>
+    <constraint source="project">MUST NOT change behavior for `SaveContentType.Email` or `SaveContentType.Attachment`. Those are immutable captures; suppress is correct for them and is relied on by email-communication-intelligence-r2 Pillar C. A test MUST pin that their behavior is unchanged.</constraint>
+    <constraint source="adr">NFR-08 — editable documents use link/graduate, NEVER suppress-forever. Non-negotiable; it is the reason this task exists.</constraint>
+    <constraint source="project">MUST mirror the shipped Compose mechanism (`sprk_canonicalhash` + `sprk_canonicaldocument`, link on byte-identical, clear on divergence). MUST NOT introduce a second dedup mechanism, a second hash column, or a parallel detector — root CLAUDE.md §11.</constraint>
+    <constraint source="project">MUST NOT modify `ContentDedupDetector` itself, or any Compose file. Those are owned elsewhere and other projects are live on them; this task changes only how the Office persistence path CONSUMES the detector's decision. Run `/conflict-check` before the PR.</constraint>
+    <constraint source="adr">CLAUDE.md §10 — BFF-touching change. State the placement decision, verify publish-size delta against a FRESH build of master (not the recorded baseline), check for new HIGH CVEs, and satisfy the test-update obligation: `Services/` changes require tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The editable/immutable distinction cannot be derived from `SaveContentType` alone — e.g. an attachment turns out to need per-case mutability, or `Document` covers immutable cases too. That is a schema/contract question, not an implementation detail: STOP and escalate rather than inventing a classification. Consider escalating the model tier to `fable`.</trigger>
+    <trigger>Mirroring the Compose pattern would require changing `ContentDedupDetector`'s contract or a Compose-owned file. STOP — that is a cross-project coordination decision.</trigger>
+    <trigger>A test proving the two-distinct-drafts case cannot be written without a live Dataverse. Report the seam gap rather than deleting the test or asserting on a mock that models nothing (see the `Unmodelled<>` stubs in `DocumentVersionAuthorizationTests` — those are NOT coverage).</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Two saves of byte-identical EDITABLE content (`SaveContentType.Document`) produce TWO `sprk_document` records; the second carries `sprk_canonicaldocument` pointing at the first, and both carry the same `sprk_canonicalhash`.</criterion>
+    <criterion testable="true">After the second document's content diverges, its `sprk_canonicaldocument` link is cleared and it stands as its own canonical.</criterion>
+    <criterion testable="true">`SaveContentType.Email` and `SaveContentType.Attachment` retain the existing suppress behavior — a byte-identical hit still skips the create and returns the canonical id. Pinned by a test that fails if the behavior changes.</criterion>
+    <criterion testable="true">No code path branches on Office host (Word vs Outlook) to reach either dedup mode. Verifiable by inspection of the diff — a grep for host identity in the changed persistence path returns nothing.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with 0 warnings, 0 errors.</criterion>
+    <criterion testable="true">New tests live at a KEEP path per ADR-038 and exercise the persistence decision, not a mock that models nothing.</criterion>
+    <criterion testable="false">The PR description states the placement decision, the publish-size delta measured against a fresh master build with the zip tool named, and the CVE check result.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Office/</output>
+  </outputs>
+
+  <notes>
+    <completed date="2026-09-08">
+      **Implemented in `OfficeDocumentPersistence.cs` only.** No Compose file and no `ContentDedupDetector`
+      change was needed — the detector already exposed the editable seam (`ResolveContentIdentityAsync` +
+      `NotifyLinkedCopyAsync`) that Compose consumes; this task makes the Office path consume the same two.
+      No escalation trigger fired: `SaveContentType` has exactly three members, so the editable/immutable axis
+      is derivable from it alone.
+
+      Three additions: `IsEditableContent(SaveContentType)` (host-neutral classifier, fail-safe default =
+      editable), `LinkEditableCopyToCanonicalAsync` (link half — writes `sprk_canonicaldocument` via the
+      generic seam, then notifies), and `GraduateLinkedCopyIfDivergedAsync` (graduate half — resolves the row
+      for this SPE drive-item via `sprk_graphitemid_uk`, severs the link with the `DBNull` clear-sentinel and
+      stamps the diverged hash). Email/Attachment keep the untouched `ReconcileAsync` suppress path.
+
+      Verified: `dotnet build src/server/api/Sprk.Bff.Api/` = 0 warnings / 0 errors; 20/20
+      `OfficeDocumentPersistence*` tests pass; 2245 passed / 0 failed across the whole Office + Dedup + Compose
+      neighbourhood. The new tests were proven to be real coverage by flipping the classifier to the pre-fix
+      "everything suppresses" behavior — 10 of them failed, and the 2 immutable pins correctly kept passing.
+      Publish size 45.36 MB vs a FRESH `origin/master` (`e0a6f87c4`) build at 45.35 MB = +0.01 MB
+      (PowerShell `Compress-Archive -CompressionLevel Optimal`). No vulnerable packages.
+
+      Residual, out of scope: a re-save under a DIFFERENT filename mints a new SPE drive-item, so the prior
+      linked copy is not resolved and keeps a stale link. FR-11 identity→version-save (task 023) is what closes
+      that; this task deliberately did not build a second resolution path for it.
+    </completed>
+  </notes>
+</task>

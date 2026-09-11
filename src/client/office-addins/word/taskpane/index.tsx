@@ -1,12 +1,18 @@
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { App } from '@shared/taskpane';
-import { WordHostAdapter } from '../WordHostAdapter';
+import { HostAdapterFactory, isHostAdapterError } from '@shared/adapters';
+import type { IHostAdapter } from '@shared/adapters';
+import { WordAdapter } from '@shared/adapters/WordAdapter';
 import { authService, apiClient } from '@shared/services';
 
-// Version information - synced with word-manifest.xml's <Version> element
-// (task 040 / FR-B0: was stale at 1.0.3 vs manifest's 1.0.4.0).
-const APP_VERSION = '1.0.6';
+// Version information - synced with word/manifest.json's "version" field
+// (task 011 / FR-05: the unified JSON manifest is now the versioning source
+// of truth, mirroring outlook/taskpane/index.tsx's convention; the retained
+// word-manifest.xml's 4-part <Version> is kept in step but is not this
+// constant's source — XML requires 4-part, the unified manifest requires
+// SemVer-style 1-3 part).
+const APP_VERSION = '1.0.8';
 const BUILD_DATE = process.env.BUILD_DATE || 'unknown';
 
 // Configuration from environment or build-time injection
@@ -30,7 +36,16 @@ function renderError(error: Error | string, stage: string) {
   const container = document.getElementById('root');
   if (!container) return;
 
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  // Task 010 / FR-04: Stage 4 can now reject with a typed `HostAdapterError` — a PLAIN OBJECT
+  // `{ code, message }`, not an Error. Without this branch every factory failure (INVALID_HOST,
+  // API_NOT_AVAILABLE, unregistered host) rendered as the literal string "[object Object]", i.e. the
+  // one failure this change introduces would have been the one nobody could diagnose from the pane.
+  // (code-review W-1, 2026-09-09.)
+  const errorMessage = isHostAdapterError(error)
+    ? `${error.code}: ${error.message}`
+    : error instanceof Error
+      ? error.message
+      : String(error);
 
   container.innerHTML = `
     <div style="padding: 20px; font-family: 'Segoe UI', sans-serif; height: 100%; box-sizing: border-box;">
@@ -72,7 +87,15 @@ async function init() {
     bffApiBaseUrl: CONFIG.bffApiBaseUrl,
   });
 
-  // Stage 1: Wait for Office.js to be ready
+  // Stage 1: Wait for Office.js to be ready.
+  // Task 010 option B (operator decision 2026-09-09): capture the host Office hands us HERE and
+  // pass it to the factory at Stage 4. `Office.onReady`'s info.host is populated by the host itself
+  // at ready time; `Office.context.host` — which the factory's detectHostType() reads when given no
+  // argument — is unpopulated in some Outlook desktop builds. Depending on the latter when the
+  // former is already in hand means a bootstrap with no fallback can throw INVALID_HOST and leave
+  // the pane never rendering. This does not dodge detection: detectHostType() still runs whenever
+  // no host is supplied, and the factory still rejects an unsupported host.
+  let readyHost: Office.HostType | undefined;
   console.log('[Spaarke] Stage 1: Waiting for Office.js...');
   try {
     await new Promise<void>((resolve, reject) => {
@@ -82,6 +105,7 @@ async function init() {
 
       Office.onReady(info => {
         clearTimeout(timeout);
+        readyHost = info?.host ?? undefined;
         console.log('[Spaarke] Office.js ready:', info);
         resolve();
       });
@@ -119,12 +143,31 @@ async function init() {
     throw error;
   }
 
-  // Stage 4: Create host adapter
+  // Stage 4: Create host adapter via the factory (task 010 / FR-04).
+  //
+  // The adapter is no longer `new`ed here. `HostAdapterFactory` was dead infrastructure —
+  // `registerAdapter()` had zero call sites, so the registry was empty and `create()` always threw
+  // INVALID_HOST while both task panes bypassed it. Registration MUST happen before any
+  // `create()`/`createAndInitialize()` call in this entry point.
+  //
+  // There is now exactly ONE Word adapter: `shared/adapters/WordAdapter`, carrying the
+  // `getFileAsync(Compressed)` .docx extraction that UAT proved correct on 2026-09-03. The duplicate
+  // `word/WordHostAdapter.ts` is deleted.
   console.log('[Spaarke] Stage 4: Creating host adapter...');
-  let hostAdapter: WordHostAdapter;
+  let hostAdapter: IHostAdapter;
   try {
-    hostAdapter = new WordHostAdapter();
-    console.log('[Spaarke] Host adapter created');
+    HostAdapterFactory.registerAdapter('word', WordAdapter);
+    // Option B (operator decision 2026-09-09, task 010 escalation trigger 3): hand the factory the
+    // host Office reported at Stage 1 rather than making it re-derive one from
+    // `Office.context.host`. Both quality gates flagged the no-arg form independently: this is the
+    // bootstrap path with NO fallback, so an unpopulated global means the pane never renders.
+    // `readyHost` is undefined only if Office.onReady itself reported no host, in which case
+    // detectHostType() still runs and a genuine detection failure still surfaces as a typed
+    // INVALID_HOST / API_NOT_AVAILABLE rendered by the catch below.
+    hostAdapter = await HostAdapterFactory.createAndInitialize(
+      readyHost === Office.HostType.Word ? 'word' : undefined
+    );
+    console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
     throw error;

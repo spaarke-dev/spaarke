@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-01 client: getDocumentUrl capability and identity threading</title>
+    <phase>1 Foundation</phase>
+    <gate>010,012 complete — the consolidated adapter must exist and the resolver route must be live</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx on the shared host-abstraction contract (`IHostAdapter`, `HostCapabilities`) consumed by both hosts, and threads new state through the app shell. Tags include frontend. Depends on two tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified wiring with a named server contract (task 012) and a named adapter (task 010). The capability-gating rule is explicit in NFR-10, so no architectural judgment is required beyond following it literally.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010,012</deps>
+    <tags>frontend, office-addins, adapter, typescript, word, outlook, unit-test</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the host adapters a real way to expose the open document's URL, and thread the resolved `sprk_document` identity from task 012's resolver into the pane's shared state. Word implements it for real; Outlook reports the capability as unavailable — and every consumer branches on the CAPABILITY, never on the host type.</prompt>
+
+  <role>SPAARKE platform developer. Expert in TypeScript strict mode, Office.js host adapters, capability-gated React state, and BFF-backed client services in an Office add-in. Follow ADRs strictly.</role>
+
+  <goal>`HostCapabilities` carries a `canGetDocumentUrl` flag, `IHostAdapter` declares `getDocumentUrl()`, `WordAdapter` implements it against Office.js and `OutlookAdapter` reports it unsupported, a client service calls task 012's resolver, and the resolved identity (document id, name, related record) lands in `App.savedContext` where downstream Phase 2 views can read it. No view branches on `hostType` for this feature.</goal>
+
+  <context>
+    <background>
+      spec.md FR-01 client half; plan.md §4 Phase 1 task 013.
+      `HostCapabilities` lives at `shared/adapters/types.ts:69-90` and has exactly 10 fields today: `canGetAttachments`, `canGetRecipients`, `canGetSender`, `canGetDocumentContent`, `canSaveAsPdf`, `canSaveAsEml`, `canInsertLink`, `canAttachFile`, `minApiVersion`, `supportedRequirementSet`. There is NO `canGetDocumentUrl` flag — this task adds it. (There is also no `canReplaceDocument` or `canGetCustomProperties`; do not add those, they are out of scope.)
+      Task 010 consolidates Word onto `shared/adapters/WordAdapter.ts` reached through `HostAdapterFactory`; this task extends that single adapter, not the deleted duplicate.
+      Task 012 exposes the server-side resolver on `/api/documents`. This task is its only client consumer in Phase 1.
+      NFR-10 is the binding rule here: capabilities land in `shared/taskpane/` and are gated by host capability, not by host-type branching in views. `src/client/office-addins/CLAUDE.md` records that the existing convention is already host-agnostic UI — components take an `IHostAdapter` and never touch `Office.*` directly.
+      Save-context threading already has a shape to follow: `SaveView.onSaved` writes into `App.savedContext`. The resolved identity joins that state rather than inventing a parallel store.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/adapters/types.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/OutlookAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="modify">src/client/office-addins/shared/adapters/__tests__/WordAdapter.test.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/__tests__/OutlookAdapter.test.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/AuthService.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">One consolidated `shared/adapters/WordAdapter.ts` reached via `HostAdapterFactory` — the adapter this task extends</dependency>
+      <dependency task="012" status="pending">The `/api/documents` document-identity resolver route and its request/response contract</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: every consumer of document identity added by this task, in `shared/taskpane/**` and `shared/adapters/**`. Gate by `capabilities.canGetDocumentUrl`, NEVER by a `hostType === 'word'` conditional in a view (NFR-10). If a view needs to know whether identity is available, it asks the adapter's capabilities.</constraint>
+    <constraint source="project">Scope: `OutlookAdapter.getDocumentUrl()`. Outlook has no open document, so the capability flag is false and the method must fail predictably — return the unsupported result the codebase already uses for absent capabilities (see how the other Word-only capabilities behave in `OutlookAdapter`), not `undefined`, not a thrown raw Error, and not a silent empty string.</constraint>
+    <constraint source="ADR-028">Scope: the client service that calls task 012's resolver. Auth goes through `shared/services/AuthService.ts` to `@spaarke/auth` `OfficeNaaStrategy`. No MSAL construction in this package — arch-test enforced.</constraint>
+    <constraint source="ADR-044">Scope: any `sprk_document` GUID or related-record GUID this task holds or forwards. Canonicalize to bare lowercase via the shared `cleanGuid`; no hand-rolled brace stripping. Note the server already canonicalizes — do not "re-clean" by string surgery, use the shared helper.</constraint>
+    <constraint source="ADR-012">Scope: any UI added or touched here. The add-in keeps thin views under `shared/taskpane/` and consumes `@spaarke/auth` only — do NOT import `@spaarke/ui-components` (project-scoped Path A exception, project CLAUDE.md Decisions 2026-09-04).</constraint>
+    <constraint source="project">Scope: components in `shared/taskpane/**`. MUST NOT import Xrm-bound components; `Xrm.*` does not exist in an Office host (NFR-03). Recreate layouts per the r2 precedent.</constraint>
+    <constraint source="ADR-021">Scope: any pane surface that renders identity state. Fluent UI v9 only, semantic tokens, Office theme drives dark mode via `useOfficeTheme`.</constraint>
+    <constraint source="project">Scope: `HostCapabilities`. Add exactly ONE field — `canGetDocumentUrl`. Do not add `canReplaceDocument`, `canGetCustomProperties`, or any other speculative flag; they are out of scope and unbacked by a consumer.</constraint>
+    <constraint source="project">Scope: build commands. There is NO `build:prod` in this module — `npm run build` IS production. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Host capability gating, Office.js document URL, client-side BFF calls in the add-in</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. Apply to any identity-state surface rendered in the pane.</pattern>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">INV-1..INV-8 — the client service calling the resolver must acquire its token through the sanctioned path.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, spec.md FR-01 and NFR-10, plan.md §4 Phase 1, and task 012's recorded request/response contract in notes/. Declare: RIGOR LEVEL FULL, model-tier sonnet, effort high, steps mode DIRECTIONAL. Confirm tasks 010 and 012 are complete.</step>
+    <step order="1">Add `canGetDocumentUrl: boolean` to `HostCapabilities` in `shared/adapters/types.ts:69-90`, with a doc comment matching the file's existing style ("Whether the open document's URL can be retrieved (Word only)"). Add exactly this one field.</step>
+    <step order="2">Declare `getDocumentUrl()` on `IHostAdapter` in `shared/adapters/IHostAdapter.ts`, following the signature and error conventions of the neighbouring capability methods (returns a promise; failure surfaces a typed `HostAdapterError`).</step>
+    <step order="3">Implement `getDocumentUrl()` on `WordAdapter` against `Office.context.document.url`, and set `canGetDocumentUrl: true` in its capabilities. Handle the case where the URL is absent or empty (an unsaved document) as a defined result, not a throw.</step>
+    <step order="4">Implement `getDocumentUrl()` on `OutlookAdapter` as unsupported and set `canGetDocumentUrl: false`. Match how the other Word-only capabilities already behave in that adapter — do not invent a new unsupported-signalling convention.</step>
+    <step order="5">Add a client service that calls task 012's resolver route on `/api/documents`, acquiring its token through `shared/services/AuthService.ts`. Handle all three server outcomes explicitly: resolved identity, no identity (a non-Spaarke document — a normal, expected result), and an error.</step>
+    <step order="6">Thread the resolved identity into `App.savedContext`, joining the existing save-context shape rather than adding a parallel store. Resolution should run when the capability is available and the pane has a document to resolve; do not resolve on every render.</step>
+    <step order="7">Add unit tests: `WordAdapter.getDocumentUrl()` returns the URL and reports the capability true; `OutlookAdapter` reports it false and its `getDocumentUrl()` signals unsupported; the client service maps each of the three server outcomes correctly. Extend the existing `__tests__` files; do not create a new test harness.</step>
+    <step order="8">Grep `shared/taskpane/**` for `hostType ===` and confirm no NEW host-type conditional was introduced for this feature (pre-existing ones outside this feature are task 040's problem, not this task's licence).</step>
+    <step order="9">Run `npm install --legacy-peer-deps --no-audit --no-fund`, then `npm run typecheck`, `npm run build` and the test suite. All must be clean.</step>
+    <step order="10">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `Office.context.document.url` on Word desktop returns a shape that task 012's resolver cannot consume (contradicting Spike-1's finding), STOP and escalate per CLAUDE.md §6 — do not reshape the URL client-side with string surgery to make it fit, and do not change the server contract unilaterally.</trigger>
+    <trigger>If capability-gating cannot express a needed distinction and a host-type conditional in a view seems necessary, STOP and escalate as an NFR-10 tension per CLAUDE.md §6.5 rather than adding the conditional.</trigger>
+    <trigger>If resolving identity requires a second BFF round-trip beyond task 012's route (for example to fetch the related record separately), STOP and escalate — that is a change to 012's contract, not a client-side addition.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`HostCapabilities` at `shared/adapters/types.ts:69-90` — 10 flags, none of which expresses document-URL availability; grep of that interface confirms no `canGetDocumentUrl`, `canGetDocumentUrl`-adjacent, or URL-related field. `IHostAdapter` has `getItemId()`, whose two implementations (`word/WordHostAdapter.ts:35-46` returning `word-doc-{title}-{Date.now()}`, and `shared/adapters/WordAdapter.ts:78-106` hashing title plus author plus creationDate) return values that cannot identify a record.</existing>
+    <extension>Yes for the shape, No for the substance — the flag extends the existing `HostCapabilities` interface and the method extends the existing `IHostAdapter` contract rather than creating a parallel abstraction. `getItemId()` could not be repurposed because its two implementations return synthesized strings by design, and callers depend on that existing meaning.</extension>
+    <cost-of-doing-nothing>Without a capability-gated `getDocumentUrl()`, the pane has no host-agnostic way to obtain the input task 012's resolver needs, so views would have to reach into `Office.context.document` directly — breaking the module's host-agnostic-UI convention and failing outright in Outlook where no document exists. Concretely: `App.savedContext` never carries a resolved `sprk_document`, so every Phase 2 view (profile, record card, version-save, open-record) has nothing to render.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Word pane resolves a Spaarke-sourced document">
+      <steps>
+        <step>In Word desktop, open a document previously saved to Spaarke.</step>
+        <step>Open the Spaarke task pane and wait for it to settle.</step>
+        <step>Observe the pane's identity state (the resolved document and related record).</step>
+      </steps>
+      <expected>The pane shows the correct `sprk_document` and its related record. No error toast, no spinner that never resolves.</expected>
+    </test>
+    <test name="Word pane treats a desktop-sourced document as new">
+      <steps>
+        <step>In Word desktop, open a .docx from the local file system that never came from Spaarke.</step>
+        <step>Open the Spaarke task pane.</step>
+      </steps>
+      <expected>The pane shows no identity and presents the document as new — no error state, no failed-request message. "Not a Spaarke document" is a normal outcome.</expected>
+    </test>
+    <test name="Outlook is capability-gated, not host-gated">
+      <steps>
+        <step>In Outlook, select an email and open the Spaarke task pane.</step>
+        <step>Confirm no identity-resolution request is issued.</step>
+        <step>Confirm the pane renders its normal Outlook surface with no identity-related error.</step>
+      </steps>
+      <expected>`canGetDocumentUrl` is false, no resolver call is made, and the pane behaves exactly as before. The suppression comes from the capability flag, not from a `hostType` check in a view.</expected>
+    </test>
+    <test name="Dark mode on identity surfaces (ADR-021)">
+      <steps>
+        <step>With an identified document open in Word, switch the Office theme to Dark and reload the pane.</step>
+      </steps>
+      <expected>Identity state renders with Fluent v9 semantic tokens — readable in dark, no hardcoded hex, no light-only background.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install (`--legacy-peer-deps --no-audit --no-fund`), typecheck, build (production; no `build:prod` here), test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/adapters/types.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/IHostAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/WordAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/OutlookAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/App.tsx</output>
+    <output type="test">src/client/office-addins/shared/adapters/__tests__/WordAdapter.test.ts</output>
+    <output type="test">src/client/office-addins/shared/adapters/__tests__/OutlookAdapter.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `shared/adapters/types.ts`, when inspecting `HostCapabilities`, then it carries exactly one new field, `canGetDocumentUrl: boolean`, and no other speculative capability flag was added.</criterion>
+    <criterion testable="true">Given `IHostAdapter`, when inspected, then `getDocumentUrl()` is declared and both `WordAdapter` and `OutlookAdapter` implement it (the interface has no unimplemented member).</criterion>
+    <criterion testable="true">Given Word with a saved document open, when `getDocumentUrl()` is called, then it returns `Office.context.document.url` and `capabilities.canGetDocumentUrl` is true.</criterion>
+    <criterion testable="true">Negative: given Outlook, when capabilities are read, then `canGetDocumentUrl` is false and `getDocumentUrl()` signals unsupported using the adapter's existing convention — not `undefined`, not a raw thrown Error, not an empty string.</criterion>
+    <criterion testable="true">Negative: given Word with an unsaved document (no URL), when `getDocumentUrl()` is called, then it returns a defined "no URL" result rather than throwing.</criterion>
+    <criterion testable="true">Given a Spaarke-sourced document, when the client service calls the task 012 resolver, then the resolved document id, name and related record land in `App.savedContext`.</criterion>
+    <criterion testable="true">Negative: given a non-Spaarke document, when the resolver returns no identity, then the pane treats it as a new document and shows no error state.</criterion>
+    <criterion testable="true">Negative: given a resolver call that fails (network or 5xx), when it errors, then the pane surfaces a handled error and remains usable — the save flow is not blocked.</criterion>
+    <criterion testable="true">Given `shared/taskpane/**` after this task, when grepped for `hostType ===`, then no NEW host-type conditional was introduced for document identity — gating is by `canGetDocumentUrl` (NFR-10).</criterion>
+    <criterion testable="true">Given every GUID this task holds or forwards, when inspected, then it is canonicalized via the shared `cleanGuid` and no hand-rolled brace-stripping exists (ADR-044).</criterion>
+    <criterion testable="true">No MSAL construction was added to the add-in package; the client service acquires its token through `AuthService` (ADR-028, arch-test green).</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, and all adapter and service unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-01 (client half), NFR-03, NFR-06, NFR-10. plan.md §4 Phase 1 task 013.
+    `parallel-safe:true` but sequenced alone: it depends on both 010 (the adapter it extends) and 012 (the route it calls), so it cannot join either wave. It does not overlap the P1-b pair (014 server-side stamping, 015 tab shell) in files, but it is ordered after 012 regardless.
+    Downstream: Phase 2 tasks 021 (profile), 024 (version-save client), 026 (record card) and 027 (open record) all read the identity this task threads into `App.savedContext`.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

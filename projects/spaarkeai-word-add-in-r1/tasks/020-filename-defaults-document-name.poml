@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-06: filename defaults to Document Name, editable in-pane</title>
+    <phase>2 Save flow</phase>
+    <gate>015 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts client code AND the BFF save persistence path (sprk_documentname mapping); tags include frontend + bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI defaulting plus a single, precisely-located server field mapping. No architectural judgment required; the reference impl and the exact defect site are both named below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>015</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addins, save-flow, dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the pane's "Document Name" field default to the document's filename and be editable in place via a pencil affordance, and make that edited value actually persist to the Dataverse `sprk_documentname` column. Today the user's typed name lands in `sprk_documentdescription` while `sprk_documentname` silently receives the sanitized SPE filename with `.docx` appended — that is the UAT defect this task closes.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in React 19 + Fluent UI v9 task-pane components, Office.js host adapters, and the BFF Office save persistence path into Dataverse. Follow ADRs strictly.</role>
+
+  <goal>The Save tab shows a Document Name that is pre-filled from the filename, editable in-pane behind a pencil affordance, and whose final value is written to `sprk_documentname` (NVARCHAR(850)) on the created `sprk_document`. The SPE blob filename remains independently correct (`.docx`, sanitized). Contract test covers the mapping; unit tests cover the defaulting and edit behaviors.</goal>
+
+  <context>
+    <background>
+      spec.md FR-06 requires: the Document Name field defaults to the filename, is editable in-pane via a pencil affordance, edits persist to `sprk_documentname`, and the field can be removed from the Dataverse form without loss of the value.
+
+      Verified as-built (do not re-derive):
+      - `SaveFlow.tsx:423` initializes `documentName` to the empty string — there is no default at all today. `SaveFlow.tsx:849-860` renders it as an always-open `Textarea` labeled "Document Name" (no pencil affordance).
+      - `useSaveFlow.ts:770` computes `effectiveDocumentName = context.documentName || context.itemName`, then `:852-853` forces a `.docx` suffix onto it to build `document.fileName`, and `:856` also sends it as `document.title`.
+      - `useSaveFlow.ts:784-787` additionally sends a TOP-LEVEL `documentMetadata: {name, description}` object. `SaveRequest` has NO such member, so System.Text.Json silently drops it. This is dead weight on the wire and must be removed or made real as part of this task — do not leave a request field that no server member receives.
+      - Server: `OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync` builds `CreateDocumentRequest { Name = fileName, Description = request.Document?.Title ?? request.Document?.FileName }`. `DataverseServiceClientImpl.cs:277` maps `Name` to `sprk_documentname` and `:280` maps `Description` to `sprk_documentdescription`. So the user's Document Name currently reaches the DESCRIPTION column and the sanitized `.docx` filename reaches the NAME column — inverted.
+      - `OfficeService.cs:408` sanitizes `request.Document.FileName` via `SpeUploadPath.SanitizeFileName` before it becomes the SPE upload path. That sanitization is load-bearing (it is the folder-minting fix) and must stay on the FILENAME, not on the display name.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.test.tsx</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="pending">FR-03 tab shell — the Save tab frame this field renders inside, and the `NavigationTab` extension that lets Word show tabs at all.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — the display name and the SPE blob filename are TWO values, not one. Within this task: `sprk_documentname` receives the user-facing Document Name (unsanitized apart from length); the SPE upload path continues to receive the sanitized, `.docx`-suffixed filename via `SpeUploadPath.SanitizeFileName` at `OfficeService.cs:408`. MUST NOT collapse them back into one value.</constraint>
+    <constraint source="project">SCOPE — `sprk_documentname` is NVARCHAR(850). Within this task, truncate or reject at 850 characters at the boundary that writes it; MUST NOT silently truncate to 200 the way `CommunicationService.cs` does for its own email paths.</constraint>
+    <constraint source="project">SCOPE — for the client request body only: remove the dead top-level `documentMetadata` object at `useSaveFlow.ts:784-787`, or add the matching server member. MUST NOT ship a request field that no `SaveRequest` member receives.</constraint>
+    <constraint source="ADR-044">SCOPE — any Dataverse GUID this task reads or writes (document id, target entity id) is canonicalized to bare-lowercase via the shared `cleanGuid` at every boundary. Never interpolate a raw GUID into an OData key predicate.</constraint>
+    <constraint source="ADR-021">SCOPE — for all pane UI added or modified here: Fluent UI v9 semantic tokens only, no hex literals, and the pencil/edit affordance must honor the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, keep the field UI as a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components` components here.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT import any Xrm-bound component (including the `Create*Wizard` family). Recreate the layout, per the r2 precedent.</constraint>
+    <constraint source="ADR-038">SCOPE — this task modifies the behavior of `POST /api/office/save`, so it MUST add or update a contract test in `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs` asserting the name mapping. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` (the method `scripts/Deploy-BffApi.ps1` uses) and report both absolute sizes plus the delta and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for every BFF-side change in this task, per `.claude/constraints/bff-extensions.md`, even when the answer is "extends an existing route group".</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening any BFF-touching PR. `spaarkeai-compose-r8` and `unified-access-control-r2` are live on this same hot path.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office add-in save flow, Fluent v9 in an Office host, Dataverse document field mapping</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. Apply its density and token rules to the inline-edit affordance so the field does not overflow the narrow pane.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Read before touching anything on the `/api/office` group; authorization stays on the filter, never in the handler body.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-06, and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">Read the four verified defect sites: SaveFlow.tsx:423 and :849-860, useSaveFlow.ts:770 / :784-787 / :852-856, and OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync's CreateDocumentRequest construction. Confirm each still reads as described before changing it.</step>
+    <step order="2">Client: derive the default Document Name from the filename. In Word, source it from the host adapter's document name/subject; in Outlook, from the subject. Strip the extension for display; keep the extension only on the wire filename.</step>
+    <step order="3">Client: replace the always-open Document Name Textarea with a read-only display plus a pencil (edit) affordance that reveals an editable Input. Keep it keyboard-reachable and announce the state change via the existing `useAnnounce` pattern (NFR-11).</step>
+    <step order="4">Client: separate the two wire values in `useSaveFlow.ts`. `document.fileName` keeps the `.docx` enforcement; `document.title` carries the user-facing Document Name. Remove the dead top-level `documentMetadata` object (or make it real — pick one and say which in the PR).</step>
+    <step order="5">Server: in `OfficeDocumentPersistence`, map the user-facing name to `CreateDocumentRequest.Name` (which lands in `sprk_documentname`) and stop putting it in `Description`. Enforce the 850-character bound at this boundary.</step>
+    <step order="6">Add/extend the contract test in `OfficeEndpointsContractTests.cs`: a Document save whose `document.title` differs from `document.fileName` results in `sprk_documentname` equal to the title, and the SPE filename equal to the sanitized `.docx` name.</step>
+    <step order="7">Add unit tests in `shared/taskpane/components/__tests__/SaveFlow.test.tsx` covering: default population from the filename, the pencil toggling to edit, an edit surviving to the built save context, and the 850-character bound.</step>
+    <step order="8">Run `npm run typecheck`, `npm test`, and `npm run build` in `src/client/office-addins`; run `dotnet build` and the Office contract tests. All green.</step>
+    <step order="9">Measure BFF publish size against a fresh `origin/master` build per the constraint above. Record both absolute sizes, the delta, and the zip tool in the PR and in projects/spaarkeai-word-add-in-r1/notes/.</step>
+    <step order="10">Run `/conflict-check`, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="11">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If separating the display name from the SPE filename would change behavior for the Email or Attachment content types (whose names come from `OfficeEmailEnricher.GenerateEmlFileName`, not from user input), STOP and escalate per CLAUDE.md §6 rather than adapting. This change is scoped to `ContentType=Document`.</trigger>
+    <trigger>If `sprk_documentname` turns out to be enforced shorter than 850 characters anywhere in the write path, STOP and escalate rather than silently truncating to the smaller bound.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Document Name defaults from the filename">
+      <steps>
+        <step>Open a Word document named "Acme Merger Agreement.docx" and open the Spaarke pane on the Save tab.</step>
+        <step>Observe the Document Name field without typing anything.</step>
+      </steps>
+      <expected>The field shows "Acme Merger Agreement" (no extension), read-only, with a pencil affordance beside it.</expected>
+    </test>
+    <test name="Pencil affordance edits in place and persists">
+      <steps>
+        <step>Click the pencil, change the value to "Acme Merger Agreement - Execution Copy", pick a related record, and Save.</step>
+        <step>Open the resulting `sprk_document` record in Dataverse.</step>
+      </steps>
+      <expected>`sprk_documentname` equals "Acme Merger Agreement - Execution Copy"; `sprk_documentdescription` is not populated with the name; the stored SPE file is named with a sanitized `.docx` filename.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>In Word, switch the Office theme to Dark (File, Account, Office Theme) and reload the pane.</step>
+        <step>Inspect the Document Name field in both its read-only and editing states, including the pencil icon and focus ring.</step>
+      </steps>
+      <expected>Text, border, icon, and focus ring all resolve from Fluent v9 semantic tokens with legible contrast in dark mode; no hardcoded light-mode colors; repeat in Light mode with the same result.</expected>
+    </test>
+    <test name="Keyboard-only operation (NFR-11)">
+      <steps>
+        <step>Using only Tab/Shift+Tab/Enter/Escape, reach the pencil affordance, enter edit mode, change the value, and commit.</step>
+      </steps>
+      <expected>Every state is reachable and operable by keyboard; the transition into and out of edit mode is announced via `useAnnounce`.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run the Office contract tests.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.test.tsx</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/020-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Word document opened in the pane, when the Save tab renders, then the Document Name field is pre-populated with the document's filename minus its extension.</criterion>
+    <criterion testable="true">Given the pre-populated Document Name, when the user clicks the pencil affordance, then the field becomes editable in-pane and the change is announced via `useAnnounce`.</criterion>
+    <criterion testable="true">Given an edited Document Name, when the save completes, then `sprk_documentname` on the created `sprk_document` equals the edited value exactly.</criterion>
+    <criterion testable="true">Given an edited Document Name, when the save completes, then the SPE blob filename is the sanitized value with a `.docx` extension and is NOT overwritten by the display name.</criterion>
+    <criterion testable="true">Given a Document Name longer than 850 characters, when the user saves, then the value is bounded to 850 characters at the write boundary and the save succeeds rather than throwing an unhandled Dataverse length error.</criterion>
+    <criterion testable="true">Negative: given a Document Name left empty, when the user saves, then the save still succeeds using the filename-derived default, and `sprk_documentname` is never empty.</criterion>
+    <criterion testable="true">Negative: the request body sent to `POST /api/office/save` contains no top-level `documentMetadata` object with no corresponding `SaveRequest` member; verified by inspecting the serialized body in the `useSaveFlow` unit test.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the pane renders, then every color in the Document Name field resolves from a Fluent v9 semantic token and no hex literal appears in the modified styles.</criterion>
+    <criterion testable="true">A contract test in `OfficeEndpointsContractTests.cs` asserts the title-to-`sprk_documentname` mapping and is executing (not `[Fact(Skip)]`).</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; `dotnet build` and the Office contract tests pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-06; plan.md §4 Phase 2 task 020. The inverted name/description mapping is the concrete UAT complaint — the record list shows `.docx` filenames instead of the names users typed. The "field can be removed from the Dataverse form without loss" acceptance in FR-06 follows automatically once the value is written to the column rather than being form-only.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

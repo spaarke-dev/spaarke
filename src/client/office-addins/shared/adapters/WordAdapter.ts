@@ -210,10 +210,36 @@ export class WordAdapter implements IHostAdapter {
   }
 
   /**
+   * Get the open document's URL (spaarkeai-word-add-in-r1 FR-01 / task 013).
+   *
+   * Reads `Office.context.document.url` — a Common API property, available without `Word.run` —
+   * EXACTLY as Office reports it. No reshaping, re-encoding, or trimming: Spike-1 verified Word web
+   * and Word desktop return byte-identical raw-space paths that the BFF's identity resolver
+   * (`POST /api/documents/resolve-identity`) consumes as-is.
+   *
+   * An unsaved document (never saved to a cloud location) has no URL. Office reports this as an
+   * empty string, not `undefined` — treated here as a defined, expected `null` result rather than a
+   * throw, per the interface contract.
+   *
+   * @returns Promise resolving to the document's absolute URL, or `null` when the document has none.
+   */
+  async getDocumentUrl(): Promise<string | null> {
+    this.ensureInitialized();
+
+    const url = Office.context.document.url;
+    return url ? url : null;
+  }
+
+  /**
    * Get the document content as an ArrayBuffer.
    *
-   * Retrieves the document in the specified format. For Word documents,
-   * OOXML is the native format and preserves all formatting.
+   * The default (and `ooxml`) path returns the **real .docx binary** (the compressed OOXML package)
+   * via `Office.context.document.getFileAsync(Office.FileType.Compressed)`. This replaces the previous
+   * `body.getOoxml()` approach, which returned FLAT OOXML XML text — not a valid .docx — so SPE could
+   * not preview it, Word could not open it, and AI profiling reported "unsupported file type"
+   * (email-communication-intelligence-r2 UAT 2026-09-03). `getFileAsync(Compressed)` returns the same
+   * bytes Word would write to disk, which every downstream consumer (SPE preview, Compose mount, AI
+   * text extraction) expects. `html`/`text` remain body-scoped extractions for non-save callers.
    *
    * @param options - Options specifying the desired format
    * @returns Promise resolving to the document content as ArrayBuffer
@@ -223,17 +249,16 @@ export class WordAdapter implements IHostAdapter {
 
     const format = options?.format ?? 'ooxml';
 
+    // The save path wants the actual .docx — Compressed is the file Word writes to disk.
+    if (format === 'ooxml') {
+      return this.getCompressedFile();
+    }
+
     return Word.run(async context => {
       const body = context.document.body;
       let content: string;
 
       switch (format) {
-        case 'ooxml': {
-          const ooxml = body.getOoxml();
-          await context.sync();
-          content = ooxml.value;
-          break;
-        }
         case 'html': {
           const html = body.getHtml();
           await context.sync();
@@ -270,6 +295,81 @@ export class WordAdapter implements IHostAdapter {
   }
 
   /**
+   * Read the current document as a compressed .docx via the Common API `getFileAsync`, assembling the
+   * 4 MB-max slices into a single ArrayBuffer. `getFileAsync` returns the document's SAVED state; Office
+   * auto-persists a temporary copy for an unsaved/dirty document, so this works before an explicit save.
+   * Slices are read sequentially (simpler + avoids the parallel-callback edge cases) and the file handle
+   * is always closed.
+   *
+   * Ported verbatim from `word/WordHostAdapter.getCompressedFile()` (deleted in task 010 / FR-04). The
+   * ONLY intentional divergence is the rejection value: this adapter surfaces a typed
+   * `CONTENT_RETRIEVAL_FAILED` `HostAdapterError` instead of a bare `Error`, surfacing the underlying
+   * Office error message as that typed error's `message`. The byte-producing statements (slice size,
+   * read order, concatenation) are character-for-character identical — changing them regresses the
+   * 2026-09-03 UAT defect.
+   */
+  private getCompressedFile(): Promise<ArrayBuffer> {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      Office.context.document.getFileAsync(Office.FileType.Compressed, { sliceSize: 65536 }, result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(
+            this.createError(
+              'CONTENT_RETRIEVAL_FAILED',
+              result.error?.message || 'Failed to read the Word document (getFileAsync).'
+            )
+          );
+          return;
+        }
+
+        const file = result.value;
+        const sliceCount = file.sliceCount;
+        const slices: Uint8Array[] = new Array(sliceCount);
+
+        const finish = (err?: HostAdapterError) => {
+          file.closeAsync(() => {
+            /* best-effort close */
+          });
+          if (err) {
+            reject(err);
+            return;
+          }
+          const total = slices.reduce((n, s) => n + s.length, 0);
+          const out = new Uint8Array(total);
+          let offset = 0;
+          for (const s of slices) {
+            out.set(s, offset);
+            offset += s.length;
+          }
+          resolve(out.buffer);
+        };
+
+        const readSlice = (index: number): void => {
+          if (index >= sliceCount) {
+            finish();
+            return;
+          }
+          file.getSliceAsync(index, sliceResult => {
+            if (sliceResult.status !== Office.AsyncResultStatus.Succeeded) {
+              finish(
+                this.createError(
+                  'CONTENT_RETRIEVAL_FAILED',
+                  sliceResult.error?.message || `Failed to read document slice ${index}.`
+                )
+              );
+              return;
+            }
+            const data = sliceResult.value.data as unknown;
+            slices[index] = data instanceof Uint8Array ? data : Uint8Array.from(data as number[]);
+            readSlice(index + 1);
+          });
+        };
+
+        readSlice(0);
+      });
+    });
+  }
+
+  /**
    * Get the capabilities of this adapter.
    *
    * Word adapter supports document content retrieval and link insertion,
@@ -285,6 +385,7 @@ export class WordAdapter implements IHostAdapter {
       canGetRecipients: false,
       canGetSender: false,
       canGetDocumentContent: isApiSupported,
+      canGetDocumentUrl: true,
       canSaveAsPdf: true, // Server-side conversion
       canSaveAsEml: false,
       canInsertLink: isApiSupported,

@@ -4,6 +4,13 @@
  * This file runs before each test file and sets up global mocks.
  */
 
+// Registers the jest-dom custom matchers (toBeInTheDocument, toHaveTextContent,
+// etc.) used throughout this package's component tests. The matchers were
+// referenced but the package was never installed — task 009 (2026-09-09)
+// added the dependency and this import to close the gap identified in task
+// 001's baseline (notes/typecheck-baseline.md).
+require('@testing-library/jest-dom');
+
 // TextEncoder/TextDecoder are not exposed by jsdom's test environment (Node's
 // implementations exist, but jsdom doesn't put them on `global`). Required by
 // `computeIdempotencyKey` (useSaveFlow.ts) and any other code path that
@@ -72,6 +79,27 @@ global.Office = {
     Text: 'text',
     Html: 'html',
     Ooxml: 'ooxml',
+  },
+  // Task 010 / FR-04: the Word .docx save path reads
+  // `Office.context.document.getFileAsync(Office.FileType.Compressed, ...)`. `FileType` was absent
+  // from this stub, so any test of that path saw `undefined.Compressed` and threw before reaching
+  // the adapter.
+  FileType: {
+    Text: 'text',
+    Compressed: 'compressed',
+    Pdf: 'pdf',
+  },
+  // Task 010 / FR-04: `OutlookAdapter.test.ts` reads `Office.MailboxEnums.Importance.Normal` at
+  // module scope. `MailboxEnums` was absent here, so that ENTIRE suite failed to run with
+  // "Cannot read properties of undefined (reading 'Importance')" — one of the two Office.js mock
+  // gaps recorded in task 017's notes. The Outlook adapter suite is this task's step-5
+  // Outlook-unregressed evidence, so the gap had to close for the verification to mean anything.
+  MailboxEnums: {
+    Importance: { Low: 'low', Normal: 'normal', High: 'high' },
+    ItemType: { Message: 'message', Appointment: 'appointment' },
+    AttachmentType: { File: 'file', Item: 'item', Cloud: 'cloud' },
+    RecipientType: { DistributionList: 'distributionList', ExternalUser: 'externalUser', Other: 'other', User: 'user' },
+    BodyType: { Html: 'html', Text: 'text' },
   },
 };
 

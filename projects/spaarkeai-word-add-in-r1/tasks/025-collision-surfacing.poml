@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-12: surface collision handling per the Spike-4 outcome</title>
+    <phase>2 Save flow</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Save-path change on the BFF upload spine with a data-loss failure mode (a silent REPLACE overwrites an existing file's bytes); tags include bff-api + save-flow.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Once Spike-4 has fixed the shape, the work is surfacing an existing typed error in the pane against a named reference dialog. If the spike concludes the path has no protection at all, the escalation trigger fires rather than this task improvising a design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Its scope is undetermined until Spike-4 (task 005) closes, so it cannot be safely co-scheduled — the files it touches and whether it is a client-only surfacing or a server change are both outputs of the spike.</parallel-reason>
+    <deps>005</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addins, save-flow, spe, data-integrity</tags>
+    <estimated-effort>unsized until Spike-4 closes; provisionally 4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Surface upload-filename-collision handling in the add-in pane, in whatever shape Spike-4 (task 005) determined is correct for the add-in's actual save path. Introduce NO new collision logic — spec FR-12 says consume the shipped handling, do not rebuild it.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the BFF Office save spine, SharePoint Embedded upload conflict semantics, and Fluent UI v9 task-pane dialogs. Follow ADRs strictly.</role>
+
+  <goal>A filename collision originating from the add-in's save produces a user-visible, non-destructive outcome consistent with the shipped two-option handling, with the existing file's bytes provably untouched — and the diff introduces no second collision-detection mechanism.</goal>
+
+  <context>
+    <background>
+      spec.md FR-12 says the data-loss bug is ALREADY FIXED by `unified-access-control-r2` (2026-09-02) and the add-in's job is only to surface the typed conflict error and honor the two-option choice.
+
+      plan.md finding F-a says FR-12's premise DOES NOT HOLD for the add-in, and this is the verified position:
+      - The shipped collision handling lives on `PUT /api/obo/.../files/{name}`. `Api/OBOEndpoints.cs:558` `ResolveConflictBehavior` defaults to `Fail`.
+      - It is surfaced by `@spaarke/sdap-client` `src/operations/UploadOperation.ts:138`, which throws `UploadNameConflictError`.
+      - The two-option dialog is `src/solutions/DocumentUploadWizard/src/components/FileUploadProgress.tsx:306` ("Keep both", which renames) and `:314` ("Save as new version", which replaces).
+      - BUT the add-in does not use that path, and `src/client/office-addins` does NOT depend on `@spaarke/sdap-client` at all. It saves JSON plus base64 via `POST /api/office/save`, which queues a job and uploads through `Services/Office/OfficeStorageUploader.cs`. That uploader contains NO `conflictBehavior` handling of any kind.
+
+      Therefore this task is BLOCKED on Spike-4 (task 005), which traces `OfficeStorageUploader` through `SpeFileStore` and produces a CLAUDE.md §6.5 path recommendation (A: project-scoped exception, B: ADR amendment, C: pivot to comply). Its output is `projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md`.
+
+      Coordination: `unified-access-control-r2` task 094 owns the remaining refinement (a pre-flight probe before bytes move, plus a "Use existing" option). Do not duplicate it.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SdapClient/src/operations/UploadOperation.ts</file>
+      <file role="canonical-reference">src/solutions/DocumentUploadWizard/src/components/FileUploadProgress.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/utils/errorMessages.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Spike-4 — determines whether the add-in's save path shares the shipped collision semantics, what `conflictBehavior` (if any) `OfficeStorageUploader` uses, and the §6.5 path recommendation that fixes this task's scope. This task cannot start until that report exists.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — spec FR-12 is explicit: introduce NO new collision logic. Within this task, do not write a second conflict detector, a second conflict-behavior resolver, or a second collision dialog. If Spike-4 concluded the add-in path needs server-side conflict behavior it does not have, that is a re-scoping decision, not something to implement inside this task.</constraint>
+    <constraint source="project">SCOPE — the exact paths named in F-a are the shipped implementation and are the reference, not the target: `OBOEndpoints.cs:558`, `UploadOperation.ts:138`, `FileUploadProgress.tsx:306` and `:314`. MUST NOT modify any of them from this project; UAC-r2 owns them.</constraint>
+    <constraint source="project">SCOPE — `unified-access-control-r2` task 094 owns the pre-flight probe and the "Use existing" option. MUST NOT duplicate either in this task; coordinate via `/conflict-check` and the project INDEX.</constraint>
+    <constraint source="project">SCOPE — the non-destructive invariant: whatever this task ships, an existing file's bytes MUST be provably untouched by a colliding add-in save. That property is testable and is an acceptance criterion, not a claim.</constraint>
+    <constraint source="ADR-007">SCOPE — any SPE conflict behavior travels through the `SpeFileStore` facade. MUST NOT let a Microsoft.Graph SDK type leak into `OfficeStorageUploader` or `OfficeService`.</constraint>
+    <constraint source="ADR-019">SCOPE — a collision surfaces as a typed, distinguishable ProblemDetails response the client can branch on. MUST NOT surface as a generic 500 or as a success with silently different content.</constraint>
+    <constraint source="ADR-021">SCOPE — for any collision UI in the pane: Fluent UI v9 semantic tokens only, no hex literals; honors the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="ADR-050">SCOPE — if the collision choice is presented as a Spaarke-rendered modal, it follows the canonical modal shell. Per this project's Path C resolution, ADR-050 governs Spaarke-rendered modals; consult `docs/standards/MODAL-DECISION-CRITERIA.md` before choosing modal versus inline in the narrow pane.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, the UI is a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components`, and MUST NOT add a dependency on `@spaarke/sdap-client` solely to reuse its error type — mirror the type if needed and say so.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT import any Xrm-bound component.</constraint>
+    <constraint source="ADR-044">SCOPE — any Dataverse GUID crossing a boundary in this task is canonicalized bare-lowercase via `cleanGuid`.</constraint>
+    <constraint source="ADR-038">SCOPE — any endpoint this task modifies gets contract coverage, and the non-destructive property gets an integration test that reads the existing file's bytes before and after. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for any BFF-side change per `.claude/constraints/bff-extensions.md`, and MUST cite the Spike-4 decision record and the §6.5 path chosen.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening this BFF PR. `unified-access-control-r2` is live on exactly this surface.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE upload conflict behavior, Office save spine, collision UX</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. A two-option choice must fit the narrow pane; prefer inline over a modal unless MODAL-DECISION-CRITERIA says otherwise.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Any authorization on the save endpoint stays on its filter.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md and spec.md FR-12. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">READ `projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md` FIRST and confirm the CLAUDE.md §6.5 path decision (A, B, or C) before writing ANY code. If the file does not exist, this task is not startable — stop and report that task 005 has not closed.</step>
+    <step order="2">Restate the spike's conclusion in your own words in the task log: what `conflictBehavior` (if any) the add-in's upload path uses today, whether a typed conflict error reaches the client, and which §6.5 path was chosen. If your reading of the code contradicts the spike report, fire the escalation trigger rather than proceeding on either.</step>
+    <step order="3">Implement only what the chosen path sanctions. If path C (pivot to comply): surface the already-typed error in the pane and honor the two-option choice, mirroring the reference dialog's semantics without importing it. If path A (documented exception): implement the narrow, documented deviation and record it in spec.md's ADR Tensions section per §6.5.</step>
+    <step order="4">Add the non-destructive integration test: capture the existing file's bytes and version before a colliding add-in save, and assert they are unchanged afterwards.</step>
+    <step order="5">Add contract coverage for the collision response shape on whatever endpoint the chosen path touches.</step>
+    <step order="6">Add client unit tests for the two-option branch and for the case where the user dismisses the choice (no bytes moved, no record created).</step>
+    <step order="7">Run `npm run typecheck`, `npm test`, `npm run build`; run `dotnet build` and the Office contract + integration tests. All green.</step>
+    <step order="8">Measure BFF publish size against a fresh `origin/master` build per the constraint above; record both absolute sizes, the delta, and the zip tool.</step>
+    <step order="9">Run `/conflict-check` (UAC-r2 task 094 is on this surface), then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation, and the final §6.5 path taken, in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Spike-4 concluded that the add-in's save path has NO collision protection at all, this task's scope has changed materially — it becomes new work, contradicting FR-12's "consume, do not rebuild". STOP and escalate per CLAUDE.md §6 for re-scoping rather than implementing collision handling under this task id.</trigger>
+    <trigger>If your own reading of `OfficeStorageUploader` / `SpeFileStore` contradicts the spike report's conclusion, STOP and escalate rather than proceeding on either version — an empirical disagreement about the write path is exactly the §F.3 reproduce-first situation.</trigger>
+    <trigger>If the implementation would require changing `OBOEndpoints.cs`, `UploadOperation.ts`, or `FileUploadProgress.tsx`, STOP and escalate — `unified-access-control-r2` owns all three and task 094 is live on that surface.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Colliding save surfaces a non-destructive choice">
+      <steps>
+        <step>Save a Word document named "Engagement Letter.docx" to a matter.</step>
+        <step>Open a different document, name it identically, and save it to the same matter.</step>
+      </steps>
+      <expected>The pane surfaces the collision with the two shipped options rather than silently replacing; the first file's bytes are unchanged regardless of which option is chosen.</expected>
+    </test>
+    <test name="Dismissing the choice is inert">
+      <steps>
+        <step>Trigger the collision, then dismiss or cancel the choice.</step>
+      </steps>
+      <expected>No bytes are written, no `sprk_document` row is created, and the pane returns to the editable save form with the error dismissible.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark and reload the pane; trigger the collision and view the choice UI.</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens with legible contrast in dark mode; no hex literals; repeat in Light mode with the same result.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF; run the Office contract and integration tests.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/025-collision-decision.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/025-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Spike-4 report exists, when this task starts, then its §6.5 path decision is restated in the task log and cited in the PR description before any code is written.</criterion>
+    <criterion testable="true">Given a filename collision from an add-in save, when the save runs, then the existing file's bytes and version are provably unchanged — asserted by an integration test that reads them before and after.</criterion>
+    <criterion testable="true">Given a filename collision, when it reaches the pane, then the user is presented with the shipped two-option choice and the outcome matches the option chosen.</criterion>
+    <criterion testable="true">Negative: given the user dismisses the collision choice, when the flow returns, then no bytes were written and no `sprk_document` row was created.</criterion>
+    <criterion testable="true">Negative: given a collision, when the response is inspected, then it is a typed, distinguishable ProblemDetails the client branches on — never a generic 500 and never a success with different content.</criterion>
+    <criterion testable="true">The diff introduces no new collision-detection mechanism: no second conflict-behavior resolver, no second typed conflict error definition beyond a documented mirror, and no second collision dialog — verified by grep and stated in the PR.</criterion>
+    <criterion testable="true">`git diff --name-only` shows no change to `src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs`, `src/client/shared/Spaarke.SdapClient/**`, or `src/solutions/DocumentUploadWizard/**`.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the collision UI renders, then every color resolves from a Fluent v9 semantic token and no hex literal appears in the added styles.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; `dotnet build` and the Office contract + integration tests pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-12 + Success Criterion 6; plan.md §3 finding F-a, §4 Phase 2 task 025, and risk R-2. The gate is `blocked` deliberately: this task's file list above is provisional and will be narrowed or widened by the spike. `parallel-safe` is false for the same reason — do not co-schedule it into a wave until Spike-4 has closed and the scope is fixed.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

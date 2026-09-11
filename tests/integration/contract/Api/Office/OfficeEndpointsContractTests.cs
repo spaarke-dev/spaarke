@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -20,8 +21,13 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.Services.Compose;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
@@ -44,7 +50,16 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #region Save Endpoint Tests
 
-    [Fact(Skip = "Requires fully mocked Office services - ContainerId not configured in test")]
+    // Un-skipped by task 016. Root cause per notes/016-fixture-diagnosis.md §1: the fixture had NO
+    // working stand-in for the save pipeline's Dataverse/SPE/Service-Bus collaborators
+    // (RecordContainerResolver → ISecurableEntityRegistry, SpeFileStore upload, OfficeJobQueue's
+    // ServiceBusClient, and IDataverseService's CreateDocumentAsync/CreateProcessingJobAsync), all
+    // now doubled in OfficeTestWebAppFactory.ConfigureTestServices. A SEPARATE, previously-unrecorded
+    // defect was also found empirically (§F.3): "sprk_matter" fails ValidateSaveRequest's association
+    // check, which accepts only the FRIENDLY entity names ("matter", "project", ...) — see the type
+    // comment on OfficeEndpoints.ValidateSaveRequest. "matter" below is the corrected arrangement, not
+    // a weakened assertion; the response-shape assertions are unchanged.
+    [Fact]
     public async Task Post_OfficeSave_WithValidRequest_Returns202Accepted()
     {
         // Arrange
@@ -59,7 +74,7 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
             },
             TargetEntity = new SaveEntityReference
             {
-                EntityType = "sprk_matter",
+                EntityType = "matter",
                 EntityId = Guid.NewGuid()
             }
         };
@@ -78,7 +93,14 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
         result.StreamUrl.Should().Contain("/stream");
     }
 
-    [Fact(Skip = "Requires fully mocked Office services - test auth handler always authenticates")]
+    // Un-skipped by task 016. The recorded skip reason ("test auth handler always authenticates") was
+    // STALE (§F.3): TestAuthHandler below has authenticated unconditionally UNLESS the caller sends
+    // "X-Test-Unauthenticated" ever since task 073 added that branch — Post_OfficeCreateTodo_WhenUnauthenticated_Returns401
+    // already exercises it successfully in this same file. The original arrangement removed the
+    // "Authorization" header, which TestAuthHandler never reads, so it authenticated anyway. Switching
+    // to the header the handler DOES check is the fix; the 401 assertion is unchanged and now exercises
+    // the real RequireAuthorization() pipeline rather than bypassing it.
+    [Fact]
     public async Task Post_OfficeSave_WithoutAuth_Returns401()
     {
         // Arrange
@@ -86,7 +108,7 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
         {
             AllowAutoRedirect = false
         });
-        client.DefaultRequestHeaders.Remove("Authorization");
+        client.DefaultRequestHeaders.Add("X-Test-Unauthenticated", "true");
 
         var request = new SaveRequest
         {
@@ -603,6 +625,15 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
                 ["AgentService:AgentId"] = "test-agent-id",
                 ["AgentService:MaxConcurrency"] = "4",
                 ["AgentService:ThreadCacheExpiryMinutes"] = "60",
+
+                // task 016 (§F.2 Fixture-Config-FIRST): the original skip reason on the save-happy-path
+                // test named this key by name — "ContainerId not configured in test". OfficeService.
+                // ResolveContainerAsync falls back to this when the target record is not securable (see
+                // ISecurableEntityRegistry override below) and the caller supplied no explicit container.
+                // "b!"-prefixed so SpeFileStore.ResolveDriveIdAsync's non-virtual short-circuit applies —
+                // it returns a "b!" id unchanged without calling Graph (see the NOTE beside the SpeFileStore
+                // mock below).
+                ["EmailProcessing:DefaultContainerId"] = "b!test-office-save-drive",
             };
             config.AddInMemoryCollection(dict!);
         });
@@ -658,11 +689,106 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // Register Office rate limit service
             services.AddSingleton<IOfficeRateLimitService, OfficeRateLimitService>();
 
-            // Mock IDataverseService to avoid real Dataverse connection
+            // Mock IDataverseService to avoid real Dataverse connection. IDataverseService is the ONE
+            // composite implementation DI hands out for IDocumentDataverseService, IGenericEntityService
+            // AND IProcessingJobService too (GraphModule.cs registers all three as
+            // sp.GetRequiredService<IDataverseService>()), so the two Setups below satisfy
+            // OfficeDocumentPersistence's document create AND OfficeService's job create with one mock —
+            // no separate IProcessingJobService/IDocumentDataverseService override needed (task 016 §F.2).
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            dataverseServiceMock
+                .Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => Guid.NewGuid().ToString());
+            dataverseServiceMock
+                .Setup(d => d.CreateProcessingJobAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => Guid.NewGuid());
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // task 016 (§F.2): RecordContainerResolver.ResolveForRecordAsync consults this BEFORE ever
+            // touching IGenericEntityService — an entity absent from the securable set short-circuits to
+            // "non-secure, no own container", which is what lets the save fall through to the
+            // EmailProcessing:DefaultContainerId configured above. An empty set here means every
+            // TargetEntity in this test class is treated as non-secure (this file tests the SAVE
+            // endpoint's HTTP contract, not record-security semantics — those have their own coverage
+            // under RecordContainerResolver's and SecureContainerDecision's own unit tests).
+            var securableEntitiesMock = new Mock<ISecurableEntityRegistry>();
+            securableEntitiesMock
+                .Setup(r => r.IsSecurableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+            securableEntitiesMock
+                .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new HashSet<string>(StringComparer.Ordinal));
+            services.RemoveAll<ISecurableEntityRegistry>();
+            services.AddSingleton(securableEntitiesMock.Object);
+
+            // task 016 (§F.2): module-boundary double of the SpeFileStore facade (ADR-007, ADR-038 §4) —
+            // the established idiom, matching tests/integration/data-mutation/SpeUploadPaths/
+            // SpeFlatUploadPathTests.cs BuildSpeMock. Only UploadSmallAsync (virtual) is exercised by the
+            // save path here.
+            //
+            // NOTE: ResolveDriveIdAsync is deliberately NOT set up — it is non-virtual, so Moq cannot
+            // intercept it. It does not need to be: the real implementation returns its argument unchanged
+            // when it already starts with "b!" (SharePoint drive ids do), short-circuiting before any
+            // Graph call — see EmailProcessing:DefaultContainerId above and SpeFileStore.cs
+            // ResolveDriveIdAsync.
+            var graphClientFactory = Mock.Of<IGraphClientFactory>();
+            var containerOps = new ContainerOperations(graphClientFactory, Mock.Of<ILogger<ContainerOperations>>());
+            var driveItemOps = new DriveItemOperations(graphClientFactory, Mock.Of<ILogger<DriveItemOperations>>());
+            var uploadMgr = new UploadSessionManager(
+                graphClientFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
+            var userOps = new UserOperations(graphClientFactory, Mock.Of<ILogger<UserOperations>>());
+            var speFileStoreMock = new Mock<SpeFileStore>(
+                MockBehavior.Loose, containerOps, driveItemOps, uploadMgr, userOps, null!);
+            speFileStoreMock
+                .Setup(s => s.UploadSmallAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string path, Stream _, CancellationToken _) =>
+                    (FileHandleDto?)new FileHandleDto(
+                        Id: $"item-{Guid.NewGuid():N}",
+                        Name: path,
+                        ParentId: null,
+                        Size: 3,
+                        CreatedDateTime: DateTimeOffset.UtcNow,
+                        LastModifiedDateTime: DateTimeOffset.UtcNow,
+                        ETag: null,
+                        IsFolder: false,
+                        WebUrl: "https://contoso.sharepoint.com/sites/test/Shared%20Documents/test.eml"));
+            services.RemoveAll<SpeFileStore>();
+            services.AddScoped(_ => speFileStoreMock.Object);
+
+            // task 016 (§F.2): OfficeJobQueue ALWAYS queues a finalization job on a successful save (it is
+            // not best-effort — an unhandled exception here was falling through to OfficeService.SaveAsync's
+            // outer catch and turning the response into Success=false). ServiceBusClient/ServiceBusSender are
+            // Azure-SDK client types designed to be mocked (virtual members, protected parameterless ctor) —
+            // same idiom already used by MembershipEventPublisherTests. OfficeJobQueue itself has no virtual
+            // members, so it is constructed for real with this fake Service Bus client rather than mocked.
+            var serviceBusSenderMock = new Mock<ServiceBusSender>();
+            serviceBusSenderMock
+                .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            var serviceBusClientMock = new Mock<ServiceBusClient>();
+            serviceBusClientMock.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(serviceBusSenderMock.Object);
+            services.RemoveAll<OfficeJobQueue>();
+            services.AddScoped(sp => new OfficeJobQueue(
+                serviceBusClientMock.Object,
+                Options.Create(new ServiceBusOptions()),
+                sp.GetRequiredService<ILogger<OfficeJobQueue>>()));
+
+            // task 016 (§F.2 / §F.3 — discovered empirically, not from the recorded skip reason): the save
+            // route ALSO carries EntityAccessFilter ("entity.associate_document"), which is a SEPARATE
+            // authorization decision from the ones the recorded skip reason named — it asks whether the
+            // caller may APPEND a document to the TargetEntity (the matter), via CallerRecordAccessProbe,
+            // which runs an OBO delegation check against Dataverse. TestAuthHandler's claims carry no real
+            // bearer token, so the real probe fails closed (AccessRights.None) and the save 403s before
+            // ever reaching OfficeService — this was NOT in the original skip comment and was found only by
+            // running the test and reading the 403 (§F.3 empirical-reproduction-first). Reused verbatim:
+            // ComposeServiceCollaborators.Probe() is CallerRecordAccessProbe's own designated test seam
+            // (its type doc: "public virtual precisely so tests can substitute the authorization answer
+            // without mocking its HttpClient transport" — ADR-038 §4), already built for exactly this.
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddScoped(_ => ComposeServiceCollaborators.Probe().Object);
         });
     }
 }

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Project wrap-up, lessons learned, test-diet gate</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>042 complete — the add-in and BFF are deployed and UAT has been run</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation, reconciliation and archival. No application code is created or modified. Quality gates skipped per the MINIMAL default; the `/test-diet` gate is separately mandatory per root CLAUDE.md §7.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reconciliation and summarization against artifacts that already exist. No architectural or security judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>042</deps>
+    <tags>documentation, wrapup, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project. Run `/test-diet` **before** marking it complete — it is a binding gate under root CLAUDE.md §7, not a formality. Write the lessons-learned record, and reconcile `notes/defer-issues.md` against GitHub Issues so no deferred item exists only in local notes.</prompt>
+
+  <role>SPAARKE platform developer closing out a project. Expertise in the project lifecycle: test reconciliation, deferral tracking, and documentation drift. Follow ADRs strictly.</role>
+
+  <goal>`/test-diet` has run and `notes/test-diet-report.md` exists with its scaffolding-vs-maintain classification. `notes/lessons-learned.md` records what the project taught, including which of the six discovery findings held. Every entry in `notes/defer-issues.md` has a GitHub Issue URL, and every project-related open GitHub Issue has an entry. `TASK-INDEX.md` and `current-task.md` reflect a completed project.</goal>
+
+  <context>
+    <background>
+      **The `/test-diet` gate (root CLAUDE.md §7, binding since 2026-06-26).** When a `090-wrapup-*` task runs, `task-execute` Step 11 invokes `/test-diet` BEFORE the project is marked complete. It reconciles every test added or modified during the project against the ADR-038 §7 build-vs-maintain classifier: MAINTAIN-class tests stay at their KEEP path, SCAFFOLDING-class tests are deleted, AMBIGUOUS tests need reviewer judgment. The skill is **read-only** — it emits `git rm` / `git mv` commands for a reviewer and does not execute them. Output goes to `projects/spaarkeai-word-add-in-r1/notes/test-diet-report.md`. Skipping the gate is a HARD WARNING and the wrap-up PR must cite the report or document the skip rationale.
+
+      **Deferral tracking obligation (project CLAUDE.md).** Deferred work and newly-discovered issues live in **both** `notes/defer-issues.md` (source of truth) and GitHub Issues (visibility). `push-to-github` blocks the push on any entry lacking a GitHub URL. Task 040 and task 042 both file defects this way, so this task's job is reconciliation, not first capture.
+
+      **What this project should have learned.** Discovery recorded six findings that modified the spec (plan.md §3): F-a (the collision-handling premise), F-b (the missing per-row authorization), F-c (no single similar-documents-and-records endpoint), F-d (the inert `ExistingDocumentId` hook), F-e (the `.docx` save regression risk in FR-04), F-f (zero executing contract coverage on `POST /api/office/save`). Whether each held under execution is the most valuable thing the lessons-learned record can carry forward — four gating spikes and a security finding is an unusual discovery yield, and the process that produced it is worth naming.
+    </background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/lessons-learned.md</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/test-diet-report.md</file>
+      <file role="modify">projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+      <file role="modify">projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/spaarkeai-word-add-in-r1/current-task.md</file>
+      <file role="modify">projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/042-uat-results.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="pending">Deployment and UAT results, including any defects filed during UAT that this task must find reconciled against GitHub Issues.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">`/test-diet` MUST be invoked BEFORE the project is marked complete (root CLAUDE.md §7). Its output goes to `projects/spaarkeai-word-add-in-r1/notes/test-diet-report.md`. Skipping it is a HARD WARNING and requires the skip rationale in the wrap-up PR description.</constraint>
+    <constraint source="project">`/test-diet` is **read-only** — it emits `git rm` / `git mv` commands for a reviewer. This task MUST NOT auto-execute those commands. Deleting a test the classifier called SCAFFOLDING is a reviewer decision, not an agent action.</constraint>
+    <constraint source="project">Every entry in `notes/defer-issues.md` MUST carry a GitHub Issue URL, and every open GitHub Issue filed by this project MUST have a corresponding entry. Use `/project-defer-issue-tracking` to add anything missing — never add an entry to the notes file alone.</constraint>
+    <constraint source="CLAUDE.md §11">Every deferral entry must name a concrete behavior or contract that fails without the work. "Future flexibility" / "separation of concerns" is not a reason. Reconciliation includes pruning or rewriting any entry that cannot meet that bar.</constraint>
+    <constraint source="project">Scope: documentation, reconciliation and status updates only. Do NOT modify application code, tests, or CI workflows in this task. If wrap-up surfaces a code defect, file it — do not fix it here.</constraint>
+    <constraint source="project">MUST NOT edit `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml` — frozen under the shadow-comparison window opened 2026-08-27.</constraint>
+    <constraint source="project">`notes/lessons-learned.md` MUST state, for each of the six discovery findings F-a through F-f, whether it held under execution. A lessons-learned record that omits the findings the project was built around has no carry-forward value.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out: test reconciliation, deferral tracking, documentation drift</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="none" location="n/a">No code pattern applies — this task produces documentation and reconciliation artifacts only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `plan.md` §3 (the six findings), and `notes/042-uat-results.md`. Emit the mandatory rigor declaration (MINIMAL / sonnet / medium).</step>
+    <step order="1">Invoke `/test-diet`. Confirm `notes/test-diet-report.md` is written and read its classification. Do NOT execute the emitted `git rm` / `git mv` commands — surface them for the reviewer.</step>
+    <step order="2">Reconcile `notes/defer-issues.md` against GitHub Issues in both directions: every note entry has an Issue URL, and every project-filed open Issue has a note entry. Add anything missing via `/project-defer-issue-tracking`. Prune or rewrite entries that cannot name a concrete failing behavior (CLAUDE.md §11).</step>
+    <step order="3">Write `notes/lessons-learned.md`. Cover: which of F-a…F-f held under execution; what the four Phase-0 spikes returned and how they changed scope; whether the FULL/opus/xhigh tiering matched where the difficulty actually was; and any procedure or constraint that should change as a result.</step>
+    <step order="4">Run `/doc-drift-audit` (or an equivalent targeted check) over the docs this project touched — `docs/architecture/office-outlook-teams-integration-architecture.md` and `src/client/office-addins/CLAUDE.md` — and record any drift found as a deferral rather than fixing it here.</step>
+    <step order="5">Update `projects/spaarkeai-word-add-in-r1/CLAUDE.md`: set Phase to complete, Current Task to none, and add the significant execution decisions to the Decisions Made table.</step>
+    <step order="6">Reset `current-task.md` to "none — project complete" per root CLAUDE.md §7.</step>
+    <step order="7">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅ and confirm every other task is ✅, deferred, or explicitly recorded as not done with a reason.</step>
+    <step order="8">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `/test-diet` classifies a substantial number of this project's tests as SCAFFOLDING — particularly the NFR-02 negative authorization test from task 032 — STOP and escalate per CLAUDE.md §6 rather than accepting the classification. That test is the gate for a shipped security fix; deleting it would remove the only proof the fix holds.</trigger>
+    <trigger>If reconciliation finds deferred entries that describe unfinished spec requirements rather than genuine deferrals, STOP and escalate — the project may not be complete, and marking it so would hide that.</trigger>
+    <trigger>If any Success Criterion in `notes/042-uat-results.md` is recorded as fail or blocked with no corresponding GitHub Issue, STOP and escalate before closing the project.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="test-diet">`/test-diet` — the binding project-close gate; read-only, emits reviewer commands.</tool>
+    <tool name="gh">List and cross-check the project's GitHub Issues against `notes/defer-issues.md`.</tool>
+    <tool name="project-defer-issue-tracking">`/defer` — writes both `notes/defer-issues.md` and a GitHub Issue in one step.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/test-diet-report.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/test-diet` was invoked BEFORE the project was marked complete, and `notes/test-diet-report.md` exists with its scaffolding-vs-maintain classification.</criterion>
+    <criterion testable="true">Negative: no `git rm` or `git mv` command emitted by `/test-diet` was executed by this task — the report's recommendations are surfaced for a reviewer, not applied.</criterion>
+    <criterion testable="true">Every entry in `notes/defer-issues.md` carries a GitHub Issue URL, and every open GitHub Issue filed by this project has a corresponding note entry — verified in both directions.</criterion>
+    <criterion testable="true">Every deferral entry names a concrete behavior or contract that fails without the work (CLAUDE.md §11); none rests on "future flexibility" or "separation of concerns".</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists and states, for each of F-a through F-f, whether the finding held under execution.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` records what the four Phase-0 spikes returned and how each changed scope.</criterion>
+    <criterion testable="true">`projects/spaarkeai-word-add-in-r1/CLAUDE.md` shows Phase complete and Current Task none, and `current-task.md` reads "none — project complete".</criterion>
+    <criterion testable="true">`TASK-INDEX.md` shows every task as ✅, deferred, or explicitly not-done with a recorded reason — no task is left ambiguous.</criterion>
+    <criterion testable="true">Negative: no application code, test file, or CI workflow was modified by this task — verified by `git diff --stat` showing only `projects/spaarkeai-word-add-in-r1/**` paths.</criterion>
+    <criterion testable="true">Negative: `ci-router.yml`, `ci-tier1-blocking.yml` and `ci-tier2-advisory.yml` are unmodified.</criterion>
+    <criterion testable="true">Every fail or blocked Success Criterion in `notes/042-uat-results.md` has a corresponding GitHub Issue.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Root CLAUDE.md §7 (project-close test-diet gate, binding since 2026-06-26) and the project CLAUDE.md deferral-tracking obligation. plan.md §3 lists the six findings this task must report back on. The wrap-up PR description must cite `notes/test-diet-report.md` or document why the gate was skipped.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

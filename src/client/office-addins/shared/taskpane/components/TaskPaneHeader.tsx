@@ -123,7 +123,6 @@ function getThemeIcon(preference: ThemePreference): React.ReactElement {
 
 export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
   title = 'Spaarke',
-  hostType = 'outlook',
   userName,
   userEmail,
   isAuthenticated = false,

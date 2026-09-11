@@ -6,7 +6,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Visualization;
 using Sprk.Bff.Api.Tests.Api.Ai;
@@ -148,6 +150,7 @@ public sealed class TenantSelectionByRequestTests
     {
         var service = new Mock<IVisualizationService>();
         var httpContext = new DefaultHttpContext { User = PrincipalIn(TenantA) };
+        GrantRowAuthorizationSignal(httpContext, VisualizationAuthorizationSubject.UploadedContent);
         httpContext.Request.QueryString = new QueryString($"?tenantId={TenantB}");
         httpContext.Request.ContentType = "multipart/form-data; boundary=----test";
         httpContext.Request.Form = new FormCollection(
@@ -187,6 +190,7 @@ public sealed class TenantSelectionByRequestTests
             .ReturnsAsync(new DocumentGraphResponse());
 
         var httpContext = new DefaultHttpContext { User = PrincipalIn(TenantA) };
+        GrantRowAuthorizationSignal(httpContext, VisualizationAuthorizationSubject.SourceDocument);
         httpContext.Request.QueryString = new QueryString($"?tenantId={TenantB}");
 
         await VisualizationEndpoints.GetRelatedDocuments(
@@ -194,6 +198,7 @@ public sealed class TenantSelectionByRequestTests
             new VisualizationQueryParameters(),
             httpContext,
             service.Object,
+            NeverConsultedAuthorization.Instance,
             NullLogger<Program>.Instance,
             CancellationToken.None);
 
@@ -214,6 +219,44 @@ public sealed class TenantSelectionByRequestTests
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "the graph must still be returned — scoped to the caller's own tenant");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers for the visualization routes' row-authorization contract
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Both visualization handlers REFUSE (500) unless their filter published the per-row obligation
+    /// (word-add-in-r1 task 032, NFR-02). These are tenant-boundary tests, not authorization tests, so
+    /// they grant the signal and go on asserting about tenants — but they must grant it explicitly,
+    /// because a handler that silently served rows without it is the defect task 032 closed. The
+    /// forcing function itself is covered in
+    /// <c>tests/integration/contract/Api/Ai/VisualizationRowAuthorizationContractTests.cs</c>.
+    /// </summary>
+    private static void GrantRowAuthorizationSignal(
+        HttpContext httpContext, VisualizationAuthorizationSubject subject) =>
+        httpContext.Items[VisualizationAuthorization.HttpContextItemsKey] = new VisualizationAuthorization
+        {
+            RequiresPerRowDocumentAuthorization = true,
+            Subject = subject,
+        };
+
+    /// <summary>
+    /// The graph these tests stub is EMPTY, so row authorization has nothing to authorize and must never
+    /// be reached. Throwing rather than returning a permissive default: if a future change makes the
+    /// handler consult it here, that is a fact worth failing on rather than absorbing.
+    /// </summary>
+    private sealed class NeverConsultedAuthorization : IAiAuthorizationService
+    {
+        public static readonly NeverConsultedAuthorization Instance = new();
+
+        public Task<Sprk.Bff.Api.Services.Ai.AuthorizationResult> AuthorizeAsync(
+            ClaimsPrincipal user,
+            IReadOnlyList<Guid> documentIds,
+            HttpContext httpContext,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(
+                "Row authorization must not be consulted for a graph with no rows.");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -4,10 +4,8 @@ import {
   tokens,
   Button,
   Card,
-  CardHeader,
   Text,
   Body1,
-  Switch,
   Spinner,
   MessageBar,
   MessageBarBody,
@@ -15,8 +13,6 @@ import {
   MessageBarActions,
   Badge,
   ProgressBar,
-  Divider,
-  Link,
   mergeClasses,
   Textarea,
   Label,
@@ -26,24 +22,16 @@ import {
   ArrowResetRegular,
   CheckmarkCircleRegular,
   ErrorCircleRegular,
-  InfoRegular,
-  SparkleRegular,
-  SearchRegular,
   OpenRegular,
   CopyRegular,
-  PersonSearchRegular,
   EditRegular,
 } from '@fluentui/react-icons';
 import { RelatedToPicker } from './RelatedToPicker';
 import { AttachmentSelector } from './AttachmentSelector';
-import { ALL_ENTITY_TYPES } from '../hooks/useEntitySearch';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 import {
   useSaveFlow,
   type SaveFlowContext,
-  type SaveFlowState,
-  type ProcessingOptions,
-  type JobStatus,
   type StageStatus,
   type UseSaveFlowOptions,
 } from '../hooks/useSaveFlow';
@@ -366,16 +354,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     apiBaseUrl = '',
     onComplete,
     onSaved,
-    onQuickCreate,
     onViewDocument,
-    onNavigate,
-    allowedEntityTypes,
     showDocumentInfo = true,
     className,
   } = props;
 
   const styles = useStyles();
-  const { announce } = useAnnounce();
+  const { announce, liveRegion } = useAnnounce();
 
   // Initialize save flow hook
   const saveFlowOptions: UseSaveFlowOptions = useMemo(
@@ -389,7 +374,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       onError: error => {
         announce(`Error: ${error.message}`, 'assertive');
       },
-      onDuplicate: (docId, message) => {
+      onDuplicate: (_docId, message) => {
         announce('Duplicate detected: ' + message, 'polite');
       },
     }),
@@ -402,10 +387,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     setSelectedEntity,
     selectedAttachmentIds,
     setSelectedAttachmentIds,
-    includeBody,
-    setIncludeBody,
-    processingOptions,
-    toggleProcessingOption,
     jobStatus,
     error,
     clearError,
@@ -415,7 +396,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     startSave,
     reset,
     retry,
-    savedDocumentId,
     savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
 
@@ -433,18 +413,18 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const buildSaveContext = useCallback(
     (): SaveFlowContext => ({
       hostType,
-      itemId,
-      itemName,
-      documentName: documentName || undefined,
-      documentDescription: documentDescription || undefined,
       attachments,
-      senderEmail,
-      senderDisplayName,
-      recipients,
-      sentDate,
-      emailBody,
-      documentUrl,
-      documentContentBase64,
+      ...(itemId !== undefined ? { itemId } : {}),
+      ...(itemName !== undefined ? { itemName } : {}),
+      ...(documentName ? { documentName } : {}),
+      ...(documentDescription ? { documentDescription } : {}),
+      ...(senderEmail !== undefined ? { senderEmail } : {}),
+      ...(senderDisplayName !== undefined ? { senderDisplayName } : {}),
+      ...(recipients !== undefined ? { recipients } : {}),
+      ...(sentDate !== undefined ? { sentDate } : {}),
+      ...(emailBody !== undefined ? { emailBody } : {}),
+      ...(documentUrl !== undefined ? { documentUrl } : {}),
+      ...(documentContentBase64 !== undefined ? { documentContentBase64 } : {}),
     }),
     [
       hostType,
@@ -654,7 +634,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         <ProgressBar value={progressPercentage / 100} />
 
         <div className={styles.stageList} role="list" aria-label="Processing stages">
-          {jobStatus.stages.map(stage => (
+          {(jobStatus.stages ?? []).map(stage => (
             <div
               key={stage.name}
               className={styles.stageItem}
@@ -752,47 +732,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     </MessageBar>
   );
 
-  // Render processing options
-  const renderProcessingOptions = () => (
-    <div className={styles.section}>
-      <div className={styles.sectionTitle}>
-        <SparkleRegular />
-        <Text weight="semibold">AI Processing</Text>
-      </div>
-      <Card>
-        <div className={styles.processingOptions}>
-          <div className={styles.processingOption}>
-            <div className={styles.processingLabel}>
-              <PersonSearchRegular />
-              <Text>Profile Summary</Text>
-            </div>
-            <Switch
-              checked={processingOptions.profileSummary}
-              onChange={() => toggleProcessingOption('profileSummary')}
-              disabled={isSaving}
-              aria-label="Enable profile summary generation"
-            />
-          </div>
-
-          <Divider />
-
-          <div className={styles.processingOption}>
-            <div className={styles.processingLabel}>
-              <SearchRegular />
-              <Text>Search Index</Text>
-            </div>
-            <Switch
-              checked={processingOptions.ragIndex}
-              onChange={() => toggleProcessingOption('ragIndex')}
-              disabled={isSaving}
-              aria-label="Enable search indexing"
-            />
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-
   // Render main form
   const renderForm = () => (
     <>
@@ -852,7 +791,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             <Textarea
               id="document-name"
               value={documentName}
-              onChange={(e, data) => setDocumentName(data.value)}
+              onChange={(_e, data) => setDocumentName(data.value)}
               placeholder="Enter document name"
               disabled={isSaving}
               aria-label="Document name"
@@ -866,7 +805,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             <Textarea
               id="document-description"
               value={documentDescription}
-              onChange={(e, data) => setDocumentDescription(data.value)}
+              onChange={(_e, data) => setDocumentDescription(data.value)}
               placeholder="Enter document description (optional)"
               disabled={isSaving}
               aria-label="Document description"
@@ -939,6 +878,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   return (
     <div className={mergeClasses(styles.container, className)} role="form" aria-label="Save to Spaarke">
+      {/* React-owned ARIA live regions (task 018 / NFR-11) -- must be rendered
+          by this component per useAnnounce's contract; placement doesn't
+          matter visually since the regions are sr-only. */}
+      {liveRegion}
       {renderContent()}
     </div>
   );

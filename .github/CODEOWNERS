@@ -18,6 +18,13 @@ Directory.Packages.props @spaarke-dev @devops-team
 docs/adr/ @spaarke-dev @architecture-team
 .github/workflows/ @spaarke-dev @devops-team
 
+# The office-addins CI gate decides what its jest check reports on. The workflow
+# above is owner-reviewed; without this line its ALLOW-LIST was not — and deleting
+# a line from the manifest turns the gate green just as effectively as deleting the
+# test it names. The workflow's existence check catches a deleted TEST FILE; only
+# review catches a deleted MANIFEST ENTRY. (code-review W-1, 2026-09-10.)
+src/client/office-addins/ci-gated-suites.txt @spaarke-dev @devops-team
+
 # Documentation
 docs/ @spaarke-dev @docs-team
 README.md @spaarke-dev @docs-team

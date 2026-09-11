@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Un-skip /api/office/save contract tests and cover the identity route</title>
+    <phase>1 Foundation</phase>
+    <gate>012 complete — the identity route must exist before contract coverage can be written for it</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override row, root CLAUDE.md §8: any task that modifies `tests/**` or carries the `testing` tag runs code-review plus adr-check at Step 9.5 UNCONDITIONALLY (binding since 2026-06-26 per ci-cd-unit-test-remediation-r1 spec FR-B07 and ADR-038). This overrides the default STANDARD skip.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified diagnostic work with a named protocol to follow (§F.2 Fixture-Config-FIRST) and named fixture symptoms to investigate. The judgment boundary — fixture defect versus product defect — is handled by an explicit escalation trigger rather than by model tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>testing, integration-test, contract-test, bff-api, backend</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`POST /api/office/save` — the add-in's entire save spine — has ZERO executing contract coverage: both of its tests are `[Fact(Skip=...)]`, and 13 of 22 tests in the file are skipped. Un-skip the two save tests by FIXING the underlying fixture defects, not by deleting or rewriting the tests away, and add contract coverage for task 012's identity route.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET integration/contract testing with `WebApplicationFactory`, test fixture configuration and auth handlers, and ADR-038's testing strategy. Follow ADRs strictly.</role>
+
+  <goal>Both `POST /api/office/save` contract tests (`OfficeEndpointsContractTests.cs:48` `Post_OfficeSave_WithValidRequest_Returns202Accepted` and `:82` `Post_OfficeSave_WithoutAuth_Returns401`) execute and pass with their fixture defects fixed at the root; the task 012 identity route has contract coverage including negative and authorization cases; no ADR-038-banned test pattern is introduced; and any real product defect surfaced by un-skipping is filed via `/project-defer-issue-tracking` and escalated rather than fixed in scope.</goal>
+
+  <context>
+    <background>
+      plan.md finding **F-f**: `POST /api/office/save` has zero executing contract coverage. Both its tests are `[Fact(Skip)]` at `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs:48` and `:82`, and 13 of 22 tests in that file are skipped.
+      The two skip reasons are specific and are the starting hypotheses, not the conclusions:
+      - `:48` — "Requires fully mocked Office services - ContainerId not configured in test"
+      - `:82` — "Requires fully mocked Office services - test auth handler always authenticates"
+      Both read as FIXTURE problems (a missing config value; an auth handler that cannot represent an unauthenticated caller), which is exactly the class `docs/procedures/test-fixture-contracts.md` and the §F.2 Fixture-Config-FIRST Inspection Protocol exist to handle. The protocol is binding: when a test is skipped suspecting a DI issue, FIRST inspect fixture config, claims and mocks for non-contract values before assuming a DI problem. Root CLAUDE.md §10 records this as one of three binding sub-mechanisms.
+      This task also carries task 012's coverage obligation: ADR-038 requires a contract test for every new endpoint, and 012 deliberately defers writing it here so the fixture work happens once.
+      Scope discipline: 13 tests are skipped in this file. This task owns the TWO save tests plus the new identity-route coverage. The other 11 are not in scope — record them for a follow-up rather than expanding.
+    </background>
+    <relevant-files>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+      <file role="canonical-reference">docs/procedures/test-fixture-contracts.md</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">The `/api/documents` document-identity resolver route and its request/response contract — the surface this task adds coverage for</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the two save tests at `:48` and `:82`. FIX the underlying fixture defects; do NOT delete the tests, do NOT rewrite them into weaker assertions, and do NOT replace them with a different test that happens to pass. The `Skip` attribute comes off because the cause is gone.</constraint>
+    <constraint source="project">Scope: diagnosis order for every skipped test touched here. Apply the §F.2 Fixture-Config-FIRST Inspection Protocol (`.claude/constraints/bff-extensions.md` §F.2, procedure in `docs/procedures/test-fixture-contracts.md`): FIRST inspect fixture config, claims and mocks for non-contract values, BEFORE assuming a DI-registration problem. Record what you inspected and what you found before making any production-code change.</constraint>
+    <constraint source="ADR-038">Scope: every test written or modified in this task. Banned patterns: `Mock&lt;HttpMessageHandler&gt;` (B1), DI-registration tests (B3), and constructor null-check tests (B4). Also banned: `Stopwatch` plus `Task.Delay` timing tests — use `TimeProvider`. New tests must land at a KEEP path per ADR-038's 7 categories.</constraint>
+    <constraint source="project">Scope: this task's boundary. Own the TWO `POST /api/office/save` tests plus new identity-route coverage. The other 11 skipped tests in the file are OUT of scope — record them in notes/ for a follow-up; do not opportunistically un-skip them, and do not let their fixture needs expand this task.</constraint>
+    <constraint source="project">Scope: findings that are not fixture defects. If un-skipping reveals a REAL PRODUCT DEFECT (the endpoint genuinely misbehaves), file it via `/project-defer-issue-tracking` (writes both `notes/defer-issues.md` and a GitHub Issue) and escalate. Do NOT silently fix product behavior out of scope — that turns a test task into an unreviewed behavior change.</constraint>
+    <constraint source="ADR-008">Scope: the 401 test at `:82` specifically. The "test auth handler always authenticates" symptom means the fixture cannot represent an unauthenticated caller. Fix that so the endpoint's real `RequireAuthorization()` behavior is exercised — do not assert 401 by bypassing the pipeline or by testing the filter in isolation.</constraint>
+    <constraint source="ADR-019">Scope: assertions on failure responses. Error shapes are ProblemDetails; assert the contract shape, not an incidental message string.</constraint>
+    <constraint source="ADR-044">Scope: any Dataverse GUID used in test arrangement or assertion. Use canonical bare-lowercase form via the shared helper; do not hand-roll brace stripping in test setup, which would mask a production canonicalization bug.</constraint>
+    <constraint source="project">Scope: BFF publish size. If this task touches `src/server/api/Sprk.Bff.Api/**` at all (for example to fix a fixture-visible config default), measure the publish-size delta against a FRESH BUILD OF MASTER, not the recorded baseline (root CLAUDE.md §10 bullet 4). If the task changes only `tests/**`, state that no BFF publish change occurred.</constraint>
+    <constraint source="project">Scope: CI files. Do NOT edit `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml` — frozen under the shadow-comparison window opened 2026-08-27.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Contract testing, WebApplicationFactory fixtures, test auth handlers, ADR-038 KEEP paths</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Where authorization actually runs in the pipeline — needed to assert 401/403 against the real pipeline rather than around it.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">The route shape task 012 produced, so the new contract test asserts the real contract.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, plan.md §3 finding F-f and §6 Testing Strategy, `docs/adr/ADR-038-testing-strategy.md`, `docs/procedures/test-fixture-contracts.md`, and `.claude/constraints/bff-extensions.md` §F.2. Declare: RIGOR LEVEL FULL (TEST-MODIFYING override, root CLAUDE.md §8), model-tier sonnet, effort high, steps mode DIRECTIONAL.</step>
+    <step order="1">Apply §F.2 Fixture-Config-FIRST to the `:48` skip ("ContainerId not configured in test"). Inspect the fixture's configuration, the claims it issues, and its registered mocks for non-contract values BEFORE touching DI or production code. Write down what you inspected and what you found in notes/ before changing anything.</step>
+    <step order="2">Apply §F.2 to the `:82` skip ("test auth handler always authenticates"). The fixture's auth handler apparently cannot represent an unauthenticated caller. Determine how to exercise the real `RequireAuthorization()` path — a client without the test auth scheme, or a fixture variant that can omit authentication — without bypassing the pipeline.</step>
+    <step order="3">Fix the fixture defects at their root. Prefer a fixture-side fix; a production-code change is only correct if the fixture was expressing a real contract the product does not honor — and in that case it is a product defect, so fire the escalation trigger instead.</step>
+    <step order="4">Remove the two `Skip` attributes and run the tests. `Post_OfficeSave_WithValidRequest_Returns202Accepted` must assert the real 202 contract (success, non-empty JobId, StatusUrl containing `/api/office/jobs/`, StreamUrl containing `/stream`). `Post_OfficeSave_WithoutAuth_Returns401` must assert 401 from the real pipeline.</step>
+    <step order="5">Add contract coverage for task 012's identity route: the happy path (a Spaarke-sourced document resolves), the "not a Spaarke document" path (a successful response carrying no identity — NOT a 404 and NOT an error), unauthenticated (401), unauthorized-for-the-resolved-document (403 with no metadata leaked), and malformed input (ProblemDetails 400).</step>
+    <step order="6">Verify no banned pattern was introduced: grep the touched test file for `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check tests, and `Stopwatch`. Confirm new tests sit at an ADR-038 KEEP path.</step>
+    <step order="7">Record the remaining 11 skipped tests in the file — id, line, skip reason, and whether the reason looks like a fixture defect or a product gap — in notes/ as a follow-up inventory. Do not un-skip them.</step>
+    <step order="8">Run `dotnet build` and `dotnet test` for the affected test projects. Confirm the two previously-skipped tests now execute and pass and that no previously-passing test regressed.</step>
+    <step order="9">If any production code under `src/server/api/Sprk.Bff.Api/**` was touched, measure publish size against a fresh build of master and record it; otherwise state explicitly that no BFF publish change occurred.</step>
+    <step order="10">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/ — including the full §F.2 diagnosis trail from steps 1 and 2.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If un-skipping reveals a REAL PRODUCT DEFECT rather than a fixture defect — `POST /api/office/save` genuinely returns the wrong status, the wrong shape, or authorizes incorrectly — STOP. File it via `/project-defer-issue-tracking` (both `notes/defer-issues.md` and a GitHub Issue) and escalate per CLAUDE.md §6. Do NOT silently fix it out of scope; a behavior change smuggled inside a test task bypasses review.</trigger>
+    <trigger>If fixing the `:82` fixture requires changing the shared test auth handler in a way that affects other test classes, STOP and escalate per CLAUDE.md §6 — a shared-fixture change has blast radius beyond this file and beyond this project's worktree.</trigger>
+    <trigger>If the two save tests cannot be made to execute without introducing a banned pattern (`Mock&lt;HttpMessageHandler&gt;` for the SPE/Graph boundary, for example), STOP and escalate as an ADR-038 tension per CLAUDE.md §6.5 rather than introducing the banned pattern or leaving the test skipped.</trigger>
+    <trigger>If the §F.2 inspection shows the skip reason recorded in the attribute is simply wrong (the real cause is different), STOP and record the corrected diagnosis before proceeding — the empirical-reproduction-FIRST protocol (§F.3) applies: hand-trace and reproduce before applying any recommended fix.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test (affected test projects), publish (only if production code was touched)</tool>
+    <tool name="git">worktree add for a fresh master publish-size baseline, only if production code was touched</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/016-fixture-diagnosis.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `OfficeEndpointsContractTests.cs`, when inspecting `Post_OfficeSave_WithValidRequest_Returns202Accepted` (was `:48`), then it has no `Skip` attribute, it executes, and it passes.</criterion>
+    <criterion testable="true">Given `OfficeEndpointsContractTests.cs`, when inspecting `Post_OfficeSave_WithoutAuth_Returns401` (was `:82`), then it has no `Skip` attribute, it executes, and it passes by asserting 401 from the real request pipeline (not by bypassing it).</criterion>
+    <criterion testable="true">Given both tests, when inspected, then neither was deleted, weakened, or replaced — the original assertions (202, non-empty JobId, StatusUrl containing `/api/office/jobs/`, StreamUrl containing `/stream`; and 401) are intact or strengthened.</criterion>
+    <criterion testable="true">Given notes/, when read, then it records the §F.2 Fixture-Config-FIRST diagnosis trail for BOTH skips — what fixture config, claims and mocks were inspected, and what was found — before any change was made.</criterion>
+    <criterion testable="true">Given the task 012 identity route, when the new contract tests run, then the happy path asserts the resolved document identity contract.</criterion>
+    <criterion testable="true">Negative: given a document that is not from Spaarke, when the identity contract test runs, then it asserts a successful response carrying no identity — explicitly NOT a 404 and NOT a ProblemDetails error.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated caller, when the identity contract test runs, then it asserts 401.</criterion>
+    <criterion testable="true">Negative: given a caller lacking Read on the resolved document, when the identity contract test runs, then it asserts 403 and asserts that no document metadata appears in the response body.</criterion>
+    <criterion testable="true">Negative: given a malformed or empty document URL, when the identity contract test runs, then it asserts a ProblemDetails 400 — not a 500 and not an unhandled exception.</criterion>
+    <criterion testable="true">Given the touched test file, when grepped, then it contains no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration test, no constructor null-check test, and no `Stopwatch`-based timing assertion (ADR-038 B1/B3/B4).</criterion>
+    <criterion testable="true">Given the file after this task, when the remaining skipped tests are counted, then 11 remain and each is inventoried in notes/ with its line, skip reason, and a fixture-versus-product classification — none was opportunistically un-skipped.</criterion>
+    <criterion testable="true">Given the full affected test suite, when run, then no previously-passing test regressed.</criterion>
+    <criterion testable="true">Given notes/, when read, then it states either the measured publish-size delta against a fresh master build (if production code was touched) or an explicit statement that only `tests/**` changed.</criterion>
+    <criterion testable="true">Negative: `ci-router.yml`, `ci-tier1-blocking.yml`, and `ci-tier2-advisory.yml` are unmodified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    plan.md §3 finding F-f and §6 Testing Strategy. spec.md's testing obligations and ADR-038.
+    This task is modify-only over existing test surface (un-skipping and extending tests for endpoints owned by other tasks), so no `justification` block is required per CLAUDE.md §11 ("add tests for existing surface" is modification, not new surface).
+    Rigor is FULL by the TEST-MODIFYING override row in root CLAUDE.md §8, not by the default decision tree — the file is under `tests/**` and the tags include `testing`. That override is binding and unconditional.
+    `parallel-safe:true`, no wave partner: it depends on task 012 and touches a test file no other Phase 1 task writes to. Task 014 also appends to this file for its own coverage — if 014 and 016 run near each other, 016 should land first or the two must coordinate on that single file.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

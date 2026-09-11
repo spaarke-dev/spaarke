@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Deploy the add-in and BFF, run UAT against the acceptance set</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>040 complete (parity checklist), 041 complete (Entra redirects + deploy trigger)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and verification task; creates no application code beyond a manifest version bump. Quality gates skipped per the STANDARD default, but the CI-only deploy rule and the prescriptive step order are hard requirements.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural execution against a documented deployment path with a fixed acceptance set. No design judgment; the escalation triggers cover the failure branches.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040,041</deps>
+    <tags>deployment, ci-cd, e2e-test, uat</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the add-in via CI and the BFF via the deployment skill, then run the full acceptance set from `spec.md` Success Criteria as UAT. Deploy is **CI-only** — push and watch the run; never execute the workflow as an agent. The manifest change requires a 4-part version bump and M365 re-registration before users see the new build.</prompt>
+
+  <role>SPAARKE platform developer executing a release. Expertise in the Office add-in deployment path (GitHub Actions → Azure Static Web App), BFF deployment, and M365 Admin Center Integrated Apps. Follow ADRs strictly.</role>
+
+  <goal>The add-in and BFF are deployed to the target environment. The Word manifest carries a bumped 4-part version and has been re-registered in M365. Every criterion in `spec.md` Success Criteria has been executed and its result recorded — pass or fail — in `notes/042-uat-results.md`. Any failure is filed as a defect, not quietly re-run until green.</goal>
+
+  <context>
+    <background>
+      **Deploy is CI-only, never agent-run.** The path is: push the branch, then observe with `gh run list --workflow=deploy-office-addins.yml` and `gh run view`. Task 041 established how the workflow is triggered for this branch — either an added push trigger or the already-declared `workflow_dispatch`. Read `notes/041-entra-redirects.md` for which.
+
+      **BFF deployment** uses the `bff-deploy` skill / `scripts/Deploy-BffApi.ps1`, which emits the package-size line required by ADR-029.
+
+      **Manifest version + re-registration.** A manifest change requires a **4-part** version bump AND re-registration in M365 Admin Center → Integrated Apps before users receive the new build. Task 037 changed the Word manifest (adding the function file and `ExecuteFunction` controls) and recorded that in `notes/037-manifest-change.md`; task 011 changed its format. Both mean re-registration here.
+
+      **The acceptance set is fixed and lives in `spec.md` Success Criteria** — 13 numbered criteria, each with its stated verification method. Several are integration tests that should already be green from earlier tasks; the value of running them here is that they are exercised against the **deployed** build, not the dev loop.
+
+      **Prerequisite from task 041.** Both SPA redirect URIs must be registered for the target environment before first sign-in, or the add-in fails with **AADSTS7000471** and the failure looks like a code defect rather than a registration gap.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="canonical-reference">.github/workflows/deploy-office-addins.yml</file>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/041-entra-redirects.md</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/042-uat-results.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">The parity checklist, which UAT verifies the deployed build against.</dependency>
+      <dependency task="041" status="pending">Registered per-environment Entra SPA redirect URIs (without which sign-in fails with AADSTS7000471) and the established deploy-workflow trigger path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy is **CI-only** and MUST NOT be run as an agent. The add-in deploys by pushing the branch and letting `deploy-office-addins.yml` run; observe with `gh run list --workflow=deploy-office-addins.yml` and `gh run view`. Do not invoke the SWA CLI or `scripts/Deploy-OfficeAddins.ps1` to push a production build.</constraint>
+    <constraint source="project">The Word manifest version MUST be bumped as a **4-part** version, and M365 Admin Center → Integrated Apps re-registration MUST be performed (or explicitly handed to the operator with instructions) before UAT. Skipping the bump means users keep the previous build and UAT tests the wrong bits.</constraint>
+    <constraint source="project">MUST NOT edit `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml` — frozen under the shadow-comparison window opened 2026-08-27. Verify with `git diff --stat`.</constraint>
+    <constraint source="project">Run the **full** acceptance set from `spec.md` Success Criteria — all 13 criteria — and record each result in `notes/042-uat-results.md` as pass or fail with evidence. A criterion that cannot be executed is recorded as blocked with the reason, never silently omitted.</constraint>
+    <constraint source="project">A UAT failure MUST be filed via `/project-defer-issue-tracking` (both `notes/defer-issues.md` and a GitHub Issue). Do not fix defects inside this task, and do not re-run a failing check until it passes without recording the earlier failure.</constraint>
+    <constraint source="ADR-029">The BFF deployment MUST report the published package size. Confirm it is within the 60 MB ceiling and record it in `notes/042-uat-results.md`.</constraint>
+    <constraint source="ADR-028">Verify the deployed add-in authenticates via NAA with no client secret anywhere in the path. If sign-in fails with AADSTS7000471, that is task 041's registration, not a code defect — diagnose accordingly.</constraint>
+    <constraint source="project">Run `/conflict-check` before pushing, and confirm the branch is up to date with `master` so the deployed build reflects merged peer work from `spaarkeai-compose-r8` and `unified-access-control-r2`.</constraint>
+    <constraint source="project">There is no `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build; CI runs it. Local installs need `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office add-in and BFF deployment; UAT against a fixed acceptance set</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Read when diagnosing a sign-in failure on the deployed build — INV-1..INV-8 distinguish a registration gap from a code defect.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` Success Criteria, `notes/parity-checklist.md` and `notes/041-entra-redirects.md`. Emit the mandatory rigor declaration (STANDARD / sonnet / high). Run `/conflict-check`.</step>
+    <step order="1">Confirm the branch is up to date with `master` and that CI is green. Confirm task 041's redirect URIs are registered for the target environment by reading the app registration back — do this BEFORE deploying, so a sign-in failure later is unambiguous.</step>
+    <step order="2">Bump the Word manifest's 4-part version. Confirm the manifest validates.</step>
+    <step order="3">Deploy the BFF using the `bff-deploy` skill / `scripts/Deploy-BffApi.ps1`. Record the emitted package size and confirm it is under the 60 MB ceiling.</step>
+    <step order="4">Push the branch. Do NOT run the deploy workflow directly. Observe the run with `gh run list --workflow=deploy-office-addins.yml` then `gh run view`, and wait for it to complete successfully.</step>
+    <step order="5">Re-register the add-in in M365 Admin Center → Integrated Apps with the bumped manifest, or hand the operator explicit instructions if the agent cannot perform it. Confirm the new version is what users receive.</step>
+    <step order="6">Execute all 13 `spec.md` Success Criteria against the deployed build, in order, recording each as pass / fail / blocked with evidence in `notes/042-uat-results.md`.</step>
+    <step order="7">Verify the deployed build against `notes/parity-checklist.md` — every capability marked supported works in both hosts on the deployed build, not just in the dev loop.</step>
+    <step order="8">File every failure via `/project-defer-issue-tracking`, capturing the GitHub Issue URL in `notes/042-uat-results.md`. Do not fix defects in this task.</step>
+    <step order="9">Run `git diff --stat` and confirm no frozen CI file was modified.</step>
+    <step order="10">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the deploy workflow fails, STOP and escalate per CLAUDE.md §6 rather than deploying by another route (SWA CLI, `scripts/Deploy-OfficeAddins.ps1`, or a manual upload). Deploy is CI-only by design; bypassing it produces a build no one can reproduce.</trigger>
+    <trigger>If sign-in on the deployed add-in fails with AADSTS7000471, STOP and escalate to task 041's registration rather than changing auth code. That error means a redirect URI is missing, not that the client is wrong.</trigger>
+    <trigger>If the BFF package size exceeds the 60 MB ceiling, STOP — that is a HARD STOP under root CLAUDE.md §10, not a warning to note and continue.</trigger>
+    <trigger>If a Success Criterion cannot be executed at all — a prerequisite is missing, an environment is unavailable — record it as blocked and escalate rather than marking it passed by analogy to a dev-loop result.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Deployed build is the bumped version">
+      <steps>
+        <step>After CI completes and M365 re-registration is done, open Word and Outlook and load the Spaarke add-in.</step>
+        <step>Check the loaded add-in's version against the bumped 4-part manifest version.</step>
+      </steps>
+      <expected>Both hosts load the newly deployed build, not a cached previous version. If the previous version loads, re-registration did not take effect and UAT must not proceed.</expected>
+    </test>
+    <test name="Sign-in succeeds on the deployed build">
+      <steps>
+        <step>Sign in to the deployed add-in in both hosts as a fresh user with no cached token.</step>
+      </steps>
+      <expected>NAA sign-in succeeds. No AADSTS7000471. If that error appears, it is task 041's redirect registration, not a code defect.</expected>
+    </test>
+    <test name="Ribbon commands work from the deployed manifest">
+      <steps>
+        <step>In Word, invoke Quick Save and Share from the ribbon on the deployed build.</step>
+      </steps>
+      <expected>Both commands execute and complete, confirming task 037's manifest entries survived the format migration and the deployment.</expected>
+    </test>
+    <test name="Dark mode on the deployed build (ADR-021)">
+      <steps>
+        <step>Switch each host to dark theme and visit every tab and view of the deployed add-in.</step>
+      </steps>
+      <expected>All surfaces render with Fluent v9 theme tokens and adequate contrast. A theming defect that appears only in the deployed build (and not the dev loop) indicates a build-time style-processing difference and is filed as a defect.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="gh">`gh run list --workflow=deploy-office-addins.yml` and `gh run view` to observe the CI deployment. Never `gh workflow run` as the deployment mechanism for production bits without operator direction.</tool>
+    <tool name="pwsh">`scripts/Deploy-BffApi.ps1` via the `bff-deploy` skill; reads the emitted package-size line for ADR-029.</tool>
+    <tool name="git">`git diff --stat` to confirm no frozen CI file was modified; branch sync check against `master`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/042-uat-results.md</output>
+    <output type="code">src/client/office-addins/word/word-manifest.xml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The add-in was deployed by the CI workflow — `gh run list --workflow=deploy-office-addins.yml` shows a successful run for this branch — and not by any agent-executed deployment command.</criterion>
+    <criterion testable="true">The BFF was deployed and its published package size is recorded in `notes/042-uat-results.md` and is under the 60 MB ceiling.</criterion>
+    <criterion testable="true">The Word manifest carries a bumped 4-part version, and the add-in has been re-registered in M365 Admin Center → Integrated Apps (or the operator has explicit instructions to do so, recorded in notes).</criterion>
+    <criterion testable="true">All 13 criteria from `spec.md` Success Criteria are recorded in `notes/042-uat-results.md` as pass, fail or blocked, each with evidence. None is omitted.</criterion>
+    <criterion testable="true">Every capability marked supported in `notes/parity-checklist.md` was verified against the DEPLOYED build in both hosts.</criterion>
+    <criterion testable="true">Negative: the permission-trimming criterion (a user denied access to a matter sees none of its documents through Find) was executed against the deployed build and passed.</criterion>
+    <criterion testable="true">Negative: sign-in on the deployed add-in succeeds via NAA with no client secret in the path; if AADSTS7000471 occurred, it was diagnosed to task 041's registration and resolved there.</criterion>
+    <criterion testable="true">Every UAT failure has a GitHub Issue URL recorded in `notes/042-uat-results.md` and an entry in `notes/defer-issues.md` — no failure was fixed inside this task or silently re-run to green.</criterion>
+    <criterion testable="true">Negative: `git diff --stat` shows no change to `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md Success Criteria (the 13-item acceptance set) and Dependencies → External ("Word/Outlook add-in distribution via M365 Admin Center → Integrated Apps (manual, version bump required)"). plan.md §4 Phase 4 task 042. The deployed build — not the dev loop — is what UAT tests; that is the entire reason these criteria are re-run here.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
