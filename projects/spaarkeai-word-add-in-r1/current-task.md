@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-10 (by context-handoff, pre-compaction)
+> **Last Updated**: 2026-09-10 (task-execute 012 started)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
@@ -9,10 +9,35 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none active — between tasks. Phase 0 COMPLETE. |
-| **Next startable** | **012** (FR-01 server identity resolver) — deps 002 ✅. Carries Spike-1 links 2-3 as its FIRST acceptance criteria. OR **014** first, if the operator accepts Spike-1 §7 (stamp-as-primary) — see Pending Decisions. |
-| **Status** | Waiting on operator items below before 012's Spike-1 criteria can be proven |
-| **Next Action** | (1) Ask the operator for the pending items below. (2) Then run task 012 via `task-execute`. Nothing is in flight; the tree is clean. |
+| **Task** | **012** — FR-01 server: document-identity resolver extending `/api/documents` (`tasks/012-document-identity-resolver-bff.poml`) |
+| **Rigor** | FULL · opus @ high · steps DIRECTIONAL |
+| **Step** | Step 9.5 review DONE, findings applied (notes/012 §9). Targeted tests 61/61 pass. Pre-fix: full unit 12116/0 fail, ArchTests 191/191, CVE none, publish +0.016 MB. **Running (bg):** post-review ArchTests + full unit suite. **Then:** commit 012 (the pre-commit hook runs `dotnet format`, which fixes the CRLF endings on the new .cs files), push, and rewrite the PR #960 body from `scratchpad/pr-960-body.md`. Task 015 ✅ committed (`aff1ca9e4` + `4ea3cf6de`). Root `node_modules` installed so the husky/lint-staged hook works in this worktree. |
+| **Status** | in-progress |
+| **In flight elsewhere** | Task **015** (tab shell) running in a background agent in an ISOLATED worktree — it must NOT touch TASK-INDEX/current-task; main session merges its branch when it reports. |
+| **Next Action** | `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SharingUrlToken|FullyQualifiedName~DocumentUrlIdentity"` → fix → full affected test run → publish-size vs fresh master → code-review + adr-check |
+
+### Task 012 — decisions so far
+- 2026-09-10 — **§7 does NOT make 012 optional.** Of 16 SPE upload sites in the BFF, task 014 stamps only the Office save path; a document uploaded via `DocumentsEndpoints` (`PUT /api/drives/{driveId}/upload`), email, AI working-doc etc. arrives UNSTAMPED, so the URL path is the only way the pane identifies it on first open. Stamp precedence is already stamp-first in 014 step 5. Corrects spike-1 §7's "consider dropping it from r1".
+- 2026-09-10 — /conflict-check: no open PR touches the target files; master has no new commits to them; branch 46 ahead / 0 behind.
+
+### Files modified (task 012) — all uncommitted
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SharingUrlToken.cs` — NEW: `u!` token + the two encoding candidates
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs` — `ResolveSharedItemAsUserAsync` (Graph `/shares`, OBO)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs` — virtual facade method
+- `src/server/api/Sprk.Bff.Api/Models/SpeFileStoreDtos.cs` — `SpeSharedItemOutcome/Attempt/Resolution`
+- `src/server/api/Sprk.Bff.Api/Models/FileOperationModels.cs` — request/response DTOs
+- `src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs` — NEW: resolver (3 answers, self-heal, drive check)
+- `src/server/api/Sprk.Bff.Api/Api/Filters/DocumentUrlIdentityFilter.cs` — NEW: resolution filter → route value `documentId`
+- `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs` — route `POST /resolve-identity` + handler
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs` — `IsRecordNotFound` private→internal (reuse)
+- `tests/unit/.../Infrastructure/Graph/SharingUrlTokenTests.cs`, `.../Services/Documents/DocumentUrlIdentityResolutionTests.cs`, `.../Filters/DocumentUrlIdentityFilterTests.cs` — NEW
+- `projects/.../notes/012-identity-resolver-decisions.md` — NEW (contract, reuse-vs-copy, auth design, encoding, placement)
+
+### Key design (details in notes/012-identity-resolver-decisions.md)
+- Two filters in order: `DocumentUrlIdentityFilter` (resolve → `RouteValues["documentId"]`) then the UNCHANGED `DocumentAuthorizationFilter("read")`.
+- Graph `/shares` runs OBO → unreachable URL answers exactly like non-document (no existence oracle).
+- Three answers: resolved / 200 no-identity / **503** — a Dataverse or Graph fault is never "not a Spaarke document" (that would mint duplicates).
+- Live SPIKE-1 criteria need this branch's BFF on dev (OBO needs MI credential) → **operator sign-off for a dev BFF deploy**.
 
 ### Completed after the handoff — doc accuracy pass (committed with this update)
 

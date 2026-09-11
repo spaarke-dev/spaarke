@@ -51,6 +51,56 @@ public record ShareLinkResponse(
     string Scope
 );
 
+/// <summary>
+/// Request body for POST /api/documents/resolve-identity (spaarkeai-word-add-in-r1 task 012, FR-01).
+/// </summary>
+/// <remarks>
+/// A body, not a query string, on purpose: the URL's path carries the file name, and request URLs are what
+/// telemetry records.
+/// </remarks>
+public record ResolveDocumentIdentityRequest(
+    /// <summary>The open document's absolute URL — <c>Office.context.document.url</c>, sent exactly as returned.</summary>
+    string? DocumentUrl
+);
+
+/// <summary>
+/// Response for POST /api/documents/resolve-identity. <see cref="Resolved"/> = <c>false</c> is a SUCCESSFUL
+/// answer, not an error. For every <see cref="Reason"/> except <c>identity_conflict</c> the open document is not a
+/// Spaarke document and the pane treats it as new. A 503 means "could not determine" — never treat it as new.
+/// </summary>
+public record DocumentIdentityResponse(
+    /// <summary><c>true</c> when the URL resolved to a <c>sprk_document</c> the caller may read.</summary>
+    bool Resolved,
+    /// <summary>The <c>sprk_documentid</c>, bare lowercase (ADR-044). Null when not resolved.</summary>
+    string? DocumentId,
+    /// <summary><c>sprk_documentname</c>.</summary>
+    string? DocumentName,
+    /// <summary><c>sprk_filename</c>.</summary>
+    string? FileName,
+    /// <summary>The record the document belongs to, from its direct association slot. Null when unassociated.</summary>
+    RelatedRecordIdentity? RelatedRecord,
+    /// <summary>
+    /// Why there is no identity, when <see cref="Resolved"/> is false: <c>not_cloud_document</c> (a local file),
+    /// <c>not_resolvable</c> (Graph found nothing at the URL), <c>not_spaarke_document</c> (the file exists but no
+    /// <c>sprk_document</c> tracks it), or <c>identity_conflict</c> (a row holds this file's item id under a different
+    /// drive — NOT a new document; do not offer save-as-new). Null when resolved.
+    /// </summary>
+    string? Reason
+)
+{
+    public static DocumentIdentityResponse NoIdentity(string reason) => new(false, null, null, null, null, reason);
+}
+
+/// <summary>The record a resolved document is associated with (spaarkeai-word-add-in-r1 task 012).</summary>
+public record RelatedRecordIdentity(
+    /// <summary>Dataverse logical name, e.g. <c>sprk_matter</c>.</summary>
+    string EntityType,
+    /// <summary>Record id, bare lowercase (ADR-044).</summary>
+    string Id,
+    /// <summary>The record's primary name, when Dataverse supplied it.</summary>
+    string? Name
+);
+
 public record UpdateFileRequest(
     string? Name = null,
     string? ParentReferenceId = null

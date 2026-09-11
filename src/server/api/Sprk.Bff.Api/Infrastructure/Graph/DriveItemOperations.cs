@@ -1305,6 +1305,139 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// FR-01 (task 012): resolves an absolute document URL — in practice <c>Office.context.document.url</c> — to
+    /// the SPE drive item it names, via Graph <c>GET /shares/u!{base64url}/driveItem</c>, AS THE CALLER (OBO).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>OBO, not app-only, deliberately.</b> Graph then resolves only files the caller can already reach, so
+    /// the identity route cannot be used to look up files the caller has no access to. It is also the only kind of
+    /// identity that can read SPE at all: the owning app or a container-type-REGISTERED app. A <c>/shares</c> call
+    /// from az CLI or Graph Explorer 403s whatever the URL (spike-1 §20).</para>
+    /// <para>Every Graph answer is classified by <see cref="ResolveAcrossFormsAsync"/>. OBO token-exchange failures
+    /// propagate, exactly as they do for the sibling OBO helpers above.</para>
+    /// </remarks>
+    public async Task<SpeSharedItemResolution> ResolveSharedItemAsUserAsync(
+        HttpContext ctx,
+        Uri documentUrl,
+        CancellationToken ct = default)
+    {
+        var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+        var resolution = await ResolveAcrossFormsAsync(
+            SharingUrlToken.BuildCandidates(documentUrl),
+            async (url, token) =>
+            {
+                var item = await graphClient.Shares[SharingUrlToken.Encode(url)]
+                    .DriveItem
+                    .GetAsync(req => req.QueryParameters.Select = new[] { "id", "parentReference" }, cancellationToken: token);
+                return (item?.Id, item?.ParentReference?.DriveId);
+            },
+            _logger,
+            ct);
+
+        // One line per resolution, carrying each form's status — the running evidence for which encoding Graph
+        // accepts over SPE paths. Logs the host, not the URL: the path carries the file name.
+        _logger.LogInformation(
+            "Graph /shares resolution {Outcome} | Host: {Host} | Attempts: {Attempts}",
+            resolution.Outcome,
+            documentUrl.Host,
+            string.Join("; ", resolution.Attempts.Select(a =>
+                $"{a.Form}={a.StatusCode?.ToString() ?? "none"}{(a.ErrorCode is null ? "" : "/" + a.ErrorCode)}")));
+
+        return resolution;
+    }
+
+    /// <summary>
+    /// Tries each encoding form in turn and classifies every answer. Separated from the Graph call so the
+    /// classification is tested through its contract with a fake fetch — a transport mock is banned (ADR-038 B1).
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>A drive item with both ids → <see cref="SpeSharedItemOutcome.Resolved"/>.</item>
+    /// <item>400 / 404 → try the next form; on every form → <see cref="SpeSharedItemOutcome.NotFound"/>.</item>
+    /// <item>403 → try the next form; if none resolves → <see cref="SpeSharedItemOutcome.AccessDenied"/>.</item>
+    /// <item>401 (it describes the token, not the item), 429, 5xx, an error body Kiota could not parse as OData, a
+    /// Polly timeout or open circuit, a transport failure, or an HttpClient timeout →
+    /// <see cref="SpeSharedItemOutcome.Unavailable"/>, at once.</item>
+    /// <item>A 200 without both ids → try the next form; if none resolves → Unavailable, not NotFound: Graph found
+    /// something and would not describe it.</item>
+    /// </list>
+    /// A cancellation the caller requested propagates. So does any other exception: an unexpected fault is a defect
+    /// to surface as a 500, not an outage to report as a 503.
+    /// </remarks>
+    public static async Task<SpeSharedItemResolution> ResolveAcrossFormsAsync(
+        IReadOnlyList<(string Form, string Url)> candidates,
+        Func<string, CancellationToken, Task<(string? ItemId, string? DriveId)>> fetch,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var attempts = new List<SpeSharedItemAttempt>();
+        var accessDenied = false;
+        var incomplete = false;
+
+        foreach (var (form, url) in candidates)
+        {
+            try
+            {
+                var (itemId, driveId) = await fetch(url, ct);
+                if (!string.IsNullOrEmpty(itemId) && !string.IsNullOrEmpty(driveId))
+                {
+                    attempts.Add(new SpeSharedItemAttempt(form, 200, null));
+                    return new SpeSharedItemResolution(SpeSharedItemOutcome.Resolved, driveId, itemId, form, attempts);
+                }
+
+                incomplete = true;
+                attempts.Add(new SpeSharedItemAttempt(form, 200, "incomplete_drive_item"));
+            }
+            // ODataError derives from ApiException; Kiota throws the base type when an error body is empty or not OData.
+            catch (Microsoft.Kiota.Abstractions.ApiException ex)
+            {
+                attempts.Add(new SpeSharedItemAttempt(form, ex.ResponseStatusCode, (ex as ODataError)?.Error?.Code));
+
+                if (ex.ResponseStatusCode is 400 or 404)
+                    continue;
+
+                if (ex.ResponseStatusCode == 403)
+                {
+                    accessDenied = true;
+                    continue;
+                }
+
+                logger.LogWarning(ex, "Graph /shares resolution unavailable ({Form}, status {Status})",
+                    form, ex.ResponseStatusCode);
+                return Unresolved(SpeSharedItemOutcome.Unavailable, attempts);
+            }
+            catch (Exception ex) when (IsSharesOutage(ex, ct))
+            {
+                attempts.Add(new SpeSharedItemAttempt(form, null, ex.GetType().Name));
+                logger.LogWarning(ex, "Graph /shares resolution unavailable ({Form}, {Failure})", form, ex.GetType().Name);
+                return Unresolved(SpeSharedItemOutcome.Unavailable, attempts);
+            }
+        }
+
+        var outcome = incomplete ? SpeSharedItemOutcome.Unavailable
+            : accessDenied ? SpeSharedItemOutcome.AccessDenied
+            : SpeSharedItemOutcome.NotFound;
+        return Unresolved(outcome, attempts);
+    }
+
+    private static SpeSharedItemResolution Unresolved(SpeSharedItemOutcome outcome, List<SpeSharedItemAttempt> attempts)
+        => new(outcome, null, null, null, attempts);
+
+    /// <summary>
+    /// Outages, as opposed to answers: a transport failure, the Graph pipeline's Polly timeout or open circuit
+    /// (<c>GraphHttpMessageHandler</c>), or an HttpClient timeout — a cancellation the CALLER did not request.
+    /// </summary>
+    private static bool IsSharesOutage(Exception ex, CancellationToken ct) => ex switch
+    {
+        HttpRequestException => true,
+        global::Polly.Timeout.TimeoutRejectedException => true,
+        global::Polly.CircuitBreaker.BrokenCircuitException => true,
+        OperationCanceledException => !ct.IsCancellationRequested,
+        _ => false,
+    };
+
+    /// <summary>
     /// Downloads file content via OBO context. Equivalent to
     /// <see cref="DownloadFileAsUserAsync"/> but kept as a distinct member for
     /// symmetry with the other CICD-088b OBO helpers consumed by

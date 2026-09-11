@@ -4,7 +4,7 @@
     <title>FR-01 server: document-identity resolver extending /api/documents</title>
     <phase>1 Foundation</phase>
     <gate>002 complete — Spike-1 must confirm the `Office.context.document.url` shape for SPE files in Word desktop before this resolver is built</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint modifying .cs in `Sprk.Bff.Api`, with authorization, Graph and Dataverse boundaries. Tags include bff-api and auth. Code-review plus adr-check run at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -153,6 +153,14 @@
     The ADR-044 exception for `sprk_graphitemid` is not an inference — it is recorded verbatim at `Services/Compose/ComposeCreateOnSavePromoter.cs:336-339`: "sprk_graphitemid is an opaque SPE drive-item id (a STRING, not a GUID), so the match is exact-string and ADR-044 GUID canonicalization does NOT apply". Read that comment before writing the lookup.
     Downstream: task 013 consumes this route from the client, task 014 uses the resolved identity for the custom XML part stamp, and task 016 writes its contract test.
     `parallel-safe:true` but no wave partner — this task sits alone between the P1-a pair (010/011) and the P1-b pair (014/015), because 013, 014 and 016 all depend on it.
+    CODE COMPLETE 2026-09-10; status in-progress until the live criteria pass. Decisions: notes/012-identity-resolver-decisions.md. Size: notes/012-publish-size.md.
+    - Route: POST /api/documents/resolve-identity. Two filters in order: DocumentUrlIdentityFilter (resolve, then RouteValues["documentId"]) and the unchanged DocumentAuthorizationFilter("read").
+    - Three answers: resolved; 200 no-identity; 503. A Graph or Dataverse fault is never "not a Spaarke document".
+    - Step 9.5 review applied (notes/012 §9). Graph 401/403 → 503. `identity_conflict` on a drive mismatch. `#` and `%` in file names encoded.
+    - DEVIATION from step 1: the #781 self-heal was NOT copied. It is the duplicate-tolerant secondary lookup this POML's own constraint and escalation trigger forbid (NFR-07). CLAUDE.md §6.5 path C.
+    - Test units are public (ADR-038 B8), not reached through InternalsVisibleTo.
+    - Verified: 61 targeted unit tests; ArchTests; full Sprk.Bff.Api.Tests; no CVE; publish +0.016 MB against a fresh master (Compress-Archive).
+    - OPEN (live, operator): the notes/012 §8 checklist on a dev BFF deploy (SPIKE-1 link 2 + 3, plus a non-Spaarke SPE file), and the Word-desktop document.url capture. Then flip spike-1 AMBER → GREEN.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
