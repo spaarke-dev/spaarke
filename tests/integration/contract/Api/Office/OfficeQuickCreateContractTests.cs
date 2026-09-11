@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.ServiceModel;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -12,7 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -25,9 +23,10 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 
 /// <summary>
 /// HTTP contract for <c>POST /api/office/quickcreate/matter</c> after spaarkeai-word-add-in-r1 task 030 (FR-13):
-/// the Matter path runs through <c>RecordCreationService</c> — a uniqueness-probed <c>sprk_matternumber</c>, a
-/// load-bearing owner, business-unit defaults and the Field Mapping Framework — behind
-/// <c>QuickCreateSourceAccessFilter</c>.
+/// the Matter path runs through <c>RecordCreationService</c> — a load-bearing owner, business-unit defaults, the
+/// matter-type lookup and the Field Mapping Framework — behind <c>QuickCreateSourceAccessFilter</c>. It never writes
+/// <c>sprk_matternumber</c> (numbering is left to a planned separate component — owner decision 2026-09-11) and never
+/// rejects a missing, empty or unknown matter type.
 /// </summary>
 /// <remarks>
 /// The REAL pipeline runs end to end (routing, OfficeAuthFilter, the source-access filter, the handler,
@@ -40,7 +39,6 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 public class OfficeQuickCreateContractTests
 {
     private const string Route = "/api/office/quickcreate/matter";
-    private const string MatterNumberFormat = @"^[A-Z]+-\d{6}$";
 
     /// <summary>Dataverse <c>0x80040217 ObjectDoesNotExist</c> as a signed int — what a retrieve of a missing row faults with.</summary>
     private const int ObjectDoesNotExist = -2147220969;
@@ -56,50 +54,136 @@ public class OfficeQuickCreateContractTests
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Matter_WithMatterType_Returns201_WithUniqueNumberOwnerAndBusinessUnitDefaults()
+    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeOwnerAndBusinessUnitDefaults_AndNoNumber()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
+        ArrangeMatterTypeExists(factory);
         ArrangeBusinessUnit(factory);
-        var probe = ArrangeNumberProbe(factory);
         var created = CaptureCreate(factory);
 
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "  Acme v. Globex  ", Description = "From Word", MatterTypeId = MatterTypeId });
+        // Upper-case input — binding to Guid canonicalizes it, so the lookup carries the bare lower-case id (ADR-044).
+        // (Brace-wrapped registry format is not accepted by System.Text.Json's Guid binding at all.)
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new
+        {
+            name = "  Acme v. Globex  ",
+            description = "From Word",
+            matterTypeId = MatterTypeId.ToString("D").ToUpperInvariant(),
+        });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Id.Should().Be(CreatedMatterId);
-        body.EntityType.Should().Be(QuickCreateEntityType.Matter);
-        body.LogicalName.Should().Be("sprk_matter");
-        body.Name.Should().Be("Acme v. Globex");
+        var json = await ReadJsonAsync(response);
+        json.GetProperty("id").GetString().Should().Be(CreatedMatterId.ToString("D"));
+        json.GetProperty("entityType").GetString().Should().Be("Matter");
+        json.GetProperty("logicalName").GetString().Should().Be("sprk_matter");
+        json.GetProperty("name").GetString().Should().Be("Acme v. Globex");
+        json.TryGetProperty("number", out _).Should().BeFalse("nothing on this path assigns a number");
+        json.TryGetProperty("warnings", out _).Should().BeFalse("a fully specified create has nothing to warn about");
 
         var matter = created.Entity!;
-        var number = matter.GetAttributeValue<string>("sprk_matternumber");
-        number.Should().MatchRegex(MatterNumberFormat).And.StartWith("PAT-");
-        probe.AssertEveryProbeFiltersOnMatterNumber();
-        probe.Candidates.Should().ContainSingle().Which.Should().Be(number, "the written number is the one the probe cleared");
-        body.Number.Should().Be(number);
-
+        matter.GetAttributeValue<EntityReference>("sprk_mattertype").Should().BeEquivalentTo(new EntityReference("sprk_mattertype_ref", MatterTypeId));
         matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", OwnerId));
-        matter.GetAttributeValue<EntityReference>("sprk_mattertype").Id.Should().Be(MatterTypeId);
         matter.GetAttributeValue<string>("sprk_mattername").Should().Be("Acme v. Globex");
         matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be("From Word");
         matter.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
         matter.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
+        AssertNoMatterNumberSent(matter);
         matter.Contains("sprk_containerid").Should().BeFalse("the container is derived server-side, never stamped on create (task 076 W1)");
     }
+
+    // ── Matter type: never a rejection (owner decision 2026-09-11) ──────────────────────────────────────
+
+    [Fact]
+    public async Task Post_Matter_NameOnly_Returns201_NotA400_OwnedByCaller_AndWarnsAboutTheType()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        var created = CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new { name = "Name Only Matter" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "a missing matter type is never a rejection");
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().ContainSingle(w => w.Contains("No matter type was supplied"));
+        created.Entity!.Contains("sprk_mattertype").Should().BeFalse();
+        AssertNoMatterNumberSent(created.Entity);
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+    }
+
+    [Fact]
+    public async Task Post_Matter_WithEmptyGuidMatterType_IsTreatedAsNoType_Returns201()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        var created = CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            Route, new QuickCreateRequest { Name = "Empty Type", MatterTypeId = Guid.Empty });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "Guid.Empty is a client's 'unset', not a malformed request");
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().ContainSingle(w => w.Contains("No matter type was supplied"));
+        created.Entity!.Contains("sprk_mattertype").Should().BeFalse();
+        factory.Entities.Verify(
+            e => e.RetrieveAsync("sprk_mattertype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "there is no type to look up");
+    }
+
+    [Fact]
+    public async Task Post_Matter_WithUnknownMatterType_Returns201_WithoutTheType_AndWarns()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = ObjectDoesNotExist, Message = "sprk_mattertype_ref Does Not Exist" },
+                new FaultReason("Does Not Exist")));
+        var created = CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            Route, new QuickCreateRequest { Name = "Ghost Type", MatterTypeId = MatterTypeId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "an unknown type is treated like a missing one — never a 400 or 500");
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().ContainSingle(w => w.Contains("matter type was not found"));
+        created.Entity!.Contains("sprk_mattertype").Should().BeFalse("a dangling lookup would fail the whole create");
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenTheTypeCheckCannotAnswer_KeepsTheChosenType()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse slow"));
+        var created = CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            Route, new QuickCreateRequest { Name = "Transient Check", MatterTypeId = MatterTypeId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        created.Entity!.GetAttributeValue<EntityReference>("sprk_mattertype").Id
+            .Should().Be(MatterTypeId, "a transient read failure must not strip the type the user chose");
+    }
+
+    // ── Field mapping ───────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Post_Matter_WithSourceContextAndProfile_AppliesEveryRule_ButNeverTheProtectedFields()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "CMRCL");
+        ArrangeMatterTypeExists(factory);
         ArrangeBusinessUnit(factory);
         ArrangeSourceRights(factory, AccessRights.Read);
-        var probe = ArrangeNumberProbe(factory);
         var created = CaptureCreate(factory);
         ArrangeProfile(factory,
             Rule("copy-text", "sprk_clientreference", 0, "sprk_clientreference", 0, mappingType: 0, order: 1),
@@ -107,14 +191,19 @@ public class OfficeQuickCreateContractTests
             Rule("default-option", "", 0, "sprk_billingstatus", 2, mappingType: 1, order: 3, defaultValue: "3"),
             Rule("template", "", 0, "sprk_matternotes", 6, mappingType: 3, order: 4,
                 expression: "Opened from {sprk_projectname} ({sprk_notonsource})"),
-            Rule("protected-number", "", 0, "sprk_matternumber", 0, mappingType: 1, order: 5, defaultValue: "HACK-000001"),
-            Rule("protected-owner", "sprk_client", 1, "ownerid", 1, mappingType: 0, order: 6),
-            Rule("protected-container", "", 0, "sprk_containerid", 0, mappingType: 1, order: 7, defaultValue: "b!shared"));
+            Rule("number-default", "", 0, "sprk_matternumber", 0, mappingType: 1, order: 5, defaultValue: "HACK-000001"),
+            Rule("number-copy", "sprk_projectnumber", 0, "sprk_matternumber", 0, mappingType: 0, order: 6),
+            Rule("number-template-mis-cased", "", 0, "  SPRK_MatterNumber ", 0, mappingType: 3, order: 7,
+                expression: "X-{sprk_projectnumber}"),
+            Rule("number-concat", "", 0, "sprk_matternumber", 0, mappingType: 2, order: 8, expression: "{sprk_projectnumber}"),
+            Rule("owner-copy", "sprk_client", 1, "ownerid", 1, mappingType: 0, order: 9),
+            Rule("container-default", "", 0, "sprk_containerid", 0, mappingType: 1, order: 10, defaultValue: "b!shared"));
         var requestedColumns = ArrangeSource(factory, new Entity("sprk_project", SourceProjectId)
         {
             ["sprk_clientreference"] = "ACME-REF",
             ["sprk_client"] = new EntityReference("account", AccountId),
             ["sprk_projectname"] = "Acme Project",
+            ["sprk_projectnumber"] = "PRJ-000123",
         });
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
@@ -129,7 +218,8 @@ public class OfficeQuickCreateContractTests
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
 
         // One source read spanning every Copy field and every placeholder.
-        requestedColumns.Single().Should().BeEquivalentTo("sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource");
+        requestedColumns.Single().Should().BeEquivalentTo(
+            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber");
 
         var matter = created.Entity!;
         matter.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
@@ -137,27 +227,26 @@ public class OfficeQuickCreateContractTests
         matter.GetAttributeValue<OptionSetValue>("sprk_billingstatus").Value.Should().Be(3);
         matter.GetAttributeValue<string>("sprk_matternotes").Should().Be("Opened from Acme Project ()");
 
-        // The invariants a mapping rule may not touch.
-        matter.GetAttributeValue<string>("sprk_matternumber").Should().Be(probe.Candidates.Single()).And.StartWith("CMRCL-");
+        // The protected attributes: never sent on create, whatever the profile says — Default, Copy, Template,
+        // Concat, and a mis-cased, padded target alike.
+        AssertNoMatterNumberSent(matter);
         matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", OwnerId));
         matter.Contains("sprk_containerid").Should().BeFalse();
 
         body!.Warnings.Should().NotBeNull();
-        body.Warnings!.Should().Contain(w => w.Contains("sprk_matternumber"))
-            .And.Contain(w => w.Contains("ownerid"))
+        body.Warnings!.Count(w => w.Contains("sprk_matternumber", StringComparison.OrdinalIgnoreCase)).Should().Be(4);
+        body.Warnings.Should().Contain(w => w.Contains("ownerid"))
             .And.Contain(w => w.Contains("sprk_containerid"))
             .And.Contain(w => w.Contains("sprk_notonsource"));
     }
 
     [Fact]
-    public async Task Post_Matter_WithTypeSetOnlyByFieldMapping_NumbersFromTheMappedType()
+    public async Task Post_Matter_WithTypeSetOnlyByFieldMapping_CarriesTheMappedType()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "EMPL");
         ArrangeBusinessUnit(factory);
         ArrangeSourceRights(factory, AccessRights.Read);
-        var probe = ArrangeNumberProbe(factory);
         var created = CaptureCreate(factory);
         ArrangeProfile(factory, Rule("copy-type", "sprk_mattertype", 1, "sprk_mattertype", 1, mappingType: 0, order: 1));
         ArrangeSource(factory, new Entity("sprk_project", SourceProjectId)
@@ -173,18 +262,20 @@ public class OfficeQuickCreateContractTests
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().BeNull("the type arrived through mapping, so nothing is missing");
         created.Entity!.GetAttributeValue<EntityReference>("sprk_mattertype").Id.Should().Be(MatterTypeId);
-        created.Entity.GetAttributeValue<string>("sprk_matternumber").Should().Be(probe.Candidates.Single()).And.StartWith("EMPL-");
+        AssertNoMatterNumberSent(created.Entity);
     }
 
     [Fact]
-    public async Task Post_Matter_WhenMappingWritesANonMatterTypeValue_RevertsIt_AndDoesNotNumber()
+    public async Task Post_Matter_WhenMappingWritesANonMatterTypeValue_KeepsTheRequestedType()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
+        ArrangeMatterTypeExists(factory);
         ArrangeBusinessUnit(factory);
         ArrangeSourceRights(factory, AccessRights.Read);
-        var probe = ArrangeNumberProbe(factory);
         var created = CaptureCreate(factory);
         ArrangeProfile(factory, Rule("bad-type", "sprk_client", 1, "sprk_mattertype", 1, mappingType: 0, order: 1));
         ArrangeSource(factory, new Entity("sprk_project", SourceProjectId)
@@ -195,6 +286,7 @@ public class OfficeQuickCreateContractTests
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
         {
             Name = "Bad Mapped Type",
+            MatterTypeId = MatterTypeId,
             SourceEntityType = "sprk_project",
             SourceRecordId = SourceProjectId,
         });
@@ -202,9 +294,37 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().Contain(w => w.Contains("not a matter type"));
+        created.Entity!.GetAttributeValue<EntityReference>("sprk_mattertype")
+            .Should().BeEquivalentTo(new EntityReference("sprk_mattertype_ref", MatterTypeId),
+                "a non-matter-type value would fail the whole create, so the requested type is restored");
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenMappingWritesANonMatterTypeValue_AndNoTypeWasRequested_RemovesIt()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        ArrangeSourceRights(factory, AccessRights.Read);
+        var created = CaptureCreate(factory);
+        ArrangeProfile(factory, Rule("bad-type", "sprk_client", 1, "sprk_mattertype", 1, mappingType: 0, order: 1));
+        ArrangeSource(factory, new Entity("sprk_project", SourceProjectId)
+        {
+            ["sprk_client"] = new EntityReference("account", AccountId),
+        });
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest
+        {
+            Name = "Bad Mapped Type, No Request",
+            SourceEntityType = "sprk_project",
+            SourceRecordId = SourceProjectId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().Contain(w => w.Contains("not a matter type"))
+            .And.Contain(w => w.Contains("No matter type was supplied"));
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse("a non-matter-type value would fail the whole create");
-        created.Entity.Contains("sprk_matternumber").Should().BeFalse();
-        probe.Candidates.Should().BeEmpty();
     }
 
     [Fact]
@@ -212,10 +332,9 @@ public class OfficeQuickCreateContractTests
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
+        ArrangeMatterTypeExists(factory);
         ArrangeBusinessUnit(factory);
         ArrangeSourceRights(factory, AccessRights.Read);
-        ArrangeNumberProbe(factory);
         var created = CaptureCreate(factory);
         ArrangeProfile(factory, Rule("blank-name", "", 0, "sprk_mattername", 0, mappingType: 3, order: 1, expression: "{sprk_notonsource}"));
         ArrangeSource(factory, new Entity("sprk_project", SourceProjectId));
@@ -235,141 +354,14 @@ public class OfficeQuickCreateContractTests
         body.Warnings.Should().Contain(w => w.Contains("name you entered was kept"));
     }
 
-    // ── Collision handling ──────────────────────────────────────────────────────────────────────────────
-
     [Fact]
-    public async Task Post_Matter_WhenFirstCandidateAlreadyExists_ProbesAgain_AndWritesOnlyTheClearedNumber()
+    public async Task Post_Matter_WithSourceContextButNoProfile_IsAGracefulNoOp_AndStillCreatesWithOwner()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "LITG");
-        ArrangeBusinessUnit(factory);
-        var probe = ArrangeNumberProbe(factory, true, false); // first candidate collides, second is free
-        var created = CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "Collision Matter", MatterTypeId = MatterTypeId });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        probe.AssertEveryProbeFiltersOnMatterNumber();
-        probe.Candidates.Should().HaveCount(2);
-        var written = created.Entity!.GetAttributeValue<string>("sprk_matternumber");
-        written.Should().Be(probe.Candidates[1], "only a candidate the probe cleared is ever written");
-        written.Should().MatchRegex(MatterNumberFormat);
-        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task Post_Matter_WhenEveryCandidateCollides_Returns409_AfterFiveProbes_AndCreatesNothing()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
-        ArrangeBusinessUnit(factory);
-        var probe = ArrangeNumberProbe(factory, true, true, true, true, true, true, true);
-        CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "Exhausted", MatterTypeId = MatterTypeId });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("matter_number_unavailable");
-        probe.Candidates.Should().HaveCount(5);
-        AssertNothingCreated(factory);
-    }
-
-    [Fact]
-    public async Task Post_Matter_WhenUniquenessProbeFails_Returns503_AndCreatesNothing()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
-        ArrangeBusinessUnit(factory);
-        factory.Entities
-            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("dataverse unavailable"));
-        CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "Probe Down", MatterTypeId = MatterTypeId });
-
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("matter_number_probe_failed");
-        AssertNothingCreated(factory);
-    }
-
-    [Fact]
-    public async Task Post_Matter_WhenUniquenessProbeReturnsNoAnswer_TreatsItAsAFailure_NotAsFree()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
-        ArrangeBusinessUnit(factory);
-        factory.Entities
-            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((EntityCollection)null!);
-        CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "Silent Probe", MatterTypeId = MatterTypeId });
-
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("matter_number_probe_failed");
-        AssertNothingCreated(factory);
-    }
-
-    [Fact]
-    public async Task Post_Matter_WhenTypeCodeCannotProduceTheFormat_Returns409_AndCreatesNothing()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "Pat1");
-        ArrangeBusinessUnit(factory);
-        var probe = ArrangeNumberProbe(factory);
-        CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "Bad Code", MatterTypeId = MatterTypeId });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("matter_type_code_unusable");
-        probe.Candidates.Should().BeEmpty();
-        AssertNothingCreated(factory);
-    }
-
-    [Fact]
-    public async Task Post_Matter_WhenMatterTypeDoesNotExist_Returns400_AndCreatesNothing()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
-                new OrganizationServiceFault { ErrorCode = ObjectDoesNotExist, Message = "sprk_mattertype_ref Does Not Exist" },
-                new FaultReason("Does Not Exist")));
-        var probe = ArrangeNumberProbe(factory);
-        CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            Route, new QuickCreateRequest { Name = "Ghost Type", MatterTypeId = MatterTypeId });
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("matter_type_not_found");
-        probe.Candidates.Should().BeEmpty();
-        AssertNothingCreated(factory);
-    }
-
-    // ── Field mapping: no profile ───────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task Post_Matter_WithSourceContextButNoProfile_IsAGracefulNoOp_AndStillWritesNumberAndOwner()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "TMRK");
+        ArrangeMatterTypeExists(factory);
         ArrangeBusinessUnit(factory);
         ArrangeSourceRights(factory, AccessRights.Read);
-        ArrangeNumberProbe(factory);
         var created = CaptureCreate(factory);
         factory.FieldMappings
             .Setup(m => m.GetFieldMappingProfileWithRulesAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
@@ -386,8 +378,8 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().BeNull("a missing profile is a silent no-op");
-        created.Entity!.GetAttributeValue<string>("sprk_matternumber").Should().MatchRegex(MatterNumberFormat);
-        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity!.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity.GetAttributeValue<EntityReference>("sprk_mattertype").Id.Should().Be(MatterTypeId);
         factory.Entities.Verify(
             e => e.RetrieveAsync("sprk_project", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "with no profile there is nothing to read from the source record");
@@ -414,7 +406,6 @@ public class OfficeQuickCreateContractTests
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
         ArrangeSourceRights(factory, AccessRights.AppendTo); // holds rights, but not Read
         CaptureCreate(factory);
 
@@ -428,7 +419,6 @@ public class OfficeQuickCreateContractTests
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
         CaptureCreate(factory);
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, SourceContextRequest("Unmapped Type", "sprk_secretthing"));
@@ -445,7 +435,6 @@ public class OfficeQuickCreateContractTests
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
-        ArrangeMatterType(factory, "PAT");
         factory.AccessProbe
             .Setup(p => p.GetCallerRightsAsync(It.IsAny<string>(), "sprk_projects", SourceProjectId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("dataverse unreachable"));
@@ -463,7 +452,6 @@ public class OfficeQuickCreateContractTests
         factory.CallerResolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Unresolved("no-matching-systemuser"));
-        ArrangeMatterType(factory, "PAT");
         CaptureCreate(factory);
 
         var response = await factory.CreateClient().PostAsJsonAsync(
@@ -507,28 +495,6 @@ public class OfficeQuickCreateContractTests
         AssertNothingCreated(factory);
     }
 
-    // ── Interim behaviour (notes/030 §7, pending the owner's matter-type decision) ───────────────────────
-
-    [Fact]
-    public async Task Post_Matter_NameOnly_IsCreatedWithOwnerButNoNumber_AndSaysWhy()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeBusinessUnit(factory);
-        var probe = ArrangeNumberProbe(factory);
-        var created = CaptureCreate(factory);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(Route, new { name = "Name Only Matter" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Number.Should().BeNull();
-        body.Warnings.Should().ContainSingle(w => w.Contains("matter type"));
-        probe.Candidates.Should().BeEmpty("no type code exists to build a candidate from — none is invented");
-        created.Entity!.Contains("sprk_matternumber").Should().BeFalse();
-        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
-    }
-
     // ── Arrangement + assertion helpers ─────────────────────────────────────────────────────────────────
 
     private static QuickCreateRequest SourceContextRequest(string name, string sourceEntityType) => new()
@@ -538,6 +504,12 @@ public class OfficeQuickCreateContractTests
         SourceEntityType = sourceEntityType,
         SourceRecordId = SourceProjectId,
     };
+
+    /// <summary>No key on the create payload names the matter number, in any casing or padding.</summary>
+    private static void AssertNoMatterNumberSent(Entity matter)
+        => matter.Attributes.Keys
+            .Should().NotContain(key => string.Equals(key.Trim(), "sprk_matternumber", StringComparison.OrdinalIgnoreCase),
+                "numbering is left to a planned separate component; this path must never send sprk_matternumber");
 
     private static async Task AssertSourceDeniedAsync(
         OfficeQuickCreateTestWebAppFactory factory, HttpResponseMessage response, string reasonCode)
@@ -566,10 +538,10 @@ public class OfficeQuickCreateContractTests
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(OwnerId.ToString("D")));
 
-    private static void ArrangeMatterType(OfficeQuickCreateTestWebAppFactory factory, string code)
+    private static void ArrangeMatterTypeExists(OfficeQuickCreateTestWebAppFactory factory)
         => factory.Entities
             .Setup(e => e.RetrieveAsync("sprk_mattertype_ref", MatterTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_mattertype_ref", MatterTypeId) { ["sprk_mattertypecode"] = code });
+            .ReturnsAsync(new Entity("sprk_mattertype_ref", MatterTypeId));
 
     private static void ArrangeBusinessUnit(OfficeQuickCreateTestWebAppFactory factory)
     {
@@ -615,32 +587,6 @@ public class OfficeQuickCreateContractTests
         return requests;
     }
 
-    /// <summary>
-    /// Answers the <c>sprk_matternumber</c> uniqueness probe: the n-th probe reports "taken" when
-    /// <paramref name="takenSequence"/>[n] is true, "free" once the sequence runs out. Records every probe; the
-    /// callback only records (assertions run afterwards, so a mismatch reports itself rather than surfacing as a 503).
-    /// </summary>
-    private static ProbeLog ArrangeNumberProbe(OfficeQuickCreateTestWebAppFactory factory, params bool[] takenSequence)
-    {
-        var log = new ProbeLog();
-        factory.Entities
-            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
-            {
-                var taken = log.Queries.Count < takenSequence.Length && takenSequence[log.Queries.Count];
-                log.Queries.Add(query);
-
-                var matches = new EntityCollection();
-                if (taken)
-                {
-                    matches.Entities.Add(new Entity("sprk_matter", Guid.NewGuid()));
-                }
-
-                return matches;
-            });
-        return log;
-    }
-
     private static CreatedHolder CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
     {
         var holder = new CreatedHolder();
@@ -668,11 +614,17 @@ public class OfficeQuickCreateContractTests
             IsActive = true,
         };
 
+    private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.Clone();
+    }
+
     /// <summary>The top-level string members of a ProblemDetails body (extensions are flattened to the root).</summary>
     private static async Task<Dictionary<string, string?>> ReadProblemAsync(HttpResponseMessage response)
     {
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return document.RootElement.EnumerateObject()
+        var root = await ReadJsonAsync(response);
+        return root.EnumerateObject()
             .Where(property => property.Value.ValueKind == JsonValueKind.String)
             .ToDictionary(property => property.Name, property => property.Value.GetString());
     }
@@ -680,27 +632,6 @@ public class OfficeQuickCreateContractTests
     private sealed class CreatedHolder
     {
         public Entity? Entity { get; set; }
-    }
-
-    private sealed class ProbeLog
-    {
-        public List<QueryExpression> Queries { get; } = [];
-
-        public List<string> Candidates => Queries
-            .Select(query => query.Criteria.Conditions.FirstOrDefault()?.Values.FirstOrDefault() as string ?? "<no condition>")
-            .ToList();
-
-        public void AssertEveryProbeFiltersOnMatterNumber()
-        {
-            foreach (var query in Queries)
-            {
-                query.EntityName.Should().Be("sprk_matter");
-                var condition = query.Criteria.Conditions.Should().ContainSingle().Subject;
-                condition.AttributeName.Should().Be("sprk_matternumber");
-                condition.Operator.Should().Be(ConditionOperator.Equal);
-                ((string)condition.Values.Single()).Should().MatchRegex(MatterNumberFormat);
-            }
-        }
     }
 }
 

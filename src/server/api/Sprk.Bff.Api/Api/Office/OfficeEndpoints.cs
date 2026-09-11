@@ -1159,7 +1159,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. A Matter is created server-side complete (spaarkeai-word-add-in-r1 FR-13): a uniqueness-checked sprk_matternumber when a matter type is supplied, the caller as owner, business-unit defaults, and the Field Mapping Framework applied from the optional record context.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. A Matter is created server-side (spaarkeai-word-add-in-r1 FR-13) with the caller as owner, business-unit defaults, the matter-type lookup when supplied, and the Field Mapping Framework applied from the optional record context. This endpoint does not assign a matter number: that will be done by a planned separate server-side numbering component, and until it exists, matters created here have no number.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1169,9 +1169,8 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict) // Idempotency conflicts; matter number unavailable / type code unusable
-            .ProducesProblem(StatusCodes.Status429TooManyRequests)
-            .ProducesProblem(StatusCodes.Status503ServiceUnavailable); // Matter number uniqueness could not be verified
+            .ProducesProblem(StatusCodes.Status409Conflict) // For idempotency conflicts
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
         // (email-communication-intelligence-r2 #3). Regarding = the record the email was filed to.
@@ -1448,9 +1447,9 @@ public static class OfficeEndpoints
         }
         catch (SdapProblemException problem)
         {
-            // Task 030: a structured creation refusal (matter number unavailable / probe failed, owner unresolved,
-            // matter type unusable). No row was written. Rendered in this endpoint's ProblemDetails shape rather
-            // than letting the generic catch below turn a deliberate refusal into a 500.
+            // Task 030: a structured creation refusal (owner unresolved → 403, invalid input → 400). No row was
+            // written. Rendered in this endpoint's ProblemDetails shape rather than letting the generic catch below
+            // turn a deliberate refusal into a 500.
             logger.LogWarning(
                 "Quick create refused for {EntityType}: {Code} ({Status}), CorrelationId={CorrelationId}",
                 entityType, problem.Code, problem.StatusCode, traceId);

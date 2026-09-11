@@ -5,13 +5,13 @@
 // POST /api/office/quickcreate/{entityType} (a user is waiting; ADR-001 rules out Functions), it composes the
 // existing IGenericEntityService + IFieldMappingDataverseService seams (no new Dataverse client), and it is the
 // one implementation task 031 (Project) and the post-r1 wizard-migration evaluation are meant to call.
+//
+// NUMBERING IS OUT OF SCOPE (owner decision 2026-09-11): sprk_matternumber will be assigned by a planned, separate
+// server-side record-numbering component that triggers on create. Until it exists, matters created here have no
+// number. This service never writes it. See projects/spaarkeai-word-add-in-r1/notes/030-numbering-handoff.md.
 
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Office;
@@ -43,7 +43,11 @@ public sealed record RecordCreationRequest
     /// </summary>
     public string? OwnerSystemUserId { get; init; }
 
-    /// <summary>Optional <c>sprk_mattertype_ref</c> id. Drives <c>sprk_mattertype</c> and the number's type code.</summary>
+    /// <summary>
+    /// The <c>sprk_mattertype_ref</c> id. The pane will always send it (owner decision 2026-09-11; the client task
+    /// adding the required field is pending). A type that resolves sets the <c>sprk_mattertype</c> lookup. A missing,
+    /// empty or unknown type is NEVER a rejection: the matter is created without the lookup, with a warning.
+    /// </summary>
     public Guid? MatterTypeId { get; init; }
 
     /// <summary>
@@ -63,26 +67,11 @@ public sealed record RecordCreationRequest
 /// <summary>Why a creation was refused. Every kind means <b>no row was written</b>.</summary>
 public enum RecordCreationFailureKind
 {
-    /// <summary>The request cannot be honoured as given (wrong entity type, blank name, empty type id).</summary>
+    /// <summary>The request cannot be honoured as given (wrong entity type, blank name).</summary>
     InvalidInput,
 
     /// <summary>The caller has no resolvable Dataverse user, so the record cannot be owned by them.</summary>
-    OwnerUnresolved,
-
-    /// <summary>The supplied matter type does not exist.</summary>
-    MatterTypeNotFound,
-
-    /// <summary>The matter type could not be read, so the number cannot be derived.</summary>
-    MatterTypeLookupFailed,
-
-    /// <summary>The matter type's code is not usable for the <c>{CODE}-{6 digits}</c> format.</summary>
-    MatterTypeCodeUnusable,
-
-    /// <summary>Every candidate number collided (the uniqueness probe exhausted its attempts).</summary>
-    NumberExhausted,
-
-    /// <summary>The uniqueness probe itself failed or gave no answer, so no candidate could be verified.</summary>
-    NumberProbeFailed
+    OwnerUnresolved
 }
 
 /// <summary>A structured refusal. <see cref="Code"/> is a stable identifier; <see cref="Detail"/> is user-safe text.</summary>
@@ -103,10 +92,7 @@ public sealed record RecordCreationResult
     /// <summary>The name actually written (a field-mapping rule may have replaced the requested one).</summary>
     public string Name { get; init; } = string.Empty;
 
-    /// <summary>The number assigned (Matter: <c>sprk_matternumber</c>), or null when none could be derived.</summary>
-    public string? Number { get; init; }
-
-    /// <summary>Non-fatal diagnostics (field-mapping skips, missing number, BU defaults unavailable).</summary>
+    /// <summary>Non-fatal diagnostics (field-mapping skips, no or unknown matter type, BU defaults unavailable).</summary>
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
     /// <summary>Set when the creation was refused; <see langword="null"/> on success.</summary>
@@ -120,43 +106,45 @@ public sealed record RecordCreationResult
 
 /// <summary>
 /// Creates Dataverse records server-side with the completeness the client <c>Create*Wizard</c> components give
-/// them in the browser: a generated number, a load-bearing owner, business-unit defaults, and the Field Mapping
-/// Framework. r1 scope is <b>Matter only</b> (FR-13; task 031 owns Project, whose semantics differ).
+/// them in the browser — a load-bearing owner, business-unit defaults, and the Field Mapping Framework. r1 scope is
+/// <b>Matter only</b> (FR-13; task 031 owns Project, whose semantics differ).
 /// </summary>
 /// <remarks>
-/// <para><b>Matter pipeline</b> (mirrors <c>matterService.createMatter</c>, with its invariants hardened):</para>
+/// <para><b>Matter pipeline</b> (mirrors <c>matterService.createMatter</c>, minus numbering):</para>
 /// <list type="number">
-///   <item><description>Name / description; the requested <c>sprk_mattertype</c>.</description></item>
+///   <item><description>Name / description; the <c>sprk_mattertype</c> lookup when the supplied type resolves (one
+///   existence read — an unknown type is dropped with a warning, never rejected).</description></item>
 ///   <item><description>BU defaults from the OWNER's business unit — <c>sprk_searchindexname</c> (INV-5 guarded) and
 ///   the <c>sprk_ai_search_index</c> lookup — mirroring <c>EntityCreationService.applyUserBuDefaults</c>.
 ///   <c>sprk_containerid</c> is deliberately NOT written (unified-access-control-r2 task 076, W1).</description></item>
 ///   <item><description>Field Mapping Framework — one profile read, one source read, rules applied by
 ///   <see cref="CreateTimeFieldMapping"/>; a missing profile is a silent no-op.</description></item>
-///   <item><description>Number — <c>{sprk_mattertypecode}-{6 digits}</c> from the type actually on the payload
-///   (requested or mapped), uniqueness-probed, at most <see cref="MaxNumberAttempts"/> candidates, structured
-///   failure on exhaustion.</description></item>
 ///   <item><description>Owner — <c>ownerid</c> = the caller, refused when unresolved.</description></item>
 /// </list>
-/// <para><b>Deliberate deviations from the client engine</b> (notes/030 §8): the client applies field mapping last,
-/// so a rule could overwrite the number. Here mapping runs BEFORE numbering (so the type code matches the type
-/// written) and may not touch <c>sprk_matternumber</c>, <c>ownerid</c> or <c>sprk_containerid</c>; a mapping that
-/// blanks the name or writes a non-matter-type value into <c>sprk_mattertype</c> is reverted with a warning.</para>
-/// <para><b>ADR-044</b>: every GUID here is a <see cref="Guid"/> value (canonical by construction) or parsed with
-/// <see cref="Guid.TryParse(string?, out Guid)"/>, which accepts registry-format input; the uniqueness probe and every
-/// read are typed SDK queries — no GUID or candidate is interpolated into an OData string.</para>
+/// <para><b><c>sprk_matternumber</c> is never written here</b> (owner decision 2026-09-11) — not directly, and not
+/// through a field-mapping rule of any type (the protected-attribute check is case-insensitive). Numbering is left to
+/// a planned separate on-create component so this path can never pre-empt or collide with it.</para>
+/// <para><b>Deliberate deviations from the client engine</b> (notes/030 §8): mapping may not touch
+/// <c>sprk_matternumber</c>, <c>ownerid</c> or <c>sprk_containerid</c>; a mapping that blanks the name or writes a
+/// non-matter-type value into <c>sprk_mattertype</c> is reverted with a warning.</para>
+/// <para><b>ADR-044</b>: every GUID handled here is a <see cref="Guid"/> value — canonical by construction. The one
+/// string GUID, <see cref="RecordCreationRequest.OwnerSystemUserId"/>, is parsed with
+/// <see cref="Guid.TryParse(string?, out Guid)"/>. Body GUIDs (<c>matterTypeId</c>, <c>sourceRecordId</c>) are bound
+/// by System.Text.Json, which accepts only the bare "D" form (either case) and fails a brace-wrapped value closed with a
+/// 400 before this service runs — so clients must send <c>cleanGuid</c> output. Reads are typed SDK calls; no GUID is
+/// interpolated into an OData string.</para>
 /// <para><b>ADR-010</b>: concrete, one registration (<c>OfficeModule</c>). No interface — there is one
 /// implementation, and the contract test substitutes the Dataverse boundary, not this class.</para>
 /// </remarks>
 public sealed class RecordCreationService
 {
     internal const string MatterEntity = "sprk_matter";
-    internal const string MatterIdAttribute = "sprk_matterid";
     internal const string MatterNameAttribute = "sprk_mattername";
     internal const string MatterDescriptionAttribute = "sprk_matterdescription";
     internal const string MatterNumberAttribute = "sprk_matternumber";
     internal const string MatterTypeAttribute = "sprk_mattertype";
     internal const string MatterTypeEntity = "sprk_mattertype_ref";
-    internal const string MatterTypeCodeAttribute = "sprk_mattertypecode";
+    internal const string MatterTypeIdAttribute = "sprk_mattertype_refid";
     internal const string OwnerAttribute = "ownerid";
     internal const string ContainerAttribute = "sprk_containerid";
     internal const string SystemUserEntity = "systemuser";
@@ -167,26 +155,9 @@ public sealed class RecordCreationService
     internal const string SearchIndexEntity = "sprk_aisearchindex";
 
     /// <summary>
-    /// Candidate numbers probed before giving up. The task's "retry up to 5 times / exhausts 5 retries" is
-    /// implemented as five probed candidates in total (notes/030 §6).
-    /// </summary>
-    internal const int MaxNumberAttempts = 5;
-
-    /// <summary>Six-digit suffix range — identical to the wizard's <c>100000 + random * 900000</c>.</summary>
-    private const int NumberSuffixMin = 100000;
-    private const int NumberSuffixMaxExclusive = 1000000;
-
-    /// <summary>
-    /// The live type codes (LITG, CMRCL, PAT, TMRK, EMPL — verified 2026-09-11) are upper-case letters, and the
-    /// shipped numbers are <c>^[A-Z]+-\d{6}$</c>. A code outside that shape would mint an off-format number, so it
-    /// is refused rather than written.
-    /// </summary>
-    private static readonly Regex TypeCodePattern =
-        new("^[A-Z]+$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
-    /// <summary>
-    /// Attributes a field-mapping rule may not write: the probed number, the load-bearing owner, and the storage
-    /// container (server-derived only — task 076 W1).
+    /// Attributes a field-mapping rule may not write on this path: the number (left to the planned numbering
+    /// component — notes/030-numbering-handoff.md), the load-bearing owner, and the storage container
+    /// (server-derived only — task 076 W1). Case-insensitive, so a mis-cased or padded target is caught too.
     /// </summary>
     private static readonly IReadOnlySet<string> ProtectedAttributes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MatterNumberAttribute, OwnerAttribute, ContainerAttribute };
@@ -206,9 +177,9 @@ public sealed class RecordCreationService
     }
 
     /// <summary>
-    /// Creates the record. Returns a structured <see cref="RecordCreationFailure"/> — never a partial or
-    /// colliding write — when the record cannot be created with its invariants intact. Dataverse transport or
-    /// rejection errors on the final create propagate (the caller's generic 500 path, unchanged from before).
+    /// Creates the record. Returns a structured <see cref="RecordCreationFailure"/> — never a partial write — when
+    /// the record cannot be created with its invariants intact. Dataverse transport or rejection errors on the final
+    /// create propagate (the caller's generic 500 path, unchanged from before).
     /// </summary>
     public async Task<RecordCreationResult> CreateAsync(RecordCreationRequest request, CancellationToken ct = default)
     {
@@ -259,27 +230,23 @@ public sealed class RecordCreationService
             entity[MatterDescriptionAttribute] = request.Description.Trim();
         }
 
-        // The requested type is validated up front: a request naming a type that does not exist is refused
-        // before anything else is read.
-        var typeCodes = new Dictionary<Guid, string?>();
+        // Guid.Empty is how some clients say "unset": treated exactly like an absent type (owner decision: never reject).
         EntityReference? requestedType = null;
-        if (request.MatterTypeId is { } requestedTypeId)
+        var typeWarningAdded = false;
+        if (request.MatterTypeId is { } requestedTypeId && requestedTypeId != Guid.Empty)
         {
-            if (requestedTypeId == Guid.Empty)
+            if (await MatterTypeIsKnownToBeMissingAsync(requestedTypeId, ct).ConfigureAwait(false))
             {
-                return RecordCreationResult.Failed(new RecordCreationFailure(
-                    RecordCreationFailureKind.InvalidInput, "matter_type_invalid", "The matter type id is empty."));
+                warnings.Add(
+                    "The selected matter type was not found, so the matter was created without a type. Open the "
+                    + "matter and set its type.");
+                typeWarningAdded = true;
             }
-
-            var (code, failure) = await ReadMatterTypeCodeAsync(requestedTypeId, ct).ConfigureAwait(false);
-            if (failure is not null)
+            else
             {
-                return RecordCreationResult.Failed(failure);
+                requestedType = new EntityReference(MatterTypeEntity, requestedTypeId);
+                entity[MatterTypeAttribute] = requestedType;
             }
-
-            typeCodes[requestedTypeId] = code;
-            requestedType = new EntityReference(MatterTypeEntity, requestedTypeId);
-            entity[MatterTypeAttribute] = requestedType;
         }
 
         await ApplyBusinessUnitDefaultsAsync(entity, ownerId, warnings, ct).ConfigureAwait(false);
@@ -294,54 +261,10 @@ public sealed class RecordCreationService
             KeepRequestedNameIfMappingBlankedIt(entity, name, warnings);
         }
 
-        var finalType = ResolveFinalMatterType(entity, requestedType, warnings);
-
-        // Number from the type ACTUALLY on the payload — requested, or written by a mapping rule.
-        string? number = null;
-        if (finalType is null)
+        if (ResolveFinalMatterType(entity, requestedType, warnings) is null && !typeWarningAdded)
         {
-            // Interim behaviour pending the owner decision recorded in notes/030 §7: the format needs a type code
-            // and a name-only request carries none. Nothing is invented; the gap is surfaced.
-            warnings.Add(
-                "No matter number was assigned because no matter type was supplied. A matter number is "
-                + "{type code}-{6 digits}, so it needs a matter type. Open the matter and set its type to number it.");
-        }
-        else
-        {
-            if (!typeCodes.TryGetValue(finalType.Id, out var code))
-            {
-                var (mappedCode, failure) = await ReadMatterTypeCodeAsync(finalType.Id, ct).ConfigureAwait(false);
-                if (failure is not null)
-                {
-                    return RecordCreationResult.Failed(failure);
-                }
-
-                code = mappedCode;
-            }
-
-            if (string.IsNullOrWhiteSpace(code) || !TypeCodePattern.IsMatch(code))
-            {
-                _logger.LogError(
-                    "[RECORD-CREATE] Matter type {MatterTypeId} has code '{TypeCode}', which cannot produce a "
-                    + "{{CODE}}-{{6 digits}} number. Refusing rather than writing an off-format number.",
-                    finalType.Id, code);
-
-                return RecordCreationResult.Failed(new RecordCreationFailure(
-                    RecordCreationFailureKind.MatterTypeCodeUnusable,
-                    "matter_type_code_unusable",
-                    "The matter type's code cannot be used to number a matter (a matter number is "
-                    + "{type code}-{6 digits}, and the code must be upper-case letters). The matter was not "
-                    + "created. Ask an administrator to correct the matter type's code."));
-            }
-
-            var (generated, numberFailure) = await GenerateUniqueMatterNumberAsync(code, ct).ConfigureAwait(false);
-            if (numberFailure is not null)
-            {
-                return RecordCreationResult.Failed(numberFailure);
-            }
-
-            number = generated;
-            entity[MatterNumberAttribute] = number;
+            // Owner decision 2026-09-11: the type is required in the pane, but a missing one is NOT a rejection.
+            warnings.Add("No matter type was supplied. Open the matter and set its type.");
         }
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing (task 030 step 4).
@@ -350,18 +273,52 @@ public sealed class RecordCreationService
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "[RECORD-CREATE] Matter {MatterId} created for caller {CallerUserId}: number={Number}, owner={OwnerId}, "
-            + "warnings={WarningCount}",
-            createdId, request.CallerUserId, number ?? "(none)", ownerId, warnings.Count);
+            "[RECORD-CREATE] Matter {MatterId} created for caller {CallerUserId}: owner={OwnerId}, warnings={WarningCount}",
+            createdId, request.CallerUserId, ownerId, warnings.Count);
 
         return new RecordCreationResult
         {
             RecordId = createdId,
             LogicalName = MatterEntity,
             Name = (string)entity[MatterNameAttribute],
-            Number = number,
             Warnings = warnings
         };
+    }
+
+    /// <summary>
+    /// The one existence read for a supplied matter type. Returns <see langword="true"/> ONLY when Dataverse says the
+    /// row does not exist — the case that would otherwise reach Dataverse as a dangling lookup and fail the whole create
+    /// with a 500. Any other outcome (found, or a read that could not answer) keeps the lookup: a transient read
+    /// failure must not strip a type the user chose, and Dataverse still validates the lookup on create.
+    /// </summary>
+    private async Task<bool> MatterTypeIsKnownToBeMissingAsync(Guid matterTypeId, CancellationToken ct)
+    {
+        try
+        {
+            await _entities
+                .RetrieveAsync(MatterTypeEntity, matterTypeId, [MatterTypeIdAttribute], ct)
+                .ConfigureAwait(false);
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
+        {
+            _logger.LogWarning(
+                "[RECORD-CREATE] Matter type {MatterTypeId} does not exist; creating the matter without a type.",
+                matterTypeId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[RECORD-CREATE] Matter type {MatterTypeId} could not be checked; keeping the lookup and letting "
+                + "Dataverse validate it on create.",
+                matterTypeId);
+            return false;
+        }
     }
 
     /// <summary>
@@ -382,7 +339,7 @@ public sealed class RecordCreationService
     }
 
     /// <summary>
-    /// The matter type the number is derived from. A mapping rule that wrote something other than a
+    /// The matter type the record will carry. A mapping rule that wrote something other than a
     /// <c>sprk_mattertype_ref</c> reference into <c>sprk_mattertype</c> is reverted (to the requested type, if any)
     /// rather than being sent to Dataverse, where it would fail the whole create.
     /// </summary>
@@ -412,130 +369,6 @@ public sealed class RecordCreationService
 
         entity.Attributes.Remove(MatterTypeAttribute);
         return null;
-    }
-
-    // ------------------------------------------------------------------------------------------------------
-    // Numbering
-    // ------------------------------------------------------------------------------------------------------
-
-    private async Task<(string? Code, RecordCreationFailure? Failure)> ReadMatterTypeCodeAsync(
-        Guid matterTypeId,
-        CancellationToken ct)
-    {
-        try
-        {
-            var row = await _entities
-                .RetrieveAsync(MatterTypeEntity, matterTypeId, [MatterTypeCodeAttribute], ct)
-                .ConfigureAwait(false);
-
-            return (row.GetAttributeValue<string>(MatterTypeCodeAttribute)?.Trim(), null);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
-        {
-            _logger.LogWarning(ex, "[RECORD-CREATE] Matter type {MatterTypeId} does not exist.", matterTypeId);
-            return (null, new RecordCreationFailure(
-                RecordCreationFailureKind.MatterTypeNotFound,
-                "matter_type_not_found",
-                "The selected matter type does not exist. The matter was not created."));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[RECORD-CREATE] Matter type {MatterTypeId} could not be read.", matterTypeId);
-            return (null, new RecordCreationFailure(
-                RecordCreationFailureKind.MatterTypeLookupFailed,
-                "matter_type_lookup_failed",
-                "The matter type could not be read, so a matter number could not be generated. The matter was "
-                + "not created. Please try again."));
-        }
-    }
-
-    /// <summary>
-    /// Generate-then-probe, at most <see cref="MaxNumberAttempts"/> times. A candidate is only ever returned after
-    /// the probe has confirmed no <c>sprk_matter</c> row carries it; a probe error — or a probe that returns no
-    /// answer at all — returns a failure rather than an unverified value.
-    /// </summary>
-    /// <remarks>
-    /// Residual (documented, notes/030 §6): probe-then-create leaves a TOCTOU window. Closing it outright needs a
-    /// Dataverse alternate key on <c>sprk_matternumber</c> — a schema change outside this task.
-    /// </remarks>
-    private async Task<(string? Number, RecordCreationFailure? Failure)> GenerateUniqueMatterNumberAsync(
-        string typeCode,
-        CancellationToken ct)
-    {
-        for (var attempt = 1; attempt <= MaxNumberAttempts; attempt++)
-        {
-            var suffix = RandomNumberGenerator.GetInt32(NumberSuffixMin, NumberSuffixMaxExclusive);
-            var candidate = string.Create(CultureInfo.InvariantCulture, $"{typeCode}-{suffix}");
-
-            bool taken;
-            try
-            {
-                taken = await IsMatterNumberTakenAsync(candidate, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "[RECORD-CREATE] Uniqueness probe for matter number {Candidate} failed on attempt {Attempt}. "
-                    + "Refusing rather than writing an unverified number.",
-                    candidate, attempt);
-
-                return (null, new RecordCreationFailure(
-                    RecordCreationFailureKind.NumberProbeFailed,
-                    "matter_number_probe_failed",
-                    "The new matter number could not be checked for uniqueness, so the matter was not created. "
-                    + "Please try again."));
-            }
-
-            if (!taken)
-            {
-                return (candidate, null);
-            }
-
-            _logger.LogWarning(
-                "[RECORD-CREATE] Matter number candidate {Candidate} is already in use (attempt {Attempt} of {Max}).",
-                candidate, attempt, MaxNumberAttempts);
-        }
-
-        _logger.LogError(
-            "[RECORD-CREATE] No unused matter number found for type code {TypeCode} after {Max} candidates.",
-            typeCode, MaxNumberAttempts);
-
-        return (null, new RecordCreationFailure(
-            RecordCreationFailureKind.NumberExhausted,
-            "matter_number_unavailable",
-            $"No unused matter number could be found after {MaxNumberAttempts} attempts, so the matter was not "
-            + "created. Please try again."));
-    }
-
-    /// <summary>
-    /// The mandated uniqueness probe: a retrieve filtered on <c>sprk_matternumber eq {candidate}</c>, expressed as a
-    /// typed <see cref="ConditionExpression"/> (no string-built filter). Inactive rows count — uniqueness is global.
-    /// A missing result is an unanswered question, not "free", so it throws into the caller's probe-failure path.
-    /// </summary>
-    private async Task<bool> IsMatterNumberTakenAsync(string candidate, CancellationToken ct)
-    {
-        var query = new QueryExpression(MatterEntity)
-        {
-            ColumnSet = new ColumnSet(MatterIdAttribute),
-            TopCount = 1
-        };
-        query.Criteria.AddCondition(MatterNumberAttribute, ConditionOperator.Equal, candidate);
-
-        var matches = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        if (matches?.Entities is not { } rows)
-        {
-            throw new InvalidOperationException("The matter-number uniqueness probe returned no result.");
-        }
-
-        return rows.Count > 0;
     }
 
     // ------------------------------------------------------------------------------------------------------

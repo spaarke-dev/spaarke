@@ -82,9 +82,11 @@ public record QuickCreateRequest
     public Guid? AccountId { get; init; }
 
     /// <summary>
-    /// Optional <c>sprk_mattertype_ref</c> id for a Matter (spaarkeai-word-add-in-r1 task 030, FR-13). Sets
-    /// <c>sprk_mattertype</c> and supplies the type code of the server-generated <c>sprk_matternumber</c>
-    /// (<c>{type code}-{6 digits}</c>). Ignored for other entity types.
+    /// <c>sprk_mattertype_ref</c> id for a Matter (spaarkeai-word-add-in-r1 task 030, FR-13). The pane will always
+    /// send it (owner decision 2026-09-11; the client task that adds the required field is pending — today the pane
+    /// sends only <c>name</c>). When supplied it sets the <c>sprk_mattertype</c> lookup; an id with no matching row is
+    /// a 400. When absent — or <see cref="Guid.Empty"/>, which some clients use for "unset" — the matter is still
+    /// created, with a warning: it is never a rejection. Ignored for other entity types.
     /// </summary>
     public Guid? MatterTypeId { get; init; }
 
@@ -225,10 +227,8 @@ public static class QuickCreateFieldRequirements
             errors["sourceEntityType"] = ["sourceEntityType must be a Dataverse entity logical name"];
         }
 
-        if (request.MatterTypeId == Guid.Empty)
-        {
-            errors["matterTypeId"] = ["matterTypeId must be a non-empty GUID"];
-        }
+        // matterTypeId is deliberately NOT validated here: a missing, empty or unknown type is never a rejection
+        // (owner decision 2026-09-11) — the creation service creates without it and warns.
 
         return errors;
     }

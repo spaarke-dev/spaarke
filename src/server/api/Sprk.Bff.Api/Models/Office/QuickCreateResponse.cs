@@ -44,15 +44,8 @@ public record QuickCreateResponse
     public string? Url { get; init; }
 
     /// <summary>
-    /// The record number the server assigned (Matter: <c>sprk_matternumber</c>, <c>{type code}-{6 digits}</c>).
-    /// Omitted when none was assigned (spaarkeai-word-add-in-r1 task 030).
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Number { get; init; }
-
-    /// <summary>
-    /// Non-fatal diagnostics from server-side creation (e.g. no matter type so no number; a field-mapping rule
-    /// skipped). Omitted when there are none (task 030).
+    /// Non-fatal diagnostics from server-side creation (e.g. no matter type supplied; a field-mapping rule
+    /// skipped). Omitted when there are none (spaarkeai-word-add-in-r1 task 030).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Warnings { get; init; }

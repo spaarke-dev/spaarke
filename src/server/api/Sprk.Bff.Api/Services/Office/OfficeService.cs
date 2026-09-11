@@ -1410,8 +1410,10 @@ public class OfficeService : IOfficeService
     /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
     /// return null (endpoint 403s) until built out.</para>
     /// <para><b>Matter</b> (spaarkeai-word-add-in-r1 task 030, FR-13) is created complete by
-    /// <see cref="RecordCreationService"/>: a uniqueness-probed <c>sprk_matternumber</c> when a matter type is
-    /// supplied, the caller as a <b>load-bearing</b> owner, business-unit defaults and the Field Mapping Framework.
+    /// <see cref="RecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
+    /// matter-type lookup when supplied, and the Field Mapping Framework. It never writes <c>sprk_matternumber</c>:
+    /// numbering is left to a planned separate server-side component (owner decision 2026-09-11); until it exists,
+    /// matters created here have no number.
     /// A refusal there surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
     /// written); see <see cref="QuickCreateMatterAsync"/>.</para>
     /// <para><b>Project / Invoice</b> keep the minimal path: the generic Dataverse create
@@ -1456,8 +1458,8 @@ public class OfficeService : IOfficeService
         }
 
         // FR-13 (spaarkeai-word-add-in-r1 task 030): Matter goes through the shared server-side creation service —
-        // uniqueness-probed sprk_matternumber, load-bearing owner, BU defaults, Field Mapping Framework. Project
-        // (task 031, different numbering semantics) and Invoice stay on the minimal path below, unchanged.
+        // load-bearing owner, BU defaults, matter-type lookup, Field Mapping Framework (no number: a separate
+        // numbering component owns sprk_matternumber). Project (task 031) and Invoice stay on the minimal path below.
         if (entityType == QuickCreateEntityType.Matter)
         {
             return await QuickCreateMatterAsync(name, request, userId, ownerSystemUserId, cancellationToken)
@@ -1555,7 +1557,6 @@ public class OfficeService : IOfficeService
             EntityType = QuickCreateEntityType.Matter,
             LogicalName = result.LogicalName,
             Name = result.Name,
-            Number = result.Number,
             Warnings = result.Warnings.Count > 0 ? result.Warnings : null,
             // Org URL isn't known server-side (the add-in must not be org-pinned).
             Url = null
@@ -1566,12 +1567,7 @@ public class OfficeService : IOfficeService
     internal static int MapCreationFailureStatus(RecordCreationFailureKind kind) => kind switch
     {
         RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
-        RecordCreationFailureKind.MatterTypeNotFound => StatusCodes.Status400BadRequest,
         RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
-        RecordCreationFailureKind.MatterTypeCodeUnusable => StatusCodes.Status409Conflict,
-        RecordCreationFailureKind.NumberExhausted => StatusCodes.Status409Conflict,
-        RecordCreationFailureKind.MatterTypeLookupFailed => StatusCodes.Status503ServiceUnavailable,
-        RecordCreationFailureKind.NumberProbeFailed => StatusCodes.Status503ServiceUnavailable,
         _ => StatusCodes.Status500InternalServerError
     };
 

@@ -149,9 +149,9 @@ public interface IOfficeService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Quick create response with created entity details, or null if creation is unavailable for the type.</returns>
     /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
-    /// Matter only (spaarkeai-word-add-in-r1 task 030): the server-side creation service refused — e.g. no unused
-    /// matter number after the uniqueness probe, the probe failed, the caller has no Dataverse user, or the matter
-    /// type is unusable. No row was written; the exception carries the stable code and HTTP status.
+    /// Matter only (spaarkeai-word-add-in-r1 task 030): the server-side creation service refused — the caller has
+    /// no Dataverse user (403) or the request is invalid (400). No row was written; the exception carries the stable
+    /// code and HTTP status.
     /// </exception>
     /// <remarks>
     /// <para>

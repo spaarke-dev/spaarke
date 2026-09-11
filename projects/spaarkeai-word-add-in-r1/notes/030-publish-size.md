@@ -30,7 +30,26 @@
 | branch, final (as committed) | 214 | 138.86 MB | **45.39 MB** (47,593,126 bytes) |
 | **Delta** | 0 | +0.11 MB | **+0.04 MB** (+36,866 bytes) |
 
-`Sprk.Bff.Api.dll` in the final build is 13,140,992 bytes (**+91,648** over master). **These final numbers are the ones to cite.**
+`Sprk.Bff.Api.dll` in that build is 13,140,992 bytes (+91,648 over master). Those were the numbers for commit `0d53d3146`.
+
+## Re-measured after the numbering removal (owner decision 2026-09-11): cite THESE
+
+`origin/master` was still `e0a6f87c4` at re-measure time, so the master figure above is still fresh. I did not rebuild master. I re-published the branch (the rework working tree on top of `0d53d3146`) and re-zipped it with the identical `Compress-Archive -Path "$PublishPath\*" -DestinationPath $ZipPath -Force` invocation.
+
+| | files | uncompressed | **zip, incl. PDBs** |
+|---|---|---|---|
+| `origin/master` @ `e0a6f87c4` | 214 | 138.75 MB | **45.35 MB** (47,556,260 bytes) |
+| branch after the rework, final (committed on top of `0d53d3146`) | 214 | 138.85 MB | **45.39 MB** (47,589,941 bytes) |
+| **Delta** | 0 | +0.10 MB | **+0.03 MB** (+33,681 bytes) |
+
+`Sprk.Bff.Api.dll`: 13,133,824 bytes, **+84,480** over master. That is smaller than at `0d53d3146` because the numbering code is gone.
+
+The final build includes the matter-type existence read (owner decision: an unknown type creates without the lookup) and the round-2 review fixes. An intermediate rework build measured 45.38 MB (+32,910 bytes); the difference is 771 bytes.
+
+- **Zip tool**: PowerShell `Compress-Archive` (default Optimal).
+- **PDB convention**: sizes include PDBs.
+- **Thresholds**: well under the +5 MB escalation line and the 55 MB / 60 MB lines.
+- **Packages**: no package changed. `dotnet list package --vulnerable --include-transitive` was re-run after the rework (result in the final report).
 
 - **Zip tool**: PowerShell `Compress-Archive` (default Optimal), matching `Deploy-BffApi.ps1`.
 - **PDB convention**: sizes include PDBs.
