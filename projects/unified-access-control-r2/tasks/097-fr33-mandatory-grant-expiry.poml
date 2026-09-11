@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-33 — every external grant carries an expiry: /grant, /invite and /invite-and-grant default an absent ExpiryDate (keep the grant's existing expiry, else today + 90) and reject a past one; backfill existing unbounded grants in dev</title>
     <phase>FR-33 External grant expiry</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on the grant write endpoints; tags bff-api/auth; includes a live data backfill.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,7 +89,22 @@
     <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-33 as redesigned 2026-09-10. Design: notes/decisions/external-grant-expiry-mandatory.md §9-§12. Supersedes task 023's escalation. Unblocks 098, 099, 100, 101.</notes>
+  <notes>Spec FR-33 as redesigned 2026-09-10. Design: notes/decisions/external-grant-expiry-mandatory.md §9-§12. Supersedes task 023's escalation. Unblocks 098, 099, 100, 101.
+
+COMPLETED 2026-09-10 (session 7) — commits 0b154bdac (FR-33 amendment), b6776e32c (code), 79c1a8522 +
+42a7e724f (backfill record), 2f2cc158a (review follow-up). Full record: notes/task-097-mandatory-expiry.md.
+- OWNER DECISION before start ("Server fills +90"): no client sends an expiry, so the "required field / 400"
+  design became a SERVER DEFAULT — absent → keep the grant's existing expiry, else today + 90; past → 400
+  sdap.access.grant.expiry_in_past. This POML's prompt/constraints/acceptance were amended to match.
+- Premises corrected: /invite writes NO grant (nothing to default there). Escalation trigger 1 did NOT fire
+  (DelegationRuleFilter:223 is target resolution only — pinned by a test). Trigger 2 did NOT fire (read
+  filter's NULL handling unchanged; the owner's call when to flip it — see ISS-009 / #974).
+- Backfill (dev, 2026-09-11 UTC): 25 active unbounded grants → 2026-12-10; after-count 0 unbounded; before
+  state + revert recorded. 🔴 TASK 100 MUST BE LIVE BY 2026-11-10; 097 must not reach any non-dev
+  environment without 100.
+- Perturbation: removing the default fails 4 tests; neutralising the past-date check fails 4.
+- Verified @ 2f2cc158a: full Sprk.Bff.Api.Tests 12,280 passed / 0 failed; ArchTests 197/197; publish master
+  45.35 vs branch 45.40 MB (214 = 214 files). Review: PASS; filed #973 (ISS-008), #974 (ISS-009).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

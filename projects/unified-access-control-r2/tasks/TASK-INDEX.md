@@ -663,7 +663,7 @@ estate-wide view.
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
 | ✅ [done] 096 | `BulkUpdateAsync` → `ExecuteTransactionRequest` — genuinely all-or-nothing, system-wide (ISS-005 / #970) | FR-33 | — | — | ❌ | sonnet | high |
-| 🔲 [open] 097 | Every grant bounded: an absent `ExpiryDate` on `/grant` · `/invite` · `/invite-and-grant` is **defaulted server-side** (keep existing, else today + 90); a past one → 400; + dev backfill of unbounded grants *(amended session 7 — was "mandatory/400": no client sends an expiry)* | FR-33 | — | — | ❌ | sonnet | high |
+| ✅ [done] 097 | Every grant bounded: an absent `ExpiryDate` on `/grant` · `/invite` · `/invite-and-grant` is **defaulted server-side** (keep existing, else today + 90); a past one → 400; + dev backfill of unbounded grants *(amended session 7 — was "mandatory/400": no client sends an expiry)* | FR-33 | — | — | ❌ | sonnet | high |
 | 🔲 [open] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) | FR-33 | 096,097 | — | ❌ | **opus** | high |
 | 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
 | 🔲 [open] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee | FR-33 | 097 | — | ❌ | sonnet | high |

@@ -23,7 +23,7 @@ request. Spec FR-33, the decision record, the POML and TASK-INDEX were amended i
 
 - **`/invite` writes no grant.** It only onboards (resolve-or-create Contact + CIAM account); the grant is
   written by `/grant` or `/invite-and-grant`. The POML's "all three write endpoints" was wrong for `/invite`:
-  there is nothing to default there, and its `ExpiryDate` is ignored. (Task-file error #10 for this project.)
+  there is nothing to default there, and its `ExpiryDate` is ignored. (Task-file error #11 for this project; #10 is the same POML never considering that no client sends an expiry.)
 - **Escalation trigger 1 does NOT fire.** `DelegationRuleFilter.cs:223` builds a `GrantAccessRequest` with
   `ExpiryDate: null` only to call `ResolveGrantRoot` — target resolution for the authorization check, not a
   write. Left unchanged, and pinned by a test.
@@ -89,6 +89,17 @@ the only writers of `sprk_expiresdate` are the grant core's create and update.
 | S8 | Comment cites ADR-003 for "don't report success over a grant that confers nothing" | Noted — copied from task 023's wording |
 | S11 | The contract stub's `QueryAsync` returns the contact JSON for every table | Noted — rerouting it risks the fixture's other classes; test debt |
 | S12 | Core tests call `internal` `CreateGrantAsync` (the file's existing pattern) | Accepted |
+
+## Verification
+
+| Run | Result |
+|---|---|
+| Grant-path + fixture-sharing suites @ `2f2cc158a` (GrantLifecycle, ExternalAccessContract, DelegationRule, PolymorphicGrantWrite, EndpointAuthorization, + the 3 classes sharing the contract fixture) | **147 / 147** |
+| Full `Sprk.Bff.Api.Tests` @ `79c1a8522` (before the review follow-up) | 12,280 passed / 0 failed / 58 skipped |
+| Full `Sprk.Bff.Api.Tests` @ **`2f2cc158a` (final)** | **12,280 passed / 0 failed / 58 skipped** (+13 vs task 096's 12,267 = the new tests) |
+| `Spaarke.ArchTests` (both) | 197 / 197 |
+| `Sprk.Bff.Api.IntegrationTests` compiles | yes |
+| Live dev backfill after-count | 0 active grants with a null expiry (was 25) |
 
 ## Publish size (CLAUDE.md §10, hazards 1–4)
 
