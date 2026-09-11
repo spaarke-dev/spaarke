@@ -11,6 +11,10 @@ on:
       # source (dist/ is gitignored), so a change there changes what ships here.
       # Without this path the add-ins would keep deploying against a stale auth lib.
       - 'src/client/shared/Spaarke.Auth/**'
+      # webpack.config.js aliases this single file into the add-in bundle (it has no
+      # imports of its own), so editing it changes what ships — watch the file, not
+      # the whole Communication.Components package, which the add-ins do not build.
+      - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
       - '.github/workflows/deploy-office-addins.yml'
   workflow_dispatch:
 

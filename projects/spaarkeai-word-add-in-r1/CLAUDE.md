@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: Initialized — tasks generated, none started
-- **Last Updated**: 2026-09-04
-- **Current Task**: none
-- **Next Action**: Execute task 001 (`npm install` + real typecheck baseline) via `task-execute`
+- **Phase**: Phase 0 complete; Phase 1 in progress (19 of 42 tasks ✅ as of 2026-09-11 — 012 identity resolver live on dev, Spike-1 GREEN)
+- **Last Updated**: 2026-09-11
+- **Current Task**: see [`current-task.md`](current-task.md) — the authoritative live state; this block is a summary only
+- **Next Action**: see `current-task.md` Quick Recovery
 
 ---
 
@@ -31,7 +31,7 @@
 - **Project Name**: `spaarkeai-word-add-in-r1`
 - **Branch**: `work/spaarkeai-word-add-in-r1`
 - **Type**: Office Add-in (client) + BFF endpoints + Dataverse
-- **Complexity**: High — 34 tasks, 5 phases, 4 gating spikes
+- **Complexity**: High — 42 tasks (34 at generation; the rest added during Phase 0 — see `tasks/TASK-INDEX.md`), 5 phases, 4 gating spikes
 - **Hot paths**: BFF=Y · SpaarkeAi=N · ci-workflows=Y · skill-directives=N · root-CLAUDE=N
 
 ### Read before touching add-in code

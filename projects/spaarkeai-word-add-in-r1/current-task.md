@@ -116,9 +116,13 @@ command, typecheck count), and the `ChatWordExportEndpoints.cs` URL-shape commen
 
 ### Open findings surfaced, NOT yet actioned
 
-- **F-1** `deploy-office-addins.yml` path filter misses `Spaarke.Communication.Components/.../provenance.ts`, which
-  webpack bundles into the add-ins — editing it ships nothing. One-line fix.
-- **W-5** `identity-obj-proxy` mapped in `jest.config.js` but not installed — now affects a PR check.
+- ~~**F-1**~~ **FIXED 2026-09-11** — `deploy-office-addins.yml` now watches
+  `src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` (verified: webpack
+  `webpack.config.js:101` aliases exactly that file; it has zero imports, so one path entry is complete).
+- **W-5** `identity-obj-proxy` mapped in `jest.config.js:48` but not installed. **Verified INERT 2026-09-11**: no
+  file in `src/client/office-addins` (source or test) imports a `.css/.less/.scss/.sass`, so the mapping is never
+  resolved. Becomes live only when a stylesheet import is added. Fix after 013 lands (it owns office-addins this
+  wave): install it as a devDependency, or drop the dead mapping.
 - **W-2 (043)** manifest-line deletion from `ci-gated-suites.txt` — mitigated by CODEOWNERS, not mechanically.
 - **W-7** CLAUDE.md §12 `npm ci` ban may not hold for office-addins (`npm ci --dry-run` exits 0) — §6.5 question.
 - 10 failing jest suites (84 tests) — genuine mock/assertion defects, unowned by a task.
