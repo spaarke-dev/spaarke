@@ -1,17 +1,19 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-10, session 7, task 097 closed** (by `task-execute` Step 11) — reflects through the 097 closing commit that follows `2f2cc158a`.
+> **Last Updated**: **2026-09-11, session 7 END** (by `context-handoff`) — reflects through the handoff commit
+> that follows `030861434`. Tree clean, 0 unpushed, 0 behind master.
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
-> ⚠️ This block had gone stale for two tasks (024 → 042) and held TWO contradictory "Next Action" rows
-> before this rewrite — the stacked-recovery-block problem again. **One block. Replace it; never append.**
+> ⚠️ **One live block. Replace it; never append.** Row headings (`| **Next Action** |`, `| **Task** |`) repeat
+> inside the HISTORICAL blocks below — a scripted edit must touch the FIRST occurrence only (session 7 overwrote
+> six historical rows once by matching all seven; restored from HEAD before anything was committed).
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's task files have been WRONG ELEVEN times now** (session 7 ×3: task 097 never mentions that NO client sends an expiry, and says `/invite` writes a grant — it writes none; see
-> "⚠️ Before 097" below; and task 096's own constraint
-> had the `ExecuteTransaction` nesting rule backwards — copied from this project's design note; caught at
-> review against Microsoft Learn). **Verify a POML's premises before obeying them — the code has won
-> every time.** Docs-vs-reality mismatches stand at **ten** (session 7: a test helper calls
-> `ServiceClient` *sealed*; it is not — `Execute` is `virtual final`).
+> ⚠️ **This project's task files have been WRONG ELEVEN times now** (session 7 ×3: task 097 never considered
+> that NO client sends an expiry, and said `/invite` writes a grant — it writes none; task 096's own constraint
+> had the `ExecuteTransaction` nesting rule backwards — copied from this project's design note, caught at review
+> against Microsoft Learn). **Verify a POML's premises against the code before obeying them — the code has won
+> every time.** Docs-vs-reality mismatches stand at **ten** (session 7: a test helper calls `ServiceClient`
+> *sealed*; it is not — `Execute` is `virtual final`).
 
 ---
 
@@ -19,15 +21,195 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress** — clean stopping point after **097** (closed session 7, 2026-09-10). |
-| **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1` |
-| **✅ Before 097 — RESOLVED** | **Owner decision 2026-09-10 (session 7): "Server fills +90".** An absent `ExpiryDate` is defaulted server-side (keep the grant's existing expiry, else today + 90); a past date is still rejected (400). 097's POML, TASK-INDEX row, spec FR-33 and the design note were amended to match. **The gap that forced it:** 097 makes `ExpiryDate` mandatory (400 when absent) on `/grant`, `/invite`, `/invite-and-grant`, but **no client sends an expiry today**: `AccessGrantModal` posts `{recordType, recordId, accessLevel, email}` to `/grant` + `/invite-and-grant`; the `TrackingFieldTrio` PCF calls the same two; the external SPA's `InviteUserDialog` calls `/invite` (`expiryDate?` is typed in `bff-client.ts` but never set). 099 adds the picker to the modal only — **nothing covers the PCF or the SPA**. 097 alone would break every sharing UI. |
-| **Next Action** | **Owner's call — next ready: 098** (opus tier: ONE atomic "set the expiry of every share on this record" endpoint, reusing the now-transactional `BulkUpdateAsync`; deps 096 ✅ 097 ✅ — verify its POML premises against the code first; task files have been wrong eleven times). Then **099** (Manage Access Expiration picker — needs task 065's M8 first; see TASK-INDEX sequencing), **100** (reminders — 🔴 **must be live by 2026-11-10**), **101** (expiry views, operator-applied). Also ready: **043** (chain C), **063** (chain B), and the C-items in § NEXT SESSION. ⚠️ **036 carries a MANUAL pre-merge canary gate.** |
+| **Task** | **none in progress** — clean stopping point after **097** (session 7 end, 2026-09-11). |
+| **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1`. CI on `030861434`: **32 pass / 1 fail** — the one red is the legacy SDAP CI **Trivy** scan, **pre-existing** (red on `0a592b7a7`, the session-6 tip, and every commit since); the blocking `Router` / Tier 1 is green. |
+| **Next Action** | **Owner's call — next ready: 098** (opus tier: ONE atomic "set the expiry of every share on this record" endpoint, reusing the now-transactional `BulkUpdateAsync`; deps 096 ✅ 097 ✅ — verify its POML premises against the code first). Then **099** (Manage Access Expiration picker — needs task 065's M8 first; see TASK-INDEX sequencing), **100** (reminders — 🔴 **must be live by 2026-11-10**), **101** (expiry views, operator-applied). Also ready: **043** (chain C), **063** (chain B), and the C-items in § NEXT SESSION. ⚠️ **036 carries a MANUAL pre-merge canary gate.** |
 | **Task status** | **67 done · 27 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows). |
-| **Session 7 record** | Closed **097** — every external grant carries an expiry (`0b154bdac` FR-33 amendment · `b6776e32c` code · `2f2cc158a` review follow-up): past → 400 `sdap.access.grant.expiry_in_past`; absent → keep the existing expiry, else today + 90 (owner decision "Server fills +90"). **Dev backfill: 25 → 0 unbounded grants** (all now 2026-12-10). Full suite @ `2f2cc158a` **12,280 / 0**; ArchTests 197/197. Filed **#973** (ISS-008) and **#974** (ISS-009). 🔴 **Task 100 must be live by 2026-11-10, and 097 must not reach any non-dev environment without 100.** · Closed **096** — `IGenericEntityService.BulkUpdateAsync` is genuinely all-or-nothing (`3570d24e4` fix + `35dd301be` review follow-up). Escalation fired at step 1 (no substitutable seam) → **owner chose the pure-builder test approach**. Full suite @ `35dd301be`: **12,267 passed / 0 failed** (58 skipped); ArchTests **197/197**; publish master 45.35 vs branch 45.40 MB (214 = 214 files). **#970 closed.** Filed **#971** (ISS-006 — the singleton `ServiceClient` throws the client-wide `LastException`, so concurrent requests can surface each other's errors; system-wide) and **#972** (ISS-007 — the layout caller writes a second default). `projects/INDEX.md` row refreshed (CI Workflows → Y). |
-| **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969** (CI ratchets unenforced) and **#970** (`BulkUpdateAsync` not transactional). CI: the **full ArchTests suite now runs blocking** in Tier 1. Owner decisions: audit enabled on all three gaps (verified live) · **FR-33 redesigned → tasks 096–101** · no Dataverse test in CI (036 manual gate; success criteria 3–4 reworded) · §10 hazards 3–4 added to root CLAUDE.md · path-A exceptions 012/023/062 ratified. |
-| **Session 6 lessons** | (1) **Look for the working in-repo example before copying the one a doc names** — `SpeAdminGraphService` already paged the collection a design told me to copy from elsewhere. (2) **Extend before you add** — twice this session the owner caught me building beside an existing component (a new root column instead of `sprk_expiresdate`; a new atomic write instead of fixing `BulkUpdateAsync`). Run CLAUDE.md §11's extension question *before* recommending, not after being asked. (3) **Commit (or copy) before you perturb** — a `git checkout` on an uncommitted file discarded a whole task's work once. |
-| **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963, #964, #965, #966, #967**. |
+| **Session 7 record** | Closed **096** — `IGenericEntityService.BulkUpdateAsync` is genuinely all-or-nothing (`ExecuteTransactionRequest`); escalation fired (no substitutable seam) → **owner chose the pure-builder test approach**. Closed **097** — every external grant carries an expiry: past → 400 `sdap.access.grant.expiry_in_past`; absent → keep the grant's existing expiry, else today + 90 (**owner decision "Server fills +90"** — no client sends an expiry). **Live dev backfill: 25 → 0 unbounded grants** (all now 2026-12-10). Full suite @ `2f2cc158a` **12,280 / 0**; ArchTests 197/197; publish 45.35 → 45.40 MB (project-cumulative; 096 and 097 each ≈ 0). **#970 closed**; filed **#971–#974**. 🔴 **Task 100 must be live by 2026-11-10, and 097 must not reach any non-dev environment without 100.** |
+| **Session 7 lessons** | See § SESSION 7 LESSONS — headline: **enumerate a contract's callers before tightening it** (097 would have broken every sharing screen), and **a broken perturbation is not a result**. |
+| **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969**, **#970**. CI: the **full ArchTests suite runs blocking** in Tier 1. FR-33 redesigned → tasks 096–101; no Dataverse test in CI (036 manual gate); §10 hazards 3–4 in root CLAUDE.md; path-A exceptions 012/023/062 ratified. |
+| **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963–#967**. |
+
+### Commits this session (session 7, 2026-09-10 → 2026-09-11) — ALL PUSHED, nothing at risk
+
+| Commit | What |
+|---|---|
+| `3570d24e4` | 096 — `BulkUpdateAsync` sends ONE `ExecuteTransactionRequest` (was a non-transactional `ExecuteMultiple`) |
+| `35dd301be` | 096 review follow-up — "nothing applied" claimed only for an `ExecuteTransactionFault`; cancellation unwrapped; `DBNull` rejected |
+| `04bfb495b` | 096 closed — verification recorded; 097 client gap flagged |
+| `0b154bdac` | FR-33 amended — an absent grant expiry is defaulted server-side (owner decision) |
+| `b6776e32c` | 097 — every external grant carries an expiry: past rejected, absent defaulted |
+| `79c1a8522` | 097 backfill BEFORE-state recorded (25 ids, prior value null) — committed before the live write |
+| `42a7e724f` | 097 backfill done (25 → 0), perturbation recorded; task 023's escalation superseded |
+| `2f2cc158a` | 097 review follow-up — truthful docs; one "today" for `sprk_granteddate` + expiry |
+| `030861434` | 097 closed |
+
+### Files modified this session — ALL COMMITTED AND PUSHED
+
+- **Code (096)**: `Spaarke.Dataverse/DataverseServiceClientImpl.cs` (`BulkUpdateAsync` → transaction; new public static `BuildBulkUpdateTransaction` + `DescribeBulkUpdateFailure`) · `IGenericEntityService.cs` (contract doc).
+- **Code (097)**: `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs` (`DefaultExpiryDays`, `TodayUtc(TimeProvider)`, `DefaultExpiry`) · `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` (`ValidateRequestedExpiry`; `CreateGrantAsync(today)` keep-else-+90; `BuildGrantPayload(today)`) · `InviteAndGrantExternalUserEndpoint.cs` (validate before onboarding) · both request DTO docs · `Infrastructure/DI/ExternalAccessModule.cs` (`TryAddSingleton(TimeProvider.System)`) · `AuthorizationModule.cs` (stale comment only).
+- **Tests**: `tests/unit/domain/Dataverse/BulkUpdateTransactionTests.cs` (**new**) · `GrantLifecycleCharacterizationTests` (fixed `Today`; +3) · `ExternalAccessContractTests` (`FakeTimeProvider` + create-payload capture; +6) · `DelegationRuleCharacterizationTests` (+2 pin).
+- **Project docs**: `spec.md` (FR-33 (a) amended; null-semantics line) · `notes/decisions/external-grant-expiry-mandatory.md` (§12.2 corrections; "Can it be blank?" amended) · `TASK-INDEX.md` (096 + 097 done; 097 row amended; sequencing: 100-by-2026-11-10, 097-not-without-100) · POMLs **096**, **097** (amended + completed), **023** (escalation superseded) · notes **task-096**, **task-097** (before/after backfill, revert list) · `defer-issues.md` (ISS-005 closed; ISS-006 … ISS-009 added) · `projects/INDEX.md` (this project's row: CI Workflows → Y, status refreshed).
+- **Live dev DATA (owner-authorised in 097's POML)**: `sprk_expiresdate` null → **2026-12-10** on **25** active `sprk_externalrecordaccess` rows (written 2026-09-11 01:17 UTC via the Web API). **Revert** = PATCH back to null on exactly the 25 ids listed in `notes/task-097-mandatory-expiry.md`. Session 6's two `sprk_accesspermissiongrant` rows are unchanged (revert recipe in the session-6 block below).
+
+---
+
+## 🔴 THE ONE THING THAT BLOCKS THE CRITICAL PATH (unchanged since 2026-09-10)
+
+Chain A: 035 ✅ → **036** → 054 → 055 → 056 → 057/058 — the longest chain; nothing else unblocks it.
+
+**036 carries a MANUAL pre-merge gate** (owner decision 2026-09-10: no Dataverse test in CI). Task 034's NFR-04
+canary is run **by hand, before 036 merges**. **PASS = the impersonated set is STRICTLY SMALLER than app-only.
+Equality = STOP** — impersonation is inert and the query returns org-wide rows that look exactly like success.
+It has **never been measured on the fixed environment** (root-BU users inherited System Administrator until
+2026-09-09); **036's run is the first real measurement, not a re-confirmation.**
+
+---
+
+## 🔔 OWNER ITEMS — what is genuinely left
+
+**Resolved this session**: 096's test approach → **pure builder** (owner, at the escalation) · 097's client gap →
+**"Server fills +90"** (owner) — which also settles session 6's open item "ratify the +90-day default": 90 is now
+a server constant, and task 099's picker is specified to match it.
+
+| # | Item | Why it is still open |
+|---|---|---|
+| 1 | 🔴 **Task 100 by 2026-11-10; 097 never to a non-dev environment without 100** | The +90 default starts an expiry clock on every new grant, with no reminder path until 100 (spec FR-33: "do not ship (a) before (d)"). Recorded in TASK-INDEX. Needs the owner's awareness before any deploy of this branch beyond dev. |
+| 2 | **#974 — a Dataverse-side expiry guard** | FR-33 holds only for BFF writes; a row created by a form / Web API / flow can still be unbounded. Fix = required column or create-time default — schema, so an **operator** step. Also the precondition for ever flipping the read filter's `eq null` to fail-closed (the owner's call). |
+| 3 | **Operator: apply task 101's two views** | Live customization is an operator step (directive 2026-09-04). Only when 101 runs. |
+| 4 | **Operator: deploy for task 047** | `Deploy BFF API` is `disabled_manually`. 047 also settles SPE paging (`scripts/Test-SpeContainerPermissionPaging.ps1`) — and would be the first time 096/097 run live through the BFF. |
+| 5 | **#967** — secure-project owner team is a DEFAULT team | Downgraded; guarded by NFR-05 clause 2. On the C-item list. |
+| 6 | **Trivy** (legacy SDAP CI) | The one red check on #950; confirmed pre-existing (red on `0a592b7a7` and since). Not this project's surface. On the C-item list. |
+| 7 | **`gh auth refresh -s read:project,project`** | The token still holds only `gist, read:org, repo, workflow` (checked 2026-09-11), so the portfolio sync keeps degrading to a warning. |
+
+**Standing owner directions — do NOT re-raise:**
+- (2026-09-09) *"let's not focus on relocating users — we have test users that are in the correct BU."*
+- (2026-09-04) Schema work is **CODE + DOCS ONLY**; live table / column / view creation is an operator step.
+- (2026-09-10) **No Dataverse test in CI.** Live assertions are manual gates (036) and UAT checks.
+- (2026-09-10) A failed revoke must give the user a **message**, not a bare 500 — in tasks 065 and 099.
+- (2026-09-10, session 7) **"Server fills +90"**: an absent grant expiry keeps the grant's existing expiry, else
+  today + 90; a past one is rejected. Required in the stored data, not in the request. No tenant cap.
+
+---
+
+## ▶ NEXT SESSION — owner's call between two ready paths
+
+### Path (a) — the C-items (owner directive 2026-09-10; mostly verification, little or no code) — NONE DONE YET
+
+> *"C ok noted; ensure these are resolved and following our objectives and consistent with the overall
+> solution approach for our UAC"*
+
+| Item | What "resolved" means |
+|---|---|
+| **#967** | Re-verify NFR-05 clause 2 still guards the default-owner-team shape; close with evidence, or keep with a stated reason. |
+| **Org FLS residual** | `sprk_organization.sprk_standinggrant` has **no FLS**; mitigated only by entity-level security (no non-admin role holds `prvWritesprk_organization` — verified live 2026-09-10). Add a constraint to **task 043** recommending FLS parity with contact — or record the owner's acceptance. Evidence: `notes/task-042-standing-grant-levels.md` §7. |
+| **#969 residuals** | (1) `sdap-ci.yml:799` `listComments` unpaginated; (2) whether the `createComment` branch is also broken; (3) whether to keep the two redundant `continue-on-error` full-suite runs. `sdap-ci.yml` is legacy (CICD-077) and **PR #806 has it open** — coordinate, do not edit blind. |
+| **Audit retention** | `organization.auditretentionperiodv2` read **empty**. Confirm what it resolves to and state task 088's replay horizon. Evidence: `notes/task-086-access-event-schema.md`, final section. |
+| **B3 — Compose sixth residual-loss row** | The owner said **"ok"** (2026-09-10) to `section-break-flattened`. Record it **in `spaarkeai-compose-r8`** (their PR / issue), not from this worktree. **Not yet done.** |
+| **Trivy** | Identify the owning surface / project and hand it over, or record why it stays red. Now known: red since at least `0a592b7a7`. |
+
+### Path (b) — tasks (27 open; most are `parallel-safe: false`)
+
+| Chain | Order | Note |
+|---|---|---|
+| **FR-33** | 096 ✅ · 097 ✅ → **098** → **099**; **100**, **101** | 098 is opus-tier and reuses `BulkUpdateAsync` (now atomic). **099 ↔ 065** share `AccessGrantModal.tsx` and finding M8 — never concurrently. 🔴 **100 by 2026-11-10.** 101's views are operator-applied. |
+| **A — critical path** | **036** → 054 → 055 → 056 → 057/058 | 036 = manual canary pre-merge gate (above) |
+| **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready |
+| **C** | **043** → 044 | 043 ready — the natural home for the org-FLS hedge |
+| Independent | **082** · **093** · **094** · **095** | |
+| Operator-gated | **047** | needs a deploy |
+| Last | **090** wrap-up | runs `/test-diet` (CLAUDE.md §7) |
+
+**Recipes that worked**: (1) **session 5's parallel wave** — verify the declared `<outputs>` do not overlap;
+forbid agents from editing `TASK-INDEX.md` / `current-task.md`, running `git`, or solution-wide `dotnet`; the main
+session does the authoritative build + suite + ONE commit. (2) **Session 7's long-verification pattern** — run
+publish-size and the full suite in **fresh short-path worktrees** (`C:\wtNNNm` / `C:\wtNNNb` / `C:\wtNNNc`) in the
+background, which keeps the main worktree free for perturbations; remove them afterwards.
+
+---
+
+## ⚙️ ENVIRONMENT — read before any Dataverse or measurement work
+
+- 🔴 **Dataverse MCP is DOWN** (`CONNECTION_CLOSED`, still so in session 7). Use `az account get-access-token
+  --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv` + PowerShell `Invoke-RestMethod`.
+  For a **PATCH by id, send `If-Match: *`** — without it the Web API PATCH is an UPSERT and a bad id silently
+  CREATES a row (097's backfill used it).
+- 🔴 **The UTC date rolls over in the local evening.** The grant code's "today" is the **UTC** date (the read
+  filter's calendar); 097's backfill ran at 01:14 UTC on 2026-09-11 while local time was still 2026-09-10.
+  Compute dates from UTC and assert the value before writing.
+- 🔴 **The pre-commit hook (lint-staged) STASHES unstaged changes while it runs.** Never commit in a worktree where
+  a perturbation or a test build is in flight — the hook hides the perturbed file mid-build.
+- 🔴 **Python is a Microsoft Store stub** and hangs. Never pipe to python.
+- 🔴 **Don't embed large quoted content in a `bash -c` heredoc** — write it with the Write tool, assemble with a
+  short script.
+- **Azure.Identity 1.16**: set `AZURE_TOKEN_CREDENTIALS=dev`, or `DefaultAzureCredential` fails like a
+  permissions problem.
+- **Publish size**: publish + zip from **short paths**, **compare file counts** (root CLAUDE.md §10 hazards 3 + 4).
+  The `C:\` root is **not writable** for the zip — zip inside the worktree or the scratchpad.
+- 🔴 **`git checkout <file>` on UNCOMMITTED work discards the whole file.** Commit or copy before you perturb.
+- **Moq**: an un-stubbed virtual returning `Task<T>` yields `null` → an NRE that looks like a product defect.
+- **Web API**: `roleprivilegescollection` cannot `$expand=roleid` — `$filter=roleid eq …` per role.
+- **Graph / SPE**: an `az` CLI Graph token **403s** on container permissions — needs the BFF's own identity.
+- **Portfolio sync (context-handoff hook)**: fails `INSUFFICIENT_SCOPES` (token lacks `read:project`; checked
+  2026-09-11). Degrades to a warning per its contract; Board #2 / Issue #808 NOT updated. Local truth: **98 tasks,
+  67 done**.
+
+---
+
+## 🧠 SESSION 7 LESSONS — these change how the next task should be done
+
+1. **Enumerate a contract's callers before tightening it.** 097's POML made a request field required and looked
+   only at the server. One grep of the clients found that **none** sends it — the "fix" would have broken every
+   sharing screen. Check who calls an endpoint before changing what it accepts.
+2. **Bring the answer with the escalation.** 096's trigger ("no testable seam") was real, but the class already had
+   a precedent for exactly this (`StageAnalysisRegardingFields`). Offering it as the recommended option made the
+   owner's decision a one-click choice.
+3. **Platform facts come from the platform, not from our notes.** 096's docs had the `ExecuteTransaction` nesting
+   rule backwards because this project's own design note did. The reviewer caught it against Microsoft Learn and
+   the SDK source.
+4. **A broken perturbation is not a result.** 097's first P1 replaced an expression with a bare `;` and failed to
+   COMPILE — no test ran. Check that a perturbation applied AND compiles before reading its outcome.
+5. **Scripted edits: first occurrence only.** Row headings repeat across this file's historical blocks; a
+   line-start match hit seven rows, not one. Caught by the hit count, fixed from HEAD before commit — always print
+   and check hit counts.
+6. **A singleton SDK client can hand one request another request's error** (`ServiceClient` throws the client-wide
+   `LastException`; #971). Never decide behaviour from exception text on that client.
+
+---
+
+## ⚠️ Residual risk carried forward (push-to-github gate 1.7)
+
+| Change | Verified by | NOT verified |
+|---|---|---|
+| 029 matter / WA to-do list + create (session 5) | live metadata; unit + seam tests | 🔴 no real create+read of a matter-parented to-do against Dataverse |
+| 035 impersonated root-set reads (session 5) | hand-run impersonated reads | not exercised through the new code path |
+| 024 SPE paging (session 6) | offline tests via a fake Kiota `IRequestAdapter`; ArchTest seam 5 | 🔴 whether the endpoint pages at all — task 047 owns it |
+| ISS-004 org-revoke convergence (session 6) | paging + org-revoke tests | never run against a real container |
+| 042 level-bearing standing term (session 6) | reader / composition / seam tests; live data backfilled and read back | never end to end through the BFF against live |
+| **096 transactional `BulkUpdateAsync`** (session 7) | pure-builder unit tests; both callers' tests; full suite | 🔴 never executed against live Dataverse (no deploy); the SDK's fault shape is from source reading, not observation |
+| **097 grant expiry default / past check** (session 7) | core + contract + delegation tests; the live backfill wrote and re-read 25 rows | 🔴 the BFF endpoints' default was never exercised live (the backfill went straight to the Web API, not through `/grant`) — needs the 047 deploy |
+
+**Recommend a real create+read smoke against dev before merging #950** — metadata and offline tests prove the
+names and the logic, not that the deployed code composes them correctly.
+
+---
+
+## Filed this session (session 7) — all have GitHub Issues; `defer-issues.md` is current
+
+| ID | Issue | What | State |
+|---|---|---|---|
+| ISS-005 | **#970** | `BulkUpdateAsync` claimed transactional behaviour `ExecuteMultiple` does not provide | ✅ **closed** by task 096 |
+| ISS-006 | **#971** | Singleton `ServiceClient` throws the client-wide `LastException` — concurrent requests can surface each other's errors (system-wide; `AssociateAsync` can mistake another request's "duplicate" for success) | 🔲 open, next-round |
+| ISS-007 | **#972** | `WorkspaceLayoutService` writes a new default layout even when clearing the old ones failed (two defaults) | 🔲 open, low |
+| ISS-008 | **#973** | Re-grant over an EXPIRED survivor → 409 without looking at live duplicates (pre-existing, task 023) | 🔲 open, next-round |
+| ISS-009 | **#974** | Grant rows created outside the BFF can still have no expiry — needs a Dataverse-side guard | 🔲 open, next-round |
+
+⚠️ `defer-issues.md`'s rollup label still does not exist — use
+`gh issue view 961 962 963 964 965 966 967 968 969 970 971 972 973 974`.
+
+---
+
+## 🗄️ HISTORICAL — session 6 live block (superseded 2026-09-11 by session 7). NOT CURRENT — the live block is above.
 
 ### Commits this session (session 6, 2026-09-09 → 2026-09-10) — ALL 15 PUSHED, nothing at risk
 
