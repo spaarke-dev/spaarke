@@ -515,6 +515,22 @@ export class OutlookAdapter implements IHostAdapter {
 
   /**
    * @inheritdoc
+   *
+   * Outlook has no open document — this capability is Word-only (`canGetDocumentUrl` is always
+   * `false` here). Rejects with a typed `CAPABILITY_NOT_SUPPORTED` `HostAdapterError`, matching
+   * `getAttachmentContent`'s convention on `WordAdapter` for an Outlook-only capability called on
+   * the wrong host. Deliberately NOT `undefined`, NOT a raw thrown `Error`, and NOT a silent empty
+   * string — a caller that skips the `canGetDocumentUrl` capability check gets a loud, typed failure.
+   */
+  async getDocumentUrl(): Promise<string | null> {
+    throw createHostAdapterError(
+      'CAPABILITY_NOT_SUPPORTED',
+      'Outlook has no open document. getDocumentUrl() is only supported in Word.'
+    );
+  }
+
+  /**
+   * @inheritdoc
    */
   getCapabilities(): HostCapabilities {
     const hasMailbox18 = this.isMailboxSupported('1.8');
@@ -530,6 +546,8 @@ export class OutlookAdapter implements IHostAdapter {
       canGetSender: true,
       // Document content is not available for emails
       canGetDocumentContent: false,
+      // No open document in Outlook — FR-01 / task 013 is Word-only
+      canGetDocumentUrl: false,
       // PDF conversion is server-side, so we can indicate support
       canSaveAsPdf: true,
       // EML saving requires Mailbox 1.8 for full attachment support

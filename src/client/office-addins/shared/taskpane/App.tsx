@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { FluentProvider, Spinner, makeStyles, tokens } from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
@@ -20,6 +20,21 @@ import type {
   ContactOption,
 } from './components/views/CreateTodoView';
 import type { EntitySearchResult } from './hooks/useEntitySearch';
+import {
+  resolveDocumentIdentity,
+  applyDocumentIdentityOutcome,
+  type DocumentIdentityContext,
+} from './services/documentIdentityService';
+
+/**
+ * `App.savedContext`'s actual shape (spaarkeai-word-add-in-r1 FR-01 / task 013). Extends the
+ * Create-To-Do "filed to" shape (`SavedTodoContext`, still populated by `SaveView.onSaved`) with
+ * the resolved document identity from task 012's resolver (`DocumentIdentityContext`) — the SAME
+ * state, not a parallel store (task 013 step 6). `Partial<SavedTodoContext>` is deliberate: a
+ * resolved Word document may have no related record at all (unassociated), in which case only the
+ * document fields are known and the Create-To-Do "regarding" fields stay unset.
+ */
+type AppSavedContext = Partial<SavedTodoContext> & DocumentIdentityContext;
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -120,18 +135,26 @@ export const App: React.FC<AppProps> = ({
 
   // The record this email is filed to — drives the inline "Create To Do" tool. Seeded from
   // initialSavedContext (browser-test demo) and set live when a real save completes (§C — the
-  // SaveView's onSaved hands us the selected "Related to" record).
-  const [savedContext, setSavedContext] = useState<SavedTodoContext | undefined>(initialSavedContext);
+  // SaveView's onSaved hands us the selected "Related to" record). Also carries the FR-01 resolved
+  // document identity (task 013) — see AppSavedContext.
+  const [savedContext, setSavedContext] = useState<AppSavedContext | undefined>(initialSavedContext);
 
   // §C — a successful save makes the email "filed to" the selected record; seed the Create To Do
-  // regarding from it so the To Do tab goes live (no more "file this email first" prompt).
+  // regarding from it so the To Do tab goes live (no more "file this email first" prompt). Merges
+  // into the existing savedContext (rather than replacing it) so a document identity already
+  // resolved by task 013 for this pane session survives an explicit Save.
   const handleSaved = useCallback((entity: EntitySearchResult) => {
-    setSavedContext({
+    setSavedContext(prev => ({
+      ...prev,
       regardingEntity: entity.entityType,
       regardingRecordId: entity.id,
       ...(entity.name ? { regardingName: entity.name } : {}),
-    });
+    }));
   }, []);
+
+  // Guards the FR-01 document-identity resolution (below) to run at most once per pane session —
+  // "do not resolve on every render" (task 013 step 6).
+  const identityResolutionAttempted = useRef(false);
 
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -211,9 +234,53 @@ export const App: React.FC<AppProps> = ({
     return map[entity] ?? entity;
   };
 
+  // FR-01 document-identity resolution (task 013). Capability-gated (NFR-10) — no `hostType`
+  // conditional: Outlook's `canGetDocumentUrl` is always false, so this is a no-op there without
+  // needing to know which host it's running in. Runs once per pane session, after authentication
+  // (the resolver call needs a token), so it also covers the "sign in after pane load" path.
+  useEffect(() => {
+    if (!isAuthenticated || identityResolutionAttempted.current) {
+      return;
+    }
+    if (!hostAdapter.getCapabilities().canGetDocumentUrl) {
+      return;
+    }
+    identityResolutionAttempted.current = true;
+
+    (async () => {
+      try {
+        const url = await hostAdapter.getDocumentUrl();
+        if (!url) {
+          // Unsaved document (no URL yet) — a defined, expected "new document" case. No network
+          // call, per task 012's notes §2 rule 3.
+          return;
+        }
+
+        const outcome = await resolveDocumentIdentity(url);
+
+        // applyDocumentIdentityOutcome is pure + independently unit-tested (documentIdentityService
+        // test suite) — it merges into the existing state (never replaces) and returns `prev`
+        // by reference, unchanged, for every non-'resolved' outcome.
+        setSavedContext(prev => applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType));
+
+        if (outcome.kind !== 'resolved' && outcome.kind !== 'new') {
+          // 'conflict' | 'indeterminate' | 'denied' | 'error' — a handled, non-blocking diagnostic.
+          // No UI surface owns these yet (Phase 2 tasks 021/024/026/027 do); the acceptance
+          // criterion is that the save flow stays usable regardless, so this never touches
+          // `error`/`isInitializing`.
+          console.warn(`[Spaarke] Document identity ${outcome.kind}`, outcome);
+        }
+      } catch (err) {
+        // Defensive: getDocumentUrl()/resolveDocumentIdentity() are designed not to throw for
+        // expected outcomes, but a resolution failure must never block the pane.
+        console.warn('[Spaarke] Document identity resolution failed', err);
+      }
+    })();
+  }, [isAuthenticated, hostAdapter]);
+
   const handleCreateTodo = useCallback(
     async (input: CreateTodoInput): Promise<CreateTodoResult> => {
-      if (!savedContext) {
+      if (!savedContext || !savedContext.regardingEntity || !savedContext.regardingRecordId) {
         return { ok: false, error: 'File this email to Spaarke first (Save tab).' };
       }
       // Browser test harness: a demo context id → mock success so the UX is iterable
@@ -322,6 +389,20 @@ export const App: React.FC<AppProps> = ({
     indicatorTargetId !== undefined &&
     (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
 
+  // `CreateTodoView.savedContext` expects the narrower `SavedTodoContext` shape (regardingEntity +
+  // regardingRecordId required). `App.savedContext` (AppSavedContext) widens those to optional so a
+  // resolved-but-unassociated FR-01 document can still carry documentId/documentName/fileName with
+  // no regarding record at all — narrow back here rather than passing a partially-populated object.
+  const todoRegardingContext: SavedTodoContext | undefined =
+    savedContext?.regardingEntity && savedContext?.regardingRecordId
+      ? {
+          regardingEntity: savedContext.regardingEntity,
+          regardingRecordId: savedContext.regardingRecordId,
+          ...(savedContext.communicationId ? { communicationId: savedContext.communicationId } : {}),
+          ...(savedContext.regardingName ? { regardingName: savedContext.regardingName } : {}),
+        }
+      : undefined;
+
   // Get user info
   const account = authService.getAccount();
   const userName = account?.name || account?.username;
@@ -404,7 +485,7 @@ export const App: React.FC<AppProps> = ({
             onCreateTodo={handleCreateTodo}
             onSearchContacts={handleSearchContacts}
             onGoToSave={() => setCurrentTab('save')}
-            {...(savedContext ? { savedContext } : {})}
+            {...(todoRegardingContext ? { savedContext: todoRegardingContext } : {})}
           />
         )}
 

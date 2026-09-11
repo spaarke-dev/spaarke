@@ -138,6 +138,29 @@ export interface IHostAdapter {
   getDocumentContent(options?: GetDocumentContentOptions): Promise<ArrayBuffer>;
 
   /**
+   * Get the open document's URL (spaarkeai-word-add-in-r1 FR-01 / task 013).
+   *
+   * This method is only supported when {@link HostCapabilities.canGetDocumentUrl} is `true`
+   * (Word only). Callers MUST check the capability flag before calling — an unconditional call
+   * from a host that does not support it fails predictably rather than silently.
+   *
+   * Two distinct "no URL" outcomes, matching the capability's actual meaning:
+   * - **Supported but no URL yet** (e.g. an unsaved Word document): resolves to `null`. This is a
+   *   defined, expected result — not a throw.
+   * - **Not supported at all** (e.g. called on an adapter whose `canGetDocumentUrl` is `false`):
+   *   rejects with a typed {@link HostAdapterError} (`CAPABILITY_NOT_SUPPORTED`), matching the
+   *   convention {@link getAttachmentContent} already uses when a capability-gated method is
+   *   invoked on the wrong host.
+   *
+   * The URL is returned EXACTLY as the host reports it — never reshaped, re-encoded, or otherwise
+   * modified client-side (Spike-1, verified byte-identical across Word web and Word desktop).
+   *
+   * @returns Promise resolving to the document's absolute URL, or `null` when the document has none.
+   * @throws {HostAdapterError} with code `CAPABILITY_NOT_SUPPORTED` when the host does not support this capability.
+   */
+  getDocumentUrl(): Promise<string | null>;
+
+  /**
    * Get the capabilities of this host adapter.
    *
    * Use this to determine what features are available before calling

@@ -343,9 +343,42 @@ describe('OutlookAdapter', () => {
         expect(capabilities.canGetRecipients).toBe(true);
         expect(capabilities.canGetSender).toBe(true);
         expect(capabilities.canGetDocumentContent).toBe(false);
+        expect(capabilities.canGetDocumentUrl).toBe(false); // Word-only (FR-01 / task 013)
         expect(capabilities.canSaveAsPdf).toBe(true);
         expect(capabilities.canInsertLink).toBe(false); // Read mode
         expect(capabilities.canAttachFile).toBe(false); // Read mode
+      });
+    });
+
+    describe('getDocumentUrl (FR-01 / task 013) — Word-only capability', () => {
+      it('rejects with a typed CAPABILITY_NOT_SUPPORTED HostAdapterError', async () => {
+        await expect(adapter.getDocumentUrl()).rejects.toMatchObject({
+          code: 'CAPABILITY_NOT_SUPPORTED',
+        });
+      });
+
+      it('does not resolve to undefined, and does not resolve to an empty string', async () => {
+        // The rejection itself is the "not undefined / not an empty string" proof — a resolved
+        // value would fail the assertion above; this test pins that it is specifically a REJECTION,
+        // not a silently-resolved falsy value.
+        let resolvedValue: string | null | undefined;
+        let rejected = false;
+        try {
+          resolvedValue = await adapter.getDocumentUrl();
+        } catch {
+          rejected = true;
+        }
+
+        expect(rejected).toBe(true);
+        expect(resolvedValue).toBeUndefined();
+      });
+
+      it('rejects with a HostAdapterError object, not a raw Error instance', async () => {
+        await expect(adapter.getDocumentUrl()).rejects.not.toBeInstanceOf(Error);
+        await expect(adapter.getDocumentUrl()).rejects.toMatchObject({
+          code: 'CAPABILITY_NOT_SUPPORTED',
+          message: expect.any(String),
+        });
       });
     });
 
