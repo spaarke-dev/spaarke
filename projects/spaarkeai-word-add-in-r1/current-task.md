@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-11 (task-execute Step 11 — 012 closed, reset for the next task)
+> **Last Updated**: 2026-09-11 (context-handoff at session end — the next session starts here)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
@@ -11,7 +11,8 @@
 |---|---|
 | **Task** | **013** — FR-01 client: `getDocumentUrl` capability and identity threading (`tasks/013-*.poml`) — **not started** |
 | **Status** | none active. **012 ✅** (live-verified on Word web + desktop; Spike-1 GREEN). **015 ✅** (live on the add-in site). |
-| **Next Action** | Operator chooses the next task. Recommended: **013** (critical path: 012 → 013 → 023/024). Also startable now: 014, 016 (do NOT co-schedule 014 and 016: same contract-test file), 020, 023, 030. |
+| **State at handoff** | The tree is clean and in sync with origin. **PR #960 CI is all green** (every check terminal, 0 pending, 0 failed; the required `Router` check passes). **Nothing is in flight**: no agents, no background jobs, no stray worktrees. The dev BFF runs `9750b4968`; the add-in site runs `8fec97b2d` (015 tabs). |
+| **Next Action** | New session: **ask the operator which task to run**. The question was put at the end of the last session and has not been answered. Recommended: **013** via `task-execute` (critical path: 012 → 013 → 023/024). Also startable now: 014, 016 (do NOT co-schedule 014 and 016: same contract-test file), 020, 023, 030. |
 
 ### What 013 must honour from 012 (notes/012 §2, "Rules for task 013")
 - **503 = could not determine.** Retry or let the user choose; never treat it as a new document.
