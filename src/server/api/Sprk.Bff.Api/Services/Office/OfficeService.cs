@@ -56,6 +56,9 @@ public class OfficeService : IOfficeService
     // Registered singleton (→ IDataverseService, GraphModule.cs); optional/null-tolerant so bare test
     // ctors keep compiling; null → quick-create returns null (endpoint 403s).
     private readonly IGenericEntityService? _genericEntityService;
+    // FR-13 (spaarkeai-word-add-in-r1 task 030): the Matter quick-create path. Required (ADR-032): its registration
+    // is unconditional, so an absent one is a startup fault, never a per-request 403.
+    private readonly RecordCreationService _recordCreation;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -72,6 +75,7 @@ public class OfficeService : IOfficeService
         IMembershipEventPublisher membershipEventPublisher,
         RecordContainerResolver containerResolver,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        RecordCreationService recordCreation,
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null,
         DataverseWebApiClient? dataverseClient = null,
@@ -79,6 +83,10 @@ public class OfficeService : IOfficeService
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
+        // Required, not optional (ADR-032): an absent registration must fail at startup, not surface as a 403
+        // "permission" message on every Matter quick-create.
+        _recordCreation = recordCreation
+            ?? throw new ArgumentNullException(nameof(recordCreation));
         _coreAncestors = coreAncestors
             ?? throw new ArgumentNullException(nameof(coreAncestors));
         _jobStatusService = jobStatusService;
@@ -837,11 +845,11 @@ public class OfficeService : IOfficeService
     private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
         new Dictionary<AssociationEntityType, EntitySearchMeta>
         {
-            [AssociationEntityType.Matter]  = new("sprk_matters",  "sprk_matterid",  "sprk_mattername",  "sprk_matternumber",  "sprk_matterdescription"),
+            [AssociationEntityType.Matter] = new("sprk_matters", "sprk_matterid", "sprk_mattername", "sprk_matternumber", "sprk_matterdescription"),
             [AssociationEntityType.Project] = new("sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription"),
-            [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name",        "sprk_invoicenumber", "sprk_description"),
-            [AssociationEntityType.Account]  = new("accounts",     "accountid",      "name",             "accountnumber",      "description"),
-            [AssociationEntityType.Contact]  = new("contacts",     "contactid",      "fullname",         null,                 "jobtitle"),
+            [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_description"),
+            [AssociationEntityType.Account] = new("accounts", "accountid", "name", "accountnumber", "description"),
+            [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle"),
         };
 
     /// <summary>
@@ -1398,14 +1406,19 @@ public class OfficeService : IOfficeService
 
     /// <inheritdoc />
     /// <remarks>
-    /// Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
-    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter + Project</b> (the common
-    /// filings from an email); other types return null (endpoint 403s) until built out. The record is
-    /// created via the generic Dataverse create (<see cref="IGenericEntityService.CreateAsync"/>) with
-    /// only the required name (Dataverse-required set is name-only for both). Ownership is attributed to
-    /// the caller when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-024
-    /// — best-effort; unresolved → app-owned, still created). There is no impersonated-create helper in
-    /// the BFF, so ownership is set via the <c>ownerid</c> lookup rather than MSCRMCallerID.
+    /// <para>Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
+    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
+    /// return null (endpoint 403s) until built out.</para>
+    /// <para><b>Matter</b> (spaarkeai-word-add-in-r1 task 030, FR-13) is created complete by
+    /// <see cref="RecordCreationService"/>: a uniqueness-probed <c>sprk_matternumber</c> when a matter type is
+    /// supplied, the caller as a <b>load-bearing</b> owner, business-unit defaults and the Field Mapping Framework.
+    /// A refusal there surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
+    /// written); see <see cref="QuickCreateMatterAsync"/>.</para>
+    /// <para><b>Project / Invoice</b> keep the minimal path: the generic Dataverse create
+    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name (plus description for Project). Ownership is
+    /// attributed to the caller when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>,
+    /// ADR-024 — best-effort; unresolved → app-owned, still created). There is no impersonated-create helper in the
+    /// BFF, so ownership is set via the <c>ownerid</c> lookup rather than MSCRMCallerID.</para>
     /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
@@ -1442,10 +1455,18 @@ public class OfficeService : IOfficeService
             return null; // endpoint validates Name; guard defensively
         }
 
+        // FR-13 (spaarkeai-word-add-in-r1 task 030): Matter goes through the shared server-side creation service —
+        // uniqueness-probed sprk_matternumber, load-bearing owner, BU defaults, Field Mapping Framework. Project
+        // (task 031, different numbering semantics) and Invoice stay on the minimal path below, unchanged.
+        if (entityType == QuickCreateEntityType.Matter)
+        {
+            return await QuickCreateMatterAsync(name, request, userId, ownerSystemUserId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
         var (nameField, descriptionField) = entityType switch
         {
-            QuickCreateEntityType.Matter => ("sprk_mattername", (string?)"sprk_matterdescription"),
             QuickCreateEntityType.Project => ("sprk_projectname", (string?)"sprk_projectdescription"),
             _ => ("sprk_invoicename", (string?)null), // Invoice: name-only (no verified description field)
         };
@@ -1483,6 +1504,76 @@ public class OfficeService : IOfficeService
             Url = null
         };
     }
+
+    /// <summary>
+    /// The Matter leg of <see cref="QuickCreateAsync"/> (spaarkeai-word-add-in-r1 task 030, FR-13): delegates to
+    /// <see cref="RecordCreationService"/> and adapts its outcome to this method's contract.
+    /// </summary>
+    /// <remarks>
+    /// <para>A structured <see cref="RecordCreationFailure"/> is surfaced as the codebase's typed-problem exception
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/>) because
+    /// <see cref="IOfficeService.QuickCreateAsync"/> returns <c>QuickCreateResponse?</c> and its signature cannot
+    /// change here: the shared <c>Phase2EndToEndFixture</c> mocks it. The endpoint renders that exception in the
+    /// Office ProblemDetails shape. <see cref="RecordCreationService"/> itself returns the failure as data — that is
+    /// the contract task 031 and the wizard-migration evaluation consume.</para>
+    /// <para>Owner attribution is LOAD-BEARING for Matter (an unresolved caller is refused, 403), unlike the
+    /// best-effort posture the Project / Invoice leg keeps.</para>
+    /// </remarks>
+    private async Task<QuickCreateResponse?> QuickCreateMatterAsync(
+        string name,
+        QuickCreateRequest request,
+        string userId,
+        string? ownerSystemUserId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _recordCreation.CreateAsync(
+            new RecordCreationRequest
+            {
+                EntityType = QuickCreateEntityType.Matter,
+                Name = name,
+                Description = request.Description,
+                CallerUserId = userId,
+                OwnerSystemUserId = ownerSystemUserId,
+                MatterTypeId = request.MatterTypeId,
+                SourceEntityLogicalName = request.SourceEntityType,
+                SourceRecordId = request.SourceRecordId,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.Failure is { } failure)
+        {
+            throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                failure.Code,
+                "Matter Not Created",
+                failure.Detail,
+                MapCreationFailureStatus(failure.Kind));
+        }
+
+        return new QuickCreateResponse
+        {
+            Id = result.RecordId,
+            EntityType = QuickCreateEntityType.Matter,
+            LogicalName = result.LogicalName,
+            Name = result.Name,
+            Number = result.Number,
+            Warnings = result.Warnings.Count > 0 ? result.Warnings : null,
+            // Org URL isn't known server-side (the add-in must not be org-pinned).
+            Url = null
+        };
+    }
+
+    /// <summary>HTTP status for each creation refusal. Every refusal means no row was written.</summary>
+    internal static int MapCreationFailureStatus(RecordCreationFailureKind kind) => kind switch
+    {
+        RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
+        RecordCreationFailureKind.MatterTypeNotFound => StatusCodes.Status400BadRequest,
+        RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
+        RecordCreationFailureKind.MatterTypeCodeUnusable => StatusCodes.Status409Conflict,
+        RecordCreationFailureKind.NumberExhausted => StatusCodes.Status409Conflict,
+        RecordCreationFailureKind.MatterTypeLookupFailed => StatusCodes.Status503ServiceUnavailable,
+        RecordCreationFailureKind.NumberProbeFailed => StatusCodes.Status503ServiceUnavailable,
+        _ => StatusCodes.Status500InternalServerError
+    };
 
     /// <summary>Friendly regarding type → (entity-specific <c>sprk_todo</c> lookup attribute, target logical name).
     /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c> for the three types the add-in "Related to"
