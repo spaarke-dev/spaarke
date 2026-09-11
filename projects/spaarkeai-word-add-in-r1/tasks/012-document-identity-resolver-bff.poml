@@ -4,7 +4,7 @@
     <title>FR-01 server: document-identity resolver extending /api/documents</title>
     <phase>1 Foundation</phase>
     <gate>002 complete — Spike-1 must confirm the `Office.context.document.url` shape for SPE files in Word desktop before this resolver is built</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint modifying .cs in `Sprk.Bff.Api`, with authorization, Graph and Dataverse boundaries. Tags include bff-api and auth. Code-review plus adr-check run at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>

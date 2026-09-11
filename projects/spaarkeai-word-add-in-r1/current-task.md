@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-10 (task-execute 012 started)
+> **Last Updated**: 2026-09-11 (task-execute Step 11 — 012 closed, reset for the next task)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
@@ -9,35 +9,22 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **012** — FR-01 server: document-identity resolver extending `/api/documents` (`tasks/012-document-identity-resolver-bff.poml`) |
-| **Rigor** | FULL · opus @ high · steps DIRECTIONAL |
-| **Step** | 012 committed (`8fec97b2d`), pushed, **deployed to dev** (hash-verified, healthy), and **live-verified**: Spike-1 links 2+3 GREEN (notes/012 §8, spike-1 §22). The live run showed Graph answers 403 for missing items, so 403 → `not_resolvable` (uncommitted; 61/61 tests pass). **Next:** commit + push that change → redeploy → re-run item 3 (expect 200 `not_resolvable`). **Open (operator):** Word-desktop `document.url` capture; optionally a non-Spaarke OneDrive/SharePoint file URL. 015 ✅ and live on the SWA (run 34546485352). PR #960 body rewritten. |
-| **Status** | in-progress |
-| **In flight elsewhere** | Task **015** (tab shell) running in a background agent in an ISOLATED worktree — it must NOT touch TASK-INDEX/current-task; main session merges its branch when it reports. |
-| **Next Action** | `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SharingUrlToken|FullyQualifiedName~DocumentUrlIdentity"` → fix → full affected test run → publish-size vs fresh master → code-review + adr-check |
+| **Task** | **013** — FR-01 client: `getDocumentUrl` capability and identity threading (`tasks/013-*.poml`) — **not started** |
+| **Status** | none active. **012 ✅** (live-verified on Word web + desktop; Spike-1 GREEN). **015 ✅** (live on the add-in site). |
+| **Next Action** | Operator chooses the next task. Recommended: **013** (critical path: 012 → 013 → 023/024). Also startable now: 014, 016 (do NOT co-schedule 014 and 016: same contract-test file), 020, 023, 030. |
 
-### Task 012 — decisions so far
-- 2026-09-10 — **§7 does NOT make 012 optional.** Of 16 SPE upload sites in the BFF, task 014 stamps only the Office save path; a document uploaded via `DocumentsEndpoints` (`PUT /api/drives/{driveId}/upload`), email, AI working-doc etc. arrives UNSTAMPED, so the URL path is the only way the pane identifies it on first open. Stamp precedence is already stamp-first in 014 step 5. Corrects spike-1 §7's "consider dropping it from r1".
-- 2026-09-10 — /conflict-check: no open PR touches the target files; master has no new commits to them; branch 46 ahead / 0 behind.
+### What 013 must honour from 012 (notes/012 §2, "Rules for task 013")
+- **503 = could not determine.** Retry or let the user choose; never treat it as a new document.
+- **A 403 with `reasonCode` `sdap.access.error.system_failure` is indeterminate too.**
+- **Don't call the route for an empty or non-absolute `document.url`** (an unsaved document). Treat it as new locally.
+- **`identity_conflict` is not "new"**: do not offer save-as-new.
+- Word desktop and web both return the raw-space path form (spike-1 §19, §23). Send it exactly as returned.
 
-### Files modified (task 012) — all uncommitted
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SharingUrlToken.cs` — NEW: `u!` token + the two encoding candidates
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs` — `ResolveSharedItemAsUserAsync` (Graph `/shares`, OBO)
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs` — virtual facade method
-- `src/server/api/Sprk.Bff.Api/Models/SpeFileStoreDtos.cs` — `SpeSharedItemOutcome/Attempt/Resolution`
-- `src/server/api/Sprk.Bff.Api/Models/FileOperationModels.cs` — request/response DTOs
-- `src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs` — NEW: resolver (3 answers, self-heal, drive check)
-- `src/server/api/Sprk.Bff.Api/Api/Filters/DocumentUrlIdentityFilter.cs` — NEW: resolution filter → route value `documentId`
-- `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs` — route `POST /resolve-identity` + handler
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs` — `IsRecordNotFound` private→internal (reuse)
-- `tests/unit/.../Infrastructure/Graph/SharingUrlTokenTests.cs`, `.../Services/Documents/DocumentUrlIdentityResolutionTests.cs`, `.../Filters/DocumentUrlIdentityFilterTests.cs` — NEW
-- `projects/.../notes/012-identity-resolver-decisions.md` — NEW (contract, reuse-vs-copy, auth design, encoding, placement)
-
-### Key design (details in notes/012-identity-resolver-decisions.md)
-- Two filters in order: `DocumentUrlIdentityFilter` (resolve → `RouteValues["documentId"]`) then the UNCHANGED `DocumentAuthorizationFilter("read")`.
-- Graph `/shares` runs OBO → unreachable URL answers exactly like non-document (no existence oracle).
-- Three answers: resolved / 200 no-identity / **503** — a Dataverse or Graph fault is never "not a Spaarke document" (that would mint duplicates).
-- Live SPIKE-1 criteria need this branch's BFF on dev (OBO needs MI credential) → **operator sign-off for a dev BFF deploy**.
+### Last session (2026-09-10 → 11) — all committed + pushed to PR #960
+- **012:** `8fec97b2d` (resolver + route), then `9750b4968` (Graph 403 → `not_resolvable`, after the live evidence). It was deployed twice to `spaarke-bff-dev` via `/bff-deploy`, hash-verified and healthy. Decisions are in `notes/012-identity-resolver-decisions.md`; the live table is in §8.
+- **015:** `aff1ca9e4` (agent, isolated worktree) plus `4ea3cf6de` (corrected stale "waits on 032" claims). The add-in site was redeployed (run 34546485352), and Find is live for Word and Outlook.
+- **Gates:** full `Sprk.Bff.Api.Tests` 12,139/0; ArchTests 191; no CVE; publish +0.016 MB against a fresh master build.
+- **This worktree** now has root `node_modules`, so the husky/lint-staged pre-commit hook runs. Never `--no-verify`.
 
 ### Completed after the handoff — doc accuracy pass (committed with this update)
 
@@ -56,26 +43,27 @@ command, typecheck count), and the `ChatWordExportEndpoints.cs` URL-shape commen
 
 ### Operator pending (none can be done by an agent)
 
-1. **Word DESKTOP capture of `Office.context.document.url`** — the 2026-09-10 capture was Word on the WEB.
-   Steps: open doc via Spaarke "Open in Desktop" → focus the pane → Ctrl+Shift+I (or right-click → Inspect, or
-   pane menu → Attach Debugger) → Console → `Office.context.document.url`. Fallback if DevTools won't open for an
-   admin-deployed add-in: user env var `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--auto-open-devtools-for-tabs`,
-   restart Word (affects all WebView2 apps — remove after). Note Protected View state before/after Enable Editing.
-2. **Re-upload the Word manifest at 1.0.8.0** — operator uploaded from the SWA while it still served 1.0.7.0.
-   SWA now serves 1.0.8.0 (verified). Path: M365 Admin Center → Settings → Integrated apps →
-   `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.xml`. Then confirm pane footer = 1.0.8 →
-   **task 011 can close** (via the XML path).
-3. **Share privilege check** — security roles → `sprk_document` → Share. If not granted, the record⇔document
+1. ~~Word DESKTOP capture~~ **DONE 2026-09-11.** The desktop value is byte-identical to the web capture and resolves
+   (spike-1 §23).
+2. **Re-upload the Word manifest at 1.0.8.0** — the operator uploaded from the SWA while it still served 1.0.7.0.
+   The SWA now serves 1.0.8.0 (verified). Path: M365 Admin Center → Settings → Integrated apps →
+   `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.xml`. Then confirm the pane footer = 1.0.8 →
+   **task 011 can close** (via the XML path). Outlook needs no re-upload (1.0.22.0, unchanged; its XML is
+   `/outlook/outlook-manifest.xml`).
+3. **Optional (012):** the URL of any OneDrive or SharePoint file that has no Spaarke record, to exercise the
+   Dataverse not-found shape live (notes/012 §8). The az CLI cannot list OneDrive (AADSTS65002), and the BFF has no
+   route that lists container children.
+4. **Share privilege check** — security roles → `sprk_document` → Share. If it is not granted, the record⇔document
    access model has no gap (see D-032-1). OR reconnect Dataverse MCP (`/mcp`) and an agent can check.
-4. **Dataverse MCP is DOWN this whole session** (`CONNECT_TIMEOUT` then `CONNECTION_CLOSED`). Nothing "verified
-   via MCP" came from this session. `/mcp` or restart to reconnect.
+5. **Dataverse MCP has been DOWN** (`CONNECTION_CLOSED`). Nothing here was "verified via MCP". Use `/mcp` or a
+   restart to reconnect.
 
 ### Pending decisions (operator)
 
-- **Spike-1 §7 — stamp-as-primary.** Recommended: FR-02 custom-XML stamp as PRIMARY identity, `document.url` as
-  fast path (URL identity breaks on rename/move; the stamp does not). Operator said legacy data doesn't matter
-  (dev only), which removes the forward-only objection — but has not explicitly accepted §7. If accepted, 014
-  runs before 012/013.
+- **Spike-1 §7 — stamp-as-primary.** Still recommended on its merits (identity by content survives a rename or a
+  move), but it is no longer needed for viability: Spike-1 is GREEN. It cannot replace the URL path either, because
+  014 stamps only the Office save path (notes/012 §1). The only thing left to decide is ORDER: 014 before or after
+  013. Both are startable now.
 - **Shadow-window latch mechanism** (ISS-002 residual) — `-Since` was advanced (Option 1, applied); the latch
   itself (`$falseGreens` unfiltered by `$countingFrom`) still exists and the NEXT false green will latch the same
   way. Needs a cutover-owner decision: hard stop or reset.

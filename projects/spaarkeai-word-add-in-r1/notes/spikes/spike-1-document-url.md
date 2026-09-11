@@ -1,6 +1,9 @@
 # Spike-1: `Office.context.document.url` shape for SPE files in Word desktop
 
-> **VERDICT: 🟠 AMBER** — see §9. Link 4 (the one the POML flagged as most likely to be assumed rather
+> **VERDICT: 🟢 GREEN (2026-09-11)** — see §22–§23. Live through the deployed BFF: the Word **web and desktop**
+> captures (byte-identical) both resolve to the right `sprk_document`, and links 1–4 are all GREEN. The desk
+> verdict below was 🟠 AMBER — see §9. It is kept as written, as the record of what was knowable before the live
+> pass. Link 4 (the one the POML flagged as most likely to be assumed rather
 > than checked) is **GREEN and closed**. Links 1–3 could not be closed: this session had **no live Office
 > host**, and sideloading is no longer available in this environment, so the empirically-verifiable half
 > is an operator pass (§8).
@@ -1471,3 +1474,32 @@ such item" (and "malformed spelling"), because SharePoint does not disclose whic
 
 **Verdict: still AMBER, with one criterion left**, the Word **desktop** capture of `document.url`. Links 1 (web), 2, 3
 and 4 are GREEN. When the desktop value resolves through the same route, this report moves to GREEN.
+
+---
+
+## 23. 🟢 VERDICT: GREEN — the Word desktop capture resolves (2026-09-11, EMPIRICALLY VERIFIED)
+
+**The capture.** The operator captured this in the Spaarke pane on Word **desktop**. `Office.context.diagnostics`
+reported host `Word`, platform `PC`, build `16.0.20326.20132`. The command was
+`JSON.stringify(Office.context.document.url)`:
+
+```
+"https://spaarke.sharepoint.com/contentstorage/CSP_585db4c8-8043-4676-965e-c92e45f07221/Document Library/Examiner report draft.docx"  (length 130)
+```
+
+**Byte-identical to the Word-on-web capture** of §19 (ordinal comparison, 130 characters, raw spaces).
+
+**Resolved through the deployed route.** Commit `9750b4968` on `spaarke-bff-dev`, OBO as the operator,
+2026-09-11T01:25Z: **HTTP 200, resolved → `8c135b45-5da8-f111-aaab-7ced8ddc4a05`, matter PAT-191111.**
+
+**Link 1c, the desktop hazard in §5, did not materialise.** Desktop returns the same server path form as the web,
+not a local or sandboxed path and not the viewer URL. The Protected View state at capture time was not recorded;
+the document was open with the pane active.
+
+**Final: links 1 (web AND desktop), 2, 3 and 4 are all GREEN. FR-01's primary path is viable.**
+
+- §7's stamp-as-primary recommendation still stands on its own merit, because identity by content survives a
+  rename or a move. It is no longer needed for viability.
+- The URL path cannot be dropped in any case (notes/012 §1).
+- **Limits of the evidence:** one document, one tenant, one Windows desktop build. Mac desktop and Office on iPad
+  were not tested (§14, secondary hosts).

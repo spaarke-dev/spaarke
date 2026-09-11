@@ -196,16 +196,16 @@ passed.
 |---|---|---|---|---|
 | 1 | Spaarke doc, **raw** (Word-on-web capture) | 200 | resolved → `8c135b45-5da8-f111-aaab-7ced8ddc4a05`, `sprk_matter` **PAT-191111** | `encoded=200` |
 | 2 | Same, **`%20`** (BFF open-links form) | 200 | same document | `encoded=403; normalized=200` |
-| 3 | Missing file in the same container | 503 → **fixed** | `identity_resolution_access_denied`, which led to the §4 revision; must answer 200 `not_resolvable` after the redeploy | `encoded=403; raw=403` |
+| 3 | Missing file in the same container | 503 on `8fec97b2d`; **200 on `9750b4968`** | first `identity_resolution_access_denied`, which led to the §4 revision; after the redeploy, **`not_resolvable`** (verified live) | `encoded=403; raw=403` |
 | 4 | `file:///C:/…/brief.docx` | 200 | `not_cloud_document` | none (Graph not called) |
 | 5, 6 | Empty url / no body | 400 | `document_url_required` ProblemDetails | — |
 | 7 | No token | 401 | the route is registered | — |
 | — | open-links for the resolved id | 200 | `desktopUrl` = the same file (`…/Document%20Library/Examiner%20report%20draft.docx`) | — |
+| **D** | **Word DESKTOP capture** (PC, build 16.0.20326.20132), 2026-09-11 | **200** | **resolved → the same document and matter.** The capture is byte-identical to the web capture. | — |
 
-**Still open:**
+**All four SPIKE-1 criteria pass. Spike-1 is GREEN** (spike-1 §23). Task 012 is complete.
 
-- **Word-desktop `document.url` capture** (operator). This is the last SPIKE-1 criterion. Then flip Spike-1 AMBER →
-  GREEN.
+**Still open (optional):**
 - **A file that exists but has no `sprk_document`.** This is the only live check of the Dataverse not-found fault
   shape. The Azure CLI cannot list OneDrive (AADSTS65002), and the BFF has no route that lists container children,
   so it needs a URL from the operator: any OneDrive or SharePoint file. A wrong guess about that shape fails safe
