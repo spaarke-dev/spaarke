@@ -201,7 +201,14 @@ it does not understand, so a filter that GAINS a narrowing clause fails loudly (
 | `Sprk.Bff.Api.Tests` @ `23953342a` (fresh worktree `C:\wt098c`) | **12,300 passed / 0 failed / 58 skipped** (+20 vs task 097's 12,280) |
 | `Spaarke.ArchTests` @ `23953342a` | **196 / 197 — 1 FAIL**: the task-074 endpoint-file census (`ExpectedEndpointFileCount` 117, found 118). Predicted by the ADR check (V1) before the run finished; fixed in the review follow-up (census → 118 + ledger entry) |
 
-_Review follow-up re-verification below._
+**Review follow-up (`a0a3f07fe`) re-verified:**
+
+| Run | Result |
+|---|---|
+| affected BFF tests (RecordShareExpiry + DelegationRule + ExternalAccessContract + GrantLifecycle + ProjectClosureCascade) | **115 / 0** (+4 refusal tests) |
+| `Spaarke.ArchTests` (full) | **197 / 197** — census green at 118 |
+| P7 — cross-record refusal disabled (`var spanning = 0`) | **1 fail** (the 409 test), 16 pass — restored from git |
+| full `Sprk.Bff.Api.Tests` @ `a0a3f07fe` (fresh worktree `C:\wt098c`) | **12,304 passed / 0 failed / 58 skipped** (+4 vs `23953342a`) |
 
 ### 7.6 Quality gates (Step 9.5) — dispositions
 

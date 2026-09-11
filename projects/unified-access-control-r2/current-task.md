@@ -1,14 +1,16 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-11, session 7 END** (by `context-handoff`) — reflects through the handoff commit
-> that follows `030861434`. Tree clean, 0 unpushed, 0 behind master.
+> **Last Updated**: **2026-09-11, session 8 — task 098 CLOSED** (by `task-execute` Step 11) — reflects through
+> `a0a3f07fe` + the docs commit that follows it. ⚠️ Session 8's commits are **NOT PUSHED** (no push requested).
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
 > ⚠️ **One live block. Replace it; never append.** Row headings (`| **Next Action** |`, `| **Task** |`) repeat
 > inside the HISTORICAL blocks below — a scripted edit must touch the FIRST occurrence only (session 7 overwrote
 > six historical rows once by matching all seven; restored from HEAD before anything was committed).
 > **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
-> ⚠️ **This project's task files have been WRONG ELEVEN times now** (session 7 ×3: task 097 never considered
+> ⚠️ **This project's task files have been WRONG TWELVE times now** (session 8: task 098 listed
+> `DelegationRuleFilter` only as a reference — without a new `case` the route denies everyone — and built a
+> constraint on a cache "fail-open window" that cannot exist; session 7 ×3: task 097 never considered
 > that NO client sends an expiry, and said `/invite` writes a grant — it writes none; task 096's own constraint
 > had the `ExecuteTransaction` nesting rule backwards — copied from this project's design note, caught at review
 > against Microsoft Learn). **Verify a POML's premises against the code before obeying them — the code has won
@@ -21,16 +23,39 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **098** — FR-33 one atomic "set the expiry of every share on this record" endpoint — 🔄 **IN PROGRESS** (session 8, started 2026-09-11). Rigor FULL · opus @ high · directional. |
+| **Task** | **none in progress** — clean stopping point after **098** (session 8, 2026-09-11). |
 | **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1`. CI on `030861434`: **32 pass / 1 fail** — the one red is the legacy SDAP CI **Trivy** scan, **pre-existing** (red on `0a592b7a7`, the session-6 tip, and every commit since); the blocking `Router` / Tier 1 is green. |
-| **Next Action** | **098 step 1 — implement** (no code written yet as of this stamp). Decided so far: route `POST /api/v1/external-access/set-record-share-expiry`; NEW `SetRecordShareExpiryEndpoint.cs` + 2 DTOs; `DelegationRuleFilter` needs a NEW `case` (POML omitted it — without it the route 403s forever); rows = ONE server-side filter `{root}_value eq {id} and statecode eq 0` via `DataverseWebApiClient`; write = ONE `IDataverseService.BulkUpdateAsync("sprk_externalrecordaccess", …)`; value = `DateTime` midnight **Kind=Unspecified** (live metadata 2026-09-11: `sprk_expiresdate` Format=DateOnly, Behavior=**TimeZoneIndependent**); cache = contact rows' contacts + org rows' members via the EXISTING `ExternalOrganizationMembership.QueryActiveMembersAsync`. **Owner decision 2026-09-11: "Renew them too"** — every statecode=0 row gets the date, INCLUDING already-lapsed ones. **Premise error #12**: the cache holds no expiry and 097 forbids past dates, so a SHORTENED expiry is never a cache fail-open window; invalidation only speeds up renewal of lapsed shares. Prior next-action text follows for context — **was: Owner's call — next ready: 098** (opus tier: ONE atomic "set the expiry of every share on this record" endpoint, reusing the now-transactional `BulkUpdateAsync`; deps 096 ✅ 097 ✅ — verify its POML premises against the code first). Then **099** (Manage Access Expiration picker — needs task 065's M8 first; see TASK-INDEX sequencing), **100** (reminders — 🔴 **must be live by 2026-11-10**), **101** (expiry views, operator-applied). Also ready: **043** (chain C), **063** (chain B), and the C-items in § NEXT SESSION. ⚠️ **036 carries a MANUAL pre-merge canary gate.** |
-| **Task status** | **67 done · 27 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows). |
+| **Next Action** | **(1) Push** session 8's commits when the owner asks (`/push-to-github`) — `23953342a`, `a0a3f07fe`, + the docs commit. **(2) Owner's call on the next task.** FR-33 chain: **100** (reminders — 🔴 **must be live by 2026-11-10**; deps 097 ✅, ready now) · **099** (Manage Access Expiration picker — deps 097 ✅ 098 ✅, but **needs task 065's M8 first**; see TASK-INDEX sequencing; consumes the 098 contract in `notes/task-098-record-share-expiry.md` §6) · **101** (expiry views, operator-applied). Also ready: **043** (chain C), **063** (chain B), and the C-items in § NEXT SESSION. ⚠️ **036 carries a MANUAL pre-merge canary gate.** Verify every POML's premises against the code first — see the header counter. |
+| **Task status** | **68 done · 26 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows, checked after 098 closed). |
+| **Session 8 record** | Closed **098** — `POST /api/v1/external-access/set-record-share-expiry`: ONE expiry on every active share of a record (contact + org) in ONE `BulkUpdateAsync` transaction. **Owner decision 2026-09-11 "Renew them too"** (lapsed-but-active shares get the date). Beyond the literal criteria, from review: **409** for a share also linked to another record, **422** above 1,000 shares, refusal of an id-less row, "not confirmed" (never "not applied") on a failed transaction. `sprk_expiresdate` is **TimeZoneIndependent** (live metadata) → SDK value midnight `Kind=Unspecified`. **7/7 perturbations caught.** Full suite @ `23953342a` **12,300 / 0 / 58**; @ `a0a3f07fe` **see § Session 8 verification below**; ArchTests **197/197** (census 117 → 118 — caught by adr-check before CI). Publish **+0.01 MB** (45.40 → 45.41; master 45.35; 214 files each side). No vulnerable packages. **Lessons**: (a) a new route file moves the ArchTests endpoint census — run ArchTests locally; (b) parallel builds can make a perturbation hit `CS0016` or print NOTHING — neither is a result (P5/P6 re-run); (c) review agents read from a FRESH worktree while perturbations rewrite the main one. |
 | **Session 7 record** | Closed **096** — `IGenericEntityService.BulkUpdateAsync` is genuinely all-or-nothing (`ExecuteTransactionRequest`); escalation fired (no substitutable seam) → **owner chose the pure-builder test approach**. Closed **097** — every external grant carries an expiry: past → 400 `sdap.access.grant.expiry_in_past`; absent → keep the grant's existing expiry, else today + 90 (**owner decision "Server fills +90"** — no client sends an expiry). **Live dev backfill: 25 → 0 unbounded grants** (all now 2026-12-10). Full suite @ `2f2cc158a` **12,280 / 0**; ArchTests 197/197; publish 45.35 → 45.40 MB (project-cumulative; 096 and 097 each ≈ 0). **#970 closed**; filed **#971–#974**. 🔴 **Task 100 must be live by 2026-11-10, and 097 must not reach any non-dev environment without 100.** |
 | **Session 7 lessons** | See § SESSION 7 LESSONS — headline: **enumerate a contract's callers before tightening it** (097 would have broken every sharing screen), and **a broken perturbation is not a result**. |
 | **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969**, **#970**. CI: the **full ArchTests suite runs blocking** in Tier 1. FR-33 redesigned → tasks 096–101; no Dataverse test in CI (036 manual gate); §10 hazards 3–4 in root CLAUDE.md; path-A exceptions 012/023/062 ratified. |
 | **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963–#967**. |
 
-### Commits this session (session 7, 2026-09-10 → 2026-09-11) — ALL PUSHED, nothing at risk
+### Commits session 8 (2026-09-11) — ⚠️ LOCAL ONLY, NOT PUSHED
+
+| Commit | What |
+|---|---|
+| `23953342a` | 098 — one atomic expiry for every share on a record (endpoint, DTOs, filter case, lifecycle helpers, 20 tests) |
+| `a0a3f07fe` | 098 review follow-up — cross-record 409, truthful titles, census 118, strict fake, +4 refusal tests; task closed |
+| _(next)_ | docs — this handoff + final verification |
+
+### Files modified session 8 — committed, NOT pushed
+
+- **Code**: NEW `Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs` · NEW `Dtos/SetRecordShareExpiryRequest.cs` + `…Response.cs` · `DelegationRuleFilter.cs` (new case) · `ExternalAccessEndpoints.cs` (route) · `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs` (`EntityLogicalName`, `ActiveRowsForRootFilter`, `QueryActiveRowsForRootAsync`, `ToSdkDateOnly`) · `ExternalParticipationService.cs` (doc only — the cache holds no dates).
+- **Tests**: NEW `tests/integration/auth/UnifiedAccessControl/RecordShareExpiryTests.cs` (17) · `DelegationRuleCharacterizationTests` (+4) · `ExternalAccessContractTests` (+3) · `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (census 118 + ledger).
+- **Docs**: NEW `notes/task-098-record-share-expiry.md` · POML 098 (completed) · `TASK-INDEX.md` (098 ✅ + 099 sequencing note) · this file.
+- **No live Dataverse writes.** One read-only metadata query (`sprk_expiresdate` / `sprk_granteddate` DateTimeBehavior).
+
+### Session 8 verification
+
+| Run | Result |
+|---|---|
+| full `Sprk.Bff.Api.Tests` @ `a0a3f07fe` (fresh worktree `C:\wt098c`) | **12,304 passed / 0 failed / 58 skipped** |
+| full `Spaarke.ArchTests` @ `a0a3f07fe` | **197 / 197** (first attempt failed at RESTORE — `NU1900`, nuget.org vulnerability feed unreachable, warning-as-error; a network hiccup, not a test result — re-run green) |
+
+### Commits session 7 (2026-09-10 → 2026-09-11) — HISTORICAL, all pushed
 
 | Commit | What |
 |---|---|
@@ -44,7 +69,7 @@
 | `2f2cc158a` | 097 review follow-up — truthful docs; one "today" for `sprk_granteddate` + expiry |
 | `030861434` | 097 closed |
 
-### Files modified this session — ALL COMMITTED AND PUSHED
+### Files modified session 7 — HISTORICAL, all committed and pushed
 
 - **Code (096)**: `Spaarke.Dataverse/DataverseServiceClientImpl.cs` (`BulkUpdateAsync` → transaction; new public static `BuildBulkUpdateTransaction` + `DescribeBulkUpdateFailure`) · `IGenericEntityService.cs` (contract doc).
 - **Code (097)**: `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs` (`DefaultExpiryDays`, `TodayUtc(TimeProvider)`, `DefaultExpiry`) · `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` (`ValidateRequestedExpiry`; `CreateGrantAsync(today)` keep-else-+90; `BuildGrantPayload(today)`) · `InviteAndGrantExternalUserEndpoint.cs` (validate before onboarding) · both request DTO docs · `Infrastructure/DI/ExternalAccessModule.cs` (`TryAddSingleton(TimeProvider.System)`) · `AuthorizationModule.cs` (stale comment only).
@@ -112,7 +137,7 @@ a server constant, and task 099's picker is specified to match it.
 
 | Chain | Order | Note |
 |---|---|---|
-| **FR-33** | 096 ✅ · 097 ✅ → **098** → **099**; **100**, **101** | 098 is opus-tier and reuses `BulkUpdateAsync` (now atomic). **099 ↔ 065** share `AccessGrantModal.tsx` and finding M8 — never concurrently. 🔴 **100 by 2026-11-10.** 101's views are operator-applied. |
+| **FR-33** | 096 ✅ · 097 ✅ · 098 ✅ → **099**; **100**, **101** | 098 done 2026-09-11 (contract for 099 in its notes §6). **099 ↔ 065** share `AccessGrantModal.tsx` and finding M8 — never concurrently. 🔴 **100 by 2026-11-10.** 101's views are operator-applied. |
 | **A — critical path** | **036** → 054 → 055 → 056 → 057/058 | 036 = manual canary pre-merge gate (above) |
 | **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready |
 | **C** | **043** → 044 | 043 ready — the natural home for the org-FLS hedge |
