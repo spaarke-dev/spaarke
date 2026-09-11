@@ -40,6 +40,13 @@ public class GrantLifecycleCharacterizationTests
     private static readonly Guid OtherContactId = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
     /// <summary>
+    /// A FIXED "today" for every date in this class. Since task 097 the grant core takes today as a
+    /// parameter instead of reading the wall clock, so these tests no longer depend on the day they run
+    /// (they previously derived every date from <c>DateTime.UtcNow</c>).
+    /// </summary>
+    private static readonly DateOnly Today = new(2026, 9, 10);
+
+    /// <summary>
     /// Config sufficient for the real <see cref="DataverseWebApiClient"/> constructor (Moq invokes it).
     /// ClientSecretCredential is constructed but never used — every method the code under test calls is
     /// overridden, so no token is requested and no network call occurs.
@@ -237,7 +244,7 @@ public class GrantLifecycleCharacterizationTests
     private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Grant(
         Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
-            request, ExternalGrantRootType.Project, ProjectId,
+            request, ExternalGrantRootType.Project, ProjectId, Today,
             callerOid: null, client.Object, Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
 
@@ -712,7 +719,7 @@ public class GrantLifecycleCharacterizationTests
         var table = new FakeGrantTable();
         var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: null);
         var client = table.BuildMock();
-        var expiry = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30);
+        var expiry = Today.AddDays(30);
 
         var outcome = await Grant(client, Request(expiryDate: expiry));
 
@@ -728,7 +735,7 @@ public class GrantLifecycleCharacterizationTests
     public async Task Upsert_ExtendingAnExpiry_PersistsTheLaterDate()
     {
         var table = new FakeGrantTable();
-        var original = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7);
+        var original = Today.AddDays(7);
         table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: original);
         var client = table.BuildMock();
         var extended = original.AddDays(30);
@@ -752,7 +759,7 @@ public class GrantLifecycleCharacterizationTests
         var table = new FakeGrantTable();
         table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: null);
         var client = table.BuildMock();
-        var expiry = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(14);
+        var expiry = Today.AddDays(14);
 
         await Grant(client, Request(level: ExternalAccessLevel.ViewOnly, expiryDate: expiry));
 
@@ -783,7 +790,7 @@ public class GrantLifecycleCharacterizationTests
     public async Task Upsert_WithNoExpiryInTheRequest_LeavesAnExistingExpiryIntact()
     {
         var table = new FakeGrantTable();
-        var existing = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30);
+        var existing = Today.AddDays(30);
         table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: existing);
         var client = table.BuildMock();
 
@@ -805,7 +812,7 @@ public class GrantLifecycleCharacterizationTests
     public async Task Upsert_OverAnExpiredRowWithNoNewExpiry_DoesNotReportSuccess()
     {
         var table = new FakeGrantTable();
-        var expired = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+        var expired = Today.AddDays(-1);
         var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: expired);
         var client = table.BuildMock();
 
@@ -828,14 +835,72 @@ public class GrantLifecycleCharacterizationTests
     public async Task Upsert_OverAnExpiredRowWithANewExpiry_Succeeds()
     {
         var table = new FakeGrantTable();
-        var expired = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+        var expired = Today.AddDays(-1);
         table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: expired);
         var client = table.BuildMock();
-        var renewed = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(30);
+        var renewed = Today.AddDays(30);
 
         var outcome = await Grant(client, Request(expiryDate: renewed));
 
         outcome.Warning.Should().BeNull("the request supplied a future expiry, so access IS restored");
         table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(renewed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FR-33 — TASK 097. Every grant is bounded: an ABSENT expiry is defaulted server-side.
+    //
+    // Owner decision 2026-09-10 ("Server fills +90"): no client sends an expiry today, so rejecting a
+    // missing one would break every sharing surface. The rule: keep the grant's existing expiry, else
+    // today + DefaultExpiryDays. Keeping is pinned in both directions — the existing +30 test above
+    // shows a shorter expiry is not EXTENDED; the +200 test below shows a longer one is not SHORTENED.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A NEW grant with no expiry is written with today + the default, never unbounded.</summary>
+    [Fact]
+    public async Task CreateGrant_NewGrantWithNoExpiry_StoresTodayPlusTheDefaultDays()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+
+        await Grant(client, Request(expiryDate: null));
+
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(
+            Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays),
+            "FR-33: a new grant is never written unbounded, whichever surface created it");
+    }
+
+    /// <summary>Re-granting an UNBOUNDED grant with no expiry bounds it at today + the default.</summary>
+    [Fact]
+    public async Task Upsert_NoExpiryOnAnUnboundedExistingGrant_StoresTodayPlusTheDefaultDays()
+    {
+        var table = new FakeGrantTable();
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: null);
+        var client = table.BuildMock();
+
+        await Grant(client, Request(expiryDate: null));
+
+        table.ExpiryUpdateCount.Should().Be(1, "an unbounded survivor is the one case the default writes to");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(
+            Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+    }
+
+    /// <summary>
+    /// Re-granting with no expiry never SHORTENS a longer expiry someone set — the twin of
+    /// <see cref="Upsert_WithNoExpiryInTheRequest_LeavesAnExistingExpiryIntact"/> (which shows a shorter
+    /// one is not extended).
+    /// </summary>
+    [Fact]
+    public async Task Upsert_NoExpiryOnAGrantWithALongerExpiry_LeavesItUnchanged()
+    {
+        var table = new FakeGrantTable();
+        var longer = Today.AddDays(200);
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: longer);
+        var client = table.BuildMock();
+
+        await Grant(client, Request(level: ExternalAccessLevel.Collaborate, expiryDate: null));
+
+        table.ExpiryUpdateCount.Should().Be(0,
+            "a re-grant from a surface with no date field must not move a date someone chose");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(longer);
     }
 }

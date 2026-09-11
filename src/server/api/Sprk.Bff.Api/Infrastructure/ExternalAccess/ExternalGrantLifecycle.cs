@@ -145,6 +145,28 @@ internal static class ExternalGrantLifecycle
 {
     internal const string EntitySet = "sprk_externalrecordaccesses";
 
+    /// <summary>
+    /// Days a grant lasts when the request names no expiry (spec FR-33; owner decision 2026-09-10,
+    /// "Server fills +90").
+    /// </summary>
+    /// <remarks>
+    /// A constant, not a setting — the owner removed the tenant cap. It matches the default of the Manage
+    /// Access Expiration picker (task 099), so a surface that has no date field (the TrackingFieldTrio
+    /// PCF, the external SPA) produces the same grant the picker would.
+    /// </remarks>
+    internal const int DefaultExpiryDays = 90;
+
+    /// <summary>
+    /// "Today" for every grant-expiry decision on the write path: the <b>UTC</b> calendar date — the same
+    /// calendar the read filter compares against (task 007, <c>ExternalParticipationService.ExpiryPredicate</c>),
+    /// so a grant the writer accepts as "expires today" is still live to the reader today.
+    /// </summary>
+    internal static DateOnly TodayUtc(TimeProvider timeProvider)
+        => DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
+    /// <summary>The expiry an absent request value becomes: <paramref name="today"/> + <see cref="DefaultExpiryDays"/>.</summary>
+    internal static DateOnly DefaultExpiry(DateOnly today) => today.AddDays(DefaultExpiryDays);
+
     // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
     // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
     // that had already expired. Verified DATE ONLY in live metadata (task 007).

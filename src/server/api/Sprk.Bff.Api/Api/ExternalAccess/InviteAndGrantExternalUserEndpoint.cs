@@ -52,6 +52,7 @@ public static class InviteAndGrantExternalUserEndpoint
         IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
+        TimeProvider timeProvider,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
@@ -74,6 +75,12 @@ public static class InviteAndGrantExternalUserEndpoint
             RecordId: request.RecordId));
         if (!grantRoot.Ok)
             return ProblemDetailsHelper.ValidationError(grantRoot.Error!);
+
+        // FR-33 (task 097): reject a past expiry BEFORE any onboarding side effect — a rejected request must
+        // not leave a Contact or a CIAM account behind. An absent expiry is defaulted by the grant core.
+        var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
+        if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
+            return expiryProblem;
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
@@ -118,7 +125,7 @@ public static class InviteAndGrantExternalUserEndpoint
         try
         {
             var grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
-                grantRequest, grantRoot.Type, grantRoot.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+                grantRequest, grantRoot.Type, grantRoot.Id, today, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
 
             accessRecordId = grantOutcome.AccessRecordId;
 

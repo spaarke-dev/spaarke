@@ -15,6 +15,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   1. Creating a sprk_externalrecordaccess record in Dataverse.
 ///   2. Invalidating the contact's participation cache in Redis.
 ///
+/// Every grant is time-bounded (spec FR-33, task 097): a requested expiry before today is rejected (400,
+/// <c>sdap.access.grant.expiry_in_past</c>); an ABSENT one keeps the grant's existing expiry, else becomes
+/// today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>. No client has to send a date.
+///
 /// Broker-only (ADR-028 Amendment A1): external users never authenticate to SPE
 /// directly — all external SPE access is app-only via the BFF — so no synthetic
 /// SPE container permission is written on grant.
@@ -69,6 +73,7 @@ public static class GrantExternalAccessEndpoint
         HttpContext httpContext,
         ILogger<Program> logger,
         IConfiguration configuration,
+        TimeProvider timeProvider,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
@@ -91,6 +96,12 @@ public static class GrantExternalAccessEndpoint
             return ProblemDetailsHelper.ValidationError(
                 $"AccessLevel must be one of: {string.Join(", ", Enum.GetNames<ExternalAccessLevel>())}.");
 
+        // FR-33 (task 097): a past expiry is rejected before anything is written. An absent one is not an
+        // error — CreateGrantAsync defaults it.
+        var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
+        if (ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
+            return expiryProblem;
+
         // ── Resolve caller identity for granted-by reference ─────────────────
         var callerSystemUserId = ResolveCallerSystemUserId(httpContext);
 
@@ -102,7 +113,7 @@ public static class GrantExternalAccessEndpoint
         GrantUpsertOutcome outcome;
         try
         {
-            outcome = await CreateGrantAsync(request, root.Type, root.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+            outcome = await CreateGrantAsync(request, root.Type, root.Id, today, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
@@ -168,6 +179,7 @@ public static class GrantExternalAccessEndpoint
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
         Guid rootId,
+        DateOnly today,
         string? callerOid,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
@@ -203,8 +215,17 @@ public static class GrantExternalAccessEndpoint
             // "clear" would silently REMOVE an expiry whenever a caller re-granted without restating it,
             // which is the same unbounded-access defect in the other direction. Making clearing possible
             // is a CONTRACT change, escalated per this task's trigger; see
-            // notes/task-023-grant-upsert-expiry.md.
-            var expiryChanged = request.ExpiryDate.HasValue && request.ExpiryDate != survivor.ExpiresDate;
+            // notes/task-023-grant-upsert-expiry.md. (FR-33 / task 097 superseded that escalation: with
+            // every grant bounded, there is no "clear" left to design.)
+            //
+            // FR-33 (task 097): an absent expiry is DEFAULTED, never left unbounded. On a match, the default
+            // is to KEEP the survivor's existing expiry — a re-grant from a surface with no date field must
+            // never move a date someone set, in either direction. Only an UNBOUNDED survivor gets
+            // today + DefaultExpiryDays. (An EXPIRED survivor keeps its date too, and is reported by the
+            // ADR-003 check below rather than silently renewed.)
+            var requestedExpiry = request.ExpiryDate
+                ?? (survivor.ExpiresDate is null ? ExternalGrantLifecycle.DefaultExpiry(today) : null);
+            var expiryChanged = requestedExpiry.HasValue && requestedExpiry != survivor.ExpiresDate;
             var levelChanged = survivor.AccessLevel != requestedLevel;
 
             if (levelChanged || expiryChanged)
@@ -215,7 +236,7 @@ public static class GrantExternalAccessEndpoint
                     update["sprk_accesslevel"] = requestedLevel;
 
                 if (expiryChanged)
-                    update["sprk_expiresdate"] = FormatDateOnly(request.ExpiryDate!.Value);
+                    update["sprk_expiresdate"] = FormatDateOnly(requestedExpiry!.Value);
 
                 await dataverseClient.UpdateAsync(EntitySet, survivor.Id, update, ct);
 
@@ -224,7 +245,7 @@ public static class GrantExternalAccessEndpoint
                     "level {OldLevel} → {NewLevel}, expiry {OldExpiry} → {NewExpiry}.",
                     key, survivor.Id,
                     survivor.AccessLevel, levelChanged ? requestedLevel : survivor.AccessLevel,
-                    survivor.ExpiresDate, expiryChanged ? request.ExpiryDate : survivor.ExpiresDate);
+                    survivor.ExpiresDate, expiryChanged ? requestedExpiry : survivor.ExpiresDate);
             }
             else
             {
@@ -240,8 +261,8 @@ public static class GrantExternalAccessEndpoint
             // record id while task 007's read filter kept excluding the row — the caller is told access
             // was restored, and the grantee still has none. If the request DID carry a new expiry, the
             // write above has already resolved it and this does not fire.
-            var effectiveExpiry = request.ExpiryDate ?? survivor.ExpiresDate;
-            if (effectiveExpiry is { } expiry && expiry < DateOnly.FromDateTime(DateTime.UtcNow))
+            var effectiveExpiry = requestedExpiry ?? survivor.ExpiresDate;
+            if (effectiveExpiry is { } expiry && expiry < today)
             {
                 logger.LogWarning(
                     "[EXT-GRANT] Grant {Key} matched record {AccessRecordId} whose expiry {Expiry} has " +
@@ -265,7 +286,12 @@ public static class GrantExternalAccessEndpoint
         // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
         var grantedBySystemUserId = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
 
-        var payload = BuildGrantPayload(request, rootType, rootId, grantedBySystemUserId);
+        // FR-33 (task 097): a new grant is never written unbounded — an absent expiry becomes
+        // today + DefaultExpiryDays.
+        var createRequest = request.ExpiryDate is null
+            ? request with { ExpiryDate = ExternalGrantLifecycle.DefaultExpiry(today) }
+            : request;
+        var payload = BuildGrantPayload(createRequest, rootType, rootId, grantedBySystemUserId);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
@@ -309,6 +335,35 @@ public static class GrantExternalAccessEndpoint
     /// supplied no new expiry, so the grantee still has nothing" — was indistinguishable from success.
     /// </remarks>
     internal sealed record GrantUpsertOutcome(Guid AccessRecordId, string? Warning);
+
+    /// <summary>Stable reason code for a requested expiry before today (spec FR-33, task 097).</summary>
+    internal const string ExpiryInPastReasonCode = "sdap.access.grant.expiry_in_past";
+
+    /// <summary>
+    /// Rejects a requested expiry BEFORE <paramref name="today"/>. Shared by <c>/grant</c> and
+    /// <c>/invite-and-grant</c>, which both call it before writing — or, for the latter, before onboarding.
+    /// </summary>
+    /// <remarks>
+    /// <para>Expiry = today is VALID — "access until 30 June means 30 June works" (task 007's Date Only
+    /// rule; the read filter uses <c>ge</c>). There is no maximum: the owner removed the cap.</para>
+    /// <para>An ABSENT expiry is not an error — <see cref="CreateGrantAsync"/> defaults it (owner decision
+    /// 2026-09-10: no client sends one, so rejecting it would break every sharing surface).</para>
+    /// </remarks>
+    /// <returns>A 400 ProblemDetails carrying <see cref="ExpiryInPastReasonCode"/>, or <c>null</c> when the
+    /// request's expiry is acceptable.</returns>
+    internal static IResult? ValidateRequestedExpiry(DateOnly? requested, DateOnly today, HttpContext httpContext)
+        => requested is { } expiry && expiry < today
+            ? Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Validation Error",
+                detail: $"ExpiryDate {expiry:yyyy-MM-dd} is in the past. Choose today ({today:yyyy-MM-dd}) or a " +
+                        $"later date, or omit it to use the default of {ExternalGrantLifecycle.DefaultExpiryDays} days.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["traceId"] = httpContext.TraceIdentifier,
+                    ["reasonCode"] = ExpiryInPastReasonCode,
+                })
+            : null;
 
     /// <summary>
     /// Formats a <see cref="DateOnly"/> for a Dataverse <b>Date Only</b> column.

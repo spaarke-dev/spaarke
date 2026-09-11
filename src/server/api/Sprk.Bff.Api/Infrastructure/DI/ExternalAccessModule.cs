@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Registration;
@@ -39,6 +40,12 @@ public static class ExternalAccessModule
     /// </summary>
     public static IServiceCollection AddExternalAccess(this IServiceCollection services)
     {
+        // Clock for grant expiry (spec FR-33, task 097): /grant and /invite-and-grant reject a past expiry and
+        // default an absent one from "today". TryAdd, matching the idempotent convention in DocumentsModule /
+        // MembershipModule / CommunicationModule — whichever module loads first wins, the rest no-op.
+        // Registered HERE so the grant routes do not depend on an unrelated module having been added.
+        services.TryAddSingleton(TimeProvider.System);
+
         // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL).
         // Resolves Contact by email and loads their project access grants.
         services.AddHttpClient<ExternalParticipationService>((sp, client) =>

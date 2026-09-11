@@ -49,6 +49,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -259,6 +260,129 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         // Broker-only (ADR-028 A1 / task 026): no synthetic SPE container membership is written on grant —
         // the grant path touches no SPE facade at all.
     }
+
+    // ================================================================================
+    // ===== (7) Grant expiry — spec FR-33 / task 097 =================================
+    // ================================================================================
+    // Every grant is bounded. A past expiry is refused BEFORE any write — and, on invite-and-grant, before
+    // any onboarding; expiry = today is valid (task 007's Date Only rule); an ABSENT expiry is defaulted
+    // server-side to today + 90 days (owner decision 2026-09-10: no client sends one). "Today" is the
+    // fixture's FakeTimeProvider date, 2026-09-10. The reason code and the 90 are asserted as LITERALS:
+    // they are the wire contract, not implementation details.
+
+    private static readonly Guid GranteeContactId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+
+    private static DateOnly FixtureToday => DateOnly.FromDateTime(ExternalAccessContractFixture.ClockStart.UtcDateTime);
+
+    private static object GrantBody(DateOnly? expiry) => new
+    {
+        contactId = GranteeContactId,
+        projectId = ProjectA,
+        accessLevel = (int)ExternalAccessLevel.ViewOnly,
+        expiryDate = expiry?.ToString("yyyy-MM-dd")
+    };
+
+    private static object InviteAndGrantBody(DateOnly? expiry) => new
+    {
+        email = "expiry@firm.example",
+        projectId = ProjectA,
+        accessLevel = (int)ExternalAccessLevel.ViewOnly,
+        expiryDate = expiry?.ToString("yyyy-MM-dd")
+    };
+
+    /// <summary>The single grant row written by the request, as the payload the BFF sent to Dataverse.</summary>
+    private IDictionary<string, object?> WrittenGrant() =>
+        (IDictionary<string, object?>)_fixture.Dataverse.Creates
+            .Should().ContainSingle(c => c.EntitySet == "sprk_externalrecordaccesses").Which.Payload;
+
+    private void GivenAnAlreadyProvisionedContact() =>
+        _fixture.Dataverse.ContactQueryResult =
+            $$"""[{"contactid":"{{GranteeContactId}}","sprk_externalobjectid":"existing-oid-exp"}]""";
+
+    private static async Task<string?> ReasonCode(HttpResponseMessage response)
+    {
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.TryGetProperty("reasonCode", out var code) ? code.GetString() : null;
+    }
+
+    [Fact]
+    public async Task PostGrant_WithAnExpiryBeforeToday_Returns400WithReasonCode_AndWritesNothing()
+    {
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/external-access/grant", GrantBody(FixtureToday.AddDays(-1)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonCode(response)).Should().Be("sdap.access.grant.expiry_in_past");
+        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("a refused grant writes no row");
+    }
+
+    [Fact]
+    public async Task PostGrant_WithAnExpiryOfToday_IsAccepted_AndStoresThatDate()
+    {
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/external-access/grant", GrantBody(FixtureToday));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "\"access until 30 June\" means 30 June works — today is not in the past (task 007)");
+        WrittenGrant()["sprk_expiresdate"].Should().Be(FixtureToday.ToString("yyyy-MM-dd"));
+    }
+
+    [Fact]
+    public async Task PostGrant_WithNoExpiry_StoresTodayPlusNinetyDays()
+    {
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/external-access/grant", GrantBody(null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "an absent expiry is defaulted, not rejected");
+        WrittenGrant()["sprk_expiresdate"].Should().Be(FixtureToday.AddDays(90).ToString("yyyy-MM-dd"),
+            "FR-33: no grant is written unbounded — the server supplies today + 90 when the client sends none");
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_WithAnExpiryBeforeToday_Returns400_AndOnboardsNothing()
+    {
+        // ContactQueryResult is "[]": had the request got past validation it would CREATE a Contact and
+        // provision a CIAM account. A refused request must leave neither behind.
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/external-access/invite-and-grant", InviteAndGrantBody(FixtureToday.AddDays(-1)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonCode(response)).Should().Be("sdap.access.grant.expiry_in_past");
+        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("no Contact and no grant row is created");
+        _fixture.Dataverse.ContactUpdates.Should().BeEmpty("no CIAM oid is bound");
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_WithAnExpiryOfToday_IsAccepted_AndStoresThatDate()
+    {
+        GivenAnAlreadyProvisionedContact();
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/external-access/invite-and-grant", InviteAndGrantBody(FixtureToday));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        WrittenGrant()["sprk_expiresdate"].Should().Be(FixtureToday.ToString("yyyy-MM-dd"));
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_WithNoExpiry_StoresTodayPlusNinetyDays()
+    {
+        GivenAnAlreadyProvisionedContact();
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/external-access/invite-and-grant", InviteAndGrantBody(null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        WrittenGrant()["sprk_expiresdate"].Should().Be(FixtureToday.AddDays(90).ToString("yyyy-MM-dd"));
+    }
 }
 
 // ================================================================================
@@ -279,6 +403,15 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Mock<ISpeFileOperations> SpeFileOperationsMock { get; } = new(MockBehavior.Loose);
     public Mock<ITenantCache> TenantCacheMock { get; } = new(MockBehavior.Loose);
     public StubDataverseWebApiClient Dataverse { get; } = new();
+
+    /// <summary>
+    /// The instant the fixture's clock is fixed at (task 097). Grant-expiry decisions read "today" from the
+    /// injected <see cref="TimeProvider"/>, so every expiry assertion here is deterministic. Never advanced —
+    /// <see cref="FakeTimeProvider"/> cannot move backwards, so a test that advanced it would leak.
+    /// </summary>
+    public static readonly DateTimeOffset ClockStart = new(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+
+    public FakeTimeProvider Clock { get; } = new(ClockStart);
 
     /// <summary>Reset per-test mutable double state so tests are independent.</summary>
     public void Reset()
@@ -433,6 +566,10 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton<DataverseWebApiClient>(Dataverse);
+
+            // Fixed clock for grant-expiry decisions (task 097).
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(Clock);
 
             // Delegation rule (unified-access-control-r2 task 008, FR-07): every /api/v1/external-access
             // route now requires Write on the target record, evaluated as the caller via an OBO probe.
@@ -700,11 +837,15 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
     public List<string> CreatedEntitySets { get; } = new();
     public List<string> ContactUpdates { get; } = new();
 
+    /// <summary>Every CREATE with its payload, so a test can read what was written (task 097: the expiry).</summary>
+    public List<(string EntitySet, object Payload)> Creates { get; } = new();
+
     public void Reset()
     {
         ContactQueryResult = "[]";
         CreatedEntitySets.Clear();
         ContactUpdates.Clear();
+        Creates.Clear();
     }
 
     public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
@@ -714,6 +855,7 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
     public override Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
     {
         CreatedEntitySets.Add(entitySetName);
+        Creates.Add((entitySetName, entity));
         return Task.FromResult(Guid.NewGuid());
     }
 

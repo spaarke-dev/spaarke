@@ -298,6 +298,58 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // FR-33 / task 097 — the delegation target does not depend on the expiry
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Pins that the delegation filter resolves its target from the grant ROOT alone. For the invite routes
+    /// it rebuilds the request with <c>ExpiryDate: null</c> purely to resolve that root — task 097's first
+    /// escalation trigger asked whether that construction is a write path; it is not. So a caller WITH
+    /// Write whose body carries a past expiry passes the gate and is refused by the HANDLER's expiry
+    /// validation (400 + the expiry reason code), never by the filter.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/v1/external-access/grant")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task ExternalAccessMutation_WithAPastExpiryAndWriteOnTarget_PassesTheGateAndIsRefusedByTheHandler(string path)
+    {
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.PostAsJsonAsync(path, PastExpiryBody(Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonCodeOf(response)).Should().Be(GrantExternalAccessEndpoint.ExpiryInPastReasonCode,
+            "the gate resolved the target despite the expiry, so the handler's own validation ran");
+    }
+
+    /// <summary>The twin: the SAME body from a caller without Write is refused by the gate, before the handler.</summary>
+    [Theory]
+    [InlineData("/api/v1/external-access/grant")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task ExternalAccessMutation_WithAPastExpiryAndNoWriteOnTarget_IsStillDeniedByTheGate(string path)
+    {
+        using var client = _fixture.CreateClientWithRights(ReadOnly);
+
+        var response = await client.PostAsJsonAsync(path, PastExpiryBody(Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+    }
+
+    /// <summary>
+    /// A body both /grant and /invite-and-grant accept (each ignores the other's fields), with an expiry
+    /// that is in the past under any clock — so the test never reads the wall clock.
+    /// </summary>
+    private static object PastExpiryBody(Guid projectId) => new
+    {
+        contactId = ContactId,
+        email = "counsel@example.com",
+        projectId,
+        accessLevel = (int)ExternalAccessLevel.ViewOnly,
+        expiryDate = "2000-01-01"
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────────
 
