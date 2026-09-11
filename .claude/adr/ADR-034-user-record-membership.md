@@ -1,6 +1,15 @@
 # ADR-034: User-Record Membership Resolution Pattern (Concise)
 
-> **Status**: Accepted — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
+> **Status**: Accepted, as amended — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
+>
+> ⚠️ **Amendment A1 (2026-09-04, `unified-access-control-r2`, path B)**: discovery over the 6 identity
+> tables stays correct for **AI scoping** and is **over-inclusive for authorization**. The
+> access-conferring allow-list becomes an **explicit registry** (contact- **and** org-typed), replacing
+> the `sprk_assigned*` prefix convention — which silently admits `sprk_assignedmonitor`, silently denies
+> `sprk_leadcontact`, and lets a **rename** grant or revoke access. The registry is a filter **inside**
+> the canonical resolver, not a second mechanism. **The 1-hop cap is NOT amended** — FR-26 denormalizes
+> the core ancestor, so every chain is one hop by construction. Full rationale + the live-consumer check:
+> [full ADR](../../docs/adr/ADR-034-user-record-membership.md#amendment-a1-2026-09-04-the-access-conferring-allow-list-becomes-first-class-and-per-surface).
 > **Domain**: BFF API / Dataverse Membership / Identity Normalization
 > **Last Updated**: 2026-06-22 (post-implementation polish per R3 task 100)
 > **Source project**: `spaarke-platform-foundations-r3` Part 1 (closes the "no canonical mechanism for records this user is associated with" gap surfaced during R2 UAT — notification-new-documents.json silently produced zero rows because its FetchXML joined through a non-existent `sprk_matterteammember` entity).
@@ -59,6 +68,9 @@ Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{
 - **MUST** publish `MembershipChangedEvent` to the Service Bus **topic** `sprk-membership-changes` (NOT queue, NOT reuse `ServiceBusJobProcessor` queue) — D3 owner clarification. Subscriptions per consumer.
 - **MUST** use **fire-and-forget** event-publishing semantics per Q2 owner clarification: publish best-effort; mutation succeeds even if publish fails. Nightly `MembershipReconciliationJob` is the defense-in-depth backstop. Log publish failures as structured warnings with correlationId (NFR-08).
 - **MUST** keep Phase 1A → Phase 2 endpoint contract identical (strangler-fig). Consumers see byRole map, ids[], count regardless of internal storage mechanism.
+- **MUST** (Amendment A1) distinguish the two **consumption surfaces**: **AI scoping** uses **all** discovered descriptors (unchanged); **authorization** uses **registry-listed columns ONLY**. Generosity is correct for retrieval and is a disclosure for permission.
+- **MUST** (A1) derive the authorization surface's conferring columns from an **explicit registry**, covering **contact-typed AND organization-typed** lookups — not from the `sprk_assigned*` prefix convention, which silently admits `sprk_assignedmonitor` and silently denies `sprk_leadcontact`.
+- **MUST** (A1) treat adding a conferring column as a **registry edit**. **Renaming a column MUST NOT grant or revoke access** (FR-24).
 
 ### ❌ MUST NOT
 
@@ -68,6 +80,8 @@ Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{
 - **MUST NOT** extend a transitive-membership query beyond 1 hop. Reject deeper chains with 400 before any Dataverse query (Q3).
 - **MUST NOT** assume the Phase 1A per-request FetchXML approach is sufficient for all future scale. Monitor AC-1A.5 (p95 ≤300ms); Phase 2 junction table is the escape hatch when margin shrinks.
 - **MUST NOT** confuse the new "Membership" terminology with the existing `AssociationResolver` PCF (record-to-record FieldMapping). The naming-collision register is binding.
+- **MUST NOT** (A1) use unfiltered discovered descriptors as an **access answer**. That set is over-inclusive by design; on the authorization surface it must pass the registry filter first.
+- **MUST NOT** (A1) build a second membership mechanism for the registry. It is a filter **inside** the canonical resolver (M1) — an extension, not a parallel engine.
 
 ---
 
@@ -78,8 +92,19 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 
 public interface IMembershipResolverService
 {
+    // The systemuser plane.
     Task<MembershipResponse> ResolveAsync(
         Guid systemUserId,
+        string entityType,
+        MembershipResolveOptions? options,
+        CancellationToken ct);
+
+    // The CONTACT plane — added after this ADR was written and omitted from it until 2026-09-04.
+    // It is how a caller with no systemuser (external contact / unlicensed workforce) resolves
+    // membership at all; a reader who assumed the systemuser overload was the whole interface would
+    // conclude, wrongly, that the contact plane had no membership path.
+    Task<MembershipResponse> ResolveByContactAsync(
+        Guid contactId,
         string entityType,
         MembershipResolveOptions? options,
         CancellationToken ct);
@@ -99,7 +124,10 @@ public sealed record MembershipResponse(
     [property: JsonPropertyName("byRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole,
     [property: JsonPropertyName("count")] int Count,
     [property: JsonPropertyName("cacheExpiresAt")] DateTimeOffset CacheExpiresAt,
-    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null);
+    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null,
+    // 1-hop transitive results (includeRelated). Omitted from this ADR until 2026-09-04; null on the
+    // paths that do not compute it.
+    [property: JsonPropertyName("relatedByRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>>? RelatedByRole = null);
 
 public sealed record PersonIdentity(
     Guid SystemUserId,
@@ -118,7 +146,7 @@ public sealed record PersonIdentity(
 | Source field type | Resolves via | Match value |
 |---|---|---|
 | `Lookup → systemuser` | Direct | `systemUserId` |
-| `Lookup → contact` | Direct; cross-referenced to `systemUserId` via `azureactivedirectoryobjectid` (ADR-028) | `contactId` |
+| `Lookup → contact` | Direct. systemuser→contact resolution is **`systemuser.sprk_primarycontact` FIRST**, with the `azureactivedirectoryobjectid` AAD cross-ref (ADR-028) as **fallback** — corrected 2026-09-04 (A1); this table previously documented only the AAD path, which is the fallback, not the primary | `contactId` |
 | `Lookup → team` | Expand `teammembership` to systemusers | `teamIds[]` (cached) |
 | `Lookup → businessunit` | User's BU + any descendant BUs (configurable per role) | `businessUnitId` |
 | `Lookup → account` | User's primary contact's `parentcustomerid` (if contact) | `accountId` (when applicable) |

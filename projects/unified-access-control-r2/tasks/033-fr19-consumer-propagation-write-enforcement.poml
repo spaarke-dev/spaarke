@@ -4,7 +4,7 @@
     <title>FR-19 consumers — propagate per-record rights onto CallerPrincipal, delete the blanket Collaborate stamp, enforce rights on write routes</title>
     <phase>1 One evaluator</phase>
     <gate>after-032</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation across resolver + endpoints; tags bff-api/auth.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -94,7 +94,19 @@
     <criterion testable="true">Build green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-19 + register A-8. The mutating-route inventory produced in step 0 is load-bearing for review — include it verbatim in the PR. Coordinate with Phase 0's FR-07 delegation task (grant/revoke endpoints get their own Write-on-target check there; do not duplicate it here).</notes>
+  <notes>Spec FR-19 + register A-8. The mutating-route inventory produced in step 0 is load-bearing for review — include it verbatim in the PR. Coordinate with Phase 0's FR-07 delegation task (grant/revoke endpoints get their own Write-on-target check there; do not duplicate it here).
+
+COMPLETED 2026-09-04. Full record: notes/task-033-consumer-propagation.md.
+
+Key finding, which reframed the task: the Create/Write gates on all four mutating routes ALREADY EXISTED. They could not fire because the workforce plane blanket-stamped Collaborate, so GetEffectiveRights returned Read|Create|Write regardless of the grant row. The deliverable was making the existing gates TRUE, not adding gates.
+
+Deviation from step 3 (steps are mode="directional"): IAccessibleRecordSetService.IsOperationPermittedAsync was ADDED as required, but the four routes are wired through CallerPrincipal's rights rather than by calling it per route. The principal already carries the SAME evaluator answer, composed once at resolve time; calling the service per route would re-compose the whole accessible set and cost a second Dataverse round trip for data already in hand. Both read the one evaluator, so they cannot drift. The new method remains the seam for callers that have no CallerPrincipal (e.g. the workforce download gate).
+
+Escalation triggers: BOTH checked, NEITHER fired. (1) No unguarded mutating route — 12 Map* sites: 4 scoped (gated here), 7 on adminGroup behind DelegationRuleFilter (FR-07's surface), 1 is a POST-bodied READ. (2) No term-level regression — MembershipTermRights is byte-identical to Collaborate, so membership-derived flows keep their rights.
+
+Additional scope taken, deliberately: the matter/work-assignment "membership implies write" asymmetry was removed (it was documented in the handler as intentional, but tasks 032/033 removed its premise), and ADR-003's machine-readable-deny-code MUST was applied to the three POST gates that lacked one.
+
+Verified: suite 12,074 passed / 0 failed; ArchTests 191/191; publish delta 0.00 MB vs a FRESH master build (45.46 MB both sides); no vulnerable packages; `grep WorkforceProjectAccessLevel` = 0. The single merged guard was perturbation-tested — removing it fails 11 of 19 ExternalTodoScopeTests.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

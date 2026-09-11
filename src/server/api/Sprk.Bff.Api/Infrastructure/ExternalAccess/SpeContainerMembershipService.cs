@@ -28,6 +28,30 @@ public class SpeContainerMembershipService
         [ExternalAccessLevel.FullAccess] = ["writer"],
     };
 
+    /// <summary>
+    /// How many permission pages one read may follow before it stops and declares itself INCOMPLETE.
+    /// </summary>
+    /// <remarks>
+    /// <para>A detector, not a cap on work — the same idea as
+    /// <c>ProjectClosureEndpoint.MaxMembersPerSweep</c>. Its job is to convert an unbounded loop into a
+    /// <b>sayable</b> condition, so hitting it sets <see cref="PermissionReadResult.EnumerationComplete"/>
+    /// to <c>false</c> and every caller treats that as failure. The bound must NEVER be reported as a
+    /// complete read; that is the entire point of having it.</para>
+    /// </remarks>
+    internal const int MaxPermissionPages = 50;
+
+    /// <summary>
+    /// The error text <see cref="RevokeMembershipAsync"/> returns when the container's permissions were
+    /// enumerated in FULL and the contact genuinely holds none.
+    /// </summary>
+    /// <remarks>
+    /// <c>RevokeExternalAccessEndpoint</c> matches on this prefix to tell a benign absence from a
+    /// failure, so it is a contract between the two — hence a shared constant rather than a literal
+    /// repeated at both ends. An incomplete enumeration MUST NOT produce this text (see
+    /// <see cref="ClassifyRevokeResult"/>).
+    /// </remarks>
+    internal const string NoPermissionFoundError = "No permission found";
+
     public SpeContainerMembershipService(
         IGraphClientFactory graphClientFactory,
         ILogger<SpeContainerMembershipService> logger)
@@ -163,18 +187,28 @@ public class SpeContainerMembershipService
         {
             var graphClient = _graphClientFactory.ForApp();
 
-            var permissions = await graphClient.Storage.FileStorage
-                .Containers[containerId].Permissions
-                .GetAsync(cancellationToken: ct);
+            var read = await ReadPermissionsAsync(graphClient, containerId, ct);
 
-            var targetPermission = FindPermissionByEmail(permissions?.Value, contactEmail);
+            var targetPermission = FindPermissionByEmail(read.Permissions, contactEmail);
 
             if (targetPermission == null)
             {
-                _logger.LogWarning(
-                    "No SPE permission found for revocation: containerId={ContainerId}, email={Email}",
-                    containerId, contactEmail);
-                return new SpeContainerMembershipResult(false, null, $"No permission found for user '{contactEmail}' in container.");
+                // Whether this is a benign absence or a failure depends on whether we finished LOOKING.
+                if (read.EnumerationComplete)
+                {
+                    _logger.LogWarning(
+                        "No SPE permission found for revocation: containerId={ContainerId}, email={Email}",
+                        containerId, contactEmail);
+                }
+                else
+                {
+                    _logger.LogError(
+                        "SPE permissions for container {ContainerId} could not be fully enumerated; the " +
+                        "absence of a permission for {Email} is UNPROVEN. They may RETAIN file access.",
+                        containerId, contactEmail);
+                }
+
+                return ClassifyRevokeResult(read.EnumerationComplete, null, contactEmail);
             }
 
             await graphClient.Storage.FileStorage
@@ -185,7 +219,7 @@ public class SpeContainerMembershipService
                 "Successfully revoked SPE membership: containerId={ContainerId}, email={Email}, permissionId={PermissionId}",
                 containerId, contactEmail, targetPermission.Id);
 
-            return new SpeContainerMembershipResult(true, targetPermission.Id, null);
+            return ClassifyRevokeResult(read.EnumerationComplete, targetPermission.Id, contactEmail);
         }
         catch (ServiceException ex)
         {
@@ -227,23 +261,49 @@ public class SpeContainerMembershipService
         string containerId,
         CancellationToken ct = default)
     {
+        var (members, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
+
+        if (!enumerationComplete)
+        {
+            // This signature can return a list or throw — it has no way to say "here are SOME of them".
+            // Returning the partial list would recreate the very defect task 016 filed, one layer up:
+            // the caller would read a short list as the whole truth. Task 024 / finding M1.
+            throw new InvalidOperationException(
+                $"External members of container '{containerId}' could not be fully enumerated " +
+                $"({members.Count} read before the read gave out). A partial list must not be returned " +
+                $"here: an empty or short list is indistinguishable from the whole set to the caller.");
+        }
+
+        _logger.LogInformation(
+            "Found {Count} external members in container {ContainerId}", members.Count, containerId);
+
+        return members;
+    }
+
+    /// <summary>
+    /// The worker behind <see cref="ListExternalMembersAsync"/>: the external members that were read,
+    /// AND whether the underlying permission collection was enumerated to its end.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the public method because the two callers need different things from a partial read.
+    /// <see cref="ListExternalMembersAsync"/> returns a bare list, so it cannot express partiality and
+    /// must throw. <see cref="RemoveAllExternalMembersAsync"/> SHOULD still remove everyone it managed to
+    /// see — aborting would leave strictly MORE access in place, which is the same reasoning tasks 016
+    /// and 017 used for not aborting the loop on a per-member failure — and then report the read as
+    /// incomplete so the closure guard fails.
+    /// </remarks>
+    internal async Task<(IReadOnlyList<SpeContainerMember> Members, bool EnumerationComplete)>
+        ReadExternalMembersAsync(string containerId, CancellationToken ct)
+    {
         _logger.LogInformation("Listing external SPE members: containerId={ContainerId}", containerId);
 
         var graphClient = _graphClientFactory.ForApp();
 
-        var permissions = await graphClient.Storage.FileStorage
-            .Containers[containerId].Permissions
-            .GetAsync(cancellationToken: ct);
-
-        if (permissions?.Value == null)
-        {
-            _logger.LogInformation("No permissions found for container {ContainerId}", containerId);
-            return [];
-        }
+        var read = await ReadPermissionsAsync(graphClient, containerId, ct);
 
         // External members are those with a GrantedToV2.User (individual user grants).
         // System / app permissions and container-type-level grants do not have a User identity.
-        var externalMembers = permissions.Value
+        var externalMembers = read.Permissions
             .Where(p => p.GrantedToV2?.User != null)
             .Select(ToContainerMember)
             .Where(m => m != null)
@@ -251,11 +311,7 @@ public class SpeContainerMembershipService
             .ToList()
             .AsReadOnly();
 
-        _logger.LogInformation(
-            "Found {Count} external members in container {ContainerId}",
-            externalMembers.Count, containerId);
-
-        return externalMembers;
+        return (externalMembers, read.EnumerationComplete);
     }
 
     /// <summary>
@@ -282,12 +338,22 @@ public class SpeContainerMembershipService
     {
         _logger.LogInformation("Removing all external members from container {ContainerId}", containerId);
 
-        var externalMembers = await ListExternalMembersAsync(containerId, ct);
+        // The worker, not ListExternalMembersAsync: a partial read must still have its members removed
+        // (aborting leaves strictly MORE access in place), with the incompleteness reported afterwards.
+        var (externalMembers, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
+
+        if (!enumerationComplete)
+        {
+            _logger.LogError(
+                "Container {ContainerId} permissions could not be fully enumerated; removing the {Count} " +
+                "external member(s) that WERE read, but the container CANNOT be reported cleared.",
+                containerId, externalMembers.Count);
+        }
 
         if (externalMembers.Count == 0)
         {
             _logger.LogInformation("No external members to remove from container {ContainerId}", containerId);
-            return new SpeBulkRemovalResult(0, 0);
+            return new SpeBulkRemovalResult(0, 0, enumerationComplete);
         }
 
         _logger.LogInformation(
@@ -343,7 +409,276 @@ public class SpeContainerMembershipService
                 containerId, removedCount, externalMembers.Count);
         }
 
-        return new SpeBulkRemovalResult(removedCount, failedCount);
+        return new SpeBulkRemovalResult(removedCount, failedCount, enumerationComplete);
+    }
+
+    /// <summary>
+    /// Removes MANY contacts' permissions from one container using a SINGLE paged read of the
+    /// permission collection.
+    /// </summary>
+    /// <param name="containerId">The SPE container ID.</param>
+    /// <param name="contactEmails">The emails to remove. Duplicates and casing are tolerated.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// One <see cref="SpeContainerMembershipResult"/> per DISTINCT email, keyed case-insensitively —
+    /// the same shape <see cref="RevokeMembershipAsync"/> returns, so callers classify it identically.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>ISS-004 (#968), closed by task 024.</b> The organization-grant revoke called
+    /// <see cref="RevokeMembershipAsync"/> once per member, and each of those calls read the container's
+    /// ENTIRE permission collection: N members = N full reads. Task 024's paging made that strictly
+    /// worse — N reads became N × pages — so consolidating went from a nicety to the thing that keeps
+    /// the sweep affordable at the 200-member bound.</para>
+    ///
+    /// <para><b>Why not <see cref="RemoveAllExternalMembersAsync"/></b> (task 020's warning, preserved):
+    /// that removes EVERY external member of the container, not just the target organization's. An
+    /// organization revoke must not evict the other organizations' people.</para>
+    ///
+    /// <para><b>Failure is per-caller-visible, not aggregated.</b> A failure to READ makes every email
+    /// unanswerable, so each one gets a failed result rather than the method throwing — that preserves
+    /// the caller's "every member gets an outcome, and the failures are counted" contract from tasks
+    /// 016/017. An incomplete enumeration flows through <see cref="ClassifyRevokeResult"/>, so a member
+    /// who is merely UNSEEN is never reported as genuinely absent.</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyDictionary<string, SpeContainerMembershipResult>>
+        RemoveMembershipsAsync(
+            string containerId,
+            IReadOnlyCollection<string> contactEmails,
+            CancellationToken ct = default)
+    {
+        var distinct = contactEmails
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var results = new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase);
+
+        if (distinct.Count == 0)
+        {
+            return results;
+        }
+
+        _logger.LogInformation(
+            "Removing {Count} contact permission(s) from container {ContainerId} via one paged read",
+            distinct.Count, containerId);
+
+        GraphServiceClient graphClient;
+        PermissionReadResult read;
+        try
+        {
+            graphClient = _graphClientFactory.ForApp();
+            read = await ReadPermissionsAsync(graphClient, containerId, ct);
+        }
+        catch (Exception ex)
+        {
+            // Nobody can be confirmed absent, so nobody is. One failure, reported N times, because the
+            // caller reports per member.
+            _logger.LogError(ex,
+                "Could not read permissions for container {ContainerId}; NONE of the {Count} contact(s) " +
+                "can be confirmed removed. They may RETAIN file access.",
+                containerId, distinct.Count);
+
+            foreach (var email in distinct)
+            {
+                results[email] = new SpeContainerMembershipResult(
+                    false, null, $"Container permissions could not be read: {ex.Message}");
+            }
+
+            return results;
+        }
+
+        foreach (var email in distinct)
+        {
+            var target = FindPermissionByEmail(read.Permissions, email);
+
+            if (target == null)
+            {
+                results[email] = ClassifyRevokeResult(read.EnumerationComplete, null, email);
+                continue;
+            }
+
+            try
+            {
+                await graphClient.Storage.FileStorage
+                    .Containers[containerId].Permissions[target.Id]
+                    .DeleteAsync(cancellationToken: ct);
+
+                results[email] = ClassifyRevokeResult(read.EnumerationComplete, target.Id, email);
+            }
+            catch (Exception ex)
+            {
+                // One member's delete failing must not abandon the rest — stopping early leaves
+                // strictly MORE access in place (tasks 016/017).
+                _logger.LogError(ex,
+                    "Failed to delete permission {PermissionId} for {Email} on container {ContainerId}. " +
+                    "They may RETAIN file access. Continuing with the rest.",
+                    target.Id, email, containerId);
+
+                results[email] = new SpeContainerMembershipResult(
+                    false, null, $"Graph error deleting permission: {ex.Message}");
+            }
+        }
+
+        return results;
+    }
+
+    // =========================================================================
+    // Paged reading (task 024, finding M1)
+    // =========================================================================
+
+    /// <summary>
+    /// Every container permission this read could see, AND whether it saw all of them.
+    /// </summary>
+    /// <param name="Permissions">The permissions actually retrieved. May be a PREFIX of the container's set.</param>
+    /// <param name="EnumerationComplete">
+    /// <c>true</c> only when the collection was followed to its end. <c>false</c> means the page bound was
+    /// hit, or Graph returned no body — in which case <paramref name="Permissions"/> is a partial view and
+    /// <b>the absence of anything from it proves nothing</b>.
+    /// </param>
+    internal sealed record PermissionReadResult(
+        IReadOnlyList<Permission> Permissions,
+        bool EnumerationComplete);
+
+    /// <summary>
+    /// Reads a container's permission collection, FOLLOWING <c>@odata.nextLink</c> to the end.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Finding M1 (review 2026-08-24), fixed by task 024.</b> Both reads in this class used to
+    /// issue a single <c>.GetAsync()</c> and use <c>permissions?.Value</c> directly, ignoring
+    /// <c>@odata.nextLink</c> entirely. Anything past the first page was invisible — so a partially
+    /// cleared container could report clean, which defeats the exact guard tasks 016 and 017 were built
+    /// to provide.</para>
+    ///
+    /// <para><b>On the severity, stated honestly (task 024 step 0).</b> Whether this endpoint currently
+    /// emits <c>@odata.nextLink</c> is <b>not established</b>: the SPE docs list <c>$skip</c>/<c>$top</c>
+    /// (client-driven) and not <c>$skiptoken</c>, and the documented sample response carries no
+    /// <c>nextLink</c>. A live probe needs the BFF's own app identity and is filed to task 047. So this is
+    /// <b>not</b> demonstrably a live hole today. It is fixed regardless, because ignoring
+    /// <c>@odata.nextLink</c> is an OData <i>protocol</i> violation independent of current server
+    /// behaviour — a service may begin server-driven paging at any time, and doing so is explicitly not a
+    /// breaking change. Correctness here is against the protocol, not against one observed response.</para>
+    ///
+    /// <para><b>Shape copied from <c>SpeAdminGraphService.ListContainerPermissionsAsync</c></b>, which
+    /// already pages THIS collection correctly. Deliberately NOT the <c>PageIterator</c> of
+    /// <c>PrivilegeGroupResolver.cs:202</c>: that one collects page 1 in a <c>foreach</c> and then hands
+    /// the same response to <c>CreatePageIterator</c>, double-counting it (ISS-001), and a page BOUND is
+    /// far more directly expressible in a plain loop than through an iterator callback.</para>
+    /// </remarks>
+    private async Task<PermissionReadResult> ReadPermissionsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct)
+    {
+        var collected = new List<Permission>();
+
+        var response = await graphClient.Storage.FileStorage
+            .Containers[containerId].Permissions
+            .GetAsync(cancellationToken: ct);
+
+        if (response == null)
+        {
+            // Not "an empty container" — Graph gave us no body at all, so we never read the set.
+            // Claiming completeness here is the false-clean report ADR-003 forbids.
+            _logger.LogError(
+                "Graph returned no permission collection for container {ContainerId}; the member set is " +
+                "UNREAD and must not be reported as empty.", containerId);
+            return new PermissionReadResult(collected, EnumerationComplete: false);
+        }
+
+        var pagesRead = 0;
+
+        while (true)
+        {
+            if (response.Value != null)
+            {
+                collected.AddRange(response.Value);
+            }
+
+            pagesRead++;
+
+            if (string.IsNullOrEmpty(response.OdataNextLink))
+            {
+                return new PermissionReadResult(collected, EnumerationComplete: true);
+            }
+
+            if (pagesRead >= MaxPermissionPages)
+            {
+                _logger.LogError(
+                    "Permission enumeration for container {ContainerId} hit the {Bound}-page bound with " +
+                    "more pages remaining; {Count} read so far. The set is INCOMPLETE — nothing may be " +
+                    "reported absent or cleared on the strength of it.",
+                    containerId, MaxPermissionPages, collected.Count);
+                return new PermissionReadResult(collected, EnumerationComplete: false);
+            }
+
+            var nextLink = response.OdataNextLink;
+
+            _logger.LogDebug(
+                "Following permission nextLink for container {ContainerId} (page {Page})",
+                containerId, pagesRead + 1);
+
+            response = await graphClient.Storage.FileStorage
+                .Containers[containerId].Permissions
+                .WithUrl(nextLink)
+                .GetAsync(cancellationToken: ct);
+
+            if (response == null)
+            {
+                _logger.LogError(
+                    "Graph returned no body while following a permission nextLink for container " +
+                    "{ContainerId}; the set is INCOMPLETE after {Count} entries.",
+                    containerId, collected.Count);
+                return new PermissionReadResult(collected, EnumerationComplete: false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The task-024 honesty rule, as a pure function: what a revoke may CLAIM, given how much of the
+    /// container it managed to read and whether the target was among it.
+    /// </summary>
+    /// <param name="enumerationComplete">Whether the permission collection was followed to its end.</param>
+    /// <param name="deletedPermissionId">The permission actually deleted, or <c>null</c> if none matched.</param>
+    /// <param name="contactEmail">The contact whose permission was sought (for the message only).</param>
+    /// <remarks>
+    /// <para><b>The vocabulary was already correct; the implementation lied about it.</b>
+    /// <c>SpeContainerRevokeOutcome.NoPermissionFound</c> is documented as <i>"the container's permissions
+    /// were read successfully and this Contact holds none — genuinely absent"</i>. Under a single-page
+    /// read that sentence was FALSE: the read succeeded but was partial, so "genuinely absent" was
+    /// unprovable. No enum member is added here — this makes the code honest to a contract that already
+    /// exists.</para>
+    ///
+    /// <list type="table">
+    ///   <item><term>complete + found</term><description>success — removed</description></item>
+    ///   <item><term>complete + not found</term><description>benign absence (<see cref="NoPermissionFoundError"/>)</description></item>
+    ///   <item><term>INCOMPLETE + found</term><description>success — the deletion is a FACT regardless of what we did not read</description></item>
+    ///   <item><term>INCOMPLETE + not found</term><description>🔴 FAILURE — never a benign absence. We did not finish looking.</description></item>
+    /// </list>
+    ///
+    /// <para>Pure and exhaustive so the rule is testable without Graph, and so that re-swallowing the
+    /// incomplete case (the perturbation) fails a test rather than passing silently.</para>
+    /// </remarks>
+    internal static SpeContainerMembershipResult ClassifyRevokeResult(
+        bool enumerationComplete,
+        string? deletedPermissionId,
+        string contactEmail)
+    {
+        if (deletedPermissionId != null)
+        {
+            // A deletion that happened, happened. An unread tail cannot retract it.
+            return new SpeContainerMembershipResult(true, deletedPermissionId, null);
+        }
+
+        if (enumerationComplete)
+        {
+            return new SpeContainerMembershipResult(
+                false, null, $"{NoPermissionFoundError} for user '{contactEmail}' in container.");
+        }
+
+        return new SpeContainerMembershipResult(
+            false, null,
+            $"Container permissions could not be fully enumerated, so no permission for user " +
+            $"'{contactEmail}' can be confirmed absent. They may RETAIN file access; retry the revoke.");
     }
 
     // =========================================================================
@@ -353,7 +688,24 @@ public class SpeContainerMembershipService
     /// <summary>
     /// Finds a permission entry by matching the grantedTo user's UPN from AdditionalData.
     /// </summary>
-    private static Permission? FindPermissionByEmail(IList<Permission>? permissions, string email)
+    /// <summary>
+    /// Finds the container permission belonging to <paramref name="email"/>, matching on the SAME key
+    /// membership is written with — <c>userPrincipalName</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b><c>internal</c> for testability (task 025, finding H6).</b> This matcher IS finding
+    /// A-13: the defect was that it compared against the contact's GUID, an email never contains a
+    /// GUID, so it matched nothing and <c>/revoke</c> reported success while the ACL entry stayed.
+    /// It was nonetheless executed by NO test — <c>SpeRevokeMatcherTests</c> substitutes
+    /// <see cref="SpeContainerMembershipService"/> wholesale, which proves the CALLER and never the
+    /// callee, so replacing this body with <c>return false</c> failed zero tests.</para>
+    ///
+    /// <para>Widened from <c>private</c> rather than reached by reflection (ADR-038 bans B8), matching
+    /// the <c>ExternalParticipationService.ExpiryPredicate</c> precedent — the same "the predicate is
+    /// the thing that broke, so test the predicate" shape. It is a pure function over a Graph model
+    /// list, so testing it needs no transport and no <c>Mock&lt;HttpMessageHandler&gt;</c> (ban B1).</para>
+    /// </remarks>
+    internal static Permission? FindPermissionByEmail(IReadOnlyList<Permission>? permissions, string email)
     {
         if (permissions == null) return null;
 
@@ -424,10 +776,27 @@ public sealed record SpeContainerMembershipResult(
 /// Members whose permission could NOT be deleted. Non-zero means those people still have file access,
 /// so a caller must not report the container cleared.
 /// </param>
-public sealed record SpeBulkRemovalResult(int Removed, int Failed)
+/// <param name="EnumerationComplete">
+/// Whether the container's permission collection was read to its END (task 024, finding M1).
+/// <para><c>false</c> means members may exist that this sweep never saw, so <c>Removed</c> and
+/// <c>Failed</c> describe only the part that was read. <b>A guard that could not finish its check must
+/// report failure, not success</b> — reporting clean on an unenumerated set is worse than having no
+/// guard, because a clean report gets acted on. Defaults to <c>true</c> so the existing two-argument
+/// construction keeps its meaning.</para>
+/// </param>
+public sealed record SpeBulkRemovalResult(int Removed, int Failed, bool EnumerationComplete = true)
 {
-    /// <summary>True only when every external member was removed.</summary>
-    public bool IsComplete => Failed == 0;
+    /// <summary>
+    /// True only when every external member was seen AND removed.
+    /// </summary>
+    /// <remarks>
+    /// Both conjuncts are load-bearing. <c>Failed == 0</c> alone once meant "cleared" — which was a false
+    /// clean whenever the member list itself was a partial read, since members nobody enumerated cannot
+    /// fail to be removed. <c>ProjectClosureEndpoint</c> maps this straight onto
+    /// <c>container_not_cleared</c>, so an incomplete enumeration now surfaces there with no change at
+    /// the endpoint.
+    /// </remarks>
+    public bool IsComplete => Failed == 0 && EnumerationComplete;
 }
 
 /// <summary>

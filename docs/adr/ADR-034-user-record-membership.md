@@ -2,12 +2,19 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
+| Updated | 2026-09-04 (Amendment A1) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
 | Cross-references | extends ADR-013 (AI architecture); reinforces ADR-009 (Redis caching), ADR-010 (DI minimalism), ADR-024 (polymorphic resolver pattern), ADR-028 (Spaarke Auth v2). |
+
+> ⚠️ **[Amendment A1](#amendment-a1-2026-09-04-the-access-conferring-allow-list-becomes-first-class-and-per-surface) adds a consumption-surface distinction that this ADR did not originally make.**
+> Discovery over the 6 identity tables remains **correct for AI scoping** and is **over-inclusive for
+> authorization**. Nothing below is retired — A1 *narrows one consumer*, it does not change the
+> mechanism. The 1-hop cap, the event semantics, the canonical-resolver rule and the
+> non-existent-entity ban are all unchanged.
 
 ---
 
@@ -227,6 +234,96 @@ See spec.md AC-1A.1 through AC-1.Docs + AC-1B.* + AC-1C.* + AC-1D.* + AC-1P2.*. 
    - **Answer**: Fire-and-forget. Publish best-effort; mutation succeeds even on publish failure. Nightly `MembershipReconciliationJob` is the defense-in-depth backstop. Log failures as structured warnings (correlationId-tagged) for diagnostic visibility.
 7. **Task 032 mechanism choice (2026-06-21)**: How does the BFF resolve user → sprk_organization mappings — N:N relationship, configurable lookup field, or team-based?
    - **Answer**: Option (b) config-driven Lookup field. Operators set `Membership:OrganizationLookup:UserLookupField` to point at a Lookup column on `sprk_organization` that targets systemuser. Fail-soft empty when unset.
+
+---
+
+## Amendment A1 (2026-09-04): The access-conferring allow-list becomes first-class and per-surface
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5).
+> **Driver project**: `unified-access-control-r2` (spec ADR Tensions row 2; FR-24; register B-12 / H-5).
+> **Evidence**: [`projects/unified-access-control-r2/notes/investigation/02-membership-spine.md`](../../projects/unified-access-control-r2/notes/investigation/02-membership-spine.md) §4.2, §8, §10.4.
+> **Sequencing**: merges **before** task 041 builds the registry it sanctions.
+
+### Why
+
+This ADR made discovery **convention-based** on purpose, and for its original consumer — AI scoping —
+that is still the right answer: when a playbook asks "which matters is this user associated with?",
+being generous is correct, because the answer feeds retrieval, not permission.
+
+**Authorization is a different question with a different failure mode.** The same discovered set, used
+as an access answer, is **over-inclusive** — and over-inclusive means disclosure. Two concrete defects:
+
+1. **The `sprk_assigned*` prefix convention is not a policy.** It *silently admits*
+   `sprk_assignedmonitor` (a watcher, who should confer nothing) and *silently denies*
+   `sprk_leadcontact` (who should confer access). Nobody chose either outcome; a naming convention did.
+   A convention cannot express intent, and worse, it changes behaviour when a column is **renamed** —
+   so an access grant can appear or vanish through a schema edit that no reviewer would read as a
+   security change.
+2. **Org-typed lookups confer too.** M4 already resolves `sprk_assignedlawfirm1/2` to `Organization` —
+   the conferring precedent exists — but the *filter* today covers contact-typed lookups only
+   (`FilterToAccessConferringContactRoles`). Unfiltered org expansion confers access from **any**
+   organization named on a record, **including opposing counsel**.
+
+### The per-surface policy (new)
+
+| Consumption surface | Which descriptors apply | Rationale |
+|---|---|---|
+| **AI scoping** (playbook nodes, briefing collectors, `/api/users/me/memberships/*`) | **All discovered descriptors** — unchanged | Generosity is correct for retrieval; the caller already has access to what they are shown |
+| **Authorization** (the evaluator's derived-member and org-expansion terms) | **Registry-listed columns ONLY** | Over-inclusion here is a disclosure, not a nuisance |
+
+**One mechanism, two policies.** The registry lives **inside** the canonical resolver as a filter over
+its output. It is an *extension* of M1, not a parallel mechanism — a second membership engine would be
+a violation of this ADR, and A1 does not create one (investigation 02 §8).
+
+### New MUST rules
+
+- **MUST** derive the authorization surface's conferring columns from an **explicit registry**, not
+  from the `sprk_assigned*` prefix convention. The registry names columns; the convention guesses.
+- **MUST** cover **contact-typed AND organization-typed** lookups in that registry. Org-typed conferral
+  is real (M4's `sprk_assignedlawfirm1/2`) and currently unfiltered.
+- **MUST** treat adding a conferring column as a **registry edit** — a reviewable change whose subject
+  is access. **Renaming a column MUST NOT grant or revoke access** (FR-24 acceptance). This is the
+  property the prefix convention could not provide.
+- **MUST** keep the registry inside the canonical resolver (M1). A parallel membership mechanism
+  remains forbidden.
+
+### Explicitly NOT amended
+
+- **The 1-hop cap (M7 / N4) stands unchanged, and needs no exception.** FR-26 denormalizes the **core
+  ancestor** onto each child record, so every child→core chain is **one hop by construction**. There is
+  no multi-hop request to permit — the data model removed the need, rather than the rule being relaxed.
+  Requests deeper than 1 hop still return `400` with `transitive-chain-too-deep`.
+- **M8 / M9 event semantics** (topic not queue; fire-and-forget with the nightly reconciliation
+  backstop) — unchanged.
+- **N2, the non-existent-entity ban** — unchanged. Precision worth recording: the ban is on joining
+  through entities that do not exist (e.g. `sprk_matterteammember`). Real `teammembership` **is**
+  legitimately used and always was; the ban is narrower than some project docs assert (investigation
+  02 §10.4).
+- **M1, the canonical resolver** — reinforced, not weakened.
+
+### A sanctioned future extension (not built here)
+
+A **record → members** inverse read ("who can see this record?", for the Manage Access UI and
+attestation) is a **future extension of this same canonical mechanism** — the resolver answering the
+existing question in the opposite direction. It is explicitly **not** a licence for a second resolver
+(investigation 02 §8 direction note).
+
+### Live-consumer check (done before amending)
+
+Codifying a per-surface split is only safe if nothing outside the authorization surface currently
+depends on unfiltered systemuser-plane descriptors *as an access answer*. Every consumer of
+`IMembershipResolverService` was enumerated and classified:
+
+| Consumer | Surface |
+|---|---|
+| `AccessibleRecordSetService` | Authorization — the one this project rehomes (Phase 1) |
+| `MembershipEndpoints` (`/api/users/me/memberships/*`) | Scoping — returns the caller's **own** memberships under OBO; a self-query, not a decision about another principal |
+| `DailyBriefingCollector`, `BriefingService` | AI scoping |
+| `LookupUserMembershipNodeExecutor`, `NodeService` | AI scoping (playbook node) |
+| `IThreadPrivateGrantProvider` | **Not a consumer** — a doc-comment cross-reference only; no code dependency |
+
+**No consumer outside `AccessibleRecordSetService` uses these descriptors as an access answer**, so the
+narrowing changes no other surface's behaviour contract.
 
 ---
 

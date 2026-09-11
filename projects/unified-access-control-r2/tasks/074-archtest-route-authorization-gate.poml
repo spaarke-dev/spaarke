@@ -3,7 +3,17 @@
   <metadata>
     <title>Forcing function: fail the build when a document- or Dataverse-reading route carries no authorization filter or named waiver</title>
     <phase>0c Secure Documents — Wave 1</phase>
-    <status>pending</status>
+    <status>completed</status>
+    <status-note>**Status corrected 2026-09-03 by a full project status audit.** The POML still read
+`pending` while `TASK-INDEX.md` marked it ✅ and git carried completion evidence — the task was DONE and
+only step 1 of root CLAUDE.md §7 ("update the task .poml status") had been skipped. This happened to **14
+tasks**, systematically, because the index is updated during execution while the POML status is a separate
+write that nothing enforces.
+
+Evidence for THIS task: 8ce4b7cac (Phase 0c Wave 1 — 070/071/074) + fba28641f ("CLOSED as do-not-delete")
+
+Two independent signals were required before flipping (git completion evidence AND the index marker); no
+status was changed on the index alone.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>This is the control that prevents the whole class of defect the other Wave 1 tasks are fixing. A weak or noisy implementation gets waived away and the class returns.</rigor-reason>
     <model-tier>opus</model-tier>

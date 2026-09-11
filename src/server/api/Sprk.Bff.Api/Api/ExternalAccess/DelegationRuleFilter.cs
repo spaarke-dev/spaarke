@@ -236,6 +236,22 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // ── /provision-project ────────────────────────────────────────
                 case ProvisionProjectRequest provision:
                     return FromProjectId(provision.ProjectId);
+
+                // ── /unsecure-project (task 061) ──────────────────────────────
+                // Removing the secure designation is at least as consequential as applying it, so it
+                // is gated by the same Write-on-the-project check, evaluated as the caller. Omitting
+                // this case would not have opened a hole — an unresolved target denies — but it would
+                // have made the route permanently 403, which reads as a bug rather than a gate.
+                case UnsecureProjectRequest unsecure:
+                    return FromProjectId(unsecure.ProjectId);
+
+                // ── /set-record-share-expiry (task 098, FR-33) ────────────────
+                // Changing when every share on a record ends changes who can access it, so it takes the same
+                // Write-on-the-record check. The target comes from the SAME ResolveRoot the handler uses, and
+                // that request has no legacy projectId — so the record authorized here is the record whose
+                // shares are written. Without this case the route would deny every caller (default branch).
+                case SetRecordShareExpiryRequest shareExpiry:
+                    return FromGrantRoot(SetRecordShareExpiryEndpoint.ResolveRoot(shareExpiry));
             }
         }
 

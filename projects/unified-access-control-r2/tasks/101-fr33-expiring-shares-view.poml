@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-33 — "External shares by expiration" Dataverse views (estate-wide)</title>
+    <phase>FR-33 External grant expiry</phase>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dataverse view definitions; no .cs/.ts. Applying them is an operator step.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, fully-specified configuration artefact.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>FR33-late</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches no code file shared with another task; can run alongside 100.</parallel-reason>
+    <deps>097</deps>
+    <tags>dataverse, solution</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <origin>Owner 2026-09-10: "there will still need to be a view with external share expiration"</origin>
+  </metadata>
+
+  <prompt>Reminders (task 100) answer "is THIS grant about to lapse?". They cannot answer "what is about to lapse across everything?". Define Dataverse views on sprk_externalrecordaccess that list active external shares by expiration, estate-wide. Deliver the definitions; the owner applies them (live customization is an operator step).</prompt>
+  <role>SPAARKE Dataverse configurator.</role>
+  <goal>An internal user can open one view and see every active external share, soonest-expiring first — and a second view narrowed to the next 30 days.</goal>
+
+  <context>
+    <background>Binding directive 2026-09-04: live Dataverse customization on this project is CODE + DOCS ONLY; applying it is an explicit operator step (FAILURE-MODES AP-13). This task therefore delivers view definitions plus exact application steps, and verifies them live AFTER the owner applies them. After task 097's backfill no active grant has a null expiry, so none should appear undated.</background>
+    <relevant-files>
+      <file role="new">projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="binding directive 2026-09-04">Scope: live changes. Do NOT create the views in Dataverse. Deliver FetchXML + layout (columns, widths, sort) and step-by-step maker-portal instructions for the owner to apply.</constraint>
+    <constraint source="owner 2026-09-10">Scope: content. View 1 "Active External Shares by Expiration": statecode = 0, sorted by sprk_expiresdate ascending. View 2 "External Shares Expiring in 30 Days": the same, filtered to sprk_expiresdate on or before today + 30 (a relative date filter, so it never goes stale). Columns: the shared record, the contact, the organization, access level, sprk_expiresdate, created by.</constraint>
+    <constraint source="live metadata">Scope: names. Verify every logical name used in the FetchXML against live metadata before delivering. This project has found nine docs-versus-metadata mismatches; do not add a tenth.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read sprk_externalrecordaccess attribute metadata live; confirm the regarding lookups, contact, organization, access level and expiry column names.</step>
+    <step order="1">Write both FetchXML definitions and layouts, plus the application steps, into notes/.</step>
+    <step order="2">After the owner applies them, verify live that both views exist and return the expected rows; record the result.</step>
+    <step order="3">Update TASK-INDEX.</step>
+  </steps>
+
+  <justification>
+    <existing>No view lists external shares by expiry; the column and its data exist (task 097).</existing>
+    <extension>Two system views on an existing table — no code, no schema.</extension>
+    <cost-of-doing-nothing>Nobody can see what is about to lapse across the estate; per-grant reminders cannot answer that question.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both FetchXML definitions use only logical names verified against live metadata.</criterion>
+    <criterion testable="true">View 1 returns only active shares, sorted soonest-expiring first.</criterion>
+    <criterion testable="true">View 2 returns only active shares expiring on or before today + 30, using a relative date filter.</criterion>
+    <criterion testable="true">After the owner applies them, a live query confirms both views exist on sprk_externalrecordaccess.</criterion>
+    <criterion testable="true">No schema change is made.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10.3.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

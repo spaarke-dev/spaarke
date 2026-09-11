@@ -13,6 +13,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -62,6 +63,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private readonly ConcurrentDictionary<Guid, SeededProject> _projects = new();
 
+    /// <summary>Monotonic counter making UPDATE order observable — see <see cref="RecordedUpdate"/>.</summary>
+    private int _updateSequence;
+
     // ── Recorded writes ──────────────────────────────────────────────────────
 
     /// <summary>Entity sets the endpoint issued a CREATE against, in order.</summary>
@@ -70,13 +74,40 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Every UPDATE the endpoint issued: entity set, record id, and the payload's keys/values.</summary>
     public ConcurrentBag<RecordedUpdate> Updates { get; } = new();
 
+    // ── Task 061: the POA share plane ───────────────────────────────────────
+
+    /// <summary>The systemuser the caller resolves to — i.e. the project's creator.</summary>
+    public static readonly Guid CallerSystemUserId = Guid.Parse("c0000000-0000-0000-0000-00000000cafe");
+
+    /// <summary>Every share the endpoint issued, in order.</summary>
+    public ConcurrentBag<RecordedShare> Grants { get; } = new();
+
+    /// <summary>Every share the endpoint revoked, in order.</summary>
+    public ConcurrentBag<RecordedShare> Revokes { get; } = new();
+
+    /// <summary>When false, the caller's Dataverse identity cannot be established.</summary>
+    public bool CallerSystemUserIdResolves { get; set; } = true;
+
+    /// <summary>Principal whose share throws, to model a partial-share failure.</summary>
+    public Guid? FailShareForPrincipal { get; set; }
+
+    /// <summary>One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke.</summary>
+    public sealed record RecordedShare(
+        string EntitySet, Guid RecordId, DataversePrincipalRef Principal, string? AccessRightsCsv);
+
     /// <summary>Container display names passed to SPE, so a test can prove a container was created.</summary>
     public ConcurrentBag<string> CreatedContainerDisplayNames { get; } = new();
 
+    /// <summary>
+    /// One recorded UPDATE. <c>Sequence</c> is a monotonic counter, because <see cref="Updates"/> is a
+    /// <c>ConcurrentBag</c> and bags do NOT preserve insertion order — an ordering assertion read off the
+    /// bag itself is not an assertion about anything (task 061 wrote one before noticing).
+    /// </summary>
     public sealed record RecordedUpdate(
         string EntitySet,
         Guid RecordId,
-        IReadOnlyDictionary<string, string?> Payload);
+        IReadOnlyDictionary<string, string?> Payload,
+        int Sequence = 0);
 
     // ── Controllable environment shape ───────────────────────────────────────
 
@@ -100,7 +131,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool OwnershipPatchIsApplied { get; set; } = true;
 
     private sealed record SeededProject(
-        Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure);
+        Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
+        Guid? OwningUserId = null);
 
     /// <summary>Seeds a project row.</summary>
     public void SeedProject(
@@ -136,6 +168,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SpeContainerCreationSucceeds = true;
         ContainerStampSucceeds = true;
         OwnershipPatchIsApplied = true;
+        _updateSequence = 0;
+        Grants.Clear();
+        Revokes.Clear();
+        CallerSystemUserIdResolves = true;
+        FailShareForPrincipal = null;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -157,7 +194,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         {
             // Entitled caller — the delegation gate (task 008) is not what these tests measure.
             services.RemoveAll<CallerRecordAccessProbe>();
-            services.AddSingleton<CallerRecordAccessProbe>(new WritableCallerRecordAccessProbe());
+            services.AddSingleton<CallerRecordAccessProbe>(new WritableCallerRecordAccessProbe(this));
+
+            // Task 061 — the POA share plane. Recorded rather than mocked: the assertions are about
+            // WHO was shared to and with WHICH rights, not about call counts.
+            services.RemoveAll<IDataverseRecordShareService>();
+            services.AddSingleton<IDataverseRecordShareService>(new RecordingRecordShareService(this));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
@@ -237,7 +279,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     private Task ApplyUpdate(string entitySet, Guid id, object payload)
     {
         var flat = Flatten(payload);
-        Updates.Add(new RecordedUpdate(entitySet, id, flat));
+        Updates.Add(new RecordedUpdate(entitySet, id, flat, Interlocked.Increment(ref _updateSequence)));
 
         if (flat.ContainsKey("sprk_containerid") && !ContainerStampSucceeds)
         {
@@ -251,9 +293,28 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 && ownerBind is not null
                 && OwnershipPatchIsApplied)
             {
-                var teamId = ParseTeamIdFromBind(ownerBind);
-                if (teamId is { } parsed)
-                    _projects[id] = project with { OwningTeamId = parsed };
+                // Task 061: `ownerid` is polymorphic. Provisioning binds a TEAM (into the Secure
+                // Project owner team); the reverse path binds a SYSTEMUSER (back out to a human).
+                // The double has to honour both, because each endpoint verifies its assignment by
+                // reading back the field its own bind should have populated — a fixture that only
+                // modelled teams would fail the un-secure read-back on every happy path, which is
+                // exactly what it did before this was widened.
+                var principalId = ParseIdFromBind(ownerBind);
+                if (principalId is { } parsed)
+                {
+                    _projects[id] = ownerBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
+                        ? project with { OwningUserId = parsed, OwningTeamId = null }
+                        : project with { OwningTeamId = parsed, OwningUserId = null };
+                }
+            }
+
+            if (flat.TryGetValue("sprk_issecure", out var isSecureRaw))
+            {
+                project = _projects[id];
+                _projects[id] = project with
+                {
+                    IsSecure = bool.TryParse(isSecureRaw, out var isSecure) && isSecure
+                };
             }
 
             if (flat.TryGetValue("sprk_containerid", out var container))
@@ -267,7 +328,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>Extracts the GUID from an <c>/teams(guid)</c> OData bind value.</summary>
-    private static Guid? ParseTeamIdFromBind(string bind)
+    private static Guid? ParseIdFromBind(string bind)
     {
         var open = bind.IndexOf('(');
         var close = bind.IndexOf(')');
@@ -392,6 +453,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     if (seeded.OwningTeamId is { } team)
                         row["_owningteam_value"] = team;
 
+                    // Task 061: the reverse path reads back _owninguser_value, so the double must
+                    // project it too.
+                    if (seeded.OwningUserId is { } owningUser)
+                        row["_owninguser_value"] = owningUser;
+
                     payload.Add(row);
                 }
                 break;
@@ -513,13 +579,67 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private sealed class WritableCallerRecordAccessProbe : CallerRecordAccessProbe
     {
-        public WritableCallerRecordAccessProbe()
+        private readonly ProvisionProjectTestFixture _fixture;
+
+        public WritableCallerRecordAccessProbe(ProvisionProjectTestFixture fixture)
             : base(new HttpClient(), new ConfigurationBuilder().Build(),
                    NullLogger<CallerRecordAccessProbe>.Instance)
-        { }
+        {
+            _fixture = fixture;
+        }
 
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
             => Task.FromResult(AccessRights.Read | AccessRights.Write);
+
+        /// <summary>
+        /// Task 061: who provisioning shares the project back to. <c>null</c> models the real
+        /// "the caller's Dataverse identity could not be established" case, which must FAIL the
+        /// provision rather than complete it — see <see cref="CallerSystemUserIdResolves"/>.
+        /// </summary>
+        public override Task<Guid?> GetCallerSystemUserIdAsync(
+            string? callerBearerToken, CancellationToken ct = default)
+            => Task.FromResult(_fixture.CallerSystemUserIdResolves ? CallerSystemUserId : (Guid?)null);
+    }
+
+    /// <summary>
+    /// Records every POA share the endpoint issues, and fails them on demand.
+    /// </summary>
+    /// <remarks>
+    /// A double rather than a mock because the assertions are about the SEQUENCE and CONTENT of what
+    /// was shared — who, with which rights — not about call counts.
+    /// </remarks>
+    internal sealed class RecordingRecordShareService : IDataverseRecordShareService
+    {
+        private readonly ProvisionProjectTestFixture _fixture;
+
+        public RecordingRecordShareService(ProvisionProjectTestFixture fixture) => _fixture = fixture;
+
+        public Task GrantAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            string accessRightsCsv, CancellationToken ct = default)
+        {
+            if (_fixture.FailShareForPrincipal == principal.Id)
+                throw new InvalidOperationException($"Seeded share failure for {principal.Id}.");
+
+            _fixture.Grants.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv));
+            return Task.CompletedTask;
+        }
+
+        public Task RevokeAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            CancellationToken ct = default)
+        {
+            _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null));
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
+            string entityLogicalName, Guid recordId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<DataversePrincipalAccess>>(
+                _fixture.Grants
+                    .Where(g => g.RecordId == recordId)
+                    .Select(g => new DataversePrincipalAccess(g.Principal, 1, DateTimeOffset.UtcNow))
+                    .ToList());
     }
 }

@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-02 (added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -32,6 +32,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-10: A JSON-aware renderer that escapes one nesting level, over a config that is re-parsed at a deeper level](#ap-10-a-json-aware-renderer-that-escapes-one-nesting-level-over-a-config-re-parsed-deeper)
 - [AP-11: Code that RUNS but reaches the wrong destination — no compiler and no test spans the seam](#ap-11-code-that-runs-but-reaches-the-wrong-destination--no-compiler-and-no-test-spans-the-seam)
 - [AP-12: A comment becomes the constraint — prose outlives the mechanism it describes](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes)
+- [G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)](#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -904,6 +905,56 @@ commit `304b6d8f2`; guard in `tests/Spaarke.ArchTests/ClientUploadRouteAgreement
 
 ---
 
+### G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)
+
+> **Added 2026-09-03** by `unified-access-control-r2`. **Cost: three wrong measurements in one
+> session**, one of which was written into a recovery file as a false claim about file corruption.
+
+**What happens.** GNU grep 3.0 under MSYS2 / Git Bash returns **`0` matches** — no error, no warning
+— for any pattern containing a **non-BMP** character (codepoint > U+FFFF, i.e. 4 bytes in UTF-8).
+Windows `wchar_t` is 16-bit, so such a codepoint needs a surrogate pair and cannot fit in one wide
+character; the match silently never fires.
+
+**It is NOT a locale problem.** Verified: `LANG=en_US.UTF-8`, and forcing `LC_ALL=C.UTF-8` changes
+nothing. The pattern also reaches grep intact — byte-dumping `'🔲'` gives the correct `f0 9f 94 b2`.
+Do not "fix" this by setting a locale.
+
+**The confusing part is that SOME emoji work**, so grep looks fine until it isn't:
+
+| Marker | Codepoint | UTF-8 | `grep -cF` on a file containing 38 |
+|---|---|---|---|
+| ✅ | U+2705 | 3-byte (BMP) | works |
+| ⚠ | U+26A0 | 3-byte (BMP) | works |
+| ❌ | U+274C | 3-byte (BMP) | works |
+| 🔲 | U+1F532 | 4-byte | **0** |
+| 🔄 | U+1F504 | 4-byte | **0** |
+| 🟡 | U+1F7E1 | 4-byte | **0** |
+| 🔴 | U+1F534 | 4-byte | **0** |
+| 🗄 | U+1F5C4 | 4-byte | **0** |
+
+A bracket class mixing them (`[🔲✅🔄]`) is worse: it made grep report **"Binary file matches"** and
+suppress output entirely.
+
+**Where this bites in this repo**: `projects/*/tasks/TASK-INDEX.md` uses 🔲 (U+1F532) for open tasks
+and ✅ (U+2705) for complete. So `grep -c '✅'` is right and `grep -c '🔲'` is **always 0** — which
+reads as "no open tasks" on a project with dozens.
+
+**Rule.** For any count or match over files with emoji status markers, use Python:
+
+```bash
+python -c "print(sum(1 for l in open(PATH,encoding='utf-8') if l.startswith('| 🔲')))"
+```
+
+**Why it earns an entry.** The failure is silent and returns a *plausible* number, so it launders
+itself into conclusions. In one session it produced "0 open tasks" on a 37-open project, then a
+follow-on false claim that the file was mojibake/binary (it was clean UTF-8 — 0 NULs, 0
+double-encoded sequences), then a third miss on a verification grep. Same family as
+[AP-12](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes), one
+layer up: there the stale *prose* misleads; here the *instrument* does, while sounding confident.
+**Cross-check any count that will drive a decision.**
+
+---
+
 ### AP-12: A comment becomes the constraint — prose outlives the mechanism it describes
 
 > **Added 2026-09-02** by `unified-access-control-r2`. **Class**: documentation drift promoted to
@@ -961,6 +1012,44 @@ would refute it.
 `68eb58ad0` (phantom route in a docstring), `09025ab39` (third copy of the phantom cap), `524a32fd3`
 (conflictBehavior claim + the additive-only framing, both corrected with do-not-re-derive notes) ·
 `projects/unified-access-control-r2/current-task.md` § "the five things that will bite a fresh session".
+
+---
+
+### AP-13: A tool with no parameter for a thing you must control, silently picking a default
+
+> **Found** 2026-09-04 by `unified-access-control-r2` task 038, on a live environment.
+
+**The shape**: an agent calls a tool to create a durable, shared artifact. The tool exposes no parameter
+for an attribute that is *not optional in this repo*. The tool succeeds, so nothing signals a problem —
+and the artifact is created under a default the caller never chose and cannot see in the result.
+
+**The instance**: `mcp__dataverse__create_table` has **no publisher or solution parameter**. Called to
+create `sprk_noaccessentry`, it silently used the environment's **default publisher**, producing
+`cr140_noaccessentry` in `spaarkedev1`. Wrong prefix, wrong solution, outside `SpaarkeCore`, invisible to
+the repo's ALM. The call returned success. Only an explicit read-back caught it.
+
+**Why it is not "just be careful"**: the failure is in the *shape of the tool*, not the caller's
+diligence. There is no argument to get wrong and no error to notice. Every future caller meets the same
+trap at full strength, and a stray table is permanent-ish: someone must find it and consent to deleting
+it. In Dataverse specifically, publisher prefix is **immutable** — the artifact cannot be corrected in
+place, only recreated.
+
+**Rules**:
+- **MUST NOT** use `mcp__dataverse__create_table` when the entity must live under the `sprk` publisher —
+  which is every Spaarke entity. Use the raw Web API with the `MSCRM.SolutionUniqueName` header, the
+  pattern `scripts/Deploy-PrecedentEntity.ps1` already uses.
+- **MUST** read the artifact back (`mcp__dataverse__describe`) and assert the *prefix*, not merely that
+  creation succeeded. A success return says the tool ran, not that it did what you meant.
+- **Generalize before reaching for a tool that mutates shared state**: ask *"what does this tool NOT let
+  me specify, and does this repo care about it?"* If the answer is "it cares", the tool is wrong for the
+  job regardless of how convenient it is.
+
+**The wider lesson, which is the reason this entry exists**: an agent should not have been creating a
+live table at all here. Task 038's declared output was a schema **document**; the brief authorized
+*verifying* schema against live metadata — a read. "I need to check the schema" drifted into "I'll create
+the schema" with no gate in between. **A read authorization is not a write authorization**, and a shared
+environment is not scratch space. Owner directive 2026-09-04: schema work on this project is **code +
+docs only**; live table creation is an explicit operator step.
 
 ---
 

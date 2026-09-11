@@ -662,12 +662,14 @@ public static class CommunicationModule
             .ValidateOnStart();
         // task 043 — Direct 1:1 thread access mechanics (find-or-create, explicit two-party read, per-message
         // GrantAccess). POA-based (owner ∪ POA share), NOT a new grant table (owner decision 2026-07-16,
-        // notes/access-model-decision.md). IDataverseAccessGrantService is the ADR-010 testing seam over the
-        // concrete DataverseWebApiService's GrantAccess/POA primitives (mirrors IImpersonatedCommunicationQuery
+        // notes/access-model-decision.md). IDataverseRecordShareService is the ADR-010 testing seam over the
+        // concrete DataverseWebApiService's GrantAccess/RevokeAccess/POA primitives (uac-r2 task 060 consolidated
+        // the two POA clients into this one seam; mirrors IImpersonatedCommunicationQuery
         // below — the same singleton, a second thin seam over it). GrantMessageAccessAsync (the per-message
         // grant hook) was GENERALIZED by task 052 (FR-11) to ALSO grant Open/record-anchored threads — see
         // that task's comment below for the DI-cycle note this required.
-        services.AddSingleton<IDataverseAccessGrantService, DataverseAccessGrantService>(); // task 043
+        services.AddSingleton<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService,
+                      Sprk.Bff.Api.Services.Access.DataverseRecordShareService>(); // task 043; renamed + consolidated by uac-r2 task 060
         // task 052 — Lazy<IThreadMembershipDerivationService> breaks a genuine 3-node DI cycle:
         // DirectThreadAccessService → IThreadMembershipDerivationService → IThreadExplicitParticipantReader
         // (DirectThreadExplicitParticipantReader) → IDirectThreadAccessService. All three are singletons;

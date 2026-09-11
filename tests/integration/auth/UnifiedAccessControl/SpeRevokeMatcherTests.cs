@@ -190,6 +190,27 @@ public class SpeRevokeMatcherTests
                     return result;
                 });
 
+            // ISS-004 (#968), task 024: the ORGANIZATION sweep now batches into one call. Modelled
+            // here for the same reason as above — an un-stubbed virtual returns a null Task and the
+            // endpoint NREs, which is a fixture gap masquerading as a product defect.
+            mock.Setup(s => s.RemoveMembershipsAsync(
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                {
+                    var results = new Dictionary<string, SpeContainerMembershipResult>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var email in emails)
+                    {
+                        CallCount++;
+                        CapturedContainerId = containerId;
+                        CapturedEmail = email;
+                        results[email] = result;
+                    }
+
+                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                });
+
             return mock;
         }
     }
@@ -664,6 +685,34 @@ public class SpeRevokeMatcherTests
 
                     CapturedEmails.Add(email);
                     return _byEmail.TryGetValue(email, out var specific) ? specific : _default;
+                });
+
+            // ── ISS-004 (#968), task 024 ────────────────────────────────────────────────────────
+            // The org sweep now resolves every member's email FIRST and asks for them in ONE call,
+            // because the per-member path re-read the whole container each time (N reads, and N ×
+            // pages after task 024's paging). The endpoint therefore lands here, not on
+            // RevokeMembershipAsync above — which is kept, since the PER-CONTACT revoke path still
+            // uses it.
+            //
+            // CapturedEmails still receives one entry per member, in order, so every existing
+            // assertion about WHICH KEY was used — the whole of finding A-13 — is unchanged.
+            mock.Setup(s => s.RemoveMembershipsAsync(
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                {
+                    if (containerId != ContainerId.ToString())
+                        throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
+
+                    var results = new Dictionary<string, SpeContainerMembershipResult>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var email in emails)
+                    {
+                        CapturedEmails.Add(email);
+                        results[email] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
+                    }
+
+                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
                 });
 
             return mock;

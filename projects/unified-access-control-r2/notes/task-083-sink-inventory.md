@@ -1,5 +1,63 @@
 # Task 083 — the SPE write-sink inventory, classified by SINK
 
+> ## ✅ CLOSED 2026-09-07. The `ClientSupplied` work list is EMPTY.
+>
+> `grep -c "^            Provenance.ClientSupplied," tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`
+> returns **0**. No SPE write sink in this codebase takes its container or drive from client input.
+> That machine count — not this document — is the acceptance evidence, per §6.1's argument from
+> absence. 191/191 ArchTests green; 12,166 BFF tests green.
+>
+> **Final dispositions of the ten rows** (§2's table was never complete, which was the point):
+>
+> | Row | Disposition | By |
+> |---|---|---|
+> | 1 | DELETED | 073 |
+> | 2 | DELETED (were dead) | 076 |
+> | 3 | DELETED after client cutover | 076 |
+> | **4** | **DELETED** — `PUT /api/drives/{driveId}/upload` | **083, 2026-09-07** |
+> | **5** | **DELETED** — `DELETE /api/drives/{driveId}/items/{itemId}` | **083, 2026-09-07** |
+> | 6 | CONVERTED to `ServerDerivedRecord` | #858 |
+> | 7 | DELETED (zero callers) | 083 sweep / 085 |
+> | 8 | CONVERTED to record-keyed | 085 |
+> | 9 | `SaveRequest.ContainerId` DELETED | 085 |
+> | 10 | Gated + `AdministrativeRoleScoped` | 091 |
+>
+> Rows 4 and 5 also took with them the orphaned **`canwritefiles`** policy (its only two consumers),
+> the already-orphaned **`canreadfiles`**, the whole of `Api/DocumentsEndpoints.cs`, both `UNOWNED`
+> waivers, and the last two entries in `PolicyOnlyRoutes` — so finding #4's shape (a real, fail-closed
+> policy pointed at the **wrong resource domain**) is now **extinct** in the governed set.
+>
+> ### One correction this closure forces — §1's "not live holes" was right, its reasoning incomplete
+>
+> §1 argued rows 4/5 were safe by **value-space disjointness**: the policy resolves the route value as
+> `sprk_documents({id})`, so a real drive id (`b!…`) is not a GUID and 400s, while a valid document
+> GUID is not addressable as a drive. That held. What §1 did **not** say is that the deleted source
+> carried a comment asserting the opposite as *design*:
+>
+> > *"The two endpoints BELOW are deliberately retained: they use canwritefiles on routes that DO carry
+> > a {driveId} resource, so their per-resource check is satisfiable."*
+>
+> **Carrying a resource is not carrying the resource the policy evaluates.** The check was never
+> satisfiable; the routes were *accidentally* safe, and a sentence in the source had recorded the
+> accident as a decision — [FAILURE-MODES AP-12](../../../.claude/FAILURE-MODES.md) exactly. That is a
+> stronger argument for deletion than "they deny anyway", because the accident stops holding the moment
+> either id domain widens.
+>
+> ### 🔴 §4's S7/S9 row is STALE — do not act on it
+>
+> The section headed *"the MINT converted, the REPLACE trio did NOT"* says rows S7/S9 remain
+> `ClientSupplied` **deliberately**. That was true when written and is **false now**: the guard records
+> all three `ComposeSaveStorageCoordinator` sinks as **`ServerDerivedRecord`**, converted **2026-09-01
+> (drive provenance)** — `SaveAsync` resolves the drive recorded on the owning `sprk_document` row once
+> and folds it back onto the request. The note and the guard disagreed; **the guard is build-enforced
+> and won**. Corrected in place below.
+>
+> ### Also stale: the "6 `Sprk.Provisioning.ControlPlane` failures" baseline
+>
+> Several notes in this project describe six pre-existing ArchTest failures as a known baseline. As of
+> 2026-09-07 `Spaarke.ArchTests` is **191/191 green, 0 failed**. Do not inherit that baseline.
+
+
 > **Produced**: 2026-08-28 by a read-only Fable sweep (083 steps 1–3), then spot-verified in the main
 > session. **Escalation trigger 3 FIRED** (">~3 unlisted instances → STOP and re-plan"); owner chose
 > **"widen the guard first, then re-plan"** — so this inventory is the INPUT to the guard, not the
@@ -145,8 +203,8 @@ existing guard keys on a hand-listed set of files classified for *route authoriz
 
 | # | file:line | sink | container/drive origin | class |
 |---|---|---|---|---|
-| S1 | `Api/DocumentsEndpoints.cs:65` | `UploadSmallAsync` (MI) | client route `{driveId}` | CLIENT — row 4, DELETE |
-| S2 | `Api/DocumentsEndpoints.cs:122` | `DeleteFileAsync` (MI) | client route | CLIENT — row 5, DELETE |
+| ~~S1~~ | ~~`Api/DocumentsEndpoints.cs:65`~~ | ~~`UploadSmallAsync` (MI)~~ | ~~client route `{driveId}`~~ | ✅ **DELETED 2026-09-07 (083)** — route, file, and the `canwritefiles` policy behind it. Dead UPSTREAM: its only caller (`DocumentOperations.js processFileUpload`) calls `GET /api/containers/{containerId}/drive` first — deleted by task 090 — and throws before the PUT is built |
+| ~~S2~~ | ~~`Api/DocumentsEndpoints.cs:122`~~ | ~~`DeleteFileAsync` (MI)~~ | ~~client route~~ | ✅ **DELETED 2026-09-07 (083)**. Reachable in code (form attributes, no deleted-route dependency) but **cannot authenticate**: that file's `getAuthToken` returns `null` and `apiCall` sends only `credentials:'include'`; the BFF has JwtBearer + ApiKey + Ciam and **no cookie scheme**, so every call 401s before any policy runs. The waiver's own precondition — *"must FIRST resolve whether the web resource is deployed"* — was **discharged, not dropped**: deployment is undeterminable from the repo, and it does not matter, because a deployed copy 401s too |
 | S3 | `Api/OBOEndpoints.cs:66,72` | `ResolveDriveIdAsync`+`UploadSmallAsUserAsync` | client route `{id}` | CLIENT — 076 converting |
 | S4 | `Api/Ai/ChatWordExportEndpoints.cs:148,154` | same pair (OBO) | config staging → default | CONFIG; zero callers → DELETE |
 | S5 | `Api/Ai/ChatDocumentEndpoints.cs:1155,1160` | same pair (OBO) | same config keys | CONFIG; LIVE → CONVERT |
@@ -178,14 +236,33 @@ in `ComposeService.ResolveCreateOnSaveContainerAsync` — caller oid → session
 authorize the bound matter via `CallerRecordAccessProbe` + `entity.associate_document` (AppendTo) →
 `ResolveForRecordAsync`; no matter → `ResolveForActingUserAsync` (systemuser → BU → `sprk_containerid`).
 
-**Rows S7 / S9 (and their `ComposeSaveStorageCoordinator` successors) are UNCHANGED and still
-`ClientSupplied` — this is deliberate, not an oversight.** They trace `request.DriveId` on the **REPLACE**
-path (`ComposeSaveStorageCoordinator.cs:216,228`), which #858 did not touch. A handoff note directed
-moving all of them; that instruction was **wrong**, and reclassifying them would have written a false
-census entry of exactly the kind Rule A exists to catch. Follow-on work: derive the replace-path
-drive+item from the authorized `sprk_document` row, as row S8 (the dedup path) already does. Blast-radius
-note: the replace path is OBO, so the user's own ACL constrains it — LATENT-bypass class, not the
-app-only live-hole class. See [`plan-858-closeout.md`](plan-858-closeout.md) §3.
+**Rows S7 / S9 (and their `ComposeSaveStorageCoordinator` successors) were UNCHANGED and still
+`ClientSupplied` WHEN THIS PARAGRAPH WAS WRITTEN** — deliberately, not by oversight. They traced
+`request.DriveId` on the **REPLACE** path (`ComposeSaveStorageCoordinator.cs:216,228`), which #858 did
+not touch. A handoff note directed moving all of them; that instruction was **wrong** at the time, and
+reclassifying them then would have written a false census entry of exactly the kind Rule A exists to
+catch. Blast-radius note that still stands: the replace path is OBO, so the user's own ACL constrains
+it — LATENT-bypass class, not the app-only live-hole class. See
+[`plan-858-closeout.md`](plan-858-closeout.md) §3.
+
+> 🔴 **SUPERSEDED 2026-09-07 (task 083 closure).** The follow-on this paragraph named — *"derive the
+> replace-path drive+item from the authorized `sprk_document` row, as row S8 already does"* — **was
+> done**, on **2026-09-01**, by the drive-provenance fix. All three coordinator sinks are now
+> `ServerDerivedRecord`: `ComposeService.SaveAsync` resolves the drive recorded on the owning
+> `sprk_document` row **once** (`ResolveAuthoritativeDriveIdAsync` →
+> `ComposeRecordResolution.TryResolveRecordedDriveIdAsync`) and folds it back onto the request, so the
+> baseline re-fetch, the pre-write metadata read, the re-anchor download and all three sinks address the
+> record's drive. `ApplyTemplateAsync` converted with them.
+>
+> The declared fallback is **not** a residual hole: when the row carries no `sprk_graphdriveid` the
+> caller's value is used and logged at Debug, because legacy rows predating the full-SPE-pointer stamp
+> exist and a hard fail-closed would break saves on real documents to close a hole OBO already closes.
+> An attacker cannot make a row's drive id *disappear*. A divergence between the two values logs at
+> Warning — that signal is the fix's actual product.
+>
+> **Read the guard, not this note, for current provenance.** This paragraph is retained rather than
+> deleted because the reasoning in it — *do not reclassify a sink to match a handoff instruction* — is
+> the correct standing rule, and it is the reason the eventual conversion is trustworthy.
 
 ### 🔴 CORRECTION 2026-08-30 — PR #806 is MERGED, and the Compose sink MOVED
 

@@ -22,6 +22,20 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// names a business unit, so it is no longer required — the previous
 /// "required unless UmbrellaBuId is provided" rule went with the umbrella branch.
 /// </param>
+/// <param name="SharePrincipalIds">
+/// Optional. Additional Dataverse <c>systemuser</c> ids to share the project with at provisioning
+/// time, alongside the creator (who is always shared to, and is identified from the caller's own
+/// token — never from this list).
+/// </param>
+/// <remarks>
+/// <para><b><c>SharePrincipalIds</c> added by task 061 (2026-09-08).</b> A secure project is owned by
+/// a memberless team, so <b>nobody</b> can see it until an explicit share is issued (design.md §5.1:
+/// <i>"All human access is by explicit Dataverse share, including the creating attorney's"</i>).
+/// Provisioning always shares to the creator; this list is for the colleagues a wizard already knows
+/// about at creation time, so the common case does not need a second round trip to the FR-29
+/// "+ User" endpoint.</para>
+/// </remarks>
 public record ProvisionProjectRequest(
     Guid ProjectId,
-    string? ProjectRef);
+    string? ProjectRef,
+    IReadOnlyList<Guid>? SharePrincipalIds = null);

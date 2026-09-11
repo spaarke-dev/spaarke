@@ -4,7 +4,7 @@
     <title>ADR-034 amendment (path B) — the access-conferring allow-list becomes first-class and per-surface; org-typed columns join it</title>
     <phase>2 One definition of member</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architecture change on the membership ADR that authorization consumes; tags auth/adr (CLAUDE.md §8 FULL row).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -82,7 +82,29 @@
     <criterion testable="true">.claude/CHANGELOG.md carries an entry.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec ADR Tensions row 2; investigation 02 §8 + §10.4; register B-12/H-5. Sequence 040 → 041 is mandatory (registry code lands under the amended ADR).</notes>
+  <notes>Spec ADR Tensions row 2; investigation 02 §8 + §10.4; register B-12/H-5. Sequence 040 -> 041 is mandatory (registry code lands under the amended ADR).
+
+COMPLETED 2026-09-04 as ADR-034 Amendment A1 (both versions + CHANGELOG).
+
+The escalation trigger did NOT fire, and the check that cleared it is the substantive part: EVERY
+IMembershipResolverService consumer was enumerated and classified before amending, because narrowing a
+surface is only safe if you know who stands on it. Only AccessibleRecordSetService (excluded by the
+trigger) uses these descriptors as an ACCESS answer. MembershipEndpoints is the easy misclassification
+- it serves membership over HTTP so it LOOKS like an access surface, but it is OBO and answers only
+about the caller themselves. IThreadPrivateGrantProvider is NOT a consumer at all: the grep hit is a
+doc-comment cross-reference with zero code dependency.
+
+NOT amended, deliberately: the 1-hop cap (M7/N4). FR-26 denormalizes the core ancestor so every chain
+is one hop BY CONSTRUCTION - the data model removed the need rather than the rule being relaxed. An
+exception here would have been a real weakening bought for nothing. M8/M9, N2 and M1 also unchanged;
+diff shows only THREE removed lines in the concise ADR, all of them the staleness fixes.
+
+Three staleness items fixed, each re-verified in source rather than trusted from investigation 02:
+ResolveByContactAsync (its absence implied the contact plane had no membership path), RelatedByRole,
+and - the costly one - contact resolution is sprk_primarycontact FIRST with the AAD oid as FALLBACK;
+the ADR had documented the fallback as if it were the only path.
+
+See notes/task-040-adr-034-a1-amendment.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

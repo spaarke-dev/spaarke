@@ -52,6 +52,7 @@ public static class InviteAndGrantExternalUserEndpoint
         IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
+        TimeProvider timeProvider,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
@@ -74,6 +75,12 @@ public static class InviteAndGrantExternalUserEndpoint
             RecordId: request.RecordId));
         if (!grantRoot.Ok)
             return ProblemDetailsHelper.ValidationError(grantRoot.Error!);
+
+        // FR-33 (task 097): reject a past expiry BEFORE any onboarding side effect — a rejected request must
+        // not leave a Contact or a CIAM account behind. An absent expiry is defaulted by the grant core.
+        var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
+        if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
+            return expiryProblem;
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
@@ -117,8 +124,22 @@ public static class InviteAndGrantExternalUserEndpoint
         Guid accessRecordId;
         try
         {
-            accessRecordId = await GrantExternalAccessEndpoint.CreateGrantAsync(
-                grantRequest, grantRoot.Type, grantRoot.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+            var grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
+                grantRequest, grantRoot.Type, grantRoot.Id, today, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+
+            accessRecordId = grantOutcome.AccessRecordId;
+
+            // Task 023: the upsert can succeed structurally while conferring no access — it matched an
+            // EXPIRED row and this request carried no new expiry. On the invite path that is logged
+            // rather than failed: the Contact WAS provisioned, so failing here would strand a real
+            // onboarding over a grant the operator can fix by re-granting with an expiry date.
+            if (grantOutcome.Warning is { } warning)
+            {
+                logger.LogWarning(
+                    "[INVITE-GRANT] Contact {ContactId} was onboarded and the grant row {AccessRecordId} " +
+                    "exists, but it confers no access: {Warning}",
+                    grantRequest.ContactId, accessRecordId, warning);
+            }
         }
         catch (Exception ex)
         {

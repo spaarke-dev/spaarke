@@ -70,7 +70,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST** authenticate Teams-host collaboration users with their **workforce Microsoft Entra identity** via Teams SSO / NAA against a **multitenant** app registration (per-customer admin consent). CIAM is not used inside Teams.
 - **MUST** serve both the external SPA (CIAM) and the Teams host (workforce) from **one shared standalone-MSAL module** whose **authority is config-driven / pluggable**; the module is exempt from the `@spaarke/auth`-only rule exactly as the A1 SPA is.
 - **MUST** keep the collaboration surface **broker-only** in both hosts (A1 invariant): the user token authenticates to the BFF **only** and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the collaboration path**). Document content streams **app-only**.
-- **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
+- **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership; ⚠️ **the systemuser derivation is SUPERSEDED by [Amendment A5](#amendment-a5-2026-09-04-workforce-systemuser-root-sets-derive-from-dataverses-impersonated-answer)** — root sets now come from Dataverse's own answer via app-only impersonated read, ∪ contact grants) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
 
 ### New MUST NOT rules
 
@@ -249,6 +249,105 @@ A4 states the target shape; adoption is staged by `spaarke-auth-v4-dataverse-MI`
 - **Certificate as the default instead of MI-FIC** — rejected as the default because it preserves a rotation lifecycle Microsoft's ranking explicitly treats as inferior; retained as the **sanctioned alternative** precisely where MI-FIC's tenancy constraints bite (Model 2b/2c), where it is not a fallback but the correct answer.
 
 > **Note (A4)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries Amendments **A1–A4**. A4 changes **server-side credential mechanism only** — it introduces no new IdP or client surface, and **does not weaken the A1/A2/A3 "no OBO on the external, collaboration, or module-host planes" invariants**, which remain in force.
+
+## Amendment A5 (2026-09-04): Workforce `systemuser` root sets derive from Dataverse's impersonated answer
+
+> **Status**: Accepted (resolution path **B — narrow amendment**, per root CLAUDE.md §6.5). **Driver project**: `unified-access-control-r2` (spec ADR Tensions row 3; FR-20). **Amends one clause of A2.** Mechanism + rejected alternatives: [`projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md`](../../projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md) §5–§6.
+
+**What changes — exactly one clause.** A2's fourth MUST requires the workforce-authenticated caller to
+resolve to a principal, "a `systemuser` (**→ ADR-034 membership**)". A5 replaces **only** the
+parenthesised derivation for the systemuser branch:
+
+> `systemuser` → **Dataverse's own answer via app-only impersonated read** ∪ contact grants.
+
+**The token model does not change. The client does not change. The plane does not change.** A5 changes
+*how the server computes what a workforce systemuser may see*, nothing else.
+
+**Why**: ADR-034 membership derivation approximates Dataverse's answer by pattern-matching columns, and
+it is wrong in **both** directions — it grants BU-matched records to users whose role depth does not
+cover them, and it hides records that were explicitly shared. Dataverse already computes this exactly,
+applying ownership, role depth, business unit, teams, POA shares and hierarchy. Asking it is both more
+correct and cheaper than approximating it (3 round trips per request — the same as today's membership
+queries, cacheable per `(systemUserId, entityType)`). It also **removes the need for a systemuser
+allow-list**: there is no approximation left to tame.
+
+### New MUST rules (workforce `systemuser` plane only)
+
+- **MUST** derive a workforce `systemuser` caller's record root set from an **app-only impersonated
+  read** — `DataverseWebApiService.RetrieveMultipleImpersonatedAsync(entitySet, query, callerSystemUserId)`,
+  which sets the `MSCRMCallerID` header (`Spaarke.Dataverse/DataverseImpersonation.cs`).
+- **MUST** pass the Dataverse **`systemuserid`** in `MSCRMCallerID` — **not** the AAD `oid`. These are
+  different identifiers. (`notes/access-model-decision.md` pairs the header with the AAD oid; that
+  pairing is **incorrect** per MS Learn, and the helper's own XML doc says so. The live code uses the
+  correct one.)
+- **MUST** keep the **contact-grants union term**. Grants live in `sprk_externalrecordaccess`, a Spaarke
+  table, not in POA — **Dataverse cannot see them**, so its answer is necessarily incomplete without the
+  union (register B-17).
+- **MUST** fail **closed** on an absent caller id. `RetrieveMultipleImpersonatedAsync` throws on
+  `Guid.Empty` — *"refusing to issue an app-only query on the access-scoped read path"*
+  (`DataverseWebApiService.cs:978`). ⚠️ **The enforcement is in the READ method, not in the helper**:
+  `DataverseImpersonation` deliberately adds no header for a null/empty id, so a *new* impersonated call
+  site that skips the read method would silently degrade to an app-only (unscoped) query. Any new
+  access-scoped impersonated path MUST carry its own equivalent refusal.
+- **MUST** keep the **NFR-04 negative canary** (task 034) as the standing guard: an impersonated
+  low-privilege read must return a **strict subset** of the app-only result **and strictly fewer rows**.
+  **Equality means impersonation is inert and MUST fail the build** — that is the exact signature of a
+  silent degradation to app-only.
+
+### Broker-only compliance (the reading this amendment records)
+
+**Impersonation is not OBO, and A5 does not weaken the no-OBO invariant.**
+
+Broker-only is defined in the code that implements it — `AccessibleRecordSetService.cs:22-24`:
+*"reads … APP-ONLY against the already-resolved principal. **No caller-token exchange (no OBO)**."*
+
+An impersonated read uses the **BFF's own app-only credential** and adds a **header naming which user
+Dataverse should scope the query to**. The caller's token is never exchanged, never forwarded, and is
+not required to exist at Dataverse at all. The BFF acts as itself and asks Dataverse to answer a
+narrower question. That satisfies broker-only as written.
+
+This reading is recorded **here**, in the ADR, rather than only in project notes — because a future
+reader encountering "impersonation" on a plane whose defining invariant is "no OBO" will otherwise have
+to re-derive whether the two conflict, and may reasonably guess wrong.
+
+### Scope + preserved invariants
+
+- **`WorkforcePrincipalKind.SystemUser` only.** The **CIAM / contact plane derivation is untouched** —
+  contact-anchored membership (A2's ADR-034 cross-reference) is unchanged, and impersonation is not
+  available to it in any case: a `contact` is not a security principal and cannot be impersonated.
+- **No OBO is sanctioned anywhere by A5.** The A1/A2/A3 prohibition on exchanging the caller's token
+  for a downstream Graph/SPE/Dataverse token is **textually unchanged and still in force**. Investigation
+  08 §6 ranked and *rejected* OBO for this plane; A5 does not revisit that.
+- **A2's token rules, client surface, plane selection, and Tier-1/Tier-2 split are all unchanged.**
+- **ADR-034 is not amended by A5.** Membership resolution remains canonical for the contact plane and
+  for every non-root-set use. A5 changes which *source* answers "which records may this systemuser see",
+  not the membership engine.
+
+### Deployment prerequisites (register E-2 / E-3)
+
+Both are **blocking** — without them the impersonated read cannot work correctly:
+
+1. **`prvActOnBehalfOfAnotherUser`** on the BFF application user, with a runbook entry recording it.
+2. **The BFF app user stays Organization-scoped.** Impersonation returns *the impersonated user's*
+   scope, so the app user's own breadth is not a shortcut — but narrowing it breaks the app-only paths
+   that legitimately need org breadth.
+
+### Alternatives considered (and rejected)
+
+- **OBO for the systemuser plane** — rejected: forbidden by A2/A3's broker-only invariant, impossible
+  for CIAM contacts, and unnecessary — impersonation obtains the same correctness without a token
+  exchange. Ranked and rejected in investigation 08 §6.
+- **Keep ADR-034 pattern-matching and tune the allow-list** (path C, comply as written) — rejected: the
+  approximation is wrong in both directions, and no allow-list makes a column-name convention equal to
+  role depth × ownership × teams × sharing. Tuning it indefinitely is the cost this amendment removes.
+- **Widen the amendment to cover the contact plane too** — rejected as out of scope and impossible: a
+  contact is not a security principal and cannot be impersonated, which is precisely *why* the contact
+  plane must compute access rather than ask for it.
+
+> **Note (A5)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists — confirmed again
+> 2026-09-04, consistent with the A2/A3/A4 notes). This concise ADR now carries Amendments **A1–A5**.
+> A5 is a **server-side derivation-policy change on one plane**: no new IdP, no new client surface, no
+> new token exchange, and **no weakening of the no-OBO invariant**.
 
 ## Documented MI exceptions
 

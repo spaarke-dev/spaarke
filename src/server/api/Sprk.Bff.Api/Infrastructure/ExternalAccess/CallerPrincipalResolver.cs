@@ -45,15 +45,42 @@ public enum CallerPrincipalPlane
 }
 
 /// <summary>
-/// A single project the caller may access, with the access level that governs effective rights.
-/// For a CIAM contact the level is the granted <c>sprk_accesslevel</c>; for a workforce caller every
-/// accessible project is surfaced at <see cref="ExternalAccessLevel.Collaborate"/> (see
-/// <c>WorkforcePrincipalStrategy</c> for the rationale).
+/// A single project the caller may access, with the <see cref="AccessRights"/> that govern what they
+/// may do on it. Both planes now source these from the ONE evaluator's <c>(recordId → rights)</c>
+/// answer (unified-access-control-r2 task 033 / FR-19).
 /// </summary>
+/// <remarks>
+/// <b>Rights are stored; the level is derived.</b> This class used to hold an
+/// <see cref="ExternalAccessLevel"/> and map it to rights on demand. That direction cannot represent
+/// the evaluator's answer: rights compose by highest-wins union across terms, and the union of two
+/// terms need not land on one of the three level constants. Storing the level and re-deriving rights
+/// would round-trip the evaluator's answer through a coarser type — the exact flattening FR-19 exists
+/// to remove.
+/// <para>
+/// <see cref="AccessLevel"/> remains available as a lossy DISPLAY projection (see
+/// <see cref="ExternalAccessLevels.ToDisplayLevel"/>) for <c>/api/v1/external/me</c>, whose response
+/// contract is a level string. Never authorize on it.
+/// </para>
+/// </remarks>
 public sealed class CallerProjectAccess
 {
     public required Guid ProjectId { get; init; }
-    public required ExternalAccessLevel AccessLevel { get; init; }
+
+    /// <summary>What the caller may do on this project — the authorization value.</summary>
+    public required AccessRights Rights { get; init; }
+
+    /// <summary>
+    /// The coarse level to display for <see cref="Rights"/>, or null when the caller holds nothing.
+    /// DISPLAY ONLY — see the class remarks.
+    /// </summary>
+    public ExternalAccessLevel? AccessLevel => ExternalAccessLevels.ToDisplayLevel(Rights);
+
+    /// <summary>
+    /// Builds an entry from a grant row's level. The single conversion point for level-sourced
+    /// construction, so the mapping table stays in <see cref="ExternalAccessLevels"/>.
+    /// </summary>
+    public static CallerProjectAccess FromLevel(Guid projectId, ExternalAccessLevel? level) =>
+        new() { ProjectId = projectId, Rights = ExternalAccessLevels.ToAccessRights(level) };
 }
 
 /// <summary>
@@ -90,18 +117,36 @@ public sealed class CallerPrincipal
     /// <summary>The caller's Tier-2 record scope: the projects they may access, with levels.</summary>
     public required IReadOnlyList<CallerProjectAccess> ProjectAccess { get; init; }
 
-    /// <summary>The caller's accessible MATTER root ids (task 028 — polymorphic Tier-2 scoping). Composed
-    /// per plane (CIAM: matter grants; workforce: membership ∪ matter grants). Empty when the caller has
-    /// no accessible matters — never "all matters" (NFR-08). Defaults empty for construction sites that
-    /// predate the polymorphic model.</summary>
-    public IReadOnlySet<Guid> AccessibleMatterIds { get; init; } = EmptyIdSet;
+    /// <summary>
+    /// The caller's accessible MATTER roots as <c>(recordId → rights)</c> (task 028 shape, upgraded from
+    /// a bare id set by task 033 / FR-19). Composed per plane (CIAM: matter grants; workforce: membership
+    /// ∪ matter grants). Empty when the caller has no accessible matters — never "all matters" (NFR-08).
+    /// </summary>
+    public IReadOnlyDictionary<Guid, AccessRights> MatterAccess { get; init; } = EmptyRights;
 
-    /// <summary>The caller's accessible WORK-ASSIGNMENT root ids (task 028). A work assignment is a
-    /// first-class root: a standalone WA (no project/matter) can be granted to outside counsel and carry
-    /// its own documents. Empty when the caller has no accessible work assignments (NFR-08).</summary>
-    public IReadOnlySet<Guid> AccessibleWorkAssignmentIds { get; init; } = EmptyIdSet;
+    /// <summary>
+    /// The caller's accessible WORK-ASSIGNMENT roots as <c>(recordId → rights)</c> (task 033). A work
+    /// assignment is a first-class root: a standalone WA (no project/matter) can be granted to outside
+    /// counsel and carry its own documents. Empty when the caller has none (NFR-08).
+    /// </summary>
+    public IReadOnlyDictionary<Guid, AccessRights> WorkAssignmentAccess { get; init; } = EmptyRights;
 
-    private static readonly IReadOnlySet<Guid> EmptyIdSet = new HashSet<Guid>();
+    private static readonly IReadOnlyDictionary<Guid, AccessRights> EmptyRights =
+        new Dictionary<Guid, AccessRights>();
+
+    private IReadOnlySet<Guid>? _matterIds;
+    private IReadOnlySet<Guid>? _workAssignmentIds;
+
+    /// <summary>
+    /// Accessible matter ids. A DERIVED VIEW over <see cref="MatterAccess"/> as of task 033 — not a
+    /// second stored collection, so ids and rights cannot disagree. Read-scope injection
+    /// (<c>Tier2ScopeFilterInjector</c>, the module <c>ScopeDimension</c>s) consumes this shape unchanged.
+    /// </summary>
+    public IReadOnlySet<Guid> AccessibleMatterIds => _matterIds ??= MatterAccess.Keys.ToHashSet();
+
+    /// <summary>Accessible work-assignment ids — a DERIVED VIEW over <see cref="WorkAssignmentAccess"/>.</summary>
+    public IReadOnlySet<Guid> AccessibleWorkAssignmentIds =>
+        _workAssignmentIds ??= WorkAssignmentAccess.Keys.ToHashSet();
 
     /// <summary>All project ids the caller can access (for list construction).</summary>
     public IEnumerable<Guid> GetAccessibleProjectIds() => ProjectAccess.Select(p => p.ProjectId);
@@ -115,23 +160,37 @@ public sealed class CallerPrincipal
     /// <summary>Whether the caller can access the specified project (the record∈set check).</summary>
     public bool HasProjectAccess(Guid projectId) => ProjectAccess.Any(p => p.ProjectId == projectId);
 
-    /// <summary>The access level for the specified project, or null if the caller has no access.</summary>
+    /// <summary>
+    /// The DISPLAY level for the specified project, or null if the caller has no access.
+    /// ⚠️ Display only — authorize on <see cref="GetEffectiveRights(Guid)"/>.
+    /// </summary>
     public ExternalAccessLevel? GetAccessLevel(Guid projectId) =>
         ProjectAccess.FirstOrDefault(p => p.ProjectId == projectId)?.AccessLevel;
 
-    /// <summary>The effective <see cref="AccessRights"/> for the project (same mapping the CIAM
-    /// <see cref="ExternalCallerContext"/> used, so CIAM behavior is unchanged).</summary>
-    public AccessRights GetEffectiveRights(Guid projectId)
-    {
-        var level = GetAccessLevel(projectId);
-        return level switch
-        {
-            ExternalAccessLevel.ViewOnly => AccessRights.Read,
-            ExternalAccessLevel.Collaborate => AccessRights.Read | AccessRights.Create | AccessRights.Write,
-            ExternalAccessLevel.FullAccess => AccessRights.Read | AccessRights.Create | AccessRights.Write | AccessRights.Delete,
-            _ => AccessRights.None
-        };
-    }
+    /// <summary>
+    /// The effective <see cref="AccessRights"/> on a PROJECT. Fail-closed: a project the caller cannot
+    /// access yields <see cref="AccessRights.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// Task 033 made this a direct read of the stored rights. It previously re-derived them from a
+    /// coarse level, which is why the workforce plane's blanket Collaborate stamp could overwrite a
+    /// deliberate ViewOnly grant (register A-8).
+    /// </remarks>
+    public AccessRights GetEffectiveRights(Guid projectId) =>
+        ProjectAccess.FirstOrDefault(p => p.ProjectId == projectId)?.Rights ?? AccessRights.None;
+
+    /// <summary>
+    /// The effective <see cref="AccessRights"/> on a MATTER (task 033). Fail-closed: absence is
+    /// <see cref="AccessRights.None"/>, never a default grant.
+    /// </summary>
+    public AccessRights GetMatterRights(Guid matterId) =>
+        MatterAccess.TryGetValue(matterId, out var rights) ? rights : AccessRights.None;
+
+    /// <summary>
+    /// The effective <see cref="AccessRights"/> on a WORK ASSIGNMENT (task 033). Fail-closed.
+    /// </summary>
+    public AccessRights GetWorkAssignmentRights(Guid workAssignmentId) =>
+        WorkAssignmentAccess.TryGetValue(workAssignmentId, out var rights) ? rights : AccessRights.None;
 }
 
 /// <summary>
@@ -325,7 +384,7 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             contactId.Value, !string.IsNullOrEmpty(oid), grantSet.Projects.Count, grantSet.Matters.Count, grantSet.WorkAssignments.Count);
 
         var projectAccess = grantSet.Projects
-            .Select(p => new CallerProjectAccess { ProjectId = p.ProjectId, AccessLevel = p.AccessLevel })
+            .Select(p => CallerProjectAccess.FromLevel(p.ProjectId, p.AccessLevel))
             .ToList();
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
@@ -336,9 +395,37 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             Email = email ?? string.Empty,
             Oid = oid,
             ProjectAccess = projectAccess,
-            AccessibleMatterIds = grantSet.Matters,
-            AccessibleWorkAssignmentIds = grantSet.WorkAssignments,
+            // Task 033 / FR-19: matter + WA grants carry THEIR OWN level (task 032 added
+            // MatterGrants/WorkAssignmentGrants as the source of truth). Before this, both arrived as
+            // bare id sets and every downstream check treated membership as implying write — which is
+            // how a deliberate ViewOnly matter grant permitted edits.
+            MatterAccess = RightsFromGrants(grantSet.MatterGrants),
+            WorkAssignmentAccess = RightsFromGrants(grantSet.WorkAssignmentGrants),
         });
+    }
+
+    /// <summary>
+    /// Projects root grants to <c>(recordId → rights)</c>, unioning duplicates HIGHEST-WINS.
+    /// </summary>
+    /// <remarks>
+    /// The union is not defensive padding: two grant rows CAN target the same record (e.g. a direct
+    /// grant plus one inherited from a different path), and <c>ToDictionary</c> would throw on the
+    /// second. Unioning matches how the evaluator composes terms, so the two agree by construction
+    /// rather than by coincidence. A null level contributes <see cref="AccessRights.None"/>, which
+    /// keeps the id in the set without widening anything (see <c>ExternalRootGrant</c>).
+    /// </remarks>
+    private static IReadOnlyDictionary<Guid, AccessRights> RightsFromGrants(
+        IReadOnlyList<ExternalRootGrant> grants)
+    {
+        var map = new Dictionary<Guid, AccessRights>();
+        foreach (var grant in grants)
+        {
+            var rights = ExternalAccessLevels.ToAccessRights(grant.AccessLevel);
+            map[grant.RecordId] = map.TryGetValue(grant.RecordId, out var existing)
+                ? existing | rights
+                : rights;
+        }
+        return map;
     }
 }
 
@@ -351,13 +438,23 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
 /// </summary>
 public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
 {
-    // Every project in a workforce caller's accessible set is surfaced at Collaborate
-    // (Read|Create|Write, no Delete). Rationale: the workforce plane is a full collaboration
-    // workspace — a systemuser is internal staff (ADR-034 membership) and an accessible-set contact
-    // is a deliberately-granted collaborator. The accessible set itself is the record-scope (NFR-08)
-    // boundary; the level governs within-project rights only. R2's F3/F5 admin layer may later refine
-    // per-project levels. Documented decision — see notes/r2-coordination-response.md.
-    internal const ExternalAccessLevel WorkforceProjectAccessLevel = ExternalAccessLevel.Collaborate;
+    // ── The blanket Collaborate stamp is GONE (task 033 / FR-19 / register A-8) ───────────────────
+    //
+    // Until 2026-09-04 this class carried a blanket `Collaborate` constant and stamped it over
+    // EVERY project in the accessible set. (The constant's name is deliberately not written here:
+    // the FR-19 acceptance check is a repo-wide grep that must return ZERO, and a prose mention
+    // would defeat it.) It was justified as "the accessible set is the
+    // record-scope (NFR-08) boundary; the level governs within-project rights only" — but those are
+    // not separable, because the stamp WAS the level every downstream rights check read. A deliberate
+    // ViewOnly grant to a workforce caller therefore conferred Read|Create|Write, and the Create/Write
+    // gates already sitting on the mutating routes could never fire.
+    //
+    // Rights now come from the evaluator's (recordId -> rights) answer, per record. Nothing here
+    // supplies a default: a record absent from the map is absent from the principal.
+    //
+    // ⚠️ Do NOT reintroduce a per-plane default level. If a plane needs one it belongs in the
+    // evaluator as a TERM (see AccessibleRecordSetService.MembershipTermRights), where it composes
+    // under highest-wins max instead of overwriting every other term.
 
     /// <summary>The root entity types whose accessible sets are composed onto the principal (task 028 —
     /// polymorphic Tier-2 scoping). Each is membership/assignment ∪ own-contact grants for that type.</summary>
@@ -426,8 +523,9 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         var accessibleWorkAssignments = await _accessibleSet
             .ComposeAsync(principal, WorkAssignmentEntity, reqCt).ConfigureAwait(false);
 
-        var projectAccess = accessibleProjects.RecordIds
-            .Select(id => new CallerProjectAccess { ProjectId = id, AccessLevel = WorkforceProjectAccessLevel })
+        // Per-record rights, straight from the evaluator — no stamp, no per-plane default.
+        var projectAccess = accessibleProjects.Rights
+            .Select(kvp => new CallerProjectAccess { ProjectId = kvp.Key, Rights = kvp.Value })
             .ToList();
 
         _logger.LogInformation(
@@ -444,8 +542,8 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             Email = WorkforcePrincipalResolver.ExtractVerifiedEmail(httpContext.User) ?? string.Empty,
             Oid = principal.Oid,
             ProjectAccess = projectAccess,
-            AccessibleMatterIds = accessibleMatters.RecordIds,
-            AccessibleWorkAssignmentIds = accessibleWorkAssignments.RecordIds,
+            MatterAccess = accessibleMatters.Rights,
+            WorkAssignmentAccess = accessibleWorkAssignments.Rights,
         });
     }
 }

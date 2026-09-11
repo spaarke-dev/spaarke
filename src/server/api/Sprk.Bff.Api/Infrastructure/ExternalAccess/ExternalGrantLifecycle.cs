@@ -86,6 +86,22 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("statecode")]
     public int? StateCode { get; set; }
 
+    /// <summary>
+    /// The row's current expiry, or <c>null</c> for an unbounded grant.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Added by task 023 (finding H1).</b> The upsert's match path could not read this column —
+    /// it was not in <c>RowSelect</c> — so it could neither write a new expiry nor notice that the row it
+    /// was "re-granting" had already expired. Both are silent wrong answers: the caller gets a 200 and a
+    /// record id either way.</para>
+    ///
+    /// <para><c>sprk_expiresdate</c> is <b>Date Only</b> in live metadata, which is why this is
+    /// <see cref="DateOnly"/> and not <see cref="DateTime"/> — and why the expiry read filter compares
+    /// with bare <c>yyyy-MM-dd</c> (task 007's <c>ExpiryPredicate</c>).</para>
+    /// </remarks>
+    [JsonPropertyName("sprk_expiresdate")]
+    public DateOnly? ExpiresDate { get; set; }
+
     [JsonPropertyName("_sprk_contact_value")]
     public Guid? ContactId { get; set; }
 
@@ -129,8 +145,36 @@ internal static class ExternalGrantLifecycle
 {
     internal const string EntitySet = "sprk_externalrecordaccesses";
 
+    /// <summary>The table's logical name — what an SDK write (<c>IGenericEntityService</c>) addresses, as opposed to the Web API <see cref="EntitySet"/>.</summary>
+    internal const string EntityLogicalName = "sprk_externalrecordaccess";
+
+    /// <summary>
+    /// Days a grant lasts when the request names no expiry (spec FR-33; owner decision 2026-09-10,
+    /// "Server fills +90").
+    /// </summary>
+    /// <remarks>
+    /// A constant, not a setting — the owner removed the tenant cap. The Manage Access Expiration picker
+    /// (task 099, not yet built) is specified to default to the same 90 days, so a grant from a surface
+    /// with no date field (e.g. the TrackingFieldTrio PCF) matches what the picker would produce.
+    /// </remarks>
+    internal const int DefaultExpiryDays = 90;
+
+    /// <summary>
+    /// "Today" for every grant-expiry decision on the write path: the <b>UTC</b> calendar date — the same
+    /// calendar the read filter compares against (task 007, <c>ExternalParticipationService.ExpiryPredicate</c>),
+    /// so a grant the writer accepts as "expires today" is still live to the reader today.
+    /// </summary>
+    internal static DateOnly TodayUtc(TimeProvider timeProvider)
+        => DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
+    /// <summary>The expiry an absent request value becomes: <paramref name="today"/> + <see cref="DefaultExpiryDays"/>.</summary>
+    internal static DateOnly DefaultExpiry(DateOnly today) => today.AddDays(DefaultExpiryDays);
+
+    // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
+    // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
+    // that had already expired. Verified DATE ONLY in live metadata (task 007).
     private const string RowSelect =
-        "sprk_externalrecordaccessid,sprk_accesslevel,statecode," +
+        "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
         "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value";
 
@@ -163,6 +207,53 @@ internal static class ExternalGrantLifecycle
             .OrderBy(r => r.Id)
             .ToList();
     }
+
+    /// <summary>
+    /// The OData <c>$filter</c> selecting every ACTIVE row held at one root record — contact grants AND
+    /// organization grants alike, since the grantee is deliberately not constrained (task 098).
+    /// </summary>
+    /// <remarks>
+    /// The root half is the same value column <see cref="ExternalGrantKey.ToActiveRowsFilter"/> uses; the two
+    /// must never disagree about which rows belong to a record.
+    /// </remarks>
+    internal static string ActiveRowsForRootFilter(ExternalGrantRootType rootType, Guid rootId)
+        => $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
+
+    /// <summary>
+    /// Every ACTIVE row held at one root record, in the same shape as <see cref="QueryActiveRowsAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>WRITE-PATH ONLY.</b> It carries no expiry predicate — by design, so that lapsed shares are
+    /// selected and can be renewed (task 098, owner decision 2026-09-11). A READ that decides who has access
+    /// must use <c>ExternalParticipationService</c>'s filters, which apply <c>ExpiryPredicate</c>; reusing this
+    /// one there would silently stop enforcing expiry.</para>
+    /// <para>Unlike <see cref="QueryActiveRowsAsync"/>, rows without a usable id are NOT discarded here: a caller
+    /// updating every row of a record must refuse rather than silently skip one (task 098). Exceptions
+    /// propagate. <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads, so an over-bound
+    /// record is detectable instead of silently truncated.</para>
+    /// </remarks>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsForRootAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveRowsForRootFilter(rootType, rootId),
+            select: RowSelect,
+            top: top,
+            cancellationToken: ct);
+
+    /// <summary>
+    /// Shapes a <see cref="DateOnly"/> for an SDK write to <c>sprk_expiresdate</c> / <c>sprk_granteddate</c>:
+    /// midnight, <see cref="DateTimeKind.Unspecified"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Both columns are <b>Format = DateOnly, Behavior = TimeZoneIndependent</b> (read from live metadata
+    /// 2026-09-11, task 098): Dataverse stores the value it is given with no time-zone conversion. An
+    /// UNSPECIFIED kind carries no offset for anything between here and Dataverse to act on — whereas a
+    /// <c>Local</c> value would be converted to UTC on a machine west or east of UTC, and midnight can land on
+    /// the neighbouring date. The Web API path writes the same column as a bare <c>yyyy-MM-dd</c> string
+    /// (<c>GrantExternalAccessEndpoint.FormatDateOnly</c>); this is the SDK equivalent.</para>
+    /// </remarks>
+    internal static DateTime ToSdkDateOnly(DateOnly value) => value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
 
     /// <summary>
     /// Reads one row by id, or <c>null</c> when it does not exist.

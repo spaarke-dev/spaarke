@@ -138,12 +138,25 @@ public interface IMembershipResolverService
 /// Opaque pagination cursor. Pass the value returned from a prior
 /// <see cref="MembershipResponse.ContinuationToken"/> to fetch the next page.
 /// </param>
+/// <param name="AccessConferringOnly">
+/// ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041). When <c>true</c> on
+/// <see cref="IMembershipResolverService.ResolveAsync"/> (the systemuser plane), the resolver applies
+/// the SAME access-conferring column registry filter <see cref="IMembershipResolverService.ResolveByContactAsync"/>
+/// always applies — narrowing discovered descriptors to only those registered in
+/// <c>MembershipOptions.AccessConferringRoles</c> for the target entity, covering both Contact- and
+/// Organization-typed lookups. Default <c>false</c> leaves <see cref="ResolveAsync"/>'s existing
+/// unfiltered (all-discovered-descriptors) scoping behavior byte-identical — this option is an explicit
+/// opt-in for callers making an ACCESS decision (e.g. the accessible-record-set composer), never a
+/// change to the AI-scoping default. Ignored by <see cref="IMembershipResolverService.ResolveByContactAsync"/>,
+/// which already applies the registry filter unconditionally regardless of this flag's value.
+/// </param>
 public sealed record MembershipResolveOptions(
     IReadOnlyList<string>? Roles = null,
     IReadOnlyList<string>? IdentityTypes = null,
     IReadOnlyList<string>? IncludeRelated = null,
     int Limit = MembershipResolveOptions.DefaultLimit,
-    string? ContinuationToken = null)
+    string? ContinuationToken = null,
+    bool AccessConferringOnly = false)
 {
     /// <summary>Default per-page row limit when not specified by caller.</summary>
     public const int DefaultLimit = 500;
