@@ -18,20 +18,21 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
-/// The record-wide share expiry — spec FR-33 (d-adjacent), task 098: the Manage Access toolbar's ONE
-/// Expiration date, written to every active share of a record in one all-or-nothing transaction.
+/// The record-wide share expiry — spec FR-33, task 098: the Manage Access toolbar's ONE Expiration date,
+/// written to every active share of a record in one all-or-nothing transaction.
 ///
 /// <para><b>What these tests protect.</b> Which rows change (every active share of THIS record — contact and
 /// organization shares, lapsed ones included per the owner's 2026-09-11 decision — and nothing else), that
 /// they change in exactly ONE <see cref="IGenericEntityService.BulkUpdateAsync"/> (the atomic write task 096
 /// built; a per-row loop is the fail-open path this endpoint exists to replace), the exact value handed to
-/// the SDK, and whose participation cache is cleared afterwards.</para>
+/// the SDK, whose participation cache is cleared afterwards, and that every refusal writes nothing.</para>
 ///
-/// <para><b>Why the fake interprets the real filter.</b> <see cref="FakeShareTable"/> narrows by each
-/// predicate ONLY when the production <c>$filter</c> carries it — exactly as Dataverse would. So a filter that
-/// lost its root clause would hand back every record's shares, and one that lost <c>statecode eq 0</c> would
-/// hand back revoked ones; the "untouched" negatives below fail in both cases instead of passing against a
-/// fake that was told the answer.</para>
+/// <para><b>Why the fake is STRICT about the filter.</b> <see cref="FakeShareTable"/> applies each clause of
+/// the production <c>$filter</c> the way Dataverse would, and THROWS on a clause it does not understand. So a
+/// filter that lost its root clause hands back every record's shares, one that lost <c>statecode eq 0</c>
+/// hands back revoked ones, and one that GAINED a narrowing clause (say an expiry predicate copied from the read
+/// path, which would silently stop renewing lapsed shares) fails loudly instead of passing against a fake that
+/// ignored it.</para>
 ///
 /// <para>Seams: <see cref="DataverseWebApiClient"/> (virtual) for the reads, a STRICT
 /// <see cref="IDataverseService"/> mock for the write — any call other than the one bulk update throws — and
@@ -45,6 +46,7 @@ public class RecordShareExpiryTests
 
     private static readonly Guid MatterId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid OtherMatterId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+    private static readonly Guid ProjectId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid ContactId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OtherContactId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid UnrelatedContactId = Guid.Parse("55555555-5555-5555-5555-555555555555");
@@ -180,6 +182,26 @@ public class RecordShareExpiryTests
     }
 
     /// <summary>
+    /// Negative, and the sharper form of the one above: a share row that is ALSO linked to another record (two
+    /// root lookups — never written by the BFF, possible through an import or a form edit) confers access on
+    /// that other record too. Changing it here would change access to a record the caller's Write was never
+    /// checked on, so the whole request is refused and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_WhenAShareIsAlsoLinkedToAnotherRecord_Refuses409AndWritesNothing()
+    {
+        _table.SeedContactShare(ContactId, ExternalGrantRootType.Matter, MatterId);
+        _table.SeedContactShare(OtherContactId, ExternalGrantRootType.Matter, MatterId).ProjectId = ProjectId;
+
+        var result = await Send(NewExpiry);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(SetRecordShareExpiryEndpoint.ShareSpansRecordsReasonCode);
+        _bulkUpdates.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Negative: standing-grant access is unaffected. Standing access is a flag on the contact / organization
     /// and has no share row (task 042), so the distinguishing observable is that NOTHING is written except this
     /// record's share rows: one bulk update on the share table, no other SDK call (the mock is strict), and no
@@ -231,6 +253,22 @@ public class RecordShareExpiryTests
         var result = await Send(Today);
 
         OkBody(result).Should().Be(new SetRecordShareExpiryResponse(UpdatedCount: 1, ExpiresDate: Today));
+    }
+
+    /// <summary>
+    /// Defence in depth: the delegation filter denies an unresolvable record before the handler runs, but the
+    /// handler checks again and answers with a reason code and a trace id rather than a bare validation error.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_ForAnUnresolvableRecordType_Returns400WithReasonCodeAndWritesNothing()
+    {
+        var result = await Send(NewExpiry, recordType: "invoice");
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(SetRecordShareExpiryEndpoint.RecordUnresolvedReasonCode);
+        problem.ProblemDetails.Extensions.Should().ContainKey("traceId");
+        _bulkUpdates.Should().BeEmpty();
     }
 
     /// <summary>
@@ -315,7 +353,8 @@ public class RecordShareExpiryTests
 
     /// <summary>
     /// A failed transaction returns a reason code and a message that says only what is known: the change is
-    /// all-or-nothing, so the record is either fully at the new date or untouched — never half.
+    /// all-or-nothing, so the record is either fully at the new date or untouched — never half. The TITLE must
+    /// not claim "not applied" either: a transaction that timed out after committing DID apply.
     /// </summary>
     [Fact]
     public async Task SetShareExpiry_WhenTheTransactionFails_Returns500WithAnAllOrNothingMessage()
@@ -331,7 +370,42 @@ public class RecordShareExpiryTests
         var problem = Problem(result);
         problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(SetRecordShareExpiryEndpoint.WriteFailedReasonCode);
+        problem.ProblemDetails.Title.Should().Be("Expiry change not confirmed");
         problem.ProblemDetails.Detail.Should().Contain("all-or-nothing").And.Contain("2026-12-10");
+    }
+
+    /// <summary>When the record's shares cannot be read, nothing is written and the caller is told so.</summary>
+    [Fact]
+    public async Task SetShareExpiry_WhenTheSharesCannotBeRead_Returns500AndWritesNothing()
+    {
+        _table.SeedContactShare(ContactId, ExternalGrantRootType.Matter, MatterId);
+        _table.QueryFailure = new HttpRequestException("Dataverse unavailable");
+
+        var result = await Send(NewExpiry);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(SetRecordShareExpiryEndpoint.EnumerationFailedReasonCode);
+        _bulkUpdates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// An active share that came back without an id cannot be addressed by an update. Skipping it — as the
+    /// upsert's own reader does, correctly for an upsert — would leave that share at its old, possibly later,
+    /// date while reporting success. The whole request is refused instead.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_WhenAShareHasNoId_Refuses500AndWritesNothing()
+    {
+        _table.SeedContactShare(ContactId, ExternalGrantRootType.Matter, MatterId);
+        _table.SeedContactShare(OtherContactId, ExternalGrantRootType.Matter, MatterId).Id = Guid.Empty;
+
+        var result = await Send(NewExpiry);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(SetRecordShareExpiryEndpoint.ShareUnidentifiableReasonCode);
+        _bulkUpdates.Should().BeEmpty();
     }
 
     /// <summary>
@@ -356,9 +430,9 @@ public class RecordShareExpiryTests
     // Driving the real handler
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private Task<IResult> Send(DateOnly? expiry) =>
+    private Task<IResult> Send(DateOnly? expiry, string recordType = "matter") =>
         SetRecordShareExpiryEndpoint.Handle(
-            new SetRecordShareExpiryRequest("matter", MatterId, expiry),
+            new SetRecordShareExpiryRequest(recordType, MatterId, expiry),
             _client.Object,
             _dataverse.Object,
             _cache.Object,
@@ -403,6 +477,9 @@ public class RecordShareExpiryTests
         private readonly List<ExternalGrantRow> _rows = new();
         private readonly List<(Guid OrganizationId, Guid ContactId, int StateCode)> _memberships = new();
         private int _seq;
+
+        /// <summary>Set to make the share query fail outright.</summary>
+        public Exception? QueryFailure { get; set; }
 
         public ExternalGrantRow SeedContactShare(
             Guid contactId, ExternalGrantRootType rootType, Guid rootId,
@@ -454,6 +531,9 @@ public class RecordShareExpiryTests
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string? filter, string? select, int? top, int? _, CancellationToken _) =>
                 {
+                    if (QueryFailure is not null)
+                        throw QueryFailure;
+
                     RejectUnknownColumns(select);
                     return MatchShares(filter).Take(top ?? int.MaxValue).ToList();
                 });
@@ -481,28 +561,42 @@ public class RecordShareExpiryTests
             }
         }
 
-        /// <summary>Each predicate narrows ONLY when the production filter carries it — as Dataverse would.</summary>
+        private static IEnumerable<string> Clauses(string? filter)
+            => (filter ?? string.Empty).Split(" and ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        private static InvalidOperationException UnknownClause(string clause) => new(
+            $"The fake does not understand the filter clause '{clause}'. Dataverse WOULD narrow by it, so ignoring " +
+            "it would let a narrowing regression pass — teach the fake the clause deliberately.");
+
+        /// <summary>Applies every clause as Dataverse would; throws on a clause it does not understand.</summary>
         private IEnumerable<ExternalGrantRow> MatchShares(string? filter)
         {
             IEnumerable<ExternalGrantRow> rows = _rows;
-            if (filter is null)
-                return rows;
 
-            var root = Regex.Match(filter,
-                @"(_sprk_project_value|_sprk_matter_value|_sprk_workassignment_value) eq ([0-9a-fA-F-]{36})");
-            if (root.Success)
+            foreach (var clause in Clauses(filter))
             {
-                var id = Guid.Parse(root.Groups[2].Value);
-                rows = root.Groups[1].Value switch
+                var root = Regex.Match(clause,
+                    @"^(_sprk_project_value|_sprk_matter_value|_sprk_workassignment_value) eq ([0-9a-fA-F-]{36})$");
+                if (root.Success)
                 {
-                    "_sprk_project_value" => rows.Where(r => r.ProjectId == id),
-                    "_sprk_matter_value" => rows.Where(r => r.MatterId == id),
-                    _ => rows.Where(r => r.WorkAssignmentId == id),
-                };
-            }
+                    var id = Guid.Parse(root.Groups[2].Value);
+                    rows = root.Groups[1].Value switch
+                    {
+                        "_sprk_project_value" => rows.Where(r => r.ProjectId == id),
+                        "_sprk_matter_value" => rows.Where(r => r.MatterId == id),
+                        _ => rows.Where(r => r.WorkAssignmentId == id),
+                    };
+                    continue;
+                }
 
-            if (filter.Contains("statecode eq 0", StringComparison.Ordinal))
-                rows = rows.Where(r => r.StateCode == 0);
+                if (clause == "statecode eq 0")
+                {
+                    rows = rows.Where(r => r.StateCode == 0);
+                    continue;
+                }
+
+                throw UnknownClause(clause);
+            }
 
             return rows;
         }
@@ -510,18 +604,25 @@ public class RecordShareExpiryTests
         private IEnumerable<(Guid OrganizationId, Guid ContactId, int StateCode)> MatchMembers(string? filter)
         {
             IEnumerable<(Guid OrganizationId, Guid ContactId, int StateCode)> members = _memberships;
-            if (filter is null)
-                return members;
 
-            var organization = Regex.Match(filter, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})");
-            if (organization.Success)
+            foreach (var clause in Clauses(filter))
             {
-                var id = Guid.Parse(organization.Groups[1].Value);
-                members = members.Where(m => m.OrganizationId == id);
-            }
+                var organization = Regex.Match(clause, @"^_sprk_organization_value eq ([0-9a-fA-F-]{36})$");
+                if (organization.Success)
+                {
+                    var id = Guid.Parse(organization.Groups[1].Value);
+                    members = members.Where(m => m.OrganizationId == id);
+                    continue;
+                }
 
-            if (filter.Contains("statecode eq 0", StringComparison.Ordinal))
-                members = members.Where(m => m.StateCode == 0);
+                if (clause == "statecode eq 0")
+                {
+                    members = members.Where(m => m.StateCode == 0);
+                    continue;
+                }
+
+                throw UnknownClause(clause);
+            }
 
             return members;
         }

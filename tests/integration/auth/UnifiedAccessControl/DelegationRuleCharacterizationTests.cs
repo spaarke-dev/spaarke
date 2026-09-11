@@ -2,6 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -364,6 +367,15 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
         _fixture.ProbedTargets.Should().Contain(("sprk_matters", matterId));
+
+        // "…and nothing is written" (acceptance criterion): the host's IDataverseService is the fixture's
+        // mock, and no test in this class legitimately writes through it, so Never is exact.
+        Mock.Get(_fixture.Services.GetRequiredService<IDataverseService>()).Verify(
+            d => d.BulkUpdateAsync(
+                It.IsAny<string>(), It.IsAny<List<(Guid id, Dictionary<string, object> fields)>>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never(),
+            "a denied request never reaches the handler, so no share is re-dated");
     }
 
     /// <summary>

@@ -664,7 +664,7 @@ estate-wide view.
 |---|---|---|---|---|---|---|---|
 | ✅ [done] 096 | `BulkUpdateAsync` → `ExecuteTransactionRequest` — genuinely all-or-nothing, system-wide (ISS-005 / #970) | FR-33 | — | — | ❌ | sonnet | high |
 | ✅ [done] 097 | Every grant bounded: an absent `ExpiryDate` on `/grant` · `/invite` · `/invite-and-grant` is **defaulted server-side** (keep existing, else today + 90); a past one → 400; + dev backfill of unbounded grants *(amended session 7 — was "mandatory/400": no client sends an expiry)* | FR-33 | — | — | ❌ | sonnet | high |
-| 🔲 [open] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) | FR-33 | 096,097 | — | ❌ | **opus** | high |
+| ✅ [done] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) — `POST …/set-record-share-expiry`; lapsed shares renewed too *(owner 2026-09-11)*; contract for 099 in `notes/task-098-record-share-expiry.md` §6 | FR-33 | 096,097 | — | ❌ | **opus** | high |
 | 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
 | 🔲 [open] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee | FR-33 | 097 | — | ❌ | sonnet | high |
 | 🔲 [open] 101 | "External shares by expiration" Dataverse views (operator-applied) | FR-33 | 097 | FR33-late | ✅ | sonnet | medium |
@@ -682,6 +682,9 @@ estate-wide view.
 >   2026-12-10, covered by the 2026-11-10 deadline above.
 > - **096 and 097 can run in parallel** — they touch different files (shared `Spaarke.Dataverse` vs the
 >   ExternalAccess endpoints). Both run `/conflict-check` first.
+> - ✅ 098 done 2026-09-11. **099 must show the endpoint's ProblemDetails `detail` verbatim** — every refusal
+>   carries a human message and a `reasonCode` (400 / 403 / 409 / 422 / 500; table in the 098 notes §6). A 500
+>   `write_failed` means "not confirmed", NOT "not applied": the picker must reload, never assume the old date.
 
 ## Wrap-up
 

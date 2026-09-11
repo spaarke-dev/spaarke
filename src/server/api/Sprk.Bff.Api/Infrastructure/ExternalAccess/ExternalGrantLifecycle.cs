@@ -223,10 +223,14 @@ internal static class ExternalGrantLifecycle
     /// Every ACTIVE row held at one root record, in the same shape as <see cref="QueryActiveRowsAsync"/>.
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="QueryActiveRowsAsync"/>, rows without a usable id are NOT discarded here: a caller
+    /// <para><b>WRITE-PATH ONLY.</b> It carries no expiry predicate — by design, so that lapsed shares are
+    /// selected and can be renewed (task 098, owner decision 2026-09-11). A READ that decides who has access
+    /// must use <c>ExternalParticipationService</c>'s filters, which apply <c>ExpiryPredicate</c>; reusing this
+    /// one there would silently stop enforcing expiry.</para>
+    /// <para>Unlike <see cref="QueryActiveRowsAsync"/>, rows without a usable id are NOT discarded here: a caller
     /// updating every row of a record must refuse rather than silently skip one (task 098). Exceptions
     /// propagate. <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads, so an over-bound
-    /// record is detectable instead of silently truncated.
+    /// record is detectable instead of silently truncated.</para>
     /// </remarks>
     internal static Task<List<ExternalGrantRow>> QueryActiveRowsForRootAsync(
         DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct)

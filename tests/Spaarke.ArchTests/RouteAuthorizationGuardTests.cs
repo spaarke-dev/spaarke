@@ -641,7 +641,20 @@ public class RouteAuthorizationGuardTests
     //            /provision-project does. DelegationRuleFilter's target map gained the matching
     //            UnsecureProjectRequest case in the same change; without it the filter would resolve no
     //            target and deny every call, which is fail-closed but reads as a bug.
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 118 (2026-09-11, unified-access-control-r2 task 098):
+    //
+    //   098  +1  Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs ADDED — POST /set-record-share-expiry,
+    //            the Manage Access toolbar Expiration (spec FR-33): one expiry written to every active
+    //            sprk_externalrecordaccess row of a record in one transaction. Classified per the maintenance
+    //            procedure: it serves NEITHER document metadata nor file bytes — it mutates the expiry of
+    //            share rows — so there is no GovernedFiles entry to add; the count alone moves.
+    //
+    //            Same shape as 061: the route sits in the external-access admin group, so it inherits
+    //            AddDelegationRuleFilter() (Write on the record, evaluated as the CALLER over OBO), and
+    //            DelegationRuleFilter's target map gained the matching SetRecordShareExpiryRequest case in
+    //            the same change. Caught by this census at review time, before CI — it is doing its job.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

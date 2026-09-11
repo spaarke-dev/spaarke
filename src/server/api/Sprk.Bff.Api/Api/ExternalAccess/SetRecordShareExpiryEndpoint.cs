@@ -1,7 +1,8 @@
+using System.Security.Claims;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
-using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -18,7 +19,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// the client is the non-atomic path: a failure part-way through while SHORTENING leaves some shares at the
 /// later date — access that outlives the date the user just set. Here every row is written by ONE
 /// <see cref="IGenericEntityService.BulkUpdateAsync"/>, which task 096 made a genuine
-/// <c>ExecuteTransactionRequest</c>: every share gets the date, or none does.</para>
+/// <c>ExecuteTransactionRequest</c>: every share read at the start gets the date, or none does. A share
+/// created by a concurrent <c>/grant</c> between that read and the commit keeps <c>/grant</c>'s own date —
+/// still bounded (task 097), and task 099 sends the toolbar date with every add, so the two converge.</para>
 ///
 /// <para><b>Which rows.</b> Every <c>statecode = 0</c> row whose root lookup is this record, selected by ONE
 /// server-side filter built from the request's own recordType + recordId. The client never supplies row ids,
@@ -30,7 +33,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <para><b>Authorization</b> is the group-level <see cref="DelegationRuleFilter"/>: Write on THIS record,
 /// evaluated as the caller (OBO), before the handler runs. The filter and the handler resolve the target
 /// through the same <see cref="ResolveRoot"/>, and this request has no legacy <c>projectId</c>, so the
-/// record that was authorized and the rows that are written cannot diverge.</para>
+/// record that was authorized and the rows that are written cannot diverge. The write itself runs app-only
+/// (as <c>/grant</c>'s does), so the caller is recorded in the log lines.</para>
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: authorization by the route group's endpoint filter.
@@ -38,6 +42,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// </summary>
 public static class SetRecordShareExpiryEndpoint
 {
+    /// <summary>The request named no record the handler can resolve (unreachable through the route — the filter denies first).</summary>
+    internal const string RecordUnresolvedReasonCode = "sdap.access.share_expiry.record_unresolved";
+
     /// <summary>The request named no expiry. Unlike <c>/grant</c> there is nothing to default to: the date IS the request.</summary>
     internal const string ExpiryRequiredReasonCode = "sdap.access.share_expiry.expiry_required";
 
@@ -47,7 +54,16 @@ public static class SetRecordShareExpiryEndpoint
     /// <summary>More shares than one transaction may carry, so nothing was changed.</summary>
     internal const string TooManySharesReasonCode = "sdap.access.share_expiry.too_many_shares";
 
-    /// <summary>The single transaction failed. All-or-nothing: no share was left half-updated.</summary>
+    /// <summary>A share was read but carries no usable id, so it cannot be addressed; nothing was changed.</summary>
+    internal const string ShareUnidentifiableReasonCode = "sdap.access.share_expiry.share_unidentifiable";
+
+    /// <summary>A share is also linked to ANOTHER record, so changing it here would change access there; nothing was changed.</summary>
+    internal const string ShareSpansRecordsReasonCode = "sdap.access.share_expiry.share_spans_records";
+
+    /// <summary>
+    /// The transaction was attempted and its outcome could not be confirmed. All-or-nothing: the record is
+    /// either fully at the new date or untouched — never half.
+    /// </summary>
     internal const string WriteFailedReasonCode = "sdap.access.share_expiry.write_failed";
 
     /// <summary>
@@ -63,6 +79,9 @@ public static class SetRecordShareExpiryEndpoint
     /// </remarks>
     internal const int MaxSharesPerRecord = 1000;
 
+    /// <summary>Title for the refusals where it is certain that no share was changed.</summary>
+    private const string NotAppliedTitle = "Expiry not applied";
+
     /// <summary>Registers the route on the external-access management group.</summary>
     public static RouteGroupBuilder MapSetRecordShareExpiryEndpoint(this RouteGroupBuilder group)
     {
@@ -77,6 +96,7 @@ public static class SetRecordShareExpiryEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -89,10 +109,11 @@ public static class SetRecordShareExpiryEndpoint
     /// <returns>
     /// 200 with the number of shares now carrying the date (0 when the record has none — the client then keeps
     /// the date as the default for the next share it adds, task 099). 400 when the expiry is missing or before
-    /// today. 422 when the record has more shares than one transaction may carry. 500, with a reason code and
-    /// a message, when the shares could not be read or the transaction failed.
+    /// today. 409 when a share is also linked to another record. 422 when the record has more shares than one
+    /// transaction may carry. 500, with a reason code and a message, when the shares could not be read or
+    /// addressed, or the transaction could not be confirmed.
     /// </returns>
-    public static async Task<IResult> Handle(
+    internal static async Task<IResult> Handle(
         SetRecordShareExpiryRequest request,
         DataverseWebApiClient dataverseClient,
         IDataverseService dataverseService,
@@ -108,15 +129,19 @@ public static class SetRecordShareExpiryEndpoint
         // pipeline it cannot see.
         var root = ResolveRoot(request);
         if (!root.Ok)
-            return ProblemDetailsHelper.ValidationError(root.Error!);
+            return Refused(httpContext, StatusCodes.Status400BadRequest, "Validation Error",
+                RecordUnresolvedReasonCode, root.Error!);
 
         if (request.ExpiryDate is not { } expiry)
-            return ExpiryRequired(httpContext);
+            return Refused(httpContext, StatusCodes.Status400BadRequest, "Validation Error",
+                ExpiryRequiredReasonCode, "ExpiryDate is required: it is the date every share on this record will end.");
 
         // Same rule as /grant (task 097): Date Only, UTC "today", today itself valid.
         var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
         if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(expiry, today, httpContext) is { } pastExpiry)
             return pastExpiry;
+
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
 
         // ── Enumerate: every active share of THIS record, one server-side filter ──
         List<ExternalGrantRow> shares;
@@ -128,9 +153,10 @@ public static class SetRecordShareExpiryEndpoint
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex,
-                "[SHARE-EXPIRY] Could not read the active shares of {RootType} {RootId}. Nothing was changed.",
-                root.Type, root.Id);
-            return NotApplied(httpContext, StatusCodes.Status500InternalServerError, EnumerationFailedReasonCode,
+                "[SHARE-EXPIRY] Could not read the active shares of {RootType} {RootId} (caller {CallerOid}). " +
+                "Nothing was changed.", root.Type, root.Id, callerOid);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotAppliedTitle,
+                EnumerationFailedReasonCode,
                 "The shares on this record could not be read, so no expiry was changed. Try again.");
         }
 
@@ -140,7 +166,8 @@ public static class SetRecordShareExpiryEndpoint
                 "[SHARE-EXPIRY] {RootType} {RootId} has more than {Max} active shares — more than one " +
                 "transaction may carry. Refusing rather than updating a subset.",
                 root.Type, root.Id, MaxSharesPerRecord);
-            return NotApplied(httpContext, StatusCodes.Status422UnprocessableEntity, TooManySharesReasonCode,
+            return Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotAppliedTitle,
+                TooManySharesReasonCode,
                 $"This record has more than {MaxSharesPerRecord} active shares, which is more than one change " +
                 "can update together. No expiry was changed.");
         }
@@ -152,14 +179,33 @@ public static class SetRecordShareExpiryEndpoint
             logger.LogError(
                 "[SHARE-EXPIRY] An active share of {RootType} {RootId} came back without an id. Nothing was changed.",
                 root.Type, root.Id);
-            return NotApplied(httpContext, StatusCodes.Status500InternalServerError, EnumerationFailedReasonCode,
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotAppliedTitle,
+                ShareUnidentifiableReasonCode,
                 "One of the shares on this record could not be identified, so no expiry was changed.");
+        }
+
+        // A share row carrying a SECOND root lookup confers access on that other record too — the read path
+        // grants every populated root. Re-dating it, or reviving it under "Renew them too", would change access
+        // to a record the caller's Write was never checked on. The BFF never writes such a row, but an import or
+        // a form edit can. Refused rather than skipped: skipping would leave it at its old date on THIS record.
+        var spanning = shares.Count(s => RootLookupCount(s) > 1);
+        if (spanning > 0)
+        {
+            logger.LogError(
+                "[SHARE-EXPIRY] {Count} active share(s) of {RootType} {RootId} are also linked to another record. " +
+                "Refusing: changing them would change access to a record the caller's Write was not checked on.",
+                spanning, root.Type, root.Id);
+            return Refused(httpContext, StatusCodes.Status409Conflict, NotAppliedTitle,
+                ShareSpansRecordsReasonCode,
+                $"{spanning} share(s) on this record are also linked to another record, so changing their expiry " +
+                "here would change access to that record too. No expiry was changed; correct those shares first.");
         }
 
         if (shares.Count == 0)
         {
             logger.LogInformation(
-                "[SHARE-EXPIRY] {RootType} {RootId} has no active shares; nothing to update.", root.Type, root.Id);
+                "[SHARE-EXPIRY] {RootType} {RootId} has no active shares; nothing to update (caller {CallerOid}).",
+                root.Type, root.Id, callerOid);
             return TypedResults.Ok(new SetRecordShareExpiryResponse(UpdatedCount: 0, ExpiresDate: expiry));
         }
 
@@ -176,22 +222,24 @@ public static class SetRecordShareExpiryEndpoint
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex,
-                "[SHARE-EXPIRY] The transaction setting {Count} shares of {RootType} {RootId} to {Expiry} failed.",
-                shares.Count, root.Type, root.Id, expiry);
+                "[SHARE-EXPIRY] The transaction setting {Count} shares of {RootType} {RootId} to {Expiry} failed " +
+                "(caller {CallerOid}).", shares.Count, root.Type, root.Id, expiry, callerOid);
 
             // Truthful by construction: a transaction whose OUTCOME is unknown (e.g. a timeout after commit)
-            // may have applied — so this does not claim "nothing changed", only "never half".
-            return NotApplied(httpContext, StatusCodes.Status500InternalServerError, WriteFailedReasonCode,
+            // may have applied — so neither the title nor the detail claims "nothing changed", only "never half".
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, "Expiry change not confirmed",
+                WriteFailedReasonCode,
                 $"The expiry could not be confirmed as applied. The change is all-or-nothing: either every share on " +
                 $"this record now ends on {expiry:yyyy-MM-dd} or none does. Reload to see which, then retry if needed.");
         }
 
         logger.LogInformation(
-            "[SHARE-EXPIRY] Set {Count} active shares of {RootType} {RootId} to expire {Expiry} " +
+            "[SHARE-EXPIRY] Caller {CallerOid} set {Count} active shares of {RootType} {RootId} to expire {Expiry} " +
             "({Renewed} of them had already lapsed and are renewed).",
-            shares.Count, root.Type, root.Id, expiry, shares.Count(s => s.ExpiresDate is { } d && d < today));
+            callerOid, shares.Count, root.Type, root.Id, expiry,
+            shares.Count(s => s.ExpiresDate is { } d && d < today));
 
-        await InvalidateAffectedCachesAsync(shares, dataverseClient, cache, httpContext, logger, ct);
+        await InvalidateAffectedCachesAsync(shares, dataverseClient, cache, httpContext.User, logger);
 
         return TypedResults.Ok(new SetRecordShareExpiryResponse(UpdatedCount: shares.Count, ExpiresDate: expiry));
     }
@@ -218,10 +266,14 @@ public static class SetRecordShareExpiryEndpoint
         return new GrantExternalAccessEndpoint.GrantRootResolution(true, type, recordId, null);
     }
 
+    private static int RootLookupCount(ExternalGrantRow row)
+        => (row.ProjectId.HasValue ? 1 : 0) + (row.MatterId.HasValue ? 1 : 0) + (row.WorkAssignmentId.HasValue ? 1 : 0);
+
     /// <summary>
     /// Clears the participation cache of every contact whose access came through one of the updated shares:
     /// the contact on a contact share, and every ACTIVE member of the organization on an organization share.
-    /// Non-fatal throughout.
+    /// Non-fatal throughout, and deliberately NOT bound to the request's cancellation token: the write has
+    /// already committed, so a client that disconnects now must not stop the clean-up half-way.
     /// </summary>
     /// <remarks>
     /// <para><b>Freshness, not a security boundary.</b> The cache holds WHICH grants a contact has, not their
@@ -229,22 +281,25 @@ public static class SetRecordShareExpiryEndpoint
     /// date is today or later, so the grantee is admitted today either way; the only window is the
     /// ≤60-second tail after an expiry midnight, which every grant already has on the read path and which
     /// invalidating at write time cannot shorten. What invalidation does buy is prompt RENEWAL: a lapsed share
-    /// this request revives is visible on the next evaluation instead of up to 60 seconds later.</para>
+    /// this request revives is normally visible on the next evaluation — at worst after the 60-second TTL,
+    /// because a read already in flight can re-populate the entry after the removal (the participation service
+    /// caches fire-and-forget).</para>
     ///
-    /// <para>Organization shares name no contact, so their members are expanded through the existing
-    /// <see cref="ExternalOrganizationMembership"/> reader (task 020) rather than a new one. An organization
-    /// over its bound, or one whose members cannot be read, is logged and left to the TTL.</para>
+    /// <para><b>Why organization members are expanded here when /grant, /revoke and /close-project do not.</b>
+    /// Those endpoints skipped it because it needed a members-of-organization read that did not exist on the
+    /// write path. It does now — <see cref="ExternalOrganizationMembership"/> (task 020) — and this task's
+    /// constraint asks for it, so the reader is reused rather than the gap copied. An organization over its
+    /// bound, or one whose members cannot be read, is logged and left to the TTL.</para>
     /// </remarks>
     private static async Task InvalidateAffectedCachesAsync(
         IReadOnlyList<ExternalGrantRow> shares,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
-        HttpContext httpContext,
-        ILogger logger,
-        CancellationToken ct)
+        ClaimsPrincipal caller,
+        ILogger logger)
     {
-        var tenantId = ExtractTenantId(httpContext);
-        if (string.IsNullOrEmpty(tenantId))
+        var tenantId = TenantResolution.ResolveTenantId(caller);
+        if (tenantId is null)
         {
             logger.LogWarning(
                 "[SHARE-EXPIRY] No tenant claim — skipping cache invalidation; affected contacts refresh within the participation TTL.");
@@ -265,7 +320,7 @@ public static class SetRecordShareExpiryEndpoint
             try
             {
                 var members = await ExternalOrganizationMembership.QueryActiveMembersAsync(
-                    dataverseClient, organizationId, ct);
+                    dataverseClient, organizationId, CancellationToken.None);
 
                 if (members.ExceededBound)
                 {
@@ -278,7 +333,7 @@ public static class SetRecordShareExpiryEndpoint
 
                 contactIds.UnionWith(members.ContactIds);
             }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
+            catch (Exception ex)
             {
                 logger.LogWarning(ex,
                     "[SHARE-EXPIRY] Could not read the members of Organization {OrganizationId}; their caches " +
@@ -292,9 +347,9 @@ public static class SetRecordShareExpiryEndpoint
             {
                 await cache.RemoveAsync(
                     tenantId, ExternalParticipationService.ExternalAccessResource, contactId.ToString(),
-                    ExternalParticipationService.CacheVersion, ct: ct);
+                    ExternalParticipationService.CacheVersion, ct: CancellationToken.None);
             }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
+            catch (Exception ex)
             {
                 logger.LogWarning(ex,
                     "[SHARE-EXPIRY] Failed to invalidate the participation cache for Contact {ContactId}. Non-critical.",
@@ -305,34 +360,15 @@ public static class SetRecordShareExpiryEndpoint
         logger.LogDebug("[SHARE-EXPIRY] Invalidated the participation cache for {Count} contact(s).", contactIds.Count);
     }
 
-    private static IResult ExpiryRequired(HttpContext httpContext)
-        => Results.Problem(
-            statusCode: StatusCodes.Status400BadRequest,
-            title: "Validation Error",
-            detail: "ExpiryDate is required: it is the date every share on this record will end.",
-            extensions: new Dictionary<string, object?>
-            {
-                ["traceId"] = httpContext.TraceIdentifier,
-                ["reasonCode"] = ExpiryRequiredReasonCode,
-            });
-
-    /// <summary>The single "not applied" shape: ProblemDetails with a reason code (ADR-003) and the trace id (ADR-019).</summary>
-    private static IResult NotApplied(HttpContext httpContext, int statusCode, string reasonCode, string detail)
+    /// <summary>The single refusal shape: ProblemDetails with a reason code (ADR-003) and the trace id (ADR-019).</summary>
+    private static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)
         => Results.Problem(
             statusCode: statusCode,
-            title: "Expiry not applied",
+            title: title,
             detail: detail,
             extensions: new Dictionary<string, object?>
             {
                 ["traceId"] = httpContext.TraceIdentifier,
                 ["reasonCode"] = reasonCode,
             });
-
-    /// <summary>
-    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
-    /// Returns null when no claim is present (in which case cache invalidation is skipped).
-    /// </summary>
-    private static string? ExtractTenantId(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 }

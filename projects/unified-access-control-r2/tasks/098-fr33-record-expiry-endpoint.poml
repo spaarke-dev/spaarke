@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-33 — one atomic "set the expiry of every share on this record" endpoint (reuses BulkUpdateAsync)</title>
     <phase>FR-33 External grant expiry</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New mutation endpoint on the access-control surface; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -85,7 +85,23 @@
     <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Consumed by task 099.</notes>
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Consumed by task 099.
+
+    COMPLETED 2026-09-11 (session 8). Full record: notes/task-098-record-share-expiry.md.
+    - Route POST /api/v1/external-access/set-record-share-expiry; request { recordType, recordId, expiryDate }
+      (no legacy projectId); 200 { updatedCount, expiresDate }. Contract table for task 099 in the notes §6.
+    - OWNER DECISION 2026-09-11 "Renew them too": every statecode=0 share gets the date, lapsed ones included.
+    - PREMISES CORRECTED (12th wrong-task-file finding): (1) DelegationRuleFilter needed a NEW case — this file
+      listed it only as a reference, and without it the route denies every caller; (2) the NFR-01 "fail-open
+      cache window" premise is false — the cache holds no dates and a past expiry is rejected, so invalidation
+      is freshness (it speeds renewal), not a security boundary; (3) sprk_expiresdate is Format=DateOnly,
+      Behavior=TimeZoneIndependent (live metadata) — SDK value is midnight, DateTimeKind.Unspecified.
+    - Escalation trigger evaluated: rows resolve with ONE server-side filter — did not fire.
+    - Added beyond the literal criteria, from review: 409 refusal for a share also linked to another record
+      (the constraint "never touch another record's grants"); 422 above 1000 shares; refusal of an id-less row.
+    - Verified: 6/6 perturbations caught (P5/P6 re-run after an invalid first run); full Sprk.Bff.Api.Tests
+      12,300/0/58 at 23953342a; ArchTests census 117 -> 118 (caught by adr-check); publish +0.01 MB
+      (45.40 -> 45.41, 214 files each side); no vulnerable packages.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

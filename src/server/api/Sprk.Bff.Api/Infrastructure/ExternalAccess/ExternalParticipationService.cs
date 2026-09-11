@@ -1248,6 +1248,13 @@ public class ExternalParticipationService
     /// Without the bump, entries written under the old shape deserialize into the new one with levels
     /// absent, reproducing exactly the bug above for one TTL after every deploy.
     /// </para>
+    /// <para>
+    /// ⚠️ It holds NO expiry dates — expiry is applied by the read <c>$filter</c> when an entry is built. The
+    /// write paths rely on that: <c>/set-record-share-expiry</c> (task 098) and <c>/grant</c> treat a failed
+    /// invalidation as a freshness issue only, because a changed date that is today or later cannot change
+    /// today's answer. If a date is ever cached here, a failed invalidation after a SHORTENING keeps the old
+    /// date for one TTL — revisit those invalidators when you change this shape.
+    /// </para>
     /// </summary>
     private sealed class CachedGrantSet
     {
