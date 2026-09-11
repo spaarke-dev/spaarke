@@ -81,7 +81,8 @@ public record DocumentIdentityResponse(
     RelatedRecordIdentity? RelatedRecord,
     /// <summary>
     /// Why there is no identity, when <see cref="Resolved"/> is false: <c>not_cloud_document</c> (a local file),
-    /// <c>not_resolvable</c> (Graph found nothing at the URL), <c>not_spaarke_document</c> (the file exists but no
+    /// <c>not_resolvable</c> (Graph will not resolve the URL for this caller — no such item, or not visible to them;
+    /// SharePoint does not distinguish the two), <c>not_spaarke_document</c> (the file exists but no
     /// <c>sprk_document</c> tracks it), or <c>identity_conflict</c> (a row holds this file's item id under a different
     /// drive — NOT a new document; do not offer save-as-new). Null when resolved.
     /// </summary>

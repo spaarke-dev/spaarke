@@ -1449,3 +1449,25 @@ What this proves:
 Word **desktop**, which has not yet been captured. Links 2 and 3 plus the desktop capture are moved into
 task 012 as its first acceptance criteria (2026-09-10); when they pass, this report's verdict moves from
 AMBER to GREEN.
+
+---
+
+## 22. 🟢 Links 2 and 3 — LIVE through the BFF (2026-09-10, EMPIRICALLY VERIFIED)
+
+Task 012's resolver was deployed to `spaarke-bff-dev` (commit `8fec97b2d`, SHA-256 hash-verified) and called
+through the BFF's own registered app, **OBO as a real user**. This is the only identity that can read SPE, so the
+§20 false-negative risk does not apply. The evidence is the resolver's own per-spelling log line from App Insights,
+and every row was unsampled (`itemCount = 1`). Full table: `notes/012-identity-resolver-decisions.md` §8.
+
+| Link | Result | Evidence |
+|---|---|---|
+| **2 — `/shares` resolves an SPE `contentstorage` URL** | 🟢 **GREEN** | The §19 capture (raw spaces), encoded per path segment to `%20`, resolved on the first try: `Attempts: encoded=200` |
+| **2 — encoding** | 🟢 **Answered** | Graph accepts the `%20` spelling. A double-encoded spelling (`%2520`) is refused, as is any path that does not exist, and in both cases with **403 accessDenied, not 404**. A token over raw spaces was never needed, so it was never tried. |
+| **3 — driveItem id + drive id match the stored row** | 🟢 **GREEN** | The item id resolved `sprk_document` `8c135b45-5da8-f111-aaab-7ced8ddc4a05` (matter PAT-191111) through `sprk_graphitemid_uk`, and the caller-side drive comparison passed. Neither the mismatch nor the empty-drive Warning was logged. The document's own open-links points back at the same file. |
+
+**A finding this spike did not anticipate:** Graph's 403 is overloaded. It means "not visible to you" *and* "no
+such item" (and "malformed spelling"), because SharePoint does not disclose which. Task 012 therefore maps 403 to
+"not resolvable", not to an outage (notes/012 §4).
+
+**Verdict: still AMBER, with one criterion left**, the Word **desktop** capture of `document.url`. Links 1 (web), 2, 3
+and 4 are GREEN. When the desktop value resolves through the same route, this report moves to GREEN.

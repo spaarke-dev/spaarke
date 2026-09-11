@@ -1,7 +1,8 @@
 # Task 012 — Document-identity resolver: decisions
 
-> FR-01 server. `POST /api/documents/resolve-identity`. Written 2026-09-10 and revised the same day after the
-> Step 9.5 review (§9 lists what the review changed).
+> FR-01 server. `POST /api/documents/resolve-identity`. Written 2026-09-10, revised the same day after the Step 9.5
+> review (§9), and revised again after the live run against dev (§8). The live run reversed one review decision:
+> Graph 403 now means "not resolvable", not 503. See §4.
 
 ## 1. Scope: 012 is required whatever the answer to Spike-1 §7
 
@@ -24,8 +25,7 @@ POST /api/documents/resolve-identity
 400 ProblemDetails  empty / over 4096 chars / not an absolute URI
 401                 the group's RequireAuthorization()
 403 ProblemDetails  resolved, but the caller may not read the sprk_document (no id, name or record)
-503 ProblemDetails  identity_resolution_unavailable     Graph or Dataverse could not answer (incl. an unhealthy alternate key)
-503 ProblemDetails  identity_resolution_access_denied   Graph refused /shares to a caller who has the file open
+503 ProblemDetails  identity_resolution_unavailable  Graph or Dataverse could not answer (incl. an unhealthy alternate key)
 ```
 
 **Rules for task 013 (the client):**
@@ -67,13 +67,13 @@ not-found. That is safe on its save path and unsafe here, because
 - The client's own "not found with provided alternate key values" literal also means absent.
 - Everything else is 503. A cancellation is rethrown as a cancellation, not as a 503.
 
-**Deliberate divergence 2: no #781 self-heal (revised after review).** Step 1 of the POML says to copy Compose's
-column-query fallback. Its constraints say "do not add a competing lookup path that tolerates duplicates", and its
-escalation trigger says "Do not add a tolerant secondary lookup" (NFR-07). The fallback picks one row from a
-duplicated set, which is exactly that. The POML's steps are directional and its constraints and triggers bind, so
-the fallback was removed. **This is CLAUDE.md §6.5 path C: pivot to comply.**
+**Deliberate divergence 2: no #781 self-heal.** Step 1 of the POML says to copy Compose's column-query fallback. Its
+constraints say "do not add a competing lookup path that tolerates duplicates", and its escalation trigger says "Do
+not add a tolerant secondary lookup" (NFR-07). The fallback picks one row from a duplicated set, which is exactly
+that. The POML's steps are directional and its constraints and triggers bind, so the fallback was removed. **This
+is CLAUDE.md §6.5 path C: pivot to comply.**
 
-- A duplicated or not-Active key now answers 503 "cannot determine", never a guessed row.
+- A duplicated or not-Active key answers 503 "cannot determine", never a guessed row.
 - Compose's save path still heals such rows when it touches them, and `scripts/Verify-ComposeIdentityKey.ps1`
   reports the key's health. The 503's log line names that script.
 - Removing the fallback also removed two duplicated rules the review flagged as drift risks: the key-fault predicate
@@ -114,55 +114,61 @@ filters were reversed, (2) would find no id and answer 400 on every call: it fai
   `not_spaarke_document`. **The residual is that they learn a Spaarke record tracks a file they can already open.**
   No id, name or related record leaks, and no reason code adds anything.
 - The acceptance criterion itself requires the 403, so this residual cannot be closed without changing the
-  criterion. It is recorded here rather than argued away. (The first draft of this note claimed that state "should
-  not arise"; the review showed that claim contradicted `FileAccessEndpoints.cs:48-52`.)
+  criterion. It is recorded here rather than argued away.
 
-**Graph 401/403 → 503, not "not resolvable" (revised after review).**
+**How Graph answers are mapped — revised by the live evidence.**
 
-- A 401 describes the token, not the item.
-- The caller has the file open in Word, so a 403 almost always means the environment's SPE container-type
-  registration or consent is broken. Reading it as "not a Spaarke document" would mint a duplicate for every
-  document in that environment.
-- The cost is a narrow existence signal: a caller probing arbitrary SPE `contentstorage` URLs could tell
-  "exists, no access" (503) from "nothing there" (200). To probe, they would have to know the container's GUID
-  (`CSP_{guid}`).
+- **401 → 503.** A 401 describes the token, not the item.
+- **403 → `not_resolvable`, with a Warning log.** The review had proposed 503, on the theory that a 403 for a file
+  the caller has open means a broken environment. **The live run disproved the theory that went with it.** Graph
+  answers **403 accessDenied**, not 404:
+  - for a path that does not exist inside an SPE container the caller *can* reach, and
+  - for a double-encoded spelling of a real file (§8).
 
-## 5. Encoding (SPIKE-1 link 2)
+  SharePoint does not distinguish "no such item" from "not yours". So a 403 is an answer, and mapping it to 503
+  would leave every missing file, and every file in another app's SPE container (e.g. Microsoft Loop), permanently
+  "unavailable".
+- **What remains:** a broken container-type registration (where every Spaarke file would 403) cannot be told apart
+  per request. So each 403 logs a Warning that names the registration as the thing to check. A burst of those
+  Warnings alongside Spaarke documents that users can open is the operational signal.
+
+## 5. Encoding (SPIKE-1 link 2) — answered live
 
 `SharingUrlToken.BuildCandidates` tries three spellings, in order, without duplicates:
 
 1. **`encoded`**: each raw path segment of the URL as sent, percent-encoded. It is right for what Office sends
-   (a raw path), including a `#` or a literal `%` in a file name. Without it, Graph would be handed a truncated or
-   sibling file.
+   (a raw path), including a `#` or a literal `%` in a file name.
 2. **`normalized`**: `Uri.AbsoluteUri`, right when the caller had already percent-encoded the URL.
 3. **`raw`**: the literal spelling the host returned.
 
-For the live capture, 1 and 2 are identical, so it takes two tries: exactly the two observed strings (a unit test
-pins this).
+**Live answer (2026-09-10, dev, unsampled App Insights):**
+
+- For the Office raw-space URL, the first spelling (`%20`) resolved: `Attempts: encoded=200`. Graph `/shares`
+  accepts the percent-encoded form over an SPE `contentstorage` path.
+- For the `%20` URL, the first spelling (double-encoded `%2520`) got 403 and the second (`normalized`, `%20`) got
+  200.
+- Whether Graph would accept a token built over RAW spaces was never reached, because it did not need to be.
 
 **How each answer is classified** (`DriveItemOperations.ResolveAcrossFormsAsync`, unit-tested through a fake fetch):
 
 | Answer | Classification |
 |---|---|
-| 400 / 404 | Try the next spelling |
-| 403 | Try the next spelling; if none resolves, AccessDenied |
+| 400 / 404 / 403 | Try the next spelling. If nothing resolves, 400/404 → NotFound and 403 → AccessDenied; the resolver maps both to `not_resolvable` |
 | A 200 missing ids | Try the next spelling; if none resolves, Unavailable |
 | 401, 429, 5xx, an unparseable error body (Kiota `ApiException`), Polly timeout or open circuit, transport failure, HttpClient timeout | Unavailable, at once |
 | Any other exception | Propagates as a 500. It is a defect, not an outage |
 
-Each resolution logs one line with every spelling's status:
-`Graph /shares resolution {Outcome} | Host | Attempts: encoded=404; raw=200`. That line is the running evidence
-for link 2.
-
-## 6. Drive corroboration (SPIKE-1 link 3)
+## 6. Drive corroboration (SPIKE-1 link 3) — answered live
 
 `sprk_graphitemid_uk` keys on the item id alone. The resolved `parentReference.driveId` is compared, ordinal, with
 the row's `sprk_graphdriveid`:
 
-- **A different recorded drive** answers `identity_conflict` (revised after review, where it used to be
-  `not_spaarke_document`). The pane must not treat it as new, because a save-as-new would collide with the key.
-- **An empty recorded drive** resolves on the item id, with a warning. Every current writer stamps the drive, and
-  refusing would push a real Spaarke document back to "new".
+- **A different recorded drive** answers `identity_conflict`.
+- **An empty recorded drive** resolves on the item id, with a warning.
+
+**Live:** the probed document resolved, and neither the mismatch Warning nor the empty-drive Warning was logged.
+Every row in the query was unsampled (`itemCount = 1`), so none could have been sampled away. The row therefore
+carries a recorded drive, and it equals the drive Graph resolved.
 
 ## 7. Placement Justification (bff-extensions.md)
 
@@ -181,26 +187,29 @@ the row's `sprk_graphdriveid`:
 - **No rate-limit policy**, matching the nine sibling routes. Each call costs up to 3 Graph calls, 1 Dataverse
   lookup and 1 authorization check.
 
-## 8. Status of the SPIKE-1 criteria, and the live checklist
+## 8. Live run — dev, 2026-09-10 (deployed `8fec97b2d`, as ralph.schroeder@spaarke.com via az CLI OBO)
 
-| Criterion | Status |
-|---|---|
-| LINK 2 encoding (every spelling tried, each status recorded) | Implemented and unit-pinned. Needs a **live call through the deployed BFF**. |
-| LINK 2 identity (through the BFF's registered app, OBO) | Implemented by construction. Needs a live call. |
-| LINK 3 drive corroboration | Implemented and unit-tested. Needs a live call for the probed document. |
-| DESKTOP capture | **Operator.** `document.url` from Word desktop. |
+Deploy: `Deploy-BffApi.ps1`. The package was 45.37 MB, 4/4 critical files were SHA-256 verified, and `/healthz`
+passed.
 
-**Live checklist.** OBO needs the Managed-Identity credential, so this runs on the dev App Service. A dev deploy of a
-worktree branch overwrites shared state (bff-extensions §F.4), so it needs operator sign-off first.
+| # | Input | HTTP | Answer | Graph attempts (App Insights) |
+|---|---|---|---|---|
+| 1 | Spaarke doc, **raw** (Word-on-web capture) | 200 | resolved → `8c135b45-5da8-f111-aaab-7ced8ddc4a05`, `sprk_matter` **PAT-191111** | `encoded=200` |
+| 2 | Same, **`%20`** (BFF open-links form) | 200 | same document | `encoded=403; normalized=200` |
+| 3 | Missing file in the same container | 503 → **fixed** | `identity_resolution_access_denied`, which led to the §4 revision; must answer 200 `not_resolvable` after the redeploy | `encoded=403; raw=403` |
+| 4 | `file:///C:/…/brief.docx` | 200 | `not_cloud_document` | none (Graph not called) |
+| 5, 6 | Empty url / no body | 400 | `document_url_required` ProblemDetails | — |
+| 7 | No token | 401 | the route is registered | — |
+| — | open-links for the resolved id | 200 | `desktopUrl` = the same file (`…/Document%20Library/Examiner%20report%20draft.docx`) | — |
 
-1. The probed Spaarke document, sent in raw form. Expect 200 resolved, with the id matching the record. Record
-   which spelling resolved.
-2. The same URL sent `%20`-encoded. Expect the same answer.
-3. **A NON-Spaarke SPE file**, meaning one in the container with no `sprk_document`. Expect 200
-   `not_spaarke_document`. This is the only live check of the not-found fault shape. A wrong guess there fails safe
-   (503), but it would make every non-Spaarke file un-saveable.
-4. A desktop-only file (`file:` URL). Expect 200 `not_cloud_document`.
-5. The Word-desktop `document.url` for item 1. Expect the same answer as the web capture.
+**Still open:**
+
+- **Word-desktop `document.url` capture** (operator). This is the last SPIKE-1 criterion. Then flip Spike-1 AMBER →
+  GREEN.
+- **A file that exists but has no `sprk_document`.** This is the only live check of the Dataverse not-found fault
+  shape. The Azure CLI cannot list OneDrive (AADSTS65002), and the BFF has no route that lists container children,
+  so it needs a URL from the operator: any OneDrive or SharePoint file. A wrong guess about that shape fails safe
+  (503), never as a duplicate.
 
 ## 9. Step 9.5 review: what changed (2026-09-10)
 
@@ -208,14 +217,14 @@ worktree branch overwrites shared state (bff-extensions §F.4), so it needs oper
 |---|---|
 | B8: tests used internals | Tested units made public (§3). No deviation needed. |
 | Self-heal = "tolerant secondary lookup" | Removed; path C (§3) |
-| Graph 401/403 read as "new" | Both are now 503 (§4) |
-| Kiota `ApiException`, Polly timeout and circuit escaped as 500 | Classified (§5); new `SharedItemResolutionTests` |
+| Graph 401/403 read as "new" | 401 → 503. 403 → `not_resolvable` + Warning, **after the live evidence** that Graph uses 403 for missing items (§4) |
+| Kiota `ApiException`, Polly timeout and circuit escaped as 500 | Classified (§5); `SharedItemResolutionTests` |
 | 403 system_failure from authz during an outage | Documented as indeterminate for 013 (§2) |
 | "Should not arise" claim | Corrected (§4) |
 | `/shares` path in telemetry | Documented as an accepted exposure (§2) |
 | Drift-prone predicate and rule copies | Gone with the self-heal (§3) |
 | Graph-classification test gap | `SharedItemResolutionTests` |
-| Not-found shape unverified live | Live checklist item 3 (§8) |
+| Not-found shape unverified live | Needs an operator URL (§8) |
 | Drive mismatch read as "new" | `identity_conflict` (§6) |
 | `#` and `%` in file names | `encoded` spelling first (§5) |
 | Cancellation reported as 503 | Rethrown (§3) |

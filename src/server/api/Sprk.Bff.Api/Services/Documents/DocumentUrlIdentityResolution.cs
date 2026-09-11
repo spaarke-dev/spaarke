@@ -129,17 +129,18 @@ public static class DocumentUrlIdentityResolution
                 return Result.None(ReasonNotResolvable);
 
             case SpeSharedItemOutcome.AccessDenied:
-                // The caller has this file open in Word, yet Graph refuses it to them through this app. That almost
-                // always means the environment's SPE container-type registration or consent is incomplete — and
-                // answering "not a Spaarke document" would then make the pane save EVERY Spaarke document as new.
+                // Measured live 2026-09-10 (notes/012 §8): Graph answers 403 — NOT 404 — for a path that does not exist
+                // inside an SPE container the caller CAN reach. SharePoint does not tell "no such item" from "not
+                // yours", so neither can this route: a 403 is an answer ("not resolvable"), not an outage. Reporting it
+                // as 503 would leave every missing file, and every file in another app's SPE container, "unavailable"
+                // forever. The case it cannot distinguish — a broken container-type registration, where EVERY Spaarke
+                // file would 403 — is surfaced here at Warning instead of being guessed at per request.
                 logger.LogWarning(
-                    "Document identity: Graph refused /shares for host {Host} to this caller. If users can open the " +
-                    "file in Word, check the BFF app's SharePoint Embedded container-type registration and consent.",
+                    "Document identity: Graph answered 403 for /shares on host {Host}. Expected for a missing path or " +
+                    "another app's container; if Spaarke documents users can open also answer this, check the BFF " +
+                    "app's SharePoint Embedded container-type registration and consent.",
                     documentUrl.Host);
-                throw new SdapProblemException(
-                    "identity_resolution_access_denied", "Document Identity Unavailable",
-                    "Spaarke could not look this document up with your access. If you can open it in Word, the " +
-                    "environment's SharePoint Embedded registration may be incomplete.", 503);
+                return Result.None(ReasonNotResolvable);
 
             case SpeSharedItemOutcome.Unavailable:
                 throw Unavailable("Microsoft Graph could not be reached to identify this document. Try again.");

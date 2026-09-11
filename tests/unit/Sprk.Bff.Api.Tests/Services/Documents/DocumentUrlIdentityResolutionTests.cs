@@ -56,25 +56,18 @@ public class DocumentUrlIdentityResolutionTests
             It.IsAny<HttpContext>(), It.IsAny<Uri>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
-    public async Task UrlGraphFindsNothingAt_IsNotResolvable_AndDataverseIsNeverAsked()
+    [Theory]
+    [InlineData(SpeSharedItemOutcome.NotFound)]
+    // Measured live 2026-09-10: Graph answers 403, not 404, for a path that does not exist inside an SPE container
+    // the caller can reach. SharePoint does not distinguish the two, so a 403 is an answer, not an outage.
+    [InlineData(SpeSharedItemOutcome.AccessDenied)]
+    public async Task UrlGraphWillNotResolve_IsNotResolvable_AndDataverseIsNeverAsked(SpeSharedItemOutcome outcome)
     {
-        var result = await Resolve(Spe(Outcome(SpeSharedItemOutcome.NotFound)));
+        // Dataverse is strict and never set up: any lookup would fail this test.
+        var result = await Resolve(Spe(Outcome(outcome)));
 
         result.Identity.Should().BeNull();
         result.NoIdentityReason.Should().Be(DocumentUrlIdentityResolution.ReasonNotResolvable);
-    }
-
-    [Fact]
-    public async Task GraphRefusingTheCaller_Is503_NeverNotASpaarkeDocument()
-    {
-        // The caller has the file open in Word; a refusal means a broken environment, and "not ours" would mint a
-        // duplicate for every document in it.
-        var act = () => Resolve(Spe(Outcome(SpeSharedItemOutcome.AccessDenied)));
-
-        var thrown = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
-        thrown.StatusCode.Should().Be(503);
-        thrown.Code.Should().Be("identity_resolution_access_denied");
     }
 
     [Fact]
