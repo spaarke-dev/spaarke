@@ -66,8 +66,14 @@ shared/taskpane/services/__tests__/communicationSuggestionsService.test.ts
 shared/taskpane/services/__tests__/createTodoLauncher.test.ts
 shared/taskpane/services/__tests__/quickSaveHelpers.test.ts
 
+# --- document identity (task 013, FR-01 client) — green from creation --------
+# Pins the rule that a 503 or a system_failure 403 from /resolve-identity is
+# "indeterminate", never "new" (treating it as new mints duplicate rows).
+shared/taskpane/services/__tests__/documentIdentityService.test.ts
+shared/taskpane/utils/__tests__/cleanGuid.test.ts
+
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
-# shared/adapters/__tests__/OutlookAdapter.test.ts               11/29
+# shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
 # shared/taskpane/components/__tests__/EntityPicker.test.tsx      28/32
 # shared/taskpane/components/__tests__/SaveFlow.test.tsx          16/25
