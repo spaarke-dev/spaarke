@@ -121,7 +121,15 @@ and how, is the owner's call. See notes/task-023-grant-upsert-expiry.md section 
 FR-09.
 
 Verified: build 0 errors 0 warnings, grant-lifecycle 29/29, access-control 794/794, ArchTests
-196/196, no new packages.</notes>
+196/196, no new packages.
+
+SUPERSEDED 2026-09-10 (session 7) by FR-33 / task 097 -- the escalation above is RESOLVED by the
+design, not decided in isolation. Every external grant now carries an expiry: an absent request
+value keeps the grant's existing expiry, else becomes today + 90; a past one is rejected (400). So
+there is no "clear" operation left to design -- clearing would re-create an unbounded grant, which
+FR-33 forbids. The null-means-leave-unchanged reading shipped here STANDS, and is now the FR-33
+rule for a grant that already carries a date. Status left as completed-with-escalation for the
+audit trail. See notes/task-097-mandatory-expiry.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

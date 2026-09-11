@@ -48,6 +48,24 @@ request. Spec FR-33, the decision record, the POML and TASK-INDEX were amended i
 Clients: **unchanged**. The 409 "matched an EXPIRED row, no new expiry" behaviour (task 023) is unchanged —
 an expired grant keeps its date and is reported, never silently renewed.
 
+## Tests
+
+| KEEP path | File | What it proves |
+|---|---|---|
+| `tests/integration/auth/` | `GrantLifecycleCharacterizationTests` | core rule on `CreateGrantAsync`: a new grant with no expiry → today + 90; an unbounded grant re-granted with no expiry → today + 90; a longer existing expiry is **not shortened** (twin of the existing test proving a shorter one is **not extended**). The class's 7 wall-clock dates were replaced by a fixed `Today`, since the core now takes `today` as a parameter |
+| `tests/integration/contract/` | `ExternalAccessContractTests` | through HTTP, on **both** grant routes: a past expiry → 400 + `sdap.access.grant.expiry_in_past` and **nothing written** (on invite-and-grant: no Contact, no CIAM bind); expiry = today → accepted and stored; no expiry → stored as today + 90. Fixture gained a `FakeTimeProvider` (fixed 2026-09-10) and create-payload capture |
+| `tests/integration/auth/` | `DelegationRuleCharacterizationTests` | pins escalation trigger 1's answer: with Write, a past-expiry body passes the delegation gate and gets the **handler's** 400; the read-only twin still gets the **gate's** 403 |
+
+## Perturbation (mandatory — committed first, each reverted with `git checkout`)
+
+| # | Perturbation | Result |
+|---|---|---|
+| P1 | Remove the default on both paths (an absent expiry is stored as null again) | **4 fail** — exactly the four default tests: `CreateGrant_NewGrantWithNoExpiry_…`, `Upsert_NoExpiryOnAnUnboundedExistingGrant_…`, `PostGrant_WithNoExpiry_…`, `InviteAndGrant_WithNoExpiry_…` |
+| P2 | Neutralise the past-date check | **4 fail** — the two contract past-date tests and the two delegation pins |
+
+(A first P1 attempt replaced the create-path expression with a bare `;` and failed to COMPILE — a broken
+perturbation, not a result. Redone with a per-path replacement; the numbers above are from the corrected run.)
+
 ## Backfill (LIVE DEV DATA — owner-authorised in the POML)
 
 **Before-state recorded here BEFORE any write.** Queried 2026-09-11 01:14 UTC against
@@ -90,6 +108,12 @@ after that date these grants' first reminders are silently missed.
 | 23 | `b64fbc28-be9c-f111-b8de-7ced8ddc4a05` | contact `2e419a4f-010d-f111-8342-7ced8d1dc988` | matter `86335ce3-4c18-f111-8343-7ced8d1dc988` |
 | 24 | `b74fbc28-be9c-f111-b8de-7ced8ddc4a05` | contact `8e9918a9-9021-f111-88b5-7c1e520aa4df` | matter `86335ce3-4c18-f111-8343-7ced8d1dc988` |
 | 25 | `9aed8ab9-c29c-f111-b8de-7ced8ddc4a05` | org `67577f8c-4301-f111-8407-7ced8d1dc988` | matter `042f4462-860e-f111-8342-7c1e520aa4df` |
+
+**After-state (re-queried 2026-09-11 01:17 UTC)**: **25 written, 0 skipped, 0 failed.** Active rows with a
+null expiry: **0** (was 25). Active total: **28** (unchanged). All 25 targets carry **`2026-12-10`**. Each row
+was re-read first and written only if still active with a null expiry, and each PATCH used `If-Match: *`
+(update-only — a PATCH to a missing id can never create a row). `sprk_externalrecordaccess` is audited
+(session 6), so every change is also in Dataverse audit history.
 
 ⚠️ **Observed in passing — pre-existing duplicate grants.** Contact `52bb55e7-…` holds **five** active rows
 on matter `b68299c6-…` (#7, #15–#18). These predate task 010's upsert; task 010 collapses them on the next
