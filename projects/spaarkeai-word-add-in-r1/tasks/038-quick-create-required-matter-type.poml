@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Pane quick-create: required Matter Type field, sent as matterTypeId</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>030 merged (the server accepts `matterTypeId`); 021 merged (it edits the same `SaveFlow.tsx`)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in the pane's save/create flow and possibly adds or extends a BFF lookup route; tags include frontend and bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI + wiring against a server contract task 030 defines. The one judgment call (how to list matter types) is bounded by §11 and an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030,021</deps>
+    <tags>frontend, office-addins, bff-api, quick-create, typescript, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision 2026-09-11 (project CLAUDE.md Decisions): "the type is required so should always be present; do not reject." Creating a Matter from the pane must collect a Matter Type — a required field the user cannot skip — and send it to `POST /api/office/quickcreate/matter` as `matterTypeId`. The server (task 030) accepts it but does NOT reject a request without it; the pane is what guarantees it is always present. The matter NUMBER is not this task's concern: it will be stamped on record create by a separate server-side numbering project and is not shown in the add-in.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent UI v9 in an Office add-in, capability-gated pane state, and BFF-backed client services. Follow ADRs strictly.</role>
+
+  <goal>When a user creates a Matter from the pane's related-record picker, they must choose a Matter Type before the create can be submitted; the request body carries `matterTypeId` (bare lowercase GUID, ADR-044); Project and Invoice quick-create are unchanged; the pane never displays or generates a matter number.</goal>
+
+  <context>
+    <background>
+      As-built (verified 2026-09-11): the picker's "Create new" option (`EntityPicker.tsx` `onQuickCreate` / `handleQuickCreate`) flows to `SaveFlow.tsx` `createRelatedRecord(type, name)`, which POSTs `JSON.stringify({ name })` only (`SaveFlow.tsx:~567`) and returns null on any failure.
+      Task 030 (rework) adds an optional `matterTypeId` to `QuickCreateRequest` and sets the `sprk_mattertype` lookup when it is supplied. Read its merged code and `notes/030-creation-service-decisions.md` for the exact field name and shape before wiring — do not assume.
+      No route lists matter types today: `git grep -i mattertype` over `src/client/office-addins` and `Sprk.Bff.Api` returned nothing on 2026-09-11. `GET /api/office/search/entities` (`OfficeEndpoints.cs` `MapSearchEndpoints`) searches Matters, Projects, Invoices, Accounts and Contacts (typeahead, min 2 chars). Live dev has 5 active matter types (LITG, CMRCL, PAT, TMRK, EMPL) in `sprk_mattertype_ref`, code in `sprk_mattertypecode`.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/EntityPicker.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.test.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Models/Office/QuickCreateRequest.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope: Matter quick-create. The Matter Type is REQUIRED in the UI — the create action is disabled (or blocked with a visible field error) until a type is chosen. Project and Invoice quick-create keep today's behaviour.</constraint>
+    <constraint source="owner">Scope: numbering. The pane MUST NOT generate, send, or display a matter number. Numbering belongs to a separate server-side project (project CLAUDE.md Decisions 2026-09-11).</constraint>
+    <constraint source="CLAUDE.md §11">Scope: how the pane lists matter types. Extend before creating: first evaluate extending `GET /api/office/search/entities` with a matter-type filter, or any existing lookup route; add a new route only if extension fails, with the three-question justification recorded in notes/. A 5-row reference list suits a dropdown loaded once, not a 2-character typeahead — say which you chose and why.</constraint>
+    <constraint source="ADR-044">Scope: the matter type id the pane holds and sends. Bare lowercase via the add-in's local `cleanGuid` (`shared/taskpane/utils/cleanGuid.ts`, ADR-012 Path A continuation).</constraint>
+    <constraint source="ADR-012">Scope: UI. Thin views under `shared/taskpane/`; do NOT import `@spaarke/ui-components` or any `Create*Wizard` code (Path A; NFR-03 — Xrm does not exist in an Office host).</constraint>
+    <constraint source="ADR-021">Scope: the new field. Fluent UI v9 only, semantic tokens, dark mode via the Office theme; the field is keyboard-reachable and labelled (NFR-11 announce on validation error).</constraint>
+    <constraint source="NFR-10">Scope: gating. No `hostType ===` conditional; quick-create is host-neutral.</constraint>
+    <constraint source="project">Scope: BFF, only if a route is added or extended. Root CLAUDE.md §10 applies in full — placement decision, publish size against a FRESH master build (Compress-Archive), CVE check, and a contract test in a NEW file (do not append to `OfficeEndpointsContractTests.cs`).</constraint>
+    <constraint source="project">Scope: build. There is no `build:prod`; `npm run build` needs `ADDIN_CLIENT_ID`, `TENANT_ID`, `BFF_API_CLIENT_ID`, `BFF_API_BASE_URL` (placeholders locally). Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md (Decisions 2026-09-11), task 030's merged code + notes, and `SaveFlow.tsx`/`EntityPicker.tsx`. Declare RIGOR FULL, sonnet @ high, DIRECTIONAL.</step>
+    <step order="1">Decide how the pane obtains the matter-type list (§11 constraint). Record the grep evidence and the decision in notes/038-*.md.</step>
+    <step order="2">Add the required Matter Type field to the Matter branch of quick-create; block submit until chosen; keep Project/Invoice unchanged.</step>
+    <step order="3">Send `matterTypeId` in the `POST /api/office/quickcreate/matter` body using task 030's exact field name.</step>
+    <step order="4">Tests: extend `SaveFlow.test.tsx` (and add a focused suite if cleaner): Matter create is blocked without a type; the request body carries a canonical `matterTypeId`; Project create sends no `matterTypeId`; no matter number is ever sent. If a BFF route changed, its contract test in a new file.</step>
+    <step order="5">Run typecheck (production stays 0), build, jest (baseline 10 failing suites / 84 tests — report before/after), and BFF gates if touched.</step>
+    <step order="6">Update TASK-INDEX (main session) and record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If listing matter types would require a new BFF route AND extending the existing search/lookup routes is not viable, STOP after recording the §11 analysis and escalate before adding the route.</trigger>
+    <trigger>If task 030's merged contract does not carry `matterTypeId` (or carries it under a different shape), STOP — do not invent a field; the server contract is 030's.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Quick-create posts `{ name }` only (`SaveFlow.tsx` `createRelatedRecord`); no matter-type field or lookup exists anywhere in the add-in or BFF (git grep 2026-09-11).</existing>
+    <extension>Yes — extends the existing picker "Create new" path and `createRelatedRecord`; no parallel create flow.</extension>
+    <cost-of-doing-nothing>Pane-created Matters arrive with no `sprk_mattertype`, so the server-side numbering component (separate project) has no type code to build `{typeCode}-{6 digits}` from, and the record is invalid for type-driven matter workflows — the owner's "the type is required" rule is unenforced.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/EntityPicker.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlow.test.tsx</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/038-quick-create-matter-type.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the pane's Matter quick-create, when no Matter Type is chosen, then the create cannot be submitted and a labelled field error is shown.</criterion>
+    <criterion testable="true">Given a chosen Matter Type, when the Matter is created, then the POST body carries `matterTypeId` as a bare lowercase GUID (ADR-044).</criterion>
+    <criterion testable="true">Negative: given Project or Invoice quick-create, when submitted, then the body carries no `matterTypeId` and behaviour is unchanged.</criterion>
+    <criterion testable="true">Negative: the pane never sends or displays a matter number.</criterion>
+    <criterion testable="true">The matter-type list source is justified per §11 in notes/, with grep evidence; if a BFF route was added or extended, it has a contract test in a new file and the §10 gates are recorded.</criterion>
+    <criterion testable="true">No `hostType ===` conditional and no `@spaarke/ui-components` / `Create*Wizard` import was added.</criterion>
+    <criterion testable="true">`npm run typecheck` production errors stay 0, `npm run build` succeeds, and no previously-passing jest test regressed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-09-11 by the main session from the owner's matter-type decision (task 030 escalation). Sequenced after 021 because both edit `SaveFlow.tsx`. The numbering component itself is out of r1 — see `notes/030-numbering-handoff.md`.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

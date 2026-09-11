@@ -1,7 +1,7 @@
 # Task Index — `spaarkeai-word-add-in-r1`
 
 > **Generated**: 2026-09-04 by `/project-pipeline` (initialize-only)
-> **Total**: 42 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment)
+> **Total**: 43 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment; 038 added 2026-09-11 — required Matter Type on pane quick-create, from the owner's task-030 decision)
 > **Status legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked · ⏭️ deferred
 
 **Execute via `task-execute` only.** Never read a POML and implement manually (root CLAUDE.md §4).
@@ -229,6 +229,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 035 | FR-14: Add To Do carrying document **and** related record | 🔲 | FULL | sonnet / high | P3-c | 013, 026 |
 | 036 | FR-15: Send Email via Outlook with document + record links | 🔲 | FULL | sonnet / high | P3-c | 026 |
 | 037 | FR-17: wire `quickSave` and `shareDocument` ribbon commands | 🔲 | FULL | sonnet / high | P3-c | 011, 010 |
+| 038 | Pane quick-create: **required Matter Type** field, sent as `matterTypeId` (owner decision 2026-09-11; the pane never shows or sends a number) — added 2026-09-11 | 🔲 | FULL | sonnet / high | — | 030, 021 (same `SaveFlow.tsx`) |
 
 **Gate**: a pane-created Matter is complete · Find returns permission-trimmed results with a **passing negative test**.
 
