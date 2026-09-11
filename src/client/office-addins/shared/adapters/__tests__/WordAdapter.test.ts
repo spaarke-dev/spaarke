@@ -405,12 +405,39 @@ describe('WordAdapter', () => {
         expect(capabilities.canGetRecipients).toBe(false);
         expect(capabilities.canGetSender).toBe(false);
         expect(capabilities.canGetDocumentContent).toBe(true);
+        expect(capabilities.canGetDocumentUrl).toBe(true);
         expect(capabilities.canSaveAsPdf).toBe(true);
         expect(capabilities.canSaveAsEml).toBe(false);
         expect(capabilities.canInsertLink).toBe(true);
         expect(capabilities.canAttachFile).toBe(false);
         expect(capabilities.minApiVersion).toBe('1.3');
         expect(capabilities.supportedRequirementSet).toBe('WordApi 1.3');
+      });
+    });
+
+    describe('getDocumentUrl (FR-01 / task 013)', () => {
+      it('returns Office.context.document.url exactly as reported, no reshaping', async () => {
+        (global.Office.context.document as { url?: string }).url =
+          'https://contoso.sharepoint.com/sites/legal/Shared Documents/Examiner report draft.docx';
+
+        const url = await adapter.getDocumentUrl();
+
+        expect(url).toBe('https://contoso.sharepoint.com/sites/legal/Shared Documents/Examiner report draft.docx');
+      });
+
+      it('returns null for an unsaved document (no url property)', async () => {
+        // beforeEach resets document to {} — url is undefined, as an unsaved document reports.
+        const url = await adapter.getDocumentUrl();
+
+        expect(url).toBeNull();
+      });
+
+      it('returns null for an unsaved document (empty string url) — resolves, does not reject', async () => {
+        (global.Office.context.document as { url?: string }).url = '';
+
+        // A defined `null` result, not a throw (task 013 step 3) — `.resolves` itself proves the
+        // promise did not reject.
+        await expect(adapter.getDocumentUrl()).resolves.toBeNull();
       });
     });
   });
@@ -420,6 +447,14 @@ describe('WordAdapter', () => {
       const uninitializedAdapter = new WordAdapter();
 
       await expect(uninitializedAdapter.getItemId()).rejects.toMatchObject({
+        code: 'NOT_INITIALIZED',
+      });
+    });
+
+    it('should throw NOT_INITIALIZED from getDocumentUrl() when called before initialize()', async () => {
+      const uninitializedAdapter = new WordAdapter();
+
+      await expect(uninitializedAdapter.getDocumentUrl()).rejects.toMatchObject({
         code: 'NOT_INITIALIZED',
       });
     });

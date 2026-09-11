@@ -210,6 +210,27 @@ export class WordAdapter implements IHostAdapter {
   }
 
   /**
+   * Get the open document's URL (spaarkeai-word-add-in-r1 FR-01 / task 013).
+   *
+   * Reads `Office.context.document.url` — a Common API property, available without `Word.run` —
+   * EXACTLY as Office reports it. No reshaping, re-encoding, or trimming: Spike-1 verified Word web
+   * and Word desktop return byte-identical raw-space paths that the BFF's identity resolver
+   * (`POST /api/documents/resolve-identity`) consumes as-is.
+   *
+   * An unsaved document (never saved to a cloud location) has no URL. Office reports this as an
+   * empty string, not `undefined` — treated here as a defined, expected `null` result rather than a
+   * throw, per the interface contract.
+   *
+   * @returns Promise resolving to the document's absolute URL, or `null` when the document has none.
+   */
+  async getDocumentUrl(): Promise<string | null> {
+    this.ensureInitialized();
+
+    const url = Office.context.document.url;
+    return url ? url : null;
+  }
+
+  /**
    * Get the document content as an ArrayBuffer.
    *
    * The default (and `ooxml`) path returns the **real .docx binary** (the compressed OOXML package)
@@ -364,6 +385,7 @@ export class WordAdapter implements IHostAdapter {
       canGetRecipients: false,
       canGetSender: false,
       canGetDocumentContent: isApiSupported,
+      canGetDocumentUrl: true,
       canSaveAsPdf: true, // Server-side conversion
       canSaveAsEml: false,
       canInsertLink: isApiSupported,

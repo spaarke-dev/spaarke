@@ -197,6 +197,21 @@ export class OutlookHostAdapter implements IHostAdapter {
   }
 
   /**
+   * Get the open document's URL — not applicable for Outlook emails (Word-only capability,
+   * spaarkeai-word-add-in-r1 FR-01 / task 013).
+   *
+   * @remarks This class is unreferenced dead code superseded by `shared/adapters/OutlookAdapter.ts`
+   * (task 010 / FR-04 consolidated Word onto the shared factory; this Outlook duplicate was outside
+   * that task's scope and was never deleted). This method exists only to keep the class satisfying
+   * `IHostAdapter` after task 013 added `getDocumentUrl()` to the interface — it is not exercised by
+   * any live code path (`HostAdapterFactory` registers `shared/adapters/OutlookAdapter.ts`, not
+   * this file).
+   */
+  async getDocumentUrl(): Promise<string | null> {
+    throw new Error('getDocumentUrl() is only supported in Word.');
+  }
+
+  /**
    * Get the capabilities of this host adapter.
    */
   getCapabilities(): HostCapabilities {
@@ -207,6 +222,7 @@ export class OutlookHostAdapter implements IHostAdapter {
       canGetRecipients: true,
       canGetSender: true,
       canGetDocumentContent: false,
+      canGetDocumentUrl: false,
       canSaveAsPdf: true,
       canSaveAsEml: hasMailbox18,
       canInsertLink: this.isComposeMode(),
