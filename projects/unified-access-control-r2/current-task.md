@@ -1,7 +1,7 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-11, session 8 — task 098 CLOSED** (by `task-execute` Step 11) — reflects through
-> `a0a3f07fe` + the docs commit that follows it. ⚠️ Session 8's commits are **NOT PUSHED** (no push requested).
+> **Last Updated**: **2026-09-11, session 8 END** (by `context-handoff`) — task 098 closed; everything through
+> `45e6814ba` PUSHED to PR #950, plus the handoff commit that follows it. Tree clean, 0 behind master.
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
 > ⚠️ **One live block. Replace it; never append.** Row headings (`| **Next Action** |`, `| **Task** |`) repeat
@@ -24,8 +24,8 @@
 | Field | Value |
 |---|---|
 | **Task** | **none in progress** — clean stopping point after **098** (session 8, 2026-09-11). |
-| **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1`. CI on `030861434`: **32 pass / 1 fail** — the one red is the legacy SDAP CI **Trivy** scan, **pre-existing** (red on `0a592b7a7`, the session-6 tip, and every commit since); the blocking `Router` / Tier 1 is green. |
-| **Next Action** | **(1) Push** session 8's commits when the owner asks (`/push-to-github`) — `23953342a`, `a0a3f07fe`, + the docs commit. **(2) Owner's call on the next task.** FR-33 chain: **100** (reminders — 🔴 **must be live by 2026-11-10**; deps 097 ✅, ready now) · **099** (Manage Access Expiration picker — deps 097 ✅ 098 ✅, but **needs task 065's M8 first**; see TASK-INDEX sequencing; consumes the 098 contract in `notes/task-098-record-share-expiry.md` §6) · **101** (expiry views, operator-applied). Also ready: **043** (chain C), **063** (chain B), and the C-items in § NEXT SESSION. ⚠️ **036 carries a MANUAL pre-merge canary gate.** Verify every POML's premises against the code first — see the header counter. |
+| **Branch** | `work/unified-access-control-r2` · PR **#950** · tip: `git log -1`. CI on `45e6814ba` (session 8, snapshot at handoff): **all 8 Tier 1 (Blocking) jobs PASS** (incl. full ArchTests — census 118); 24 pass / 1 fail / 2 pending overall. The one red is the legacy SDAP CI **Trivy** scan, **pre-existing** (red since `0a592b7a7`). The 2 pending were legacy `Build & Test (Debug)` and `Tier 2 (Advisory) / Full Unit Tests` — both non-blocking; re-check with `gh pr checks 950`. |
+| **Next Action** | **Owner's call on the next task** (session 8's work is pushed). FR-33 chain: **100** (reminders — 🔴 **must be live by 2026-11-10**; deps 097 ✅, ready now) · **099** (Manage Access Expiration picker — deps 097 ✅ 098 ✅, but **needs task 065's M8 first**; see TASK-INDEX sequencing; consumes the 098 contract in `notes/task-098-record-share-expiry.md` §6) · **101** (expiry views, operator-applied). Also ready: **043** (chain C), **063** (chain B), and the C-items in § NEXT SESSION. ⚠️ **036 carries a MANUAL pre-merge canary gate.** Verify every POML's premises against the code first — see the header counter. |
 | **Task status** | **68 done · 26 open · 3 escalated (012, 023, 062 — all path-A exceptions ratified 2026-09-10) · 1 blocked-shipped (034) · 98 total.** Drift gate green (98 POMLs = 98 index rows, checked after 098 closed). |
 | **Session 8 record** | Closed **098** — `POST /api/v1/external-access/set-record-share-expiry`: ONE expiry on every active share of a record (contact + org) in ONE `BulkUpdateAsync` transaction. **Owner decision 2026-09-11 "Renew them too"** (lapsed-but-active shares get the date). Beyond the literal criteria, from review: **409** for a share also linked to another record, **422** above 1,000 shares, refusal of an id-less row, "not confirmed" (never "not applied") on a failed transaction. `sprk_expiresdate` is **TimeZoneIndependent** (live metadata) → SDK value midnight `Kind=Unspecified`. **7/7 perturbations caught.** Full suite @ `23953342a` **12,300 / 0 / 58**; @ `a0a3f07fe` **see § Session 8 verification below**; ArchTests **197/197** (census 117 → 118 — caught by adr-check before CI). Publish **+0.01 MB** (45.40 → 45.41; master 45.35; 214 files each side). No vulnerable packages. **Lessons**: (a) a new route file moves the ArchTests endpoint census — run ArchTests locally; (b) parallel builds can make a perturbation hit `CS0016` or print NOTHING — neither is a result (P5/P6 re-run); (c) review agents read from a FRESH worktree while perturbations rewrite the main one. |
 | **Session 7 record** | Closed **096** — `IGenericEntityService.BulkUpdateAsync` is genuinely all-or-nothing (`ExecuteTransactionRequest`); escalation fired (no substitutable seam) → **owner chose the pure-builder test approach**. Closed **097** — every external grant carries an expiry: past → 400 `sdap.access.grant.expiry_in_past`; absent → keep the grant's existing expiry, else today + 90 (**owner decision "Server fills +90"** — no client sends an expiry). **Live dev backfill: 25 → 0 unbounded grants** (all now 2026-12-10). Full suite @ `2f2cc158a` **12,280 / 0**; ArchTests 197/197; publish 45.35 → 45.40 MB (project-cumulative; 096 and 097 each ≈ 0). **#970 closed**; filed **#971–#974**. 🔴 **Task 100 must be live by 2026-11-10, and 097 must not reach any non-dev environment without 100.** |
@@ -33,15 +33,16 @@
 | **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969**, **#970**. CI: the **full ArchTests suite runs blocking** in Tier 1. FR-33 redesigned → tasks 096–101; no Dataverse test in CI (036 manual gate); §10 hazards 3–4 in root CLAUDE.md; path-A exceptions 012/023/062 ratified. |
 | **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963–#967**. |
 
-### Commits session 8 (2026-09-11) — ⚠️ LOCAL ONLY, NOT PUSHED
+### Commits session 8 (2026-09-11) — ALL PUSHED to PR #950
 
 | Commit | What |
 |---|---|
 | `23953342a` | 098 — one atomic expiry for every share on a record (endpoint, DTOs, filter case, lifecycle helpers, 20 tests) |
 | `a0a3f07fe` | 098 review follow-up — cross-record 409, truthful titles, census 118, strict fake, +4 refusal tests; task closed |
-| _(next)_ | docs — this handoff + final verification |
+| `45e6814ba` | docs — task 098 final verification + session 8 handoff |
+| _(next)_ | handoff — push + CI result recorded |
 
-### Files modified session 8 — committed, NOT pushed
+### Files modified session 8 — committed and pushed
 
 - **Code**: NEW `Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs` · NEW `Dtos/SetRecordShareExpiryRequest.cs` + `…Response.cs` · `DelegationRuleFilter.cs` (new case) · `ExternalAccessEndpoints.cs` (route) · `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs` (`EntityLogicalName`, `ActiveRowsForRootFilter`, `QueryActiveRowsForRootAsync`, `ToSdkDateOnly`) · `ExternalParticipationService.cs` (doc only — the cache holds no dates).
 - **Tests**: NEW `tests/integration/auth/UnifiedAccessControl/RecordShareExpiryTests.cs` (17) · `DelegationRuleCharacterizationTests` (+4) · `ExternalAccessContractTests` (+3) · `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (census 118 + ledger).
@@ -213,6 +214,7 @@ background, which keeps the main worktree free for perturbations; remove them af
 | 042 level-bearing standing term (session 6) | reader / composition / seam tests; live data backfilled and read back | never end to end through the BFF against live |
 | **096 transactional `BulkUpdateAsync`** (session 7) | pure-builder unit tests; both callers' tests; full suite | 🔴 never executed against live Dataverse (no deploy); the SDK's fault shape is from source reading, not observation |
 | **097 grant expiry default / past check** (session 7) | core + contract + delegation tests; the live backfill wrote and re-read 25 rows | 🔴 the BFF endpoints' default was never exercised live (the backfill went straight to the Web API, not through `/grant`) — needs the 047 deploy |
+| **098 record-wide share expiry** (session 8) | handler + delegation + contract tests (strict filter-interpreting fake); 7/7 perturbations; full suite; live READ of the column's DateTimeBehavior (TimeZoneIndependent) | 🔴 never executed against live Dataverse (no deploy): the SDK write of a TZI date via `BulkUpdateAsync` is reasoned from metadata, not observed. **Smoke when 047 deploys**: call the endpoint on a dev matter, then Web-API-read `sprk_expiresdate` on its shares and confirm the exact date |
 
 **Recommend a real create+read smoke against dev before merging #950** — metadata and offline tests prove the
 names and the logic, not that the deployed code composes them correctly.
