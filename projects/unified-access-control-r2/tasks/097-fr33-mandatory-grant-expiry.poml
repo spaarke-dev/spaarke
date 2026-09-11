@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="097" project="unified-access-control-r2">
   <metadata>
-    <title>FR-33 — ExpiryDate becomes MANDATORY on /grant, /invite and /invite-and-grant; backfill existing unbounded grants in dev</title>
+    <title>FR-33 — every external grant carries an expiry: /grant, /invite and /invite-and-grant default an absent ExpiryDate (keep the grant's existing expiry, else today + 90) and reject a past one; backfill existing unbounded grants in dev</title>
     <phase>FR-33 External grant expiry</phase>
     <status>pending</status>
     <rigor>FULL</rigor>
@@ -18,7 +18,7 @@
     <origin>FR-33 redesign, owner decisions 2026-09-10 (notes/decisions/external-grant-expiry-mandatory.md §9-§12)</origin>
   </metadata>
 
-  <prompt>Today every grant endpoint accepts ExpiryDate as OPTIONAL and a blank value means the grant NEVER EXPIRES (GrantAccessRequest / InviteExternalUserRequest: `DateOnly? ExpiryDate`). That is the single gap between the existing column and FR-33: sprk_expiresdate already exists, is already written on the upsert (task 023) and is already enforced server-side in the $filter (task 007) — but grants are still unbounded because nothing requires a value. Make ExpiryDate required and not-in-the-past on all three write endpoints, and backfill existing active grants that have no expiry.</prompt>
+  <prompt>Today every grant endpoint accepts ExpiryDate as OPTIONAL and a blank value means the grant NEVER EXPIRES (GrantAccessRequest / InviteExternalUserRequest: `DateOnly? ExpiryDate`). That is the single gap between the existing column and FR-33: sprk_expiresdate already exists, is already written on the upsert (task 023) and is already enforced server-side in the $filter (task 007) — but grants are still unbounded because nothing requires a value. Guarantee every grant is bounded on all three write endpoints: when a request carries no ExpiryDate the SERVER applies the default (the surviving grant row's existing sprk_expiresdate if it has one, otherwise today + 90 days, Date Only); an ExpiryDate before today is rejected. Then backfill existing active grants that have no expiry. (Amended 2026-09-10 session 7 by owner decision — this task originally made ExpiryDate a REQUIRED request field returning 400 when absent; see the constraint marked "owner 2026-09-10 session 7".)</prompt>
   <role>SPAARKE platform developer, C#/.NET Minimal API + Dataverse Web API.</role>
   <goal>No new external grant can be created or updated without a present-or-future expiry; every active grant in dev carries one.</goal>
 
@@ -36,8 +36,9 @@
   </context>
 
   <constraints>
-    <constraint source="owner 2026-09-10">Scope: validation. All three endpoints reject a request with no ExpiryDate, and one whose ExpiryDate is BEFORE today (Date Only), with 400 and NO row written. Expiry = today is VALID (task 007's Date Only rule). There is NO maximum — do not add a cap or a tenant setting; the owner removed it.</constraint>
-    <constraint source="project">Scope: reason codes. Reuse the existing `sdap.*` reason-code convention (e.g. sdap.access.deny.delegation_write_required) — e.g. `sdap.access.grant.expiry_required` and `sdap.access.grant.expiry_in_past`. Do not invent a new envelope shape.</constraint>
+    <constraint source="owner 2026-09-10 session 7">Scope: the absent-expiry default. SUPERSEDES this task's original "required field, 400 when absent" rule. Found at session 7: NO client sends an expiry today — AccessGrantModal (/grant, /invite-and-grant), the TrackingFieldTrio PCF (same endpoints) and the external SPA's InviteUserDialog (/invite; `expiryDate?` typed in bff-client.ts but never set) — so a 400 would break every sharing UI, and task 099 adds a picker to the modal only. Owner chose a SERVER DEFAULT: when the request has no ExpiryDate, (a) if the surviving grant row already carries sprk_expiresdate, KEEP it (a re-grant from a screen without a date field must never move a date someone set — this matches the existing "a null ExpiryDate does not clear an existing expiry" behaviour at GrantExternalAccessEndpoint.cs:200-227); (b) otherwise store today + 90 days (Date Only). Compute "today" ONCE, in ONE place shared by all three endpoints, from an injected TimeProvider (tests use FakeTimeProvider), in the same calendar the read filter uses (task 007). The stored value is never null after any of the three endpoints writes. Clients need NO change in this task.</constraint>
+    <constraint source="owner 2026-09-10">Scope: validation. All three endpoints reject an ExpiryDate that is BEFORE today (Date Only) with 400, an sdap.* reason code, and NO row written. Expiry = today is VALID (task 007's Date Only rule). There is NO maximum — do not add a cap or a tenant setting; the owner removed it. The default of 90 days is a constant, not a setting.</constraint>
+    <constraint source="project">Scope: reason codes. Reuse the existing `sdap.*` reason-code convention (e.g. sdap.access.deny.delegation_write_required) — e.g. `sdap.access.grant.expiry_in_past`. (No `expiry_required` code: an absent expiry is defaulted, not rejected.) Do not invent a new envelope shape.</constraint>
     <constraint source="NFR-01">Scope: read enforcement. Do NOT change ExpiryPredicate / the $filter's handling of a NULL sprk_expiresdate in this task. Flipping null to "expired" would lock out any row the backfill missed. See the escalation trigger.</constraint>
     <constraint source="owner 2026-09-10">Scope: backfill (LIVE DEV DATA, owner-authorised). Set sprk_expiresdate = today + 90 days on every ACTIVE (statecode = 0) sprk_externalrecordaccess row whose sprk_expiresdate is null. BEFORE writing, record every affected row id and its prior value in notes/ so the change is revertible. Verify the after-count by re-query. Inactive rows are NOT touched.</constraint>
     <constraint source="spec FR-33 sequencing">Scope: deploy order. The backfill starts a 90-day clock. The first reminder (task 100) fires at 30 days before expiry, so task 100 MUST be live within 60 days of this backfill or those reminders are silently missed. Record the backfill date in notes/ so the deadline is visible.</constraint>
@@ -74,14 +75,17 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Negative: POST /grant with no ExpiryDate returns 400 with an sdap.* reason code, and no sprk_externalrecordaccess row is created or updated.</criterion>
+    <criterion testable="true">POST /grant with no ExpiryDate creating a NEW grant stores sprk_expiresdate = today + 90 days (Date Only, from the injected TimeProvider).</criterion>
+    <criterion testable="true">POST /grant with no ExpiryDate on an EXISTING grant that already carries an expiry leaves that expiry unchanged — neither shortened nor extended.</criterion>
+    <criterion testable="true">POST /grant with no ExpiryDate on an existing grant whose expiry is null stores today + 90 days.</criterion>
     <criterion testable="true">Negative: POST /grant with an ExpiryDate before today returns 400, and nothing is written.</criterion>
     <criterion testable="true">POST /grant with ExpiryDate = today is accepted (Date Only rule from task 007).</criterion>
     <criterion testable="true">The same three cases hold for /invite and /invite-and-grant.</criterion>
     <criterion testable="true">DelegationRuleFilter's behaviour is unchanged, pinned by a test — or the first escalation trigger has fired.</criterion>
     <criterion testable="true">The read filter's handling of a NULL expiry is unchanged.</criterion>
     <criterion testable="true">Backfill: every active sprk_externalrecordaccess row in dev with a null expiry now carries today + 90 days; before-state ids, the backfill date and the after-count are recorded in notes/.</criterion>
-    <criterion testable="true">Perturbation: removing the required check fails at least one test.</criterion>
+    <criterion testable="true">Perturbation: removing the default (so an absent ExpiryDate is stored as null) fails at least one test, and removing the past-date check fails at least one test.</criterion>
+    <criterion testable="true">Clients are unchanged: no file under src/client/** or src/solutions/** is modified by this task.</criterion>
     <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
