@@ -675,6 +675,11 @@ estate-wide view.
 >   fires if 065 has not landed M8 — M8 on its own is safe; it is M2-before-M8 that 065 forbids.
 > - **100 must be live within 60 days of 097's backfill.** The backfill sets existing grants to today + 90;
 >   the first reminder fires 30 days before expiry, so after day 60 those reminders are silently missed.
+>   ✅ 097 done 2026-09-10: backfill date **2026-09-11 (UTC)** → **task 100 must be live by 2026-11-10**.
+> - 🔴 **097 must not reach ANY environment other than dev without 100.** Since 097 the server defaults every
+>   new grant to today + 90 — so a deploy of 097 alone starts an expiry clock on every grant created there,
+>   with no reminder path (spec FR-33: "do not ship (a) before (d)"). In dev the earliest default expiry is
+>   2026-12-10, covered by the 2026-11-10 deadline above.
 > - **096 and 097 can run in parallel** — they touch different files (shared `Spaarke.Dataverse` vs the
 >   ExternalAccess endpoints). Both run `/conflict-check` first.
 

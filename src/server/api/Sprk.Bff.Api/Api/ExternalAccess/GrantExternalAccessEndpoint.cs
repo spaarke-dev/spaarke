@@ -291,7 +291,7 @@ public static class GrantExternalAccessEndpoint
         var createRequest = request.ExpiryDate is null
             ? request with { ExpiryDate = ExternalGrantLifecycle.DefaultExpiry(today) }
             : request;
-        var payload = BuildGrantPayload(createRequest, rootType, rootId, grantedBySystemUserId);
+        var payload = BuildGrantPayload(createRequest, rootType, rootId, grantedBySystemUserId, today);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
@@ -357,7 +357,8 @@ public static class GrantExternalAccessEndpoint
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Validation Error",
                 detail: $"ExpiryDate {expiry:yyyy-MM-dd} is in the past. Choose today ({today:yyyy-MM-dd}) or a " +
-                        $"later date, or omit it to use the default of {ExternalGrantLifecycle.DefaultExpiryDays} days.",
+                        "later date, or omit it: an existing grant then keeps its current expiry, and a new or " +
+                        $"unbounded grant gets today + {ExternalGrantLifecycle.DefaultExpiryDays} days.",
                 extensions: new Dictionary<string, object?>
                 {
                     ["traceId"] = httpContext.TraceIdentifier,
@@ -566,8 +567,14 @@ public static class GrantExternalAccessEndpoint
     /// assembly (<c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c>) can assert the typed-lookup bind
     /// contract directly — a wrong <c>@odata.bind</c> key silently breaks the grant.
     /// </summary>
+    /// <param name="today">
+    /// The grant date for <c>sprk_granteddate</c> — the same "today" the expiry was computed from (task 097),
+    /// so the two can never straddle a UTC midnight. Optional only for direct callers that build a payload
+    /// outside a request; they get the wall-clock UTC date.
+    /// </param>
     internal static object BuildGrantPayload(
-        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId)
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId,
+        DateOnly? today = null)
     {
         // Bind exactly ONE typed root lookup per record type (never two). Nav property is PascalCase
         // (sprk_Project / sprk_Matter / sprk_WorkAssignment), verified live — see ExternalGrantRoot.
@@ -581,7 +588,7 @@ public static class GrantExternalAccessEndpoint
             [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
             // DATE ONLY column (live metadata) — a full timestamp was the recorded LOW finding; task 023.
-            ["sprk_granteddate"] = FormatDateOnly(DateOnly.FromDateTime(DateTime.UtcNow))
+            ["sprk_granteddate"] = FormatDateOnly(today ?? DateOnly.FromDateTime(DateTime.UtcNow))
         };
 
         // Grantee: bind the Contact for a per-contact grant; OMIT it for an ORGANIZATION grant (task 073

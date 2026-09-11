@@ -150,9 +150,9 @@ internal static class ExternalGrantLifecycle
     /// "Server fills +90").
     /// </summary>
     /// <remarks>
-    /// A constant, not a setting — the owner removed the tenant cap. It matches the default of the Manage
-    /// Access Expiration picker (task 099), so a surface that has no date field (the TrackingFieldTrio
-    /// PCF, the external SPA) produces the same grant the picker would.
+    /// A constant, not a setting — the owner removed the tenant cap. The Manage Access Expiration picker
+    /// (task 099, not yet built) is specified to default to the same 90 days, so a grant from a surface
+    /// with no date field (e.g. the TrackingFieldTrio PCF) matches what the picker would produce.
     /// </remarks>
     internal const int DefaultExpiryDays = 90;
 

@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="AccessLevel">The access level to grant (ViewOnly, Collaborate, or FullAccess).</param>
 /// <param name="ExpiryDate">
-/// Optional in the REQUEST, never absent from the stored grant (spec FR-33, task 097). A date before today
+/// Optional in the REQUEST, never absent from a grant this API writes (spec FR-33, task 097). A date before today
 /// is rejected (400 <c>sdap.access.grant.expiry_in_past</c>); today is valid. When omitted, the grant keeps
 /// its existing expiry, or — for a new or unbounded grant — gets today + 90 days.
 /// </param>

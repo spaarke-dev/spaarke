@@ -66,6 +66,37 @@ an expired grant keeps its date and is reported, never silently renewed.
 (A first P1 attempt replaced the create-path expression with a bare `;` and failed to COMPILE — a broken
 perturbation, not a result. Redone with a per-path replacement; the numbers above are from the corrected run.)
 
+## Review (Step 9.5) — code-review + adr-check
+
+**PASS — no Critical, no new ADR violation.** The reviewer re-ran the grant suites (118/118) and the three
+other classes sharing the contract fixture (23/23 — the fixed clock breaks nothing). Every path through
+`CreateGrantAsync` checked: new / unbounded → +90; set expiry (shorter or longer) → kept; **expired → kept and
+reported (409), never silently renewed**; race → bounded either way. No BFF path can write a null expiry, and
+the only writers of `sprk_expiresdate` are the grant core's create and update.
+
+| # | Finding | Decision |
+|---|---|---|
+| W1 | Expired survivor → 409 returns before duplicate collapse; a live duplicate makes "confers no access" false (pre-existing, task 023) | **Filed ISS-008 / #973.** Not "collapse first" — that would revoke live access |
+| W2 | Rows created outside the BFF (form, Web API, flow) can still be unbounded; users hold Create | **Filed ISS-009 / #974** — needs a Dataverse-side guard (operator step) |
+| W3 | The +90 default starts a clock on EVERY new grant before reminders (100) exist | **Recorded in TASK-INDEX**: 097 must not reach any non-dev environment without 100; in dev the earliest default expiry is 2026-12-10, covered by the 2026-11-10 deadline. **Flagged to the owner** |
+| S1, S2, S9, S10 | Docs overclaimed (picker "matches" an unbuilt task; the SPA "produces a grant"; the 400 detail implied omitting always gives +90; "never absent from the stored grant"; history inside an XML doc) | **Fixed** |
+| S3 | `sprk_granteddate` still read the wall clock | **Fixed** — `BuildGrantPayload` takes the same `today` |
+| S13 | `AuthorizationModule` comment: "TimeProvider is not registered at all in this app" — false, now doubly | **Fixed** (outside the diff, but made more false by it) |
+| — | `spec.md:125` still said null "means leave unchanged" | **Fixed** |
+| S4 | Default + past check live in the core / handlers, not a pure `ResolveExpiry` | Noted — clear as is; revisit if a third grant writer appears |
+| S5 | Concurrent create race can leave a +90 row where the other caller sent a date | Accepted — same pre-existing race class as the lost access level |
+| S6, S7 | ADR-019 names `errorCode`/`correlationId`; this file uses `reasonCode`/`traceId` (pre-existing); the 409's code is the odd one out of the `{domain}.{area}.{action}.{reason}` format | Noted — pre-existing drift; an ADR-019 amendment (path B) is the likely resolution, not 097's |
+| S8 | Comment cites ADR-003 for "don't report success over a grant that confers nothing" | Noted — copied from task 023's wording |
+| S11 | The contract stub's `QueryAsync` returns the contact JSON for every table | Noted — rerouting it risks the fixture's other classes; test debt |
+| S12 | Core tests call `internal` `CreateGrantAsync` (the file's existing pattern) | Accepted |
+
+## Publish size (CLAUDE.md §10, hazards 1–4)
+
+Fresh worktrees at short paths (`C:\wt097m` = `origin/master`, `C:\wt097b` = `79c1a8522`; branch 0 behind),
+`dotnet publish -c Release`, **`Compress-Archive`**, incl. PDBs: master **45.35 MB** / 214 files; branch
+**45.40 MB** / 214 files → **+0.05 MB**, the project's cumulative delta and identical to task 096's, so 097
+contributes ≈ 0. ≤ 60 MB ✅. No package added.
+
 ## Backfill (LIVE DEV DATA — owner-authorised in the POML)
 
 **Before-state recorded here BEFORE any write.** Queried 2026-09-11 01:14 UTC against

@@ -472,8 +472,11 @@ public static class AuthorizationModule
         //
         // Constructed by factory rather than by convention so the two OPTIONAL dependencies stay
         // optional: SecretClient is registered by SpeAdminModule (only when a Key Vault URI is
-        // configured) and TimeProvider is not registered at all in this app. GetService returns null
-        // for both, which the provider handles; constructor injection would instead fail to resolve.
+        // configured) and TimeProvider is registered only by feature modules (TryAddSingleton in
+        // DocumentsModule, MembershipModule, CommunicationModule, InsightsIngestModule, WorkspaceModule,
+        // ExternalAccessModule). GetService returns null for either when absent, which the provider
+        // handles; constructor injection would instead fail to resolve. (This comment previously said
+        // TimeProvider "is not registered at all in this app" — stale; corrected 2026-09-10, task 097.)
         services.AddSingleton(sp => new OrderedCredentialClientProvider(
             sp.GetRequiredService<IOptions<CredentialSelectionOptions>>(),
             sp.GetRequiredService<IConfiguration>(),

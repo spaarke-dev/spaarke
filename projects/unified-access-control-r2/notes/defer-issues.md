@@ -371,6 +371,58 @@ clear and the new default in one transaction.
 
 ---
 
+### ISS-008 — Re-grant over an EXPIRED survivor returns 409 without looking at live duplicates on the same key
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-10 |
+| **Source** | Task 097 code review. Pre-existing (task 023). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/973 |
+
+**Description**
+
+In `GrantExternalAccessEndpoint.CreateGrantAsync`'s match path, when the elected survivor (lowest id) is
+**expired** and the request carries no new expiry, it returns the task-023 warning (`/grant` → 409
+`sdap.grant.expired_not_restored`, "still confers no access") **before** `CollapseDuplicatesAsync`. A duplicate
+active row on the same key with a later or null expiry is still live, so the grantee **does** have access
+while the 409 says not. Pre-existing duplicates are real in dev (task 097 notes: one contact, five rows, one
+matter).
+
+**Suggested fix**: judge "confers access" across all active rows on the key, or elect the survivor with the
+latest effective expiry. NOT "collapse first" — collapsing onto an expired survivor would revoke live access.
+
+**Estimated effort**: small–medium. **Blockers**: none. **Related**: task 023, task 010, task 097.
+
+---
+
+### ISS-009 — `sprk_externalrecordaccess` rows created outside the BFF can still have no expiry
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-10 |
+| **Source** | Task 097 code review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/974 |
+
+**Description**
+
+Since task 097 the BFF never writes a grant without `sprk_expiresdate`, but the column is optional in
+Dataverse and users hold Create on the table (the `TrackingFieldTrio` PCF checks for it). A row created
+through a form, the Web API directly, a flow or an import can still be unbounded — and the read filter
+treats null as never-expiring. FR-33 therefore holds for BFF writes only.
+
+**Suggested fix**: a Dataverse-side guard — make the column required (after the dev backfill no active row is
+null) or default it on create via a plugin / business rule. Schema changes are code + docs; the live change
+is an operator step (owner directive 2026-09-04). Once no null can arrive from any path, the read filter's
+`eq null` clause could flip to fail-closed — still the owner's call (097 escalation trigger 2).
+
+**Estimated effort**: small (+ operator step). **Blockers**: none. **Related**: task 097, FR-33.
+
+---
+
 ## Closed
 
 *(none yet)*

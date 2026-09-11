@@ -12,7 +12,6 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// Used by <c>/invite-and-grant</c> only — <c>/invite</c> writes no grant and ignores it. Same rule as
 /// <c>GrantAccessRequest.ExpiryDate</c> (spec FR-33, task 097): a date before today is rejected (400) before
 /// any onboarding happens; when omitted, the grant keeps its existing expiry, else gets today + 90 days.
-/// (This line used to say "No expiry if not specified" — true until task 097, and the reason FR-33 exists.)
 /// </param>
 /// <param name="OrganizationId">
 /// Optional grantee firm/organization — a <c>sprk_organization</c> id (NOT the OOB <c>account</c>) —
