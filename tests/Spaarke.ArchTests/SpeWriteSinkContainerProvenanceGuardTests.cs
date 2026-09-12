@@ -708,6 +708,25 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "from a ClientSupplied sink in the same file, which is the clearest argument in this list for "
             + "per-site rather than per-file classification."),
 
+        // ── ADDED 2026-09-11 by spaarkeai-word-add-in-r1 task 023 (FR-11 version save) — a NEW site. ──
+        // Traced backwards: WriteNewVersionAsync(driveId, itemId) <- OfficeService.CompleteVersionSaveAsync
+        // <- VersionTarget.DriveId/ItemId <- OfficeDocumentPersistence.ResolveVersionTargetAsync, which reads
+        // sprk_graphdriveid/sprk_graphitemid off the sprk_document row. The CLIENT supplies only that row's id
+        // (SaveRequest.Document.ExistingDocumentId) — a record key, never a container or drive — and
+        // OfficeVersionSaveAuthorizationFilter requires "write" on that same row before the handler runs.
+        new SinkSite("Services/Office/OfficeStorageUploader.cs", "ReplaceFileContentAsUserAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "driveId/itemId parameters <- OfficeService.CompleteVersionSaveAsync <- "
+            + "OfficeDocumentPersistence.ResolveVersionTargetAsync (sprk_graphdriveid / sprk_graphitemid on the "
+            + "sprk_document row named by SaveRequest.Document.ExistingDocumentId, which the route's "
+            + "OfficeVersionSaveAuthorizationFilter authorized for \"write\")",
+            "The Office version save (FR-11): a new SPE version of an EXISTING item, written OBO into the "
+            + "drive the authorized record itself records (ADR-003; ADR-007; ADR-008). The client names the "
+            + "document, and the document names the drive — so the authorization key and the write "
+            + "destination are one row, the same shape as the Compose save's ServerDerivedRecord replaces. "
+            + "Deliberately NOT the container derived from SaveRequest.TargetEntity: the destination is an "
+            + "item that already exists, and a derived container could only disagree with it."),
+
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED
         // before the folder-removal change touched anything: task 076 added the record-keyed upload pair

@@ -831,3 +831,688 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 }
+
+// =====================================================================================================
+// FR-11 VERSION SAVE — spaarkeai-word-add-in-r1 task 023
+// =====================================================================================================
+
+/// <summary>
+/// HTTP contract of the FR-11 version save on <c>POST /api/office/save</c>: a <c>ContentType=Document</c>
+/// save carrying <c>document.existingDocumentId</c> writes a new SPE version of that document's own item and
+/// creates no row; every refusal returns a distinct ProblemDetails code and writes nothing; a save without the
+/// field, and every Email/Attachment save, behaves as before.
+/// </summary>
+/// <remarks>
+/// <para><b>Fixture.</b> <see cref="OfficeVersionSaveTestWebAppFactory"/> layers ONE stateful in-memory world
+/// (<see cref="OfficeVersionSaveWorld"/>) over task 016's <see cref="OfficeTestWebAppFactory"/>, at the same
+/// module boundaries that fixture already doubles — <see cref="IDataverseService"/>, the <see cref="SpeFileStore"/>
+/// facade (ADR-007), the <see cref="OfficeJobQueue"/>'s <see cref="ServiceBusClient"/> — plus
+/// <see cref="IAccessDataSource"/>, the authorization decision's data seam (the same seam
+/// <c>DocumentIdentityContractTests</c> uses). No <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 B1). A fresh
+/// factory per test, because each test seeds its own world.</para>
+/// <para><b>"Wrote nothing"</b> is asserted against the world, not inferred from a status code: a 4xx alone
+/// would pass even if the bytes had been written first.</para>
+/// </remarks>
+[Trait("status", "repaired")]
+public class OfficeVersionSaveContractTests
+{
+    private static readonly byte[] InitialBytes = { 0x50, 0x4B, 0x03, 0x04, 0x01 };
+    private static readonly byte[] RevisedBytes = { 0x50, 0x4B, 0x03, 0x04, 0x02, 0x02 };
+
+    // ── AC3: no existingDocumentId → a new document, exactly as today ─────────────────────────────
+
+    [Fact]
+    public async Task Post_OfficeSave_DocumentWithoutExistingDocumentId_CreatesANewDocumentAsBefore()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.NewDocumentSave("New brief.docx", InitialBytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.DocumentCreates.Should().Be(1, "a save without existingDocumentId still creates its own sprk_document");
+        world.UploadSmallCalls.Should().Be(1, "it still uploads through the path-keyed container upload");
+        world.ReplaceCalls.Should().Be(0, "no version of any existing item is written");
+        world.AccessChecks.Should().BeEmpty("the version-save gate is not engaged for a non-version save");
+        world.DocumentReads.Should().BeEmpty();
+        world.Jobs.Should().ContainSingle().Which.Name.Should().StartWith("Document Save - ");
+    }
+
+    // ── The version path, HTTP shape ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_OfficeSave_VersionSave_Returns202_AuthorizesWriteOnTheTarget_AndWritesAVersionOfItsItem()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, RevisedBytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var result = await response.Content.ReadFromJsonAsync<SaveResponse>();
+        result!.Success.Should().BeTrue();
+        result.Duplicate.Should().BeFalse();
+
+        // ADR-044: the id reaches the access data source bare-lowercase.
+        world.AccessChecks.Should().ContainSingle().Which.Should().Be(documentId.ToString("D"));
+        world.ReplaceCalls.Should().Be(1);
+        world.SpeItems[itemId].Versions.Should().HaveCount(2);
+        world.UploadSmallCalls.Should().Be(0, "a version is never a path-keyed upload into the derived container");
+        world.DocumentCreates.Should().Be(0);
+        world.Jobs.Should().ContainSingle().Which.Name.Should().StartWith("Document Version Save - ");
+    }
+
+    // ── AC5: an existingDocumentId that resolves to no row ───────────────────────────────────────
+
+    [Fact]
+    public async Task Post_OfficeSave_VersionSave_WhenTheDocumentDoesNotResolve_Returns404Office016_AndWritesNothing()
+    {
+        // Authorization answered "allowed" (e.g. the row was deleted between the gate and the read), so the
+        // refusal is the SERVICE's own. With a real access data source an unknown id is refused one step
+        // earlier, by the filter — see the 403 theory below.
+        var world = new OfficeVersionSaveWorld();
+        var unknownId = Guid.NewGuid();
+        world.AccessByDocumentId[unknownId] = AccessRights.Read | AccessRights.Write;
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(unknownId, RevisedBytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_016");
+        world.ShouldHaveWrittenNothing();
+    }
+
+    // ── AC6: a caller without write on the target ────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(AccessRights.Read)] // can open the document, may not version it
+    [InlineData(AccessRights.None)] // also what a real, fail-closed access source answers for an UNKNOWN id
+    public async Task Post_OfficeSave_VersionSave_WhenTheCallerLacksWrite_IsRefusedByTheFilter_AndWritesNothing(
+        AccessRights rights)
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes, rights);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, RevisedBytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        world.AccessChecks.Should().ContainSingle("the endpoint filter decided");
+        world.DocumentReads.Should().BeEmpty("the handler never ran — the refusal is the filter's (ADR-008)");
+        world.SpeItems[itemId].Versions.Should().HaveCount(1, "no bytes reached SPE");
+        world.ShouldHaveWrittenNothing();
+    }
+
+    // ── AC7: the target row carries no SPE pointers ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_OfficeSave_VersionSave_WhenTheDocumentHasNoSpePointers_Returns409Office017_AndNeverFallsBackToANewItem()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, _) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes, withPointers: false);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, RevisedBytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_017");
+        world.ShouldHaveWrittenNothing();
+    }
+
+    // ── IsNewVersion is part of the contract, not decoration ─────────────────────────────────────
+
+    [Fact]
+    public async Task Post_OfficeSave_ExistingDocumentIdWithIsNewVersionFalse_Returns400Office018_AndWritesNothing()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, RevisedBytes, isNewVersion: false));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_018");
+        world.SpeItems[itemId].Versions.Should().HaveCount(1);
+        world.ShouldHaveWrittenNothing();
+    }
+
+    // ── SPE refuses the write: the item is locked ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_OfficeSave_VersionSave_WhenTheItemIsLocked_Returns423Office019_AndCreatesNoRow()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        world.LockedItemIds.Add(itemId);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, RevisedBytes));
+
+        response.StatusCode.Should().Be((HttpStatusCode)423);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_019");
+        world.SpeItems[itemId].Versions.Should().HaveCount(1);
+        world.DocumentCreates.Should().Be(0);
+        world.UploadSmallCalls.Should().Be(0, "a refused version write never falls back to a fresh upload");
+        world.DocumentUpdates.Should().BeEmpty();
+    }
+
+    // ── AC8: Email and Attachment never act on the field ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData(SaveContentType.Email)]
+    [InlineData(SaveContentType.Attachment)]
+    public async Task Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_IgnoresIt_AndBehavesAsBefore(
+        SaveContentType contentType)
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var request = new SaveRequest
+        {
+            ContentType = contentType,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+            Email = contentType == SaveContentType.Email
+                ? new EmailMetadata { Subject = "Filing", SenderEmail = "sender@test.com" }
+                : null,
+            Attachment = contentType == SaveContentType.Attachment
+                ? new AttachmentMetadata
+                {
+                    AttachmentId = "att-1",
+                    FileName = "Exhibit A.pdf",
+                    ContentBase64 = Convert.ToBase64String(RevisedBytes),
+                }
+                : null,
+            // The field the Email/Attachment branches must never act on.
+            Document = new DocumentMetadata
+            {
+                FileName = "Brief.docx",
+                IsNewVersion = true,
+                ExistingDocumentId = documentId,
+            },
+        };
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.DocumentCreates.Should().Be(1, "the Email/Attachment save creates its own document, as before");
+        world.UploadSmallCalls.Should().Be(1);
+        world.ReplaceCalls.Should().Be(0);
+        world.AccessChecks.Should().BeEmpty("the version-save gate never engages for Email/Attachment");
+        world.DocumentReads.Should().BeEmpty("the existing document is never resolved");
+        world.SpeItems[itemId].Versions.Should().HaveCount(1, "the named document's item is untouched");
+        world.DocumentUpdates.Should().NotContain(u => u.DocumentId == documentId.ToString("D"));
+        world.Jobs.Should().ContainSingle().Which.Name.Should().StartWith($"{contentType} Save - ");
+    }
+
+    private static async Task<string?> ErrorCodeOf(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.TryGetProperty("errorCode", out var code) ? code.GetString() : null;
+    }
+}
+
+/// <summary>
+/// One in-memory world behind the version-save fixture: <c>sprk_document</c> rows, ProcessingJob rows, an
+/// SPE drive whose items keep a VERSION HISTORY, per-document caller rights, and the finalization messages sent.
+/// </summary>
+/// <remarks>
+/// SPE semantics reproduced, because they are what the tests are about: <c>UploadSmallAsync</c> is PATH-keyed
+/// (same name → a new version of that item; new name → a NEW item), and <c>ReplaceFileContentAsUserAsync</c>
+/// is ITEM-keyed (a new version of that item; unknown item → <c>null</c>, the facade's 404 shape). The live
+/// hash stands in for SPE's <c>quickXorHash</c>: equal bytes, equal hash.
+/// </remarks>
+public sealed class OfficeVersionSaveWorld
+{
+    public sealed class DocumentRow
+    {
+        public required Guid Id { get; init; }
+        public string? DriveId { get; set; }
+        public string? ItemId { get; set; }
+        public string? FileName { get; set; }
+        public long? FileSize { get; set; }
+        public string? FilePath { get; set; }
+        public string? CanonicalHash { get; set; }
+        public Guid? CanonicalDocumentId { get; set; }
+    }
+
+    public sealed class SpeItem
+    {
+        public required string DriveId { get; init; }
+        public required string Id { get; init; }
+        public required string Name { get; init; }
+        public List<byte[]> Versions { get; } = new();
+        public string WebUrl => $"https://contoso.sharepoint.com/contentstorage/{DriveId}/{Uri.EscapeDataString(Name)}";
+    }
+
+    private readonly object _gate = new();
+    private readonly Dictionary<string, Guid> _jobIdsByKey = new(StringComparer.Ordinal);
+
+    public Dictionary<Guid, DocumentRow> Documents { get; } = new();
+    public Dictionary<string, SpeItem> SpeItems { get; } = new(StringComparer.Ordinal);
+    public Dictionary<Guid, AccessRights> AccessByDocumentId { get; } = new();
+    public HashSet<string> LockedItemIds { get; } = new(StringComparer.Ordinal);
+    public List<string> AccessChecks { get; } = new();
+    public List<string> DocumentReads { get; } = new();
+    public List<(string DocumentId, UpdateDocumentRequest Update)> DocumentUpdates { get; } = new();
+    public List<(Guid Id, Dictionary<string, object> Fields)> GenericUpdates { get; } = new();
+    public List<string> DeletedItemIds { get; } = new();
+    public List<(string Name, string IdempotencyKey)> Jobs { get; } = new();
+    public List<JsonElement> FinalizationPayloads { get; } = new();
+    public int DocumentCreates { get; private set; }
+    public int UploadSmallCalls { get; private set; }
+    public int ReplaceCalls { get; private set; }
+
+    /// <summary>Stand-in for SPE's quickXorHash: equal bytes → equal hash.</summary>
+    public static string Hash(byte[] bytes) => Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(bytes));
+
+    /// <summary>Seeds an existing Spaarke document: an SPE item with ONE version, and its row.</summary>
+    public (Guid DocumentId, string ItemId) SeedDocument(
+        string driveId,
+        string fileName,
+        byte[] bytes,
+        AccessRights rights = AccessRights.Read | AccessRights.Write,
+        bool withPointers = true,
+        Guid? linkedToCanonical = null,
+        string? linkedHash = null)
+    {
+        var itemId = $"item-{Guid.NewGuid():N}";
+        var item = new SpeItem { DriveId = driveId, Id = itemId, Name = fileName };
+        item.Versions.Add(bytes);
+        SpeItems[itemId] = item;
+
+        var id = Guid.NewGuid();
+        Documents[id] = new DocumentRow
+        {
+            Id = id,
+            DriveId = withPointers ? driveId : null,
+            ItemId = withPointers ? itemId : null,
+            FileName = fileName,
+            FileSize = bytes.Length,
+            FilePath = item.WebUrl,
+            CanonicalHash = linkedHash ?? Hash(bytes),
+            CanonicalDocumentId = linkedToCanonical,
+        };
+        AccessByDocumentId[id] = rights;
+        return (id, itemId);
+    }
+
+    public static SaveRequest NewDocumentSave(string fileName, byte[] bytes) => new()
+    {
+        ContentType = SaveContentType.Document,
+        TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+        Document = new DocumentMetadata { FileName = fileName, ContentBase64 = Convert.ToBase64String(bytes) },
+    };
+
+    public static SaveRequest VersionSave(
+        Guid existingDocumentId, byte[] bytes, bool isNewVersion = true, string fileName = "Brief.docx",
+        string? comment = "Second draft") => new()
+    {
+        ContentType = SaveContentType.Document,
+        TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+        Document = new DocumentMetadata
+        {
+            FileName = fileName,
+            ContentBase64 = Convert.ToBase64String(bytes),
+            IsNewVersion = isNewVersion,
+            ExistingDocumentId = existingDocumentId,
+            VersionComment = comment,
+        },
+    };
+
+    /// <summary>The refusal invariant: no row, no SPE item, no SPE version, no job, no finalization.</summary>
+    public void ShouldHaveWrittenNothing()
+    {
+        DocumentCreates.Should().Be(0, "a refused version save creates no sprk_document");
+        UploadSmallCalls.Should().Be(0, "a refused version save uploads no SPE item");
+        ReplaceCalls.Should().Be(0, "a refused version save writes no SPE version");
+        DocumentUpdates.Should().BeEmpty();
+        Jobs.Should().BeEmpty("the refusal precedes the ProcessingJob");
+        FinalizationPayloads.Should().BeEmpty();
+    }
+
+    // ── Dataverse ─────────────────────────────────────────────────────────────────────────────────
+
+    internal string CreateDocument(CreateDocumentRequest request)
+    {
+        lock (_gate)
+        {
+            DocumentCreates++;
+            var id = Guid.NewGuid();
+            Documents[id] = new DocumentRow { Id = id, FileName = request.Name };
+            return id.ToString("D");
+        }
+    }
+
+    internal void ApplyUpdate(string id, UpdateDocumentRequest update)
+    {
+        lock (_gate)
+        {
+            DocumentUpdates.Add((id, update));
+            if (!Documents.TryGetValue(Guid.Parse(id), out var row))
+                return;
+            row.DriveId = update.GraphDriveId ?? row.DriveId;
+            row.ItemId = update.GraphItemId ?? row.ItemId;
+            row.FileName = update.FileName ?? row.FileName;
+            row.FileSize = update.FileSize ?? row.FileSize;
+            row.FilePath = update.FilePath ?? row.FilePath;
+            row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
+        }
+    }
+
+    internal DocumentEntity? ReadDocument(string id)
+    {
+        lock (_gate)
+        {
+            DocumentReads.Add(id);
+            return Documents.TryGetValue(Guid.Parse(id), out var row)
+                ? new DocumentEntity
+                {
+                    Id = row.Id.ToString("D"),
+                    Name = row.FileName ?? "document",
+                    FileName = row.FileName,
+                    GraphDriveId = row.DriveId,
+                    GraphItemId = row.ItemId,
+                }
+                : null;
+        }
+    }
+
+    internal Guid RecordJob(object job)
+    {
+        lock (_gate)
+        {
+            var type = job.GetType();
+            var name = (string?)type.GetProperty("Name")?.GetValue(job) ?? string.Empty;
+            var key = (string?)type.GetProperty("IdempotencyKey")?.GetValue(job) ?? string.Empty;
+            var id = Guid.NewGuid();
+            Jobs.Add((name, key));
+            _jobIdsByKey[key] = id;
+            return id;
+        }
+    }
+
+    internal object? FindJobByIdempotencyKey(string key)
+    {
+        lock (_gate)
+        {
+            if (!_jobIdsByKey.TryGetValue(key, out var id))
+                return null;
+            dynamic existing = new System.Dynamic.ExpandoObject();
+            existing.Id = id;
+            existing.Status = 2; // Completed
+            existing.JobType = 0;
+            existing.Progress = 100;
+            return (object)existing;
+        }
+    }
+
+    internal Microsoft.Xrm.Sdk.Entity RetrieveDocumentByItemId(string itemId)
+    {
+        lock (_gate)
+        {
+            var row = Documents.Values.FirstOrDefault(r => string.Equals(r.ItemId, itemId, StringComparison.Ordinal))
+                // The real client signals "no row for this alternate key" by THROWING.
+                ?? throw new InvalidOperationException("sprk_document not found with provided alternate key values.");
+
+            var entity = new Microsoft.Xrm.Sdk.Entity("sprk_document", row.Id);
+            entity["sprk_canonicalhash"] = row.CanonicalHash;
+            if (row.CanonicalDocumentId is { } canonical)
+                entity["sprk_canonicaldocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", canonical);
+            return entity;
+        }
+    }
+
+    internal void ApplyGenericUpdate(Guid id, Dictionary<string, object> fields)
+    {
+        lock (_gate)
+        {
+            GenericUpdates.Add((id, fields));
+            if (!Documents.TryGetValue(id, out var row))
+                return;
+            if (fields.TryGetValue("sprk_canonicaldocument", out var link) && link is DBNull)
+                row.CanonicalDocumentId = null;
+            if (fields.TryGetValue("sprk_canonicalhash", out var hash) && hash is string h)
+                row.CanonicalHash = h;
+        }
+    }
+
+    // ── SPE ───────────────────────────────────────────────────────────────────────────────────────
+
+    internal FileHandleDto PutByPath(string driveId, string path, byte[] bytes)
+    {
+        lock (_gate)
+        {
+            UploadSmallCalls++;
+            var item = SpeItems.Values.FirstOrDefault(i =>
+                i.DriveId == driveId && string.Equals(i.Name, path, StringComparison.OrdinalIgnoreCase));
+            if (item is null)
+            {
+                item = new SpeItem { DriveId = driveId, Id = $"item-{Guid.NewGuid():N}", Name = path };
+                SpeItems[item.Id] = item;
+            }
+            item.Versions.Add(bytes);
+            return Handle(item, bytes.Length);
+        }
+    }
+
+    internal FileHandleDto? PutByItemId(string driveId, string itemId, byte[] bytes)
+    {
+        lock (_gate)
+        {
+            ReplaceCalls++;
+            if (LockedItemIds.Contains(itemId))
+                throw new DocumentLockedByWordException(itemId);
+            if (!SpeItems.TryGetValue(itemId, out var item) || item.DriveId != driveId)
+                return null; // the facade's 404 shape
+            item.Versions.Add(bytes);
+            return Handle(item, bytes.Length);
+        }
+    }
+
+    internal string? LiveHash(string itemId)
+    {
+        lock (_gate)
+        {
+            return SpeItems.TryGetValue(itemId, out var item) ? Hash(item.Versions[^1]) : null;
+        }
+    }
+
+    internal bool Delete(string itemId)
+    {
+        lock (_gate)
+        {
+            DeletedItemIds.Add(itemId);
+            return SpeItems.Remove(itemId);
+        }
+    }
+
+    private static FileHandleDto Handle(SpeItem item, long size) => new(
+        Id: item.Id,
+        Name: item.Name,
+        ParentId: null,
+        Size: size,
+        CreatedDateTime: DateTimeOffset.UtcNow,
+        LastModifiedDateTime: DateTimeOffset.UtcNow,
+        ETag: $"\"{{{item.Id}}},{item.Versions.Count}\"",
+        IsFolder: false,
+        WebUrl: item.WebUrl);
+
+    // ── Authorization + Service Bus ───────────────────────────────────────────────────────────────
+
+    internal AccessSnapshot Access(string userId, string resourceId)
+    {
+        lock (_gate)
+        {
+            AccessChecks.Add(resourceId);
+            var rights = Guid.TryParse(resourceId, out var id) && AccessByDocumentId.TryGetValue(id, out var granted)
+                ? granted
+                : AccessRights.None;
+            return new AccessSnapshot { UserId = userId, ResourceId = resourceId, AccessRights = rights };
+        }
+    }
+
+    internal void RecordFinalization(string messageJson)
+    {
+        using var document = JsonDocument.Parse(messageJson);
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (string.Equals(property.Name, "Payload", StringComparison.OrdinalIgnoreCase))
+            {
+                lock (_gate)
+                {
+                    FinalizationPayloads.Add(property.Value.Clone());
+                }
+            }
+        }
+    }
+
+    internal static byte[] ReadAll(Stream content)
+    {
+        using var buffer = new MemoryStream();
+        if (content.CanSeek)
+            content.Position = 0;
+        content.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Case-insensitive property read on a finalization payload.</summary>
+    public static string? PayloadValue(JsonElement payload, string name)
+    {
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                return property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : property.Value.ToString();
+        }
+
+        return null;
+    }
+}
+
+/// <summary>
+/// <see cref="OfficeTestWebAppFactory"/> with its Dataverse, SPE, Service Bus and access-data doubles bound to
+/// one <see cref="OfficeVersionSaveWorld"/>. Everything else (auth handler, config, the
+/// <see cref="CallerRecordAccessProbe"/> grant, the non-securable registry) is task 016's fixture, unchanged.
+/// </summary>
+public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
+{
+    private readonly OfficeVersionSaveWorld _world;
+
+    public OfficeVersionSaveTestWebAppFactory(OfficeVersionSaveWorld world)
+    {
+        _world = world;
+    }
+
+    /// <summary>
+    /// Every client this factory creates carries a caller bearer token.
+    /// </summary>
+    /// <remarks>
+    /// §F.2 (fixture-config-first), found by running the suite: <c>AuthorizationService</c> FAILS CLOSED with
+    /// <c>sdap.access.deny.no_caller_token</c> when a caller-scoped check has no bearer token — correct
+    /// production behaviour (it refuses to degrade to app-only evaluation). The base fixture's
+    /// <see cref="TestAuthHandler"/> authenticates WITHOUT an Authorization header, so without this every
+    /// version save 403'd before the access data source was even consulted. Same arrangement as
+    /// <c>DocumentIdentityContractTests</c>. The token's value is never validated by the test host.
+    /// </remarks>
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-caller-token");
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+
+        builder.ConfigureTestServices(services =>
+        {
+            var world = _world;
+
+            var dataverse = new Mock<IDataverseService>();
+            dataverse.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            dataverse
+                .Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((CreateDocumentRequest r, CancellationToken _) => world.CreateDocument(r));
+            dataverse
+                .Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+                .Callback((string id, UpdateDocumentRequest u, CancellationToken _) => world.ApplyUpdate(id, u))
+                .Returns(Task.CompletedTask);
+            dataverse
+                .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string id, CancellationToken _) => world.ReadDocument(id));
+            dataverse
+                .Setup(d => d.CreateProcessingJobAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((object job, CancellationToken _) => world.RecordJob(job));
+            dataverse
+                .Setup(d => d.GetProcessingJobByIdempotencyKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string key, CancellationToken _) => world.FindJobByIdempotencyKey(key));
+            dataverse
+                .Setup(d => d.RetrieveByAlternateKeyAsync(
+                    "sprk_document", It.IsAny<Microsoft.Xrm.Sdk.KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Microsoft.Xrm.Sdk.KeyAttributeCollection keys, string[] _, CancellationToken _) =>
+                    world.RetrieveDocumentByItemId((string)keys["sprk_graphitemid"]));
+            dataverse
+                .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Callback((string _, Guid id, Dictionary<string, object> fields, CancellationToken _) => world.ApplyGenericUpdate(id, fields))
+                .Returns(Task.CompletedTask);
+            dataverse
+                .Setup(d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+            services.RemoveAll<IDataverseService>();
+            services.AddSingleton(dataverse.Object);
+
+            var graphClientFactory = Mock.Of<IGraphClientFactory>();
+            var spe = new Mock<SpeFileStore>(
+                MockBehavior.Loose,
+                new ContainerOperations(graphClientFactory, Mock.Of<ILogger<ContainerOperations>>()),
+                new DriveItemOperations(graphClientFactory, Mock.Of<ILogger<DriveItemOperations>>()),
+                new UploadSessionManager(graphClientFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+                new UserOperations(graphClientFactory, Mock.Of<ILogger<UserOperations>>()),
+                null!);
+            spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string driveId, string path, Stream content, CancellationToken _) =>
+                    (FileHandleDto?)world.PutByPath(driveId, path, OfficeVersionSaveWorld.ReadAll(content)));
+            spe.Setup(s => s.ReplaceFileContentAsUserAsync(
+                    It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Microsoft.AspNetCore.Http.HttpContext _, string driveId, string itemId, Stream content, CancellationToken _) =>
+                    world.PutByItemId(driveId, itemId, OfficeVersionSaveWorld.ReadAll(content)));
+            spe.Setup(s => s.GetQuickXorHashAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string itemId, CancellationToken _) => world.LiveHash(itemId));
+            spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string itemId, CancellationToken _) => world.Delete(itemId));
+            services.RemoveAll<SpeFileStore>();
+            services.AddScoped(_ => spe.Object);
+
+            var access = new Mock<IAccessDataSource>();
+            access
+                .Setup(a => a.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string userId, string resourceId, string? _, CancellationToken _) => world.Access(userId, resourceId));
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton(access.Object);
+
+            var sender = new Mock<ServiceBusSender>();
+            sender
+                .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
+                .Callback((ServiceBusMessage message, CancellationToken _) => world.RecordFinalization(message.Body.ToString()))
+                .Returns(Task.CompletedTask);
+            var serviceBus = new Mock<ServiceBusClient>();
+            serviceBus.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(sender.Object);
+            services.RemoveAll<OfficeJobQueue>();
+            services.AddScoped(sp => new OfficeJobQueue(
+                serviceBus.Object,
+                Options.Create(new ServiceBusOptions()),
+                sp.GetRequiredService<ILogger<OfficeJobQueue>>()));
+        });
+    }
+}

@@ -244,6 +244,25 @@ public class OfficeService : IOfficeService
                 _ => throw new ArgumentOutOfRangeException(nameof(request.ContentType))
             };
 
+            // ══ FR-11 VERSION SAVE (spaarkeai-word-add-in-r1 task 023) ════════════════════════════════
+            // A Document save naming an existing sprk_document writes a NEW SPE VERSION of that document's
+            // own drive item and refreshes that row — it never creates a second row. Scoped by IsVersionSave
+            // on the CONTENT TYPE explicitly, so Email and Attachment saves never read the field, whatever
+            // their body carries. The endpoint filter has already required "write" on the target (ADR-008);
+            // this is the existence + pointer read that follows it, and every refusal returns HERE — before a
+            // ProcessingJob row, an SPE write, or a document row can exist.
+            OfficeDocumentPersistence.VersionTarget? versionTarget = null;
+            if (IsVersionSave(request))
+            {
+                var (target, refusal) = await ResolveVersionTargetAsync(request.Document!, cancellationToken);
+                if (refusal is not null)
+                {
+                    return new SaveResponse { Success = false, Error = refusal };
+                }
+
+                versionTarget = target;
+            }
+
             // Step 4: Create a new ProcessingJob record in Dataverse
             var jobId = Guid.Empty;
 
@@ -278,7 +297,12 @@ public class OfficeService : IOfficeService
             // upload-before-a-record-exists client paths in task 076, which are a different surface;
             // Office save always carries a TargetEntity from the shipped add-in, so its no-record
             // branch is contract-only and needs no new derivation component (CLAUDE.md §11).
-            var derivedContainerId = await ResolveContainerAsync(request, cancellationToken);
+            //
+            // FR-11 (task 023): a VERSION save writes to the target document's OWN drive — the destination is
+            // an item that already exists, so a container derived from TargetEntity could only disagree with it.
+            var derivedContainerId = versionTarget is not null
+                ? versionTarget.DriveId!
+                : await ResolveContainerAsync(request, cancellationToken);
 
             // Serialize the request payload for storage
             var payload = System.Text.Json.JsonSerializer.Serialize(new
@@ -297,7 +321,10 @@ public class OfficeService : IOfficeService
                 // Create ProcessingJob in Dataverse using existing IDataverseService
                 jobId = await _jobService.CreateProcessingJobAsync(new
                 {
-                    Name = $"{request.ContentType} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    // FR-11 (task 023): a version save is named as one, so each revision's job row — which
+                    // also carries Document.IsNewVersion/VersionComment in its payload — is identifiable.
+                    // Every other save keeps the identical "{ContentType} Save - …" name.
+                    Name = $"{(versionTarget is not null ? "Document Version" : request.ContentType.ToString())} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     JobType = (int)jobType,
                     Status = 0, // Queued
                     Progress = 0,
@@ -416,6 +443,16 @@ public class OfficeService : IOfficeService
                 // payload was built. This site used to read request.ContainerId and only fall back to
                 // config — which is how a caller chose the destination of an app-only MI write.
                 var containerId = derivedContainerId;
+
+                // FR-11 (task 023): the version path leaves HERE — after the Document branch above has decoded
+                // the bytes and sanitized the name (the folder-minting fix stays on this path too) — and never
+                // reaches the path-keyed upload or CreateDocumentWithSpePointersAsync below.
+                if (versionTarget is not null)
+                {
+                    return await CompleteVersionSaveAsync(
+                        versionTarget, request, userId, httpContext, jobId, jobRecord, idempotencyKey,
+                        correlationId, contentStream, fileName, fileSize, cancellationToken);
+                }
 
                 // Upload to SPE
                 var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
@@ -619,9 +656,200 @@ public class OfficeService : IOfficeService
                        $"{request.Document?.FileName}|" +
                        $"{request.Document?.ExistingDocumentId}";
 
+        // FR-11 (task 023): a VERSION save also keys on its CONTENT. Without this, every revision of the same
+        // document (same file name, same target, same existing id) produced the SAME key, and the persistent
+        // ProcessingJob lookup in SaveAsync answered the SECOND revision "Duplicate" with the first save's job —
+        // the new bytes were never written. With it, two different revisions are two operations while a retried
+        // identical request still de-duplicates. Every other request's canonical string is unchanged.
+        if (IsVersionSave(request))
+        {
+            canonical += $"|version-content:{HashContent(request.Document!.ContentBase64)}";
+        }
+
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToBase64String(hashBytes);
+    }
+
+    /// <summary>
+    /// FR-11 (task 023): is this save a VERSION of an existing document? True only for
+    /// <see cref="SaveContentType.Document"/> carrying a non-empty <c>Document.ExistingDocumentId</c>.
+    /// </summary>
+    /// <remarks>
+    /// The ONE predicate for the version path: <see cref="SaveAsync"/> branches on it and
+    /// <c>OfficeVersionSaveAuthorizationFilter</c> gates on it, so the gate and the write cannot disagree about
+    /// what a version save is. Keyed on the content type EXPLICITLY — never on <c>request.Document</c> being
+    /// null — so an Email or Attachment body that happens to carry the field is never acted on.
+    /// </remarks>
+    public static bool IsVersionSave(SaveRequest request) =>
+        request.ContentType == SaveContentType.Document
+        && request.Document?.ExistingDocumentId is { } existingDocumentId
+        && existingDocumentId != Guid.Empty;
+
+    private static string HashContent(string? contentBase64) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(contentBase64 ?? string.Empty)));
+
+    /// <summary>
+    /// FR-11 (task 023): validates a version save's intent and resolves its target row. Returns the target, or
+    /// a refusal whose code is distinct per cause. Runs BEFORE any ProcessingJob, SPE write or document row.
+    /// </summary>
+    private async Task<(OfficeDocumentPersistence.VersionTarget? Target, SaveError? Refusal)> ResolveVersionTargetAsync(
+        DocumentMetadata document,
+        CancellationToken cancellationToken)
+    {
+        // IsNewVersion is the explicit-intent half of the contract. A request naming an existing document while
+        // declaring "not a new version" is ambiguous, and both guesses are data-integrity faults: a second row
+        // (the defect this path removes) or an overwrite nobody asked for. So it is refused, not interpreted.
+        if (!document.IsNewVersion)
+        {
+            return (null, new SaveError
+            {
+                Code = "OFFICE_018",
+                Message = "A save that names an existing document must set isNewVersion to true. Nothing was saved.",
+                Retryable = false
+            });
+        }
+
+        var existingDocumentId = document.ExistingDocumentId!.Value;
+        var target = await _documentPersistence.ResolveVersionTargetAsync(existingDocumentId, cancellationToken);
+
+        if (target is null)
+        {
+            _logger.LogWarning(
+                "Version save refused: existing document {ExistingDocumentId} was not found.", existingDocumentId);
+            return (null, new SaveError
+            {
+                Code = "OFFICE_016",
+                Message = "The document this save was meant to add a version to could not be found. Nothing was saved.",
+                Retryable = false
+            });
+        }
+
+        if (!target.HasSpePointers)
+        {
+            // Never fall back to uploading a fresh item: that is a second document, not a version.
+            _logger.LogWarning(
+                "Version save refused: existing document {ExistingDocumentId} has no SPE pointers.", existingDocumentId);
+            return (null, new SaveError
+            {
+                Code = "OFFICE_017",
+                Message = "The document this save was meant to add a version to has no file in storage. Nothing was saved.",
+                Retryable = false
+            });
+        }
+
+        return (target, null);
+    }
+
+    /// <summary>
+    /// FR-11 (task 023): the version path's write half — a new SPE version of the target's own drive item, the
+    /// target row's file metadata refreshed, and finalization queued against the EXISTING document id.
+    /// </summary>
+    /// <remarks>
+    /// <para>No row is created (the one-row invariant) and no membership <c>Added</c> event is published (no
+    /// new row, so no ownership change). The job phases reuse the names the task pane keys its progress list
+    /// on (<c>FileUploaded</c>, <c>RecordsCreated</c>, <c>Complete</c> — <c>useSaveFlow.ts</c>); on this path
+    /// <c>RecordsCreated</c> means "the existing record was updated".</para>
+    /// </remarks>
+    private async Task<SaveResponse> CompleteVersionSaveAsync(
+        OfficeDocumentPersistence.VersionTarget target,
+        SaveRequest request,
+        string userId,
+        HttpContext httpContext,
+        Guid jobId,
+        JobStatusResponse jobRecord,
+        string idempotencyKey,
+        string correlationId,
+        Stream content,
+        string sanitizedFileName,
+        long fileSize,
+        CancellationToken cancellationToken)
+    {
+        var driveId = target.DriveId!;
+        var itemId = target.ItemId!;
+
+        var write = await _storageUploader.WriteNewVersionAsync(httpContext, driveId, itemId, content, cancellationToken);
+        if (!write.Success)
+        {
+            await _documentPersistence.UpdateJobStatusInDataverseAsync(
+                jobId, JobStatus.Failed, "UploadFailed", 0, write.Error, cancellationToken);
+            _jobStore[jobId] = jobRecord with
+            {
+                Status = JobStatus.Failed,
+                CurrentPhase = "UploadFailed",
+                CompletedAt = DateTimeOffset.UtcNow
+            };
+
+            var code = write.ErrorCode ?? "OFFICE_012";
+            return new SaveResponse
+            {
+                Success = false,
+                Error = new SaveError
+                {
+                    Code = code,
+                    Message = code switch
+                    {
+                        "OFFICE_017" => "The document's file was not found in storage, so a new version could not be written. Nothing was saved.",
+                        "OFFICE_019" => "The document is locked for editing, so a new version could not be written. Nothing was saved; try again when it is released.",
+                        "OFFICE_009" => "You do not have permission to write this document's file. Nothing was saved.",
+                        _ => "Failed to write the new version to storage"
+                    },
+                    Details = write.Error,
+                    Retryable = code is "OFFICE_012" or "OFFICE_019"
+                }
+            };
+        }
+
+        await _documentPersistence.UpdateJobStatusInDataverseAsync(
+            jobId, JobStatus.Running, "FileUploaded", 30, null, cancellationToken);
+        _jobStore[jobId] = jobRecord with { Status = JobStatus.Running, Progress = 30, CurrentPhase = "FileUploaded" };
+
+        var metadataRefreshed = await _documentPersistence.RecordNewVersionAsync(
+            target, write.ItemName, write.WebUrl, fileSize, cancellationToken);
+
+        await _documentPersistence.UpdateJobStatusInDataverseAsync(
+            jobId, JobStatus.Running, "RecordsCreated", 50, null, cancellationToken);
+        _jobStore[jobId] = _jobStore[jobId] with { Progress = 50, CurrentPhase = "RecordsCreated" };
+
+        // The EXISTING document id and the SAME drive item: downstream artifacts and AI attach to this record.
+        // The file name is SPE's (a PUT by item id does not rename the item), falling back to the row's.
+        await _jobQueue.QueueUploadFinalizationAsync(
+            jobId,
+            idempotencyKey,
+            correlationId,
+            userId,
+            request,
+            driveId,
+            itemId,
+            write.ItemName ?? target.FileName ?? sanitizedFileName,
+            fileSize,
+            target.DocumentId,
+            cancellationToken);
+
+        await _documentPersistence.UpdateJobStatusInDataverseAsync(
+            jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
+        _jobStore[jobId] = _jobStore[jobId] with
+        {
+            Status = JobStatus.Completed,
+            Progress = 100,
+            CurrentPhase = "Complete",
+            CompletedAt = DateTimeOffset.UtcNow
+        };
+
+        _logger.LogInformation(
+            "ProcessingJob {JobId} completed: new SPE version of item {ItemId} saved to existing document {DocumentId} " +
+            "(metadata refreshed: {MetadataRefreshed}, comment supplied: {HasComment}). Finalization queued.",
+            jobId, itemId, target.DocumentId, metadataRefreshed, !string.IsNullOrWhiteSpace(request.Document?.VersionComment));
+
+        return new SaveResponse
+        {
+            Success = true,
+            Duplicate = false,
+            JobId = jobId,
+            StatusUrl = $"/api/office/jobs/{jobId}",
+            StreamUrl = $"/api/office/jobs/{jobId}/stream"
+        };
     }
 
     /// <inheritdoc />

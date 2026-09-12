@@ -105,4 +105,98 @@ public class OfficeStorageUploader
             return false;
         }
     }
+
+    /// <summary>
+    /// Outcome of <see cref="WriteNewVersionAsync"/>. <see cref="ErrorCode"/> is an Office error code
+    /// (<c>OFFICE_0xx</c>) chosen HERE, where the typed SPE exception is still in hand, so no caller has to
+    /// re-derive what went wrong from a message string.
+    /// </summary>
+    public sealed record VersionWriteResult(
+        bool Success,
+        string? ItemId,
+        string? ItemName,
+        string? WebUrl,
+        string? ErrorCode,
+        string? Error);
+
+    /// <summary>
+    /// FR-11 version save (spaarkeai-word-add-in-r1 task 023): writes <paramref name="content"/> as a NEW
+    /// VERSION of the EXISTING drive item <paramref name="itemId"/>. The item id is unchanged and the previous
+    /// content stays in the item's version history.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why item-keyed, and why this call.</b> <see cref="UploadToSpeAsync"/> is PATH-keyed: if the
+    /// document had been renamed, or the user typed a different name, a path PUT would mint a SECOND item —
+    /// the rename-approximation of versioning that task 023 forbids. <see cref="SpeFileStore.ReplaceFileContentAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>
+    /// PUTs to <c>/drives/{driveId}/items/{itemId}/content</c>, which SharePoint commits as a new version of
+    /// that same item. It is the call Compose's save-back already uses for "update in place, never mint a
+    /// duplicate". ADR-007: it is the facade's; no Graph type crosses into this class.</para>
+    /// <para><b>Why the caller's identity (OBO).</b> The add-in user is, by construction, editing this
+    /// item — Word reached it in SPE as that user — so the delegated identity holds write on it, and SPE then
+    /// enforces that write itself, beneath the Dataverse <c>write</c> gate on the route. An app-only write
+    /// would bypass SPE's ACL and rest the whole decision on the filter.</para>
+    /// <para>Never throws for an SPE refusal: each typed refusal becomes a <see cref="VersionWriteResult"/> with
+    /// a distinct code. A cancellation still propagates.</para>
+    /// </remarks>
+    public async Task<VersionWriteResult> WriteNewVersionAsync(
+        HttpContext httpContext,
+        string driveId,
+        string itemId,
+        Stream content,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var saved = await _speFileStore.ReplaceFileContentAsUserAsync(
+                httpContext, driveId, itemId, content, cancellationToken);
+
+            if (saved is null)
+            {
+                // The facade maps a Graph 404 to null: the row's pointers name an item SPE no longer has.
+                // Never recover by uploading a fresh item — that is a second document, not a version.
+                _logger.LogWarning(
+                    "Version write refused: drive item {ItemId} on drive {DriveId} was not found in SPE.",
+                    itemId, driveId);
+                return new VersionWriteResult(false, null, null, null, "OFFICE_017",
+                    "The document's file was not found in storage.");
+            }
+
+            if (!string.Equals(saved.Id, itemId, StringComparison.Ordinal))
+            {
+                // A PUT to /items/{id}/content cannot answer with a different item. If it ever does, the
+                // one-item invariant is already broken somewhere below the facade: report it, never paper over it.
+                _logger.LogError(
+                    "Version write returned drive item {ReturnedItemId}, not the targeted {ItemId} (drive {DriveId}).",
+                    saved.Id, itemId, driveId);
+                return new VersionWriteResult(false, saved.Id, saved.Name, saved.WebUrl, "OFFICE_012",
+                    "Storage answered the version write with a different item.");
+            }
+
+            _logger.LogInformation(
+                "New SPE version written: DriveId={DriveId}, ItemId={ItemId}, Size={Size}",
+                driveId, itemId, saved.Size);
+
+            return new VersionWriteResult(true, saved.Id, saved.Name, saved.WebUrl, null, null);
+        }
+        catch (DocumentLockedByWordException ex)
+        {
+            _logger.LogWarning(ex,
+                "Version write refused: drive item {ItemId} on drive {DriveId} is locked.", itemId, driveId);
+            return new VersionWriteResult(false, null, null, null, "OFFICE_019",
+                "The document is locked for editing, so a new version could not be written.");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex,
+                "Version write refused: the caller may not write drive item {ItemId} on drive {DriveId}.",
+                itemId, driveId);
+            return new VersionWriteResult(false, null, null, null, "OFFICE_009",
+                "You do not have permission to write this document's file.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Version write failed for drive item {ItemId} on drive {DriveId}.", itemId, driveId);
+            return new VersionWriteResult(false, null, null, null, "OFFICE_012", ex.Message);
+        }
+    }
 }

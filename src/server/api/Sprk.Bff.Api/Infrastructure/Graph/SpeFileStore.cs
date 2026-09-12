@@ -293,7 +293,11 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, conflictBehavior, ct);
 
-    public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+    // `virtual` (spaarkeai-word-add-in-r1 task 023) for the same module-boundary-test-double reason as
+    // UploadSmallAsync/DeleteFileAsync: the Office version save (FR-11) writes a new SPE version of an
+    // EXISTING drive item through this call, and the one-row + same-item invariants are only verifiable if a
+    // test can observe which item was written — and prove, on refusal paths, that nothing was. No behaviour change.
+    public virtual Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
