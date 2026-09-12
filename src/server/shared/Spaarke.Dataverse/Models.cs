@@ -347,7 +347,14 @@ public class DocumentEntity
     /// </summary>
     public string? Keywords { get; set; }
 
-    /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
+    /// <summary>
+    /// Document type classification (e.g., Contract, NDA, Invoice). Maps to <c>sprk_documenttype</c>,
+    /// a Choice (Picklist) column — verified live 2026-09-12. This is the Choice's DISPLAY LABEL
+    /// (from Dataverse's <c>FormattedValues</c>), not free text and not the raw option integer;
+    /// <see cref="DataverseServiceClientImpl.MapToDocumentEntity"/> is the one place that reads it —
+    /// see its remarks for the OptionSetValue-cast regression this comment exists to prevent
+    /// recurring.
+    /// </summary>
     public string? DocumentType { get; set; }
 
     /// <summary>

@@ -27,3 +27,12 @@
   `Sprk.Bff.Api.csproj` reports **no vulnerable packages**, consistent with zero package changes.
 - **Thresholds:** +5 MB for a single task needs justification, 55 MB cumulative triggers an architecture
   review, 60 MB is a hard stop. +0.02 MB is far below all three.
+
+## Re-measured after the `sprk_documenttype` bugfix (same day)
+
+A coordinator review caught a runtime bug in the DocumentType mapping (see
+`notes/021-profile-section-display.md` "Post-review bugfix" for the full writeup). The fix (a
+corrected field-mapping expression + XML doc comments + a `private`→`public static` visibility
+change on `MapToDocumentEntity`) was re-published and re-zipped the same way: **45.37 MB**, byte-for-
+byte identical to the pre-fix measurement above — expected, since the change is a few lines of IL in
+an already-compiled method plus comments (comments do not emit IL).

@@ -82,6 +82,66 @@ Spaarke.Auth` had no `dist/`), which made `npm run typecheck` and `npm run build
 After that, both `npm run typecheck` (0 production errors, 284 test-file errors — matches the
 project's documented baseline exactly) and `npm run build` (clean) ran representatively.
 
+## Post-review bugfix: `sprk_documenttype` is a Choice column, not text
+
+A coordinator review (2026-09-12, after the initial task-021 commit `45653864d`) caught a real
+runtime defect: `sprk_documenttype` is a Dataverse **Choice (Picklist)** column, not free text —
+verified live via the metadata API, and corroborated by the pre-existing writer at
+`DataverseServiceClientImpl.cs:850` (`document["sprk_documenttype"] = new
+OptionSetValue(request.DocumentType.Value)`). My original mapper line,
+`entity.GetAttributeValue<string>("sprk_documenttype")`, casts the stored `OptionSetValue` directly
+to `string`; the SDK's `Entity.GetAttributeValue<T>` performs an unconditional `(T)obj` cast, so this
+threw `InvalidCastException` for any entity where the attribute was present.
+
+**Blast radius, confirmed by grep**: because task 021 added `sprk_documenttype` to
+`GetDocumentAsync`'s `ColumnSet`, the crash was reachable from two places — the new
+`GET /api/v1/documents/{id}` read AND `VisualizationService.SearchForVisualizationAsync`, whose Step
+1 (`sourceDataverseDoc = await _documentService.GetDocumentAsync(documentId.ToString(), ...)`, its own
+comment: "always required") calls the SAME method. This means the bug, unfixed, would have broken the
+**Find Similar visualization feature** for any document with a classified document type — not only
+the new Profile section. No OTHER `IDocumentDataverseService` method (`GetDocumentsByMatterAsync`,
+`GetDocumentsByParentAsync`, etc.) selects `sprk_documenttype` in its own `ColumnSet`, so those paths
+were never at risk. Grep of `src/server` for `.DocumentType` confirmed **zero** production consumers
+of `DocumentEntity.DocumentType` existed before task 021 (every other `.DocumentType` hit belongs to
+an unrelated type — `BulkRagIndexingPayload`, `VisualizationDocument`, etc.) — so no consumer could
+have been relying on the old always-null value or on a code string; the read-model's `string?` shape
+for `DocumentType` was free to keep.
+
+**Fix**: `MapToDocumentEntity` now reads `sprk_documenttype` by preferring
+`entity.FormattedValues["sprk_documenttype"]` (the SDK populates this with the Choice's display label
+on every `Retrieve`) and falling back to the raw numeric value, stringified, only when no formatted
+value is present (defensive — some hand-built entities in other tests/paths may lack
+`FormattedValues`). This needs zero client-side changes: `DocumentProfileSection.tsx` already renders
+`documentType` as a plain label string. Considered also carrying the raw `int` option value alongside
+the label (per the reviewer's "consider") — decided against it: zero consumers need the int today,
+and `DocumentEntity` is already a wide DTO; adding an unused field would be scope creep the existing
+component-justification discipline (CLAUDE.md §11) argues against. `sprk_filesummarystatus` (also a
+Choice column) already read correctly via `GetAttributeValue<OptionSetValue>(...)?.Value` — not part
+of the same bug class, confirmed by tests below. The three Memo columns
+(`sprk_filesummary`/`sprk_filetldr`/`sprk_filekeywords`) were also independently verified live as
+Memo (string-backed, no OptionSetValue involved) — no fix needed there.
+
+**Seam for the regression test (ADR-038 §7 B8)**: `MapToDocumentEntity` was `private` and uses no
+instance state, so it was changed to `public static` — the SAME precedent this file already uses for
+`StageAnalysisRegardingFields` ("Exposed public static for direct testability... avoids the
+tests/CLAUDE.md B8 ban on internal/reflection tests"). No `InternalsVisibleTo`, no reflection.
+
+**Fail-then-pass, demonstrated directly** (not merely asserted): with the public-static conversion
+applied but the buggy `DocumentType` line unchanged, `dotnet test --filter
+FullyQualifiedName~DocumentEntityMappingTests` gave **2 failed / 8 passed / 10 total**, both failures
+throwing `System.InvalidCastException : Unable to cast object of type 'Microsoft.Xrm.Sdk.OptionSetValue'
+to type 'System.String'.` at `DataverseServiceClientImpl.cs:1542` — the exact line and exact exception
+the reviewer predicted. After applying the fix, the same filter gave **10/10 passed**. Both runs are
+captured verbatim in the task's final report.
+
+New test file: `tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs` (KEEP path
+`tests/unit/domain/**`, ADR-038 §2 #6 — pure domain mapping logic) — 10 cases: DocumentType with a
+formatted label, DocumentType with no formatted label (raw-value fallback), DocumentType column not
+selected (null, no throw), SummaryStatus across 3 option values (asserts the RAW int is returned even
+when a formatted label IS present — pins the deliberate DIFFERENCE from DocumentType's label-preferring
+behavior so a future refactor doesn't accidentally unify the two and break the client's status switch),
+SummaryStatus column not selected (null), and the 3 Memo columns read cleanly as plain strings.
+
 ## `useDocumentProfile` design note
 
 `useOfficeTheme` (named in the ADR-021 constraint) is not called directly inside
