@@ -115,7 +115,7 @@ public class OfficeService : IOfficeService
     }
 
     /// <inheritdoc />
-    public Task<bool> GenerateProfileAsync(
+    public Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
         Guid documentId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)

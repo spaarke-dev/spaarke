@@ -338,5 +338,36 @@ describe('DocumentProfileSection', () => {
       expect(generateProfileButton()).toBeEnabled();
       expect(mockGet).toHaveBeenCalledTimes(1);
     });
+
+    it('coordinator-review fix: a 503 (AI facade unavailable) shows the error, never "Pending", and never re-reads', async () => {
+      // Server-side fix: OFFICE_PROFILE_002 is what OfficeEndpoints.GenerateProfileAsync returns when
+      // GenerateProfileDispatchOutcome.FacadeUnavailable comes back — the trigger was NEVER dispatched.
+      // The client must never move the displayed status to Pending for a job that will never run.
+      mockGet.mockResolvedValueOnce(envelope({ summaryStatus: 100000000 })); // None — not yet profiled
+      mockPost.mockRejectedValueOnce(
+        new ApiClientError({
+          type: 'https://spaarke.com/errors/office/office_profile_002',
+          title: 'Service Unavailable',
+          status: 503,
+          detail: 'Document profiling is currently unavailable. Try again later.',
+        })
+      );
+
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} />);
+      await waitFor(() => expect(screen.getByText(/has not been profiled yet/i)).toBeTruthy());
+
+      await user.click(generateProfileButton());
+
+      await waitFor(() =>
+        expect(screen.getByText('Document profiling is currently unavailable. Try again later.')).toBeTruthy()
+      );
+      // NEVER "Pending" — the trigger never dispatched, so the pane must not claim it did.
+      expect(screen.queryByText(/in progress/i)).toBeNull();
+      // The read outcome is unchanged (still "not been profiled yet"), and no re-read was triggered.
+      expect(screen.getByText(/has not been profiled yet/i)).toBeTruthy();
+      expect(generateProfileButton()).toBeEnabled();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+    });
   });
 });

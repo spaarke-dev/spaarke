@@ -199,9 +199,9 @@ public interface IOfficeService
     /// FR-08 (spaarkeai-word-add-in-r1 task 022): re-runs document profiling for the given
     /// <c>sprk_document</c> on user request from the pane's "Generate Profile" control. Fire-and-forget,
     /// best-effort — mirrors Compose's shipped <c>refresh-profile</c> semantics exactly: dispatches the
-    /// SAME OBO direct-Action profile pipeline (<c>IDocumentProfileAi</c>) and returns as soon as
-    /// dispatch is attempted, never awaiting the profile itself. Unconditionally OVERWRITES any existing
-    /// profile — no confirmation, no idempotency gate (deliberately NOT the
+    /// SAME OBO direct-Action profile pipeline (<c>IDocumentProfileAi</c>) and returns as soon as the
+    /// DISPATCH DECISION is made (fast, synchronous), never awaiting the profile itself. Unconditionally
+    /// OVERWRITES any existing profile — no confirmation, no idempotency gate (deliberately NOT the
     /// <c>AppOnlyDocumentAnalysis</c> Service-Bus job path, whose idempotency key would silently skip an
     /// already-profiled or Failed document).
     /// </summary>
@@ -211,10 +211,16 @@ public interface IOfficeService
     /// captured from it before the background dispatch detaches.</param>
     /// <param name="cancellationToken">Request-scope cancellation token (not used by the detached
     /// background profile itself, which runs under the app-shutdown token instead).</param>
-    /// <returns><see langword="true"/> when the profile was dispatched to the background; <see
-    /// langword="false"/> only when there was nothing to dispatch to (AI features disabled or no bearer
-    /// token) — the caller still returns 202 either way, per the fire-and-forget contract.</returns>
-    Task<bool> GenerateProfileAsync(
+    /// <returns>
+    /// The dispatch outcome (<see cref="GenerateProfileDispatchOutcome"/>). The caller MUST branch on
+    /// this — coordinator-review fix: an earlier draft ignored a bare <see langword="bool"/> return and
+    /// always answered 202, which let the endpoint claim success for a profile that would never run
+    /// (compound AI gate off). Only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce
+    /// a 202; <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> and
+    /// <see cref="GenerateProfileDispatchOutcome.NoBearer"/> are honest non-success outcomes the endpoint
+    /// maps to 503 and 401 respectively.
+    /// </returns>
+    Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
         Guid documentId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default);

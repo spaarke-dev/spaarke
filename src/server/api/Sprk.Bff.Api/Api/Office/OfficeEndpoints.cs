@@ -1350,6 +1350,9 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            // 503: the compound AI gate is off (IDocumentProfileAi unavailable) — coordinator-review fix,
+            // see GenerateProfileDispatchOutcome.FacadeUnavailable.
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 
@@ -1359,7 +1362,18 @@ public static class OfficeEndpoints
     /// <paramref name="documentId"/> is non-empty and <see cref="Api.Filters.DocumentAuthorizationFilter"/>
     /// has already authorized the caller for <c>write</c> on it (ADR-008 — no inline authorization here).
     /// </summary>
-    private static IResult GenerateProfileAsync(
+    /// <remarks>
+    /// Coordinator-review fix: this handler used to fire-and-forget
+    /// <c>officeService.GenerateProfileAsync</c> WITHOUT awaiting or inspecting its result, so it
+    /// returned 202 unconditionally — including when the AI profile facade was unavailable (compound AI
+    /// gate off) or no usable bearer token reached the dispatcher. That let an unconditionally-mapped
+    /// endpoint claim success for a feature-gated dependency that would never run the job (root
+    /// CLAUDE.md §10 asymmetric-registration rule / §F.1 / the ADR-032 Null-Object kill-switch
+    /// principle). The fix AWAITS the dispatch DECISION (fast — it does not wait for the background
+    /// profile itself, only for <c>OfficeProfileDispatcher.Dispatch</c>'s synchronous branch) and
+    /// switches on the outcome, so only a genuine dispatch produces 202.
+    /// </remarks>
+    private static async Task<IResult> GenerateProfileAsync(
         Guid documentId,
         IOfficeService officeService,
         ILogger<Program> logger,
@@ -1367,18 +1381,69 @@ public static class OfficeEndpoints
     {
         var traceId = context.TraceIdentifier;
 
-        // Dispatch is fire-and-forget best-effort — the response never waits on the background profile,
-        // per spec Assumptions (mirrors Compose refresh-profile: 202, unconditional overwrite, no
-        // confirmation). officeService.GenerateProfileAsync's own Task completes as soon as dispatch is
-        // attempted (or determined undispatchable); it is not the profile completing. Intentionally not
-        // awaited beyond that — see OfficeProfileDispatcher.Dispatch.
-        _ = officeService.GenerateProfileAsync(documentId, context, context.RequestAborted);
+        // Awaits only the DISPATCH DECISION, not the background profile — see the XML remarks above and
+        // OfficeProfileDispatcher.Dispatch, whose synchronous branch (facade-availability check, bearer
+        // check, Task.Run scheduling) completes immediately; the profile itself continues detached.
+        var outcome = await officeService.GenerateProfileAsync(documentId, context, context.RequestAborted)
+            .ConfigureAwait(false);
 
-        logger.LogInformation(
-            "Office Generate Profile: document {DocumentId} requested by user, dispatched (best-effort) TraceId={TraceId}",
-            documentId, traceId);
+        switch (outcome)
+        {
+            case GenerateProfileDispatchOutcome.Dispatched:
+                logger.LogInformation(
+                    "Office Generate Profile: document {DocumentId} requested by user, dispatched (best-effort) TraceId={TraceId}",
+                    documentId, traceId);
+                return Results.Accepted(value: new { documentId, correlationId = traceId });
 
-        return Results.Accepted(value: new { documentId, correlationId = traceId });
+            case GenerateProfileDispatchOutcome.FacadeUnavailable:
+                logger.LogWarning(
+                    "Office Generate Profile: document {DocumentId} — AI profile facade unavailable, refusing to claim success. TraceId={TraceId}",
+                    documentId, traceId);
+                return Results.Problem(
+                    type: "https://spaarke.com/errors/office/office_profile_002",
+                    title: "Service Unavailable",
+                    detail: "Document profiling is currently unavailable. Try again later.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_002",
+                        ["correlationId"] = traceId,
+                    });
+
+            case GenerateProfileDispatchOutcome.NoBearer:
+                // Defensive-only branch — unreachable via this route's filter chain (see the XML doc on
+                // GenerateProfileDispatchOutcome.NoBearer and OfficeProfileDispatcher.Dispatch for the
+                // proof). Mapped honestly rather than assumed away.
+                logger.LogWarning(
+                    "Office Generate Profile: document {DocumentId} — no usable bearer token reached the dispatcher. TraceId={TraceId}",
+                    documentId, traceId);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    title: "Unauthorized",
+                    detail: "A caller bearer token is required to generate a document profile.",
+                    type: "https://tools.ietf.org/html/rfc7235#section-3.1",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_003",
+                        ["correlationId"] = traceId,
+                    });
+
+            default:
+                // Exhaustive-switch safety net — new enum members must be handled explicitly, not fall
+                // through to an implicit 202.
+                logger.LogError(
+                    "Office Generate Profile: document {DocumentId} — unrecognized dispatch outcome {Outcome}. TraceId={TraceId}",
+                    documentId, outcome, traceId);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while starting document profiling.",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_INTERNAL",
+                        ["correlationId"] = traceId,
+                    });
+        }
     }
 
     #endregion

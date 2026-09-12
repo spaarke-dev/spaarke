@@ -68,25 +68,42 @@ internal sealed class OfficeProfileDispatcher
 
     /// <summary>
     /// Dispatches the best-effort OBO document-profile to a detached background scope and returns
-    /// immediately — never blocks the caller. The endpoint returns 202 regardless of this method's
-    /// return value (mirrors Compose: dispatch is always best-effort, never a precondition of the
-    /// response); the return value is for logging/diagnostics only.
+    /// immediately — never blocks the caller. Unlike the earlier draft of this method, the return value
+    /// is NOT advisory: the endpoint MUST map <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/>
+    /// and <see cref="GenerateProfileDispatchOutcome.NoBearer"/> to a non-success response. A
+    /// feature-gated service (the compound AI gate) sitting behind an UNCONDITIONALLY mapped endpoint
+    /// must never let the endpoint claim success for work that will never run — root CLAUDE.md §10's
+    /// asymmetric-registration rule / §F.1 / the ADR-032 Null-Object kill-switch principle, applied to a
+    /// case that has no DI kill-switch (the facade is a nullable ctor param, not a swappable
+    /// implementation) but the SAME obligation: an unavailable dependency is a distinct, honest outcome,
+    /// never a silent 202.
     /// </summary>
-    internal bool Dispatch(Guid documentId, HttpContext httpContext)
+    internal GenerateProfileDispatchOutcome Dispatch(Guid documentId, HttpContext httpContext)
     {
         // Availability gate: no scope factory (unit-test host) or no facade registered (compound AI gate
-        // off) — nothing to dispatch.
+        // off) — nothing to dispatch. The endpoint must 503, not 202, on this branch.
         if (_scopeFactory is null || _documentProfileAi is null)
         {
             _logger.LogWarning(
                 "Office Generate Profile: profile facade unavailable (no IDocumentProfileAi / IServiceScopeFactory) " +
                 "— not dispatched for document {DocumentId}.",
                 documentId);
-            return false;
+            return GenerateProfileDispatchOutcome.FacadeUnavailable;
         }
 
         // Capture the OBO user assertion (raw Authorization header) BEFORE the request scope disposes.
         // Non-throwing so a token-less request degrades cleanly rather than dispatching a doomed OBO call.
+        //
+        // In production this branch is UNREACHABLE for this route: the endpoint's own
+        // DocumentAuthorizationFilter("write") already fails closed with 403 "no_caller_token"
+        // (AuthorizationService.AuthorizeAsync) whenever TokenHelper.ExtractBearerTokenOrNull returns
+        // null for the SAME header this check reads — using the identical
+        // IsNullOrWhiteSpace-or-not-"Bearer "-prefixed condition — so the filter denies BEFORE the
+        // handler or this dispatcher ever runs. Proven by
+        // OfficeGenerateProfileContractTests.Post_GenerateProfile_WithNoCallerBearerToken_
+        // Returns403ViaTheEndpointFilter_AndDispatchesNothing (asserts the facade is never invoked).
+        // Retained defensively — e.g. if this method is ever called from a route without that filter —
+        // rather than assuming unreachability forever.
         var authorizationHeader = httpContext.Request?.Headers.Authorization.ToString();
         if (string.IsNullOrWhiteSpace(authorizationHeader)
             || !authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
@@ -95,7 +112,7 @@ internal sealed class OfficeProfileDispatcher
                 "Office Generate Profile: no bearer Authorization header on the request for document {DocumentId} " +
                 "— background OBO profile not dispatched (best-effort skip).",
                 documentId);
-            return false;
+            return GenerateProfileDispatchOutcome.NoBearer;
         }
 
         // Capture the remaining request-scoped context the profile facade reads. A ClaimsPrincipal is a
@@ -107,7 +124,7 @@ internal sealed class OfficeProfileDispatcher
         // unobserved by design; RunAsync owns its own try/catch so nothing faults the finalizer thread.
         _ = Task.Run(() => RunAsync(documentId, authorizationHeader, user, correlationId));
 
-        return true;
+        return GenerateProfileDispatchOutcome.Dispatched;
     }
 
     /// <summary>
@@ -180,4 +197,39 @@ internal sealed class OfficeProfileDispatcher
                 documentId, correlationId);
         }
     }
+}
+
+/// <summary>
+/// Outcome of dispatching the FR-08 Generate Profile trigger (spaarkeai-word-add-in-r1 task 022).
+/// Public — crosses from <see cref="OfficeProfileDispatcher"/> through <see cref="IOfficeService"/> to
+/// <c>OfficeEndpoints.GenerateProfileAsync</c>, which maps every member to a distinct HTTP response.
+/// </summary>
+/// <remarks>
+/// Coordinator-review fix (post-merge-review, same day as initial task 022 implementation): the first
+/// draft returned a bare <see cref="bool"/> that the endpoint ignored, so the endpoint ALWAYS returned
+/// 202 even when nothing was dispatched — the pane would show "Pending" for a job that would never run.
+/// A feature-gated dependency (the compound AI gate) sitting behind an unconditionally mapped endpoint
+/// must not let the endpoint produce a false success signal (root CLAUDE.md §10 asymmetric-registration
+/// rule / §F.1 / ADR-032 Null-Object kill-switch principle). This enum makes the three possible outcomes
+/// exhaustive and explicit so the mapping is a compiler-checked switch, not an implicit assumption.
+/// </remarks>
+public enum GenerateProfileDispatchOutcome
+{
+    /// <summary>The profile was dispatched to a detached background scope. The endpoint returns 202
+    /// Accepted with a correlation id — the ONLY outcome that may claim success.</summary>
+    Dispatched,
+
+    /// <summary>The AI profile facade is unavailable — the compound AI gate is off (no
+    /// <c>IDocumentProfileAi</c> registered) or no <c>IServiceScopeFactory</c> was resolved. The
+    /// endpoint MUST return 503 Service Unavailable, never 202 — this is a Feature-gated dependency, and
+    /// an unconditionally mapped endpoint claiming success for it would be exactly the asymmetric-
+    /// registration failure mode root CLAUDE.md §10 / §F.1 exists to catch.</summary>
+    FacadeUnavailable,
+
+    /// <summary>No usable bearer token was present on the request when the dispatcher inspected it. In
+    /// production this is UNREACHABLE for the mapped route — see the XML doc on
+    /// <see cref="OfficeProfileDispatcher.Dispatch"/> for the proof — but is retained as a defensive,
+    /// explicit outcome (never silently 202) rather than an assumption baked into the return type. The
+    /// endpoint returns 401 Unauthorized.</summary>
+    NoBearer,
 }

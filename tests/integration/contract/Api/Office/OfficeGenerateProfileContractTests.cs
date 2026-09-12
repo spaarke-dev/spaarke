@@ -196,6 +196,35 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
             Times.Never);
     }
 
+    // ── Negative: feature-gated dependency unavailable (coordinator-review fix) ────────────────────────────
+
+    /// <summary>
+    /// Coordinator-review fix: the first draft of this trigger ALWAYS returned 202, even when
+    /// <c>IDocumentProfileAi</c> was unavailable (the compound AI gate off) — the pane would show
+    /// "Pending" for a job that would never run. Uses its OWN local <see cref="WebApplicationFactory{T}"/>
+    /// (not the class-shared <see cref="_factory"/>) — a per-test factory, the SAME idiom
+    /// <c>OfficeQuickCreateContractTests</c> uses for its own module-boundary doubles — because this is
+    /// the one scenario in this file that needs a DIFFERENT DI shape (the facade genuinely UNREGISTERED,
+    /// not a mock standing in for it) than every other test here. Configured entirely in this file — the
+    /// shared <c>OfficeTestWebAppFactory</c> in <c>OfficeEndpointsContractTests.cs</c> is untouched.
+    /// </summary>
+    [Fact]
+    public async Task Post_GenerateProfile_WhenTheAiFacadeIsUnavailable_Returns503_NeverA202()
+    {
+        using var factory = new OfficeGenerateProfileFacadeUnavailableTestWebAppFactory();
+        factory.GrantWrite(DocumentId);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-caller-token");
+
+        var response = await client.PostAsync(RouteForDocument(DocumentId), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_PROFILE_002");
+        problem.Should().ContainKey("correlationId").WhoseValue.Should().NotBeNullOrEmpty();
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response)
@@ -280,6 +309,50 @@ public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFac
                 .ReturnsAsync(DocumentProfileOutcome.Succeeded());
             services.RemoveAll<IDocumentProfileAi>();
             services.AddScoped(_ => ProfileAi.Object);
+        });
+    }
+}
+
+/// <summary>
+/// Coordinator-review fix fixture: a host where <see cref="IDocumentProfileAi"/> is REMOVED and never
+/// re-registered — simulating the compound AI gate being off. <c>OfficeService</c>'s
+/// <c>documentProfileAi</c> constructor parameter is optional-nullable (ADR-032 optional-via-null-
+/// tolerance), so DI resolves it to <see langword="null"/> rather than failing to construct the host,
+/// which is exactly the production condition <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/>
+/// exists to answer honestly instead of with a false 202.
+/// </summary>
+public sealed class OfficeGenerateProfileFacadeUnavailableTestWebAppFactory : OfficeTestWebAppFactory
+{
+    private readonly Dictionary<string, Spaarke.Dataverse.AccessRights> _grants = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Grants <c>write</c> (and <c>read</c>) on the given document id — the ADR-008 filter passes,
+    /// so the request reaches the handler and this fixture's facade-unavailable condition is what actually
+    /// produces the 503 (not an incidental 403).</summary>
+    public void GrantWrite(Guid documentId) =>
+        _grants[documentId.ToString("D")] = Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write;
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+
+        builder.ConfigureTestServices(services =>
+        {
+            var access = new Mock<IAccessDataSource>();
+            access
+                .Setup(a => a.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string userId, string resourceId, string? _, CancellationToken _) =>
+                    new AccessSnapshot
+                    {
+                        UserId = userId,
+                        ResourceId = resourceId,
+                        AccessRights = _grants.TryGetValue(resourceId, out var rights) ? rights : Spaarke.Dataverse.AccessRights.None,
+                    });
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton(access.Object);
+
+            // The defect under test: remove IDocumentProfileAi and DO NOT re-register anything in its
+            // place. No Mock<IDocumentProfileAi> substitute here — an actual absence, not a stand-in.
+            services.RemoveAll<IDocumentProfileAi>();
         });
     }
 }

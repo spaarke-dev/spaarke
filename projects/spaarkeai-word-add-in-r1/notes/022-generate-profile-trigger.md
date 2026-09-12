@@ -7,6 +7,63 @@ Added a "Generate Profile" control to the Save tab's Profile section (task 021) 
 shipped `refresh-profile` semantics: fire-and-forget, 202 Accepted, unconditional overwrite, no
 confirmation prompt.
 
+## Post-review fix: honest non-success outcomes (same day)
+
+A coordinator review found a real defect in the first draft: `OfficeProfileDispatcher.Dispatch`
+already distinguished "dispatched" from "nothing to dispatch to" via a bare `bool`, but
+`OfficeEndpoints.GenerateProfileAsync` never inspected it — it fired the call and unconditionally
+returned 202. Two consequences: (1) the pane would flip to "Pending" for a job that would never run
+when the compound AI gate was off, then silently fall back to the prior status with no explanation;
+(2) an unconditionally-mapped endpoint sitting in front of a feature-gated dependency must not produce
+a false success signal — root CLAUDE.md §10's asymmetric-registration rule, §F.1, and the ADR-032
+Null-Object kill-switch principle, applied here even though there is no DI kill-switch to invert (the
+facade is an optional ctor param, not a swappable registered implementation).
+
+**Fix:** `OfficeProfileDispatcher.Dispatch` now returns an explicit `GenerateProfileDispatchOutcome`
+enum (`Dispatched` / `FacadeUnavailable` / `NoBearer`) instead of `bool`. `IOfficeService.
+GenerateProfileAsync` and `OfficeService.GenerateProfileAsync` propagate it unchanged.
+`OfficeEndpoints.GenerateProfileAsync` now `await`s the dispatch DECISION (not the background profile
+— `Dispatch`'s synchronous branch still completes immediately; only the actual OBO/LLM call stays
+detached via `Task.Run`) and switches on the outcome:
+
+| Outcome | HTTP | errorCode |
+|---|---|---|
+| `Dispatched` | 202 Accepted | — |
+| `FacadeUnavailable` | 503 Service Unavailable | `OFFICE_PROFILE_002` |
+| `NoBearer` | 401 Unauthorized | `OFFICE_PROFILE_003` |
+
+**On `NoBearer` reachability:** traced `TokenHelper.ExtractBearerTokenOrNull` (the exact seam
+`DocumentAuthorizationFilter` uses to populate `AuthorizationContext.UserAccessToken`) against
+`OfficeProfileDispatcher.Dispatch`'s own bearer check — both use the identical
+`IsNullOrWhiteSpace(header) || !StartsWith("Bearer ", OrdinalIgnoreCase)` condition on the SAME
+`Authorization` header. `AuthorizationService.AuthorizeAsync` fails closed with 403
+`sdap.access.deny.no_caller_token` whenever `UserAccessToken` is null/empty — BEFORE any rule
+evaluation, BEFORE the handler, BEFORE the dispatcher. So for THIS route, `NoBearer` is unreachable
+over HTTP: the filter denies first. Proven by the pre-existing test
+`Post_GenerateProfile_WithNoCallerBearerToken_Returns403ViaTheEndpointFilter_AndDispatchesNothing`
+(asserts `IDocumentProfileAi.ProfileDocumentAsUserAsync` is `Times.Never` when no bearer token is
+sent) — no new test was added for `NoBearer` reachability since unreachability is what needed
+proving, not reachability, and that existing test already proves it. The branch is kept as a
+defensive, explicit outcome (never silently 202) rather than an assumption baked into the return
+type, in case this dispatcher is ever called from a route without that filter.
+
+**New test:** `Post_GenerateProfile_WhenTheAiFacadeIsUnavailable_Returns503_NeverA202` uses a NEW
+per-test fixture, `OfficeGenerateProfileFacadeUnavailableTestWebAppFactory`, which removes
+`IDocumentProfileAi` from the test host's DI container and does NOT re-register anything — an actual
+absence, not a mock standing in for one. `OfficeService`'s `documentProfileAi` ctor parameter is
+optional-nullable, so the host still builds; DI resolves it to `null`, `OfficeProfileDispatcher`'s
+availability gate fires, and the endpoint answers 503. Configured entirely in the contract test file
+(no shared fixture touched).
+
+**Client:** `useDocumentProfile.generateProfile` needed NO code change — `apiClient.post` already
+throws `ApiClientError` for any non-2xx response (`response.ok` false), so the `try` block's
+`setOutcome({kind:'status', status:'Pending'})` line was already unreachable on a 503/401; the
+`catch` block already routed to `generateError` without touching `outcome`. Added a dedicated test
+(`coordinator-review fix: a 503 ... shows the error, never "Pending"`) to close the loop explicitly
+per the coordinator's request, asserting `screen.queryByText(/in progress/i)).toBeNull()` alongside
+the existing error-surfacing assertions — this is new test coverage of already-correct behavior, not
+a behavior change.
+
 ## §11 reuse decision (component justification)
 
 **Existing:** `POST /api/compose/documents/{documentRecordId:guid}/refresh-profile`
