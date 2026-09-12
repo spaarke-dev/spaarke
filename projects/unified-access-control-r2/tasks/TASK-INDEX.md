@@ -666,7 +666,7 @@ estate-wide view.
 | ✅ [done] 097 | Every grant bounded: an absent `ExpiryDate` on `/grant` · `/invite` · `/invite-and-grant` is **defaulted server-side** (keep existing, else today + 90); a past one → 400; + dev backfill of unbounded grants *(amended session 7 — was "mandatory/400": no client sends an expiry)* | FR-33 | — | — | ❌ | sonnet | high |
 | ✅ [done] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) — `POST …/set-record-share-expiry`; lapsed shares renewed too *(owner 2026-09-11)*; contract for 099 in `notes/task-098-record-share-expiry.md` §6 | FR-33 | 096,097 | — | ❌ | **opus** | high |
 | 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
-| 🔲 [open] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee | FR-33 | 097 | — | ❌ | sonnet | high |
+| 🔲 [open] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee. *In progress: `e7bd02189`. Owner 2026-09-12: granter → record owner → record creator, else unroutable; MDA bell (`NotificationService`). Waits on **103**.* | FR-33 | 097, **103** | — | ❌ | sonnet | high |
 | 🔲 [open] 101 | "External shares by expiration" Dataverse views (operator-applied) | FR-33 | 097 | FR33-late | ✅ | sonnet | medium |
 
 > ⚠️ **Sequencing the Deps column cannot express:**
@@ -685,6 +685,19 @@ estate-wide view.
 > - ✅ 098 done 2026-09-11. **099 must show the endpoint's ProblemDetails `detail` verbatim** — every refusal
 >   carries a human message and a `reasonCode` (400 / 403 / 409 / 422 / 500; table in the 098 notes §6). A 500
 >   `write_failed` means "not confirmed", NOT "not applied": the picker must reload, never assume the old date.
+
+## Governance — background-work placement (added 2026-09-12)
+
+Raised by task 100's review. The repo's directives gave four incompatible answers about Azure Functions and
+timer/queue work, and the in-process scheduler runs every job once per instance. Owner decisions and evidence:
+[`notes/decisions/workload-placement-policy-evaluation.md`](../notes/decisions/workload-placement-policy-evaluation.md).
+
+| # | Task | FR | Deps | Group | Safe | Tier | Effort |
+|---|---|---|---|---|---|---|---|
+| 🔲 [open] 102 | Workload-placement governance — new **ADR-052** (BFF vs Azure Functions vs Container Apps Jobs), ADR-001/004/013/036 amendments, **all** documentation aligned, ADR-001 ArchTest message + scan fix, doc-drift guard, over-time issues filed | — | — | — | ❌ | **opus** | high |
+| 🔲 [open] 103 | Scheduled jobs run exactly once — distributed lease in `ScheduledJobHost`, staging-slot guard, `AddScheduledJob<TJob>` helper; all three scheduled jobs migrated | — | 102 | — | ❌ | **opus** | high |
+
+> Sequence **102 → 103 → 100**. Task 100 must still be live by **2026-11-10**.
 
 ## Wrap-up
 

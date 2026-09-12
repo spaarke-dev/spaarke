@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="unified-access-control-r2">
+  <metadata>
+    <title>Workload-placement governance — new ADR (BFF vs Azure Functions vs Container Apps Jobs), aligned amendments, all documentation aligned, ArchTest fixes, drift guard</title>
+    <phase>Governance — background-work placement</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits ADRs, binding constraints, skills and tests/Spaarke.ArchTests (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR authoring + cross-repo governance with a binding CI guard; high blast radius. The ADR draft additionally gets a Fable-tier adversarial review (owner 2026-09-12).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/ (main-session only) and skill directives (serial PRs only).</parallel-reason>
+    <deps></deps>
+    <tags>governance, adr, documentation, skill-directive, testing, background</tags>
+    <estimated-effort>1–2 sessions</estimated-effort>
+    <origin>Owner 2026-09-12, raised by task 100's review: "we do not want to prohibit use of azure functions and we want to use them where they are the right fit … yes new ADR — BUT we need to ensure that all documentation is aligned so we do not get drift"</origin>
+  </metadata>
+
+  <prompt>The repo's directives give four incompatible answers about where timer, queue and event work belongs (no Functions; Functions only for narrow out-of-band work; timer/queue/webhook work goes to Functions; scheduled work is in-process with no Functions). The code follows none consistently. Replace them with ONE owner-approved placement policy in a new ADR, align every document to it, and add a CI guard so the old phrasings cannot return.</prompt>
+  <role>Spaarke architecture steward — ADR authoring, AI-procedure maintenance, NetArchTest fitness functions.</role>
+  <goal>One authoritative placement ADR; ADR-001/004/013/036 amended to point to it; every in-scope directive states the policy only by pointer; a Tier-1 ArchTest fails on reintroduced stale phrasings; the ADR-001 ArchTest's message and scan are correct.</goal>
+
+  <context>
+    <background>Evaluation, owner decisions D1–D7 and all evidence: notes/decisions/workload-placement-policy-evaluation.md (read FIRST). Best-practice research with URLs: .claude/agent-memory/researcher/background-work-hosting-best-practice-2026-09-12.md. The new ADR number is ADR-052 (ADR-050 and ADR-051 exist concise-only; verify no other branch has claimed 052 before creating).</background>
+    <relevant-files>
+      <file role="new">docs/adr/ADR-052-workload-placement.md</file>
+      <file role="new">.claude/adr/ADR-052-workload-placement.md</file>
+      <file role="amend">docs/adr/ADR-001-minimal-api-and-workers.md + .claude/adr/ADR-001-minimal-api.md</file>
+      <file role="amend">docs/adr/ADR-036-background-job-infrastructure.md + .claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file role="amend">docs/adr/ADR-004-async-job-contract.md + .claude/adr/ADR-004-job-contract.md</file>
+      <file role="amend">docs/adr/ADR-013-ai-architecture.md + .claude/adr/ADR-013-ai-architecture.md (decision-table row only)</file>
+      <file role="amend">tests/Spaarke.ArchTests/ADR001_MinimalApiTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/SourceScan.cs + CredentialCensusTests.cs (fitness-function conventions: negative + positive controls, allowlist with reasons, maintenance procedure in the file)</file>
+      <file role="procedure">.claude/skills/ai-procedure-maintenance/SKILL.md (Checklist A)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-12 D1">Scope: policy. No prohibition of Azure Functions; placement is decided per workload on merit (streamline / performance / flexibility vs. complexity).</constraint>
+    <constraint source="owner 2026-09-12 D2/D3">Scope: identity and tenancy. Functions reuse the stamp's BFF identity by default, consistent with Model 1 / Model 2; a shared multi-tenant Function is acceptable for Model 1; Model 2 is per customer.</constraint>
+    <constraint source="owner 2026-09-12 D4">Scope: tie-breaker. When neither host is clearly stronger, choose the option with fewer moving parts.</constraint>
+    <constraint source="owner 2026-09-12 D5">Scope: anti-drift. ADR-052 is the only place the placement rule is stated in full; every other document carries at most a one-line summary plus a link. A blocking ArchTest enforces it.</constraint>
+    <constraint source="CLAUDE.md §6.5">Scope: sequencing. Path B — the ADR changes land before the code that relies on them (tasks 103, 100).</constraint>
+    <constraint source="CLAUDE.md §3">Scope: .claude/ edits. Main session only; add a .claude/CHANGELOG.md entry; follow ai-procedure-maintenance Checklist A.</constraint>
+    <constraint source="tests/CLAUDE.md (ArchTests KEEP path)">Scope: fitness functions. Every new or changed rule carries a negative control (fires on a seeded violation), a positive control (does not fire on the sanctioned shape), a written reason + ADR citation per allowlist entry, and its maintenance procedure in the file.</constraint>
+    <constraint source="project">Scope: history. Historical records are not rewritten — ADR history/context sections, .claude/archive/**, and notes of closed projects. The drift guard allowlists them explicitly, each with a reason. Active projects' CLAUDE.md files (projects/INDEX.md) get a one-line pointer correction; archived projects are untouched.</constraint>
+    <constraint source="owner 2026-09-12">Scope: review. A Fable-tier adversarial review of the ADR-052 draft and amendments, against the evidence, before they are applied.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read the evaluation note. Confirm ADR-052 is unclaimed (master, open PRs, other worktrees' projects).</step>
+    <step order="1">Draft ADR-052 (full + concise) and the ADR-001 / ADR-036 / ADR-004 / ADR-013 amendments in notes/drafts/.</step>
+    <step order="2">Fable-tier adversarial review of the drafts against notes/decisions/workload-placement-policy-evaluation.md; resolve every finding (fix, or record why not).</step>
+    <step order="3">Apply the ADRs and all indexes (docs/adr/README-ADRs.md, .claude/adr/INDEX.md, ADR-VALIDATION-PROCESS.md).</step>
+    <step order="4">Align every in-scope document listed in the evaluation note §4.1 (constraints, patterns, skills, architecture/standards/procedures/guides/data-model docs, PR template, project-setup template, active project CLAUDE.md pointers), correcting IJobHandler&lt;T&gt; to IJobHandler and the admin guide's Dataverse-backed claims.</step>
+    <step order="5">ArchTests: fix ADR001_MinimalApiTests message and make the attribute test inspect method-level attributes; add WorkloadPlacementDocDriftTests.</step>
+    <step order="6">File the over-time GitHub issues (evaluation note §5).</step>
+    <step order="7">Verify: ArchTests green; negative controls fire; repo grep for the banned phrasings; CHANGELOG; notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Fable review finds a material flaw in the owner-approved policy DIRECTION (not wording) — e.g. a case where D1–D4 produce an unsafe or contradictory outcome — STOP and bring it to the owner before applying anything.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ADR-001 (host), ADR-004 (queue mechanism), ADR-036 (schedule mechanism), bff-extensions.md (checklist) — each states part of the rule, inconsistently.</existing>
+    <extension>Amending ADR-001 alone was considered; rejected by the owner (D5) because provisioning, identity and future Functions projects all need one citable placement ADR, and ADR-001 is about the BFF runtime.</extension>
+    <cost-of-doing-nothing>Agents keep receiving contradictory MUSTs: task 100 was flagged as an ADR violation for following the newest ADR; new projects are seeded with "no Azure Functions" by the project-setup template; five timer services were added after ADR-036 forbade them.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">docs/adr/ADR-052-workload-placement.md, .claude/adr/ADR-052-workload-placement.md, four amended ADRs, aligned directives</output>
+    <output type="test">tests/Spaarke.ArchTests/ADR001_MinimalApiTests.cs (fixed), tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs (new)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-102-workload-placement-governance.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ADR-052 exists (full + concise) and is indexed. It states: the two-question model (host vs in-BFF mechanism); fit signals F1–F5 and stay-in-BFF signals B1–B4; the Spaarke costs; owner decisions D1–D4; the Functions guardrails; Durable Task allowed on Durable Task Scheduler, with a written reason required for hand-rolled orchestration; no new WebJobs; no user-facing BFF endpoints or user-token work in Functions.</criterion>
+    <criterion testable="true">ADR-001, ADR-004, ADR-013 and ADR-036 carry dated amendments that point to ADR-052 and do not restate the placement rule. ADR-036's amendment states the actual runtime (in-memory store, per-instance cron, non-durable disable) and the exactly-once / idempotency rules task 103 implements.</criterion>
+    <criterion testable="true">Outside allowlisted historical entries (each with a reason), in-scope surfaces contain none of the banned stale phrasings: flat "no Azure Functions" / "Functions are not permitted" / "do not use Azure Functions"; "timer/queue/webhook → Functions"; "IJobHandler&lt;T&gt;".</criterion>
+    <criterion testable="true">code-review, adr-check (+ its reference rules), adr-aware, task-create and design-to-spec route host → ADR-052, schedule-driven → IScheduledJob / ADR-036, and queue-driven → IJobHandler / ADR-004.</criterion>
+    <criterion testable="true">ADR001_MinimalApiTests: its message says Functions are not permitted INSIDE the BFF assembly. Its attribute test inspects method-level attributes. A negative control proves it fires on a seeded Function-attributed method; a positive control proves it does not fire on a sanctioned method.</criterion>
+    <criterion testable="true">WorkloadPlacementDocDriftTests runs in Spaarke.ArchTests (Tier 1, blocking). Its negative control proves it fires on a seeded stale phrasing; its positive control proves it passes on the aligned tree and the allowlist.</criterion>
+    <criterion testable="true">docs/guides/BACKGROUND-JOBS-ADMIN-GUIDE.md no longer claims Dataverse-backed history, disable or de-duplication that the code does not have.</criterion>
+    <criterion testable="true">The eight over-time GitHub issues (evaluation note §5) are filed and linked from the task notes.</criterion>
+    <criterion testable="true">A .claude/CHANGELOG.md entry exists. The full Spaarke.ArchTests suite is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-12 from the task 100 review. Blocks 103 (the lease is sanctioned by ADR-036 A1 / ADR-052) and, through 103, task 100.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

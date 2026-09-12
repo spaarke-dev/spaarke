@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="unified-access-control-r2">
+  <metadata>
+    <title>Scheduled jobs run exactly once — distributed lease in ScheduledJobHost, staging-slot guard, AddScheduledJob&lt;TJob&gt; registration helper</title>
+    <phase>Governance — background-work placement</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the shared scheduling framework and the BFF DI surface; concurrency semantics.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-instance concurrency with correctness consequences for three production jobs (one sends notifications hourly).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SchedulingModule / Spaarke.Scheduling (hot path) and the modules that register scheduled jobs.</parallel-reason>
+    <deps>102</deps>
+    <tags>bff-api, background, scheduling, testing</tags>
+    <estimated-effort>4–6 hours</estimated-effort>
+    <origin>Task 100 review + 2026-09-12 inventory: every BFF instance and the staging slot runs its own cron; model2-full autoscales from 2 instances.</origin>
+  </metadata>
+
+  <prompt>ScheduledJobHost runs on every App Service instance and every deployment slot, with a process-local "already ran" check, so each tick of each scheduled job runs N times. Microsoft's documented self-hosted fix for "exactly once per schedule on a scaled-out app" is a distributed lease. Add one, stop slots from running scheduled work, and give every scheduled job a single registration helper.</prompt>
+  <role>SPAARKE platform developer — .NET background services, Redis, the Spaarke.Scheduling framework.</role>
+  <goal>Each scheduled tick runs on exactly one instance across instances and slots. Every IScheduledJob registers through one helper with one bootstrap. The job contract stays host-neutral, so a Function timer could host the same job if ADR-052 ever says so.</goal>
+
+  <context>
+    <background>Evidence: notes/decisions/workload-placement-policy-evaluation.md §4.3. Framework: src/server/shared/Spaarke.Scheduling (ScheduledJobHost, InMemoryBackgroundJobStore, IBackgroundJobStore). Current per-job bootstraps: SchedulingModule.SchedulingBootstrapHostedService (PlaybookSchedulerJob), MembershipModule.MembershipReconciliationBootstrapHostedService, ExternalAccessModule.GrantExpiryReminderBootstrapHostedService (task 100, uncommitted-to-master). Redis is the BFF's distributed cache (ADR-009); IConnectionMultiplexer is registered when Redis is enabled.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/MembershipModule.cs (migrate to the helper, if /conflict-check is clean)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (task 100 job onto the helper)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs (existing raw-Redis use via IConnectionMultiplexer, with the instance-name prefix)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-052 / ADR-036 A1 (task 102)">Scope: design. In-process lease (Leader-Election / distributed-lock pattern); no Functions project in this task.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: machinery. Reuse Redis through the existing connection. No new package, store or scheduler. An atomic SET NX with expiry, never check-then-set.</constraint>
+    <constraint source="ADR-032 / bff-extensions §F.1">Scope: registration. Unconditional registration. Behaviour when Redis is not configured (single-instance dev) must be explicit, logged, and covered by a test.</constraint>
+    <constraint source="ADR-036">Scope: contract. IScheduledJob stays free of any lease or host dependency — the lease belongs to the host, not the job.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification; publish size vs a fresh master (hazards 3 + 4); no new HIGH CVE.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read ScheduledJobHost dispatch and the manual-trigger path; decide lease key, TTL and Redis-unavailable behaviour (escalation below).</step>
+    <step order="1">Implement the lease in the host, a slot guard (a setting honoured by the host, set sticky on slots), and AddScheduledJob&lt;TJob&gt;(cron, enabled) with one shared bootstrap.</step>
+    <step order="2">Migrate PlaybookSchedulerJob, MembershipReconciliationJob (if conflict-check is clean) and GrantExpiryReminderJob onto the helper; delete the per-job bootstraps.</step>
+    <step order="3">Tests per the closed set; perturbations; build, full suite, ArchTests, publish size; notes; TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Redis-unavailable behaviour is a judgment call: run on every instance (duplicates) or skip (missed runs). Present both with a recommendation before implementing; do not pick silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ScheduledJobHost, InMemoryBackgroundJobStore.HasRunForScheduledTimeAsync (process-local), IIdempotencyService (non-atomic check-then-set).</existing>
+    <extension>The lease extends the existing host. The helper replaces three duplicated bootstrap classes with one.</extension>
+    <cost-of-doing-nothing>On any multi-instance stamp (model2-full autoscales from 2), the hourly notification playbook scheduler sends duplicates, and task 100's reminders can duplicate. Admin disable and "already ran" stay per-instance.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Scheduling/** and src/server/api/Sprk.Bff.Api/Infrastructure/DI/{SchedulingModule,MembershipModule,ExternalAccessModule}.cs</output>
+    <output type="test">tests/unit/Spaarke.Scheduling.Tests (or the KEEP path the existing scheduler tests use)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-103-scheduled-jobs-exactly-once.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Two hosts sharing one lease store and firing the same tick run the job exactly once.</criterion>
+    <criterion testable="true">A host that loses the lease records the tick as skipped, not failed, and logs it.</criterion>
+    <criterion testable="true">A lease outlives a normal run and expires if the holder dies, so a later tick is not blocked forever.</criterion>
+    <criterion testable="true">With the slot guard set, a host runs no scheduled jobs, and says so at startup.</criterion>
+    <criterion testable="true">Redis-unavailable behaviour matches the owner's escalation answer and has a test.</criterion>
+    <criterion testable="true">All three IScheduledJobs are registered via AddScheduledJob&lt;TJob&gt;; no per-job bootstrap class remains; the existing scheduler and job tests stay green.</criterion>
+    <criterion testable="true">Perturbation: replacing the atomic acquire with check-then-set, or removing the lease, fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-12. Blocks task 100's completion (100 must be live by 2026-11-10).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

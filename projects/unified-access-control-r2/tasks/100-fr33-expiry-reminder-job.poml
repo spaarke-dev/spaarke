@@ -12,7 +12,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Adds a DI registration to a contended module file.</parallel-reason>
-    <deps>097</deps>
+    <deps>097, 103</deps>
     <tags>bff-api, background, worker, testing</tags>
     <estimated-effort>4-6 hours</estimated-effort>
     <origin>Owner 2026-09-10: "should be 30 / 14 / 7 / 3 / 1 day reminder"</origin>
@@ -79,7 +79,13 @@
     <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10.3. Must be live within 60 days of task 097's backfill.</notes>
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10.3. Must be live within 60 days of task 097's backfill.
+
+AMENDED 2026-09-12 (session 9) — owner decisions and premise corrections; these supersede the constraints above where they differ:
+- The escalation fired: 20 of 28 live grants had no sprk_grantedby. Owner: recipient = sprk_grantedby → the record's owning user → the record's creator (the first ENABLED, NON-APPLICATION systemuser); otherwise "unroutable" (counted in the heartbeat + an Error log per grant). Never the grantee.
+- Channel: the MDA bell via the existing NotificationService (appnotification), NOT OutboxService. The POML's premise was wrong: the client KindRouter skips unknown outbox kinds, so an outbox reminder would reach no screen.
+- Scheduling: IScheduledJob on Spaarke.Scheduling (ADR-036), not a SessionFilesCleanupJob-style BackgroundService. Placement is governed by ADR-052 (task 102). Exactly-once across instances comes from task 103's lease, so this task now depends on 103.
+- Implemented in e7bd02189 (23 tests, full suite 12,327/0/58, ArchTests 197/197, publish 45.42 MB vs master 45.35). Outstanding review fixes are listed in notes/task-100-expiry-reminders.md and the session-9 handoff.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
