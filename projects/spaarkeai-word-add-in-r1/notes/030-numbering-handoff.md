@@ -103,4 +103,4 @@ It ran in the BFF request path, which is **not** where an on-create trigger live
 
 - The Office quick-create path **never sends `sprk_matternumber`** on create. A field-mapping rule that targets it (Copy, Default, Concat or Template, in any casing, padded or not) is skipped with a warning. This is pinned by the contract test `Post_Matter_WithSourceContextAndProfile_AppliesEveryRule_ButNeverTheProtectedFields`, which asserts that no payload key equals `sprk_matternumber` ignoring case.
 - It sets `sprk_mattertype` when the pane supplies a type that exists, so an on-create component can read the type code from the created row.
-- A missing, empty or unknown type creates the matter **without** a type, with a warning. Such a matter has no type code to number from; see the "No type at create" decision in §4.
+- A missing, empty or unknown type, or one whose existence could not be checked, creates the matter **without** a type, with a warning. Such a matter has no type code to number from; see the "No type at create" decision in §4.

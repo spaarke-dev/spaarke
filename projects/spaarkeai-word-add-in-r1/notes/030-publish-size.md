@@ -39,12 +39,16 @@
 | | files | uncompressed | **zip, incl. PDBs** |
 |---|---|---|---|
 | `origin/master` @ `e0a6f87c4` | 214 | 138.75 MB | **45.35 MB** (47,556,260 bytes) |
-| branch after the rework, final (committed on top of `0d53d3146`) | 214 | 138.85 MB | **45.39 MB** (47,589,941 bytes) |
-| **Delta** | 0 | +0.10 MB | **+0.03 MB** (+33,681 bytes) |
+| branch, final (the commit after `ecec444a2`, including the type-check fix) | 214 | 138.85 MB | **45.39 MB** (47,590,129 bytes) |
+| **Delta** | 0 | +0.10 MB | **+0.03 MB** (+33,869 bytes) |
 
-`Sprk.Bff.Api.dll`: 13,133,824 bytes, **+84,480** over master. That is smaller than at `0d53d3146` because the numbering code is gone.
+`Sprk.Bff.Api.dll`: 13,134,336 bytes, **+84,992** over master. That is smaller than at `0d53d3146` because the numbering code is gone.
 
-The final build includes the matter-type existence read (owner decision: an unknown type creates without the lookup) and the round-2 review fixes. An intermediate rework build measured 45.38 MB (+32,910 bytes); the difference is 771 bytes.
+The final build includes the matter-type existence read (an unknown or unverifiable type is created without the lookup) and the round-2 review fixes. Earlier builds on this path:
+- `ecec444a2` measured 45.39 MB (+33,681 bytes).
+- An intermediate rework build measured 45.38 MB (+32,910 bytes).
+
+The differences are a few hundred bytes.
 
 - **Zip tool**: PowerShell `Compress-Archive` (default Optimal).
 - **PDB convention**: sizes include PDBs.

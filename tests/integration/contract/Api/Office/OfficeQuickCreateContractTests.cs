@@ -156,7 +156,7 @@ public class OfficeQuickCreateContractTests
     }
 
     [Fact]
-    public async Task Post_Matter_WhenTheTypeCheckCannotAnswer_KeepsTheChosenType()
+    public async Task Post_Matter_WhenTheTypeCheckFails_CreatesWithoutTheType_AndWarnsDistinctly()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -169,9 +169,12 @@ public class OfficeQuickCreateContractTests
         var response = await factory.CreateClient().PostAsJsonAsync(
             Route, new QuickCreateRequest { Name = "Transient Check", MatterTypeId = MatterTypeId });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        created.Entity!.GetAttributeValue<EntityReference>("sprk_mattertype").Id
-            .Should().Be(MatterTypeId, "a transient read failure must not strip the type the user chose");
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the optional type never fails the create");
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().ContainSingle(w => w.Contains("could not be checked"))
+            .And.NotContain(w => w.Contains("was not found"), "an unanswered check is reported distinctly from a missing type");
+        created.Entity!.Contains("sprk_mattertype").Should().BeFalse("an unverified lookup that dangled would fault the whole create");
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
     }
 
     // ── Field mapping ───────────────────────────────────────────────────────────────────────────────────

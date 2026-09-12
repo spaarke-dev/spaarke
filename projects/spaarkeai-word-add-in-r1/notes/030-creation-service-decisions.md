@@ -100,7 +100,7 @@ This is extracted from `RecordCreationService` at the round-1 Step 9.5 review (�
 - **Matter type**: one existence read (`RetrieveAsync` on `sprk_mattertype_ref`).
   - Found → the `sprk_mattertype` lookup is set.
   - **Not found** (Dataverse `ObjectDoesNotExist`, classified by the shared `RecordContainerResolver.IsRecordNotFound`) → created **without** the lookup, plus the warning *"The selected matter type was not found…"*.
-  - **Read could not answer** (transient) → the lookup is **kept**. A transient failure must not strip a type the user chose, and Dataverse still validates it on create.
+  - **Read could not answer** (any other Dataverse fault) → also created **without** the lookup, plus a *distinct* warning (*"The selected matter type could not be checked…"*). The optional type never fails the create: a kept-but-unverified lookup that turned out to dangle would fault it with a 500. Corrected 2026-09-12 per the main session; the first rework kept the lookup here.
   - **Missing or `Guid.Empty`** → no read, created without a type, plus the warning *"No matter type was supplied…"*.
 - **HTTP**:
   - `QuickCreateRequest` gains the optional `MatterTypeId`, `SourceEntityType` and `SourceRecordId`. `matterTypeId` is **not** validated: no 400 for missing or empty.
@@ -118,7 +118,13 @@ What task 030 still guarantees: **the quick-create path never sends `sprk_matter
 
 1. **Matter type is never a rejection.** "The type is required so should always be present; do not reject." The pane must always send `matterTypeId`; a separate client task, created by the main session, adds a required matter-type field to the pane. The server does **not** 400 when it is missing. It creates the record with a warning.
 2. **Numbering.** The number must come from a server-side record-numbering component that triggers on create; it need not show in the add-in. That component does not exist (verified by the main session in the repo, on `origin/master` `e0a6f87c4`, and in dev Dataverse), so the owner is setting up a **separate project** to build it. **Not a Dataverse plugin.**
-3. **Unknown matter type** (decided by the main session under decision 1's "do not reject" rule). A supplied `matterTypeId` that does not resolve must be neither a 500 nor a 400. It is treated like a missing type: one existence read, and if the type does not exist the matter is created **without** the type lookup, plus a warning. Contract test: `Post_Matter_WithUnknownMatterType_Returns201_WithoutTheType_AndWarns`. This replaced both the 500 (after numbering was removed there was no type read, so a dangling lookup faulted the create) and the 400 that round 2 had recommended restoring.
+3. **Unknown matter type** (decided by the main session under decision 1's "do not reject" rule, recorded in the project CLAUDE.md Decisions, 2026-09-11). A supplied `matterTypeId` that does not resolve must be neither a 500 nor a 400. It is treated like a missing type: one existence read, and if the type does not exist the matter is created **without** the type lookup, plus a warning. **If the existence read itself fails** (a Dataverse fault other than not-found), the matter is **also** created without the type, plus a distinct warning. The optional type never fails the create.
+
+   Contract tests: `Post_Matter_WithUnknownMatterType_Returns201_WithoutTheType_AndWarns` and `Post_Matter_WhenTheTypeCheckFails_CreatesWithoutTheType_AndWarnsDistinctly`.
+
+   This replaced two alternatives: the 500 (after numbering was removed there was no type read, so a dangling lookup faulted the create), and the 400 `matter_type_not_found` that round 2 had recommended restoring, which the main session rejected as contrary to "do not reject".
+
+   Warnings in `QuickCreateResponse.Warnings` are plain user-facing sentences, like every other warning on this path; there are no machine codes.
 
 This resolves the 🔔 escalation raised earlier in this task: the name-only request could not meet the original AC1.
 
@@ -135,7 +141,7 @@ This resolves the 🔔 escalation raised earlier in this task: the name-only req
 ## 9. Known residuals (to report, not fixed here)
 
 1. **Field-level security on the mapping source.** The source record is read **app-only** after the filter proves the caller holds **Read** on it (record level). App-only reads do not apply column-level (FLS) masking, so a secured column named in an admin-authored profile would be copied. An OBO read would close this, but the only OBO Dataverse reader (`IDataverseUserClient`) is AI-gated (a CRUD→AI dependency and an asymmetric registration). Recommend a follow-up if any mapping source column is FLS-secured.
-2. **An unknown matter type during a transient read failure.** If the existence read cannot answer *and* the id is also unknown, the lookup is kept and the create faults with a 500. That needs two independent faults at once. Keeping a type the user chose is the better default for the overwhelmingly common transient case.
+2. **A valid type can be dropped on a transient read failure.** Because the optional type must never fail the create, an existence read that cannot answer drops the lookup, even when the id is in fact valid. The matter is created untyped with the warning *"…could not be checked…"*, and the user sets the type on the record. That trade is deliberate: an unverified lookup that turned out to dangle would fault the whole create with a 500.
 3. **The pane sends neither `matterTypeId` nor the source context yet.** That needs a client follow-up: the matter-type field is being created by the main session, and the record context needs its own task. The client must send `cleanGuid` output: System.Text.Json fails a brace-wrapped GUID closed with a 400.
 4. **Default-rule typing server-side.** The SDK needs exact CLR types. `Number` defaults parse as `int` when integral, otherwise `decimal`. A currency (`Money`) or float target given a Default literal could be rejected by Dataverse and fail the create, the same outcome as a bad payload from the wizard. There are no Matter-target profiles in dev today.
 5. **The caller's Create privilege is not checked** (pre-existing; inherited). The create is app-only with `ownerid` = the caller, the same posture `QuickCreateAsync` already had for Matter, Project and Invoice. Closing it needs an OBO create or a caller-privilege probe, a separate decision.

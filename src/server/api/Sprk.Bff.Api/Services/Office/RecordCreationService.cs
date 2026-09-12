@@ -231,15 +231,15 @@ public sealed class RecordCreationService
         }
 
         // Guid.Empty is how some clients say "unset": treated exactly like an absent type (owner decision: never reject).
+        // A supplied type is set only once it is VERIFIED to exist; not-found or an unanswerable check → no lookup + a
+        // warning. The optional type never fails the create (a dangling lookup would fault it with a 500).
         EntityReference? requestedType = null;
         var typeWarningAdded = false;
         if (request.MatterTypeId is { } requestedTypeId && requestedTypeId != Guid.Empty)
         {
-            if (await MatterTypeIsKnownToBeMissingAsync(requestedTypeId, ct).ConfigureAwait(false))
+            if (await CheckMatterTypeAsync(requestedTypeId, ct).ConfigureAwait(false) is { } typeWarning)
             {
-                warnings.Add(
-                    "The selected matter type was not found, so the matter was created without a type. Open the "
-                    + "matter and set its type.");
+                warnings.Add(typeWarning);
                 typeWarningAdded = true;
             }
             else
@@ -286,19 +286,24 @@ public sealed class RecordCreationService
     }
 
     /// <summary>
-    /// The one existence read for a supplied matter type. Returns <see langword="true"/> ONLY when Dataverse says the
-    /// row does not exist — the case that would otherwise reach Dataverse as a dangling lookup and fail the whole create
-    /// with a 500. Any other outcome (found, or a read that could not answer) keeps the lookup: a transient read
-    /// failure must not strip a type the user chose, and Dataverse still validates the lookup on create.
+    /// The one existence read for a supplied matter type (owner decision 2026-09-11, "do not reject"; project CLAUDE.md
+    /// Decisions). Returns <see langword="null"/> when the type exists — the lookup is then set. Otherwise returns the
+    /// warning to report, and the matter is created WITHOUT the lookup:
+    /// <list type="bullet">
+    ///   <item><description>not found → "…was not found…";</description></item>
+    ///   <item><description>the read itself failed (any other Dataverse fault) → a distinct "…could not be checked…".</description></item>
+    /// </list>
+    /// Neither is ever a 400 or a 500: the type is optional, and a lookup that is not verified to exist would, if it
+    /// dangled, fault the whole create.
     /// </summary>
-    private async Task<bool> MatterTypeIsKnownToBeMissingAsync(Guid matterTypeId, CancellationToken ct)
+    private async Task<string?> CheckMatterTypeAsync(Guid matterTypeId, CancellationToken ct)
     {
         try
         {
             await _entities
                 .RetrieveAsync(MatterTypeEntity, matterTypeId, [MatterTypeIdAttribute], ct)
                 .ConfigureAwait(false);
-            return false;
+            return null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -309,15 +314,17 @@ public sealed class RecordCreationService
             _logger.LogWarning(
                 "[RECORD-CREATE] Matter type {MatterTypeId} does not exist; creating the matter without a type.",
                 matterTypeId);
-            return true;
+            return "The selected matter type was not found, so the matter was created without a type. Open the "
+                   + "matter and set its type.";
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[RECORD-CREATE] Matter type {MatterTypeId} could not be checked; keeping the lookup and letting "
-                + "Dataverse validate it on create.",
+                "[RECORD-CREATE] Matter type {MatterTypeId} could not be checked; creating the matter without a type "
+                + "rather than risk a dangling lookup failing the create.",
                 matterTypeId);
-            return false;
+            return "The selected matter type could not be checked just now, so the matter was created without a type. "
+                   + "Open the matter and set its type.";
         }
     }
 
