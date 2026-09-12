@@ -303,6 +303,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                     "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
                     "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
                     "sprk_graphitemid", "sprk_graphdriveid", "statuscode", "createdon", "modifiedon",
+                    // Document Profile fields (task 021 / FR-07) — populated by AI via
+                    // DocumentProfileFieldMapper + written by CreateDocumentAsync below. Previously
+                    // selected nowhere: DocumentEntity already modeled Summary/Tldr/Keywords/
+                    // DocumentType as properties, but no caller of GetDocumentAsync ever selected or
+                    // mapped the underlying columns, so the pane-facing GET this task extends
+                    // (/api/v1/documents/{id}) always returned them null. sprk_filesummarystatus is
+                    // new (DocumentEntity.SummaryStatus, added task 021).
+                    "sprk_filesummary", "sprk_filetldr", "sprk_filekeywords", "sprk_filesummarystatus",
+                    "sprk_documenttype",
                     // Email fields (MapToDocumentEntityWithEmailFields)
                     "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
                     "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive", "sprk_parentdocument",
@@ -1525,6 +1534,18 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
             ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon"),
+
+            // Document Profile fields (task 021 / FR-07). GetAttributeValue<T> returns default(T) for
+            // any column not in the caller's ColumnSet, so this is safe to populate unconditionally
+            // across every caller of MapToDocumentEntity (list paths included) — callers that didn't
+            // select these columns simply get null back, exactly as before this change.
+            Summary = entity.GetAttributeValue<string>("sprk_filesummary"),
+            Tldr = entity.GetAttributeValue<string>("sprk_filetldr"),
+            Keywords = entity.GetAttributeValue<string>("sprk_filekeywords"),
+            DocumentType = entity.GetAttributeValue<string>("sprk_documenttype"),
+            SummaryStatus = entity.Contains("sprk_filesummarystatus")
+                ? entity.GetAttributeValue<OptionSetValue>("sprk_filesummarystatus")?.Value
+                : null,
 
             // Search index tracking (multi-container-multi-index-r1 + R3 FR-3H3.2 dual-write) — used
             // by VisualizationService to bind the correct SearchClient for Find Similar against

@@ -493,6 +493,9 @@ export const App: React.FC<AppProps> = ({
         {currentTab === 'save' && (
           <SaveView
             hostAdapter={hostAdapter}
+            // Task 021 / FR-07: thread task 013's resolved document identity into the Profile
+            // section rather than re-resolving it there.
+            {...(savedContext?.documentId ? { resolvedDocumentId: savedContext.documentId } : {})}
             getAccessToken={async () => {
               // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
               // scope argument (see AuthService.ts) — removed as dead code.

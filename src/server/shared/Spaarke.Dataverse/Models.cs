@@ -339,11 +339,26 @@ public class DocumentEntity
     /// <summary>Full summary (2-4 paragraphs). Maps to sprk_filesummary.</summary>
     public string? Summary { get; set; }
 
-    /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>
+    /// <summary>
+    /// Comma-separated keywords. Maps to <c>sprk_filekeywords</c> (corrected
+    /// spaarkeai-word-add-in-r1 task 021 — this comment previously said "sprk_keywords", which is
+    /// not a column on <c>sprk_document</c>; the real column is the one
+    /// <c>DataverseServiceClientImpl</c>'s writer and <c>DocumentProfileFieldMapper</c> both already use).
+    /// </summary>
     public string? Keywords { get; set; }
 
     /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
     public string? DocumentType { get; set; }
+
+    /// <summary>
+    /// AI profiling status for this document (task 021 / FR-07). Maps to the <c>sprk_filesummarystatus</c>
+    /// Choice column — exactly SEVEN values, verified live: None=100000000, Pending=100000001,
+    /// Completed=100000002, OptedOut=100000003, Failed=100000004, NotSupported=100000005,
+    /// Skipped=100000006. <c>null</c> means the column has never been set on this row (Dataverse
+    /// applies no implicit default), which callers should treat identically to None — profiling has
+    /// not been attempted.
+    /// </summary>
+    public int? SummaryStatus { get; set; }
 
     /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
     public string? Entities { get; set; }

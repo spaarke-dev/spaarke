@@ -56,6 +56,12 @@ export interface SaveViewProps {
   onNavigate?: (view: 'save' | 'status') => void;
   /** Entity types allowed for association */
   allowedEntityTypes?: EntityType[];
+  /**
+   * `sprk_document` id resolved by task 013's FR-01 identity resolution (task 021 / FR-07), from
+   * `App.savedContext`. Threaded straight through to `SaveFlow`'s Profile section — this view does
+   * not re-resolve identity itself.
+   */
+  resolvedDocumentId?: string;
 }
 
 /**
@@ -90,6 +96,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   onViewDocument,
   onNavigate,
   allowedEntityTypes,
+  resolvedDocumentId,
 }) => {
   const styles = useStyles();
 
@@ -274,6 +281,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(onQuickCreate ? { onQuickCreate } : {})}
         {...(onNavigate ? { onNavigate } : {})}
         {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
+        {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
       />
     </div>
   );
