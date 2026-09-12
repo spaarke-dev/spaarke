@@ -1,7 +1,7 @@
 namespace Sprk.Bff.Api.Api.Office.Errors;
 
 /// <summary>
-/// Error codes for Office integration endpoints (OFFICE_001-015).
+/// Error codes for Office integration endpoints (OFFICE_001-019).
 /// Per spec.md Error Code Catalog.
 /// </summary>
 /// <remarks>
@@ -67,6 +67,22 @@ public static class OfficeErrorCodes
     /// <summary>OFFICE_015: Processing unavailable - Workers offline</summary>
     public const string ProcessingUnavailable = "OFFICE_015";
 
+    // FR-11 version save (spaarkeai-word-add-in-r1 task 023). Every one of these is a refusal that
+    // wrote NOTHING — no sprk_document row, no SPE item, no SPE version — and none of them falls back to
+    // creating a new document, which would mint exactly the duplicate row a version save exists to prevent.
+
+    /// <summary>OFFICE_016 (404): Version target not found - document.existingDocumentId resolved to no sprk_document</summary>
+    public const string VersionTargetNotFound = "OFFICE_016";
+
+    /// <summary>OFFICE_017 (409): Version target has no file - the sprk_document carries no SPE pointers, or they no longer resolve</summary>
+    public const string VersionTargetHasNoFile = "OFFICE_017";
+
+    /// <summary>OFFICE_018 (400): Version intent mismatch - existingDocumentId sent without isNewVersion=true</summary>
+    public const string VersionIntentMismatch = "OFFICE_018";
+
+    /// <summary>OFFICE_019 (423): Version target locked - SPE refused the version write because the item is locked</summary>
+    public const string VersionTargetLocked = "OFFICE_019";
+
     /// <summary>
     /// Base URI for Office error types.
     /// </summary>
@@ -87,11 +103,15 @@ public static class OfficeErrorCodes
             AttachmentTooLarge => "validation-error",
             TotalSizeExceeded => "validation-error",
             BlockedFileType => "validation-error",
+            VersionIntentMismatch => "validation-error",
             AssociationNotFound => "not-found",
             JobNotFound => "not-found",
+            VersionTargetNotFound => "not-found",
             AccessDenied => "forbidden",
             CannotCreateEntity => "forbidden",
             DocumentAlreadyExists => "conflict",
+            VersionTargetHasNoFile => "conflict",
+            VersionTargetLocked => "locked",
             SpeUploadFailed => "service-error",
             GraphApiError => "service-error",
             DataverseError => "service-error",
@@ -126,6 +146,10 @@ public static class OfficeErrorCodes
             GraphApiError => "Graph API Error",
             DataverseError => "Dataverse Error",
             ProcessingUnavailable => "Processing Unavailable",
+            VersionTargetNotFound => "Version Target Not Found",
+            VersionTargetHasNoFile => "Version Target Has No File",
+            VersionIntentMismatch => "Version Intent Mismatch",
+            VersionTargetLocked => "Version Target Locked",
             _ => "Error"
         };
     }
@@ -145,11 +169,15 @@ public static class OfficeErrorCodes
             AttachmentTooLarge => 400,
             TotalSizeExceeded => 400,
             BlockedFileType => 400,
+            VersionIntentMismatch => 400,
             AssociationNotFound => 404,
             JobNotFound => 404,
+            VersionTargetNotFound => 404,
             AccessDenied => 403,
             CannotCreateEntity => 403,
             DocumentAlreadyExists => 409,
+            VersionTargetHasNoFile => 409,
+            VersionTargetLocked => 423,
             SpeUploadFailed => 502,
             GraphApiError => 502,
             DataverseError => 502,

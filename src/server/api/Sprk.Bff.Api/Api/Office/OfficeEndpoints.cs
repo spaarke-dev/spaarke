@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
@@ -172,6 +173,7 @@ public static class OfficeEndpoints
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
             .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
+            .AddOfficeVersionSaveAuthorizationFilter() // word-add-in-r1 task 023 - FR-11 version save: "write" on the existing sprk_document
             .Accepts<SaveRequest>("application/json")
             .Produces<SaveResponse>(StatusCodes.Status202Accepted)
             .Produces<SaveResponse>(StatusCodes.Status200OK) // For duplicate detection
@@ -180,6 +182,7 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict) // For idempotency conflicts
+            .ProducesProblem(StatusCodes.Status423Locked) // FR-11 version save: target item locked (OFFICE_019)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
@@ -460,6 +463,22 @@ public static class OfficeEndpoints
             "OFFICE_007" => ProblemDetailsHelper.OfficeAssociationTargetNotFound("entity", Guid.Empty, correlationId),
             "OFFICE_009" => ProblemDetailsHelper.OfficeAccessDenied(correlationId),
             "OFFICE_012" => ProblemDetailsHelper.OfficeSpeUploadFailed(error.Message, correlationId),
+            // FR-11 version save (word-add-in-r1 task 023) — refusals that wrote nothing; see OfficeErrorCodes.
+            OfficeErrorCodes.VersionTargetNotFound => ProblemDetailsHelper.OfficeNotFound(
+                error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
+            OfficeErrorCodes.VersionIntentMismatch => ProblemDetailsHelper.OfficeValidationError(
+                error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
+            OfficeErrorCodes.VersionTargetHasNoFile or OfficeErrorCodes.VersionTargetLocked => Results.Problem(
+                type: OfficeErrorCodes.GetTypeUri(error.Code),
+                title: OfficeErrorCodes.GetTitle(error.Code),
+                detail: error.Message,
+                statusCode: OfficeErrorCodes.GetStatusCode(error.Code),
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = error.Code,
+                    ["correlationId"] = correlationId,
+                    ["retryable"] = error.Retryable
+                }),
             _ => Results.Problem(
                 title: "Save Failed",
                 detail: error.Message,

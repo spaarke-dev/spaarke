@@ -251,6 +251,109 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
+    /// The existing <c>sprk_document</c> an FR-11 version save targets (task 023), with the SPE pointers the
+    /// version is written to.
+    /// </summary>
+    public sealed record VersionTarget(Guid DocumentId, string? DriveId, string? ItemId, string? FileName)
+    {
+        /// <summary>Both SPE pointers are present — without them there is no item to version.</summary>
+        public bool HasSpePointers => !string.IsNullOrWhiteSpace(DriveId) && !string.IsNullOrWhiteSpace(ItemId);
+    }
+
+    /// <summary>
+    /// FR-11 version save (task 023): resolves the EXISTING <c>sprk_document</c> named by
+    /// <c>SaveRequest.Document.ExistingDocumentId</c>. Returns <c>null</c> when no such row exists.
+    /// </summary>
+    /// <remarks>
+    /// Read-only. Authorization is NOT decided here — the route's endpoint filter already required
+    /// <c>write</c> on this row (ADR-008); this is the existence and pointer read that follows it.
+    /// </remarks>
+    public async Task<VersionTarget?> ResolveVersionTargetAsync(Guid existingDocumentId, CancellationToken cancellationToken)
+    {
+        // ADR-044: bare-lowercase at the Dataverse boundary. The value is a typed Guid (the JSON binder rejects
+        // a braced string), and "D" formatting of a Guid IS bare-lowercase by definition — there is no raw
+        // client string to clean. The retrieve then takes it as a Guid (SDK RetrieveAsync), never as an
+        // interpolated OData key predicate.
+        var document = await _documentService.GetDocumentAsync(existingDocumentId.ToString("D"), cancellationToken);
+        if (document is null)
+            return null;
+
+        return new VersionTarget(existingDocumentId, document.GraphDriveId, document.GraphItemId, document.FileName);
+    }
+
+    /// <summary>
+    /// FR-11 version save (task 023): records a just-written SPE version on the EXISTING row — and never
+    /// creates one. Returns <c>false</c> when the metadata refresh could not be written (the version itself is
+    /// already durable in SPE; the row's size/path are then stale, which is logged, never silent).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What is written, and what is never written.</b> Mirrors the existing-row branch of
+    /// <c>ComposeCreateOnSavePromoter.PromoteIfEphemeralAsync</c>: only the file metadata the version just
+    /// changed — <c>sprk_filesize</c>, <c>sprk_filepath</c>, and <c>sprk_filename</c> ONLY when SPE's item name
+    /// differs from the row's. The name comes from SPE, not from the request: a PUT by item id does not rename
+    /// the item, so writing the typed name would make the row disagree with the file. Identity columns
+    /// (<c>sprk_graphitemid</c>, <c>sprk_graphdriveid</c>, the association lookups, <c>sprk_documentname</c>,
+    /// <c>sprk_canonicaldocument</c>) are never written here — the row's identity is the whole point.</para>
+    /// <para><b>Content dedup.</b> The version path deliberately does NOT call
+    /// <see cref="ContentDedupDetector.ReconcileAsync"/> (the immutable suppress mode): a version of a document
+    /// that already exists is not a duplicate of it, so nothing may delete the version just written or redirect
+    /// the user to another canonical. The only dedup step is task 028's graduate-on-divergence seam: if this row
+    /// is a hash-linked COPY whose content has now diverged, the link is severed. A true canonical keeps its
+    /// hash, exactly as Compose's existing-row branch leaves it.</para>
+    /// </remarks>
+    public async Task<bool> RecordNewVersionAsync(
+        VersionTarget target,
+        string? speItemName,
+        string? webUrl,
+        long fileSize,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (!target.HasSpePointers)
+            throw new ArgumentException("A version can only be recorded on a document with SPE pointers.", nameof(target));
+
+        var update = new UpdateDocumentRequest { FileSize = fileSize };
+        if (!string.IsNullOrWhiteSpace(webUrl))
+            update.FilePath = webUrl;
+        if (!string.IsNullOrWhiteSpace(speItemName)
+            && !string.Equals(speItemName, target.FileName, StringComparison.Ordinal))
+        {
+            update.FileName = speItemName;
+        }
+
+        var refreshed = true;
+        try
+        {
+            await _documentService.UpdateDocumentAsync(target.DocumentId.ToString("D"), update, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            refreshed = false;
+            _logger.LogWarning(ex,
+                "Version recorded in SPE for sprk_document {DocumentId}, but its file metadata could not be " +
+                "refreshed; sprk_filesize/sprk_filepath are stale for this row.",
+                target.DocumentId);
+        }
+
+        try
+        {
+            // Hash read through the detector's editable seam (no notification, no suppression); its canonical
+            // lookup result is not used on this path.
+            var (liveHash, _) = await _dedupDetector
+                .ResolveContentIdentityAsync(target.DriveId!, target.ItemId!, cancellationToken);
+            await GraduateLinkedCopyIfDivergedAsync(target.ItemId!, liveHash, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Graduate-on-divergence check failed (non-fatal) after a version save of sprk_document {DocumentId}.",
+                target.DocumentId);
+        }
+
+        return refreshed;
+    }
+
+    /// <summary>
     /// NFR-08 (task 028): classifies a save as EDITABLE (link/graduate dedup) or IMMUTABLE (suppress dedup).
     /// The axis is the content type — which is HOST-NEUTRAL by construction: <see cref="SaveContentType.Email"/>
     /// and <see cref="SaveContentType.Attachment"/> are archival captures that never diverge (Outlook today),
