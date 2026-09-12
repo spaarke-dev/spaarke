@@ -44,6 +44,14 @@ public static class OfficeModule
         // every document-creating upload path (email-attachment today; Compose next). Non-fatal by design.
         services.AddScoped<ContentDedupDetector>();
 
+        // FR-13 (spaarkeai-word-add-in-r1 task 030): shared server-side creation service — load-bearing owner, BU
+        // defaults, matter-type lookup, Field Mapping Framework (no numbering: left to a planned separate
+        // component, notes/030-numbering-handoff.md). Concrete (ADR-010: one
+        // implementation, no seam) and UNCONDITIONAL: its consumer, OfficeService.QuickCreateAsync, serves an
+        // unconditionally-mapped route, and its deps (IGenericEntityService, IFieldMappingDataverseService) are
+        // unconditional GraphModule singletons — no §10 F.1 asymmetry.
+        services.AddScoped<RecordCreationService>();
+
         // ============================================================================
         // Office Add-in Orchestrator Service
         // ============================================================================

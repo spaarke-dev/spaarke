@@ -80,6 +80,28 @@ public record QuickCreateRequest
     /// Account ID to associate a Contact with.
     /// </summary>
     public Guid? AccountId { get; init; }
+
+    /// <summary>
+    /// <c>sprk_mattertype_ref</c> id for a Matter (spaarkeai-word-add-in-r1 task 030, FR-13). The pane will always
+    /// send it (owner decision 2026-09-11; the client task that adds the required field is pending — today the pane
+    /// sends only <c>name</c>). When supplied it sets the <c>sprk_mattertype</c> lookup; an id with no matching row is
+    /// a 400. When absent — or <see cref="Guid.Empty"/>, which some clients use for "unset" — the matter is still
+    /// created, with a warning: it is never a rejection. Ignored for other entity types.
+    /// </summary>
+    public Guid? MatterTypeId { get; init; }
+
+    /// <summary>
+    /// Optional record context: the Dataverse entity <b>logical name</b> (e.g. <c>sprk_project</c>) of the record the
+    /// new record is being created from — the Field Mapping Framework source (task 030). Must be supplied together
+    /// with <see cref="SourceRecordId"/>. The caller must hold Read on it (<c>QuickCreateSourceAccessFilter</c>).
+    /// </summary>
+    [MaxLength(64)]
+    public string? SourceEntityType { get; init; }
+
+    /// <summary>
+    /// Optional record context id; see <see cref="SourceEntityType"/>.
+    /// </summary>
+    public Guid? SourceRecordId { get; init; }
 }
 
 /// <summary>
@@ -184,8 +206,36 @@ public static class QuickCreateFieldRequirements
                 break;
         }
 
+        // Task 030 record context: both halves or neither. A half-supplied context is refused HERE, before the
+        // creation service runs, so the service never reads a context the access filter did not authorize
+        // (QuickCreateSourceAccessFilter passes a half-supplied context through for exactly this reason).
+        var hasSourceType = !string.IsNullOrWhiteSpace(request.SourceEntityType);
+        var hasSourceId = request.SourceRecordId is not null;
+        if (hasSourceType != hasSourceId)
+        {
+            errors[hasSourceType ? "sourceRecordId" : "sourceEntityType"] =
+                ["sourceEntityType and sourceRecordId must be supplied together"];
+        }
+
+        if (request.SourceRecordId == Guid.Empty)
+        {
+            errors["sourceRecordId"] = ["sourceRecordId must be a non-empty GUID"];
+        }
+
+        if (hasSourceType && !EntityLogicalNamePattern.IsMatch(request.SourceEntityType!.Trim()))
+        {
+            errors["sourceEntityType"] = ["sourceEntityType must be a Dataverse entity logical name"];
+        }
+
+        // matterTypeId is deliberately NOT validated here: a missing, empty or unknown type is never a rejection
+        // (owner decision 2026-09-11) — the creation service creates without it and warns.
+
         return errors;
     }
+
+    /// <summary>A Dataverse entity logical name: lower-case letter first, then lower-case letters, digits, underscores.</summary>
+    private static readonly System.Text.RegularExpressions.Regex EntityLogicalNamePattern =
+        new("^[a-z][a-z0-9_]{0,63}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Tries to parse an entity type string to the enum value.

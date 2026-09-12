@@ -3,11 +3,12 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Office.Errors;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Office;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Office;
 
@@ -1177,10 +1178,11 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, Invoice, Account, or Contact with minimal required fields. Supports inline entity creation from the Office add-in when the user needs a new association target.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. A Matter is created server-side (spaarkeai-word-add-in-r1 FR-13) with the caller as owner, business-unit defaults, the matter-type lookup when supplied, and the Field Mapping Framework applied from the optional record context. This endpoint does not assign a matter number: that will be done by a planned separate server-side numbering component, and until it exists, matters created here have no number.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
+            .AddQuickCreateSourceAccessFilter() // word-add-in-r1 task 030 - caller must hold Read on the record context
             .Accepts<QuickCreateRequest>("application/json")
             .Produces<QuickCreateResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1380,8 +1382,9 @@ public static class OfficeEndpoints
 
         try
         {
-            // Attribute record ownership to the caller (ADR-024) — best-effort; an unresolved
-            // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
+            // Resolve the caller's systemuserid for ownerid. For MATTER it is load-bearing: the creation service
+            // refuses an unresolved caller (403 owner_unresolved, no row written — word-add-in-r1 task 030). For
+            // Project / Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 
@@ -1460,6 +1463,27 @@ public static class OfficeEndpoints
 
             // Return 201 Created with location header
             return Results.Created(response.Url ?? $"/office/quickcreate/{entityType}/{response.Id}", response);
+        }
+        catch (SdapProblemException problem)
+        {
+            // Task 030: a structured creation refusal (owner unresolved → 403, invalid input → 400). No row was
+            // written. Rendered in this endpoint's ProblemDetails shape rather than letting the generic catch below
+            // turn a deliberate refusal into a 500.
+            logger.LogWarning(
+                "Quick create refused for {EntityType}: {Code} ({Status}), CorrelationId={CorrelationId}",
+                entityType, problem.Code, problem.StatusCode, traceId);
+
+            return Results.Problem(
+                type: $"https://spaarke.com/errors/office/{problem.Code}",
+                title: problem.Title,
+                detail: problem.Detail,
+                statusCode: problem.StatusCode,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = problem.Code,
+                    ["correlationId"] = traceId,
+                    ["entityType"] = entityType
+                });
         }
         catch (Exception ex)
         {

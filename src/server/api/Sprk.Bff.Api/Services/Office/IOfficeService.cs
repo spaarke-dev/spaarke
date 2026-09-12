@@ -147,7 +147,12 @@ public interface IOfficeService
     /// <param name="request">Quick create request with entity fields.</param>
     /// <param name="userId">Authenticated user ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Quick create response with created entity details, or null if creation failed.</returns>
+    /// <returns>Quick create response with created entity details, or null if creation is unavailable for the type.</returns>
+    /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
+    /// Matter only (spaarkeai-word-add-in-r1 task 030): the server-side creation service refused — the caller has
+    /// no Dataverse user (403) or the request is invalid (400). No row was written; the exception carries the stable
+    /// code and HTTP status.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// This supports inline entity creation from the Office add-in when the user
