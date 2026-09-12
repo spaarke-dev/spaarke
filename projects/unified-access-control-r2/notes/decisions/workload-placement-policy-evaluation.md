@@ -142,6 +142,22 @@ only — Function attributes sit on methods, so its second test can never fire.
 
 ---
 
+## 4.4 Fable-tier review of the ADR-052 drafts (2026-09-12) — corrections to this note
+
+The review confirmed D1–D7 and found the v1 drafts not ready; v2 drafts in `notes/drafts/` fix every finding.
+Two corrections apply to THIS note:
+
+- **Identity reuse (D2) — mechanism, and what it does not inherit.** §2 above said reuse gives "same appId →
+  existing grants". That conflated two identities. The stamp's **managed identity** holds the Dataverse application
+  user and the Key Vault / AI Search / Service Bus assignments; the BFF **app registration** — which the managed
+  identity can act as through its federated credential (ADR-028 A4) — holds the SharePoint Embedded
+  container-type registration grants and can perform OBO. ADR-052 v2 therefore says: a Function reuses the
+  **managed identity, app-only**, and MUST NOT act as the BFF app registration (no confidential client, no OBO, no
+  user tokens, no calls to BFF endpoints). SPE access for a Function is an explicit extra grant. This narrows D2
+  for safety without changing its intent — **flagged to the owner**.
+- **Timer triggers can retry.** §4.2's "no retry on failure" is imprecise: `[FixedDelayRetry]` /
+  `[ExponentialBackoffRetry]` are supported on timer triggers.
+
 ## 5. Now vs over time
 
 | Now (tasks 102 / 103 / 100) | Over time (tracked GitHub issues, filed by task 102) |

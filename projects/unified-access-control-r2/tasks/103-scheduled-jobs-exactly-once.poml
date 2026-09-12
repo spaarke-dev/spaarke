@@ -66,9 +66,11 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Two hosts sharing one lease store and firing the same tick run the job exactly once.</criterion>
+    <criterion testable="true">Two hosts sharing one lease store and firing the same tick dispatch the job once (one dispatch per schedule; execution stays at-least-once under retry — ADR-036 A1).</criterion>
     <criterion testable="true">A host that loses the lease records the tick as skipped, not failed, and logs it.</criterion>
-    <criterion testable="true">A lease outlives a normal run and expires if the holder dies, so a later tick is not blocked forever.</criterion>
+    <criterion testable="true">The lease outlives a run including every retry attempt and its backoff, and expires if the holder dies, so a later tick is not blocked forever.</criterion>
+    <criterion testable="true">A manual trigger and a scheduled tick of the same job never run concurrently.</criterion>
+    <criterion testable="true">With no lease store configured (single-instance dev), the host dispatches and warns once.</criterion>
     <criterion testable="true">With the slot guard set, a host runs no scheduled jobs, and says so at startup.</criterion>
     <criterion testable="true">Redis-unavailable behaviour matches the owner's escalation answer and has a test.</criterion>
     <criterion testable="true">All three IScheduledJobs are registered via AddScheduledJob&lt;TJob&gt;; no per-job bootstrap class remains; the existing scheduler and job tests stay green.</criterion>
