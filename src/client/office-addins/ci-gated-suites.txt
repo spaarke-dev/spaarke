@@ -72,6 +72,11 @@ shared/taskpane/services/__tests__/quickSaveHelpers.test.ts
 shared/taskpane/services/__tests__/documentIdentityService.test.ts
 shared/taskpane/utils/__tests__/cleanGuid.test.ts
 
+# --- document profile (task 021, FR-07) — green from creation ---------------
+# Pins the six non-Completed profile states rendering distinct messages (never
+# blank fields) and that the section is read-only.
+shared/taskpane/components/__tests__/DocumentProfileSection.test.tsx
+
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
