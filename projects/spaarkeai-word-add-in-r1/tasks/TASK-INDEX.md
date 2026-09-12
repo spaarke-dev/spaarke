@@ -1,7 +1,7 @@
 # Task Index — `spaarkeai-word-add-in-r1`
 
 > **Generated**: 2026-09-04 by `/project-pipeline` (initialize-only)
-> **Total**: 43 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment; 038 added 2026-09-11 — required Matter Type on pane quick-create, from the owner's task-030 decision)
+> **Total**: 44 tasks across 5 phases (028 added 2026-09-08 — finding F-h; 009 + 017 added 2026-09-09 — jest harness + RTL alignment; 038 added 2026-09-11 — required Matter Type on pane quick-create, from the owner's task-030 decision; 029 added 2026-09-12 — re-profile/re-index after a version save, from task 023's open item)
 > **Status legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked · ⏭️ deferred
 
 **Execute via `task-execute` only.** Never read a POML and implement manually (root CLAUDE.md §4).
@@ -204,14 +204,15 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 020 | FR-06: filename defaults to Document Name, editable in-pane | 🔲 | FULL | sonnet / high | P2-a | 015 |
-| 021 | FR-07: Description becomes Profile, populated from the record | 🔲 | FULL | sonnet / high | P2-a | 013, 015 |
+| 021 | FR-07: Description becomes Profile, populated from the record — built 2026-09-11/12 (`45653864d`, merged `1fdf464cb`): read-only Profile section fed by the EXISTING `GET /api/v1/documents/{id}` (§11 — extended, no new route; `Spaarke.Dataverse` `GetDocumentAsync` now selects the 5 profile columns). **Main-session review caught a runtime defect**: `sprk_documenttype` is a Picklist but was read as a string → `InvalidCastException` for every `GetDocumentAsync` caller (incl. Find Similar) — fixed `7bf213cf0` with a real-`Entity` mapping test (fail 2/10 → pass 10/10). 🔄 **Owner 2026-09-12: remove the kept "Notes" box** (agent applying) | 🔄 | FULL | sonnet / high | P2-a | 013, 015 |
 | 022 | FR-08: Generate Profile button and BFF trigger | 🔲 | FULL | sonnet / high | P2-a | 013 |
-| 023 | FR-11 server: make `ExistingDocumentId`/`IsNewVersion` real | 🔲 | FULL | opus / xhigh | — | 012 |
+| 023 | FR-11 server: make `ExistingDocumentId`/`IsNewVersion` real — **done 2026-09-12** (`d382bc7e5`, merged `32ae91373`): a Document save carrying `existingDocumentId` writes a new SPE version via `SpeFileStore.ReplaceFileContentAsUserAsync` (by item id, OBO) and updates the existing row — never a second row; write-level `OfficeVersionSaveAuthorizationFilter` → `DocumentAuthorizationFilter("write")`; version path skips suppress-dedup, runs 028's graduate-on-divergence; idempotency key gains a content hash for version saves only. Full suite 12,161/0; +0.03 MB. **Owner decisions:** AC4 — SPE has NO readable version comment (researcher, Graph `$metadata` checked) → `VersionComment` stays on the job record for r1; AC5 — unknown id → 403 (anti-enumeration) accepted; AI/index refresh gap → new task **029** | ✅ | FULL | opus / xhigh | — | 012 |
 | 024 | FR-11 client: default to version; override routes link/graduate | 🔲 | FULL | opus / high | — | 023, 013 |
 | 025 | FR-12: surface collision handling per the Spike-4 outcome — ⚠️ **needs re-scope**, premise falsified | ⛔ | FULL | sonnet / high | — | **005**, 023, 024 |
 | 026 | FR-09: related-to record card honoring the two-slot model | 🔲 | FULL | sonnet / high | P2-b | 013 |
 | 027 | FR-10: open the related record and the Document record | 🔲 | FULL | sonnet / high | P2-b | 003, 026 |
 | 028 | 🔴 **F-h/NFR-08**: editable Office saves must link/graduate, never immutable-suppress | ✅ | FULL | **opus / xhigh** | — | none |
+| 029 | Re-profile + re-index a document after a version save (per-version analysis key) — added 2026-09-12 from 023's open item; owner: "new task in this project". Today the profile job key is `analysis-{documentId}-documentprofile`, so a new version of the same document is skipped → stale profile + stale Find | 🔲 | FULL | opus / high | — | 023 ✅ |
 
 **Gate**: identified document saves as a version, not a duplicate row · override creates a linked copy · profile displays · record card opens the record.
 
@@ -221,7 +222,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 030 | FR-13: shared server-side creation service (**Matter**) — first pass `0d53d3146` (owner, BU defaults, field mapping, source-access filter, probe-based numbering). **REWORK in flight 2026-09-11 per owner decision: numbering moves to a SEPARATE project** (server-side numbering component on record create; no plugin). 030 removes its generator, never writes `sprk_matternumber`, accepts optional `matterTypeId` without rejecting; AC2/AC3 withdrawn → numbering project. Hand-off: `notes/030-numbering-handoff.md` | 🔄 | FULL | opus / xhigh | — | 012 |
+| 030 | FR-13: shared server-side creation service (**Matter**) — **done 2026-09-12, RE-SCOPED** (`0d53d3146` → `ecec444a2` → `4b05985b9`, merged `514ed0521`). Quick-create Matter now gets owner (403 if the caller has no Dataverse user), BU defaults, create-time field mapping, and a `QuickCreateSourceAccessFilter` (Read on the source record before an app-only read). **Numbering moved to a SEPARATE project per owner** (no plugin) — the server never writes `sprk_matternumber`; the probe-based generator survives in `0d53d3146` as a starting point. Matter Type optional, never rejected: unknown/unverifiable → created without it + warning. 19/19 contract tests; ArchTests 191; +0.03 MB. ⚠️ **`sprk_matternumber` is Matter's PRIMARY NAME (verified live) → pane-created Matters show a blank name until the numbering project ships.** Hand-off: `notes/030-numbering-handoff.md`; re-scoped ACs: `notes/030-creation-service-decisions.md` | ✅ | FULL | opus / xhigh | — | 012 |
 | 031 | FR-13: Project creation completeness + QuickCreate routing — ⚠️ **re-scope before start**: `sprk_projectnumber` likely belongs to the same separate numbering project (owner to confirm) | 🔲 | FULL | opus / high | — | 030 |
 | 032 | **FR-16a: per-row authorization on the similarity surface** | ✅ | FULL | opus / xhigh | — | none |
 | 033 | FR-16b: Find view three-state gating and Run Index | 🔲 | FULL | sonnet / high | — | 032, 015, 013 |

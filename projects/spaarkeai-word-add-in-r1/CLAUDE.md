@@ -7,8 +7,8 @@
 
 ## Project Status
 
-- **Phase**: Phase 0 complete; Phase 1 nearly complete (21 of 43 tasks ✅ as of 2026-09-11 — 012 identity resolver live on dev, Spike-1 GREEN; 013 + 016 done; 011 awaits the 1.0.8 manifest re-upload; 014 not started)
-- **Last Updated**: 2026-09-11
+- **Phase**: Phase 0 complete; Phase 1 nearly complete (011 awaits the 1.0.8 manifest re-upload; 014 not started); Phases 2–3 under way. **23 of 44 tasks ✅ as of 2026-09-12** — 012, 013, 016, 023 (version save), 030 (Matter quick-create, numbering moved out) done; 021 (Profile) finishing
+- **Last Updated**: 2026-09-12
 - **Current Task**: see [`current-task.md`](current-task.md) — the authoritative live state; this block is a summary only
 - **Next Action**: see `current-task.md` Quick Recovery
 

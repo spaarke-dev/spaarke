@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Re-profile and re-index a document after a version save (per-version analysis key)</title>
+    <phase>2 Save flow</phase>
+    <gate>023 merged (version save writes a new SPE version of the existing sprk_document)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the BFF background-job path (idempotency of document analysis + indexing) consumed by every document-save surface; tags include bff-api, ai and jobs.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-surface blast radius: the analysis idempotency key and the index-replace semantics are shared by Email, Attachment, Compose and Office saves. Getting the key wrong either double-processes every save or silently never refreshes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>023</deps>
+    <tags>bff-api, ai, jobs, indexing, save-flow, integration-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>After task 023, a version save writes new bytes to the SAME `sprk_document` (same document id). Finalization then queues the AI profile job with the idempotency key `analysis-{documentId}-documentprofile`, and the handler skips an already-processed key — so the new version is never re-profiled or re-indexed. The profile card and Find results go stale after the first re-save. Make analysis and indexing refresh for a genuinely new version while staying idempotent for retries of the same version and unchanged for every other save.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF job contract (ADR-004 / ADR-036), Service Bus idempotency, the document profile pipeline and the RAG indexing pipeline. Follow ADRs strictly.</role>
+
+  <goal>A version save whose content differs from the previous version triggers exactly one re-profile and one re-index of that `sprk_document`; replaying or retrying the same version triggers nothing extra; a first save and every Email/Attachment/Compose save behave exactly as today; the index holds chunks for the current version only (no duplicates, no orphans).</goal>
+
+  <context>
+    <background>
+      Source: `notes/023-save-path-trace.md` §13 (task 023's open items, 2026-09-11). `UploadFinalizationWorker` queues `AppOnlyDocumentAnalysis` with idempotency key `analysis-{documentId}-documentprofile`, and that handler skips an already-processed key. A version keeps the same document id. The note suggests a per-version key (for example the drive-item version or a content hash). Re-locate every symbol by name — do not trust line numbers.
+      Task 023 already hashes content into the save's idempotency key for version saves only (decision 3 in its trace note) — reuse that hash if it reaches the finalization payload, rather than computing a second one.
+      Owner decision 2026-09-12: this gap is owned by THIS project (not handed off).
+      Also unverified from 023: whether the app-only finalization jobs can read a version written by the user (OBO). If a live check becomes possible, record it; do not block on it.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/023-save-path-trace.md</file>
+      <file role="canonical-reference">.claude/patterns/ai/indexing-pipeline.md</file>
+      <file role="canonical-reference">docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: only a version save (a Document save that targeted an existing `sprk_document`) may produce a new analysis/index key. First saves and every Email, Attachment and Compose path keep their current key and behaviour byte-for-byte.</constraint>
+    <constraint source="project">Scope: idempotency. A Service Bus redelivery or client retry of the SAME version must be skipped exactly as today. The per-version discriminator must be deterministic for identical content (content hash or SPE version id), never a timestamp or random value.</constraint>
+    <constraint source="indexing-pipeline">Scope: re-indexing. Pass `documentId` on every index call. Re-indexing a document must REPLACE its chunks — confirm the pipeline's delete/replace semantics for an existing document before relying on it; duplicate or orphan chunks are a defect.</constraint>
+    <constraint source="ADR-013">Scope: any AI capability reached from job code goes through `Services/Ai/PublicContracts/`; do not inject `IOpenAiClient` / `IPlaybookService` into CRUD code.</constraint>
+    <constraint source="ADR-010">Scope: DI. No new service registration unless the existing job handlers cannot be extended; justify per CLAUDE.md §11 if one is added.</constraint>
+    <constraint source="ADR-038">Scope: tests. Prove (a) a differing version triggers one re-profile + one re-index, (b) the same version replayed triggers none, (c) a first save and an Email save produce the same keys as master. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="project">Scope: BFF hygiene (root CLAUDE.md §10) — publish size against a FRESH master build (Compress-Archive), CVE check, placement statement in notes.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, `notes/023-save-path-trace.md`, the indexing-pipeline pattern and the document-profile architecture doc. Declare FULL, opus @ high, DIRECTIONAL. Run `/conflict-check` (BFF hot path).</step>
+    <step order="1">Trace finalization → profile job → index job for a version save and a first save; write the trace (keys, skip checks, index replace semantics) to `notes/029-version-ai-refresh.md` before changing code.</step>
+    <step order="2">Carry a deterministic per-version discriminator from the version save into the finalization payload and into the analysis/index idempotency keys — for version saves only.</step>
+    <step order="3">Ensure re-indexing replaces the document's previous chunks.</step>
+    <step order="4">Add the tests in the ADR-038 constraint; run the BFF build, the affected job/AI/Office tests, ArchTests, and the full `Sprk.Bff.Api.Tests` once.</step>
+    <step order="5">Publish size + CVE; record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If changing the key for version saves would change the key, retry or skip behaviour of ANY other save path, STOP and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If the indexing pipeline has no way to replace an existing document's chunks (re-indexing would duplicate or orphan them), STOP and escalate — do not add a bespoke delete path without a decision.</trigger>
+    <trigger>If the profile handler's skip logic is shared with a job type outside document analysis, STOP before modifying it and escalate the blast radius.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The finalization → `AppOnlyDocumentAnalysis` path and the RAG indexing pipeline already exist; the defect is only the idempotency key being per-document rather than per-version for version saves (023 trace §13).</existing>
+    <extension>Yes — extend the existing key composition and payload; no new job type, handler or route.</extension>
+    <cost-of-doing-nothing>After the first re-save of a Word document, its AI profile (task 021's Profile section) and its Find/semantic-search chunks describe the OLD content forever — users see a stale summary and search misses the new text.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/029-version-ai-refresh.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a version save whose content differs from the prior version, when finalization runs, then exactly one re-profile and one re-index are queued for that `sprk_document`.</criterion>
+    <criterion testable="true">Negative: given the same version replayed (Service Bus redelivery or client retry), then no additional profile or index job runs.</criterion>
+    <criterion testable="true">Negative: given a first save, or an Email/Attachment/Compose save, then the analysis and index keys are identical to master.</criterion>
+    <criterion testable="true">Given a re-index, then the index holds chunks for the current version only — no duplicates and no orphans — proven by a test.</criterion>
+    <criterion testable="true">`dotnet build` green; affected tests, ArchTests and the full suite pass; publish size vs a fresh master build and the CVE result are recorded in notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-09-12 by the main session from task 023's open item (owner: "New task in this project"). Related: task 021 (Profile section reads what this job writes), task 024 (client version save), task 033/034 (Find).
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

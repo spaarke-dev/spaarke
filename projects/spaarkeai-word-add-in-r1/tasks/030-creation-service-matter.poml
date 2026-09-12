@@ -135,6 +135,7 @@
   </acceptance-criteria>
 
   <notes>
+    ⚠️ RE-SCOPED 2026-09-11/12 by owner decision (project CLAUDE.md Decisions): matter NUMBERING moved OUT of r1 into a separate server-side numbering project (no Dataverse plugin). The numbering parts of the goal, constraints and acceptance criteria above (the `{typeCode}-{6 digits}` scheme, the uniqueness probe, the first two collision criteria) are WITHDRAWN here and transfer to that project — see `notes/030-numbering-handoff.md`. The server never writes `sprk_matternumber`; Matter Type is optional in the request and never rejected (an unknown or unverifiable type creates the matter without it, with a warning). The re-scoped acceptance table is `notes/030-creation-service-decisions.md`.
     spec.md FR-13; plan.md §3 ("FR-13's halves are not symmetric") and §4 Phase 3. This task is Matter; task 031 is Project and is deliberately NOT a mirror. The `sprk_matternumber` values verified live are `PAT-191111`, `CMRCL-285858`, `CMRCL-734193` — six digits, uppercase type-code prefix, hyphen separator.
   </notes>
 

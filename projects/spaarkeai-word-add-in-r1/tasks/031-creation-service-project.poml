@@ -27,7 +27,7 @@
     <background>
       Verified as-built, and it differs from Matter in two ways that matter:
 
-      1. **`sprk_projectnumber` is the Project PRIMARY NAME ATTRIBUTE.** It is not a secondary reference field like `sprk_matternumber`. Whatever is written there is what every lookup, every grid and every record header displays as the Project's name.
+      1. **`sprk_projectnumber` is the Project PRIMARY NAME ATTRIBUTE.** (⚠️ CORRECTED 2026-09-12: an earlier version of this line said Project differs from Matter because `sprk_matternumber` is "a secondary reference field". That is FALSE — task 030 verified live that `sprk_matternumber` is ALSO its entity's primary name attribute (`EntityDefinitions(LogicalName='sprk_matter')` → `PrimaryNameAttribute: sprk_matternumber`). The real difference is only that Matter has a client-side type-code generator and Project has none. Also: the owner moved Matter numbering to a SEPARATE server-side numbering project (project CLAUDE.md Decisions 2026-09-11) — confirm with the owner whether `sprk_projectnumber` belongs there too BEFORE starting this task.) Whatever is written there is what every lookup, every grid and every record header displays as the Project's name.
       2. **`CreateProjectWizard/projectService.ts` generates NO number at all** — unlike `matterService.ts:255-273`, which generates `{typeCode}-{random6}`. There is no existing client-side scheme for this task to lift onto the server, because none exists.
 
       Consequently the Matter design from task 030 cannot be copied. Blindly generating a `{typeCode}-{6 digits}` value for `sprk_projectnumber` would overwrite the Project's display name with a machine token, which is a user-visible regression, not a fix.
