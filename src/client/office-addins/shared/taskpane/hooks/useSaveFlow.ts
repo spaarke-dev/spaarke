@@ -4,11 +4,16 @@ import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import {
   mapProblemDetailsToMessage,
+  describeVersionSaveFailure,
   isProblemDetails,
   createErrorFromException,
   type ErrorMessage,
 } from '../utils/errorMessages';
 import { createSseConnection, type SseConnection, type SseEvent } from '../services/SseClient';
+import { cleanGuid } from '../utils/cleanGuid';
+
+/** A canonical (bare-lowercase, ADR-044) Dataverse GUID. */
+const CANONICAL_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * Source types for save operations.
@@ -158,9 +163,25 @@ export interface EmailRecipient {
 }
 
 /**
+ * Where a Word Document save goes (FR-11, spaarkeai-word-add-in-r1 task 024).
+ *
+ * - `create` — a new `sprk_document` (the only behavior before task 024).
+ * - `version` — a new SPE version of the EXISTING `sprk_document` task 013 resolved, via task 023's
+ *   server path (`document.existingDocumentId` + `document.isNewVersion: true`). One row before and after.
+ *
+ * Only the Document branch reads it; an Outlook (Email) save never carries version fields.
+ */
+export type SaveTarget = { mode: 'create' } | { mode: 'version'; existingDocumentId: string };
+
+/**
  * Save flow context data.
  */
 export interface SaveFlowContext {
+  /**
+   * Where a Word Document save goes (task 024). Absent → `create`, exactly as before. Chosen by
+   * `SaveFlow` from the resolved identity + the user's explicit override (`resolveSaveMode`).
+   */
+  saveTarget?: SaveTarget;
   /** Host type (outlook or word) */
   hostType: HostType;
   /** Current item ID (email or document) */
@@ -297,10 +318,36 @@ function saveLastAssociation(entity: EntitySearchResult): void {
 }
 
 /**
- * Compute idempotency key (SHA-256 of canonical payload).
+ * The parts of a VERSION save (FR-11, task 024) that make its idempotency key distinct.
+ *
+ * Mirrors what task 023 made the SERVER's key discriminate on for a version save
+ * (`OfficeService.GenerateIdempotencyKey`: `…|FileName|ExistingDocumentId|version-content:{sha256}`):
+ * - `existingDocumentId` — a version save and a fresh save of the same file name never share a key;
+ * - `contentSha256` — two different revisions of the same document are two operations, while an
+ *   identical re-send (same bytes) still de-duplicates;
+ * - `failedAttempts` — how many version-save attempts have FAILED in this pane session. A failed attempt
+ *   leaves a failed `sprk_processingjob` row behind carrying its key, and the server's persistent
+ *   idempotency lookup answers any later request with that key as a "duplicate" of the FAILED job — so a
+ *   retry after, say, a 423 lock would loop on the old failure forever. The counter only grows, so a
+ *   retry never reproduces a failed attempt's key, and a completed attempt's key is only ever re-sent
+ *   for identical content (a true duplicate).
  */
-async function computeIdempotencyKey(request: SaveRequest): Promise<string> {
-  const canonical = JSON.stringify({
+export interface VersionIdempotencyParts {
+  existingDocumentId: string;
+  fileName: string;
+  contentSha256: string;
+  failedAttempts: number;
+}
+
+/**
+ * The canonical string an idempotency key is the SHA-256 of. Exported for its unit tests.
+ *
+ * For every save that is NOT a version save the string is byte-for-byte what it was before task 024 (the
+ * `version` member is absent, and `JSON.stringify` emits nothing for it), matching task 023's rule that
+ * "the canonical string for every other request is unchanged".
+ */
+export function buildIdempotencyCanonical(request: SaveRequest, version?: VersionIdempotencyParts): string {
+  return JSON.stringify({
     sourceType: request.sourceType,
     associationType: request.associationType,
     associationId: request.associationId,
@@ -308,13 +355,32 @@ async function computeIdempotencyKey(request: SaveRequest): Promise<string> {
     attachmentIds: request.content.attachmentIds?.sort(),
     includeBody: request.content.includeBody,
     documentUrl: request.content.documentUrl,
+    ...(version
+      ? {
+          version: {
+            existingDocumentId: version.existingDocumentId,
+            fileName: version.fileName,
+            contentSha256: version.contentSha256,
+            ...(version.failedAttempts > 0 ? { failedAttempts: version.failedAttempts } : {}),
+          },
+        }
+      : {}),
   });
+}
 
-  const encoder = new TextEncoder();
-  const data = encoder.encode(canonical);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+/** Lowercase-hex SHA-256 of a string's UTF-8 bytes. */
+async function sha256Hex(text: string): Promise<string> {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Compute idempotency key (SHA-256 of the canonical payload — see {@link buildIdempotencyCanonical}).
+ */
+export async function computeIdempotencyKey(request: SaveRequest, version?: VersionIdempotencyParts): Promise<string> {
+  return sha256Hex(buildIdempotencyCanonical(request, version));
 }
 
 /**
@@ -403,6 +469,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const abortControllerRef = useRef<AbortController | null>(null);
   const pollingRetryCountRef = useRef<number>(0);
   const maxPollingRetries = 3;
+  // FR-11 (task 024): whether the save in flight is a VERSION save, and how many version-save attempts have
+  // FAILED in this pane session (see VersionIdempotencyParts.failedAttempts). Deliberately NOT reset by
+  // reset(): the counter must only grow, or a later identical re-send could reproduce a failed attempt's
+  // key and be answered with that failed job.
+  const activeVersionSaveRef = useRef(false);
+  const versionFailuresRef = useRef(0);
+  // The existing document an in-flight VERSION save targets. By contract (task 023) a version save's resulting
+  // document IS that document, so completion can name it even when the job record carries no artifact — which
+  // the synchronous save path never sets (only the AI workers do, later, over SSE).
+  const activeVersionDocumentIdRef = useRef<string | null>(null);
 
   // Computed values
   const isSaving = flowState === 'uploading' || flowState === 'processing';
@@ -515,8 +591,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           return { ...prev, ...(stages !== undefined ? { stages } : {}) };
         });
       } else if (eventType === 'complete') {
-        // Completion: { jobId: string, documentId?: string, documentUrl?: string }
-        const documentId = data.documentId as string | undefined;
+        // Completion: { jobId: string, documentId?: string, documentUrl?: string }. A VERSION save falls back to
+        // the document it named (task 024) — see activeVersionDocumentIdRef.
+        const documentId = (data.documentId as string | undefined) ?? activeVersionDocumentIdRef.current ?? undefined;
         const documentUrl = data.documentUrl as string | undefined;
 
         if (documentId) {
@@ -528,6 +605,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         cleanup();
       } else if (eventType === 'failed' || eventType === 'error') {
         // Error: { code: string, message: string, retryable?: boolean }
+        if (activeVersionSaveRef.current) {
+          versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
+        }
         const errorMsg: ErrorMessage = {
           title: 'Processing Failed',
           message: (data.message as string) || 'An error occurred during processing.',
@@ -633,8 +713,10 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           }
         }
 
-        // Extract document info from result.artifact
-        const documentId = rawStatus.result?.artifact?.id;
+        // Extract document info from result.artifact. For a VERSION save, fall back to the document it named
+        // (task 024): the synchronous save path completes the job without an artifact, and without this the pane
+        // would stop polling on "Completed" with no way forward.
+        const documentId = rawStatus.result?.artifact?.id ?? activeVersionDocumentIdRef.current ?? undefined;
         const documentUrl = rawStatus.result?.artifact?.webUrl;
 
         const status: JobStatus = {
@@ -654,6 +736,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             setFlowState('complete');
             onComplete?.(documentId, documentUrl || '');
           } else if (status.status === 'Failed') {
+            if (activeVersionSaveRef.current) {
+              versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
+            }
             const errorMsg: ErrorMessage = {
               title: 'Processing Failed',
               message: status.error?.message || 'An error occurred during processing.',
@@ -775,6 +860,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       cleanup();
       abortControllerRef.current = new AbortController();
 
+      // FR-11 (task 024): whether THIS attempt is a version save. Declared before the request is built so every
+      // failure path below — a ProblemDetails refusal, a thrown error — can count it.
+      let isVersionAttempt = false;
+      activeVersionSaveRef.current = false;
+      activeVersionDocumentIdRef.current = null;
+
       try {
         // Auth v2 (D-AUTH-7 / task 082): no top-level token snapshot.
         // The token used for the POST below is acquired inline immediately
@@ -799,6 +890,29 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Use custom documentName if provided, otherwise fall back to itemName
         const effectiveDocumentName = context.documentName || context.itemName;
 
+        // FR-11 (task 024): a VERSION save is a Word Document save whose target is an existing sprk_document
+        // (task 013's resolved identity, unless the user chose "a new document"). Only the Document branch can
+        // carry it — an Outlook Email save never sends version fields, whatever the context says.
+        const versionTarget =
+          contentType === 'Document' && context.saveTarget?.mode === 'version' ? context.saveTarget : undefined;
+        // ADR-044: canonical bare-lowercase via the shared cleanGuid BEFORE the id leaves the client (the server
+        // binds it as a typed Guid and formats it "D" again at its own boundary).
+        const existingDocumentId = versionTarget ? cleanGuid(versionTarget.existingDocumentId) : undefined;
+        if (versionTarget && (!existingDocumentId || !CANONICAL_GUID.test(existingDocumentId))) {
+          // Never fall back to creating: a version save that cannot name its document is refused here.
+          throw new Error('The existing Spaarke document could not be identified, so no version was saved.');
+        }
+        isVersionAttempt = versionTarget !== undefined;
+        activeVersionSaveRef.current = isVersionAttempt;
+        activeVersionDocumentIdRef.current = existingDocumentId ?? null;
+
+        // The "Related to" record actually sent. NOT on a version save: that path writes to the existing
+        // document's own item and never re-associates it (task 023 D-4/D-5), so a picker selection would be
+        // inert — and would add an unrelated authorization check (EntityAccessFilter) that could refuse a
+        // legitimate version save.
+        const sentEntity = versionTarget ? null : selectedEntity;
+        let documentFileName: string | undefined;
+
         // Build request in server-expected format
         // Server requires: contentType, targetEntity, and type-specific metadata
         const serverRequest: Record<string, unknown> = {
@@ -819,12 +933,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           },
         };
 
-        // Add target entity if an association was selected
-        if (selectedEntity?.id) {
+        // Add target entity if an association was selected (never on a version save — see `sentEntity`)
+        if (sentEntity?.id) {
           serverRequest.targetEntity = {
-            entityType: selectedEntity.entityType,
-            entityId: selectedEntity.id,
-            displayName: selectedEntity.name,
+            entityType: sentEntity.entityType,
+            entityId: sentEntity.id,
+            displayName: sentEntity.name,
           };
         }
 
@@ -873,11 +987,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           // an unknown/unsupported type (email-communication-intelligence-r2 UAT 2026-09-03).
           const rawDocName = (effectiveDocumentName || 'document').trim() || 'document';
           const docFileName = /\.docx$/i.test(rawDocName) ? rawDocName : `${rawDocName}.docx`;
+          documentFileName = docFileName;
           serverRequest.document = {
             fileName: docFileName,
             title: effectiveDocumentName,
             contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             contentBase64: context.documentContentBase64,
+            // FR-11 (task 024): the two version fields travel TOGETHER — the server refuses existingDocumentId
+            // without isNewVersion:true (OFFICE_018). "Save as new document" sends neither. No versionComment:
+            // the pane collects none (SharePoint Embedded keeps no readable version comment).
+            ...(existingDocumentId ? { existingDocumentId, isNewVersion: true } : {}),
           };
         }
 
@@ -889,8 +1008,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
                 ? 'OutlookAttachment'
                 : 'OutlookEmail'
               : 'WordDocument',
-          associationType: selectedEntity?.entityType || '',
-          associationId: selectedEntity?.id || '',
+          associationType: sentEntity?.entityType || '',
+          associationId: sentEntity?.id || '',
           content: {
             ...(context.itemId !== undefined ? { emailId: context.itemId } : {}),
             includeBody: includeBody && context.hostType === 'outlook',
@@ -901,8 +1020,24 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           processing: processingOptions,
         };
 
-        // Compute idempotency key from legacy format for consistency
-        const idempotencyKey = await computeIdempotencyKey(request);
+        // Idempotency key. Every save except a version save computes it exactly as before (legacy format).
+        // A VERSION save keys on its document + file name + content + failed-attempt count
+        // (VersionIdempotencyParts), and ALSO sends that key in the body: the server's PERSISTENT job dedupe
+        // uses `request.idempotencyKey` when present — the X-Idempotency-Key header only reaches the Redis
+        // response cache (IdempotencyFilter) — so the body key is what stops a retry after a failure from being
+        // answered with the failed job, and what makes two revisions of one document two operations.
+        let idempotencyKey: string;
+        if (existingDocumentId && documentFileName && context.documentContentBase64) {
+          idempotencyKey = await computeIdempotencyKey(request, {
+            existingDocumentId,
+            fileName: documentFileName,
+            contentSha256: await sha256Hex(context.documentContentBase64),
+            failedAttempts: versionFailuresRef.current,
+          });
+          serverRequest.idempotencyKey = idempotencyKey;
+        } else {
+          idempotencyKey = await computeIdempotencyKey(request);
+        }
 
         // Submit save request.
         // Auth v2 (D-AUTH-7, updated task 072): acquire token inline — no snapshot.
@@ -963,7 +1098,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         if (!response.ok) {
           // Error response
           if (isProblemDetails(responseData)) {
-            const errorMsg = mapProblemDetailsToMessage(responseData);
+            if (isVersionAttempt) {
+              versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
+            }
+            // A refused VERSION save is described in terms of the existing document and — when the refusal is
+            // about that document — offers "Save as new document" as the way forward (task 024).
+            const errorMsg = isVersionAttempt
+              ? describeVersionSaveFailure(responseData)
+              : mapProblemDetailsToMessage(responseData);
             setError(errorMsg);
             setFlowState('error');
             onError?.(errorMsg);
@@ -981,6 +1123,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           return; // Cancelled
+        }
+
+        if (isVersionAttempt) {
+          // Failed, or its outcome is unknown (no response). Either way a retry is a NEW attempt: at worst it
+          // writes one more identical SPE version of the same document — never a second row (task 023).
+          versionFailuresRef.current += 1;
         }
 
         const errorMsg = createErrorFromException(err, 'Failed to save. Please try again.');

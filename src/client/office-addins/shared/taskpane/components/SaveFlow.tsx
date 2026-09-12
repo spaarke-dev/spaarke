@@ -29,8 +29,16 @@ import {
 import { RelatedToPicker } from './RelatedToPicker';
 import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
+import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
-import { useSaveFlow, type SaveFlowContext, type StageStatus, type UseSaveFlowOptions } from '../hooks/useSaveFlow';
+import {
+  useSaveFlow,
+  type SaveFlowContext,
+  type SaveTarget,
+  type StageStatus,
+  type UseSaveFlowOptions,
+} from '../hooks/useSaveFlow';
+import type { DocumentIdentityState } from '../services/documentIdentityService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
@@ -285,6 +293,14 @@ export interface SaveFlowProps {
    * profile read call.
    */
   resolvedDocumentId?: string;
+  /**
+   * The open document's identity state (task 024 / FR-11), threaded from `App` via `SaveView`. A resolved
+   * identity makes Save DEFAULT to a new version of that record, with an explicit "a new document"
+   * override; `undefined` means identity does not apply (Outlook) → a plain create save, as before.
+   */
+  documentIdentity?: DocumentIdentityState;
+  /** Re-runs identity resolution ("Check again" / "Try again"). */
+  onRetryDocumentIdentity?: () => void;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -354,6 +370,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     documentUrl,
     documentContentBase64,
     resolvedDocumentId,
+    documentIdentity,
+    onRetryDocumentIdentity,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -412,11 +430,68 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [relatedCandidates, setRelatedCandidates] = useState<RelatedCandidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
 
+  // ── FR-11 save mode (task 024) ──────────────────────────────────────────────────────────────────
+  // The user's EXPLICIT choice; null = the identity's default (a new version when resolved). A new identity
+  // (first resolution, or a retry) starts again from its own default — never from a stale override.
+  const [saveModeChoice, setSaveModeChoice] = useState<SaveModeChoice | null>(null);
+  useEffect(() => {
+    setSaveModeChoice(null);
+  }, [documentIdentity]);
+  const saveMode = useMemo(() => resolveSaveMode(documentIdentity, saveModeChoice), [documentIdentity, saveModeChoice]);
+  const isVersionMode = saveMode.target?.mode === 'version';
+  // What the LAST submitted save was — drives the success copy and whether "Related to" is handed on.
+  const [submittedTarget, setSubmittedTarget] = useState<SaveTarget | null>(null);
+
+  const handleSaveModeChange = useCallback(
+    (choice: SaveModeChoice | null) => {
+      setSaveModeChoice(choice);
+      // NFR-11: every mode change is announced.
+      if (choice === 'new') {
+        announce('Save mode: a new document. The existing document will not be changed.', 'polite');
+      } else if (choice === 'version') {
+        announce(`Save mode: a new version of ${saveMode.documentLabel ?? 'the existing document'}.`, 'polite');
+      } else {
+        announce('Save as a new document is no longer selected. Save is unavailable.', 'polite');
+      }
+    },
+    [announce, saveMode.documentLabel]
+  );
+
+  // NFR-11: announce what identity resolution decided for Save.
+  useEffect(() => {
+    switch (saveMode.view) {
+      case 'version':
+        announce(
+          `This document is already in Spaarke. Save will add a new version of ${saveMode.documentLabel ?? 'it'}.`,
+          'polite'
+        );
+        break;
+      case 'conflict':
+        announce(
+          'This document can’t be saved from here: Spaarke has a conflicting record for this file.',
+          'assertive'
+        );
+        break;
+      case 'undetermined':
+        announce(
+          'Couldn’t check whether this document is already in Spaarke. Try again, or choose to save it as a new document.',
+          'polite'
+        );
+        break;
+      case 'denied':
+        announce('You can’t add a version to this document. You can save your copy as a new document.', 'polite');
+        break;
+      default:
+        break;
+    }
+  }, [saveMode.view, saveMode.documentLabel, announce]);
+
   // Build save context
   const buildSaveContext = useCallback(
     (): SaveFlowContext => ({
       hostType,
       attachments,
+      ...(saveMode.target ? { saveTarget: saveMode.target } : {}),
       ...(itemId !== undefined ? { itemId } : {}),
       ...(itemName !== undefined ? { itemName } : {}),
       ...(documentName ? { documentName } : {}),
@@ -441,21 +516,35 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       emailBody,
       documentUrl,
       documentContentBase64,
+      saveMode.target,
     ]
   );
 
-  // Handle save button click
+  // Handle save button click. A null target means the save mode is not settled (identity still checking,
+  // a conflict, or an undetermined identity with no explicit choice) — the button is disabled then, and this
+  // guard makes sure nothing is sent even if it were not.
   const handleSave = useCallback(() => {
-    const context = buildSaveContext();
-    startSave(context);
-  }, [buildSaveContext, startSave]);
+    if (!saveMode.target) return;
+    setSubmittedTarget(saveMode.target);
+    startSave(buildSaveContext());
+  }, [buildSaveContext, saveMode.target, startSave]);
 
-  // Cancel = clear the current selection + fields (wizard "Cancel" pattern).
+  // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
+  // the identity's default.
   const handleCancel = useCallback(() => {
     setSelectedEntity(null);
     setDocumentName('');
+    setSaveModeChoice(null);
     reset();
   }, [setSelectedEntity, reset]);
+
+  // A refused VERSION save whose cause is the existing document (task 024): switch to "a new document" so
+  // the user can choose where to file it and save. Deliberately does not save on its own.
+  const handleSaveAsNewInstead = useCallback(() => {
+    setSaveModeChoice('new');
+    clearError();
+    announce('Save mode: a new document. Choose where to file it, then select Save.', 'polite');
+  }, [clearError, announce]);
 
   // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
@@ -498,15 +587,22 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // §C — when a save completes, hand the selected "Related to" record to the host once so it can
   // seed the Create To Do tab's regarding. Reset on a fresh save (idle/selecting) so a second save
   // re-notifies. Fires on 'complete' and 'duplicate' (both mean "this email is now filed to X").
+  // A VERSION save (task 024) files nothing: it never re-associates the existing record, and it does not send
+  // the picker's selection, so there is no "Related to" to hand on.
   const savedNotifiedRef = useRef(false);
   useEffect(() => {
-    if ((flowState === 'complete' || flowState === 'duplicate') && selectedEntity && !savedNotifiedRef.current) {
+    if (
+      (flowState === 'complete' || flowState === 'duplicate') &&
+      selectedEntity &&
+      submittedTarget?.mode !== 'version' &&
+      !savedNotifiedRef.current
+    ) {
       savedNotifiedRef.current = true;
       onSaved?.(selectedEntity);
     } else if (flowState === 'idle' || flowState === 'selecting') {
       savedNotifiedRef.current = false;
     }
-  }, [flowState, selectedEntity, onSaved]);
+  }, [flowState, selectedEntity, submittedTarget, onSaved]);
 
   // "Look up another record" search — scoped to the selected chip type.
   const relatedSearch = useCallback(
@@ -657,11 +753,20 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     <Card className={styles.successCard}>
       <CheckmarkCircleRegular className={styles.successIcon} aria-hidden="true" />
       <Text size={500} weight="semibold">
-        Document Saved
+        {submittedTarget?.mode === 'version' ? 'New Version Saved' : 'Document Saved'}
       </Text>
       <Body1 style={{ marginTop: tokens.spacingVerticalS }}>
-        Your document has been saved to Spaarke and associated with{' '}
-        <Text weight="semibold">{selectedEntity?.name}</Text>.
+        {submittedTarget?.mode === 'version' ? (
+          <>
+            A new version of <Text weight="semibold">{saveMode.documentLabel ?? 'the document'}</Text> was saved to
+            Spaarke.
+          </>
+        ) : (
+          <>
+            Your document has been saved to Spaarke and associated with{' '}
+            <Text weight="semibold">{selectedEntity?.name}</Text>.
+          </>
+        )}
       </Body1>
       <div className={styles.successActions}>
         <Button appearance="primary" icon={<OpenRegular />} onClick={handleViewDocument} disabled={!savedDocumentUrl}>
@@ -725,6 +830,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             Retry
           </Button>
         )}
+        {error?.offerSaveAsNew && saveMode.view === 'version' && (
+          <Button appearance="outline" size="small" onClick={handleSaveAsNewInstead}>
+            Save as new document
+          </Button>
+        )}
         <Button appearance="subtle" size="small" onClick={clearError}>
           Dismiss
         </Button>
@@ -760,46 +870,54 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         </div>
       )}
 
-      {/* Related to — the RelatedToPicker renders its own header + type chips
-          (UI feedback 2026-09-02); reconciliation-style auto-match cards. */}
-      <div className={styles.section}>
-        <RelatedToPicker
-          value={selectedEntity}
-          onChange={handleEntitySelect}
-          candidates={relatedCandidates}
-          candidatesLoading={candidatesLoading}
-          onSearch={relatedSearch}
-          onCreateRecord={createRelatedRecord}
-          // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
-          allowedTypes={['Matter', 'Project', 'Invoice']}
-          defaultType="Matter"
-          disabled={isSaving}
-        />
-      </div>
-
-      {/* Document Metadata Fields */}
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>
-          <EditRegular />
-          <Text weight="semibold">Document Details</Text>
-        </div>
-        <Card>
-          <div className={styles.fieldContainer}>
-            <Label htmlFor="document-name" className={styles.fieldLabel}>
-              Document Name
-            </Label>
-            <Textarea
-              id="document-name"
-              value={documentName}
-              onChange={(_e, data) => setDocumentName(data.value)}
-              placeholder="Enter document name"
+      {/* Related to + Document Details apply to a NEW document only. A version save (task 024) keeps the
+          existing record's name and associations — the server never renames or re-associates on that path
+          (task 023 D-5) — so these inputs would have no effect there, and are not shown. They appear as soon
+          as the user chooses "A new document". */}
+      {!isVersionMode && (
+        <>
+          {/* Related to — the RelatedToPicker renders its own header + type chips
+              (UI feedback 2026-09-02); reconciliation-style auto-match cards. */}
+          <div className={styles.section}>
+            <RelatedToPicker
+              value={selectedEntity}
+              onChange={handleEntitySelect}
+              candidates={relatedCandidates}
+              candidatesLoading={candidatesLoading}
+              onSearch={relatedSearch}
+              onCreateRecord={createRelatedRecord}
+              // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
+              allowedTypes={['Matter', 'Project', 'Invoice']}
+              defaultType="Matter"
               disabled={isSaving}
-              aria-label="Document name"
-              rows={2}
             />
           </div>
-        </Card>
-      </div>
+
+          {/* Document Metadata Fields */}
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>
+              <EditRegular />
+              <Text weight="semibold">Document Details</Text>
+            </div>
+            <Card>
+              <div className={styles.fieldContainer}>
+                <Label htmlFor="document-name" className={styles.fieldLabel}>
+                  Document Name
+                </Label>
+                <Textarea
+                  id="document-name"
+                  value={documentName}
+                  onChange={(_e, data) => setDocumentName(data.value)}
+                  placeholder="Enter document name"
+                  disabled={isSaving}
+                  aria-label="Document name"
+                  rows={2}
+                />
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
 
       {/* Profile — task 021 / FR-07. Read-only AI profile (sprk_filesummary, sprk_filetldr,
           sprk_filekeywords, sprk_documenttype) for the document identity task 013 resolved, or an
@@ -822,13 +940,25 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           saved to Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles
           (UI feedback 2026-09-02). */}
 
-      {/* Footer actions — wizard pattern: Cancel (left), Save (right). */}
+      {/* FR-11 save mode (task 024) — in the footer area, directly above Cancel / Save: a resolved
+          document defaults to "a new version", with an explicit "a new document" override; every other
+          identity outcome states what happens and what the user can do. Inline, not a modal (narrow pane). */}
+      <SaveModeSection
+        identity={documentIdentity}
+        resolution={saveMode}
+        onChoiceChange={handleSaveModeChange}
+        {...(onRetryDocumentIdentity ? { onRetryIdentity: onRetryDocumentIdentity } : {})}
+        disabled={isSaving}
+      />
+
+      {/* Footer actions — wizard pattern: Cancel (left), Save (right). Save stays disabled while the save
+          mode is unsettled (identity checking, a conflict, or an undetermined identity with no choice). */}
       <div className={styles.footer}>
         <Button appearance="secondary" onClick={handleCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid}>
-          {isSaving ? 'Saving...' : 'Save'}
+        <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid || !saveMode.target}>
+          {isSaving ? 'Saving...' : isVersionMode ? 'Save version' : 'Save'}
         </Button>
       </div>
     </>
