@@ -1502,7 +1502,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
-    private DocumentEntity MapToDocumentEntity(Entity entity)
+    /// <summary>
+    /// Maps a raw Dataverse <c>sprk_document</c> <see cref="Entity"/> to the read-model
+    /// <see cref="DocumentEntity"/>. Pure (no ServiceClient / no I/O) and uses no instance state,
+    /// so it is <c>public static</c> for direct testability — the SAME precedent as
+    /// <see cref="StageAnalysisRegardingFields"/> (this file) and <c>TodoRegardingBuilder
+    /// .ApplyResolverFieldsAsync</c>: a test constructs a real <see cref="Entity"/> with real
+    /// Dataverse-typed attribute values (<see cref="OptionSetValue"/> for Choice columns, etc.) and
+    /// calls this method directly, avoiding the tests/CLAUDE.md B8 ban on internal/reflection tests.
+    /// </summary>
+    /// <remarks>
+    /// Task 021 fail-then-pass regression (spaarkeai-word-add-in-r1): <c>sprk_documenttype</c> is a
+    /// Choice (Picklist) column — verified live 2026-09-12 — not free text. Reading it via
+    /// <c>entity.GetAttributeValue&lt;string&gt;("sprk_documenttype")</c> throws
+    /// <see cref="InvalidCastException"/> for any entity where the attribute is present, because the
+    /// underlying stored value is an <see cref="OptionSetValue"/>, not a <see cref="string"/>. Fixed
+    /// by preferring <c>entity.FormattedValues</c> (the SDK populates this on <c>Retrieve</c> with the
+    /// Choice's display label) and falling back to the raw numeric value only when no formatted value
+    /// is present. See <c>tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs</c> for the
+    /// regression test, which fails on the pre-fix line and passes on this one.
+    /// </remarks>
+    public static DocumentEntity MapToDocumentEntity(Entity entity)
     {
         // Handle ContainerId which could be either a lookup (EntityReference) or text field (string)
         string? containerId = null;
@@ -1539,10 +1559,25 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             // any column not in the caller's ColumnSet, so this is safe to populate unconditionally
             // across every caller of MapToDocumentEntity (list paths included) — callers that didn't
             // select these columns simply get null back, exactly as before this change.
+            //
+            // sprk_filesummary / sprk_filetldr / sprk_filekeywords are Memo columns (verified live
+            // 2026-09-12) — stored as plain strings, so GetAttributeValue<string> is correct as-is.
             Summary = entity.GetAttributeValue<string>("sprk_filesummary"),
             Tldr = entity.GetAttributeValue<string>("sprk_filetldr"),
             Keywords = entity.GetAttributeValue<string>("sprk_filekeywords"),
-            DocumentType = entity.GetAttributeValue<string>("sprk_documenttype"),
+            // sprk_documenttype is a Choice (Picklist) column — verified live 2026-09-12, corroborated
+            // by the writer at line ~850 (`new OptionSetValue(request.DocumentType.Value)`). The
+            // originally-shipped `entity.GetAttributeValue<string>("sprk_documenttype")` cast an
+            // OptionSetValue directly to string and threw InvalidCastException for any entity where
+            // the attribute was present — reachable from GET /api/v1/documents/{id} AND from
+            // VisualizationService's Find Similar entry point (GetDocumentAsync is its unconditional
+            // Step 1). Fixed: prefer the SDK-populated FormattedValues label (what the pane displays);
+            // fall back to the raw numeric value, stringified, only when no label is available. Never
+            // read as <string> or <OptionSetValue> without going through FormattedValues first — see
+            // tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs for the fail-then-pass proof.
+            DocumentType = entity.FormattedValues.TryGetValue("sprk_documenttype", out var documentTypeLabel)
+                ? documentTypeLabel
+                : entity.GetAttributeValue<OptionSetValue>("sprk_documenttype")?.Value.ToString(),
             SummaryStatus = entity.Contains("sprk_filesummarystatus")
                 ? entity.GetAttributeValue<OptionSetValue>("sprk_filesummarystatus")?.Value
                 : null,

@@ -405,7 +405,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // Local state for document metadata fields
   const [documentName, setDocumentName] = useState<string>('');
-  const [documentDescription, setDocumentDescription] = useState<string>('');
 
   // Auto-match candidates for the "Related to" cards (engine suggestions, ranked
   // highest-first). Replaces the old single pre-selection with the reconciliation-
@@ -421,7 +420,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       ...(itemId !== undefined ? { itemId } : {}),
       ...(itemName !== undefined ? { itemName } : {}),
       ...(documentName ? { documentName } : {}),
-      ...(documentDescription ? { documentDescription } : {}),
       ...(senderEmail !== undefined ? { senderEmail } : {}),
       ...(senderDisplayName !== undefined ? { senderDisplayName } : {}),
       ...(recipients !== undefined ? { recipients } : {}),
@@ -435,7 +433,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       itemId,
       itemName,
       documentName,
-      documentDescription,
       attachments,
       senderEmail,
       senderDisplayName,
@@ -457,7 +454,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleCancel = useCallback(() => {
     setSelectedEntity(null);
     setDocumentName('');
-    setDocumentDescription('');
     reset();
   }, [setSelectedEntity, reset]);
 
@@ -800,29 +796,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               disabled={isSaving}
               aria-label="Document name"
               rows={2}
-            />
-          </div>
-          <div className={styles.fieldContainer} style={{ marginTop: tokens.spacingVerticalM }}>
-            {/* Task 021 / FR-07 decision: this field is RETAINED (not removed and not renamed to
-                "Profile") — it is a free-text INPUT for sprk_documentdescription, a different
-                column from the four AI profile fields, and dropping it would silently regress an
-                existing save-time capability with nothing in spec requiring its removal. Its own
-                label is renamed "Description" -> "Notes" so no label on the Save tab reads
-                "Description" (the acceptance criterion), which would otherwise read as if this
-                free-text box were the AI-populated Profile section immediately below it. The new,
-                read-only Profile section (rendered after this card) is a SEPARATE section with its
-                own "Profile" heading — see DocumentProfileSection. */}
-            <Label htmlFor="document-description" className={styles.fieldLabel}>
-              Notes
-            </Label>
-            <Textarea
-              id="document-description"
-              value={documentDescription}
-              onChange={(_e, data) => setDocumentDescription(data.value)}
-              placeholder="Enter notes about this document (optional)"
-              disabled={isSaving}
-              aria-label="Document notes"
-              rows={6}
             />
           </div>
         </Card>
