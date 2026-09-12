@@ -5,31 +5,38 @@ import {
   Text,
   Body1,
   Badge,
+  Button,
   Spinner,
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
+import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 import { DOCUMENT_SUMMARY_STATUS_MESSAGES } from '../services/documentProfileChoices';
 import { useDocumentProfile } from '../hooks/useDocumentProfile';
 
 /**
- * DocumentProfileSection.tsx — spaarkeai-word-add-in-r1 task 021 (FR-07).
+ * DocumentProfileSection.tsx — spaarkeai-word-add-in-r1 task 021 (FR-07) + task 022 (FR-08).
  *
  * Renders the Save tab's "Profile" section: read-only `sprk_filesummary`, `sprk_filetldr`,
  * `sprk_filekeywords`, `sprk_documenttype` for a resolved `sprk_document`, or an honest state
  * message for each of the six non-Completed `sprk_filesummarystatus` values, or a no-identity
- * state when task 013 resolved nothing.
+ * state when task 013 resolved nothing — plus (task 022) a "Generate Profile" control that
+ * re-dispatches profiling for the current document.
  *
- * SCOPE (spec Assumptions): every field here is READ-ONLY. There is no edit affordance, no
- * pencil icon, no save-back for any of the four profile fields — editing happens in the record
- * (FR-10 / task 027).
+ * SCOPE (spec Assumptions): the four profile FIELDS are READ-ONLY — no edit affordance, no
+ * pencil icon, no save-back; editing happens in the record (FR-10 / task 027). Generate Profile is
+ * not an edit of a field, it is an ACTION that re-runs the AI pipeline server-side; per spec
+ * Assumptions it OVERWRITES the existing profile with NO confirmation prompt — this component must
+ * never add one.
  *
  * Theming (ADR-021): tokens.* only, no hex literals. This component does not call
  * `useOfficeTheme` directly — the pane's Fluent `FluentProvider` (rooted in `App.tsx` via
  * `useTheme`, which runs the same Office.js theme-bridge detection as `useOfficeTheme`) already
  * resolves every `tokens.*` reference to the correct light/dark/high-contrast value for the whole
  * tree; a second, independent theme subscription in this leaf component would not change what
- * renders (SaveFlow.tsx, the sibling this section lives inside, follows the same convention).
+ * renders (SaveFlow.tsx, the sibling this section lives inside, follows the same convention). The
+ * Generate Profile button's default/busy/disabled states resolve colors from Fluent's Button
+ * appearance + `tokens.*` (the empty-value hint text) the same way.
  */
 
 const useStyles = makeStyles({
@@ -82,6 +89,16 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontStyle: 'italic',
   },
+  actions: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: tokens.spacingVerticalXS,
+  },
+  disabledReason: {
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+  },
 });
 
 export interface DocumentProfileSectionProps {
@@ -102,7 +119,13 @@ function splitKeywords(keywords: string): string[] {
 
 export function DocumentProfileSection({ documentId }: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
-  const outcome = useDocumentProfile(documentId);
+  const { outcome, generateProfile, isGenerating, generateError } = useDocumentProfile(documentId);
+
+  // Disabled without a resolved identity (task 013 resolved nothing) or while a request is already
+  // in flight. Never disabled merely because the current status is Completed — FR-08/spec
+  // Assumptions require Generate Profile to remain available (and to overwrite silently) for a
+  // document that already has a profile.
+  const isDisabled = !documentId || isGenerating;
 
   return (
     <div className={styles.section}>
@@ -110,6 +133,29 @@ export function DocumentProfileSection({ documentId }: DocumentProfileSectionPro
         <Text weight="semibold">Profile</Text>
       </div>
       <div className={styles.card}>{renderBody()}</div>
+      <div className={styles.actions}>
+        <Button
+          appearance="secondary"
+          size="small"
+          icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+          disabled={isDisabled}
+          onClick={() => {
+            void generateProfile();
+          }}
+        >
+          {isGenerating ? 'Generating…' : 'Generate Profile'}
+        </Button>
+        {!documentId && (
+          <Text size={200} className={styles.disabledReason}>
+            This document is not yet in Spaarke. Save it first to generate a profile.
+          </Text>
+        )}
+        {generateError && (
+          <MessageBar intent="error">
+            <MessageBarBody>{generateError}</MessageBarBody>
+          </MessageBar>
+        )}
+      </div>
     </div>
   );
 

@@ -1,20 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiClient, ApiClientError } from '@shared/services';
 import { cleanGuid } from '../utils/cleanGuid';
 import { summaryStatusFromCode, type DocumentSummaryStatusName } from '../services/documentProfileChoices';
 
 /**
- * useDocumentProfile.ts — spaarkeai-word-add-in-r1 task 021 (FR-07).
+ * useDocumentProfile.ts — spaarkeai-word-add-in-r1 task 021 (FR-07) + task 022 (FR-08).
  *
  * Reads the four AI profile fields (`sprk_filesummary`, `sprk_filetldr`, `sprk_filekeywords`,
  * `sprk_documenttype`) plus `sprk_filesummarystatus` for the `sprk_document` resolved by task 013,
- * via the EXISTING `GET /api/v1/documents/{id}` read (extended by this task to select + map those
- * five columns — no new BFF route; see task notes for the §11 grep evidence and the placement
- * decision).
+ * via the EXISTING `GET /api/v1/documents/{id}` read (task 021 — no new BFF route for the read).
  *
  * Deliberately does NOT call the BFF at all when `documentId` is absent (task 013 resolved no
  * identity, or hasn't resolved yet) — acceptance criterion "makes no profile read call" for the
  * no-identity case.
+ *
+ * Task 022 adds `generateProfile()`: POSTs the new `/api/office/documents/{id}/generate-profile`
+ * trigger (fire-and-forget, 202 Accepted, mirrors Compose's shipped `refresh-profile` semantics —
+ * unconditional overwrite, no confirmation). On a 202 the displayed status moves to Pending
+ * immediately and the hook re-reads the record, per task 021's SAME status mapping — no second
+ * status table.
  */
 
 /** @internal Response shape for `GET /api/v1/documents/{id}` (only the fields this hook reads). */
@@ -26,6 +30,12 @@ interface BffDocumentProfileEnvelope {
     documentType?: string | null;
     summaryStatus?: number | null;
   } | null;
+}
+
+/** @internal Response shape for `POST /api/office/documents/{id}/generate-profile`. */
+interface GenerateProfileResponse {
+  documentId?: string;
+  correlationId?: string;
 }
 
 export interface DocumentProfileFields {
@@ -46,16 +56,33 @@ export type DocumentProfileOutcome =
   | { kind: 'status'; status: Exclude<DocumentSummaryStatusName, 'Completed'> }
   | { kind: 'error'; message: string };
 
+export interface UseDocumentProfileResult {
+  /** The current read outcome — unchanged shape/semantics from task 021. */
+  outcome: DocumentProfileOutcome;
+  /**
+   * Dispatches the FR-08 Generate Profile trigger. No-op (resolves immediately, issues no network
+   * request) when `documentId` is absent — the caller (DocumentProfileSection) also disables the
+   * button in that state, so this is defense-in-depth, not the only guard.
+   */
+  generateProfile: () => Promise<void>;
+  /** True while the POST is in flight (button busy state). */
+  isGenerating: boolean;
+  /** Set when the trigger POST itself fails (network/auth/validation) — distinct from a profile
+   * that ran and failed (that is `outcome.status === 'Failed'`, a normal read state). */
+  generateError: string | null;
+}
+
 /**
- * Reads the AI profile for the given resolved document id. Re-fetches whenever `documentId`
- * changes (e.g. task 022's Generate Profile flow re-triggers profiling and the caller re-mounts
- * or otherwise asks this hook to re-read — out of this task's scope, but the effect dependency
- * already supports it).
+ * Reads the AI profile for the given resolved document id, and exposes the FR-08 Generate Profile
+ * trigger. Re-fetches whenever `documentId` changes, or after a successful `generateProfile()` call.
  */
-export function useDocumentProfile(documentId: string | undefined): DocumentProfileOutcome {
+export function useDocumentProfile(documentId: string | undefined): UseDocumentProfileResult {
   const [outcome, setOutcome] = useState<DocumentProfileOutcome>(
     documentId ? { kind: 'loading' } : { kind: 'no-identity' }
   );
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!documentId) {
@@ -113,7 +140,39 @@ export function useDocumentProfile(documentId: string | undefined): DocumentProf
     return () => {
       cancelled = true;
     };
+  }, [documentId, refreshToken]);
+
+  const generateProfile = useCallback(async (): Promise<void> => {
+    if (!documentId) {
+      // Defense-in-depth — the caller disables the control in this state so this path should be
+      // unreachable in practice, but generateProfile() must never issue a network call without an id.
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenerateError(null);
+
+    try {
+      const id = cleanGuid(documentId);
+      await apiClient.post<GenerateProfileResponse>(`/api/office/documents/${id}/generate-profile`);
+
+      // Task 021 semantics: no second status table. Move the DISPLAYED state to Pending immediately
+      // (the 202 confirms dispatch, not completion), then re-read so the pane eventually reflects
+      // whatever status the background profile actually lands on.
+      setOutcome({ kind: 'status', status: 'Pending' });
+      setRefreshToken(token => token + 1);
+    } catch (err) {
+      const message =
+        err instanceof ApiClientError
+          ? err.error.detail || err.error.title
+          : err instanceof Error
+            ? err.message
+            : 'Failed to start profiling.';
+      setGenerateError(message);
+    } finally {
+      setIsGenerating(false);
+    }
   }, [documentId]);
 
-  return outcome;
+  return { outcome, generateProfile, isGenerating, generateError };
 }

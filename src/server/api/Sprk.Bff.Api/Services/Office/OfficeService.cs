@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Office;
@@ -61,6 +62,12 @@ public class OfficeService : IOfficeService
     private readonly RecordCreationService _recordCreation;
     private readonly ILogger<OfficeService> _logger;
 
+    // FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" fire-and-forget dispatch, extracted —
+    // mirrors the ComposeProfileDispatcher pattern (detached DI scope + OBO facade) without touching
+    // Services/Compose/. Built in this constructor from fields already resolved via DI (ADR-010 — no new
+    // registration); optional ctor params below so existing bare test constructions keep compiling.
+    private readonly OfficeProfileDispatcher _profileDispatcher;
+
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, JobStatusResponse> _jobStore = new();
 
@@ -79,7 +86,10 @@ public class OfficeService : IOfficeService
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null,
         DataverseWebApiClient? dataverseClient = null,
-        IGenericEntityService? genericEntityService = null)
+        IGenericEntityService? genericEntityService = null,
+        IServiceScopeFactory? scopeFactory = null,
+        IDocumentProfileAi? documentProfileAi = null,
+        IHostApplicationLifetime? appLifetime = null)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -101,6 +111,17 @@ public class OfficeService : IOfficeService
         _dataverseClient = dataverseClient;
         _genericEntityService = genericEntityService;
         _logger = logger;
+        _profileDispatcher = new OfficeProfileDispatcher(scopeFactory, documentProfileAi, appLifetime, logger);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> GenerateProfileAsync(
+        Guid documentId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        return Task.FromResult(_profileDispatcher.Dispatch(documentId, httpContext));
     }
 
     /// <summary>

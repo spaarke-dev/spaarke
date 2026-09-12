@@ -63,6 +63,9 @@ public static class OfficeEndpoints
         // Recent locations endpoint
         MapRecentEndpoints(group);
 
+        // Generate Profile trigger (FR-08, spaarkeai-word-add-in-r1 task 022)
+        MapDocumentProfileEndpoints(group);
+
         return app;
     }
 
@@ -1293,6 +1296,94 @@ public static class OfficeEndpoints
                 });
         }
     }
+
+    #endregion
+
+    #region Document Profile Endpoints
+
+    /// <summary>
+    /// FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" trigger. Mirrors
+    /// <c>ComposeDocumentEndpoints.RefreshProfileAsync</c> exactly — fire-and-forget, 202 Accepted, no
+    /// synchronous wait for the profile to complete, unconditional overwrite with no confirmation.
+    /// </summary>
+    private static void MapDocumentProfileEndpoints(RouteGroupBuilder group)
+    {
+        var documents = group.MapGroup("/documents");
+
+        // POST /api/office/documents/{documentId}/generate-profile — re-run the Document Profile for an
+        // identified document on user request (task 021's Profile section reflects the resulting status
+        // transition). ADR-008: resource-level authorization ("write" — the trigger overwrites the
+        // record's profile fields) via the canonical DocumentAuthorizationFilter, the SAME filter and
+        // operation PUT /api/v1/documents/{id} already uses — reused, not duplicated (CLAUDE.md §11).
+        // Filter order matters: the Guid.Empty VALIDATION filter runs BEFORE the AUTHORIZATION filter so
+        // an obviously-invalid id 400s without ever probing the access data source for a record that
+        // cannot exist — validation and authorization stay two separate decisions, neither one inline
+        // in the handler.
+        documents.MapPost("/{documentId:guid}/generate-profile", GenerateProfileAsync)
+            .WithName("OfficeGenerateDocumentProfile")
+            .WithSummary("Re-run the Document Profile for an identified document (FR-08)")
+            .WithDescription("Fire-and-forget best-effort re-dispatch of the Document Profile for the given sprk_document, mirroring Compose's shipped refresh-profile semantics: 202 Accepted, unconditional overwrite of any existing profile, no confirmation prompt.")
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate) // low-frequency inline action — same category as /todo
+            .AddOfficeAuthFilter()
+            .AddEndpointFilter(async (context, next) =>
+            {
+                // Guid.Empty is the one malformed shape that still matches the {documentId:guid} route
+                // constraint (a syntactically valid GUID, but never a real record) — mirrors
+                // ComposeDocumentEndpoints.RefreshProfileAsync's own Guid.Empty check. A non-GUID route
+                // segment never reaches this filter at all; the :guid constraint 404s it at the routing
+                // layer, the same shape Compose's own refresh-profile route accepts.
+                var raw = context.HttpContext.Request.RouteValues["documentId"] as string;
+                if (!Guid.TryParse(raw, out var routeDocumentId) || routeDocumentId == Guid.Empty)
+                {
+                    return ProblemDetailsHelper.OfficeValidationError(
+                        "OFFICE_PROFILE_001",
+                        "Bad Request",
+                        "documentId is required.",
+                        context.HttpContext.TraceIdentifier);
+                }
+
+                return await next(context);
+            })
+            .AddDocumentAuthorizationFilter("write")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
+
+    /// <summary>
+    /// Generate Profile endpoint handler. See <see cref="IOfficeService.GenerateProfileAsync"/> for the
+    /// dispatch contract. By the time this handler runs, the endpoint filter chain has already validated
+    /// <paramref name="documentId"/> is non-empty and <see cref="Api.Filters.DocumentAuthorizationFilter"/>
+    /// has already authorized the caller for <c>write</c> on it (ADR-008 — no inline authorization here).
+    /// </summary>
+    private static IResult GenerateProfileAsync(
+        Guid documentId,
+        IOfficeService officeService,
+        ILogger<Program> logger,
+        HttpContext context)
+    {
+        var traceId = context.TraceIdentifier;
+
+        // Dispatch is fire-and-forget best-effort — the response never waits on the background profile,
+        // per spec Assumptions (mirrors Compose refresh-profile: 202, unconditional overwrite, no
+        // confirmation). officeService.GenerateProfileAsync's own Task completes as soon as dispatch is
+        // attempted (or determined undispatchable); it is not the profile completing. Intentionally not
+        // awaited beyond that — see OfficeProfileDispatcher.Dispatch.
+        _ = officeService.GenerateProfileAsync(documentId, context, context.RequestAborted);
+
+        logger.LogInformation(
+            "Office Generate Profile: document {DocumentId} requested by user, dispatched (best-effort) TraceId={TraceId}",
+            documentId, traceId);
+
+        return Results.Accepted(value: new { documentId, correlationId = traceId });
+    }
+
+    #endregion
+
+    #region Quick Create Endpoints — handlers
 
     /// <summary>
     /// Quick Create endpoint handler.

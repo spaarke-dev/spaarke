@@ -1,18 +1,24 @@
 /**
- * Unit tests for DocumentProfileSection (spaarkeai-word-add-in-r1 task 021, FR-07).
+ * Unit tests for DocumentProfileSection (spaarkeai-word-add-in-r1 task 021 FR-07 + task 022 FR-08).
  *
  * Covers:
- * - No-identity state: no network call, honest message, no blank fields.
- * - Completed: all four fields render, keywords as a chip list, nothing editable.
+ * - No-identity state: no network call, honest message, no blank fields; Generate Profile present but
+ *   disabled with a stated reason, and clicking it issues no network request.
+ * - Completed: all four fields render, keywords as a chip list, the four fields remain read-only
+ *   (Generate Profile is the one control this section carries — an action, not a field edit).
  * - Each of the six non-Completed `sprk_filesummarystatus` states renders its own distinct message
  *   (no catch-all default — the closed acceptance set from the POML).
  * - A `summaryStatus` value outside the seven enumerated options fails honestly (escalation-trigger
  *   fail-safe) rather than silently rendering blank fields.
  * - A network/API failure renders an error state, not blank fields or an unhandled throw.
+ * - Generate Profile (task 022): busy state while in flight; on 202 the displayed status moves to
+ *   Pending and the record is re-read; no confirmation dialog ever appears, including when the current
+ *   profile is Completed; a trigger failure surfaces an error without corrupting the read outcome.
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { DocumentProfileSection } from '../DocumentProfileSection';
 import { apiClient, ApiClientError } from '@shared/services';
@@ -48,8 +54,10 @@ jest.mock('@shared/services', () => {
 });
 
 const mockGet = apiClient.get as jest.Mock;
+const mockPost = apiClient.post as jest.Mock;
 
 const DOCUMENT_ID = '11111111-1111-1111-1111-111111111111';
+const GENERATE_PROFILE_ROUTE = `/api/office/documents/${DOCUMENT_ID}/generate-profile`;
 
 const renderWithProvider = (ui: React.ReactElement) =>
   render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
@@ -64,20 +72,44 @@ function envelope(fields: {
   return { data: fields };
 }
 
+function generateProfileButton() {
+  return screen.getByRole('button', { name: /generate profile/i });
+}
+
 describe('DocumentProfileSection', () => {
   beforeEach(() => {
     mockGet.mockReset();
+    mockPost.mockReset();
   });
 
   describe('no-identity state', () => {
     it('shows the no-identity message and makes no profile read call', async () => {
       renderWithProvider(<DocumentProfileSection />);
 
-      expect(screen.getByText(/not yet in Spaarke/i)).toBeTruthy();
+      // Exact match — the Generate Profile disabled-reason text also contains "not yet in Spaarke"
+      // (a second, deliberately similar message; see the dedicated test below), so this asserts the
+      // body message specifically rather than the shared substring.
+      expect(
+        screen.getByText('This document is not yet in Spaarke. Save it first to see its AI profile here.')
+      ).toBeTruthy();
 
       // Give effects a chance to run.
       await Promise.resolve();
       expect(mockGet).not.toHaveBeenCalled();
+    });
+
+    it('renders Generate Profile disabled with a stated reason, and a click issues no network request', async () => {
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection />);
+
+      const button = generateProfileButton();
+      expect(button).toBeDisabled();
+      expect(screen.getAllByText(/not yet in Spaarke/i).length).toBeGreaterThan(0);
+
+      await user.click(button);
+
+      expect(mockGet).not.toHaveBeenCalled();
+      expect(mockPost).not.toHaveBeenCalled();
     });
   });
 
@@ -103,10 +135,13 @@ describe('DocumentProfileSection', () => {
       expect(screen.getByText('confidentiality')).toBeTruthy();
       expect(screen.getByText('breach')).toBeTruthy();
 
-      // Read-only: no input/textarea/button (save-back) inside this section.
+      // The four profile fields are read-only: no input/textarea, and the ONE button in this section
+      // is Generate Profile (an action, not a field save-back) — enabled here since Completed must not
+      // block re-generation (spec Assumptions: overwrite is always available).
       expect(container.querySelector('input')).toBeNull();
       expect(container.querySelector('textarea')).toBeNull();
-      expect(container.querySelector('button')).toBeNull();
+      expect(container.querySelectorAll('button')).toHaveLength(1);
+      expect(generateProfileButton()).toBeEnabled();
 
       expect(mockGet).toHaveBeenCalledWith(`/api/v1/documents/${DOCUMENT_ID}`);
     });
@@ -191,5 +226,117 @@ describe('DocumentProfileSection', () => {
 
     await waitFor(() => expect(screen.getByText(/^AI profiling failed/i)).toBeTruthy());
     expect(mockGet).toHaveBeenCalledWith(`/api/v1/documents/${otherId}`);
+  });
+
+  describe('Generate Profile (task 022, FR-08)', () => {
+    it('shows a busy state while in flight, then moves the displayed status to Pending and re-reads', async () => {
+      mockGet
+        .mockResolvedValueOnce(
+          envelope({
+            summary: 'A four-paragraph summary of the agreement.',
+            tldr: 'Short TL;DR.',
+            keywords: 'contract, confidentiality',
+            documentType: 'NDA',
+            summaryStatus: 100000002,
+          })
+        )
+        .mockResolvedValueOnce(envelope({ summaryStatus: 100000001 }));
+
+      let resolvePost: (value: unknown) => void = () => {
+        throw new Error('resolvePost called before it was assigned');
+      };
+      mockPost.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            resolvePost = resolve;
+          })
+      );
+
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} />);
+      await waitFor(() => expect(screen.getByText('A four-paragraph summary of the agreement.')).toBeTruthy());
+
+      await user.click(generateProfileButton());
+
+      // Busy state: button disabled and relabeled while the POST is in flight.
+      await waitFor(() => expect(screen.getByRole('button', { name: /generating/i })).toBeDisabled());
+      expect(mockPost).toHaveBeenCalledWith(GENERATE_PROFILE_ROUTE);
+
+      await act(async () => {
+        resolvePost({ documentId: DOCUMENT_ID, correlationId: 'corr-1' });
+      });
+
+      // On 202, the displayed status moves to Pending immediately (task 021's SAME status mapping —
+      // no second status table) and the hook re-reads the record.
+      await waitFor(() => expect(screen.getByText(/in progress/i)).toBeTruthy());
+      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(generateProfileButton()).toBeEnabled();
+    });
+
+    it('overwrites a Completed profile with no confirmation prompt', async () => {
+      mockGet.mockResolvedValueOnce(
+        envelope({
+          summary: 'A four-paragraph summary of the agreement.',
+          tldr: 'Short TL;DR.',
+          keywords: 'contract',
+          documentType: 'NDA',
+          summaryStatus: 100000002,
+        })
+      );
+      mockGet.mockResolvedValueOnce(envelope({ summaryStatus: 100000001 }));
+      mockPost.mockResolvedValueOnce({ documentId: DOCUMENT_ID, correlationId: 'corr-2' });
+
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} />);
+      await waitFor(() => expect(screen.getByText('A four-paragraph summary of the agreement.')).toBeTruthy());
+
+      // A single click is the entire interaction — no "are you sure" step per spec Assumptions.
+      await user.click(generateProfileButton());
+
+      await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+    it('disabled without a resolved identity issues no network request when clicked', async () => {
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection />);
+
+      await user.click(generateProfileButton());
+
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a trigger failure without corrupting the read outcome, and never re-reads', async () => {
+      mockGet.mockResolvedValueOnce(
+        envelope({
+          summary: 'A four-paragraph summary of the agreement.',
+          tldr: 'Short TL;DR.',
+          keywords: 'contract',
+          documentType: 'NDA',
+          summaryStatus: 100000002,
+        })
+      );
+      mockPost.mockRejectedValueOnce(
+        new ApiClientError({
+          type: 'about:blank',
+          title: 'Too Many Requests',
+          status: 429,
+          detail: 'Rate limited — try again shortly.',
+        })
+      );
+
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} />);
+      await waitFor(() => expect(screen.getByText('A four-paragraph summary of the agreement.')).toBeTruthy());
+
+      await user.click(generateProfileButton());
+
+      await waitFor(() => expect(screen.getByText('Rate limited — try again shortly.')).toBeTruthy());
+      // The read outcome is untouched by a trigger-POST failure — the Completed fields still render.
+      expect(screen.getByText('A four-paragraph summary of the agreement.')).toBeTruthy();
+      expect(generateProfileButton()).toBeEnabled();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+    });
   });
 });
