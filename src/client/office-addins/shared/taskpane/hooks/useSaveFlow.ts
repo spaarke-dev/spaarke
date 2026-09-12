@@ -169,8 +169,6 @@ export interface SaveFlowContext {
   itemName?: string;
   /** Custom document name (overrides itemName if provided) */
   documentName?: string;
-  /** Document description for Dataverse sprk_documentdescription field */
-  documentDescription?: string;
   /** Available attachments (Outlook only) */
   attachments: AttachmentInfo[];
   /** Email body content (Outlook only) */
@@ -812,10 +810,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             ragIndex: processingOptions.ragIndex,
             deepAnalysis: processingOptions.deepAnalysis,
           },
-          // Include custom document name and description for Dataverse fields
+          // Include custom document name for Dataverse fields. Description removed per owner
+          // decision (2026-09-12): FR-07 literal — "Description" becomes "Profile", no free-text
+          // description box in the pane, no sprk_documentdescription sent from here on save. The
+          // server's DocumentMetadata.Description stays accepted (other clients may still send it).
           documentMetadata: {
             name: effectiveDocumentName,
-            description: context.documentDescription || undefined,
           },
         };
 
@@ -899,9 +899,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             ...(effectiveDocumentName !== undefined ? { documentName: effectiveDocumentName } : {}),
           },
           processing: processingOptions,
-          ...(context.documentDescription
-            ? { metadata: { description: context.documentDescription } }
-            : {}),
         };
 
         // Compute idempotency key from legacy format for consistency

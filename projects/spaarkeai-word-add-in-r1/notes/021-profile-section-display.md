@@ -30,7 +30,21 @@ had never called this route before. Adding 5 columns/fields to a DTO already thi
 route with one unrelated consumer, is a low-risk additive change; the alternative (new route) would
 have needed the escalation the task explicitly wanted surfaced.
 
-## Free-text "Description" field — RETAINED, not removed, relabeled to "Notes"
+## Free-text "Description" field — ORIGINALLY retained + relabeled "Notes"; REVERSED by owner decision — now REMOVED
+
+**⚠️ Superseded 2026-09-12.** This deviation's original decision (below, preserved for the record) was
+overturned the same day by an explicit owner decision: **remove the free-text description box
+entirely** and follow FR-07 literally — "Description" becomes "Profile", full stop. The pane no
+longer shows any free-text description input, and no longer sends `sprk_documentdescription` (via
+`documentMetadata.description` / the legacy `SaveRequest.metadata.description`) on save. See "Owner
+reversal — Notes field removed" below for the removal writeup. The server contract
+(`DocumentMetadata.Description` on `POST /api/office/save`) was left untouched — grep confirmed
+`src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentUploadWizardWidget.tsx` is a
+different client surface with its own independent `documentDescription` state that still POSTs a
+`description` form field to a different endpoint, so the server-side field remains load-bearing for
+that consumer.
+
+### Original decision (2026-09-12, superseded same day)
 
 Per the task's own framing ("Decide and state in the PR whether the free-text description input is
 retained alongside the Profile section or removed; do not silently conflate the two"):
@@ -49,6 +63,45 @@ A new, separate `<div className={styles.section}>` with its own `"Profile"` head
 `DocumentProfileSection`) was added immediately after the "Document Details" card. It never shared
 a label with the free-text field, so there is no possible reading where "Description" labels the
 AI-profile section.
+
+### Owner reversal — Notes field removed (2026-09-12)
+
+Removed end-to-end from the Office add-in package (client-only; server untouched per the owner's
+explicit instruction):
+
+- **`SaveFlow.tsx`**: deleted the `documentDescription` state, its `buildSaveContext` spread + effect
+  dependency, its `handleCancel` reset, and the entire "Notes" `Label`/`Textarea` JSX block (and its
+  now-obsolete task-021-decision comment). The "Document Details" card now contains only the
+  "Document Name" field.
+- **`useSaveFlow.ts`** (pre-existing wiring, not originally touched by task 021 — the owner's
+  decision reaches past this task's original diff into the field's actual save-request plumbing):
+  removed `documentDescription?: string` from `SaveFlowContext`; removed
+  `description: context.documentDescription || undefined` from the real `POST /api/office/save`
+  request body (`serverRequest.documentMetadata`); removed the
+  `...(context.documentDescription ? { metadata: { description: ... } } : {})` spread from the
+  legacy `SaveRequest` object used only for idempotency-key hashing. Left the `SaveMetadata` /
+  `SaveRequest.metadata` TYPE definitions in place — `tags?: string[]` is a separate, independently
+  unused-but-modeled field predating this task that the owner's decision does not name, and deleting
+  a type because one of its two fields lost its only writer is a bigger deletion than "remove the
+  Notes field and its wiring" asked for (CLAUDE.md §11 cuts both ways: don't manufacture new surface,
+  and don't over-delete existing surface nobody asked to remove).
+- **No dangling consumers found.** Grep of `documentDescription` across `src/client/office-addins`
+  returns zero matches after the removal. The only other repo-wide hit,
+  `DocumentUploadWizardWidget.tsx` (`src/client/shared/Spaarke.AI.Widgets`), is an unrelated MCP-App
+  widget with its own independent `documentDescription` React state — not shared code, not touched.
+- **No jest assertions referenced the field.** Grep of every `*.test.ts(x)` under
+  `src/client/office-addins` for `documentDescription`, `document-description`, `Document notes`,
+  `Document description`, and `"Notes"` returned zero matches before the removal — the pre-existing
+  test suite never covered this field (consistent with `SaveFlow.test.tsx`'s near-total pre-existing
+  breakage against a stale prop/behavior surface). Removing it therefore removed zero test coverage,
+  and no assertion needed updating.
+- **Before/after proof (stash-isolated, single jest invocation each side)**: `SaveFlow.test.tsx` +
+  `useSaveFlow.test.ts` + `SaveView.test.tsx` together, BEFORE the removal (commit `7bf213cf0`) —
+  **3 suites failed / 3 total; 38 failed / 39 passed / 77 tests total**. AFTER the removal — the
+  **identical** 3 failed / 3 total suites, 38 failed / 39 passed / 77 tests total. Byte-for-byte
+  unchanged, confirming zero regression and zero accidental coverage loss. Full-suite run (all 25
+  files) after the removal: **10 failed / 15 passed / 25 suites total** — matches the documented
+  jest baseline exactly.
 
 ## BFF Placement Justification (root CLAUDE.md §10)
 
