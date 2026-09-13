@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Save-spine server defects found by task 024: idempotency header, failed-job replay, content-blind create key, job completion without a document id</title>
+    <phase>2 Save flow</phase>
+    <gate>023 + 024 merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the BFF save spine (`POST /api/office/save`) — idempotency and job status shared by Email, Attachment and Document saves. One finding is a silent data-loss path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: the idempotency key and job-status semantics are shared by every Office save content type; a wrong change either re-writes duplicates on every retry or keeps dropping edits.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Owns `OfficeService.SaveAsync` / `GenerateIdempotencyKey` / the job store — the same region 014 and 025 edit. Run alone on the save spine.</parallel-reason>
+    <deps>023,024</deps>
+    <tags>bff-api, save-flow, idempotency, data-integrity, integration-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Task 024 (client version save) found four server defects on the Office save spine, outside its own files. Verify each empirically (reproduce before fixing — root CLAUDE.md §10 §F.3), then fix the confirmed ones. Finding 4 is the priority: it silently loses a user's edits.</prompt>
+
+  <role>SPAARKE platform developer. Deep expertise in the BFF Office save spine, idempotency, the in-memory + Dataverse job store, and ADR-038 contract/data-mutation testing. Follow ADRs strictly.</role>
+
+  <goal>Each of the four findings is either reproduced and fixed (with a test that fails before and passes after) or shown not to reproduce (with the evidence); Email and Attachment saves keep their current behaviour except where a finding is a defect for them too, and any such change is called out explicitly.</goal>
+
+  <context>
+    <background>
+      Source: task 024's final report (2026-09-12) and `notes/024-save-mode-and-deviations.md`. As reported — verify every claim against code by symbol:
+      1. **Idempotency header ignored.** `OfficeEndpoints.SaveAsync` reads `X-Idempotency-Key` into a variable it never uses; only a key in the request BODY reaches the persistent dedupe. (The pane now also sends the key in the body as a workaround.)
+      2. **Failed jobs replay as duplicates.** The job lookup treats a FAILED job as a duplicate, so any retry with the same key after a failure gets the failed job back instead of a new attempt. (The pane changes the key after each failed version save as a workaround.)
+      3. **Jobs complete with no document id.** Both save paths mark the job Completed without a document id, so the pane can never show its success state for a create save.
+      4. 🔴 **Content-blind create key → lost edits.** The Word CREATE idempotency key ignores the content. A second create save of an EDITED document to the same record within the idempotency window (reported as 24 hours) is answered from cache and never written. Task 023 added a content hash to the key for VERSION saves only (`notes/023-save-path-trace.md` decision 3); create saves were left content-blind.
+      A fifth finding (an override saved under the same name into the original's container lands on the original's file) belongs to task 025 (collision surfacing), not here.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/023-save-path-trace.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/024-save-mode-and-deviations.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10 §F.3">Scope: every finding. Reproduce with a failing test BEFORE changing code; if a finding does not reproduce, record the evidence and do not change code for it.</constraint>
+    <constraint source="project">Scope: finding 4. Adding content to the create key must NOT change the key for a byte-identical re-save (retries of the same bytes must stay idempotent) and must not break task 028's link/graduate semantics or task 023's version-save key. Byte-identical Document re-saves are content-dedup's job (link/graduate), not the idempotency cache's.</constraint>
+    <constraint source="project">Scope: Email and Attachment. Their key and replay behaviour stay as today unless the finding is equally a defect for them; any change to them is listed explicitly in the notes and the PR.</constraint>
+    <constraint source="project">Scope: finding 1. Decide whether the header or the body is the contract; one source must win deterministically, and the pane (task 024) must keep working. Do not silently break the body path the pane now uses.</constraint>
+    <constraint source="NFR-07">MUST NOT relax `sprk_graphitemid_uk`.</constraint>
+    <constraint source="ADR-038">Contract + data-mutation tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests, no Stopwatch timing.</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size vs a FRESH master build (Compress-Archive), CVE check, `/conflict-check` (compose-r8 and UAC-r2 are live on this path).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, the 023 and 024 notes, and DEDUP-AND-SAVE-BACK-IDENTITY.md. Declare FULL, opus @ xhigh, DIRECTIONAL. Run `/conflict-check`.</step>
+    <step order="1">For each finding, write a failing test that reproduces it (contract or data-mutation). Record reproduce / not-reproduced with evidence in `notes/039-save-spine-defects.md`.</step>
+    <step order="2">Fix finding 4 first; then 2, 3, 1. Each fix turns its test green without breaking the existing Office, version-save and link/graduate tests.</step>
+    <step order="3">Run the BFF build, the Office contract + data-mutation tests, ArchTests and the full `Sprk.Bff.Api.Tests` once; publish size + CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If fixing finding 4 would change the key for a byte-identical retry, or collide with task 023's version-save key or task 028's link/graduate path, STOP and escalate.</trigger>
+    <trigger>If any fix changes Email or Attachment save behaviour in a way that is not itself a defect fix, STOP and escalate (CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>All four defects live in the existing save spine (`OfficeEndpoints.SaveAsync`, `OfficeService.SaveAsync` / `GenerateIdempotencyKey`, the job store). No new component.</existing>
+    <extension>Yes — modify-only on existing code.</extension>
+    <cost-of-doing-nothing>Finding 4: a user who saves a new Word document to a record, edits it, and saves again the same day loses the edits silently — the second save returns the first job from cache and writes nothing. Findings 2–3: a failed save can never be retried with the same key, and a successful create never shows success in the pane.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/039-save-spine-defects.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Finding 4: given two create saves of DIFFERENT content to the same record and filename within the idempotency window, both are written (a data-mutation test counts the writes); given two create saves of IDENTICAL bytes, the second is still idempotent.</criterion>
+    <criterion testable="true">Finding 2: given a failed save, a retry with the same key starts a new attempt rather than returning the failed job — or the notes show why the current behaviour is correct.</criterion>
+    <criterion testable="true">Finding 3: a completed create save's job carries the created document id, and a version save's job carries the existing id.</criterion>
+    <criterion testable="true">Finding 1: exactly one idempotency-key source is authoritative, documented, and tested; the pane's body key keeps working.</criterion>
+    <criterion testable="true">Each fix has a test that fails on the old code and passes on the new — shown in the notes.</criterion>
+    <criterion testable="true">`dotnet build` green; Office contract + data-mutation tests, ArchTests and the full suite pass; publish size and CVE recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-09-12 by the main session from task 024's report (unowned work is owned by this project — standing deferral policy). Finding 5 (same-name override collision) is routed to task 025. Must run before any production deploy of the save path: finding 4 is a silent data-loss path.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

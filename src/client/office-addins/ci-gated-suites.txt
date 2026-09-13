@@ -77,6 +77,14 @@ shared/taskpane/utils/__tests__/cleanGuid.test.ts
 # blank fields) and that the section is read-only.
 shared/taskpane/components/__tests__/DocumentProfileSection.test.tsx
 
+# --- version save + save-as-new override (task 024, FR-11) — green from creation
+# Pins: an identified document defaults to a VERSION save; `conflict` never offers
+# save-as-new; `indeterminate` is never treated as new; each OFFICE_016-019
+# refusal has a way forward; the override sends no existingDocumentId.
+shared/taskpane/hooks/__tests__/useSaveFlow.versionSave.test.ts
+shared/taskpane/components/__tests__/SaveModeSection.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
+
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20

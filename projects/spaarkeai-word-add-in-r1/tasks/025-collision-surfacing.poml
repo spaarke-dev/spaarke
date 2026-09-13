@@ -166,6 +166,7 @@
 
   <notes>
     spec.md FR-12 + Success Criterion 6; plan.md §3 finding F-a, §4 Phase 2 task 025, and risk R-2. The gate is `blocked` deliberately: this task's file list above is provisional and will be narrowed or widened by the spike. `parallel-safe` is false for the same reason — do not co-schedule it into a wave until Spike-4 has closed and the scope is fixed.
+    ADDED 2026-09-12 (from task 024's report — verify by reproduction before acting): with FR-11 now live, the pane's explicit "A new document" override sends a CREATE with no `existingDocumentId`. Saved under the SAME file name into the original document's container, that create lands on the ORIGINAL's SPE file — Spike-4's collision case (the add-in's upload path hard-codes `ConflictBehavior.Replace`). This is now reachable from a normal pane action, which raises this task's priority. Related server defects on the same save spine are owned by task 039 — coordinate, do not co-schedule (both are `parallel-safe=false` on `OfficeService.SaveAsync`).
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
