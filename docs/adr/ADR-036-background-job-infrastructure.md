@@ -2,12 +2,18 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
+| Updated | 2026-09-12 (Amendment A1) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 2 |
 | Supersedes | n/a |
-| Cross-references | extends ADR-001 (in-process workers); reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library); aligns with CLAUDE.md §10 (BFF hygiene). |
+| Cross-references | **Where** scheduled work runs → [ADR-052](ADR-052-workload-placement.md); this ADR governs **how** it runs inside the BFF (A1 §1 withdraws the original "extends ADR-001 (in-process workers)" reference). Reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library); aligns with CLAUDE.md §10 (BFF hygiene). |
+
+> ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-12-placement-runtime-as-built-and-one-dispatch-per-schedule) FIRST.**
+> It corrects this ADR's statement of ADR-001, records how the scheduler actually runs today, and adds the dispatch,
+> idempotency, retry, heartbeat and registration rules. Statements below about Dataverse-persisted job definitions,
+> run history and operator-tuned cron describe the **target state** (A1 §2) — the only store today is in-memory.
 
 ---
 
@@ -228,4 +234,74 @@ See spec.md AC-2.1 through AC-2.ADR. Highlights:
 - Data model: [`docs/data-model/sprk_backgroundjob.md`](../data-model/sprk_backgroundjob.md), [`docs/data-model/sprk_backgroundjobrun.md`](../data-model/sprk_backgroundjobrun.md)
 - Code: `src/server/shared/Spaarke.Scheduling/`, `src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs`, `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs`
 - Constraints: [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) §§A, F.1
-- Related ADRs: ADR-001 (in-process), ADR-008 (endpoint filters), ADR-009 (Redis), ADR-010 (DI minimalism), ADR-012 (shared library), ADR-029 (BFF publish hygiene), ADR-032 (Null-Object Kill-Switch — applies if any IScheduledJob is feature-gated), ADR-034 (User-record membership — provides `MembershipReconciliationJob` as second reference consumer).
+- Related ADRs: ADR-052 (where scheduled work runs — A1), ADR-004 (queue-driven work), ADR-008 (endpoint filters), ADR-009 (Redis), ADR-010 (DI minimalism), ADR-012 (shared library), ADR-029 (BFF publish hygiene), ADR-032 (Null-Object Kill-Switch — applies if any IScheduledJob is feature-gated), ADR-034 (User-record membership — provides `MembershipReconciliationJob` as second reference consumer).
+
+---
+
+## Amendment A1 (2026-09-12): placement, runtime as built, and one dispatch per schedule
+
+> **Status**: Accepted (path **B**, root CLAUDE.md §6.5; owner decision 2026-09-12). **Driver**:
+> `unified-access-control-r2` task 102 (this text); task 103 implements the lease, slot guard and helper.
+> **Evidence**: [`workload-placement-policy-evaluation.md`](../../projects/unified-access-control-r2/notes/decisions/workload-placement-policy-evaluation.md).
+
+### 1. Placement
+
+Where scheduled work runs is decided by **[ADR-052](ADR-052-workload-placement.md)** — the BFF, a Functions timer,
+or a Container Apps job. This ADR governs **how scheduled work runs inside the BFF**. The earlier cross-reference
+<!-- adr052-drift:allow reason="quotes the withdrawn cross-reference" -->"ADR-001: in-process workers; no Azure Functions"<!-- /adr052-drift:allow -->
+misstated ADR-001 and is withdrawn.
+
+### 2. Runtime as built (verified in code, 2026-09-12)
+
+- The only store is `InMemoryBackgroundJobStore`; no `DataverseBackgroundJobStore` exists, although the
+  `sprk_backgroundjob*` tables are deployed. Durable run history, and cron tuned in Dataverse, are the **target**
+  state. Until that store exists, cron and enablement are set in code at registration.
+- `ScheduledJobHost` starts on **every App Service instance and every deployment slot**, with no lease — each tick
+  is dispatched once **per instance**.
+- `HasRunForScheduledTimeAsync` is **inert** for its stated purpose: memory is lost on restart, and within a
+  process `AdvanceNextFire` already prevents a re-fire.
+- Admin `disable` changes the store on the one instance that served the request; a restart re-seeds the job to its
+  registration default. It is neither durable nor fleet-wide.
+
+### 3. Rules added
+
+1. **One dispatch per schedule (MUST, for jobs that must not run concurrently).** Before dispatch, the host takes
+   a distributed lease that (a) outlives the whole run **including every retry attempt and backoff**, and (b)
+   makes a manual trigger and a scheduled tick of the same job mutually exclusive. A host that does not obtain the
+   lease records the tick as **skipped**, not failed. When **no lease store is configured** (single-instance
+   development), the host dispatches and logs a warning once. When a lease store **is configured but
+   unavailable**, behaviour follows the owner decision recorded in task 103 (A1.1) — this amendment does not
+   prescribe it. Execution remains at-least-once under retry.
+2. **Slots (MUST).** Deployment slots other than production do not run scheduled jobs (a slot-sticky setting the
+   host honours).
+3. **Idempotency (MUST).** Each unit of work takes an **atomic claim** before its side effect and writes a
+   **completion marker** after it; a failed unit releases its claim. A retry never re-applies a unit already
+   marked complete.
+4. **Retry (MUST for new jobs; existing jobs when next touched, as ADR-052 §1 defines it).** Throw from
+   `ExecuteAsync` when a retry could complete work this tick would otherwise lose: the run cannot make progress
+   (its query or a shared dependency is unreachable), or units failed transiently and no later tick will revisit
+   them. Otherwise count failures and complete; the next tick retries. `Success:false` without throwing means a
+   retry cannot help.
+5. **Heartbeat (MUST).** Every attempt emits one structured heartbeat carrying its counts and attempt number,
+   including an attempt with nothing to do, so a missed run is detectable while run history is process-local.
+6. **Registration (MUST).** `services.AddScheduledJob<TJob>(cron, enabled)` — one shared bootstrap, no per-job
+   bootstrap class. (The helper is introduced by task 103.)
+7. **Host-neutrality (MUST).** Jobs do not depend on `ScheduledJobHost`, `IBackgroundJobStore` or
+   `ScheduledJobRegistry` (ADR-052 §5).
+
+### 4. Corrections
+
+- `MembershipReconciliationJob` **shipped** (registered in `MembershipModule`); it is not deferred.
+- Third consumer: `GrantExpiryReminderJob` (`unified-access-control-r2` task 100).
+- §6 above calls the other services' migration "opportunistic". ADR-052 §1 now makes it **when next touched**, held
+  by an ArchTest ratchet.
+
+### 5. Until task 103 merges
+
+The three shipped jobs still dispatch once per instance and rely on per-unit idempotency (owner 2026-09-12: the
+work is in dev only, so no formal exception is recorded).
+
+### 6. Still deferred
+
+`DataverseBackgroundJobStore` — durable history, fleet-wide enable/disable (#983). Migrating the 14 hand-rolled timer
+services is tracked in #976.

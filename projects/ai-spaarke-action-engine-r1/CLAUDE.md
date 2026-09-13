@@ -116,7 +116,7 @@ These are the binding rules every task in this project must respect. Extracted f
 
 ### Architecture & Placement
 
-- **ADR-001** — Use .NET 8 Minimal API + BackgroundService. NO Azure Functions for in-proc Action execution. Scheduler MAY be Azure-native (task 001 decides between Logic Apps timer / Service Bus scheduled / Functions timer / Container Apps Jobs).
+- **ADR-001** — BFF endpoints in Minimal API; where background work runs (incl. the scheduler host task 001 chooses) → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md).
 - **ADR-010** — Register Action Engine via `AddActionEngineModule()` extension in `Infrastructure/DI/`. NO flat `Program.cs` registration. ≤15 non-framework DI registrations.
 - **ADR-013 (refined 2026-05-20)** — Action Engine lives in BFF per decision criteria. CRUD-side consumers MUST reach Action Engine via `Services/Ai/PublicContracts/IActionEngineFacade.cs` — never inject `IActionOrchestrationService` or other internals directly.
 
@@ -128,7 +128,7 @@ These are the binding rules every task in this project must respect. Extracted f
 
 ### Background Work
 
-- **ADR-004** — `ScheduledActionDispatchJobHandler` implements `IJobHandler<T>` and is consumed by existing `ServiceBusJobProcessor`. Honors idempotency via `IIdempotencyService`.
+- **ADR-004** — `ScheduledActionDispatchJobHandler` implements the non-generic `IJobHandler` (dispatched on `JobType`) and is consumed by existing `ServiceBusJobProcessor`. Honors idempotency via `IIdempotencyService`.
 - **ADR-002** — Action triggers via Dataverse webhooks (R2 scope), NOT plugins. Plugins stay thin (no HTTP/Graph calls).
 
 ### Audit, Errors, Flags, Limits

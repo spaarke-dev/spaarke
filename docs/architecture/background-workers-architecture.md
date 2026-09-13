@@ -10,7 +10,7 @@
 
 ## Overview
 
-The SDAP BFF API hosts 15 background workers that run as .NET `BackgroundService` or `IHostedService` implementations within the single API process. Per ADR-001, all background processing uses this pattern — no Azure Functions. Workers fall into four categories: Service Bus queue processors, periodic timer services, event-driven channel consumers, and startup-only services.
+The SDAP BFF API hosts 15 background workers that run as .NET `BackgroundService` or `IHostedService` implementations within the single API process. Where background work runs is decided per workload under [ADR-052](../../.claude/adr/ADR-052-workload-placement.md); every worker listed here currently runs in the BFF. Workers fall into four categories: Service Bus queue processors, periodic timer services, event-driven channel consumers, and startup-only services.
 
 This architecture keeps operational complexity low (single deployment unit) while providing durable async processing, scheduled maintenance, and real-time event handling.
 
@@ -40,7 +40,7 @@ Topic policies: 1 GB max, 14-day default TTL, non-partitioned, batched ops, no d
 
 ### Periodic Timer Services (7)
 
-These workers execute on a recurring schedule using `PeriodicTimer` or delay-until-time patterns.
+These workers execute on a recurring schedule using `PeriodicTimer` or delay-until-time patterns. They are existing hand-rolled timer services: new scheduled work uses `IScheduledJob` on `ScheduledJobHost` ([ADR-036](../../.claude/adr/ADR-036-background-job-infrastructure.md)), and these migrate when next touched ([ADR-052](../../.claude/adr/ADR-052-workload-placement.md) §1).
 
 | Component | Path | Interval | Pattern |
 |-----------|------|----------|---------|
@@ -89,7 +89,7 @@ These workers run once at startup (if enabled) and then exit.
 
 ### Scheduling Patterns
 
-**PeriodicTimer** (preferred for fixed intervals):
+**PeriodicTimer** (existing services only — new scheduled work uses `IScheduledJob`, ADR-036):
 - Used by: ScheduledRagIndexingService, GraphSubscriptionManager, InboundPollingBackupService, PlaybookSchedulerService, TodoGenerationService, SpeDashboardSyncService
 - Pattern: `using var timer = new PeriodicTimer(interval); while (await timer.WaitForNextTickAsync(ct)) { ... }`
 
@@ -122,15 +122,15 @@ These workers run once at startup (if enabled) and then exit.
 
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
-| All background work in-process | BackgroundService in BFF API | Single deployment unit; no Azure Functions overhead | ADR-001 |
+| Current workers run in the BFF process | BackgroundService in BFF API | Single deployment unit for these workers; each workload's host is decided under ADR-052 | ADR-001, ADR-052 |
 | Opt-in migration services | Disabled by default via config flag | Prevents migration services from running in all environments | — |
 | Queue isolation by domain | Separate queues for shared jobs, communication, and Office pipeline | DI failure isolation; independent scaling | ADR-004 |
-| PeriodicTimer over Timer/CronJob | .NET 6+ PeriodicTimer | No timer drift, cancellation-aware, simpler than cron | ADR-001 |
+| PeriodicTimer over Timer/CronJob (existing services) | .NET 6+ PeriodicTimer | No timer drift, cancellation-aware. New scheduled work uses `IScheduledJob` instead | ADR-001, ADR-036, ADR-052 §1 |
 | Channel for in-process events | System.Threading.Channels | Back-pressure-free FIFO with minimal allocation; no external dependency | ADR-010 |
 
 ## Constraints
 
-- **MUST**: Use BackgroundService pattern for all background processing — no Azure Functions (ADR-001)
+- **MUST**: Decide where background work runs under [ADR-052](../../.claude/adr/ADR-052-workload-placement.md); inside the BFF, queue work follows ADR-004 and scheduled work ADR-036 — no new hand-rolled timer `BackgroundService`
 - **MUST**: Register all hosted services via `AddHostedService<T>()` in the appropriate DI module
 - **MUST**: Include startup delay (10-30s) in services that depend on external systems (Dataverse, Graph)
 - **MUST**: Catch exceptions per-cycle in periodic services — never let a single failure crash the loop
@@ -151,5 +151,6 @@ These workers run once at startup (if enabled) and then exit.
 
 - [jobs-architecture.md](jobs-architecture.md) — Job contract, handlers, idempotency, dead-letter management
 - [communication-service-architecture.md](communication-service-architecture.md) — Email pipeline including GraphSubscriptionManager and InboundPollingBackupService
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API + BackgroundService (no Azure Functions)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API for every BFF endpoint
+- [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) — Where background work runs (the BFF, Azure Functions, or Container Apps Jobs)
 - [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) — DI minimalism

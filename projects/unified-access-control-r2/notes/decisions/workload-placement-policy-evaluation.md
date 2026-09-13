@@ -155,6 +155,15 @@ Two corrections apply to THIS note:
   **managed identity, app-only**, and MUST NOT act as the BFF app registration (no confidential client, no OBO, no
   user tokens, no calls to BFF endpoints). **CORRECTION (owner Q1, 2026-09-12):** in Azure the BFF's own app-only Graph/SPE calls already run as the managed identity (`GraphClientFactory`, `Graph:ManagedIdentity:Enabled=true`), so a Function reusing it gets the same app-only access with **no extra grant**; only the user-delegated OBO path is excluded, which a Function never holds anyway. Users never sign in to a Function in any option. This narrows D2
   for safety without changing its intent — **flagged to the owner**.
+  **REFINEMENT (owner, 2026-09-13 — "use whatever is consistent with existing approach"):** option 1 adopted —
+  the Function uses ADR-028 A4's **app-only** row (UAMI-pinned `DefaultAzureCredential`), exactly as the BFF's
+  managed-identity work and the provisioning control plane already do. "No extra grant" covers that row only. Two
+  BFF app-only paths are bound to **other app registrations** and are NOT inherited: CIAM Graph provisioning
+  (`CiamGraphClientFactory`, certificate) and Power BI (`ReportingEmbedService`, secret — task 042 deferred). A
+  Function needing either needs a dedicated identity or grant (owner approval). Because the UAMI is technically able
+  to mint the MI-FIC assertion for the BFF app registration, "never act as the BFF app registration" is enforced,
+  not just stated: ADR-052's Functions-project ArchTest bans MSAL confidential-client / assertion types under
+  `src/server/functions/**` (POML 102 AC (c)).
 - **Timer triggers can retry.** §4.2's "no retry on failure" is imprecise: `[FixedDelayRetry]` /
   `[ExponentialBackoffRetry]` are supported on timer triggers.
 

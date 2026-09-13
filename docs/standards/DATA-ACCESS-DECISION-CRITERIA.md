@@ -258,7 +258,7 @@ The three checks below validate the criteria reach the right answer:
 - OBO? No.
 - Audit? Standard Dataverse audit may be sufficient.
 
-**Verdict: BFF** (criterion #6 — bulk > 50 records, criterion #2 — N+1 in JS is wasteful). The BFF dispatches a Service Bus job (`IJobHandler<UpdateOwnersJob>`); the wizard shows a progress UI and polls or subscribes for completion. If the project later needs cross-system audit (AI orchestration produced the new owner assignment), criterion #4 also pushes to BFF.
+**Verdict: BFF** (criterion #6 — bulk > 50 records, criterion #2 — N+1 in JS is wasteful). The BFF dispatches a Service Bus job (an `IJobHandler` with `JobType = "update-owners"`); the wizard shows a progress UI and polls or subscribes for completion. If the project later needs cross-system audit (AI orchestration produced the new owner assignment), criterion #4 also pushes to BFF.
 
 The criteria reach the right answer in all three scenarios.
 

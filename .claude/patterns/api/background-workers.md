@@ -15,8 +15,8 @@ Adding async job processing via **Service Bus queue** (event-triggered work — 
 5. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkersModule.cs` — Worker DI registration
 
 ## Constraints
-- **ADR-001**: Use BackgroundService, not Azure Functions
-- **ADR-004**: Idempotent job processing — check idempotency key before work
+- **ADR-052**: where the work runs (BFF, Azure Functions, Container Apps Jobs) is decided per workload; this pattern is the in-BFF mechanism for queue-driven work
+- **ADR-004**: Idempotent job processing — an **atomic** per-message claim before the side effect and a completion marker after (check-then-set is not enough — ADR-004 A1 §4). `MessageId` de-duplicates only where the queue has duplicate detection enabled; it is off on the BFF queues (A1 §5)
 - **ADR-017**: Retry with exponential backoff; dead-letter after max attempts
 
 ## Key Rules

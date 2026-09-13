@@ -75,8 +75,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <para>
 /// <b>Constraints</b>:
 /// <list type="bullet">
-///   <item>ADR-001: <see cref="BackgroundService"/> + <see cref="PeriodicTimer"/>
-///     (no Azure Functions, no Hangfire/Quartz).</item>
+///   <item>ADR-052: runs in the BFF on <see cref="BackgroundService"/> + <see cref="PeriodicTimer"/>
+///     (no Hangfire/Quartz).</item>
 ///   <item>ADR-010: DI minimalism — registered in
 ///     <c>AnalysisServicesModule</c> under the existing compound gate,
 ///     ZERO new <c>Program.cs</c> lines.</item>

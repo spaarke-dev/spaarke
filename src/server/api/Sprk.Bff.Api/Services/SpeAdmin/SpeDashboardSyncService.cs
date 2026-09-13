@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 /// Background service that periodically syncs SPE container metrics (counts, storage usage,
 /// container count by status) from the Graph API and caches them for the admin dashboard.
 ///
-/// Implements ADR-001 BackgroundService pattern — no Azure Functions.
+/// Runs in the BFF as a BackgroundService (placement decided under ADR-052).
 ///
 /// Sync flow:
 ///   1. Query sprk_specontainertypeconfigs from Dataverse (all active configs).

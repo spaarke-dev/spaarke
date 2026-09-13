@@ -1,3 +1,7 @@
+> **APPLIED 2026-09-13 (task 102 step 5)** as `tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs`, which
+> departs from this draft in three ways found on its first run: emphasis/code-tick normalisation with `\s+`
+> patterns, a Durable pattern covering "do not use", and a BFF-scope exemption for ADR-001's live rule.
+
 # Draft — `WorkloadPlacementDocDriftTests` design (task 102, step 5)
 
 > Adopted from the Fable-tier review's recommendation (2026-09-12), with the scope aligned to the ArchTests

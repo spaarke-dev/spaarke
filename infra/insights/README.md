@@ -121,7 +121,7 @@ The `deploy-spaarke-insights-index` deploymentScript runs on every Bicep deploym
 | D-33 (vectorFilterMode=preFilter friendly) | All filter fields (`tenantId`, `artifactType`, `predicate`, `subject`, `status`, `value.raw.*`) are `filterable: true` |
 | D-52 (single-tenant deployment unit) | One parameter file per customer; no tenant loops |
 | D-53 revised (one derived index) | Single `spaarke-insights-index` with `artifactType` discriminator (not 5 separate indexes) |
-| ADR-001 (Functions only for out-of-band integration) | Function App shell created for D-P8 SPE-upload consumer (out-of-band integration); no BFF endpoints rehomed |
+| ADR-052 (workload placement — [`docs/adr/ADR-052-workload-placement.md`](../../docs/adr/ADR-052-workload-placement.md)) | Function App shell created for the D-P8 SPE-upload consumer (event intake); no BFF endpoints rehomed. Shell predates ADR-052: its per-tenant UAMI and shared-key `AzureWebJobsStorage` must be aligned with ADR-052 §6 before first use |
 | ADR-010 (DI minimalism) | N/A — infra layer |
 
 ## Known constraints / future work

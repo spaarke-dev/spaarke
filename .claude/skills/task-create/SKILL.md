@@ -96,7 +96,7 @@ When a task has these tags, ALWAYS include these knowledge files:
 | `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` | `.claude/patterns/ai/streaming-endpoints.md` | — |
 | `deploy` | — | — | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/guides/PCF-DEPLOYMENT-GUIDE.md` |
 | `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` | — |
-| `worker`, `job`, `background` | `.claude/constraints/jobs.md` | — | — |
+| `worker`, `job`, `background` | `.claude/constraints/jobs.md` | `.claude/patterns/api/background-workers.md` (queue), `.claude/patterns/api/scheduled-jobs.md` (schedule) | `.claude/adr/ADR-052-workload-placement.md` (where it runs) |
 
 **Critical: PCF tasks MUST reference PCF-DEPLOYMENT-GUIDE.md**
 
@@ -130,7 +130,7 @@ FOR each task identified:
     - Dataverse Plugin → ADR-002
     - Graph/SPE Integration → ADR-007
     - PCF Control → ADR-006, ADR-011, ADR-012, ADR-021
-    - Background Worker → ADR-001, ADR-004
+    - Background Worker → ADR-052 (where it runs), ADR-004 (queue) / ADR-036 (schedule)
     - DI Registration → ADR-010
     - AI Features → ADR-013, ADR-014, ADR-015, ADR-016
     - Testing → ADR-022

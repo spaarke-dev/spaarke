@@ -632,7 +632,7 @@ ADR-013 4-criteria evaluation (the case for non-BFF deployment is strong):
 
 **(b) Workflows-in-Function** (Durable-Functions-style hosting via Agent Framework Durable Workflow patterns)
 - **Fit**: Multi-day workflows requiring state survival across BFF restarts; event-driven triggers (timer, queue, webhook)
-- **Pros**: ADR-001 already permits Functions for out-of-band integration; Workflows-in-Functions matches the existing Insights Engine sync pipeline pattern; lower per-session cost than Foundry-hosted
+- **Pros**: <!-- adr052-drift:allow reason="dated 2026-06-03 assessment; records ADR-001's wording at the time, superseded by ADR-052 on 2026-09-12" -->ADR-001 already permits Functions for out-of-band integration; Workflows-in-Functions matches the existing Insights Engine sync pipeline pattern; lower per-session cost than Foundry-hosted<!-- /adr052-drift:allow --> *(2026-09-12: placement is now [ADR-052](../adr/ADR-052-workload-placement.md), which permits Durable Task in its own host.)*
 - **Cons**: **EVIDENCE-THIN** — `04-hosting/DurableWorkflows` sample category exists at SHA `afa7834e` but no dedicated Microsoft Learn `/hosting/` page covers production deployment patterns yet. Open [Issue #6308](https://github.com/microsoft/agent-framework/issues/6308) indicates the Foundry-hosting story is in active triage as of 2026-06-03.
 - **When to choose**: Multi-day workflows without VM-isolation / per-agent-Entra-identity / A2A-endpoint requirements
 

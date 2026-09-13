@@ -33,7 +33,7 @@ Load when:
 
 Every PR that adds material new code/dependencies to the BFF MUST be able to answer YES to all of these:
 
-1. **MUST** have considered whether the new functionality belongs OUTSIDE the BFF (Azure Functions for out-of-band work per ADR-001; a separate deployable per refined ADR-013 if all four exception criteria are met). The PR description MUST state the placement decision with one-sentence justification — even if the answer is "obviously in BFF."
+1. **MUST** have considered whether the new functionality belongs OUTSIDE the BFF (Azure Functions or Container Apps Jobs per [ADR-052](../adr/ADR-052-workload-placement.md) — cite its signals and costs; a separate deployable per refined ADR-013 if all four exception criteria are met). The PR description MUST state the placement decision with one-sentence justification — even if the answer is "obviously in BFF."
 
 2. **MUST** cite the relevant ADRs (and any constraints) that bind the design. ADR-001 (Minimal API), ADR-007 (SpeFileStore), ADR-008 (endpoint filters), ADR-010 (DI minimalism), ADR-013 (AI architecture) are the most common. If unsure which apply, load [`.claude/adr/INDEX.md`](../adr/INDEX.md).
 
@@ -61,7 +61,8 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 ### D. New Background Work
 
-- **MUST** use the ADR-004 Job Contract pattern (`IJobHandler<T>`) for new async work — not a free-form `IHostedService`
+- **MUST** decide the host — the BFF, Azure Functions or Container Apps Jobs — under [ADR-052](../adr/ADR-052-workload-placement.md), and record it in the Placement Justification (§A).
+- Inside the BFF, the mechanism follows the trigger: queue/topic message → Service Bus + `IJobHandler` via `ServiceBusJobProcessor` (ADR-004); schedule → `IScheduledJob` on `ScheduledJobHost` (ADR-036); startup, or a long-lived connection that is not a message consumer → plain `IHostedService`. A queue or topic consumer is never a "long-lived listener". **MUST NOT** add a hand-rolled timer `BackgroundService`.
 - **MUST** keep AI-coupled job handlers in `Services/Ai/Jobs/` (post-Outcome E reorganization) — NOT in `Services/Jobs/Handlers/`
 - **MUST NOT** add new direct LLM/Azure-OpenAI calls outside `Services/Ai/`
 - **MUST** if the background work reads an SPE file, verify the SPE writer-identity rule (Pattern 4):
@@ -73,7 +74,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 - **MUST** check refined ADR-013 decision criteria before assuming "AI work goes in BFF" — the default is yes, but the criteria are now explicit, not categorical
 - **MUST** keep AI synthesis/chat/orchestration in BFF (latency + transactional coupling)
-- **MUST** consider whether new AI work is event-driven (sync, scheduled, webhook-triggered) — if yes, it belongs in Azure Functions per ADR-001, not the BFF request pipeline
+- **MUST** decide where non-request AI work (sync, scheduled, webhook-triggered) runs under [ADR-052](../adr/ADR-052-workload-placement.md). A trigger type alone never decides it
 - **MUST NOT** propose extracting existing AI code into a separate service without a successor ADR amending ADR-013 + fresh extraction-assessment evidence
 
 ### F. Test Update Obligation (Binding per FR-22 / D-05)
@@ -339,7 +340,7 @@ Use this table when designing new functionality. **All four "BFF" answers → BF
 | Does it have a latency/TTFB budget against BFF state (<500ms)? | YES | NO (consider Functions) |
 | Does it write to BFF-managed session/audit/safety state in the same request lifecycle? | YES | NO |
 | Does it require retroactive annotation of a streaming response? | YES | NO |
-| Is it event-driven (timer, queue, webhook) with no synchronous user wait? | NO | YES (Functions per ADR-001) |
+| Does ADR-052 place it outside the BFF (an F-signal outweighs the costs)? | NO | YES (Functions / Container Apps Jobs per ADR-052) |
 | Is it a thin facade exposing capabilities to EXTERNAL consumers (e.g., MCP for M365 Copilot)? | (consider) | (consider — needs successor ADR per refined ADR-013) |
 
 ---
@@ -404,7 +405,8 @@ app.MapPost("/api/my-feature", async (HttpContext ctx, ...) => { ... });  // do 
 
 ## Source ADRs (Full Context)
 
-- [ADR-001 Minimal API and Workers](../../docs/adr/ADR-001-minimal-api-and-workers.md) — single BFF + Functions for narrow out-of-band
+- [ADR-001 Minimal API](../../docs/adr/ADR-001-minimal-api-and-workers.md) — the single BFF runtime
+- [ADR-052 Workload Placement](../../docs/adr/ADR-052-workload-placement.md) — where background, scheduled and event-driven work runs
 - [ADR-007 SpeFileStore Facade](../../docs/adr/ADR-007-spefilestore.md) — file access via facade
 - [ADR-008 Endpoint Filters](../../docs/adr/ADR-008-endpoint-filters.md) — authorization model
 - [ADR-010 DI Minimalism](../../docs/adr/ADR-010-di-minimalism.md) — feature-module DI

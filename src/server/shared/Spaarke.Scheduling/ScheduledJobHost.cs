@@ -25,7 +25,7 @@ namespace Spaarke.Scheduling;
 ///     (default 30s) for in-flight jobs to observe cancellation and complete.</item>
 ///   <item>NFR-08 — Every run carries a fresh GUID-derived correlation id passed to the handler
 ///     via <see cref="JobRunContext.CorrelationId"/>.</item>
-///   <item>ADR-001 — Pure in-process <see cref="BackgroundService"/>; no Azure Functions / external scheduler.</item>
+///   <item>ADR-052 / ADR-036 — Where scheduled work runs is ADR-052; this host is the in-BFF mechanism (ADR-036).</item>
 ///   <item>ADR-010 — Registered as Singleton via <c>AddHostedService</c>; constructor takes concretes / minimal interfaces.</item>
 /// </list>
 /// <para><b>Design choices (departures from the POML wording):</b></para>

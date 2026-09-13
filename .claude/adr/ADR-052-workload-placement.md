@@ -1,11 +1,8 @@
-> **APPLIED 2026-09-13 (task 102 step 3).** The canonical text is `.claude/adr/ADR-052-workload-placement.md`.
-> This draft is history — do not edit it to change policy.
-
 # ADR-052: Workload Placement — BFF, Azure Functions, Container Apps Jobs (Concise)
 
 > **Status**: Proposed (Accepted when `unified-access-control-r2` task 102 merges) — owner-approved direction 2026-09-12
 > **Domain**: Background, scheduled and event-driven work; hosting
-> **Last Updated**: 2026-09-12
+> **Last Updated**: 2026-09-13
 > **Supersedes**: ADR-001's Functions / Durable provisions · ADR-004's Durable prohibition · **Amends**: ADR-013, ADR-036
 
 > **This ADR is the only place the placement rule is stated in full.** Other documents link here.
@@ -36,9 +33,10 @@ choice in the Placement Justification.
 | **F4** Isolation — failure, security, release cadence | **B4** Tied to a live request (streaming, chat, sub-500 ms) |
 | **F5** Multi-step durable orchestration | |
 
-Move out of the BFF when an F-signal is material **and** outweighs the costs: reusing the managed identity needs no new
-grants (the BFF's app-only work already runs as it), but BFF code must be extracted to shared libraries, a deployable per stamp (app +
-host storage + provisioning + CI/CD), and Flex cost/limits.
+Move out of the BFF when an F-signal is material **and** outweighs the costs. Reusing the managed identity needs no
+new grants for managed-identity app-only access (it is not OBO, and not the CIAM Graph or Power BI app
+registrations). The costs are: BFF code extracted to shared libraries; a deployable per stamp (app + host storage +
+provisioning + CI/CD); Flex cost and limits.
 
 ---
 
@@ -50,7 +48,7 @@ host storage + provisioning + CI/CD), and Flex cost/limits.
 - **MUST** give scheduled work that must not run concurrently **one dispatch per schedule across instances** — a Functions timer, or an `IScheduledJob` under `ScheduledJobHost`'s distributed lease (ADR-036 A1). Never a per-instance timer. Execution stays at-least-once under retry
 - **MUST** make every background handler idempotent per unit of work
 - **MUST** keep `IScheduledJob` implementations free of `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry` dependencies
-- **MUST** place a Functions project under `src/server/functions/<Name>/` so the server-source ArchTests cover it
+- **MUST** place a Functions project under `src/server/functions/<Name>/` so the `src/server/**` ArchTests cover it (credential guards, I2/I3 today; the first Function's setup widens I4–I6)
 
 ### ❌ MUST NOT
 
@@ -65,7 +63,7 @@ host storage + provisioning + CI/CD), and Flex cost/limits.
 |---|---|
 | Hosting | .NET isolated worker, **Flex Consumption** (Premium only for a named Flex limit, with owner approval) |
 | Tenancy | **Model 2**: one app per customer stamp · **Model 1**: a shared multi-tenant app is acceptable, carrying invariants I1–I5 · **Fleet-scoped**: platform subscription, platform identity |
-| Identity | **Reuse the stamp's managed identity**, app-only (`DefaultAzureCredential` + `AZURE_CLIENT_ID`). **MUST NOT** act as the BFF app registration (no confidential client, no OBO, no user tokens) or call BFF endpoints. No secrets — including identity-based host storage. Dedicated identity only for isolation, with owner approval |
+| Identity | **Reuse the stamp's user-assigned managed identity**, app-only (`DefaultAzureCredential` pinned to its client ID) — ADR-028 A4's **app-only** row: the BFF's managed-identity access, no new grants, no user sign-in. **MUST NOT** use A4's **confidential-client** row (no MSAL confidential client, no managed-identity assertion as the BFF app registration, no OBO, no user tokens) or call BFF endpoints. No secrets — including identity-based host storage. Dedicated identity only for isolation or for access bound to another app registration (e.g. CIAM Graph, Power BI), with owner approval |
 | Inbound HTTP | Webhook-shaped only, with sender validation (Graph `clientState`, Event Grid validation, or an Entra app role) |
 | Deploy / config | Bicep in the stamp's provisioning; same repo and CI/CD; Key Vault references |
 | Observability | Shared App Insights; the supported isolated-worker telemetry integration; W3C trace context |
@@ -86,7 +84,7 @@ host storage + provisioning + CI/CD), and Flex cost/limits.
 |---|---|
 | No Functions / Durable Task packages or Function-attributed methods in the BFF assembly | `ADR001_MinimalApiTests` |
 | No contradicting placement phrasing outside marked historical regions | `WorkloadPlacementDocDriftTests` |
-| No new hand-rolled timer `BackgroundService` (ratchet) · `IScheduledJob` host-neutrality · Functions projects under `src/server/functions/`, not referencing `Sprk.Bff.Api` | ArchTests added by task 102 |
+| No new hand-rolled timer `BackgroundService` (ratchet) · `IScheduledJob` host-neutrality · Functions projects under `src/server/functions/`, not referencing `Sprk.Bff.Api`, no confidential-client / assertion types | ArchTests added by task 102 |
 | Host choice recorded with signals + costs | Placement Justification; `code-review` / `adr-check` |
 
 ## Integration with Other ADRs
@@ -96,10 +94,15 @@ host storage + provisioning + CI/CD), and Flex cost/limits.
 | [ADR-001](ADR-001-minimal-api.md) | BFF runtime (Minimal API, one pipeline); its Functions provisions are superseded here |
 | [ADR-004](ADR-004-job-contract.md) | Mechanism for queue-driven work in the BFF; its Durable prohibition is superseded here |
 | [ADR-036](ADR-036-background-job-infrastructure.md) | Mechanism for scheduled work in the BFF; the distributed lease |
-| [ADR-028](ADR-028-spaarke-auth-architecture.md) | Secret-free identity (A4) |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | A4: the app-only row a Function uses; the confidential-client row it must not |
 | [ADR-032](ADR-032-bff-nullobject-kill-switch.md) | Kill switch when moving a workload out of the BFF |
 | [ADR-038](ADR-038-testing-strategy.md) | Test KEEP paths for Functions projects |
 | [ADR-013](ADR-013-ai-architecture.md) | AI placement of non-request work defers to this ADR |
+
+## When to Reference This ADR
+
+**Load when**: adding background, scheduled, queue- or event-driven work; proposing an Azure Function, Container
+Apps job or Durable Task orchestration; writing a Placement Justification; reviewing where work runs.
 
 **Full ADR**: [docs/adr/ADR-052-workload-placement.md](../../docs/adr/ADR-052-workload-placement.md) · **Evidence**:
 `projects/unified-access-control-r2/notes/decisions/workload-placement-policy-evaluation.md`

@@ -82,7 +82,7 @@ namespace Sprk.Provisioning.ControlPlane.Enqueue;
 
 /// <summary>
 /// Envelope for a single provisioning-handler dispatch enqueued via Service Bus.
-/// Consumed by the BFF's <c>IJobHandler</c> infrastructure per spec.md FR-22.
+/// Consumed by the BFF's job-handler infrastructure (<c>Services/Jobs/IJobHandler.cs</c>) per spec.md FR-22.
 /// </summary>
 /// <remarks>
 /// The wire format is stable across L2 + BFF releases — treat schema changes

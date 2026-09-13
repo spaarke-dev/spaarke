@@ -7,6 +7,45 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-13 — `unified-access-control-r2` task 102: **new ADR-052 Workload placement** + ADR-001/004/013/036 amendments
+
+- **New ADR-052** (`docs/adr/` + `.claude/adr/`): where background, scheduled and event-driven work runs — the BFF,
+  Azure Functions or Container Apps Jobs — is decided **per workload** on stated signals (F1–F5 favour Functions,
+  B1–B4 favour the BFF) against named Spaarke costs; **tie-breaker = fewer moving parts**. A Function reuses the
+  stamp's user-assigned managed identity **app-only** (ADR-028 A4's app-only row: no new grants, no user sign-in),
+  never the BFF app registration (no confidential client, no OBO). Durable Task is permitted in its own host, never
+  inside the BFF. No new WebJobs; no new hand-rolled timer `BackgroundService`. Owner decisions D1–D7, 2026-09-12.
+- **Amended (path B, root CLAUDE.md §6.5)**: ADR-001 A1 (narrowed to the BFF runtime; its Functions and Durable
+  provisions superseded and kept as marked history) · ADR-004 A1 (queue-driven scope; the Durable prohibition
+  withdrawn; atomic receive-side idempotency; duplicate detection is a create-time queue property) · ADR-036 A1
+  (runtime as built; one dispatch per schedule via a distributed lease; slot guard; atomic per-unit claim; retry,
+  heartbeat, `AddScheduledJob<TJob>` and host-neutrality rules) · ADR-013 and ADR-002 (pointers).
+- **Why**: four directive eras contradicted each other on Functions, each deciding the host from the trigger. An
+  agent following the newest ADR was flagged for violating an older one, and the project-setup template seeded
+  every new project with a flat ban. `WorkloadPlacementDocDriftTests` (Tier 1) now fails the build when a
+  contradicting phrasing reappears outside a reasoned `adr052-drift:allow` region.
+- **Directives aligned (`.claude/**`)**: constraints `api.md`, `ai.md`, `plugins.md`, `jobs.md` (rewritten —
+  placement, queue vs schedule, atomic receive-side claim, the truth about Service Bus duplicate detection, a
+  non-generic `IJobHandler` sample, the scheduled-job rules) and `bff-extensions.md` (§A.1, §D, §E, the decision
+  table, the source list); patterns `api/background-workers.md`, `api/scheduled-jobs.md` (rewritten to the runtime
+  as built), `api/endpoint-definition.md`, `auth/graph-webhooks.md`, `testing/integration-tests.md`; skills
+  `code-review` (+ `references/review-checklist.md`), `adr-check` (+ `references/adr-validation-rules.md`),
+  `adr-aware`, `task-create`, `design-to-spec`, `mcp-tool-handler`, and `project-setup/references/claudemd-template.md`
+  (which had seeded every new project's CLAUDE.md with a flat ban); root `CLAUDE.md` §17 gains a pointer row.
+- **A generic `IJobHandler` never existed.** The contract is the non-generic `IJobHandler` (`Services/Jobs/IJobHandler.cs`);
+  every generic mention in directives, ADR samples and docs was corrected.
+- **ArchTests (Tier 1, blocking)**: `ADR001_MinimalApiTests` now reads method- and parameter-level attributes (the
+  class-level-only scan could never fire on a Function) and its message states the rule's real scope, the BFF
+  assembly. New `WorkloadPlacementDocDriftTests` (the drift guard, with reasoned `adr052-drift:allow` markers;
+  formatting-proof after its first run found bold text slipping past it) and `WorkloadPlacementGuardTests`
+  (timer-service ratchet at 14 · `IScheduledJob` host-neutrality · Functions-project location, references and
+  app-only identity). Every rule has negative and positive controls.
+- **Follow-ups filed**: #976–#986 — timer migration, non-conforming consumers, two Service Bus defects, duplicate
+  detection, MessageId gaps, `DataverseBackgroundJobStore`, atomic idempotency, the Insights Function Bicep, and
+  the SPE container-type grant reconciliation.
+- Evidence: `projects/unified-access-control-r2/notes/decisions/workload-placement-policy-evaluation.md`.
+
+---
 ###### 2026-09-10 — `unified-access-control-r2`: root CLAUDE.md **§10 gains publish-size hazards THREE and FOUR**
 
 - **Root CLAUDE.md §10 only.** No skill, ADR, pattern or constraint changed. §10 already documented two

@@ -138,7 +138,7 @@ public sealed class RecordSearchDocument
 /// </para>
 ///
 /// <para>
-/// ADR-001: Uses BackgroundService + PeriodicTimer — no Azure Functions.
+/// Uses BackgroundService + PeriodicTimer in the BFF (placement decided under ADR-052).
 /// ADR-009: Watermark stored in IDistributedCache (Redis-first).
 /// ADR-017: Exponential backoff on HTTP 429 from AI Search (3 retries max).
 /// </para>

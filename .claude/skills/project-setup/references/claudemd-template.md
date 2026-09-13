@@ -145,7 +145,7 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 ## Key Technical Constraints
 
 {Extract key constraints from spec.md, examples:}
-- Must use .NET 8 Minimal API (no Azure Functions) - per ADR-001
+- BFF endpoints use .NET Minimal API - per ADR-001; where any background work runs is decided per workload - per ADR-052
 - PCF controls must use Fluent UI v9, no v8, dark mode required - per ADR-006, ADR-021
 - No HTTP calls from Dataverse plugins - per ADR-002
 - Redis-first caching strategy - per ADR-009

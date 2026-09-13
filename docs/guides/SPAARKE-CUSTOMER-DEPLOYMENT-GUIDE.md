@@ -591,6 +591,7 @@ Cross-tenant data bleed is the single class of catastrophe r1 must make structur
 **Verification lifecycle**:
 
 - **At code time**: 5 ArchTests (CI Tier-1 blocking, coordinated PR with `ci-cd-unit-test-remediation-r1`)
+  - **Functions projects** live under `src/server/functions/` ([ADR-052](../adr/ADR-052-workload-placement.md) §5). The I2 and I3 ArchTests scan all of `src/server/**`, so a Model-1 shared Function carries those invariants automatically; I4 and I5 currently scan BFF paths only (`Sprk.Bff.Api/Services`, `Sprk.Bff.Api/Infrastructure/{Graph,Auth}`), so a Function's SPE-container and Graph-token code is covered by review until those scans are widened.
 - **At provisioning time**: H13 samples a query in each of the 5 classes
 - **At runtime**: OpenTelemetry span attributes include `tenantId`; log samples cross-referenced for anomaly detection
 

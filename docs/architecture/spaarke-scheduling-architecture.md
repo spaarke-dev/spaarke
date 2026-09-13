@@ -8,6 +8,15 @@
 
 ---
 
+> ⚠️ **Runtime as built — read first** ([ADR-036 A1 §2](../adr/ADR-036-background-job-infrastructure.md), verified in code
+> 2026-09-12). The only store is `InMemoryBackgroundJobStore`: no Dataverse-backed store exists, so the "one-line swap"
+> mentioned below is not available and `sprk_backgroundjob*` are deployed but unused. Run history, admin enable/disable
+> and the `HasRunForScheduledTimeAsync` probe are process-local and lost on restart. `ScheduledJobHost` runs on every
+> App Service instance and deployment slot with no lease, so each tick is dispatched once per instance; a distributed
+> lease and slot guard are being added by `unified-access-control-r2` task 103. Where scheduled work runs at all is
+> [ADR-052](../../.claude/adr/ADR-052-workload-placement.md), and migration of the remaining timer services is "when next
+> touched" (ADR-052 §1), no longer opportunistic.
+
 ## Overview (plain language)
 
 `Spaarke.Scheduling` is a small shared .NET library that provides **one** uniform way to write, schedule, monitor, retry, and manually trigger a cron-driven background job inside the BFF.
@@ -242,7 +251,7 @@ The following deliberately do NOT migrate to `Spaarke.Scheduling`:
 | One-time migration services (`DocumentVectorBackfillService`, `EmbeddingMigrationService`) | Opt-in run-once-and-exit pattern; cron is the wrong abstraction. | Existing `BackgroundService` per [`background-workers-architecture.md`](background-workers-architecture.md) §4 |
 | Startup validation (`StartupValidationService`) | Not periodic — runs once at host start. | Existing `IHostedService` per [`background-workers-architecture.md`](background-workers-architecture.md) §5 |
 
-External schedulers (Hangfire, Quartz.NET, Azure Functions, Logic Apps) are NOT considered — ADR-001 prefers in-process workers; the volume + cadence requirements are met comfortably by a single in-process `BackgroundService`. See ADR-036 "Alternatives Considered" for the full rejection rationale.
+Where scheduled work runs — the BFF, a Functions timer, or a Container Apps job — is decided per workload under [ADR-052](../../.claude/adr/ADR-052-workload-placement.md); this document covers the in-BFF mechanism (ADR-036). Third-party in-process schedulers (Hangfire, Quartz.NET) are not used — see ADR-036 "Alternatives Considered".
 
 ---
 
@@ -252,7 +261,8 @@ External schedulers (Hangfire, Quartz.NET, Azure Functions, Logic Apps) are NOT 
 
 - **Framework library** — `Spaarke.Scheduling` ships in every BFF deployment.
 - **Entities** — `sprk_backgroundjob` + `sprk_backgroundjobrun` deployed to **spaarkedev1**; idempotent re-creation scripts at `scripts/Create-BackgroundJobEntity.ps1` and `scripts/Create-BackgroundJobRunEntity.ps1`.
-- **Backing store** — `InMemoryBackgroundJobStore` is wired on spaarkedev1. Run history is process-local (lost on App Service restart). The Dataverse-backed swap is a one-line change in `SchedulingModule.AddSchedulingModule`.
+- **Backing store** — `InMemoryBackgroundJobStore` is wired on spaarkedev1. Run history is process-local (lost on App Service restart). No Dataverse-backed store exists yet (ADR-036 A1 §2, §6); the entities are deployed but unused.
+- **Instances** — the host runs on every App Service instance and deployment slot with no lease, so each tick dispatches once per instance; admin enable/disable and run history below are per instance (see the callout at the top; lease + slot guard: `unified-access-control-r2` task 103).
 - **Seeded jobs** — `notification-playbook-scheduler` (cron `0 * * * *`, enabled) and `membership-reconciliation` (cron `0 2 * * *`, enabled by default; honors `Membership:Reconciliation:Enabled` appsettings override).
 - **Admin endpoints** — `/api/admin/jobs/*` (all 6) live and unconditional.
 
@@ -270,7 +280,8 @@ External schedulers (Hangfire, Quartz.NET, Azure Functions, Logic Apps) are NOT 
 ## Related
 
 - [ADR-036](../../.claude/adr/ADR-036-background-job-infrastructure.md) — Background-job infrastructure (binding decision record, concise) + [full ADR](../adr/ADR-036-background-job-infrastructure.md)
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API + in-process workers (no Azure Functions)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API for every BFF endpoint
+- [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) — Where scheduled work runs (the BFF, a Functions timer, or a Container Apps job)
 - [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) — Endpoint-filter authorization (admin endpoints follow this pattern)
 - [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) — DI minimalism (justifies `IScheduledJob` + `IBackgroundJobStore` interfaces with ≥2 implementations from day one)
 - [ADR-012](../../.claude/adr/ADR-012-shared-components.md) — Shared library convention (`Spaarke.Scheduling` follows this)

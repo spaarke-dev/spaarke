@@ -1,14 +1,28 @@
 # Background Jobs Admin Guide (Spaarke.Scheduling)
 
-> **Status**: Shipped in R3 (2026-06-22)
+> **Status**: Shipped in R3 (2026-06-22); corrected 2026-09-13 to match the runtime as built ([ADR-036 Amendment A1 §2](../adr/ADR-036-background-job-infrastructure.md))
 > **Audience**: Spaarke operators, system administrators
-> **Last Updated**: 2026-06-22
+> **Last Updated**: 2026-09-13
 > **Related**:
-> - Architecture: [`docs/architecture/background-workers-architecture.md`](../architecture/background-workers-architecture.md)
+> - Architecture: [`docs/architecture/background-workers-architecture.md`](../architecture/background-workers-architecture.md), [`docs/architecture/spaarke-scheduling-architecture.md`](../architecture/spaarke-scheduling-architecture.md)
 > - ADR (concise): [`.claude/adr/ADR-036-background-job-infrastructure.md`](../../.claude/adr/ADR-036-background-job-infrastructure.md)
 > - ADR (full): [`docs/adr/ADR-036-background-job-infrastructure.md`](../adr/ADR-036-background-job-infrastructure.md)
-> - Data model: [`docs/data-model/sprk_backgroundjob.md`](../data-model/sprk_backgroundjob.md), [`docs/data-model/sprk_backgroundjobrun.md`](../data-model/sprk_backgroundjobrun.md)
-> - Forward link: future project `scheduled-jobs-migration` (Wave 28 — opportunistic migration of remaining 26 `BackgroundService` implementations)
+> - Placement (where scheduled work runs at all): [`docs/adr/ADR-052-workload-placement.md`](../adr/ADR-052-workload-placement.md)
+> - Data model (target store): [`docs/data-model/sprk_backgroundjob.md`](../data-model/sprk_backgroundjob.md), [`docs/data-model/sprk_backgroundjobrun.md`](../data-model/sprk_backgroundjobrun.md)
+> - Forward link: future project `scheduled-jobs-migration` (Wave 28 — migration of the remaining timer `BackgroundService` implementations)
+
+---
+
+> ⚠️ **Runtime as built — read this first** ([ADR-036 A1 §2](../adr/ADR-036-background-job-infrastructure.md), verified in code 2026-09-12)
+>
+> - **The only store is `InMemoryBackgroundJobStore`** — per-process memory. No Dataverse-backed store exists yet; the `sprk_backgroundjob` / `sprk_backgroundjobrun` tables are deployed but **unused** (the Dataverse store is deferred — ADR-036 A1 §6).
+> - **Run history is per instance and lost on every restart** (deploy, recycle, scale-in). `/status` and `/history` show only the runs recorded by the instance that served your request.
+> - **Cron and enablement are set in code at registration**, not in Dataverse. Nothing an operator edits in Dataverse affects the scheduler today.
+> - **`disable` / `enable` change only the instance that served the request**, and a restart re-seeds the job to its registration default. They are neither durable nor fleet-wide.
+> - **`HasRunForScheduledTimeAsync` is process-local** — it cannot see a run from before a restart or on another instance, so it does not prevent duplicates.
+> - **Every App Service instance and every deployment slot runs the scheduler**, with no lease: each cron tick is dispatched **once per instance**. Jobs rely on per-unit idempotency (ADR-036 A1 §5) until a distributed lease and a slot guard land (`unified-access-control-r2` task 103).
+>
+> The sections below describe both the behaviour you get today and, where they differ, the target state.
 
 ---
 
@@ -33,9 +47,9 @@ Spaarke's BFF API runs **28 different scheduled background tasks** (notification
 The **Spaarke.Scheduling framework** — shipped in R3 Part 2 — replaces that fragmentation with one place to see and control every scheduled job:
 
 - A shared library `Spaarke.Scheduling` defines a uniform `IScheduledJob` contract and a `ScheduledJobHost` that owns the cron loop for all of them.
-- Job definitions live in the new Dataverse entity **`sprk_backgroundjob`** (catalog of "what jobs exist"), tunable by operators without code deploys.
-- Each run is recorded in **`sprk_backgroundjobrun`** (per-run history with status, duration, error message, correlation id).
-- Admin endpoints **`/api/admin/jobs/*`** let operators list, inspect, trigger, enable, and disable jobs with HTTP calls — gated by the existing `SystemAdmin` policy.
+- Job definitions are seeded **in code at registration** into the job store. The Dataverse entity **`sprk_backgroundjob`** (catalog of "what jobs exist", tunable by operators without code deploys) is the **target** store — deployed but unused today.
+- Each run is recorded in the store's run history (status, duration, error message, correlation id) — **in process memory today**. The Dataverse entity **`sprk_backgroundjobrun`** is the target durable history.
+- Admin endpoints **`/api/admin/jobs/*`** let operators list, inspect, trigger, enable, and disable jobs with HTTP calls — gated by the existing `SystemAdmin` policy. Each call acts on the instance that serves it (see the callout above).
 
 This guide covers what an operator needs to do day-to-day. **You don't need to know any C#** to use the framework.
 
@@ -45,14 +59,15 @@ This guide covers what an operator needs to do day-to-day. **You don't need to k
 
 ## Current Job Inventory
 
-Two reference consumers ship in R3 and are seeded automatically at BFF startup:
+Three jobs ship and are seeded automatically at BFF startup:
 
 | Job ID | Display Name | Default Cron | Default Enabled | Purpose |
 |---|---|---|---|---|
 | `notification-playbook-scheduler` | Notification Playbook Scheduler | `0 * * * *` (every hour at minute 0) | Yes | Fans out all 7 active notification-mode playbooks for every active user. Each child playbook gets a fresh correlation id; children are recorded in the parent run's `ResultJson` for tracing. Replaces the legacy `PlaybookSchedulerService`. |
-| `membership-reconciliation` | Membership Junction Reconciliation | `0 2 * * *` (daily at 02:00 UTC) | Yes | Reconciles the `sprk_userentityassociation` junction table against source-of-truth identity Lookups on configured entities (`sprk_matter`, `sprk_document`, `sprk_event`, `sprk_task`, `sprk_opportunity`). Load-bearing for the 8 Q4 `sprk_assigned*` Lookups on `sprk_matter` because those fields are edited exclusively via maker portal / Power Automate / plugins (not through BFF endpoints), so real-time membership events do not cover them. |
+| `membership-reconciliation` | Membership Junction Reconciliation | `0 2 * * *` (daily at 02:00 UTC) | Yes (`Membership:Reconciliation:Enabled`) | Reconciles the `sprk_userentityassociation` junction table against source-of-truth identity Lookups on configured entities (`sprk_matter`, `sprk_document`, `sprk_event`, `sprk_task`, `sprk_opportunity`). Load-bearing for the 8 Q4 `sprk_assigned*` Lookups on `sprk_matter` because those fields are edited exclusively via maker portal / Power Automate / plugins (not through BFF endpoints), so real-time membership events do not cover them. |
+| `external-grant-expiry-reminders` | External Grant Expiry Reminders | `0 6 * * *` (daily at 06:00 UTC) | Yes | Reminds the internal user who granted an external share (else the record's owner, else its creator) that the grant is about to expire, through the existing `NotificationService`. Added by `unified-access-control-r2` task 100. |
 
-Both definitions are seeded on every BFF startup (idempotent — a host restart re-runs the same seed without harm). Operators can tune the cron schedule, the enabled flag, or the per-job `ConfigJson` via Dataverse without redeploying the BFF.
+All definitions are seeded on every BFF startup (idempotent — a restart re-runs the same seed without harm). **The seed is also the only source of cron and enablement**: a restart restores the values set in code, which is why an admin `disable` does not survive one. Changing a cron schedule or default today means a code change and a BFF redeploy (for the membership recon, its `appsettings` section — see [Configuration](#configuration)).
 
 ---
 
@@ -60,11 +75,13 @@ Both definitions are seeded on every BFF startup (idempotent — a host restart 
 
 All endpoints live under `/api/admin/jobs` and require the `SystemAdmin` policy (the same policy used by `RagEndpoints`'s bulk-indexing admin group — there is **no separate `PlatformAdmin` policy**).
 
+**Every endpoint acts on the single App Service instance that serves the request.** With more than one instance (or a running deployment slot), two consecutive calls can reach different instances and return different run histories.
+
 The base URL on dev is `https://spe-api-dev-67e2xz.azurewebsites.net`. Substitute your environment's BFF host name.
 
 ### `GET /api/admin/jobs` — List all registered jobs
 
-Enumerates every `IScheduledJob` currently registered with the host. Joins each row with the most-recent run summary and the next computed cron occurrence.
+Enumerates every `IScheduledJob` currently registered with the host. Joins each row with the most-recent run summary (from this instance's in-memory history) and the next computed cron occurrence.
 
 ```bash
 curl -s \
@@ -101,20 +118,20 @@ curl -s \
 ]
 ```
 
-Results are sorted alphabetically by `jobId` for predictability. An empty list (HTTP 200, body `[]`) means no jobs are registered — that is a valid steady state, not an error.
+Results are sorted alphabetically by `jobId` for predictability. An empty list (HTTP 200, body `[]`) means no jobs are registered — that is a valid steady state, not an error. A `lastRunStatus` of `null` shortly after a deploy is normal: the instance has no history yet.
 
 | Field | Meaning |
 |---|---|
-| `jobId` | Stable id matching the Dataverse `sprk_backgroundjob.sprk_jobid` row |
+| `jobId` | Stable job id (also the `sprk_jobid` key of the target Dataverse store) |
 | `displayName` | Human-readable name |
-| `enabled` | Whether the scheduling loop will fire this job on its next cron tick |
+| `enabled` | Whether this instance's scheduling loop will fire this job on its next cron tick |
 | `cronSchedule` | Standard 5-field cron expression (e.g., `0 2 * * *`) — parsed by [Cronos](https://github.com/HangfireIO/Cronos) |
-| `lastRunStatus` | `"Succeeded"`, `"Failed"`, `"InProgress"`, or `null` if never executed |
+| `lastRunStatus` | `"Succeeded"`, `"Failed"`, `"InProgress"`, or `null` if this instance has not run it since it started |
 | `nextScheduledOn` | Next cron occurrence; `null` if `enabled` is false or the cron expression is unparseable |
 
 ### `GET /api/admin/jobs/{jobId}/status` — Detail for one job
 
-Returns the same summary fields **plus the last 10 run records** (most-recent-first). The most-recent failure surfaces in `recentRuns[0].errorMessage` when `lastRunStatus = "Failed"`.
+Returns the same summary fields **plus the last 10 run records** held by this instance (most-recent-first). The most-recent failure surfaces in `recentRuns[0].errorMessage` when `lastRunStatus = "Failed"`.
 
 ```bash
 curl -s \
@@ -151,11 +168,13 @@ curl -s \
 }
 ```
 
+Run records do **not** include the job's `ResultJson` (per-child or per-entity breakdown): the store keeps it, but `JobRunDetail` does not expose it. Use the run's `correlationId` to find the detail in the BFF logs.
+
 **HTTP 404** is returned when `jobId` is not registered (e.g., typo in the URL).
 
-### `GET /api/admin/jobs/{jobId}/history?limit=N` — Full run history
+### `GET /api/admin/jobs/{jobId}/history?limit=N` — Run history
 
-Returns the most-recent run records for a job, ordered newest-first. Use this for "what happened in the last 50 runs?" queries.
+Returns this instance's most-recent run records for a job, ordered newest-first. Use this for "what happened in the last 50 runs?" queries — bearing in mind that history starts at the instance's last restart.
 
 ```bash
 curl -s \
@@ -171,7 +190,7 @@ curl -s \
 
 ### `POST /api/admin/jobs/{jobId}/trigger` — Run NOW (out-of-band)
 
-Dispatches the job immediately with `Trigger = ManualAdmin` and a fresh correlation id. The endpoint **returns 202 Accepted immediately** with the new run id — it does **not** wait for the job to complete. Admin clients poll `GET /api/admin/jobs/{jobId}/status` to see when the run finishes.
+Dispatches the job immediately on the instance that serves the request, with `Trigger = ManualAdmin` and a fresh correlation id. The endpoint **returns 202 Accepted immediately** with the new run id — it does **not** wait for the job to complete. Admin clients poll `GET /api/admin/jobs/{jobId}/status` to see when the run finishes (and may need to retry the poll if it lands on another instance).
 
 ```bash
 curl -s -X POST \
@@ -194,13 +213,13 @@ The response also includes a `Location: /api/admin/jobs/membership-reconciliatio
 **Key facts about manual triggers**:
 
 - **Always returns immediately**. Jobs run for arbitrary durations (membership recon = minutes; an index rebuild could be hours) — blocking the HTTP request would time out and tie up a request thread.
-- **No idempotency dedupe**. If you double-click the trigger button, two run records are written and the handler runs twice. This is the operator's explicit choice. Scheduled cron ticks DO dedupe (see [Retry and Idempotency Behavior](#retry-and-idempotency-behavior)).
+- **No idempotency dedupe**. If you double-click the trigger button, two runs start and the handler runs twice. This is the operator's explicit choice. A manual trigger is also **not** mutually exclusive with a scheduled tick of the same job today (the lease that makes them exclusive is task 103).
 - **Admin client cancellation does NOT interrupt the run**. Once dispatch is complete, only host shutdown can stop the in-flight job (and even then it has a 30-second drain window).
 - **HTTP 404** if `jobId` is not registered.
 
 ### `POST /api/admin/jobs/{jobId}/enable` — Resume scheduled execution
 
-Flips `sprk_backgroundjob.sprk_enabled = true` and triggers an immediate refresh of the scheduling host so the change takes effect on the **next scheduling-loop tick** (not the hourly refresh).
+Sets the job's `Enabled` flag in the **in-memory store of the instance that served the request** and triggers an immediate refresh of that instance's scheduling host, so the change takes effect on its **next scheduling-loop tick**. Other instances and slots are unaffected, and a restart restores the registration default. (Target state: flips `sprk_backgroundjob.sprk_enabled`, durable and fleet-wide.)
 
 ```bash
 curl -s -X POST \
@@ -212,7 +231,7 @@ curl -s -X POST \
 
 ### `POST /api/admin/jobs/{jobId}/disable` — Pause without removing
 
-Mirror of `/enable`. Disabled jobs remain visible in `GET /api/admin/jobs` (the admin surface) but the scheduling loop skips them on cron ticks. Use this to pause a job pending a fix rather than redeploying.
+Mirror of `/enable`, with the same single-instance, non-durable scope. Disabled jobs remain visible in `GET /api/admin/jobs` but that instance's scheduling loop skips them on cron ticks. **Do not rely on it to stop a job fleet-wide** — see [Scenario 2](#scenario-2-a-buggy-job-needs-to-be-paused-pending-fix).
 
 ```bash
 curl -s -X POST \
@@ -228,10 +247,10 @@ curl -s -X POST \
 |---|---|
 | 200 | Read operation succeeded |
 | 202 | Manual trigger accepted; poll `/status` for outcome |
-| 204 | Enable/disable succeeded |
+| 204 | Enable/disable succeeded (on the serving instance) |
 | 401 | Missing or invalid bearer token |
 | 403 | Token does not have the `SystemAdmin` policy |
-| 404 | `jobId` is not registered (or — for enable/disable — has no definition row in the store) |
+| 404 | `jobId` is not registered (or — for enable/disable — has no definition in the store) |
 | 500 | Server-side error (read `/healthz` and the BFF App Service logs) |
 
 ---
@@ -240,21 +259,21 @@ curl -s -X POST \
 
 ### Scenario 1: "Last night's daily briefings didn't send"
 
-The notification playbook scheduler is hourly, but each individual playbook respects its own schedule inside `sprk_configjson` (typically daily at 06:00 UTC for the morning-briefing playbook). If users report a missing briefing, walk through this:
+The notification playbook scheduler is hourly, but each individual playbook respects its own schedule (on its `sprk_analysisplaybook` row; typically daily at 06:00 UTC for the morning-briefing playbook). If users report a missing briefing, walk through this:
 
 1. **List all jobs** and check the playbook scheduler's last run:
    ```bash
    curl -s -H "Authorization: Bearer {token}" \
      https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs
    ```
-   Look for `notification-playbook-scheduler.lastRunStatus`. If `"Succeeded"`, the scheduler ran but individual playbooks may have been skipped (not due) or failed for specific users.
+   Look for `notification-playbook-scheduler.lastRunStatus`. If `"Succeeded"`, the scheduler ran but individual playbooks may have been skipped (not due) or failed for specific users. If `null`, the instance you reached has restarted since the run — history is not durable.
 
 2. **Pull recent history**:
    ```bash
    curl -s -H "Authorization: Bearer {token}" \
      "https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/history?limit=10"
    ```
-   For each run, look at `errorMessage` (top-level failure) and — when you fetch `/status` — open the parent run record in Dataverse to inspect `sprk_resultjson` for per-child-playbook breakdown including the `correlationId` and `failureCount` for each playbook.
+   For each run, look at `errorMessage` (top-level failure). The per-child-playbook breakdown (`correlationId`, `failureCount` per playbook) is in the run's `ResultJson`, which the admin endpoints do not return — search the BFF logs by the run's `correlationId`.
 
 3. **Decide**: was it a transient failure (Dataverse hiccup, Graph throttling) or a logic error?
 
@@ -265,31 +284,28 @@ The notification playbook scheduler is hourly, but each individual playbook resp
    ```
    Poll status until `lastRunStatus = "Succeeded"`.
 
-5. **For logic errors**, disable the job pending a fix (see Scenario 2) and notify the development team.
+5. **For logic errors**, stop the job (see Scenario 2) and notify the development team.
 
 ### Scenario 2: "A buggy job needs to be paused pending fix"
 
-You spotted a regression — the recon job is creating bad junction rows, or the playbook scheduler is sending duplicate emails. Pause the job immediately, no redeploy required:
+You spotted a regression — the recon job is creating bad junction rows, or the playbook scheduler is sending duplicate emails.
+
+**Today, `disable` is not a reliable stop.** It pauses the job only on the instance that served the request; every other instance and any running deployment slot keeps firing it, and the next restart (including the redeploy that ships the fix) re-enables it from its registration default. Use it as an immediate, partial brake, then stop the job durably:
 
 ```bash
-# Pause now — takes effect on the next scheduling-loop tick (within seconds)
+# Partial brake — pauses the job on the serving instance only
 curl -s -X POST -H "Authorization: Bearer {token}" \
   https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/{jobId}/disable
 
-# Verify it's paused
+# Verify on that instance
 curl -s -H "Authorization: Bearer {token}" \
   https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/{jobId}/status
 # Expect "enabled": false, "nextScheduledOn": null
 ```
 
-After the developer ships a fix and the BFF redeploys, re-enable:
+**Durable stop**: change the job's enablement where it is registered and redeploy — for `membership-reconciliation`, set `Membership:Reconciliation:Enabled=false` in App Service configuration (a configuration change restarts the app, and every instance re-seeds with the new value); for the other jobs, the registration default is in code, so the developer ships the change. On a single-instance environment the `disable` call is effective until the next restart.
 
-```bash
-curl -s -X POST -H "Authorization: Bearer {token}" \
-  https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/{jobId}/enable
-```
-
-The job resumes on its next cron tick — no manual trigger needed unless you want immediate execution.
+After the fix ships, the redeploy re-seeds the job to its registration default (enabled) — no `enable` call is needed unless you disabled it on an instance that has not restarted.
 
 ### Scenario 3: "Membership data is stale; force a recon"
 
@@ -307,34 +323,35 @@ A user reports their access permissions are wrong (e.g., they should see a matte
    curl -s -H "Authorization: Bearer {token}" \
      https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/membership-reconciliation/status
    ```
-   Watch `recentRuns[0]` — `status` flips from `"InProgress"` to `"Succeeded"`. `processedItems` shows the count of junction rows touched (added + removed + verified).
+   Watch `recentRuns[0]` — `status` flips from `"InProgress"` to `"Succeeded"`. `processedItems` shows the count of junction rows touched (added + removed + verified). If the run does not appear, the poll reached a different instance from the trigger — retry.
 
-3. **Per-entity breakdown** — open the most recent `sprk_backgroundjobrun` record in Dataverse and read `sprk_resultjson`. You'll see one object per entity type with `entityType`, `discoveredFields`, `parentRowsScanned`, `verified`, `removed`, `errors`, and `durationMs`. If any entity type's `errors > 0`, check the BFF App Service logs for the correlation id (filterable by `correlationId={...}`).
+3. **Per-entity breakdown** — the run's `ResultJson` holds one object per entity type (`entityType`, `discoveredFields`, `parentRowsScanned`, `verified`, `removed`, `errors`, `durationMs`), but the admin endpoints do not return it and it is not written to Dataverse today. Search the BFF App Service logs by the run's `correlationId`. If any entity type reports errors, the same logs carry the detail.
 
 ### Scenario 4: "Onboarding a new scheduled job"
 
 For operators, onboarding a new job is **mostly a no-op**. The developer:
 
-1. Implements `IScheduledJob` (interface with `JobId`, `DisplayName`, `Description`, `ExecuteAsync(JobRunContext, CancellationToken)`).
-2. Registers the singleton in DI plus a startup hosted service that calls `ScheduledJobRegistry.Register(handler)` and `IBackgroundJobStore.AddOrReplaceJob(definition)` — the same idempotent pattern that ships `notification-playbook-scheduler` and `membership-reconciliation`.
-3. Deploys the BFF.
+1. Decides where the work runs under [ADR-052](../adr/ADR-052-workload-placement.md); for work that stays in the BFF:
+2. Implements `IScheduledJob` (interface with `JobId`, `DisplayName`, `Description`, `ExecuteAsync(JobRunContext, CancellationToken)`).
+3. Registers it — today a singleton in DI plus a startup hosted service that calls `ScheduledJobRegistry.Register(handler)` and `IBackgroundJobStore.AddOrReplaceJob(definition)`, the idempotent pattern the shipped jobs use (a shared `AddScheduledJob<TJob>(cron, enabled)` helper replaces this — ADR-036 A1 §3.6, task 103).
+4. Deploys the BFF.
 
-On host startup the seed registers the handler and seeds the `sprk_backgroundjob` row with the default cron. The job immediately appears in `GET /api/admin/jobs`. Operators only need to act if they want to change the cron schedule, disable the job, or trigger it manually.
+On host startup the seed registers the handler and seeds its definition, with the default cron, into the job store. The job immediately appears in `GET /api/admin/jobs`. Operators only need to act if they want to trigger it manually; changing its cron or default enablement is a code change today.
 
 ---
 
 ## Configuration
 
-The framework's configuration surface lives in **two places**: per-job tuning in Dataverse, and host-level tuning in `appsettings.json`.
+The framework's configuration surface lives in **code at registration** today, plus host-level tuning in `ScheduledJobHostOptions`. Per-job tuning in Dataverse is the target state.
 
-### Job-level configuration (Dataverse — `sprk_backgroundjob` row)
+### Job-level configuration (target: Dataverse — `sprk_backgroundjob` row)
 
-Edit these fields directly in the model-driven Dataverse maker portal (or via the BFF admin endpoints for `enabled`). Changes take effect on the next scheduling-loop tick (no redeploy):
+**Not active today.** Until the Dataverse-backed store exists, nothing reads these fields; edits to a `sprk_backgroundjob` row have no effect. Cron and enablement come from the job's registration in code. When the store ships, these fields become the operator's tuning surface, taking effect on the next scheduling-loop tick:
 
 | Field | Logical name | Type | Purpose |
 |---|---|---|---|
 | Cron schedule | `sprk_cronschedule` | Text | Standard 5-field cron expression. Examples below. Empty or null = manual-trigger only (no scheduled ticks). |
-| Enabled | `sprk_enabled` | Yes/No | Master enable/disable. Toggleable via `POST /api/admin/jobs/{jobId}/enable\|disable` (instant takes effect on next tick). |
+| Enabled | `sprk_enabled` | Yes/No | Master enable/disable. Will be toggleable fleet-wide via `POST /api/admin/jobs/{jobId}/enable\|disable`. |
 | Config JSON | `sprk_configjson` | Multiline text | Handler-specific configuration JSON. Each `IScheduledJob` implementation owns its schema. For example, `notification-playbook-scheduler` reads no fields from here (its config lives on each `sprk_analysisplaybook` row); `membership-reconciliation` reads no fields from here either (its config lives in `appsettings.json` under `Membership:Reconciliation` — see below). |
 | Display name | `sprk_displayname` | Text | Updates the value returned in admin endpoints. Cosmetic. |
 | Description | `sprk_description` | Multiline text | Updates the value returned in admin endpoints. Cosmetic. |
@@ -349,17 +366,17 @@ Edit these fields directly in the model-driven Dataverse maker portal (or via th
 | `0 8 * * 1-5` | Weekdays at 08:00 UTC |
 | `0 0 1 * *` | First of every month at midnight UTC |
 
-All cron expressions are evaluated in **UTC**. Cronos's [cron reference](https://github.com/HangfireIO/Cronos) is the canonical source for syntax details. If the expression is unparseable, the host logs an error, leaves `sprk_lastrunstatus` untouched, and returns `nextScheduledOn = null` in the admin listing — the operator can spot the broken row and fix it.
+All cron expressions are evaluated in **UTC**. Cronos's [cron reference](https://github.com/HangfireIO/Cronos) is the canonical source for syntax details. If the expression is unparseable, the host logs an error and returns `nextScheduledOn = null` in the admin listing — the job never fires until the registration is fixed.
 
 **6-field syntax** (with seconds field) is supported for internal high-frequency jobs (tests, watchdogs); production jobs are expected to stick to 5-field minute-precision.
 
-### Host-level configuration (BFF `appsettings.json` / App Service settings)
+### Host-level configuration (`ScheduledJobHostOptions`)
 
 These settings control the framework's overall behavior; they apply to all jobs and rarely need to be changed:
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `ScheduledJobHostOptions.RefreshInterval` | `1 hour` | How often the host re-reads `sprk_backgroundjob` rows to pick up new / disabled / cron-changed jobs without a restart. Admin enable/disable triggers an immediate refresh in addition to the periodic one. |
+| `ScheduledJobHostOptions.RefreshInterval` | `1 hour` | How often the host re-reads its job store to pick up new / disabled / cron-changed definitions without a restart. Admin enable/disable triggers an immediate refresh on the serving instance in addition to the periodic one. |
 | `ScheduledJobHostOptions.ShutdownDrainTimeout` | `30 seconds` (NFR-07) | How long `StopAsync` waits for in-flight jobs to observe cancellation and complete before the host force-exits. |
 | `ScheduledJobHostOptions.MaxLoopSleep` | `1 hour` | Maximum time the scheduling loop sleeps between checks. Defends against pathological cron expressions whose next-fire is far in the future. |
 | `ScheduledJobHostOptions.RetryPolicy.MaxAttempts` | `3` | Total attempts including the first call (so: first call + 2 retries). |
@@ -368,7 +385,7 @@ These settings control the framework's overall behavior; they apply to all jobs 
 
 These are POCO defaults baked into `ScheduledJobHostOptions`. They are not bound from `appsettings.json` by default — overriding them today requires a code change to the DI registration (`PostConfigure<ScheduledJobHostOptions>`). The defaults match the R3 spec and are conservative for current production volumes.
 
-**Membership reconciliation** has its own `appsettings.json` section that controls which entity types the recon scans:
+**Membership reconciliation** has its own `appsettings.json` section that controls which entity types the recon scans, its cron and whether it is enabled (read at startup, when the job is seeded):
 
 ```json
 {
@@ -396,19 +413,21 @@ When an `IScheduledJob.ExecuteAsync` invocation throws, the host applies a per-j
 
 - **Default**: 3 attempts total (1 initial + 2 retries).
 - **Delay schedule**: 5 seconds before attempt 2; 10 seconds before attempt 3 — formula `BaseDelay * 2^(attempt-1)`, capped at `MaxDelay = 2 minutes`.
-- **No jitter** — the in-process scheduler has exactly one caller per job per tick, so deterministic delays are easier to reason about than randomized ones.
+- **No jitter** — each host dispatches a job once per tick, so deterministic delays are easier to reason about than randomized ones. (Note that "once per tick" is per instance today — see below.)
 
-After 3 failed attempts, the run is recorded as `status = "Failed"`, the final exception's message is written to `sprk_backgroundjobrun.sprk_errormessage`, and the message is denormalized to `sprk_backgroundjob.sprk_lastrunerror` for parent-row visibility. The job's next scheduled tick proceeds normally — retries are bounded to the current tick; the cron cadence is the macro-level retry.
+After 3 failed attempts, the run is recorded as `status = "Failed"` and the final exception's message is written to the run record, where `/status` surfaces it as `recentRuns[0].errorMessage`. (Target state: also written to `sprk_backgroundjobrun.sprk_errormessage` and denormalized to `sprk_backgroundjob.sprk_lastrunerror`.) The job's next scheduled tick proceeds normally — retries are bounded to the current tick; the cron cadence is the macro-level retry. ADR-036 A1 §3 sets when a job should throw (so the host retries) versus record failures and complete.
 
-### Idempotency on host restart
+### Duplicate runs and idempotency
 
-When the BFF restarts in the middle of a scheduled tick (App Service recycle, deploy, crash), the framework prevents a duplicate run of the same scheduled occurrence:
+**Today there is no cross-instance or cross-restart de-duplication.** Specifically:
 
-1. Before dispatching a tick, the host calls `IBackgroundJobStore.HasRunForScheduledTimeAsync(jobId, scheduledFireUtc)`.
-2. If a row already exists for the `(jobId, scheduledFireUtc)` pair (regardless of status — `Running`, `Succeeded`, `Failed`, `Cancelled`), the host **skips dispatch** and logs the dedupe.
-3. If no row exists, the host records a fresh run-start row and proceeds.
+1. Before dispatching a tick, the host calls `IBackgroundJobStore.HasRunForScheduledTimeAsync(jobId, scheduledFireUtc)` and skips dispatch if its store already holds a run for that `(jobId, scheduledFireUtc)` pair.
+2. With `InMemoryBackgroundJobStore` that store is **this process's memory**. It is empty after a restart, so the probe cannot see a run from before one; and within a running process the scheduling loop has already advanced past a fired tick, so the probe never has anything to catch. It is inert for its stated purpose (ADR-036 A1 §2).
+3. **Every App Service instance and every deployment slot runs its own `ScheduledJobHost`**, each dispatching every tick. With two instances, each scheduled job runs twice per tick.
 
-The `scheduledFireUtc` value is the cron-derived scheduled fire time (matched at second precision or better), persisted on the `sprk_backgroundjobrun.sprk_scheduledfireon` column. It is `null` for `ManualAdmin` and `OnStartup` triggers — those do **not** participate in tick-level idempotency, which is intentional (an admin who clicks "Run Now" twice in 5 minutes expects two runs).
+What keeps this safe today is that each shipped job is **idempotent per unit of work** (ADR-036 A1 §3.3, §5). The fix — a distributed lease taken before dispatch, so one instance runs each tick, and a slot guard so non-production slots do not run jobs — is `unified-access-control-r2` task 103 (ADR-036 A1 §3.1–3.2).
+
+Manual triggers (`ManualAdmin`) and `OnStartup` runs carry no `scheduledFireUtc` and never participate in tick-level de-duplication, which is intentional (an admin who clicks "Run Now" twice in 5 minutes expects two runs).
 
 ### Cancellation and shutdown drain
 
@@ -419,7 +438,7 @@ Every `IScheduledJob` implementation must honor the `CancellationToken` passed t
 3. The host waits up to **30 seconds** (`ShutdownDrainTimeout`, per NFR-07) for in-flight runs to observe cancellation and return.
 4. If the 30-second window expires with jobs still running, the host logs a warning ("NFR-07 ceiling reached — N job(s) still running") and exits anyway.
 
-In-flight runs that are cancelled return `JobRunResult.Success = false`, `ErrorMessage = "Cancelled by host shutdown (NFR-07)"`. The host writes the completion record using `CancellationToken.None` so the row persists even on shutdown.
+In-flight runs that are cancelled return `JobRunResult.Success = false`, `ErrorMessage = "Cancelled by host shutdown (NFR-07)"`. The host writes the completion record using `CancellationToken.None` so the record is written even on shutdown — though with the in-memory store it is lost with the process.
 
 ---
 
@@ -427,15 +446,17 @@ In-flight runs that are cancelled return `JobRunResult.Success = false`, `ErrorM
 
 | Symptom | Likely Cause | Fix |
 |---|---|---|
-| Job is not running on its schedule | `enabled` is false, OR the cron expression is unparseable, OR the BFF host is not running | Check `GET /api/admin/jobs/{jobId}/status`. If `enabled = false`, call `POST .../enable`. If `nextScheduledOn = null` despite `enabled = true`, the cron expression is invalid — fix it on the Dataverse row (check BFF App Service logs for the `CronFormatException` warning). If the host itself is down, check `GET /healthz`. |
-| `nextScheduledOn` is `null` for an enabled job | Cron expression is unparseable | Open the `sprk_backgroundjob` row in Dataverse and verify `sprk_cronschedule`. Test with [crontab.guru](https://crontab.guru/) for the human-readable interpretation. |
+| Job is not running on its schedule | `enabled` is false on the instance you checked, OR the cron expression is unparseable, OR the BFF host is not running | Check `GET /api/admin/jobs/{jobId}/status`. If `enabled = false`, call `POST .../enable` (serving instance only) or restart to restore the registration default. If `nextScheduledOn = null` despite `enabled = true`, the cron expression is invalid — it is set in code, so file a bug (check BFF App Service logs for the `CronFormatException` warning). If the host itself is down, check `GET /healthz`. |
+| `nextScheduledOn` is `null` for an enabled job | Cron expression is unparseable | The cron is set at registration in code (or `Membership:Reconciliation:CronSchedule` for the recon). Test the expression with [crontab.guru](https://crontab.guru/) and fix the registration. |
 | Job always fails | Read `recentRuns[0].errorMessage` from `/status` | If the message references Dataverse timeout or throttling, check the BFF's connection health and Service Bus throttle counters. If it references a code path / null reference / parse error, file a bug with the correlation id from the run record. |
 | HTTP 403 on `/api/admin/jobs/*` | Token does not have the `SystemAdmin` policy | The endpoint uses the same policy as `RagEndpoints`'s bulk-indexing admin group. Verify the user's role assignment includes the `SystemAdmin` claim. |
-| HTTP 404 on enable / disable | `jobId` is registered as a handler but has no `sprk_backgroundjob` row | This is rare — typically means the seed hosted service hasn't run yet (race on startup) or the developer registered the handler without seeding. Check BFF startup logs for "Seeded BackgroundJobDefinition" messages. |
-| Manual trigger returns 202 but `/status` never updates | The run is still in progress | Jobs run on a background task; poll `/status` every few seconds. For long-running jobs (recon, large fan-out), expect minutes. The `recentRuns[0].status` flips from `"InProgress"` to `"Succeeded"` / `"Failed"` when complete. |
-| Duplicate runs after a deploy | Should not happen due to `HasRunForScheduledTimeAsync` idempotency check | If you do see two `sprk_backgroundjobrun` rows with the same `sprk_scheduledfireon` for the same `sprk_backgroundjob`, file a bug — the idempotency probe is not working as expected. Inspect App Service logs for "idempotency dedupe" messages on the affected tick. |
+| HTTP 404 on enable / disable | `jobId` is registered as a handler but has no definition in the store | This is rare — typically means the seed hosted service hasn't run yet (race on startup) or the developer registered the handler without seeding. Check BFF startup logs for "Seeded BackgroundJobDefinition" messages. |
+| Manual trigger returns 202 but `/status` never updates | The run is still in progress, or the poll reached a different instance | Jobs run on a background task; poll `/status` every few seconds. For long-running jobs (recon, large fan-out), expect minutes. The run is recorded only on the instance that served the trigger. |
+| History is empty or shorter than expected | The instance restarted (deploy, recycle, scale-in) or the request reached a different instance | Expected today: run history is in-memory and per instance. Use App Insights / BFF logs by `JobId` + `CorrelationId` for durable history. |
+| Duplicate runs for one scheduled tick | Several App Service instances or deployment slots are running the scheduler | **Expected today** — each instance dispatches every tick; per-unit idempotency keeps the effects single. The lease and slot guard land with `unified-access-control-r2` task 103. If a job's side effects are duplicated (not just its run), file a bug against that job's idempotency. |
+| A disabled job ran anyway | `disable` reached one instance; another instance, a slot, or a restarted instance ran it | Expected today — see [Scenario 2](#scenario-2-a-buggy-job-needs-to-be-paused-pending-fix) for a durable stop. |
 | Host shutdown takes longer than 30s | A job is not honoring the `CancellationToken` | Read the BFF logs for "NFR-07 ceiling reached — N job(s) still running" warnings. Identify the slow job by the in-flight count + correlation id. The job's `IScheduledJob.ExecuteAsync` implementation needs to check `CancellationToken.IsCancellationRequested` at every await boundary. |
-| Notification playbooks dispatched for "skipped" playbooks | A playbook's individual schedule (in `sprk_configjson.schedule`) said it wasn't due | Read the parent run's `sprk_resultjson` — children with `status: "Skipped"` are intentional. The scheduler ran the hourly tick but the individual playbook's `frequency = "daily"` and `lastRun` was less than 24 hours ago. |
+| Notification playbooks dispatched for "skipped" playbooks | A playbook's individual schedule said it wasn't due | Children with `status: "Skipped"` in the parent run's `ResultJson` are intentional — the scheduler ran the hourly tick but the individual playbook's `frequency = "daily"` and `lastRun` was less than 24 hours ago. `ResultJson` is not returned by the admin endpoints; check the BFF logs by correlation id. |
 
 ### Verifying the framework is healthy
 
@@ -446,10 +467,11 @@ A 30-second smoke test:
 curl -s https://spe-api-dev-67e2xz.azurewebsites.net/healthz
 # Expected: "Healthy"
 
-# 2. List jobs — should return both seeded jobs
+# 2. List jobs — should return the three seeded jobs
 curl -s -H "Authorization: Bearer {token}" \
   https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs | jq '.[] | .jobId'
 # Expected:
+#   "external-grant-expiry-reminders"
 #   "membership-reconciliation"
 #   "notification-playbook-scheduler"
 
@@ -464,6 +486,7 @@ curl -s -H "Authorization: Bearer {token}" \
   https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/jobs/notification-playbook-scheduler/status \
   | jq '.recentRuns[0]'
 # Expected: status flips from "InProgress" to "Succeeded" within a few seconds
+# (on a multi-instance plan, retry if the poll reaches a different instance)
 ```
 
 ---
@@ -472,31 +495,32 @@ curl -s -H "Authorization: Bearer {token}" \
 
 | Item | Dev (spaarkedev1) | UAT | Prod |
 |---|---|---|---|
-| Dataverse entities (`sprk_backgroundjob`, `sprk_backgroundjobrun`) | Deployed | Pending Dataverse schema deploy | Pending Dataverse schema deploy |
-| `Spaarke.Scheduling` library + `ScheduledJobHost` hosted service | Live on BFF | Pending BFF deploy | Pending BFF deploy |
-| Admin endpoints (`/api/admin/jobs/*`) | Live, `SystemAdmin`-gated | Pending BFF deploy | Pending BFF deploy |
-| Seeded jobs (`notification-playbook-scheduler`, `membership-reconciliation`) | Both seeded at host startup, both enabled | Pending BFF deploy | Pending BFF deploy |
+| Dataverse entities (`sprk_backgroundjob`, `sprk_backgroundjobrun`) | Deployed, **unused** | Pending Dataverse schema deploy | Pending Dataverse schema deploy |
+| `Spaarke.Scheduling` library + `ScheduledJobHost` hosted service | Live on BFF (every instance and slot; no lease) | Pending BFF deploy | Pending BFF deploy |
+| Admin endpoints (`/api/admin/jobs/*`) | Live, `SystemAdmin`-gated, per instance | Pending BFF deploy | Pending BFF deploy |
+| Seeded jobs (`notification-playbook-scheduler`, `membership-reconciliation`, `external-grant-expiry-reminders`) | Seeded at host startup, all enabled | Pending BFF deploy | Pending BFF deploy |
 | Run-history backing store | In-memory (process-local; lost on App Service restart) | In-memory | In-memory |
 
-**About the in-memory store**: the early-wave R3 ships with an in-memory `IBackgroundJobStore` implementation. The framework still records every run, but the history is process-local — an App Service recycle wipes it. The next wave swaps in a Dataverse-backed store that writes to `sprk_backgroundjob` / `sprk_backgroundjobrun`, at which point history becomes durable. The swap is a single-line DI change; no operator action is needed beyond redeploying the BFF after the swap lands.
+**About the in-memory store**: `InMemoryBackgroundJobStore` is the only `IBackgroundJobStore` implementation. The framework records every run, but the history is process-local — an App Service recycle wipes it, and each instance holds its own. **No Dataverse-backed store exists yet** (deferred — ADR-036 A1 §6, GitHub issue filed by `unified-access-control-r2` task 102); building it is real work (durable history, fleet-wide enable/disable), not a one-line swap.
 
 **UAT / Prod onboarding** requires:
 
-1. Run the idempotent Dataverse schema scripts ([`Create-BackgroundJobEntity.ps1`](../../scripts/Create-BackgroundJobEntity.ps1) + [`Create-BackgroundJobRunEntity.ps1`](../../scripts/Create-BackgroundJobRunEntity.ps1)) against the target environment.
-2. Add both entities to the active unmanaged Spaarke solution (per ADR-027).
-3. Deploy the BFF (no `appsettings.json` changes required — defaults are spec-correct).
-4. Run the [verifying the framework is healthy](#verifying-the-framework-is-healthy) smoke test.
+1. *(Optional today — the tables are unused until the Dataverse store ships.)* Run the idempotent Dataverse schema scripts ([`Create-BackgroundJobEntity.ps1`](../../scripts/Create-BackgroundJobEntity.ps1) + [`Create-BackgroundJobRunEntity.ps1`](../../scripts/Create-BackgroundJobRunEntity.ps1)) against the target environment and add both entities to the active unmanaged Spaarke solution (per ADR-027).
+2. Deploy the BFF (no `appsettings.json` changes required — defaults are spec-correct).
+3. Run the [verifying the framework is healthy](#verifying-the-framework-is-healthy) smoke test.
+4. Until task 103 lands, expect each scheduled job to run once per App Service instance and per running deployment slot.
 
 ---
 
 ## Future Roadmap
 
-- **Dataverse-backed run-history store** — replaces the in-memory store so run records survive App Service restarts.
-- **Opportunistic migration of the remaining 26 `BackgroundService` implementations** — tracked under the future project **`scheduled-jobs-migration`** (Wave 28 will scaffold). The existing services keep their bespoke patterns until touched; no big-bang migration. Queue-consumer services (`ServiceBusJobProcessor` family) are intentionally out of scope — they are event-driven, not schedule-driven, and have a different shape.
-- **Cron-expression validator helper in the admin endpoints** — today, an invalid cron expression is logged and `nextScheduledOn` returns `null`; future work will add a pre-save validator endpoint so operators get immediate feedback when editing `sprk_cronschedule` in Dataverse.
+- **Distributed lease + slot guard** — one dispatch per schedule across instances, and no scheduled jobs on non-production slots (`unified-access-control-r2` task 103; ADR-036 A1 §3.1–3.2).
+- **Dataverse-backed job store** — durable run history and fleet-wide enable/disable, making the `sprk_backgroundjob*` tables live (ADR-036 A1 §6).
+- **Migration of the remaining timer `BackgroundService` implementations** — **when next touched** ([ADR-052](../adr/ADR-052-workload-placement.md) §1), held by an ArchTest ratchet; tracked under the future project **`scheduled-jobs-migration`**. Queue-consumer services (`ServiceBusJobProcessor` family) are out of scope — they are ADR-004 work, not schedule-driven.
+- **Cron-expression validator helper in the admin endpoints** — pre-save feedback for operators once cron is tunable in Dataverse.
 - **Slack / Teams notification on job failure** — future hook into the run-completion path so a failed run pings a configured channel.
 - **Per-playbook "Run Now"** — today `POST .../notification-playbook-scheduler/trigger` runs the whole scheduler (all 7 playbooks for all users). A follow-up will optionally accept a `playbookId` in the request body to fan out only one playbook.
 
 ---
 
-*Admin guide for the `Spaarke.Scheduling` background-job framework. See also: [Architecture](../architecture/background-workers-architecture.md) | [ADR-036 concise](../../.claude/adr/ADR-036-background-job-infrastructure.md) | [ADR-036 full](../adr/ADR-036-background-job-infrastructure.md) | [`sprk_backgroundjob`](../data-model/sprk_backgroundjob.md) | [`sprk_backgroundjobrun`](../data-model/sprk_backgroundjobrun.md)*
+*Admin guide for the `Spaarke.Scheduling` background-job framework. See also: [Architecture](../architecture/background-workers-architecture.md) | [ADR-036 concise](../../.claude/adr/ADR-036-background-job-infrastructure.md) | [ADR-036 full](../adr/ADR-036-background-job-infrastructure.md) | [ADR-052](../adr/ADR-052-workload-placement.md) | [`sprk_backgroundjob`](../data-model/sprk_backgroundjob.md) | [`sprk_backgroundjobrun`](../data-model/sprk_backgroundjobrun.md)*

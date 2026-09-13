@@ -1,3 +1,6 @@
+> **APPLIED 2026-09-13 (task 102 steps 3–4).** The canonical text is in the amended ADRs (001/004/013/036) and
+> `.claude/constraints/bff-extensions.md`. This draft is history — do not edit it to change policy.
+
 # Draft v2 — ADR amendments + key directive rewrites for ADR-052 (task 102)
 
 > **Status**: DRAFT v2 — revised after the Fable-tier adversarial review (2026-09-12). Awaiting owner approval.

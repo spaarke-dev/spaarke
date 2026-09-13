@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Ai.Export;
 
 /// <summary>
 /// DOCX export service using OpenXML SDK.
-/// Implements ADR-001 (BFF pattern) - runs in-process, no Azure Functions.
+/// Implements ADR-001 (BFF pattern) - runs in-process within the export request (placement per ADR-052).
 /// Handles large documents (100+ pages) efficiently via streaming generation.
 /// </summary>
 public partial class DocxExportService : IExportService

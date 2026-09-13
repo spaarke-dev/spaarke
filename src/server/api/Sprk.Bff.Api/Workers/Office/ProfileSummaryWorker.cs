@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Workers.Office;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Per ADR-001, this worker uses BackgroundService pattern (not Azure Functions).
+/// Runs in the BFF as a BackgroundService (placement decided under ADR-052).
 /// Per ADR-004, handlers are idempotent using IdempotencyKey for duplicate detection.
 /// </para>
 /// <para>

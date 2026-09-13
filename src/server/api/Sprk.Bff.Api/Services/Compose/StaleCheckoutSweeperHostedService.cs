@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </para>
 ///
 /// <para>
-/// <b>ADR-001</b> BackgroundService pattern (in-process async work; no Azure Functions).
+/// <b>ADR-052</b> Runs in the BFF as a BackgroundService (in-process async work).
 /// <b>ADR-010</b> DI minimalism: registered once via
 /// <c>services.AddHostedService&lt;StaleCheckoutSweeperHostedService&gt;()</c> in
 /// <see cref="Sprk.Bff.Api.Infrastructure.DI.ComposeModule"/>. Uses

@@ -12,8 +12,8 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 
 ## Index of ADRs (001–020)
 
-- [ADR-001: Minimal API + BackgroundService; do not use Azure Functions](./ADR-001-minimal-api-and-workers.md)
-  Establishes the single runtime: Minimal API for sync calls, BackgroundService workers for async via Service Bus.
+- [ADR-001: Minimal API as the single BFF runtime](./ADR-001-minimal-api-and-workers.md)
+  Establishes the single BFF runtime: Minimal API for sync calls. Where background work runs is [ADR-052](./ADR-052-workload-placement.md); inside the BFF, queue work follows ADR-004 and scheduled work ADR-036 (Amendment A1, 2026-09-12).
 
 - [ADR-002: Keep Dataverse plugins thin; no orchestration in plugins](./ADR-002-no-heavy-plugins.md)
   Plugins do validation/projection only. No HTTP/Graph calls or long-running logic; orchestration sits in the BFF/workers.
@@ -72,6 +72,11 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 - [ADR-020: Versioning Strategy (APIs, Jobs, and Client Packages)](./ADR-020-versioning-strategy-apis-jobs-client-packages.md)
   SemVer and compatibility rules across endpoints, job payloads, and shared packages.
 
+## Later ADRs (selected — the full list is [INDEX.md](./INDEX.md))
+
+- [ADR-052: Workload placement — the BFF, Azure Functions, or Container Apps Jobs](./ADR-052-workload-placement.md)
+  Where background, scheduled and event-driven work runs, decided per workload on stated signals and costs. The only full statement of the placement rule.
+
 ## Guides
 
 - **[SDAP_Architecture_Simplification_Guide.md](SDAP_Architecture_Simplification_Guide.md)**  
@@ -82,7 +87,7 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 
 ## Enforcement and guardrails
 
-- CI should fail on reintroduction of Azure Functions/WebJobs packages or attributes ([ADR-001]).
+- CI fails on Azure Functions, WebJobs or Durable Task packages, or Function-attributed methods, **inside the BFF assembly** ([ADR-001]). Where background work runs is decided per workload ([ADR-052]); `WorkloadPlacementDocDriftTests` fails on contradicting placement phrasings.
 - Controllers/handlers must not reference Graph SDK types; storage calls route through `SpeFileStore` ([ADR-007]).
 - Authorization is performed via endpoint filters/policy handlers that call `AuthorizationService` ([ADR-008]).
 - Redis is the only cross-request cache; do not introduce hybrid L1 unless profiling drives an ADR update ([ADR-009]).
@@ -131,6 +136,7 @@ Claude Code skill providing guidance for the ADR set with contextual explanation
 
 ## Change log
 
+- 2026-09-12: ADR-001 amended (A1) — Minimal API as the single BFF runtime; where background work runs moved to the new ADR-052 (listed under Later ADRs).
 - 2025-12-12: Added ADR-014..ADR-020 (AI caching, governance, backpressure, job status, feature flags, error standards, versioning).
 - 2025-12-02: Implemented hybrid ADR validation (NetArchTest + Claude Code skill) covering the ADR set. Added ADR-011 (Dataset PCF) and ADR-012 (Shared components).
 - 2025-09-27: Initial publication of consolidated ADRs (001–010) and guides with README.
