@@ -244,3 +244,111 @@ All 8 pass (`dotnet test --filter "FullyQualifiedName~OfficeMatterType"`).
 - Live-dev "5 active matter types" was verified read-only (§3); the deployed BFF route itself was not
   hit against live dev (only through the local test host + unit tests) — no deployment was performed in
   this task.
+
+---
+
+## 8. Coordinator follow-up 1 (2026-09-13): the initial-load failure was a dead end — Retry fix
+
+**Finding** (code-review Warning 1, addressed on the coordinator's instruction): `fetchMatterTypes`
+swallowed every failure to `[]`, and `SaveFlow`'s effect fetched exactly once on mount. A transient
+BFF/Dataverse error or a network drop on that ONE call made the required Matter Type field permanently
+unsatisfiable for the rest of the pane session — Matter quick-create was effectively dead until reload.
+That blocks a core action on a transient fault.
+
+**Fix**:
+- `matterTypeLookupService.fetchMatterTypes` now **throws** on a non-2xx response, a network failure,
+  or a malformed body, instead of swallowing to `[]`. This is the load-bearing change: it lets the
+  caller tell "the call failed" apart from "the call succeeded and the table has zero active rows" —
+  two states that need different UI (a Retry affordance vs. a quiet "none configured" note).
+- `SaveFlow.tsx` replaced its one-shot mount effect with a `loadMatterTypes` `useCallback` (guarded by
+  a mounted-ref, so a stale response never sets state after unmount) that is invoked once on mount AND
+  is the exact function passed down as `onRetryMatterTypes` — the SAME code path serves the initial
+  load and every retry, so there is no second, drifting implementation to keep in sync.
+- `RelatedToPicker.tsx` renders three MUTUALLY EXCLUSIVE states for the Matter Type field, gated on
+  `matterTypesLoading` / `matterTypesError` / `matterTypeOptions.length`: (1) loading → the Dropdown's
+  placeholder reads "Loading matter types…" and it is disabled (never an empty-looking-final
+  dropdown); (2) a genuine failure → a `role="alert"` message plus a **Retry** button (hidden while
+  loading, so a click can't be double-fired mid-request — "one user-initiated retry at a time"); (3) a
+  successful load with zero configured rows → the pre-existing quiet "No matter types are available
+  right now." note. The Create button's existing disabled-until-a-type-is-chosen logic needed NO
+  change — an empty `matterTypeOptions` (whichever of the three states caused it) already leaves
+  `selectedMatterTypeId` unset.
+- The failure message is announced via `useAnnounce('...', 'assertive')` in `SaveFlow.loadMatterTypes`
+  (NFR-11) — the one state change here a screen-reader user could otherwise miss entirely, since the
+  field just becomes a disabled, silent dropdown.
+- Project/Invoice quick-create reads none of `matterTypesLoading`/`matterTypesError` — the block that
+  renders them is gated on `selectedType === 'Matter'` in `RelatedToPicker`, unchanged from before this
+  fix. Verified by a dedicated test (§10).
+
+**No auto-retry loop**: there is no interval, no retry-on-mount-again — the ONLY way `loadMatterTypes`
+runs a second time is the user clicking Retry (or, per §9 below, a cache-clearing warning making the
+NEXT call a live fetch instead of a cache hit — still user-initiated, via the next create attempt or
+pane reopen, never a background loop).
+
+## 9. Coordinator follow-up 2 (2026-09-13): owner decision — keep the route, add a cache
+
+**Owner decision (2026-09-13)**: keep `GET /api/office/search/matter-types` as built (§2's decision
+stands — no route-shape change was made or requested), and cache the list in the pane so repeat opens
+don't call the BFF.
+
+**Rationale, as relayed by the coordinator**: matter-type ids ARE preserved across environments by
+`scripts/Migrate-DataverseData.ps1`, so a hard-coded five-row list client-side WAS a real option (unlike
+most reference data, this one wouldn't have silently drifted between a customer's dev/UAT/prod
+environments). The owner chose the live call plus a cache instead specifically so that a **new or
+customer-added matter type appears without an add-in redeploy** — a hard-coded list would require a
+code change + release every time an admin added a type via `sprk_mattertype_ref`, while the live+cache
+approach picks it up on the next uncached load.
+
+**Implementation** (`matterTypeLookupService.ts`):
+- **Cache only successful, non-empty results.** `setCachedEntry` returns immediately (writes nothing)
+  when `items.length === 0`. A failed call already throws before reaching the cache-write path at all
+  (§8's fix). This is deliberate: an empty or failed result cached would defeat the Retry fix — a retry
+  would just re-serve the same absence from cache instead of trying the network again.
+- **Scope**: an in-memory `let memoryCache` (module-level — lives for the page/pane session) checked
+  first, then `window.localStorage` under the key `spaarke.officeAddin.matterTypes.v1`
+  (`{ fetchedAt, items }`), TTL ~24h (`24 * 60 * 60 * 1000` ms). A localStorage hit is PROMOTED into
+  `memoryCache` so the next call in the same session skips `localStorage` entirely.
+- **Every `localStorage` read and write is wrapped in try/catch** (`readLocalStorageCache`,
+  `writeLocalStorageCache`, `removeLocalStorageCache`) — storage can throw inside the Office webview
+  (quota, disabled storage, a privacy mode). A throw, or a malformed stored value (bad JSON, wrong
+  shape, a non-string id/name/code), is treated identically to "no cache" — the caller falls through to
+  a live fetch. Never a broken field over a storage fault.
+- **Invalidation**: an expired entry (`Date.now() - fetchedAt >= TTL`) is NOT returned by
+  `getFreshCachedEntry`, so it triggers a fresh fetch. **A stale entry is NOT served while refetching**
+  (no stale-while-revalidate) — kept simple per the coordinator's "optional" framing; noting the choice
+  here as asked. `clearMatterTypesCache()` (exported) empties both memory and `localStorage`
+  unconditionally; `SaveFlow.createRelatedRecord` calls it when a Matter quick-create response's
+  warnings match `warningsIndicateMatterTypeNotFound` (case-insensitive "matter type" + "not found" —
+  deliberately NOT matched against the distinct "…could not be checked…" transient warning, which does
+  not mean the type is invalid and must not evict a good cache entry). Per the coordinator's literal
+  ask, this ONLY clears the cache for the next fetch (the pane's next open, or this session's next
+  uncached call) — it does not force an immediate in-session re-fetch of the currently-rendered list;
+  noting that as a deliberate scope decision, not an oversight.
+- Placement: kept inside the existing `matterTypeLookupService.ts` (no new file) — the cache is an
+  implementation detail of "fetch the matter types," not a separate component; CLAUDE.md §11 extend
+  question answered "yes, extend the existing fetch function" with no new service/DI surface created.
+
+## 10. Tests added for the two coordinator follow-ups
+
+- `shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts` (new, 11 tests): cached
+  entry served with no second fetch within the TTL; the SAME holds across a `jest.resetModules()`
+  reload (a real pane reopen) because `localStorage` — unlike the in-memory cache — survives it; an
+  expired entry refetches; `localStorage` throwing on every access still yields a working fetch; a
+  malformed stored value is ignored; a failed fetch is not cached; a successful-but-empty result is not
+  cached; `clearMatterTypesCache` empties both layers; `warningsIndicateMatterTypeNotFound`'s three
+  cases (matches, does not match the transient warning, does not match no-warnings).
+- `RelatedToPicker.matterType.test.tsx` gained a second `describe` block (4 tests): a failed load shows
+  the error + Retry with Create disabled; the loading state never looks like an empty final dropdown
+  and offers no Retry to double-click; a Retry that transitions loading → success lets the user pick a
+  type and create (via `rerender` simulating the prop transitions a real retry drives); Project
+  quick-create is unaffected by a Matter-types failure.
+- `SaveFlow.matterTypeQuickCreate.test.tsx` gained one end-to-end test: a Matter Type cache is seeded
+  directly, the pane is proven to serve the dropdown from it (`/search/matter-types` is asserted never
+  called), a "not found" warning comes back from the quick-create call, and `localStorage`'s entry is
+  asserted gone afterward. The file's `beforeEach` now calls `clearMatterTypesCache()` for full
+  cross-test isolation (the two original tests do not seed or assert on the cache and are unaffected).
+
+All new/changed test files: 23/23 pass together (multiple runs); the 18 gated suites remain 277/277;
+the two pre-existing suites most exposed to `SaveFlow.tsx`/`RelatedToPicker.tsx` changes
+(`SaveFlow.test.tsx` + `EntityPicker.test.tsx`) remain an EXACT match to their documented baselines
+(13 failed / 44 passed / 57 total) — zero regression from either follow-up.

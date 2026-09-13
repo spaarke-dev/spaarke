@@ -11,7 +11,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { RelatedToPicker, type CreateRecordResult } from '../RelatedToPicker';
+import { RelatedToPicker, type CreateRecordResult, type RelatedToPickerProps } from '../RelatedToPicker';
 import type { EntityType } from '../../hooks/useEntitySearch';
 import type { MatterTypeChoice } from '../../services/matterTypeLookupService';
 
@@ -34,14 +34,22 @@ Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: 
 // this file avoids that flakiness without touching shared jest config.
 jest.setTimeout(20000);
 
-function renderPicker(props: {
+type PickerOverrides = Partial<
+  Pick<
+    RelatedToPickerProps,
+    | 'allowedTypes'
+    | 'defaultType'
+    | 'matterTypeOptions'
+    | 'matterTypesLoading'
+    | 'matterTypesError'
+    | 'onRetryMatterTypes'
+  >
+> & {
   onCreateRecord: jest.Mock<Promise<CreateRecordResult | null>, [EntityType, string, string?]>;
-  allowedTypes?: EntityType[];
-  defaultType?: EntityType;
-  matterTypeOptions?: MatterTypeChoice[];
-}) {
-  const onChange = jest.fn();
-  render(
+};
+
+function pickerElement(props: PickerOverrides, onChange: jest.Mock) {
+  return (
     <FluentProvider theme={webLightTheme}>
       <RelatedToPicker
         value={null}
@@ -52,10 +60,21 @@ function renderPicker(props: {
         allowedTypes={props.allowedTypes ?? ['Matter', 'Project', 'Invoice']}
         defaultType={props.defaultType ?? 'Matter'}
         matterTypeOptions={props.matterTypeOptions ?? MATTER_TYPES}
+        {...(props.matterTypesLoading !== undefined ? { matterTypesLoading: props.matterTypesLoading } : {})}
+        {...(props.matterTypesError !== undefined ? { matterTypesError: props.matterTypesError } : {})}
+        {...(props.onRetryMatterTypes ? { onRetryMatterTypes: props.onRetryMatterTypes } : {})}
       />
     </FluentProvider>
   );
-  return { onChange };
+}
+
+function renderPicker(props: PickerOverrides) {
+  const onChange = jest.fn();
+  const { rerender } = render(pickerElement(props, onChange));
+  return {
+    onChange,
+    rerender: (next: PickerOverrides) => rerender(pickerElement(next, onChange)),
+  };
 }
 
 async function openCreateForm(name: string) {
@@ -135,6 +154,118 @@ describe('RelatedToPicker — required Matter Type on Matter quick-create (task 
     await openCreateForm('New Project Name');
 
     expect(screen.queryByText('Matter Type')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(onCreateRecord).toHaveBeenCalledWith('Project', 'New Project Name', undefined);
+  });
+});
+
+describe('RelatedToPicker — a failed matter-types load is recoverable, not a dead end (coordinator fix, 2026-09-13)', () => {
+  it('a failed load shows the error and a Retry action, and Create stays disabled', async () => {
+    const onCreateRecord = jest.fn();
+    const onRetryMatterTypes = jest.fn();
+    renderPicker({
+      onCreateRecord,
+      matterTypeOptions: [],
+      matterTypesLoading: false,
+      matterTypesError: "Couldn't load matter types. Try again, or search for an existing record instead.",
+      onRetryMatterTypes,
+    });
+
+    await openCreateForm('New Matter Name');
+
+    const error = screen.getByText("Couldn't load matter types. Try again, or search for an existing record instead.");
+    expect(error).toHaveAttribute('role', 'alert');
+    // The genuine-empty-table note must NOT also show — the two states are mutually exclusive.
+    expect(screen.queryByText('No matter types are available right now.')).toBeNull();
+
+    expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetryMatterTypes).toHaveBeenCalledTimes(1);
+    expect(onCreateRecord).not.toHaveBeenCalled();
+  });
+
+  it('while loading (including during a retry) the field shows a loading state, never an empty-looking final dropdown, and there is no Retry button to double-click', async () => {
+    const onCreateRecord = jest.fn();
+    const onRetryMatterTypes = jest.fn();
+    renderPicker({
+      onCreateRecord,
+      matterTypeOptions: [],
+      matterTypesLoading: true,
+      matterTypesError: null,
+      onRetryMatterTypes,
+    });
+
+    await openCreateForm('New Matter Name');
+
+    expect(screen.getByRole('combobox', { name: 'Matter Type' })).toHaveTextContent('Loading matter types…');
+    expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByText('No matter types are available right now.')).toBeNull();
+  });
+
+  it('a Retry that succeeds lets the user pick a type and create — the field recovers fully', async () => {
+    const created: CreateRecordResult = {
+      record: { id: 'm-3', entityType: 'Matter', logicalName: 'sprk_matter', name: 'New Matter Name' },
+    };
+    const onCreateRecord = jest.fn().mockResolvedValue(created);
+    const onRetryMatterTypes = jest.fn();
+    const { onChange, rerender } = renderPicker({
+      onCreateRecord,
+      matterTypeOptions: [],
+      matterTypesLoading: false,
+      matterTypesError: "Couldn't load matter types. Try again, or search for an existing record instead.",
+      onRetryMatterTypes,
+    });
+
+    await openCreateForm('New Matter Name');
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetryMatterTypes).toHaveBeenCalledTimes(1);
+
+    // The parent (SaveFlow) re-fetches: loading, then success — simulated here as the prop transitions
+    // a real retry drives.
+    rerender({ onCreateRecord, matterTypeOptions: [], matterTypesLoading: true, matterTypesError: null });
+    expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeDisabled();
+
+    rerender({ onCreateRecord, matterTypeOptions: MATTER_TYPES, matterTypesLoading: false, matterTypesError: null });
+
+    expect(
+      screen.queryByText("Couldn't load matter types. Try again, or search for an existing record instead.")
+    ).toBeNull();
+    const dropdown = screen.getByRole('combobox', { name: 'Matter Type' });
+    expect(dropdown).toBeEnabled();
+
+    await userEvent.click(dropdown);
+    await userEvent.click(screen.getByRole('option', { name: 'Litigation' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(onCreateRecord).toHaveBeenCalledWith('Matter', 'New Matter Name', '11aed095-30da-f011-8406-7ced8d1dc988');
+    expect(onChange).toHaveBeenCalledWith(created.record);
+  });
+
+  it('Project quick-create is unaffected by a matter-types load failure', async () => {
+    const created: CreateRecordResult = {
+      record: { id: 'p-2', entityType: 'Project', logicalName: 'sprk_project', name: 'New Project Name' },
+    };
+    const onCreateRecord = jest.fn().mockResolvedValue(created);
+    renderPicker({
+      onCreateRecord,
+      defaultType: 'Project',
+      matterTypeOptions: [],
+      matterTypesLoading: false,
+      matterTypesError: "Couldn't load matter types. Try again, or search for an existing record instead.",
+    });
+
+    await openCreateForm('New Project Name');
+
+    expect(screen.queryByText('Matter Type')).toBeNull();
+    expect(
+      screen.queryByText("Couldn't load matter types. Try again, or search for an existing record instead.")
+    ).toBeNull();
     expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));

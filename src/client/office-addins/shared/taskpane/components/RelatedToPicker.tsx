@@ -107,6 +107,7 @@ const useStyles = makeStyles({
   ctrlBtn: { flexShrink: 0 },
   emptyNote: { color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} 0` },
   matterTypeField: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
+  matterTypeErrorRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   fieldError: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
   fieldWarning: { color: tokens.colorPaletteDarkOrangeForeground1, fontSize: tokens.fontSizeBase200 },
 });
@@ -139,6 +140,14 @@ export interface RelatedToPickerProps {
   matterTypeOptions?: MatterTypeChoice[];
   /** Whether `matterTypeOptions` is still loading (disables the dropdown, shows a loading placeholder). */
   matterTypesLoading?: boolean;
+  /**
+   * A readable message when the matter-type list failed to load — distinct from "loaded, zero active
+   * rows" (coordinator fix, 2026-09-13). Renders a non-blocking notice with a Retry action; the field
+   * stays required (and Create stays disabled) either way.
+   */
+  matterTypesError?: string | null;
+  /** Re-fetches the matter-type list (the Retry action). Absent → no Retry button is rendered. */
+  onRetryMatterTypes?: () => void;
   disabled?: boolean;
 }
 
@@ -172,6 +181,8 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   defaultType = 'Matter',
   matterTypeOptions = [],
   matterTypesLoading = false,
+  matterTypesError = null,
+  onRetryMatterTypes,
   disabled = false,
 }) => {
   const styles = useStyles();
@@ -432,10 +443,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
               setSelectedMatterTypeId(data.optionValue ?? '');
               setMatterTypeError(null);
             }}
-            disabled={disabled || creating || matterTypesLoading}
+            disabled={disabled || creating || matterTypesLoading || !!matterTypesError}
             aria-label="Matter Type"
             aria-required="true"
-            aria-invalid={!!matterTypeError}
+            aria-invalid={!!matterTypeError || !!matterTypesError}
           >
             {matterTypeOptions.map(mt => (
               <Option key={mt.id} value={mt.id} text={mt.name}>
@@ -443,10 +454,25 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
               </Option>
             ))}
           </Dropdown>
-          {!matterTypesLoading && matterTypeOptions.length === 0 && (
+          {/* A failed load and "zero active rows, loaded fine" are different states (coordinator fix,
+              2026-09-13): only the genuine empty-table case gets the quiet note; a failure gets its
+              own message + Retry below, and the two never show at once. */}
+          {!matterTypesLoading && !matterTypesError && matterTypeOptions.length === 0 && (
             <Text size={200} className={styles.emptyNote}>
               No matter types are available right now.
             </Text>
+          )}
+          {!matterTypesLoading && matterTypesError && (
+            <div className={styles.matterTypeErrorRow}>
+              <Text size={200} className={styles.fieldError} role="alert">
+                {matterTypesError}
+              </Text>
+              {onRetryMatterTypes && (
+                <Button appearance="outline" size="small" onClick={() => onRetryMatterTypes()}>
+                  Retry
+                </Button>
+              )}
+            </div>
           )}
           {matterTypeError && (
             <Text size={200} className={styles.fieldError} role="alert">

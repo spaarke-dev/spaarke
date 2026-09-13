@@ -10,6 +10,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SaveFlow } from '../SaveFlow';
+import { clearMatterTypesCache } from '../../services/matterTypeLookupService';
+
+const MATTER_TYPES_CACHE_KEY = 'spaarke.officeAddin.matterTypes.v1';
 
 jest.mock('../DocumentProfileSection', () => ({ DocumentProfileSection: () => null }));
 jest.mock('../../services/SseClient', () => ({
@@ -43,6 +46,9 @@ const mockFetch = jest.fn();
 beforeEach(() => {
   jest.clearAllMocks();
   mockFetch.mockReset();
+  // Full isolation for the matter-types cache (owner decision 2026-09-13) between tests — each test
+  // that cares seeds exactly the cache state it needs.
+  clearMatterTypesCache();
   mockFetch.mockImplementation(async (url: string) => {
     const u = String(url);
     if (u.includes('/api/office/search/matter-types')) {
@@ -117,6 +123,49 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
 
       const body = await quickCreateCall('project');
       expect(body).toEqual({ name: 'Acme Project' });
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'Matter: a "not found" quick-create warning clears the matter-types cache (owner decision 2026-09-13)',
+    async () => {
+      // Seed the cache directly (deterministic regardless of other tests) and prove the picker is
+      // served from it — the search/matter-types GET must never fire.
+      window.localStorage.setItem(
+        MATTER_TYPES_CACHE_KEY,
+        JSON.stringify({
+          fetchedAt: Date.now(),
+          items: [{ id: '11aed095-30da-f011-8406-7ced8d1dc988', name: 'Litigation', code: 'LITG' }],
+        })
+      );
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes('/api/office/search/matter-types')) {
+          throw new Error('must be served from the cache, not fetched');
+        }
+        if (u.includes('/api/office/quickcreate/matter')) {
+          return json(true, 201, {
+            id: 'new-matter-2',
+            logicalName: 'sprk_matter',
+            name: 'Acme Litigation',
+            warnings: ['The selected matter type was not found; the matter was created without it.'],
+          });
+        }
+        return json(true, 200, {});
+      });
+
+      renderPane();
+
+      await userEvent.click(await screen.findByRole('button', { name: 'New' }));
+      await userEvent.type(screen.getByLabelText('New Matter name'), 'Acme Litigation');
+      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('combobox', { name: 'Matter Type' }));
+      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+      await quickCreateCall('matter');
+      await waitFor(() => expect(window.localStorage.getItem(MATTER_TYPES_CACHE_KEY)).toBeNull());
     },
     TEST_TIMEOUT_MS
   );

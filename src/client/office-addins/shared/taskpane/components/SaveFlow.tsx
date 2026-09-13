@@ -41,7 +41,12 @@ import {
 import type { DocumentIdentityState } from '../services/documentIdentityService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
-import { fetchMatterTypes, type MatterTypeChoice } from '../services/matterTypeLookupService';
+import {
+  fetchMatterTypes,
+  clearMatterTypesCache,
+  warningsIndicateMatterTypeNotFound,
+  type MatterTypeChoice,
+} from '../services/matterTypeLookupService';
 import { cleanGuid } from '../utils/cleanGuid';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
@@ -445,32 +450,56 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [relatedCandidates, setRelatedCandidates] = useState<RelatedCandidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
 
-  // Matter Type list for the required field on Matter quick-create (task 038). A small, load-once
-  // reference list (5 rows in dev) — fetched once on mount, host-neutral (NFR-10: no hostType check),
-  // never gated on a keystroke like the /search/entities typeahead.
+  // Matter Type list for the required field on Matter quick-create (task 038). A small reference list
+  // (5 rows in dev) loaded once on mount, host-neutral (NFR-10: no hostType check), never gated on a
+  // keystroke like the /search/entities typeahead.
+  //
+  // A failed load and "the table has zero active rows" are different states (coordinator fix,
+  // 2026-09-13): fetchMatterTypes THROWS on failure, so a transient BFF/network fault surfaces as
+  // `matterTypesError` — a readable, announced (NFR-11), non-blocking message with a single
+  // user-initiated Retry — rather than silently making Matter quick-create permanently unsatisfiable
+  // for the rest of the session. Project/Invoice quick-create never reads this state at all.
   const [matterTypes, setMatterTypes] = useState<MatterTypeChoice[]>([]);
   const [matterTypesLoading, setMatterTypesLoading] = useState(false);
-  useEffect(() => {
+  const [matterTypesError, setMatterTypesError] = useState<string | null>(null);
+  const matterTypesMountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      matterTypesMountedRef.current = false;
+    },
+    []
+  );
+
+  const loadMatterTypes = useCallback(async () => {
     if (isBrowserTestMode()) {
       setMatterTypes(DEMO_MATTER_TYPES);
+      setMatterTypesError(null);
       return;
     }
     if (!apiBaseUrl || !getAccessToken) return;
-    let cancelled = false;
     setMatterTypesLoading(true);
-    (async () => {
-      try {
-        const token = await getAccessToken();
-        const types = await fetchMatterTypes(apiBaseUrl, token, getAccessToken);
-        if (!cancelled) setMatterTypes(types);
-      } finally {
-        if (!cancelled) setMatterTypesLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetched once per mount, not per prop change
+    setMatterTypesError(null);
+    try {
+      const token = await getAccessToken();
+      const types = await fetchMatterTypes(apiBaseUrl, token, getAccessToken);
+      if (!matterTypesMountedRef.current) return;
+      setMatterTypes(types);
+    } catch {
+      if (!matterTypesMountedRef.current) return;
+      const message = "Couldn't load matter types. Try again, or search for an existing record instead.";
+      setMatterTypesError(message);
+      // NFR-11: the failure is announced — this is the one state change here a screen-reader user
+      // could otherwise miss entirely (the field just stays a disabled, empty-looking dropdown).
+      announce(message, 'assertive');
+    } finally {
+      if (matterTypesMountedRef.current) setMatterTypesLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apiBaseUrl/getAccessToken are stable for the pane's lifetime; announce is stable per useAnnounce
+  }, [apiBaseUrl, getAccessToken]);
+
+  useEffect(() => {
+    void loadMatterTypes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetched once per mount; loadMatterTypes is re-invoked explicitly by the Retry action, not by a dependency change
   }, []);
 
   // ── FR-11 save mode (task 024) ──────────────────────────────────────────────────────────────────
@@ -720,6 +749,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           name: string;
           warnings?: string[];
         };
+        // The chosen matterTypeId didn't resolve (renamed/removed on the server since this pane's
+        // cache was populated) — clear the cache so the NEXT fetch (a later create, or the pane's next
+        // open) picks up the current reference table rather than serving the same stale entry again.
+        if (type === 'Matter' && warningsIndicateMatterTypeNotFound(data.warnings)) {
+          clearMatterTypesCache();
+        }
         return {
           record: { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name },
           ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
@@ -948,6 +983,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               defaultType="Matter"
               matterTypeOptions={matterTypes}
               matterTypesLoading={matterTypesLoading}
+              matterTypesError={matterTypesError}
+              onRetryMatterTypes={loadMatterTypes}
               disabled={isSaving}
             />
           </div>
