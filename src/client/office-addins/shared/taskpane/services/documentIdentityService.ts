@@ -1,5 +1,6 @@
 import { apiClient, ApiClientError } from '@shared/services';
 import { cleanGuid } from '../utils/cleanGuid';
+import { ACCESS_SYSTEM_FAILURE_REASON_CODE } from '../utils/errorMessages';
 
 /**
  * documentIdentityService.ts
@@ -79,6 +80,14 @@ export type DocumentIdentityOutcome =
       message: string;
     };
 
+/**
+ * The Save tab's view of the open document's identity (task 024 / FR-11): `'checking'` while resolution
+ * is in flight — Save must wait, because a create in that window could mint a duplicate record — and the
+ * settled {@link DocumentIdentityOutcome} afterwards. Call sites use `undefined` for "identity does not
+ * apply" (a host without `canGetDocumentUrl`, i.e. Outlook).
+ */
+export type DocumentIdentityState = 'checking' | DocumentIdentityOutcome;
+
 /** @internal Response shape returned by the BFF resolver. */
 interface BffRelatedRecord {
   entityType: string;
@@ -102,7 +111,7 @@ interface ForbiddenProblemDetails {
 }
 
 /** `AuthorizationService.cs` denies with this code when Dataverse is down during the authorization check. */
-const SYSTEM_FAILURE_REASON_CODE = 'sdap.access.error.system_failure';
+const SYSTEM_FAILURE_REASON_CODE = ACCESS_SYSTEM_FAILURE_REASON_CODE;
 
 const RESOLVE_IDENTITY_ENDPOINT = '/api/documents/resolve-identity';
 

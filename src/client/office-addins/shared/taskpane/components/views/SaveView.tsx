@@ -4,6 +4,7 @@ import { SaveFlow } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import type { EntityType, EntitySearchResult } from '../../hooks/useEntitySearch';
+import type { DocumentIdentityState } from '../../services/documentIdentityService';
 
 const useStyles = makeStyles({
   container: {
@@ -62,6 +63,14 @@ export interface SaveViewProps {
    * not re-resolve identity itself.
    */
   resolvedDocumentId?: string;
+  /**
+   * The open document's identity state (task 024 / FR-11), from `App`. Threaded straight through to
+   * `SaveFlow`, which decides from it whether Save defaults to a new version. `undefined` = identity does
+   * not apply (Outlook) → a plain create save, as before.
+   */
+  documentIdentity?: DocumentIdentityState;
+  /** Re-runs identity resolution for the "Check again" / "Try again" actions. */
+  onRetryDocumentIdentity?: () => void;
 }
 
 /**
@@ -97,6 +106,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
   onNavigate,
   allowedEntityTypes,
   resolvedDocumentId,
+  documentIdentity,
+  onRetryDocumentIdentity,
 }) => {
   const styles = useStyles();
 
@@ -282,6 +293,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(onNavigate ? { onNavigate } : {})}
         {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
         {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
+        {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+        {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
       />
     </div>
   );

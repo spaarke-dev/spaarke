@@ -24,7 +24,20 @@ import {
   resolveDocumentIdentity,
   applyDocumentIdentityOutcome,
   type DocumentIdentityContext,
+  type DocumentIdentityOutcome,
+  type DocumentIdentityState,
 } from './services/documentIdentityService';
+
+/**
+ * Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved context may
+ * carry either the friendly type or the Dataverse logical name depending on the Save-flow wiring; normalize
+ * defensively so both work. Module-scoped (pure) so the identity-resolution callback can depend on it
+ * without re-creating itself every render.
+ */
+function toFriendlyRegardingType(entity: string): string {
+  const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
+  return map[entity] ?? entity;
+}
 
 /**
  * `App.savedContext`'s actual shape (spaarkeai-word-add-in-r1 FR-01 / task 013). Extends the
@@ -153,8 +166,21 @@ export const App: React.FC<AppProps> = ({
   }, []);
 
   // Guards the FR-01 document-identity resolution (below) to run at most once per pane session —
-  // "do not resolve on every render" (task 013 step 6).
+  // "do not resolve on every render" (task 013 step 6). A user-initiated retry bypasses it on purpose.
   const identityResolutionAttempted = useRef(false);
+
+  // FR-11 (task 024): the open document's identity as the Save tab consumes it. Seeded 'checking' for a
+  // host that CAN resolve identity, so Save can never be pressed in the window before resolution starts —
+  // a create in that window could mint a duplicate record. `undefined` = identity does not apply (Outlook).
+  const [documentIdentity, setDocumentIdentity] = useState<DocumentIdentityState | undefined>(() => {
+    try {
+      return hostAdapter.getCapabilities().canGetDocumentUrl ? 'checking' : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  // Monotonic attempt counter: a resolution result is applied only if no newer attempt has started.
+  const identityAttemptRef = useRef(0);
 
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -226,18 +252,52 @@ export const App: React.FC<AppProps> = ({
   // to the record that the email has been Related to"). Returns a plain ok/error the view renders.
   const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net';
 
-  // Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved
-  // context may carry either the friendly type or the Dataverse logical name depending on the Save-
-  // flow wiring; normalize defensively so both work.
-  const toFriendlyRegardingType = (entity: string): string => {
-    const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
-    return map[entity] ?? entity;
-  };
+  // FR-01 document-identity resolution (task 013), now also the input to the Save tab's FR-11 save mode
+  // (task 024). Capability-gated (NFR-10) — no `hostType` conditional: Outlook's `canGetDocumentUrl` is
+  // always false, so this is a no-op there without needing to know which host it's running in.
+  //
+  // Every attempt ends in a DEFINED outcome in `documentIdentity`, which the Save tab acts on:
+  // 'resolved' defaults Save to a new version; 'new' is a plain create; 'conflict' / 'indeterminate' /
+  // 'denied' / 'error' never silently create — the user retries (`retryDocumentIdentity`) or explicitly
+  // chooses "a new document" (SaveModeSection). A superseded attempt (a retry started before an earlier
+  // one returned) is ignored, so a stale answer can never overwrite a newer one.
+  const resolveOpenDocumentIdentity = useCallback(async () => {
+    const attempt = ++identityAttemptRef.current;
+    const settle = (outcome: DocumentIdentityOutcome) => {
+      if (attempt !== identityAttemptRef.current) {
+        return;
+      }
+      setDocumentIdentity(outcome);
+      // applyDocumentIdentityOutcome is pure + independently unit-tested (documentIdentityService test
+      // suite) — it merges into the existing state (never replaces) and returns `prev` by reference,
+      // unchanged, for every non-'resolved' outcome.
+      setSavedContext(prev => applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType));
+      if (outcome.kind !== 'resolved' && outcome.kind !== 'new') {
+        console.warn(`[Spaarke] Document identity ${outcome.kind}`, outcome);
+      }
+    };
 
-  // FR-01 document-identity resolution (task 013). Capability-gated (NFR-10) — no `hostType`
-  // conditional: Outlook's `canGetDocumentUrl` is always false, so this is a no-op there without
-  // needing to know which host it's running in. Runs once per pane session, after authentication
-  // (the resolver call needs a token), so it also covers the "sign in after pane load" path.
+    setDocumentIdentity('checking');
+    try {
+      const url = await hostAdapter.getDocumentUrl();
+      if (!url) {
+        // Unsaved document (no URL yet) — a defined, expected "new document" case. No network call,
+        // per task 012's notes §2 rule 3.
+        settle({ kind: 'new', reason: 'not_cloud_document' });
+        return;
+      }
+      settle(await resolveDocumentIdentity(url));
+    } catch (err) {
+      // getDocumentUrl()/resolveDocumentIdentity() are designed not to throw for expected outcomes. An
+      // unexpected throw is an 'error' outcome — NOT "new": it says nothing about whether Spaarke already
+      // tracks this file. The pane stays usable (retry, or an explicit save-as-new).
+      console.warn('[Spaarke] Document identity resolution failed', err);
+      settle({ kind: 'error', message: err instanceof Error ? err.message : 'Document identity resolution failed.' });
+    }
+  }, [hostAdapter]);
+
+  // Runs once per pane session, after authentication (the resolver call needs a token), so it also covers
+  // the "sign in after pane load" path — "do not resolve on every render" (task 013 step 6).
   useEffect(() => {
     if (!isAuthenticated || identityResolutionAttempted.current) {
       return;
@@ -246,37 +306,13 @@ export const App: React.FC<AppProps> = ({
       return;
     }
     identityResolutionAttempted.current = true;
+    void resolveOpenDocumentIdentity();
+  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity]);
 
-    (async () => {
-      try {
-        const url = await hostAdapter.getDocumentUrl();
-        if (!url) {
-          // Unsaved document (no URL yet) — a defined, expected "new document" case. No network
-          // call, per task 012's notes §2 rule 3.
-          return;
-        }
-
-        const outcome = await resolveDocumentIdentity(url);
-
-        // applyDocumentIdentityOutcome is pure + independently unit-tested (documentIdentityService
-        // test suite) — it merges into the existing state (never replaces) and returns `prev`
-        // by reference, unchanged, for every non-'resolved' outcome.
-        setSavedContext(prev => applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType));
-
-        if (outcome.kind !== 'resolved' && outcome.kind !== 'new') {
-          // 'conflict' | 'indeterminate' | 'denied' | 'error' — a handled, non-blocking diagnostic.
-          // No UI surface owns these yet (Phase 2 tasks 021/024/026/027 do); the acceptance
-          // criterion is that the save flow stays usable regardless, so this never touches
-          // `error`/`isInitializing`.
-          console.warn(`[Spaarke] Document identity ${outcome.kind}`, outcome);
-        }
-      } catch (err) {
-        // Defensive: getDocumentUrl()/resolveDocumentIdentity() are designed not to throw for
-        // expected outcomes, but a resolution failure must never block the pane.
-        console.warn('[Spaarke] Document identity resolution failed', err);
-      }
-    })();
-  }, [isAuthenticated, hostAdapter]);
+  // "Check again" / "Try again" in the Save tab (task 024).
+  const retryDocumentIdentity = useCallback(() => {
+    void resolveOpenDocumentIdentity();
+  }, [resolveOpenDocumentIdentity]);
 
   const handleCreateTodo = useCallback(
     async (input: CreateTodoInput): Promise<CreateTodoResult> => {
@@ -496,6 +532,11 @@ export const App: React.FC<AppProps> = ({
             // Task 021 / FR-07: thread task 013's resolved document identity into the Profile
             // section rather than re-resolving it there.
             {...(savedContext?.documentId ? { resolvedDocumentId: savedContext.documentId } : {})}
+            // Task 024 / FR-11: the identity STATE (not just the resolved id) decides the save mode —
+            // version by default when resolved; conflict / indeterminate / denied / error never create
+            // silently. The retry re-runs task 013's resolution.
+            {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+            onRetryDocumentIdentity={retryDocumentIdentity}
             getAccessToken={async () => {
               // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
               // scope argument (see AuthService.ts) — removed as dead code.

@@ -1280,12 +1280,55 @@ public sealed class OfficeVersionSaveWorld
             GenericUpdates.Add((id, fields));
             if (!Documents.TryGetValue(id, out var row))
                 return;
-            if (fields.TryGetValue("sprk_canonicaldocument", out var link) && link is DBNull)
-                row.CanonicalDocumentId = null;
+            if (fields.TryGetValue("sprk_canonicaldocument", out var link))
+            {
+                // DBNull = the graduation sever; an EntityReference = the editable-copy LINK (task 028), which
+                // task 024's override test reads back from the row.
+                if (link is DBNull)
+                    row.CanonicalDocumentId = null;
+                else if (link is Microsoft.Xrm.Sdk.EntityReference reference)
+                    row.CanonicalDocumentId = reference.Id;
+            }
             if (fields.TryGetValue("sprk_canonicalhash", out var hash) && hash is string h)
                 row.CanonicalHash = h;
         }
     }
+
+    /// <summary>
+    /// The one query shape the save path's content dedup issues (task 024): <c>ContentDedupDetector</c>'s
+    /// canonical lookup — an ACTIVE <c>sprk_document</c> whose <c>sprk_canonicalhash</c> equals the hash and whose
+    /// <c>sprk_canonicaldocument</c> is null (a true canonical, never a hash-linked copy), top 1. Every other
+    /// query answers empty, exactly as this fixture always did. Seeded rows are active.
+    /// </summary>
+    internal Microsoft.Xrm.Sdk.EntityCollection RetrieveMultiple(Microsoft.Xrm.Sdk.Query.QueryExpression query)
+    {
+        var result = new Microsoft.Xrm.Sdk.EntityCollection();
+        if (!string.Equals(query.EntityName, DocumentEntityName, StringComparison.Ordinal))
+            return result;
+
+        var conditions = query.Criteria.Conditions;
+        var hashCondition = conditions.FirstOrDefault(c =>
+            c.AttributeName == "sprk_canonicalhash" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal);
+        var excludesLinkedCopies = conditions.Any(c =>
+            c.AttributeName == "sprk_canonicaldocument" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Null);
+        if (hashCondition is null || hashCondition.Values.Count != 1 || hashCondition.Values[0] is not string hash
+            || !excludesLinkedCopies)
+        {
+            return result;
+        }
+
+        lock (_gate)
+        {
+            var canonical = Documents.Values.FirstOrDefault(r =>
+                string.Equals(r.CanonicalHash, hash, StringComparison.Ordinal) && r.CanonicalDocumentId is null);
+            if (canonical is not null)
+                result.Entities.Add(new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, canonical.Id));
+        }
+
+        return result;
+    }
+
+    private const string DocumentEntityName = "sprk_document";
 
     // ── SPE ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -1465,9 +1508,11 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                 .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Callback((string _, Guid id, Dictionary<string, object> fields, CancellationToken _) => world.ApplyGenericUpdate(id, fields))
                 .Returns(Task.CompletedTask);
+            // Task 024: answers the content-dedup canonical lookup from the world (empty for every other query,
+            // as before), so the editable LINK a byte-identical "Save as new document" writes is observable.
             dataverse
                 .Setup(d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+                .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => world.RetrieveMultiple(query));
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverse.Object);
 
@@ -1514,5 +1559,185 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                 Options.Create(new ServiceBusOptions()),
                 sp.GetRequiredService<ILogger<OfficeJobQueue>>()));
         });
+    }
+}
+
+// =====================================================================================================
+// FR-11 — THE WORD PANE'S WIRE SHAPE (spaarkeai-word-add-in-r1 task 024)
+// =====================================================================================================
+
+/// <summary>
+/// The contract between the Word pane's <c>useSaveFlow</c> and <c>POST /api/office/save</c> for FR-11, posted as
+/// the RAW JSON the pane builds — camelCase, with the members it sends that the server model does not name
+/// (<c>documentMetadata</c>, <c>aiOptions</c>, <c>document.contentType</c>) — rather than as a server-side
+/// <see cref="SaveRequest"/>, so a drift in either side's field names fails here.
+/// </summary>
+/// <remarks>
+/// <para><b>The default (an identified document)</b> sends <c>document.existingDocumentId</c> (bare-lowercase,
+/// ADR-044) with <c>document.isNewVersion: true</c>, no <c>targetEntity</c>, and its idempotency key in BOTH the body
+/// and the <c>X-Idempotency-Key</c> header. The body key matters: the server's persistent job dedupe reads
+/// <c>SaveRequest.IdempotencyKey</c>, while the header only reaches the <c>IdempotencyFilter</c> response cache.</para>
+/// <para><b>The override</b> ("A new document") sends neither version field and a header key only — the create path,
+/// byte-for-byte as before task 024.</para>
+/// </remarks>
+[Trait("status", "repaired")]
+public class OfficeSaveAddInWireContractTests
+{
+    private static readonly byte[] InitialBytes = { 0x50, 0x4B, 0x03, 0x04, 0x31 };
+    private static readonly byte[] Revision2 = { 0x50, 0x4B, 0x03, 0x04, 0x32, 0x32 };
+    private static readonly byte[] Revision3 = { 0x50, 0x4B, 0x03, 0x04, 0x33, 0x33, 0x33 };
+
+    /// <summary>The body useSaveFlow builds for a Word Document save.</summary>
+    private static string PaneBody(byte[] bytes, string? existingDocumentId, string? bodyKey, bool withTarget = false)
+    {
+        var document = new Dictionary<string, object?>
+        {
+            ["fileName"] = "Brief.docx",
+            ["title"] = "Brief",
+            ["contentType"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ["contentBase64"] = Convert.ToBase64String(bytes),
+        };
+        if (existingDocumentId is not null)
+        {
+            document["existingDocumentId"] = existingDocumentId;
+            document["isNewVersion"] = true;
+        }
+
+        var body = new Dictionary<string, object?>
+        {
+            ["contentType"] = "Document",
+            ["triggerAiProcessing"] = true,
+            ["aiOptions"] = new { profileSummary = true, ragIndex = true, deepAnalysis = false },
+            ["documentMetadata"] = new { name = "Brief" },
+            ["document"] = document,
+        };
+        if (withTarget)
+        {
+            body["targetEntity"] = new { entityType = "Matter", entityId = Guid.NewGuid(), displayName = "Acme v. Beta" };
+        }
+        if (bodyKey is not null)
+        {
+            body["idempotencyKey"] = bodyKey;
+        }
+
+        return JsonSerializer.Serialize(body);
+    }
+
+    private static HttpRequestMessage PanePost(string json, string headerKey)
+    {
+        var message = new HttpRequestMessage(HttpMethod.Post, "/api/office/save")
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+        };
+        message.Headers.Add("X-Idempotency-Key", headerKey);
+        return message;
+    }
+
+    private static string Key(string label) => Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(label))).ToLowerInvariant();
+
+    [Fact]
+    public async Task Post_OfficeSave_PaneVersionSaveBody_Returns202_WritesAVersion_AndLeavesExactlyOneRow()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var key = Key("revision-2");
+
+        var response = await factory.CreateClient().SendAsync(
+            PanePost(PaneBody(Revision2, documentId.ToString("D"), key), key));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.Documents.Should().ContainSingle("an identified document's save produces no second row")
+            .Which.Key.Should().Be(documentId);
+        world.DocumentCreates.Should().Be(0);
+        world.SpeItems[itemId].Versions.Should().HaveCount(2);
+        world.AccessChecks.Should().ContainSingle().Which.Should().Be(documentId.ToString("D"));
+        var job = world.Jobs.Should().ContainSingle().Subject;
+        job.Name.Should().StartWith("Document Version Save - ");
+        job.IdempotencyKey.Should().Be(key, "the body key the pane sends is the server's persistent dedupe key");
+    }
+
+    [Fact]
+    public async Task Post_OfficeSave_PaneVersionSave_WithAnUppercaseId_IsCanonicalizedAtTheServerBoundary()
+    {
+        // ADR-044: the pane canonicalizes before sending, and the server does again — a typed Guid formatted "D".
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, _) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var key = Key("uppercase");
+
+        var response = await factory.CreateClient().SendAsync(
+            PanePost(PaneBody(Revision2, documentId.ToString("D").ToUpperInvariant(), key), key));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.AccessChecks.Should().ContainSingle().Which.Should().Be(documentId.ToString("D"));
+        world.DocumentCreates.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SuccessivePaneRevisions_EachWithItsOwnKey_AreEachWritten_AndAnIdenticalResendIsNot()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var id = documentId.ToString("D");
+
+        (await client.SendAsync(PanePost(PaneBody(Revision2, id, Key("r2")), Key("r2"))))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await client.SendAsync(PanePost(PaneBody(Revision3, id, Key("r3")), Key("r3"))))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted, "a different revision is a different operation");
+        world.SpeItems[itemId].Versions.Should().HaveCount(3);
+
+        // The pane re-sending the same revision sends the same key — it is de-duplicated, never re-written.
+        var resend = await client.SendAsync(PanePost(PaneBody(Revision3, id, Key("r3")), Key("r3")));
+        resend.IsSuccessStatusCode.Should().BeTrue();
+        world.SpeItems[itemId].Versions.Should().HaveCount(3, "an identical re-send writes nothing new");
+        world.Documents.Should().HaveCount(1);
+        world.DocumentCreates.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PaneRetryAfterALockedRefusal_WithTheNextAttemptKey_WritesTheVersion()
+    {
+        // The pane counts the failed attempt into its next key, so the retry is not answered with the FAILED job
+        // that the refused attempt left behind under the first key.
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        world.LockedItemIds.Add(itemId);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var id = documentId.ToString("D");
+
+        var refused = await client.SendAsync(PanePost(PaneBody(Revision2, id, Key("attempt-0")), Key("attempt-0")));
+        refused.StatusCode.Should().Be((HttpStatusCode)423);
+        world.SpeItems[itemId].Versions.Should().HaveCount(1);
+
+        world.LockedItemIds.Remove(itemId); // the user closed the other editor
+        var retried = await client.SendAsync(PanePost(PaneBody(Revision2, id, Key("attempt-1")), Key("attempt-1")));
+
+        retried.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.SpeItems[itemId].Versions.Should().HaveCount(2);
+        world.Documents.Should().HaveCount(1);
+        world.DocumentCreates.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Post_OfficeSave_PaneOverrideBody_CreatesANewRow_AndNeverEngagesTheVersionGate()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (_, seededItemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().SendAsync(
+            PanePost(PaneBody(Revision2, existingDocumentId: null, bodyKey: null, withTarget: true), Key("override")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.DocumentCreates.Should().Be(1, "the override creates a new sprk_document");
+        world.AccessChecks.Should().BeEmpty("no existingDocumentId → the version-save gate does not engage");
+        world.ReplaceCalls.Should().Be(0);
+        world.SpeItems[seededItemId].Versions.Should().HaveCount(1, "the identified document's file is untouched");
+        world.Jobs.Should().ContainSingle().Which.Name.Should().StartWith("Document Save - ");
     }
 }
