@@ -140,10 +140,9 @@ misstated ADR-001 and is withdrawn.
 - `MembershipReconciliationJob` **shipped** (registered in `MembershipModule`); it is not deferred.
 - Third consumer: `GrantExpiryReminderJob` (`unified-access-control-r2` task 100).
 
-### 5. Transitional exception (path A, bounded)
-Until task 103 merges, the three shipped jobs run under per-instance dispatch, which rule 1 forbids. They rely on
-per-unit idempotency meanwhile. The exception expires when task 103 merges, and no later than **2026-11-10**
-(task 100's go-live deadline). Recorded in the project's spec, ADR Tensions table.
+### 5. Until task 103 merges
+The three shipped jobs still dispatch once per instance and rely on per-unit idempotency (owner 2026-09-12: the
+work is in dev only, so no formal exception is recorded).
 
 ### 6. Still deferred
 `DataverseBackgroundJobStore` — durable history, fleet-wide enable/disable (GitHub issue #TBD).

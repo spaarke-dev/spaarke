@@ -153,7 +153,7 @@ Two corrections apply to THIS note:
   identity can act as through its federated credential (ADR-028 A4) — holds the SharePoint Embedded
   container-type registration grants and can perform OBO. ADR-052 v2 therefore says: a Function reuses the
   **managed identity, app-only**, and MUST NOT act as the BFF app registration (no confidential client, no OBO, no
-  user tokens, no calls to BFF endpoints). SPE access for a Function is an explicit extra grant. This narrows D2
+  user tokens, no calls to BFF endpoints). **CORRECTION (owner Q1, 2026-09-12):** in Azure the BFF's own app-only Graph/SPE calls already run as the managed identity (`GraphClientFactory`, `Graph:ManagedIdentity:Enabled=true`), so a Function reusing it gets the same app-only access with **no extra grant**; only the user-delegated OBO path is excluded, which a Function never holds anyway. Users never sign in to a Function in any option. This narrows D2
   for safety without changing its intent — **flagged to the owner**.
 - **Timer triggers can retry.** §4.2's "no retry on failure" is imprecise: `[FixedDelayRetry]` /
   `[ExponentialBackoffRetry]` are supported on timer triggers.

@@ -108,10 +108,12 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 
 ### 4. The Spaarke cost of a Function — weigh it explicitly
 
-1. **Identity and access.** Reusing the stamp's managed identity (§6) inherits its Dataverse application user,
-   Key Vault, AI Search and Service Bus assignments. It does **not** inherit access keyed to the BFF *app
-   registration* — SharePoint Embedded container-type registration grants — which a Function must be granted
-   explicitly if it needs SPE.
+1. **Identity and access.** Reusing the stamp's managed identity (§6) gives a Function everything the BFF's own
+   app-only background work can do — its Dataverse application user, SharePoint Embedded app-only access, and its
+   Key Vault, AI Search and Service Bus assignments — because in Azure the BFF's app-only calls already run as
+   that managed identity (`GraphClientFactory`, `Graph:ManagedIdentity:Enabled=true`). No new grants, nothing to
+   provision. What a Function does not get is the user-delegated (OBO) path, which it must never use (§5). Only a
+   **dedicated** identity (§6) needs grants of its own.
 2. **Code sharing.** BFF-coupled work needs its domain logic extracted into `src/server/shared/*` first.
 3. **A deployable per stamp.** A Function app, its host storage account (`AzureWebJobsStorage`, which also holds
    the timer lease), provisioning steps (Bicep, app settings, acceptance), a CI/CD path, a deploy procedure and a
@@ -148,7 +150,7 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 | Tenancy — Model 2 | A Function app per customer stamp. |
 | Tenancy — Model 1 | A shared multi-tenant Function app is acceptable. It carries the same tenant-isolation invariants as the shared BFF — `tenantId` on every AI Search query and Cosmos partition key (deployment guide §8, I1–I5) — enforced because it lives under `src/server/` (§5). |
 | Tenancy — fleet-scoped | Platform-level work that is not per customer (e.g. the provisioning control plane) runs in the platform subscription under the platform's identity, never a customer stamp's. |
-| Identity | **Reuse the stamp's user-assigned managed identity by default**; a dedicated identity only when isolation is the reason for the Function (owner approval, §10). The Function authenticates **app-only as that managed identity** (`DefaultAzureCredential` pinned by `AZURE_CLIENT_ID`). It **MUST NOT** use the identity's federated credential to act as the BFF app registration — no confidential client for the BFF app, no OBO, no accepting or exchanging user tokens — and **MUST NOT** call BFF endpoints. No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
+| Identity | **Reuse the stamp's user-assigned managed identity by default** — the identity the BFF's own app-only work already runs as, so no additional grants are needed; a dedicated identity only when isolation is the reason for the Function (owner approval, §10). The Function authenticates **app-only as that managed identity** (`DefaultAzureCredential` pinned by `AZURE_CLIENT_ID`). It **MUST NOT** use the identity's federated credential to act as the BFF app registration — no confidential client for the BFF app, no OBO, no accepting or exchanging user tokens — and **MUST NOT** call BFF endpoints. No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
 | Inbound HTTP | Webhook-shaped triggers only, and each MUST validate its sender (Graph `clientState`, Event Grid subscription validation, or an Entra app role). A Function never serves an interactive API. |
 | Deployment | Bicep inside the stamp's provisioning (Model 1 / Model 2 stacks); same repo, same CI/CD. |
 | Configuration | Key Vault references. |

@@ -33,8 +33,8 @@ choice in the Placement Justification.
 | **F4** Isolation — failure, security, release cadence | **B4** Tied to a live request (streaming, chat, sub-500 ms) |
 | **F5** Multi-step durable orchestration | |
 
-Move out of the BFF when an F-signal is material **and** outweighs the costs: SPE access keyed to the BFF app
-registration is not inherited, BFF code must be extracted to shared libraries, a deployable per stamp (app +
+Move out of the BFF when an F-signal is material **and** outweighs the costs: reusing the managed identity needs no new
+grants (the BFF's app-only work already runs as it), but BFF code must be extracted to shared libraries, a deployable per stamp (app +
 host storage + provisioning + CI/CD), and Flex cost/limits.
 
 ---
