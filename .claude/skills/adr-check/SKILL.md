@@ -167,7 +167,7 @@ FOR EACH violation:
 
 ### ✅ Compliant ADRs
 
-- ADR-001: Minimal API + BackgroundService
+- ADR-001: Minimal API BFF runtime
 - ADR-007: Graph isolation
 - [list all compliant ADRs]
 

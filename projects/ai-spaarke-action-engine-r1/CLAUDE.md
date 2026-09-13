@@ -189,7 +189,7 @@ Every BFF-touching task MUST:
 
 | ADR | Title | Why applicable |
 |-----|-------|----------------|
-| ADR-001 | Minimal API + BackgroundService | BFF placement; scheduler choice constrained |
+| ADR-001 / ADR-052 | Minimal API BFF runtime / workload placement | BFF endpoints; the scheduler host is chosen under ADR-052 |
 | ADR-002 | Thin Dataverse plugins | Action triggers via webhooks, not plugins |
 | ADR-003 | Authorization seams | Multi-surface OBO chain |
 | ADR-004 | Job Contract pattern | `ScheduledActionDispatchJobHandler` |

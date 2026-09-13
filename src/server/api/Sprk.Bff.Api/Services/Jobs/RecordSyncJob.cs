@@ -138,7 +138,7 @@ public sealed class RecordSearchDocument
 /// </para>
 ///
 /// <para>
-/// Uses BackgroundService + PeriodicTimer in the BFF (placement decided under ADR-052).
+/// Uses BackgroundService + PeriodicTimer in the BFF, governed by ADR-052 (legacy hand-rolled timer, ratchet-listed — migrates when next touched).
 /// ADR-009: Watermark stored in IDistributedCache (Redis-first).
 /// ADR-017: Exponential backoff on HTTP 429 from AI Search (3 retries max).
 /// </para>

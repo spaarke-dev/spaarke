@@ -181,7 +181,7 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 | ADR | Title | Relevance |
 |-----|-------|-----------|
-| **ADR-001** | BFF Minimal API + BackgroundService | P2b (`/narrate`) and P3 (`CreateNotificationNodeExecutor`) stay inside `Sprk.Bff.Api` (no separate services); where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) |
+| **ADR-001** | BFF Minimal API runtime | P2b (`/narrate`) and P3 (`CreateNotificationNodeExecutor`) stay inside `Sprk.Bff.Api` (no separate services); where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) |
 | **ADR-006** | UI Surface Architecture | Standalone Daily Briefing remains Vite + React 19 Code Page; Pattern D dual-use |
 | **ADR-008** | Endpoint-filter auth | `/narrate` follows existing endpoint-filter convention |
 | **ADR-010** | DI minimalism | No new BFF DI registrations needed for R2 |

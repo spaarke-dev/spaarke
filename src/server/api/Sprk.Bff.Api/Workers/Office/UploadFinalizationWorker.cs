@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Workers.Office;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Runs in the BFF as a BackgroundService (placement decided under ADR-052).
+/// Runs in the BFF as a BackgroundService, governed by ADR-052 (ADR-004 A1 §6 named non-conforming consumer).
 /// Per ADR-004, handlers are idempotent using IdempotencyKey for duplicate detection.
 /// Per ADR-007, all SPE operations go through SpeFileStore facade.
 /// </para>

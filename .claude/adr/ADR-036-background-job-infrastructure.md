@@ -62,7 +62,7 @@ A shared library `src/server/shared/Spaarke.Scheduling/` provides a uniform cont
 - **MUST (A1-6) registration**: `services.AddScheduledJob<TJob>(cron, enabled)` — one shared bootstrap, no per-job bootstrap class (helper introduced by task 103).
 - **MUST (A1-7) host-neutrality**: jobs do not depend on `ScheduledJobHost`, `IBackgroundJobStore` or `ScheduledJobRegistry` (ADR-052 §5).
 - **MUST** honor `CancellationToken` end-to-end; `ScheduledJobHost.StopAsync` drains in-flight jobs within 30s (NFR-07).
-- **MUST** apply `JobRetryPolicy` (default: 3 attempts, 5s base, 2min cap, exponential 2^(attempt-1)). It retries only when `ExecuteAsync` throws.
+- **MUST** apply `JobRetryPolicy` (default: 3 attempts; no delay before attempt 1, then `BaseDelay·2^(attempt-2)` — 5s, 10s — capped at 2min). It retries only when `ExecuteAsync` throws.
 - **MUST** register `ScheduledJobHost` as `Singleton` AND `AddHostedService(sp => sp.GetRequiredService<ScheduledJobHost>())` (singleton-identity forwarder so admin trigger and cron loop share `_inFlight` state).
 - **MUST** gate admin endpoints with `RequireAuthorization("SystemAdmin")` (Q6 — use the existing policy at [`AuthorizationModule.cs:241`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs#L241); do NOT create a new "PlatformAdmin" policy).
 - **MUST** apply `bff-extensions.md §A` (pre-merge checklist) + `§F.1` (asymmetric-registration guard) on every BFF-touching task that adds an `IScheduledJob` consumer.

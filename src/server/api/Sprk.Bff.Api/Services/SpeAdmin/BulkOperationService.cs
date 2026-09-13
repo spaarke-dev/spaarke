@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 ///   - Callers poll GET /api/spe/bulk/{operationId}/status to observe progress.
 ///   - Status records are retained in memory for <see cref="StatusRetentionMinutes"/> minutes after completion.
 ///
-/// Runs in the BFF as a BackgroundService (placement decided under ADR-052).
+/// Runs in the BFF as a BackgroundService, governed by ADR-052.
 /// ADR-007: No Graph SDK types exposed in public API surface.
 /// ADR-010: Registered as Singleton in DI; hosted via AddHostedService factory delegate.
 /// </summary>

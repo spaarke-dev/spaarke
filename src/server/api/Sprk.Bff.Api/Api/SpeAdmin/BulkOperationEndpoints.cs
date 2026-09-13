@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// Authorization: Inherited from SpeAdminEndpoints route group (RequireAuthorization + SpeAdminAuthorizationFilter).
 /// </summary>
 /// <remarks>
-/// Long-running processing runs in the BFF on a BackgroundService (placement decided under ADR-052).
+/// Long-running processing runs in the BFF on a BackgroundService, governed by ADR-052.
 /// ADR-007: No Graph SDK types in public API surface — endpoints return domain records only.
 /// ADR-008: Authorization inherited from parent route group (no global middleware).
 /// ADR-019: All errors return ProblemDetails (RFC 7807).

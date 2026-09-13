@@ -72,7 +72,7 @@ approval. Two corrections came out of checking the code:
    rule; the flat-ban patterns skip a match scoped, within the sentence, to the BFF / `Sprk.Bff.Api`. Rephrasing
    was preferred over markers for every current (non-historical) sentence.
 6. **The timer inventory matches the evaluation.** 23 `BackgroundService` subclasses in the BFF: 14 hand-rolled
-   timers (ratchet baseline 14) + 9 others (5 queue/topic consumers, a Null-Object, a work processor, a one-shot
+   timers (ratchet baseline 14) + 9 others (6 queue/topic consumers, a Null-Object, a work processor, a one-shot
    migration). All three `IScheduledJob`s are host-neutral today.
 7. **Left for the owner**: Insights Engine D-20 still records "no Durable Functions" as that project's decision —
    now marked as a project choice, not a platform rule; revisiting it is their call.
@@ -81,9 +81,60 @@ approval. Two corrections came out of checking the code:
 
 - Targeted run (session 10): 64 ADR-001 / ADR-052 tests, 63 passed; the one failure was the repository drift scan
   naming exactly two `.claude/` lines, both then fixed.
-- Full ArchTests suite + final drift scan: see § 6 (filled at Step 9).
-- Publish size: **not applicable** — no BFF runtime code changed (18 comment-only edits in `src/server`; tests).
+- Full ArchTests suite + final drift scan: see § 7 (filled at Step 9).
+- Publish size: **not applicable** — no BFF runtime code changed (comment-only edits in `src/server`, see §7; tests).
 
-## 6. Step 9 / 9.5 results
+## 6. Step 9.5 quality gates — findings and resolutions
+
+Two independent read-only reviewers (code-review; adr-check), both coverage-first.
+
+**adr-check — "pass with fixes"; no contradiction of D1–D7 or ADR-028 A4; every code claim it spot-checked held.**
+Fixed: the identity ban lacked `ClientAssertionCredential` / `ClientCertificateCredential` (High); the concise ADR's
+ADR-038 link was broken; "Proposed — Accepted when task 102 merges" would be false after merge → **ADR-052 Accepted
+2026-09-13** everywhere; Dataverse caller impersonation (ADR-028 A5) was unaddressed → explicit MUST NOT in §6 plus
+the guard (🔔 flagged to the owner — it follows from the existing §5 rule, so it tightens, never relaxes); concise
+gaps (orchestration payloads, first-Function setup items); invariant numbering (guide I2–I5 vs ArchTest I6);
+date-stamped claims that will age; stale counts and the retry formula (`JobRetryPolicy` uses `2^(attempt-2)`);
+comments across `src/server` still crediting ADR-001 with the `BackgroundService` pattern (reworded, and now a
+banned phrasing); the `.claude/adr/INDEX.md` "26 other BackgroundServices" line.
+
+**code-review — no Critical; all `src/server` edits confirmed comment-only.** Fixed: `BffScope` let a flat ban
+hide behind a later "in the BFF" (now must follow immediately); house-style `MUST NOT use` / `never use`,
+comment-prefix line wraps, underscore emphasis and `IJobHandler{T}` crefs evaded; the Durable pattern flagged
+ADR-001's own BFF-scoped rule; an unclosed marker could borrow a later closer (now paired); reason parsed beyond the
+opener; root `*.md` and `scripts/` unscanned; no assertion that a project CLAUDE.md was scanned; reparse-point loops;
+ratchet baselines were `<=` (now exact, plus an `OtherServiceBaseline`) and simple-name collisions were silent (now
+fail); the Functions-project guard only walked `src/`, only read one attribute order and one SDK (now repo-wide,
+order-insensitive, in-process SDK / WebJobs / Durable Task worker, `Directory.*.props`); rules 2 and 3 lacked
+maintenance procedures and rule 3 an owner-approved exception list; ADR-001's package rule lacked controls
+(`Adr001ControlFixtures.cs`) and the attribute scan missed return values and assembly attributes; the
+`HandlerEnvelope` comment named the wrong consumer.
+
+**Accepted as documented limits**: a timer on a direct `IHostedService` or in a shared library (none today);
+HTML emphasis; neutral "not Durable Functions" clauses; marker syntax inside code spans; `//` inside string
+literals in the identity scan.
+
+**Escalated to the owner (🔔 scope)**: not-started task POMLs in ACTIVE projects still say "No Azure Functions" —
+`ai-spaarke-action-engine-r1` tasks 001/014/022/030/040/042/070 and `sdap-SPE-admin-app-r2` task 050 (plus active
+specs). The approved scope excluded `projects/` except active CLAUDE.md, so neither editing other projects' task
+files nor widening the guard to them was done without a decision.
+
+## 7. Step 9 results
+
+- **Full ArchTests suite: 288 / 288 passed** (197 before task 102; the rest are the new rules, their controls and the
+  drift guard's theory cases).
+- **Final drift scan: 0 findings** over the whole scope. The scan asserts more than 500 files, every root kind, and at
+  least one active project's CLAUDE.md, so it cannot pass by scanning nothing.
+- **`src/server`: comment-only.** Mechanical check against `ae27527a7`: 86 changed lines in 33 files, 0 non-comment.
+- **Acceptance criteria**: all met. ADR-052 full + concise, indexed and Accepted; ADR-001/004/013/036 amended by
+  pointer; no banned phrasing outside reasoned markers; code-review / adr-check / adr-aware / task-create /
+  design-to-spec route host → ADR-052, schedule → ADR-036, queue → ADR-004; ADR-001 ArchTest message scoped and its
+  scan reads method, parameter, return and assembly attributes, with controls; the drift guard, ratchet,
+  host-neutrality and Functions-project guards all carry negative + positive controls; ADR-004 A1 withdraws the Durable
+  ban and ADR-052 §7 keeps Durable Task out of the BFF; ADR-036 A1 §5 records the dev-only interim; the admin guide
+  no longer claims Dataverse-backed behaviour; follow-ups filed (11, against 8 required); CHANGELOG entry written.
+- **Publish size: not applicable** — no BFF runtime code changed.
+- **Open for the owner (non-blocking)**: the not-started POMLs in active projects (§6); confirming the Function
+  impersonation MUST NOT (§6); Insights D-20 (§4.7).
 
 _(filled below at completion)_

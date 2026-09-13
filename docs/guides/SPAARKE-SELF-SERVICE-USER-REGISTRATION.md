@@ -501,7 +501,7 @@ To modify a template:
 
 ### DemoExpirationService
 
-- **Type**: .NET 10 `BackgroundService` (ADR-001 pattern, same structure as `DailySendCountResetService`)
+- **Type**: .NET 10 hand-rolled timer `BackgroundService` (same structure as `DailySendCountResetService`; existing debt — migrates to an `IScheduledJob` when next touched, ADR-052 §1)
 - **Schedule**: Runs daily at midnight UTC
 - **Location**: `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs`
 

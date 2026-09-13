@@ -40,6 +40,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
   formatting-proof after its first run found bold text slipping past it) and `WorkloadPlacementGuardTests`
   (timer-service ratchet at 14 · `IScheduledJob` host-neutrality · Functions-project location, references and
   app-only identity). Every rule has negative and positive controls.
+- **Step 9.5 review fixes (same task)**: the drift guard's BFF-scope exemption now needs the scope phrase
+  immediately after the match (a later "in the BFF" no longer hides a flat ban); it catches the house
+  `MUST NOT use` / `never use` style, `///`- and `#`-wrapped lines, underscore emphasis, generic-`IJobHandler` crefs,
+  and comments that still attribute the timer-service pattern to the BFF-runtime ADR; an unclosed or nested marker now exempts
+  nothing. The Functions-project guard walks the whole repository, reads any attribute order, covers the in-process
+  SDK, WebJobs and a Durable Task worker, and bans `ClientAssertionCredential` / `ClientCertificateCredential` /
+  `ClientSecretCredential` and Dataverse caller impersonation, with a reasoned owner-approved exception list. The
+  ratchet baselines are exact. ADR-052 is **Accepted** (2026-09-13) and gains an explicit "no Dataverse
+  impersonation" rule (ADR-028 A5) in the Function identity row.
 - **Follow-ups filed**: #976–#986 — timer migration, non-conforming consumers, two Service Bus defects, duplicate
   detection, MessageId gaps, `DataverseBackgroundJobStore`, atomic idempotency, the Insights Function Bicep, and
   the SPE container-type grant reconciliation.

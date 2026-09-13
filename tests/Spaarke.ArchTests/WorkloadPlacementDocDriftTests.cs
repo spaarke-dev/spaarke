@@ -35,7 +35,8 @@ public class WorkloadPlacementDocDriftTests
     //         C#/Bicep:  // adr052-drift:allow reason="..."          covers its own line
     //                    // adr052-drift:allow-begin reason="..."  ...  // adr052-drift:allow-end
     //         YAML/PS1:  the same with '#'.
-    //      A marker without a non-empty reason is itself a failure. An unclosed block is a failure.
+    //      A marker without a non-empty reason (inside the opener) is a failure. An opener that is not closed
+    //      before the next opener of its kind is a failure, and exempts nothing.
     //
     //   3. NEVER widen the path excludes to make a directive pass. The excludes are records that are not
     //      directives: .claude/archive, .claude/agent-memory, knowledge/, and projects/ other than the
@@ -45,43 +46,58 @@ public class WorkloadPlacementDocDriftTests
     //      until you do. Write multi-word patterns with \s+ between words (see BannedPhrasings).
     //
     //   5. A BFF-scoped statement ("Azure Functions are not permitted inside the BFF assembly") is ADR-001's
-    //      current rule, not drift. The flat-ban patterns therefore skip a match followed, within the same
-    //      sentence, by "inside / in / within the BFF" or "Sprk.Bff.Api" (BffScope).
+    //      current rule, not drift. The flat-ban patterns skip a match IMMEDIATELY followed by "inside / within /
+    //      in the BFF" or "Sprk.Bff.Api" (BffScope). Mentioning the BFF later in the sentence does not exempt it —
+    //      "No Azure Functions — keep everything in the BFF" is still a flat ban.
     //
-    //   Known limits: paraphrases ("in-process only") are missed; inventory statements ("zero Azure Functions
-    //   projects today") need wording that does not read as a rule, or a marker.
+    //   Known limits (accepted — a tripwire, not a parser): paraphrases ("in-process only") are missed; HTML
+    //   emphasis (<b>No</b>) is not normalised; a neutral clause such as "the Durable Task SDK, not Durable
+    //   Functions" is reported and needs rewording; marker syntax written inside a code span or fence IS parsed as
+    //   a marker, so document the syntax only in this file (which the scan excludes).
     // =============================================================================================
 
-    private const string GuardRelativePath = "tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs";
+    internal const string GuardRelativePath = "tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs";
 
     private const RegexOptions Options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
 
-    /// <summary>Not drift when the same sentence scopes the statement to the BFF assembly (ADR-001's live rule).</summary>
-    private const string BffScope = @"(?![^.\n]{0,40}\b(?:inside|in|within)\s+(?:the\s+)?(?:BFF\b|`?Sprk\.Bff\.Api))";
+    /// <summary>Not drift when the match is immediately scoped to the BFF assembly (ADR-001's live rule).</summary>
+    private const string BffScope =
+        @"(?!\s+(?:or\s+Durable\s+Task\s+packages\s+)?(?:inside|within|in)\s+(?:the\s+)?(?:BFF\b|Sprk\.Bff\.Api))";
+
+    /// <summary>Not drift when the same sentence cites ADR-052 — that is a current placement decision.</summary>
+    private const string Adr052Sentence = @"(?![^.\n]*\bADR-052\b)(?<!\bADR-052\b[^.\n]*)";
+
+    private const string CreditedToAdr001 =
+        "background work credited to ADR-001 (A1: ADR-001 is the BFF runtime; placement is ADR-052, mechanisms ADR-004 / ADR-036)";
 
     /// <summary>
-    /// Matched against the text with markdown emphasis and code ticks blanked out (same length, so line numbers
-    /// hold), and with <c>\s+</c> between words — otherwise <c>**MUST NOT** use Durable Functions</c>, a backticked
-    /// phrase, or a phrase wrapped across two lines walks straight past a literal-space pattern. That hole was found
-    /// on the first alignment pass, in decision-log lines written in bold.
+    /// Matched against the text with markdown emphasis, code ticks, edge underscores and line-comment / quote
+    /// prefixes blanked out (same length, so line numbers hold), and with <c>\s+</c> between words — otherwise
+    /// <c>**MUST NOT** use Durable Functions</c>, a backticked phrase, or a phrase wrapped across two <c>///</c>
+    /// lines walks straight past a literal-space pattern. Those holes were found on the first alignment pass and in
+    /// the task-102 code review.
     /// </summary>
     private static readonly Banned[] BannedPhrasings =
     {
         new(@"\bno\s+Azure\s+Functions\b" + BffScope, "a flat 'no Azure Functions' rule"),
         new(@"\bnot\s+Azure\s+Functions\b" + BffScope, "a flat 'not Azure Functions' rule"),
-        new(@"\bdo(?:n'?t|\s+not)\s+use\s+Azure\s+Functions\b" + BffScope, "a flat ban on Azure Functions"),
-        new(@"\bFunctions\s+are\s+(?:not\s+permitted|prohibited|forbidden|banned|discouraged)\b" + BffScope, "a flat ban on Azure Functions"),
+        new(@"\b(?:do(?:n'?t|\s+not)|MUST\s+NOT|never)\s+use\s+Azure\s+Functions\b" + BffScope, "a flat ban on Azure Functions"),
+        new(@"\bFunctions\s+(?:(?:is|are)\s+)?(?:not\s+(?:permitted|allowed)|prohibited|forbidden|banned|discouraged|MUST\s+NOT\s+be\s+used)\b" + BffScope, "a flat ban on Azure Functions"),
         new(@"\b(?:avoid|prohibit\w*)\s+(?:Azure\s+)?Functions\b" + BffScope, "a flat ban on Azure Functions"),
         new(@"Functions[^.\n]{0,80}out-of-band|out-of-band[^.\n]{0,80}Functions", "Functions scoped to 'out-of-band' work (ADR-001's superseded 2026-05-19 wording)"),
-        new(@"\b(?:no|not|never|do\s+not\s+(?:introduce|use)|don'?t\s+use|MUST\s+NOT\s+use)\s+Durable\s+Functions\b", "a Durable Functions ban (withdrawn — ADR-052 §7)"),
+        new(@"\b(?:no|not|never|do\s+not\s+(?:introduce|use)|don'?t\s+use|MUST\s+NOT\s+use)\s+Durable\s+Functions\b" + BffScope, "a Durable Functions ban (withdrawn — ADR-052 §7)"),
         new(@"Durable\s+Functions\s+\(always", "a Durable Functions ban (withdrawn — ADR-052 §7)"),
-        new(@"\bIJobHandler<", "IJobHandler<T>, a type that does not exist — the contract is the non-generic IJobHandler"),
+        new(@"\bIJobHandler(?:<|\{|&lt;)", "IJobHandler<T>, a type that does not exist — the contract is the non-generic IJobHandler"),
         new(@"event-driven\s+\(timer,\s+queue,\s+webhook\)", "the trigger deciding the host (superseded 2026-05-20 wording)"),
-        new(@"\b(?:timer|queue|webhook)[^.\n]{0,40}(?:→|->)\s+(?:Azure\s+)?Functions\b", "the trigger deciding the host"),
+        new(@"\b(?:timer|queue|webhook)[^.\n]{0,40}(?:→|->)\s+(?:Azure\s+)?Functions\b" + Adr052Sentence, "the trigger deciding the host"),
         new(@"ADR-001\s+prefers\s+in-process", "a misstatement of ADR-001 (withdrawn by ADR-036 A1)"),
         new(@"in-process\s+workers;\s+no\s+Azure\s+Functions", "a misstatement of ADR-001 (withdrawn by ADR-036 A1)"),
         new(@"default\s+to\s+BackgroundService\s+when", "ADR-001's superseded 2026-05-19 tie-breaker"),
         new(@"\(use\s+Service\s+Bus\s+\+\s+state\s+machine", "the withdrawn Durable ban's replacement clause"),
+        new(@"\bADR-001\b[^.\n]{0,30}\bBackgroundService\b", CreditedToAdr001),
+        new(@"\bBackgroundService\b[^.\n]{0,50}\bADR-001\b", CreditedToAdr001),
+        new(@"\bADR-001\b[^.\n]{0,30}\bPeriodicTimer\b", CreditedToAdr001),
+        new(@"\bADR-001\b[^.\n]{0,20}\b(?:mandate|in-process)\b", CreditedToAdr001),
     };
 
     private static readonly Regex MarkerStart =
@@ -92,6 +108,12 @@ public class WorkloadPlacementDocDriftTests
     private static readonly Regex BlockMarkerEnd = new(@"(?://|#)[ \t]*adr052-drift:allow-end\b", Options);
 
     private static readonly Regex Reason = new("reason=\"(?<r>[^\"]*)\"", Options);
+
+    /// <summary>Underscore emphasis (<c>_No_</c>) — an underscore at a word edge, never one inside an identifier.</summary>
+    private static readonly Regex EdgeUnderscore = new(@"(?<![A-Za-z0-9])_|_(?![A-Za-z0-9])", RegexOptions.CultureInvariant);
+
+    /// <summary>Line-comment, heading and quote prefixes, so a phrase wrapped across <c>///</c> lines still matches.</summary>
+    private static readonly Regex LinePrefix = new(@"(?m)^[ \t]*(?:///?|#+|>+)", RegexOptions.CultureInvariant);
 
     private const string Guidance =
         "ADR-052 is the only full statement of where background, scheduled and event-driven work runs. Rewrite each " +
@@ -116,8 +138,10 @@ public class WorkloadPlacementDocDriftTests
         Assert.True(scanned.Count > 500, $"Only {scanned.Count} files scanned — the repository walk is broken.");
         Assert.Contains("docs/adr/ADR-052-workload-placement.md", scanned);
         Assert.Contains(".claude/constraints/bff-extensions.md", scanned);
+        Assert.Contains("CLAUDE.md", scanned);
         Assert.Contains("tests/Spaarke.ArchTests/ADR001_MinimalApiTests.cs", scanned);
         Assert.Contains(scanned, f => f.StartsWith("src/server/", StringComparison.Ordinal) && f.EndsWith(".cs", StringComparison.Ordinal));
+        Assert.Contains(scanned, f => f.StartsWith("projects/", StringComparison.Ordinal) && f.EndsWith("/CLAUDE.md", StringComparison.Ordinal));
         Assert.DoesNotContain(GuardRelativePath, scanned);
 
         Assert.True(findings.Count == 0, Guidance + string.Join("\n", findings));
@@ -133,7 +157,12 @@ public class WorkloadPlacementDocDriftTests
         "This is not Azure Functions territory",
         "Do not use Azure Functions for this",
         "Don't use Azure Functions for this",
+        "MUST NOT use Azure Functions",
+        "Never use Azure Functions",
         "Azure Functions are not permitted.",
+        "Azure Functions is not permitted",
+        "Functions are not allowed",
+        "Azure Functions MUST NOT be used",
         "Functions are prohibited",
         "Avoid Azure Functions",
         "ADR-001 prohibits Functions",
@@ -144,6 +173,8 @@ public class WorkloadPlacementDocDriftTests
         "Do not use Durable Functions",
         "Violation: Durable Functions (always)",
         "Uses IJobHandler<T> per ADR-004",
+        "Implements <see cref=\"IJobHandler{T}\"/>",
+        "IJobHandler&lt;T&gt; handlers",
         "Is it event-driven (timer, queue, webhook) with no synchronous user wait?",
         "timer-driven work → Functions",
         "queue triggers -> Azure Functions",
@@ -151,6 +182,10 @@ public class WorkloadPlacementDocDriftTests
         "ADR-001: in-process workers; no Azure Functions",
         "Default to BackgroundService when the choice is close",
         "orchestration (use Service Bus + state machine instead)",
+        "Implements ADR-001 BackgroundService pattern",
+        "BackgroundService with a 24-hour timer (ADR-001 mandate)",
+        "ADR-001: BackgroundService + PeriodicTimer",
+        "ADR-001 mandate",
     };
 
     public static IEnumerable<object[]> BannedSampleData => BannedSamples.Select(s => new object[] { s });
@@ -174,14 +209,26 @@ public class WorkloadPlacementDocDriftTests
         Assert.True(uncovered.Count == 0, "Patterns with no sample in BannedSamples: " + string.Join(" | ", uncovered));
     }
 
-    [Fact(DisplayName = "ADR-052 drift guard: negative control — emphasis, code ticks and line wraps do not defeat it")]
+    [Fact(DisplayName = "ADR-052 drift guard: negative control — emphasis, code ticks, comment prefixes and line wraps do not defeat it")]
     public void NegativeControl_FormattingDoesNotDefeatTheGuard()
     {
         Assert.NotEmpty(Scan("x.md", "- **MUST NOT** use Durable Functions (D-20)\n"));
         Assert.NotEmpty(Scan("x.md", "| `No Azure Functions` | ADR-001 |\n"));
         Assert.NotEmpty(Scan("x.md", "*No* Azure Functions here.\n"));
+        Assert.NotEmpty(Scan("x.md", "_No_ Azure Functions here.\n"));
         Assert.NotEmpty(Scan("x.md", "The rule is: no\nAzure Functions for sync work.\n"));
+        Assert.NotEmpty(Scan("x.cs", "/// The worker runs in-process (no\n/// Azure Functions) for now.\n"));
+        Assert.NotEmpty(Scan("x.yml", "# no\n# Azure Functions here\n"));
+        Assert.NotEmpty(Scan("x.md", "> no\n> Azure Functions here\n"));
         Assert.NotEmpty(Scan("x.md", "Handlers implement `IJobHandler<T>`.\n"));
+    }
+
+    [Fact(DisplayName = "ADR-052 drift guard: negative control — mentioning the BFF later in the sentence does not exempt a flat ban")]
+    public void NegativeControl_ALaterBffMentionDoesNotExempt()
+    {
+        Assert.NotEmpty(Scan("x.md", "No Azure Functions — keep everything in the BFF.\n"));
+        Assert.NotEmpty(Scan("x.md", "No Azure Functions; all background work runs in the BFF.\n"));
+        Assert.NotEmpty(Scan("x.md", "No Azure Functions, everything in-process in the BFF.\n"));
     }
 
     [Fact(DisplayName = "ADR-052 drift guard: negative control — a marker without a reason is reported")]
@@ -191,9 +238,12 @@ public class WorkloadPlacementDocDriftTests
         Assert.Contains(Scan("x.md", "<!-- adr052-drift:allow reason=\"  \" -->history<!-- /adr052-drift:allow -->"), f => f.Contains("without a reason", StringComparison.Ordinal));
         Assert.Contains(Scan("x.cs", "var a = 1; // adr052-drift:allow\n"), f => f.Contains("without a reason", StringComparison.Ordinal));
         Assert.Contains(Scan("x.yml", "# adr052-drift:allow-begin\nkey: value\n# adr052-drift:allow-end\n"), f => f.Contains("without a reason", StringComparison.Ordinal));
+
+        // A reason written inside the exempted content does not count — it must be inside the opener.
+        Assert.Contains(Scan("x.md", "<!-- adr052-drift:allow -->reason=\"sneaky\"<!-- /adr052-drift:allow -->"), f => f.Contains("without a reason", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "ADR-052 drift guard: negative control — an unclosed marker is reported, and exempts nothing")]
+    [Fact(DisplayName = "ADR-052 drift guard: negative control — an unclosed or nested marker is reported, and exempts nothing")]
     public void NegativeControl_AnUnclosedMarkerIsReported()
     {
         var markdown = Scan("x.md", "<!-- adr052-drift:allow reason=\"history\" -->\nNo Azure Functions\n");
@@ -203,6 +253,14 @@ public class WorkloadPlacementDocDriftTests
         var block = Scan("x.cs", "// adr052-drift:allow-begin reason=\"history\"\n// No Azure Functions\n");
         Assert.Contains(block, f => f.Contains("unclosed", StringComparison.Ordinal));
         Assert.Contains(block, f => f.Contains("flat 'no Azure Functions'", StringComparison.Ordinal));
+
+        // An opener with no closer must not borrow the NEXT opener's closer and exempt everything in between.
+        var nested = Scan(
+            "x.md",
+            "<!-- adr052-drift:allow reason=\"a\" -->\nNo Azure Functions\n" +
+            "<!-- adr052-drift:allow reason=\"b\" -->\nquoted\n<!-- /adr052-drift:allow -->\n");
+        Assert.Contains(nested, f => f.Contains("unclosed", StringComparison.Ordinal));
+        Assert.Contains(nested, f => f.Contains("flat 'no Azure Functions'", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "ADR-052 drift guard: negative control — a marker exempts only its own region")]
@@ -245,12 +303,17 @@ public class WorkloadPlacementDocDriftTests
             "Azure Functions are not permitted inside the BFF assembly (ADR-001).",
             "The BFF has no Azure Functions or Durable Task packages inside Sprk.Bff.Api.",
             "No Azure Functions or Durable Task packages inside `Sprk.Bff.Api`.",
+            "No Durable Functions inside the BFF assembly.",
             "Where background work runs is decided per workload under ADR-052.",
             "Durable Task runs in its own host, never inside the BFF (ADR-052 §7).",
+            "Graph webhook intake -> Azure Functions (F1, per ADR-052).",
+            "Per ADR-052, webhook intake → Azure Functions.",
             "Handlers implement the non-generic `IJobHandler`.",
             "Outside a reasoned `adr052-drift:allow` region the guard fails.",
             "Queue-driven → ADR-004; schedule-driven → ADR-036.",
             "A Function reuses the stamp's managed identity, app-only.",
+            "ADR-001 (Minimal API); ADR-052 (placement of background work).",
+            "See ADR001_MinimalApiTests and __init__ helpers.",
         };
 
         foreach (var line in aligned)
@@ -265,55 +328,54 @@ public class WorkloadPlacementDocDriftTests
 
     /// <summary>
     /// Findings for one file: each banned phrasing outside a reasoned marker region, each marker without a
-    /// reason, and each unclosed marker block. Returned as <c>path:line: message</c>.
+    /// reason, and each unclosed marker. Returned as <c>path:line: message</c>.
     /// </summary>
     internal static IReadOnlyList<string> Scan(string relativePath, string text)
     {
         var findings = new List<string>();
         var regions = new List<(int Start, int End)>();
+        var markers = MarkerStart.Matches(text).Cast<Match>().ToList();
 
-        foreach (Match marker in MarkerStart.Matches(text))
+        for (var k = 0; k < markers.Count; k++)
         {
+            var marker = markers[k];
+            var kind = KindOf(marker);
             var line = LineOf(text, marker.Index);
-            var reason = Reason.Match(marker.Groups["rest"].Value);
+
+            var openerClose = kind == MarkerKind.Markdown ? text.IndexOf("-->", marker.Index, StringComparison.Ordinal) : -1;
+            var reasonScope = kind == MarkerKind.Markdown && openerClose >= 0 ? text[marker.Index..openerClose] : marker.Value;
+            var reason = Reason.Match(reasonScope);
             if (!reason.Success || string.IsNullOrWhiteSpace(reason.Groups["r"].Value))
             {
                 findings.Add($"{relativePath}:{line}: adr052-drift:allow marker without a reason — every exemption must say why the text is history");
             }
 
-            if (marker.Groups["open"].Value == "<!--")
-            {
-                var openerClose = text.IndexOf("-->", marker.Index, StringComparison.Ordinal);
-                var end = openerClose < 0 ? Match.Empty : MarkdownMarkerEnd.Match(text, openerClose + 3);
-                if (!end.Success)
-                {
-                    findings.Add($"{relativePath}:{line}: unclosed adr052-drift:allow marker — add <!-- /adr052-drift:allow -->");
-                    continue;
-                }
-
-                regions.Add((marker.Index, end.Index + end.Length));
-            }
-            else if (marker.Groups["begin"].Success)
-            {
-                var end = BlockMarkerEnd.Match(text, marker.Index + marker.Length);
-                if (!end.Success)
-                {
-                    findings.Add($"{relativePath}:{line}: unclosed adr052-drift:allow-begin marker — add adr052-drift:allow-end");
-                    continue;
-                }
-
-                regions.Add((marker.Index, end.Index + end.Length));
-            }
-            else
+            if (kind == MarkerKind.Line)
             {
                 var lineStart = text.LastIndexOf('\n', Math.Max(marker.Index - 1, 0)) + 1;
                 var lineEnd = text.IndexOf('\n', marker.Index);
                 regions.Add((lineStart, lineEnd < 0 ? text.Length : lineEnd));
+                continue;
             }
+
+            var end = kind == MarkerKind.Markdown
+                ? (openerClose < 0 ? Match.Empty : MarkdownMarkerEnd.Match(text, openerClose + 3))
+                : BlockMarkerEnd.Match(text, marker.Index + marker.Length);
+            var nextOpener = markers.Skip(k + 1).FirstOrDefault(m => KindOf(m) == kind);
+
+            if (!end.Success || (nextOpener is not null && nextOpener.Index < end.Index))
+            {
+                findings.Add($"{relativePath}:{line}: unclosed adr052-drift:allow marker — close it before the next marker of its kind opens");
+                continue;
+            }
+
+            regions.Add((marker.Index, end.Index + end.Length));
         }
 
-        // Blank out emphasis and code ticks without changing any index, so formatting cannot split a phrase.
+        // Blank formatting without changing any index, so emphasis, ticks and comment prefixes cannot split a phrase.
         var normalized = text.Replace('*', ' ').Replace('`', ' ');
+        normalized = EdgeUnderscore.Replace(normalized, " ");
+        normalized = LinePrefix.Replace(normalized, m => new string(' ', m.Length));
 
         var reportedLines = new HashSet<int>();
         foreach (var banned in BannedPhrasings)
@@ -335,6 +397,18 @@ public class WorkloadPlacementDocDriftTests
 
         return findings;
     }
+
+    private enum MarkerKind
+    {
+        Markdown,
+        Block,
+        Line,
+    }
+
+    private static MarkerKind KindOf(Match marker)
+        => marker.Groups["open"].Value == "<!--" ? MarkerKind.Markdown
+            : marker.Groups["begin"].Success ? MarkerKind.Block
+            : MarkerKind.Line;
 
     private static int LineOf(string text, int index)
     {
@@ -365,8 +439,9 @@ public class WorkloadPlacementDocDriftTests
 }
 
 /// <summary>
-/// The repository files the ADR-052 guards read. A plain walk that skips build output and package folders — a
-/// recursive <c>Directory.EnumerateFiles</c> would descend into every <c>node_modules</c> under <c>src/</c>.
+/// The repository files the ADR-052 guards read. A plain walk that skips build output, package folders and
+/// reparse points — a recursive <c>Directory.EnumerateFiles</c> would descend into every <c>node_modules</c>
+/// under <c>src/</c>, and a directory link back to an ancestor would loop.
 /// </summary>
 internal static class PlacementRepoFiles
 {
@@ -374,7 +449,7 @@ internal static class PlacementRepoFiles
 
     private static readonly HashSet<string> SkippedDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
-        "node_modules", "bin", "obj", "dist", "out", ".git", ".vs", "packages", "TestResults", "coverage",
+        "node_modules", "bin", "obj", "dist", ".git", ".vs", "TestResults", "coverage",
     };
 
     /// <summary>Not directives — see the maintenance procedure, step 3.</summary>
@@ -384,7 +459,7 @@ internal static class PlacementRepoFiles
 
     internal static string Relative(string file) => SourceScan.Relative(file).Replace('\\', '/');
 
-    /// <summary>Every file under <paramref name="root"/>, skipping build output and package folders.</summary>
+    /// <summary>Every file under <paramref name="root"/>, skipping build output, package folders and links.</summary>
     internal static IEnumerable<string> Walk(string root)
     {
         if (!Directory.Exists(root))
@@ -404,7 +479,8 @@ internal static class PlacementRepoFiles
 
             foreach (var child in Directory.EnumerateDirectories(dir))
             {
-                if (!SkippedDirectories.Contains(Path.GetFileName(child)))
+                var info = new DirectoryInfo(child);
+                if (!SkippedDirectories.Contains(info.Name) && !info.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 {
                     pending.Push(child);
                 }
@@ -417,16 +493,18 @@ internal static class PlacementRepoFiles
     {
         var repo = SourceScan.RepoRoot;
 
-        foreach (var name in new[] { "CLAUDE.md", "README.md", ".coderabbit.yaml" })
+        foreach (var rootMarkdown in Directory.EnumerateFiles(repo, "*.md"))
         {
-            var path = Path.Combine(repo, name);
-            if (File.Exists(path))
-            {
-                yield return path;
-            }
+            yield return rootMarkdown;
         }
 
-        var roots = new[] { ".claude", "docs", ".github", "src", "tests" }
+        var coderabbit = Path.Combine(repo, ".coderabbit.yaml");
+        if (File.Exists(coderabbit))
+        {
+            yield return coderabbit;
+        }
+
+        var roots = new[] { ".claude", "docs", ".github", "src", "tests", "scripts" }
             .Select(r => Path.Combine(repo, r))
             .Concat(Directory.EnumerateDirectories(repo, "infra*"));
 
@@ -441,7 +519,7 @@ internal static class PlacementRepoFiles
 
                 var relative = Relative(file);
                 if (ExcludedPrefixes.Any(p => relative.StartsWith(p, StringComparison.OrdinalIgnoreCase))
-                    || relative.Equals("tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs", StringComparison.Ordinal))
+                    || relative.Equals(WorkloadPlacementDocDriftTests.GuardRelativePath, StringComparison.Ordinal))
                 {
                     continue;
                 }

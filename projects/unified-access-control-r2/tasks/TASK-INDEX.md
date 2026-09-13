@@ -694,7 +694,7 @@ timer/queue work, and the in-process scheduler runs every job once per instance.
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 [open] 102 | Workload-placement governance — new **ADR-052** (BFF vs Azure Functions vs Container Apps Jobs), ADR-001/004/013/036 amendments, **all** documentation aligned, ADR-001 ArchTest message + scan fix, doc-drift guard, over-time issues filed | — | — | — | ❌ | **opus** | high |
+| ✅ [done] 102 | Workload-placement governance — new **ADR-052** (BFF vs Azure Functions vs Container Apps Jobs), ADR-001/004/013/036 amendments, **all** documentation aligned, ADR-001 ArchTest message + scan fix, doc-drift guard, over-time issues filed *(done 2026-09-13: ADR-052 Accepted; ArchTests 288/288; issues #976–#986; record `notes/task-102-workload-placement-governance.md`)* | — | — | — | ❌ | **opus** | high |
 | 🔲 [open] 103 | Scheduled jobs run exactly once — distributed lease in `ScheduledJobHost`, staging-slot guard, `AddScheduledJob<TJob>` helper; all three scheduled jobs migrated | — | 102 | — | ❌ | **opus** | high |
 
 > Sequence **102 → 103 → 100**. Task 100 must still be live by **2026-11-10**.

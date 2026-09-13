@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Proposed** — owner-approved direction 2026-09-12; Accepted when `unified-access-control-r2` task 102 merges |
+| Status | **Accepted** (2026-09-13) — owner-approved direction 2026-09-12 (decisions D1–D7) and identity wording 2026-09-13; lands with `unified-access-control-r2` (PR #950) |
 | Date | 2026-09-12 |
-| Updated | 2026-09-13 (identity wording: ADR-028 A4 app-only row; app-registration-bound access named; ArchTest coverage of Functions projects stated exactly) |
+| Updated | 2026-09-13 (identity wording: ADR-028 A4 app-only row, no A5 impersonation; app-registration-bound access named; ArchTest coverage of Functions projects stated exactly) |
 | Authors | Spaarke Engineering — `unified-access-control-r2` task 102 |
 | Supersedes | ADR-001's Azure Functions and Durable Functions provisions (ADR-001 Amendment A1); ADR-004's Durable Functions prohibition (ADR-004 Amendment A1) |
 | Amends | ADR-013 (placement pointers), ADR-036 (placement statement + runtime rules) |
@@ -121,8 +121,8 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
    (`GraphClientFactory` authenticates app-only as that identity when `Graph:ManagedIdentity:Enabled=true` —
    ADR-028 A4, app-only row). Nothing new to grant, and no user sign-in: users only ever authenticate to the BFF.
    SharePoint Embedded grants container-type permissions per appId, so that access exists exactly where the
-   container-type registration grants the managed identity's appId. The SPE topology guide still describes
-   granting the BFF app registration; reconciling the guide with the code is tracked in #986.
+   container-type registration grants the managed identity's appId. As of 2026-09-13 the SPE topology guide
+   describes granting the BFF app registration; reconciling the guide with the code is tracked in #986.
    **Not inherited** is anything bound to an *app registration* rather than the managed identity: the
    user-delegated (OBO) path, which a Function must never use (§5), and the BFF's separate confidential clients
    for CIAM Graph provisioning (`CiamGraphClientFactory`) and Power BI (`ReportingEmbedService`). A Function that
@@ -147,8 +147,8 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
   `IBackgroundJobStore` or `ScheduledJobRegistry`. (While jobs live in `Sprk.Bff.Api`, moving one to a Function
   still requires extracting its dependencies — host-neutrality removes the host coupling, not that work.)
 - **MUST** place a Functions project under `src/server/functions/<Name>/`, so the ArchTests that scan all of
-  `src/server/**` cover it — the credential guards and the I2/I3 tenant-isolation invariants. The I4, I5 and I6
-  invariants scan BFF and shared paths only; widening them to `src/server/functions/**` is part of the first
+  `src/server/**` cover it — the credential guards and the I2/I3 tenant-isolation tests. As of 2026-09-13 the I4,
+  I5 and I6 tests scan BFF and shared paths only; widening them to `src/server/functions/**` is part of the first
   Function's one-time setup (§10).
 
 **MUST NOT**
@@ -163,9 +163,9 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 |---|---|
 | Hosting | .NET isolated worker on **Flex Consumption**. Premium only for a named Flex limitation (owner approval, §10). |
 | Tenancy — Model 2 | A Function app per customer stamp. |
-| Tenancy — Model 1 | A shared multi-tenant Function app is acceptable. It carries the same tenant-isolation invariants as the shared BFF — `tenantId` on every AI Search query and Cosmos partition key, per-tenant SPE containers and Graph tokens (deployment guide §8, I1–I5) — enforced by the `src/server/**` ArchTests (I2/I3 today; I4–I6 once widened, §10). |
+| Tenancy — Model 1 | A shared multi-tenant Function app is acceptable. It carries the same tenant-isolation invariants as the shared BFF — `tenantId` on every AI Search query and Cosmos partition key, per-tenant SPE containers and Graph tokens (deployment guide §8, invariants I2–I5) — enforced by the `src/server/**` ArchTests (I2/I3 as of 2026-09-13; I4, I5 and the ArchTest-only I6 once widened, §10). |
 | Tenancy — fleet-scoped | Platform-level work that is not per customer (e.g. the provisioning control plane) runs in the platform subscription under the platform's identity, never a customer stamp's. |
-| Identity | **Reuse the stamp's user-assigned managed identity by default** — attach the UAMI the BFF runs as (Model 1: the shared BFF UAMI; Model 2: the stamp UAMI) and authenticate **app-only** as it (`DefaultAzureCredential` pinned to the UAMI's client ID, e.g. `AZURE_CLIENT_ID`). This is ADR-028 A4's **app-only** row, so it needs no new grants (§4). The Function **MUST NOT** use A4's **confidential-client** row: no MSAL confidential client, no managed-identity client assertion to act as the BFF app registration, no OBO, no accepting or exchanging user tokens. (The UAMI is technically able to mint that assertion, so the Functions-project ArchTest bans those types under `src/server/functions/**`.) It **MUST NOT** call BFF endpoints. A dedicated identity only when isolation is the reason for the Function, or when it needs access bound to another app registration (owner approval, §10). No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
+| Identity | **Reuse the stamp's user-assigned managed identity by default** — attach the UAMI the BFF runs as (Model 1: the shared BFF UAMI; Model 2: the stamp UAMI) and authenticate **app-only** as it (`DefaultAzureCredential` pinned to the UAMI's client ID, e.g. `AZURE_CLIENT_ID`). This is ADR-028 A4's **app-only** row, so it needs no new grants (§4). The Function **MUST NOT** use A4's **confidential-client** row: no MSAL confidential client, no client-assertion or certificate credential to act as the BFF app registration, no OBO, no accepting or exchanging user tokens. It **MUST NOT** impersonate a Dataverse caller (the ADR-028 A5 `MSCRMCallerID` / `CallerObjectId` headers): that is acting as a user outside the user's request (§5). (The UAMI is technically able to mint the assertion and to send those headers, so the Functions-project ArchTest bans the confidential-client, credential, OBO and impersonation types under `src/server/functions/**`.) It **MUST NOT** call BFF endpoints. A dedicated identity only when isolation is the reason for the Function, or when it needs access bound to another app registration (owner approval, §10). No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
 | Inbound HTTP | Webhook-shaped triggers only, and each MUST validate its sender (Graph `clientState`, Event Grid subscription validation, or an Entra app role). A Function never serves an interactive API. |
 | Deployment | Bicep inside the stamp's provisioning (Model 1 / Model 2 stacks); same repo, same CI/CD. |
 | Configuration | Key Vault references. |
@@ -253,8 +253,8 @@ does not go stale as the inventory changes.
 | `WorkloadPlacementDocDriftTests` | Contradicting placement phrasings do not reappear outside marked historical regions |
 | `WorkloadPlacementGuardTests` — timer ratchet | No new hand-rolled timer `BackgroundService`; the allow-listed existing set may only shrink |
 | `WorkloadPlacementGuardTests` — host-neutrality | `IScheduledJob` implementations do not depend on `ScheduledJobHost`, `IBackgroundJobStore` or `ScheduledJobRegistry` |
-| `WorkloadPlacementGuardTests` — Functions projects | A project referencing the Functions worker SDK lives under `src/server/functions/`, does not reference `Sprk.Bff.Api`, and uses no MSAL confidential-client or managed-identity-assertion types |
-| Credential guards and I2/I3 tenant-isolation ArchTests | Cover Functions projects automatically, because they scan `src/server/**`. I4–I6 scan BFF and shared paths and are widened by the first Function's setup (§10) |
+| `WorkloadPlacementGuardTests` — Functions projects | A project referencing the Functions worker SDK lives under `src/server/functions/`, does not reference `Sprk.Bff.Api`, and uses no confidential-client, client-assertion, certificate-credential, OBO or Dataverse-impersonation types |
+| Credential guards and I2/I3 tenant-isolation ArchTests | Cover Functions projects automatically, because they scan `src/server/**`. As of 2026-09-13, I4–I6 scan BFF and shared paths and are widened by the first Function's setup (§10) |
 | Placement Justification + `code-review` / `adr-check` | Host recorded with signals and costs; routing to ADR-052 / ADR-036 / ADR-004 |
 
 **Review checklist**
@@ -262,4 +262,4 @@ does not go stale as the inventory changes.
 - [ ] Nothing that needs the caller's identity runs outside the BFF request
 - [ ] Scheduled work that must not run concurrently gets one dispatch per schedule (timer trigger or lease)
 - [ ] Handlers idempotent with an atomic per-unit claim; dead-letter queue monitored
-- [ ] For a Function: §6 guardrails met (Flex, tenancy row, managed identity app-only, no secrets, sender validation, Bicep, Key Vault, telemetry, shared code only) and §10 approval obtained where required
+- [ ] For a Function: §6 guardrails met (Flex, tenancy row, managed identity app-only, no impersonation, no secrets, sender validation, Bicep, Key Vault, telemetry, shared code only) and §10 approval obtained where required

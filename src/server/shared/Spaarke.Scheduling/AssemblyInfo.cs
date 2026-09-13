@@ -5,7 +5,7 @@
 //
 // Where scheduled work runs is ADR-052; this library is the in-BFF mechanism (ADR-036).
 // Per ADR-012: shared component library under src/server/shared/.
-// Per ADR-036 (to be authored in task 017): canonical replacement for ad-hoc
+// Per ADR-036: canonical replacement for ad-hoc
 // BackgroundService implementations across BFF (~26 candidates to migrate opportunistically).
 //
 // Depends on: Spaarke.Core (sibling shared lib) + Cronos 0.13.0 (~50KB) +

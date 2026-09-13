@@ -63,7 +63,7 @@ After deciding, load the matching samples:
 ### Step 3: Apply Spaarke contracts (ADR-013, ADR-001, ADR-009)
 
 - **ADR-013 (AI Architecture)**: Extend the BFF in-process — no separate AI microservice. Agent Framework loops live alongside `IAiToolHandler` implementations in `Sprk.Bff.Api/Services/Ai/`.
-- **ADR-001 (Minimal API + BackgroundService)**: For long-running but non-durable work (e.g., batch indexing), use `BackgroundService`. For genuinely durable (days/weeks) work with HITL: Foundry Agent Service.
+- **ADR-052 (workload placement)**: where long-running but non-durable work (e.g., batch indexing) runs is decided per workload — inside the BFF it is an ADR-004 queue job or an ADR-036 scheduled job. For genuinely durable (days/weeks) work with HITL: Foundry Agent Service, or Durable Task in its own host (ADR-052 §7).
 - **ADR-009 (Redis-first caching)**: Cache Foundry IQ retrieval results in Redis when query stability + cost matter. Do not introduce L1 in-memory cache unless profiling proves need.
 
 ### Step 4: HITL approval semantics

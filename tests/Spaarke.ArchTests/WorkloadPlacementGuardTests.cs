@@ -14,11 +14,11 @@ namespace Spaarke.ArchTests;
 ///   <item><b>Host-neutrality</b> (ADR-052 §5, ADR-036 A1 rule 7) — no <c>IScheduledJob</c> depends on
 ///   <c>ScheduledJobHost</c>, <c>IBackgroundJobStore</c> or <c>ScheduledJobRegistry</c>, so a job can move to
 ///   another host without being rewritten.</item>
-///   <item><b>Functions projects</b> (ADR-052 §5–§6) — a project referencing the Functions worker SDK lives under
-///   <c>src/server/functions/</c> (so every <c>src/server/**</c> ArchTest — credential guards, tenant-isolation
-///   invariants — covers it), never references <c>Sprk.Bff.Api</c>, and authenticates app-only as the stamp's
-///   managed identity: no MSAL confidential client and no managed-identity assertion, which is how a Function
-///   would act as the BFF app registration.</item>
+///   <item><b>Functions projects</b> (ADR-052 §5–§6) — a project that hosts Azure Functions or a Durable Task
+///   worker lives under <c>src/server/functions/</c> (so the <c>src/server/**</c> ArchTests — credential guards,
+///   tenant-isolation invariants — cover it), never references <c>Sprk.Bff.Api</c>, and authenticates app-only as
+///   the stamp's managed identity: no confidential client, client-assertion or certificate credential, OBO, or
+///   Dataverse caller impersonation — the ways a Function would act as the BFF app registration or as a user.</item>
 /// </list>
 /// <para>Per <c>tests/CLAUDE.md</c> "Structural fitness functions" this file is MAINTAIN-class: it is the
 /// mechanism, not scaffolding.</para>
@@ -37,16 +37,26 @@ public class WorkloadPlacementGuardTests
     //      IScheduledJob instead (ADR-036; .claude/patterns/api/scheduled-jobs.md). If it consumes a queue or
     //      topic, it is ADR-004 work: an IJobHandler behind ServiceBusJobProcessor. Only a genuinely different
     //      shape — once-at-startup work, a long-lived connection that is not a message consumer — belongs in
-    //      OtherBackgroundServices, with a reason and an ADR citation.
+    //      OtherBackgroundServices, with a reason and an ADR citation, and OtherServiceBaseline raised in the
+    //      same PR so the reviewer sees the addition.
     //
     //   2. ExistingTimerServices ONLY SHRINKS. When a timer service migrates to IScheduledJob (ADR-052 §1:
     //      "when next touched" — any PR changing its behaviour or its timer loop), delete its entry AND lower
-    //      TimerServiceBaseline. Never add an entry; never raise the baseline.
+    //      TimerServiceBaseline to match. Never add an entry; never raise the baseline.
     //
-    //   3. An entry naming a class that no longer exists fails InventoryHasNoStaleEntries — delete it. A stale
-    //      entry is a hole the next class of that name walks through.
+    //   3. An entry naming a class that no longer exists fails InventoryHasNoStaleEntries — delete it and lower
+    //      its baseline. A stale entry is a hole the next class of that name walks through.
+    //
+    //   4. Keys are simple type names; two BackgroundService classes sharing a simple name fail the inventory test
+    //      rather than silently sharing an entry.
+    //
+    //   Known limits: a timer on a direct IHostedService (System.Threading.Timer), or a BackgroundService in a
+    //   shared library the BFF registers, is not inventoried — none exists today (task-102 code review). Review
+    //   catches those; widen the scan if one appears.
     // =============================================================================================
     private const int TimerServiceBaseline = 14;
+
+    private const int OtherServiceBaseline = 9;
 
     private static readonly IReadOnlyDictionary<string, string> ExistingTimerServices = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -70,13 +80,13 @@ public class WorkloadPlacementGuardTests
     {
         ["ServiceBusJobProcessor"] = "Queue consumer — the ADR-004 host itself; Task.Delay(Infinite) only parks ExecuteAsync while the processor runs.",
         ["CommunicationJobProcessor"] = "Queue consumer for communication jobs (ADR-004 shape); parks on Task.Delay(Infinite).",
-        ["UploadFinalizationWorker"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6).",
-        ["ProfileSummaryWorker"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6).",
-        ["IndexingWorkerHostedService"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6).",
+        ["UploadFinalizationWorker"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6, #977).",
+        ["ProfileSummaryWorker"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6, #977).",
+        ["IndexingWorkerHostedService"] = "Office queue consumer with a bespoke message shape — a named non-conforming consumer (ADR-004 A1 §6, #977, #978).",
         ["MembershipJunctionUpdaterHost"] = "Topic consumer for sprk-membership-changes — a named non-conforming consumer (ADR-004 A1 §6, ADR-034).",
         ["NullMembershipJunctionUpdaterHost"] = "Null-Object stand-in for MembershipJunctionUpdaterHost when the topic is not configured; does no work (ADR-032).",
-        ["BulkOperationService"] = "Processes SPE bulk operations submitted through BulkOperationEndpoints; not a periodic timer (ADR-052 §1).",
-        ["EmbeddingMigrationService"] = "One-shot embedding migration started at host startup, batched with back-off delays; not a periodic timer (ADR-052 §1).",
+        ["BulkOperationService"] = "In-process work processor for SPE bulk operations queued by BulkOperationEndpoints — not a timer, so outside the ADR-052 §1 ban; listed so a new processor needs a reason.",
+        ["EmbeddingMigrationService"] = "One-shot embedding migration started at host startup, batched with back-off delays — ADR-052 §1's once-at-startup shape, not a timer.",
     };
 
     [Fact(DisplayName = "ADR-052 §1: no BackgroundService in the BFF outside the reasoned inventory (timer ratchet)")]
@@ -91,6 +101,11 @@ public class WorkloadPlacementGuardTests
             discovered.Count >= ExistingTimerServices.Count + OtherBackgroundServices.Count,
             $"Found only {discovered.Count} BackgroundService subclasses in the BFF — the detector is not seeing them.");
 
+        var shared = discovered.GroupBy(n => n, StringComparer.Ordinal).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Assert.True(
+            shared.Count == 0,
+            "Two BackgroundService classes share a simple name, so they would share one inventory entry: " + string.Join(", ", shared));
+
         var unlisted = FindUnlisted(discovered, ExistingTimerServices, OtherBackgroundServices);
         Assert.True(
             unlisted.Count == 0,
@@ -100,7 +115,7 @@ public class WorkloadPlacementGuardTests
             "BackgroundService (ADR-052 §1). See the maintenance procedure in WorkloadPlacementGuardTests.cs.");
     }
 
-    [Fact(DisplayName = "ADR-052 §1: the timer-service list only shrinks, and names no class that no longer exists")]
+    [Fact(DisplayName = "ADR-052 §1: the inventory only shrinks, matches its baselines, and names no class that no longer exists")]
     public void InventoryHasNoStaleEntries()
     {
         var discovered = BackgroundServiceTypes(ADR001_MinimalApiTests.LoadableTypes(typeof(Program).Assembly), BackgroundServiceFullName)
@@ -108,11 +123,17 @@ public class WorkloadPlacementGuardTests
             .ToHashSet(StringComparer.Ordinal);
 
         var stale = ExistingTimerServices.Keys.Concat(OtherBackgroundServices.Keys).Where(n => !discovered.Contains(n)).ToList();
-        Assert.True(stale.Count == 0, "Inventory entries naming no BFF BackgroundService — delete them (and lower TimerServiceBaseline for a timer): " + string.Join(", ", stale));
+        Assert.True(stale.Count == 0, "Inventory entries naming no BFF BackgroundService — delete them and lower the matching baseline: " + string.Join(", ", stale));
 
+        // Equality, not <=: deleting an entry without lowering the baseline would leave headroom for a future add.
         Assert.True(
-            ExistingTimerServices.Count <= TimerServiceBaseline,
-            $"ExistingTimerServices grew to {ExistingTimerServices.Count} (baseline {TimerServiceBaseline}). The list only shrinks — write an IScheduledJob instead.");
+            ExistingTimerServices.Count == TimerServiceBaseline,
+            $"ExistingTimerServices has {ExistingTimerServices.Count} entries but TimerServiceBaseline is {TimerServiceBaseline}. " +
+            "The list only shrinks: after a migration, lower the baseline to match; never add a timer — write an IScheduledJob.");
+        Assert.True(
+            OtherBackgroundServices.Count == OtherServiceBaseline,
+            $"OtherBackgroundServices has {OtherBackgroundServices.Count} entries but OtherServiceBaseline is {OtherServiceBaseline}. " +
+            "Change both in the same PR, with a reason for the entry.");
     }
 
     [Fact(DisplayName = "ADR-052 §1: every inventory entry carries a written reason and an ADR citation")]
@@ -176,10 +197,17 @@ public class WorkloadPlacementGuardTests
 
     // =============================================================================================
     // RULE 2 — IScheduledJob HOST-NEUTRALITY
+    // ---------------------------------------------------------------------------------------------
+    // MAINTENANCE PROCEDURE: a failure means a job took a dependency on the scheduler's host, store or registry.
+    // Move that dependency out — registration belongs in AddScheduledJob<TJob> (ADR-036 A1 rule 6), run state in
+    // JobRunContext / JobRunResult. Do not add an exemption: host-neutrality is what lets a job move to another host
+    // (ADR-052 §5). The ">= 3 jobs" floor exists so the rule cannot pass by selecting nothing; if jobs are
+    // legitimately removed below three, lower the floor in the same PR and say why.
     // =============================================================================================
     private static readonly string[] SchedulerHostTypes =
     {
         "Spaarke.Scheduling.ScheduledJobHost",
+        "Spaarke.Scheduling.ScheduledJobHostOptions",
         "Spaarke.Scheduling.IBackgroundJobStore",
         "Spaarke.Scheduling.InMemoryBackgroundJobStore",
         "Spaarke.Scheduling.ScheduledJobRegistry",
@@ -191,7 +219,11 @@ public class WorkloadPlacementGuardTests
         var assembly = typeof(Program).Assembly;
 
         var jobs = Types.InAssembly(assembly).That().ImplementInterface(typeof(IScheduledJob)).GetTypes().ToList();
-        Assert.True(jobs.Count >= 3, $"Found {jobs.Count} IScheduledJob implementations in the BFF — expected at least 3; the rule would pass vacuously.");
+        Assert.True(
+            jobs.Count >= 3,
+            $"Found {jobs.Count} IScheduledJob implementations in the BFF — expected at least 3 (PlaybookSchedulerJob, " +
+            "MembershipReconciliationJob, GrantExpiryReminderJob), so the rule would pass by selecting nothing. If a job " +
+            "was legitimately removed, lower the floor in the same PR.");
 
         var result = Types.InAssembly(assembly)
             .That().ImplementInterface(typeof(IScheduledJob))
@@ -235,38 +267,65 @@ public class WorkloadPlacementGuardTests
 
     // =============================================================================================
     // RULE 3 — FUNCTIONS PROJECTS: location, references, identity
+    // ---------------------------------------------------------------------------------------------
+    // MAINTENANCE PROCEDURE
+    //   1. A location failure: move the project under src/server/functions/<Name>/ — that is what brings it under
+    //      the src/server/** ArchTests (ADR-052 §5). Do not special-case another path.
+    //   2. A BFF-reference failure: extract the shared logic to src/server/shared/* (ADR-052 §6 Code row).
+    //   3. An identity failure: a Function authenticates app-only as the stamp's managed identity (ADR-052 §6).
+    //      The ONLY exception is an owner-approved dedicated identity, or access bound to another app registration
+    //      (ADR-052 §6, §10). Record it in OwnerApprovedIdentityExceptions, keyed by the file's repo-relative path,
+    //      with the approval date, the approver and the reason. Never widen the banned-type list's escape hatch in
+    //      any other way.
+    //   4. Detection covers the isolated worker, the in-process SDK, WebJobs and a standalone Durable Task worker,
+    //      in any .csproj or Directory.*.props / .targets under the repository. A new hosting SDK means a new
+    //      prefix in FunctionsHostPackage, with a control sample.
     // =============================================================================================
     private const string FunctionsRoot = "src/server/functions/";
 
-    private static readonly Regex FunctionsWorkerPackage =
-        new(@"<PackageReference\s+Include=""Microsoft\.Azure\.Functions\.Worker", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex FunctionsHostPackage = new(
+        @"<PackageReference\b[^>]*\b(?:Include|Update)\s*=\s*[""'](?:Microsoft\.Azure\.Functions\.Worker|Microsoft\.NET\.Sdk\.Functions|Microsoft\.Azure\.WebJobs|Microsoft\.DurableTask\.Worker)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex BffProjectReference =
-        new(@"<ProjectReference\s+Include=""[^""]*Sprk\.Bff\.Api\.csproj""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex BffProjectReference = new(
+        @"<(?:ProjectReference|Reference)\b[^>]*\bInclude\s*=\s*[""'][^""']*Sprk\.Bff\.Api(?:\.csproj)?[""']",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// The types a Function would need to act as an app registration rather than app-only as the managed
-    /// identity (ADR-028 A4's confidential-client row). The stamp's UAMI can mint the MI-FIC assertion for the BFF
-    /// app registration, so the rule is enforced here rather than trusted.
+    /// The types a Function would need to act as an app registration (ADR-028 A4's confidential-client row) or as a
+    /// user (ADR-028 A5 impersonation) rather than app-only as the managed identity. The stamp's UAMI can mint the
+    /// MI-FIC assertion for the BFF app registration and can send the impersonation headers, so the rule is
+    /// enforced here rather than trusted. <c>CredentialCensusTests</c> would also see a new confidential client, but
+    /// a reasoned census entry could admit it without anyone noticing that ADR-052 §6 forbids it in a Function.
     /// </summary>
-    private static readonly Regex ConfidentialClientUse =
-        new(@"\b(?:ConfidentialClientApplicationBuilder|ManagedIdentityClientAssertion|WithClientAssertion|AcquireTokenOnBehalfOf|OnBehalfOfCredential)\b", RegexOptions.CultureInvariant);
+    private static readonly Regex ConfidentialClientUse = new(
+        @"\b(?:ConfidentialClientApplicationBuilder|ManagedIdentityClientAssertion|WithClientAssertion|AcquireTokenOnBehalfOf|OnBehalfOfCredential|ClientAssertionCredential|ClientCertificateCredential|ClientSecretCredential|DataverseImpersonation|MSCRMCallerID|CallerObjectId)\b",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Owner-approved exceptions to the identity rule (ADR-052 §6 / §10), keyed by repo-relative path. Each value
+    /// must name the approval (date, approver) and the reason. Empty: no Function exists yet.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> OwnerApprovedIdentityExceptions =
+        new Dictionary<string, string>(StringComparer.Ordinal);
 
     [Fact(DisplayName = "ADR-052 §5-§6: every Functions project lives under src/server/functions/ and does not reference the BFF")]
     public void FunctionsProjectsAreWhereTheGuardsCanSeeThem()
     {
-        var csprojs = PlacementRepoFiles.Walk(Path.Combine(SourceScan.RepoRoot, "src"))
-            .Where(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        var projectFiles = PlacementRepoFiles.Walk(SourceScan.RepoRoot)
+            .Where(IsProjectOrBuildFile)
             .Select(f => (Path: PlacementRepoFiles.Relative(f), Content: File.ReadAllText(f)))
             .ToList();
 
-        Assert.True(csprojs.Count > 5, $"Found only {csprojs.Count} projects under src/ — the walk is broken.");
+        Assert.True(
+            projectFiles.Count(p => p.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) > 5,
+            "Found almost no .csproj files — the repository walk is broken.");
 
-        var findings = CheckFunctionsProjects(csprojs);
+        var findings = CheckFunctionsProjects(projectFiles);
         Assert.True(findings.Count == 0, string.Join("\n", findings));
     }
 
-    [Fact(DisplayName = "ADR-052 §6: code under src/server/functions/ authenticates app-only — no confidential client, no assertion, no OBO")]
+    [Fact(DisplayName = "ADR-052 §6: code under src/server/functions/ authenticates app-only — no confidential client, credential, OBO or impersonation")]
     public void FunctionsAuthenticateAppOnly()
     {
         // Until the first Function exists this scans nothing; the controls below are what prove the rule.
@@ -274,32 +333,55 @@ public class WorkloadPlacementGuardTests
             .Where(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
             .Select(f => (Path: PlacementRepoFiles.Relative(f), Content: File.ReadAllText(f)));
 
-        var findings = CheckFunctionsIdentity(sources);
+        var findings = CheckFunctionsIdentity(sources, OwnerApprovedIdentityExceptions);
         Assert.True(findings.Count == 0, string.Join("\n", findings));
     }
 
-    [Fact(DisplayName = "ADR-052 §5-§6: negative control — a misplaced project, a BFF reference and a confidential client are each flagged")]
+    [Fact(DisplayName = "ADR-052 §6: every owner-approved identity exception names its approval and reason")]
+    public void EveryIdentityExceptionIsExplained()
+    {
+        var unexplained = OwnerApprovedIdentityExceptions
+            .Where(e => e.Value.Length < 40 || !e.Value.Contains("owner", StringComparison.OrdinalIgnoreCase) || !e.Value.Contains("ADR-052", StringComparison.Ordinal))
+            .Select(e => e.Key)
+            .ToList();
+
+        Assert.True(unexplained.Count == 0, "Identity exceptions without an owner approval, a reason and an ADR-052 citation: " + string.Join(", ", unexplained));
+    }
+
+    [Fact(DisplayName = "ADR-052 §5-§6: negative control — misplaced projects, BFF references and forbidden credentials are each flagged")]
     public void FunctionsGuard_NegativeControl_FiresOnEachViolation()
     {
-        var misplaced = CheckFunctionsProjects(new[] { ("src/server/api/Sprk.Sync/Sprk.Sync.csproj", WorkerProject(string.Empty)) });
-        Assert.Contains(misplaced, f => f.Contains("must live under src/server/functions/", StringComparison.Ordinal));
+        var misplaced = CheckFunctionsProjects(new[]
+        {
+            ("src/server/api/Sprk.Sync/Sprk.Sync.csproj", HostProject(@"<PackageReference Include=""Microsoft.Azure.Functions.Worker"" Version=""2.0.0"" />", string.Empty)),
+            ("functions/Sprk.Sync/Sprk.Sync.csproj", HostProject(@"<PackageReference Version=""4.4.0"" Include=""Microsoft.NET.Sdk.Functions"" />", string.Empty)),
+            ("tools/Sprk.Orchestrator/Sprk.Orchestrator.csproj", HostProject(@"<PackageReference Include='Microsoft.DurableTask.Worker' Version='1.5.0' />", string.Empty)),
+            ("src/server/api/Directory.Build.props", HostProject(@"<PackageReference Update=""Microsoft.Azure.WebJobs.Extensions.ServiceBus"" Version=""5.0.0"" />", string.Empty)),
+        });
+        Assert.Equal(4, misplaced.Count(f => f.Contains("must live under src/server/functions/", StringComparison.Ordinal)));
 
         var bffReference = CheckFunctionsProjects(new[]
         {
             ("src/server/functions/Sprk.Sync/Sprk.Sync.csproj",
-             WorkerProject(@"<ProjectReference Include=""..\..\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj"" />")),
+             HostProject(@"<PackageReference Include=""Microsoft.Azure.Functions.Worker"" Version=""2.0.0"" />", @"<ProjectReference Include=""..\..\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj"" />")),
+            ("src/server/functions/Sprk.Other/Sprk.Other.csproj",
+             HostProject(@"<PackageReference Include=""Microsoft.Azure.Functions.Worker"" Version=""2.0.0"" />", @"<Reference Include=""Sprk.Bff.Api"" />")),
         });
-        Assert.Contains(bffReference, f => f.Contains("must not reference Sprk.Bff.Api", StringComparison.Ordinal));
+        Assert.Equal(2, bffReference.Count(f => f.Contains("must not reference Sprk.Bff.Api", StringComparison.Ordinal)));
 
         var identity = CheckFunctionsIdentity(new[]
         {
             ("src/server/functions/Sprk.Sync/Auth.cs",
              "var app = ConfidentialClientApplicationBuilder.Create(id)\n    .WithClientAssertion(GetAssertionAsync)\n    .Build();\n" +
-             "var obo = await app.AcquireTokenOnBehalfOf(scopes, userAssertion).ExecuteAsync();\n"),
+             "var obo = await app.AcquireTokenOnBehalfOf(scopes, userAssertion).ExecuteAsync();\n" +
+             "var asApp = new ClientAssertionCredential(tenantId, bffAppId, ct => GetMiTokenAsync(ct));\n" +
+             "var cert = new ClientCertificateCredential(tenantId, clientId, certificate);\n" +
+             "request.Headers.Add(\"MSCRMCallerID\", systemUserId.ToString());\n"),
         });
-        Assert.Contains(identity, f => f.Contains("ConfidentialClientApplicationBuilder", StringComparison.Ordinal));
-        Assert.Contains(identity, f => f.Contains("WithClientAssertion", StringComparison.Ordinal));
-        Assert.Contains(identity, f => f.Contains("AcquireTokenOnBehalfOf", StringComparison.Ordinal));
+        foreach (var banned in new[] { "ConfidentialClientApplicationBuilder", "WithClientAssertion", "AcquireTokenOnBehalfOf", "ClientAssertionCredential", "ClientCertificateCredential", "MSCRMCallerID" })
+        {
+            Assert.Contains(identity, f => f.Contains(banned, StringComparison.Ordinal));
+        }
     }
 
     [Fact(DisplayName = "ADR-052 §5-§6: positive control — the sanctioned Functions project and app-only credential pass")]
@@ -308,7 +390,7 @@ public class WorkloadPlacementGuardTests
         Assert.Empty(CheckFunctionsProjects(new[]
         {
             ("src/server/functions/Sprk.Sync/Sprk.Sync.csproj",
-             WorkerProject(@"<ProjectReference Include=""..\..\shared\Spaarke.Core\Spaarke.Core.csproj"" />")),
+             HostProject(@"<PackageReference Include=""Microsoft.Azure.Functions.Worker"" Version=""2.0.0"" />", @"<ProjectReference Include=""..\..\shared\Spaarke.Core\Spaarke.Core.csproj"" />")),
             // Not a Functions project: referencing the BFF is fine for, e.g., a test project.
             ("tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj",
              @"<Project Sdk=""Microsoft.NET.Sdk""><ItemGroup><ProjectReference Include=""..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj"" /></ItemGroup></Project>"),
@@ -323,6 +405,15 @@ public class WorkloadPlacementGuardTests
             ("src/server/api/Sprk.Bff.Api/Infrastructure/Auth/OrderedCredentialClientProvider.cs",
              "var app = ConfidentialClientApplicationBuilder.Create(id).Build();\n"),
         }));
+
+        // An owner-approved exception exempts exactly its own file.
+        var approved = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["src/server/functions/Sprk.Ciam/CiamGraph.cs"] = "Owner approval 2026-01-01 (test fixture): dedicated identity for CIAM Graph, ADR-052 §6.",
+        };
+        Assert.Empty(CheckFunctionsIdentity(
+            new[] { ("src/server/functions/Sprk.Ciam/CiamGraph.cs", "var cert = new ClientCertificateCredential(t, c, x509);\n") },
+            approved));
     }
 
     internal static IReadOnlyList<string> CheckFunctionsProjects(IEnumerable<(string Path, string Content)> projects)
@@ -330,14 +421,14 @@ public class WorkloadPlacementGuardTests
         var findings = new List<string>();
         foreach (var (path, content) in projects)
         {
-            if (!FunctionsWorkerPackage.IsMatch(content))
+            if (!FunctionsHostPackage.IsMatch(content))
             {
                 continue;
             }
 
             if (!path.StartsWith(FunctionsRoot, StringComparison.Ordinal))
             {
-                findings.Add($"{path}: a Functions project must live under src/server/functions/<Name>/ so every src/server/** ArchTest covers it (ADR-052 §5)");
+                findings.Add($"{path}: a Functions / Durable Task host project must live under src/server/functions/<Name>/ so the src/server/** ArchTests cover it (ADR-052 §5)");
             }
 
             if (BffProjectReference.IsMatch(content))
@@ -349,12 +440,15 @@ public class WorkloadPlacementGuardTests
         return findings;
     }
 
-    internal static IReadOnlyList<string> CheckFunctionsIdentity(IEnumerable<(string Path, string Content)> sources)
+    internal static IReadOnlyList<string> CheckFunctionsIdentity(
+        IEnumerable<(string Path, string Content)> sources,
+        IReadOnlyDictionary<string, string>? approvedExceptions = null)
     {
         var findings = new List<string>();
         foreach (var (path, content) in sources)
         {
-            if (!path.StartsWith(FunctionsRoot, StringComparison.Ordinal))
+            if (!path.StartsWith(FunctionsRoot, StringComparison.Ordinal)
+                || (approvedExceptions is not null && approvedExceptions.ContainsKey(path)))
             {
                 continue;
             }
@@ -364,19 +458,25 @@ public class WorkloadPlacementGuardTests
             {
                 findings.Add(
                     $"{path}:{SourceScan.LineOf(code, match.Index)}: {match.Value} — a Function authenticates app-only as the " +
-                    "stamp's managed identity (ADR-028 A4 app-only row); it never builds a confidential client, presents a " +
-                    "managed-identity assertion or performs OBO, which is how it would act as the BFF app registration (ADR-052 §6)");
+                    "stamp's managed identity (ADR-028 A4 app-only row); it never builds a confidential client or credential " +
+                    "for an app registration, performs OBO, or impersonates a Dataverse caller (ADR-052 §6). An owner-approved " +
+                    "exception goes in OwnerApprovedIdentityExceptions.");
             }
         }
 
         return findings;
     }
 
-    private static string WorkerProject(string extraItems)
-        => @"<Project Sdk=""Microsoft.NET.Sdk""><ItemGroup>" +
-           @"<PackageReference Include=""Microsoft.Azure.Functions.Worker"" Version=""2.0.0"" />" +
-           extraItems +
-           "</ItemGroup></Project>";
+    private static bool IsProjectOrBuildFile(string file)
+    {
+        var name = Path.GetFileName(file);
+        return name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+               || (name.StartsWith("Directory.", StringComparison.OrdinalIgnoreCase)
+                   && (name.EndsWith(".props", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".targets", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string HostProject(string packageItem, string extraItems)
+        => @"<Project Sdk=""Microsoft.NET.Sdk""><ItemGroup>" + packageItem + extraItems + "</ItemGroup></Project>";
 }
 
 // ---------------------------------------------------------------------------------------------------

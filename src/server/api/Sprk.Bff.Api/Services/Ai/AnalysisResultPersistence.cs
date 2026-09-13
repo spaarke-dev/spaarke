@@ -220,7 +220,7 @@ public class AnalysisResultPersistence
     /// <summary>
     /// Enqueues a RAG indexing job to the Service Bus queue so the document
     /// is indexed into Azure AI Search in the background after analysis completes.
-    /// Implements ADR-001 (BackgroundService pattern) and ADR-004 (idempotent job contract).
+    /// Implements ADR-004 (idempotent job contract; an IJobHandler dispatched by ServiceBusJobProcessor).
     /// </summary>
     public async Task EnqueueRagIndexingJobAsync(
         string analysisId,

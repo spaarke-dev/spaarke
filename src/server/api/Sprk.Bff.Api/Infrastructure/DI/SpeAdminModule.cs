@@ -94,7 +94,7 @@ public static class SpeAdminModule
 
         // Background service: syncs dashboard metrics (container counts, storage usage)
         // from Graph API into IDistributedCache on a configurable interval (default 15 min).
-        // Runs in the BFF as a BackgroundService (placement decided under ADR-052).
+        // Runs in the BFF as a BackgroundService, governed by ADR-052 (legacy hand-rolled timer, ratchet-listed — migrates when next touched).
         //
         // Registered as Singleton first so the same instance can be injected into dashboard
         // endpoints (for ReadCachedMetricsAsync and TriggerRefreshAsync). The hosted service
@@ -104,7 +104,7 @@ public static class SpeAdminModule
         services.AddHostedService(sp => sp.GetRequiredService<SpeDashboardSyncService>());
 
         // Background service: processes bulk container operations (delete, permission assignment).
-        // Runs in the BFF as a BackgroundService (placement decided under ADR-052).
+        // Runs in the BFF as a BackgroundService, governed by ADR-052.
         //
         // Registered as Singleton first so bulk endpoints can inject the same instance
         // to call EnqueueDelete / EnqueuePermissions / GetStatus. The hosted service

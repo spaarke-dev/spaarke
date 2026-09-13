@@ -42,7 +42,7 @@
 
 ## What the Framework Does
 
-Spaarke's BFF API runs **28 different scheduled background tasks** (notification dispatch, reconciliation passes, cache warming, polling, etc.). Before R3 each of those had its own bespoke `BackgroundService` implementation with a private `PeriodicTimer`, a private `IOptions<XOptions>` for "enabled" and "interval," and no shared run history. Operators had **no admin visibility** ("did the nightly job actually run?"), **no "Run Now" button** ("the data is stale; I need it refreshed before the hour is up"), and **no central registry** ("which scheduled jobs exist? what are they doing? are they healthy?").
+Spaarke's BFF API runs a couple of dozen background services — as of 2026-09-13, 23 `BackgroundService` subclasses (14 of them hand-rolled timers, migrating per ADR-052 §1, #976) plus 3 `IScheduledJob`s on this framework (notification dispatch, reconciliation passes, polling, etc.). Before R3 each scheduled one had its own bespoke `BackgroundService` implementation with a private `PeriodicTimer`, a private `IOptions<XOptions>` for "enabled" and "interval," and no shared run history. Operators had **no admin visibility** ("did the nightly job actually run?"), **no "Run Now" button** ("the data is stale; I need it refreshed before the hour is up"), and **no central registry** ("which scheduled jobs exist? what are they doing? are they healthy?").
 
 The **Spaarke.Scheduling framework** — shipped in R3 Part 2 — replaces that fragmentation with one place to see and control every scheduled job:
 
@@ -412,7 +412,7 @@ To narrow the recon to a single entity type during testing (faster runs), shrink
 When an `IScheduledJob.ExecuteAsync` invocation throws, the host applies a per-job retry-with-exponential-backoff:
 
 - **Default**: 3 attempts total (1 initial + 2 retries).
-- **Delay schedule**: 5 seconds before attempt 2; 10 seconds before attempt 3 — formula `BaseDelay * 2^(attempt-1)`, capped at `MaxDelay = 2 minutes`.
+- **Delay schedule**: 5 seconds before attempt 2; 10 seconds before attempt 3 — formula `BaseDelay * 2^(attempt-2)`, capped at `MaxDelay = 2 minutes`.
 - **No jitter** — each host dispatches a job once per tick, so deterministic delays are easier to reason about than randomized ones. (Note that "once per tick" is per instance today — see below.)
 
 After 3 failed attempts, the run is recorded as `status = "Failed"` and the final exception's message is written to the run record, where `/status` surfaces it as `recentRuns[0].errorMessage`. (Target state: also written to `sprk_backgroundjobrun.sprk_errormessage` and denormalized to `sprk_backgroundjob.sprk_lastrunerror`.) The job's next scheduled tick proceeds normally — retries are bounded to the current tick; the cron cadence is the macro-level retry. ADR-036 A1 §3 sets when a job should throw (so the host retries) versus record failures and complete.

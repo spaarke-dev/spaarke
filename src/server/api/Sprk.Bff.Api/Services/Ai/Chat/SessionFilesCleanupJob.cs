@@ -75,8 +75,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <para>
 /// <b>Constraints</b>:
 /// <list type="bullet">
-///   <item>ADR-052: runs in the BFF on <see cref="BackgroundService"/> + <see cref="PeriodicTimer"/>
-///     (no Hangfire/Quartz).</item>
+///   <item>Legacy hand-rolled timer <see cref="BackgroundService"/> + <see cref="PeriodicTimer"/>; migrates
+///     to an IScheduledJob when next touched (ADR-052 §1, ADR-036) (no Hangfire/Quartz).</item>
 ///   <item>ADR-010: DI minimalism — registered in
 ///     <c>AnalysisServicesModule</c> under the existing compound gate,
 ///     ZERO new <c>Program.cs</c> lines.</item>

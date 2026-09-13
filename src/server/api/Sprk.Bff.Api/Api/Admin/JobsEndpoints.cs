@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Api.Admin;
 /// <c>PlatformAdmin</c> policy. Precedent: <c>RagEndpoints.cs</c> bulk-indexing admin group uses
 /// the same policy.</para>
 ///
-/// <para><b>ADR compliance</b>: ADR-001 (Minimal API + BackgroundService), ADR-008 (endpoint-filter
+/// <para><b>ADR compliance</b>: ADR-001 (Minimal API), ADR-052 (placement), ADR-008 (endpoint-filter
 /// authorization, not global middleware), ADR-010 (concretes via DI; <see cref="IBackgroundJobStore"/>
 /// is justified as an interface because there are ≥2 implementations from day one — in-memory now,
 /// Dataverse-backed in task 023+).</para>

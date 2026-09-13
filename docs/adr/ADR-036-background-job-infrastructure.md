@@ -8,7 +8,7 @@
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 2 |
 | Supersedes | n/a |
-| Cross-references | **Where** scheduled work runs → [ADR-052](ADR-052-workload-placement.md); this ADR governs **how** it runs inside the BFF (A1 §1 withdraws the original "extends ADR-001 (in-process workers)" reference). Reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library); aligns with CLAUDE.md §10 (BFF hygiene). |
+| Cross-references | **Where** scheduled work runs → [ADR-052](ADR-052-workload-placement.md); this ADR governs **how** it runs inside the BFF (A1 §1 withdraws the original <!-- adr052-drift:allow reason="quotes the withdrawn cross-reference" -->"extends ADR-001 (in-process workers)"<!-- /adr052-drift:allow --> reference). Reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library); aligns with CLAUDE.md §10 (BFF hygiene). |
 
 > ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-12-placement-runtime-as-built-and-one-dispatch-per-schedule) FIRST.**
 > It corrects this ADR's statement of ADR-001, records how the scheduler actually runs today, and adds the dispatch,
@@ -99,7 +99,7 @@ R3 ships `InMemoryBackgroundJobStore` (default registration). A `DataverseBackgr
 
 - Reads `sprk_backgroundjob` rows on startup + refreshes hourly (or on-demand via `RefreshDefinitionsAsync` after admin enable/disable)
 - For each enabled job, parses cron via Cronos → computes next-fire → dispatches `IScheduledJob.ExecuteAsync` at the right time
-- Wraps each invocation in `JobRetryPolicy` (default 3 attempts, 5s base, 2min cap, exponential 2^(attempt-1))
+- Wraps each invocation in `JobRetryPolicy` (default 3 attempts; no delay before attempt 1, then `BaseDelay·2^(attempt-2)` — 5s, 10s — capped at 2min; corrected 2026-09-13 against `JobRetryPolicy.cs`)
 - Persists `sprk_backgroundjobrun` row per invocation; idempotency probe via `HasRunForScheduledTimeAsync` prevents duplicate execution on restart mid-tick
 - Honors `CancellationToken` end-to-end; `StopAsync` drains in-flight jobs within 30s (NFR-07)
 

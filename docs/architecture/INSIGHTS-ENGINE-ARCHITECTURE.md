@@ -318,7 +318,7 @@ Asynchronously, when Dataverse mutates, the sync pipeline keeps the substrate fr
 | | New for the Engine | Reused from existing Spaarke |
 |---|---|---|
 | **Code** | `InsightsResolverService`, `Insights Agent`, `IInsightGraph` + `CosmosNoSqlInsightGraph`, `LiveFactResolverService`, `IInsightArtifactStore`, Sync/Reconciliation/Extraction Functions | `IChatClient`, `UseFunctionInvocation` pipeline, `IAiToolHandler` + `IToolHandlerRegistry`, `RagIndexingPipeline`, `ReferenceIndexingService` patterns, `EmbeddingCache`, `SemanticDocumentChunker`, `IOpenAiClient`, `PlaybookExecutionEngine`, `DataverseService`, `DeliverToIndexNodeExecutor` |
-| **Azure** | Cosmos NoSQL account (new), Function App (new — narrowed ADR-001 permits), Service Bus topic for Dataverse changes (new), `insight-*` indexes in existing AI Search service | AI Search service, Azure OpenAI account, Redis, Key Vault, App Insights, Log Analytics, Managed Identity |
+| **Azure** | Cosmos NoSQL account (new), Function App (new — placement per ADR-052), Service Bus topic for Dataverse changes (new), `insight-*` indexes in existing AI Search service | AI Search service, Azure OpenAI account, Redis, Key Vault, App Insights, Log Analytics, Managed Identity |
 | **Schema** | `InsightArtifact` envelope (C# types), 4 new AI Search index schemas, Cosmos graph schema (vertex types + edge types), question catalog with evidence-sufficiency rules | JPS playbook schema (existing) — closure-extraction is a JPS playbook |
 
 The Engine is intentionally additive. It does not replace any existing AI subsystem; it sits beside them and consumes their primitives.

@@ -297,7 +297,7 @@ All handlers follow the same pattern: idempotency check, acquire Redis processin
 - **MUST** follow SPE First, Dataverse Second ordering for all upload flows
 - **MUST** use `IDistributedCache` (Redis) for all caching — no in-process L1 cache (ADR-009)
 - **MUST** use `SpeFileStore` facade for SPE operations — no `GraphServiceClient` injection into endpoints (ADR-007)
-- **MUST NOT** add Azure Functions — all background work via BackgroundService + Service Bus (ADR-001)
+- **MUST NOT** put Azure Functions inside the BFF assembly (ADR-001); where background work runs is ADR-052 (queue work: ADR-004 `IJobHandler`; scheduled work: ADR-036 `IScheduledJob`)
 - **MUST NOT** make HTTP/Graph calls from Dataverse plugins
 
 ---

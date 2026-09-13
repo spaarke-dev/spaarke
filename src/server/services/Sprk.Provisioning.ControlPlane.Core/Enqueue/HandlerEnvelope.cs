@@ -5,15 +5,15 @@
 //
 // PURPOSE:
 //   Wire-shape record for a single handler dispatch message. Carries the
-//   MINIMUM information the BFF's IJobHandler infrastructure needs to route
+//   MINIMUM information L2's ProvisioningHandlerDispatcher needs to route
 //   + execute a provisioning handler:
 //
 //     - HandlerId       — string handler identifier (e.g. "H4",
 //                         "H5-DataverseEnvCreation"). Copied into the
 //                         Service Bus message's ApplicationProperties["JobType"]
-//                         and Subject so BFF's ServiceBusJobProcessor can
-//                         dispatch to the right IJobHandler without
-//                         deserializing the body.
+//                         and Subject; L2's ProvisioningHandlerDispatcher
+//                         resolves the keyed IProvisioningHandler by this
+//                         HandlerId.
 //     - RunId           — Cosmos `runs` container document id (the tie back
 //                         to spaarke-provisioning/runs/{RunId}). Handlers
 //                         must NOT mutate anything if `runs/{RunId}` is
@@ -28,7 +28,7 @@
 //                         feeds this envelope + the enqueuer's log-line
 //                         redaction guard).
 //     - EnqueuedAt      — UTC timestamp of enqueue. Copied into
-//                         ApplicationProperties for BFF-side latency metrics
+//                         ApplicationProperties for consumer-side latency metrics
 //                         + reconciler crash-recovery ordering.
 //     - Attempt         — (task 107 / DS-2 §4-L1) int, defaults to 0 and is
 //                         OMITTED from the wire payload at 0 ("first
@@ -65,7 +65,7 @@
 //     silently drop it within the dedup window (spec.md MUST rule:
 //     MessageId = SHA256(HandlerId|RunId|CustomerId|paramHash|attempt)).
 //     This is NOT the same bookkeeping as Service Bus's own DeliveryCount
-//     or the BFF handler's own attempt semantics (ADR-036) — those track
+//     or a handler's own attempt semantics — those track
 //     wire-level/handler-level redelivery; this field exists solely to keep
 //     the deterministic MessageId hash distinguishable across an
 //     application-level retry.
@@ -73,7 +73,7 @@
 //     `CorrelationId` field is set by the enqueuer to the RunId so the
 //     receiver can log/trace by run without unwrapping the body.
 //   - No mutable state — record init-only + required-init props. Handlers
-//     receive it via JSON deserialization on the BFF side.
+//     receive it via JSON deserialization in L2's ProvisioningHandlerDispatcher.
 // -----------------------------------------------------------------------------
 
 using System.Text.Json.Serialization;
@@ -82,7 +82,7 @@ namespace Sprk.Provisioning.ControlPlane.Enqueue;
 
 /// <summary>
 /// Envelope for a single provisioning-handler dispatch enqueued via Service Bus.
-/// Consumed by the BFF's job-handler infrastructure (<c>Services/Jobs/IJobHandler.cs</c>) per spec.md FR-22.
+/// Consumed by L2's <c>ProvisioningHandlerDispatcher</c> (<c>Sprk.Provisioning.ControlPlane.Worker/Dispatch/ProvisioningHandlerDispatcher.cs</c>); enqueued by L2 and by the BFF's <c>ServiceBusProvisioningEnqueuer</c>.
 /// </summary>
 /// <remarks>
 /// The wire format is stable across L2 + BFF releases — treat schema changes
