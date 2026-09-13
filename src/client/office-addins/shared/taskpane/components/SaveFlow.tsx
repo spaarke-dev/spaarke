@@ -26,7 +26,7 @@ import {
   CopyRegular,
   EditRegular,
 } from '@fluentui/react-icons';
-import { RelatedToPicker } from './RelatedToPicker';
+import { RelatedToPicker, type CreateRecordResult } from './RelatedToPicker';
 import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
 import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
@@ -41,6 +41,8 @@ import {
 import type { DocumentIdentityState } from '../services/documentIdentityService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
+import { fetchMatterTypes, type MatterTypeChoice } from '../services/matterTypeLookupService';
+import { cleanGuid } from '../utils/cleanGuid';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 
@@ -92,6 +94,19 @@ const DEMO_RELATED_CANDIDATES: RelatedCandidate[] = [
     displayInfo: 'PROJ-2025-014',
     confidence: 0.88,
   },
+];
+
+/**
+ * Demo Matter Type options for the browser test harness ONLY — mirrors the real
+ * `GET /api/office/search/matter-types` five-row dev list (task 038) so the required-field UX is
+ * iterable without the BFF.
+ */
+const DEMO_MATTER_TYPES: MatterTypeChoice[] = [
+  { id: '6cedd99b-30da-f011-8406-7ced8d1dc988', name: 'Commercial', code: 'CMRCL' },
+  { id: 'cdbf53b0-30da-f011-8406-7ced8d1dc988', name: 'Employment', code: 'EMPL' },
+  { id: '11aed095-30da-f011-8406-7ced8d1dc988', name: 'Litigation', code: 'LITG' },
+  { id: '46c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Patent', code: 'PAT' },
+  { id: '60c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Trademark', code: 'TMRK' },
 ];
 
 /**
@@ -430,6 +445,34 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [relatedCandidates, setRelatedCandidates] = useState<RelatedCandidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
 
+  // Matter Type list for the required field on Matter quick-create (task 038). A small, load-once
+  // reference list (5 rows in dev) — fetched once on mount, host-neutral (NFR-10: no hostType check),
+  // never gated on a keystroke like the /search/entities typeahead.
+  const [matterTypes, setMatterTypes] = useState<MatterTypeChoice[]>([]);
+  const [matterTypesLoading, setMatterTypesLoading] = useState(false);
+  useEffect(() => {
+    if (isBrowserTestMode()) {
+      setMatterTypes(DEMO_MATTER_TYPES);
+      return;
+    }
+    if (!apiBaseUrl || !getAccessToken) return;
+    let cancelled = false;
+    setMatterTypesLoading(true);
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        const types = await fetchMatterTypes(apiBaseUrl, token, getAccessToken);
+        if (!cancelled) setMatterTypes(types);
+      } finally {
+        if (!cancelled) setMatterTypesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetched once per mount, not per prop change
+  }, []);
+
   // ── FR-11 save mode (task 024) ──────────────────────────────────────────────────────────────────
   // The user's EXPLICIT choice; null = the identity's default (a new version when resolved). A new identity
   // (first resolution, or a retry) starts again from its own default — never from a stale override.
@@ -641,32 +684,46 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // "New record" — BFF-backed inline create (Slice 3, #10). POST /api/office/quickcreate/{type}
   // creates the sprk_matter/sprk_project under the caller's ownership and returns it; the picker
-  // auto-selects the created record as the Related-to.
+  // auto-selects the created record as the Related-to. Matter (task 038): the request always carries
+  // `matterTypeId` — a bare lowercase GUID (ADR-044) — and any server warning (e.g. an unresolvable
+  // type, or numbering not existing yet) is surfaced, never swallowed. The pane never sends or
+  // constructs a matter number; that is a separate server-side numbering project.
   const createRelatedRecord = useCallback(
-    async (type: EntityType, name: string): Promise<EntitySearchResult | null> => {
+    async (type: EntityType, name: string, matterTypeId?: string): Promise<CreateRecordResult | null> => {
       // Test harness: return a mock created record so the flow is iterable without the BFF.
       if (isBrowserTestMode()) {
         await new Promise(resolve => setTimeout(resolve, 400));
         return {
-          id: `demo-new-${Date.now()}`,
-          entityType: type,
-          logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
-          name,
-          displayInfo: 'New',
+          record: {
+            id: `demo-new-${Date.now()}`,
+            entityType: type,
+            logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
+            name,
+            displayInfo: 'New',
+          },
         };
       }
       if (!apiBaseUrl || !getAccessToken) return null;
       try {
         const token = await getAccessToken();
+        const body = type === 'Matter' && matterTypeId ? { name, matterTypeId: cleanGuid(matterTypeId) } : { name };
         const res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/quickcreate/${type.toLowerCase()}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) },
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
           token,
           { getRetryToken: getAccessToken }
         );
         if (!res.ok) return null;
-        const data = (await res.json()) as { id: string; logicalName: string; name: string };
-        return { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name };
+        const data = (await res.json()) as {
+          id: string;
+          logicalName: string;
+          name: string;
+          warnings?: string[];
+        };
+        return {
+          record: { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name },
+          ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+        };
       } catch {
         return null;
       }
@@ -889,6 +946,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
               allowedTypes={['Matter', 'Project', 'Invoice']}
               defaultType="Matter"
+              matterTypeOptions={matterTypes}
+              matterTypesLoading={matterTypesLoading}
               disabled={isSaving}
             />
           </div>

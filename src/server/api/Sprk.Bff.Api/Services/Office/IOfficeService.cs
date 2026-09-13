@@ -93,6 +93,23 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lists the active <c>sprk_mattertype_ref</c> reference rows for the pane's required Matter Type
+    /// field (spaarkeai-word-add-in-r1 task 038).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The active matter types, ordered by name.</returns>
+    /// <remarks>
+    /// <para>
+    /// A small (five rows in dev), load-once reference list — a sibling of <see cref="SearchEntitiesAsync"/>
+    /// under the same <c>/api/office/search</c> group, not a filter on it. <c>sprk_mattertype_ref</c> is a
+    /// reference/lookup table, not an association-target entity, and the caller loads this once rather than
+    /// per keystroke, so it does not fit the 2-character-minimum typeahead contract.
+    /// </para>
+    /// </remarks>
+    Task<MatterTypeListResponse> GetMatterTypesAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Searches for documents to share from the Office add-in.
     /// Returns documents the user has permission to share.
     /// </summary>
