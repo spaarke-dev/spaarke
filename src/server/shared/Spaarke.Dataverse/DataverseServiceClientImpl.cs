@@ -1796,6 +1796,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             },
             TopCount = 1
         };
+        // The NEWEST row with this key decides (spaarkeai-word-add-in-r1 task 039). A key can carry several rows
+        // once a failed attempt is retried, and the caller treats a Failed/Cancelled row as "not performed" — so
+        // an unordered TOP 1 could return the old failed row and re-run a save whose retry already completed.
+        query.AddOrder("createdon", OrderType.Descending);
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         var entity = results.Entities.FirstOrDefault();

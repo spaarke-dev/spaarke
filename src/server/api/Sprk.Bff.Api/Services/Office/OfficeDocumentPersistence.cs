@@ -654,6 +654,20 @@ public class OfficeDocumentPersistence
             var status = MapDataverseStatusToJobStatus((int?)job.Status);
             var jobType = MapDataverseJobTypeToJobType((int?)job.JobType);
 
+            // Task 039 (finding 2): a FAILED or CANCELLED attempt is not a performed operation, so it cannot make
+            // a retry a duplicate. Before this, a same-key retry after any failure (OFFICE_012 upload, OFFICE_019
+            // lock, a save that threw) was answered Duplicate with the failed job and wrote nothing, forever. The
+            // row consulted is the NEWEST with this key (the query orders by createdon), so a failed attempt can
+            // never shadow a later one that completed.
+            if (status is JobStatus.Failed or JobStatus.Cancelled)
+            {
+                _logger.LogInformation(
+                    "Existing job {JobId} with this idempotency key is {Status}; treating the request as a new attempt",
+                    (Guid)job.Id,
+                    status);
+                return null;
+            }
+
             _logger.LogInformation(
                 "Found existing job {JobId} with idempotency key, status: {Status}",
                 (Guid)job.Id,

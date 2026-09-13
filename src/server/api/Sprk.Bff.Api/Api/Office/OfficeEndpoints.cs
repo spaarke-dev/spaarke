@@ -168,13 +168,16 @@ public static class OfficeEndpoints
         // POST /office/save - Submit email, attachment, or document for saving
         // Authorization: OfficeAuthFilter validates user authentication,
         //                EntityAccessFilter validates user has access to target entity
-        // Idempotency: IdempotencyFilter prevents duplicate document creation
+        // Idempotency (task 039 — see SaveAsync's remarks for the contract): the persistent job de-dupe keys on the
+        //   BODY idempotencyKey, else on the server's own key (content-aware for Document saves). IdempotencyFilter's
+        //   X-Idempotency-Key response cache is bound to that same key for Document saves
+        //   (DocumentSaveIdempotencyBinding), so a reused header can never replay a response for a different document.
         // Rate Limit: 10 requests/minute/user (per spec.md)
         group.MapPost("/save", SaveAsync)
             .WithName("OfficeSave")
             .WithDescription("Submit email, attachment, or document for saving to Spaarke DMS")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
-            .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
+            .AddIdempotencyFilter(bindClientKeyTo: DocumentSaveIdempotencyBinding) // Task 030 + task 039 (finding 4)
             .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
             .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
             .AddOfficeVersionSaveAuthorizationFilter() // word-add-in-r1 task 023 - FR-11 version save: "write" on the existing sprk_document
@@ -201,8 +204,19 @@ public static class OfficeEndpoints
     /// - Return 202 Accepted with jobId within 3 seconds (heavy processing is async)
     /// - Validate that association target is provided (OFFICE_003 if missing)
     /// - Validate that association target exists (OFFICE_006/OFFICE_007 if invalid/not found)
-    /// - Support idempotency via X-Idempotency-Key header
+    /// - Support idempotency (contract below)
     /// - Return 200 OK with duplicate=true if idempotent request already processed
+    /// </para>
+    /// <para>
+    /// <b>Idempotency contract (spaarkeai-word-add-in-r1 task 039, finding 1).</b> ONE source decides whether a
+    /// save runs: the request BODY's <c>idempotencyKey</c> when present, else the server's own key
+    /// (<c>OfficeService.GenerateIdempotencyKey</c>, content-aware for every Document save). A ProcessingJob with
+    /// that key that did not fail makes the request a duplicate (200, <c>duplicate: true</c>); a Failed or Cancelled
+    /// one does not (finding 2). The <c>X-Idempotency-Key</c> header is NOT that key — it only names
+    /// <c>IdempotencyFilter</c>'s 24-hour response-replay cache, and for a Document save the cache entry is bound
+    /// to that same authoritative key (<see cref="DocumentSaveIdempotencyBinding"/>), so a reused header replays only
+    /// a request the key would also de-duplicate. Email and Attachment keep the header-keyed replay unchanged: their
+    /// header names the same immutable message/attachment the server key does.
     /// </para>
     /// </remarks>
     /// <param name="request">The save request with content metadata.</param>
@@ -230,9 +244,9 @@ public static class OfficeEndpoints
         var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
             ?? CallerResolution.ResolveObjectId(context.User);
 
-        // Get idempotency key from header if provided
-        var idempotencyKey = context.Request.Headers["X-Idempotency-Key"].FirstOrDefault()
-            ?? request.IdempotencyKey;
+        // Task 039 (finding 1): a dead read of X-Idempotency-Key used to sit here — assigned, never used — which
+        // made the header look like an input to the save's de-duplication. It is not, by decision: see the remarks
+        // above. The header is consumed only by IdempotencyFilter's response cache.
 
         // Diagnostic logging for debugging 400 errors
         logger.LogInformation(
@@ -319,6 +333,28 @@ public static class OfficeEndpoints
                 });
         }
     }
+
+    /// <summary>
+    /// Task 039 (findings 1 + 4): the value a Document save's <c>X-Idempotency-Key</c> response-cache entry is bound
+    /// to — the save's AUTHORITATIVE idempotency key (<see cref="OfficeService.ResolveIdempotencyKey"/>: the body key,
+    /// else the server's content-aware key). <c>null</c> (the default, header-only cache key) for Email and
+    /// Attachment.
+    /// </summary>
+    /// <remarks>
+    /// <para>Why bind at all. The Word pane's create-save header names the record and the document URL, not the
+    /// content — so the second save of an EDITED document to the same record reused the first save's header and was
+    /// answered with its cached 202, never written. Bound to the authoritative key, the response cache can replay only
+    /// a request that key would ALSO de-duplicate: the header can split two saves, never merge them.</para>
+    /// <para>Why Document only. A Document is editable, so one header can legitimately carry different bytes. An
+    /// Outlook header names an immutable message/attachment — the same identity the server key names — so its replay
+    /// is left exactly as it was.</para>
+    /// <para>Read from the BOUND <see cref="SaveRequest"/> argument: endpoint filters run after parameter binding, so
+    /// the raw JSON body has already been consumed by the time <c>IdempotencyFilter</c> runs.</para>
+    /// </remarks>
+    internal static string? DocumentSaveIdempotencyBinding(EndpointFilterInvocationContext context) =>
+        context.Arguments.OfType<SaveRequest>().FirstOrDefault() is { ContentType: SaveContentType.Document } request
+            ? OfficeService.ResolveIdempotencyKey(request)
+            : null;
 
     /// <summary>
     /// Validates a save request for required fields and constraints.
