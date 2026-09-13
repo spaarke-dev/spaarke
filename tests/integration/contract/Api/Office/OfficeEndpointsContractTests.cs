@@ -1187,6 +1187,12 @@ public sealed class OfficeVersionSaveWorld
     {
         lock (_gate)
         {
+            if (FailNextDocumentCreate)
+            {
+                FailNextDocumentCreate = false;
+                throw new InvalidOperationException("Test: Dataverse refused the sprk_document create.");
+            }
+
             DocumentCreates++;
             var id = Guid.NewGuid();
             Documents[id] = new DocumentRow { Id = id, FileName = request.Name };
@@ -1235,10 +1241,29 @@ public sealed class OfficeVersionSaveWorld
             var type = job.GetType();
             var name = (string?)type.GetProperty("Name")?.GetValue(job) ?? string.Empty;
             var key = (string?)type.GetProperty("IdempotencyKey")?.GetValue(job) ?? string.Empty;
+            var status = type.GetProperty("Status")?.GetValue(job) as int? ?? 0;
             var id = Guid.NewGuid();
             Jobs.Add((name, key));
+            JobStatuses[id] = status;
+            // Last write wins, so a key maps to its NEWEST job — the row the real query returns first
+            // (DataverseServiceClientImpl.GetProcessingJobByIdempotencyKeyAsync orders by createdon desc, task 039).
             _jobIdsByKey[key] = id;
             return id;
+        }
+    }
+
+    /// <summary>
+    /// The Dataverse <c>sprk_status</c> each ProcessingJob row holds (0 Queued, 1 Running, 2 Completed, 3 Failed,
+    /// 4 Cancelled), as written by <c>CreateProcessingJobAsync</c> and every <c>UpdateProcessingJobAsync</c> since.
+    /// </summary>
+    public Dictionary<Guid, int> JobStatuses { get; } = new();
+
+    internal void UpdateJob(Guid id, object update)
+    {
+        lock (_gate)
+        {
+            if (update.GetType().GetProperty("Status")?.GetValue(update) is int status)
+                JobStatuses[id] = status;
         }
     }
 
@@ -1250,12 +1275,22 @@ public sealed class OfficeVersionSaveWorld
                 return null;
             dynamic existing = new System.Dynamic.ExpandoObject();
             existing.Id = id;
-            existing.Status = 2; // Completed
+            // The row's REAL status (task 039, finding 2). This fixture used to answer Completed for every key,
+            // which hid the failed-job replay: a same-key retry after a failure was answered from a row the
+            // fixture claimed had succeeded.
+            existing.Status = JobStatuses.TryGetValue(id, out var status) ? status : 0;
             existing.JobType = 0;
             existing.Progress = 100;
             return (object)existing;
         }
     }
+
+    /// <summary>
+    /// When set, the NEXT <c>CreateDocumentAsync</c> throws — a save that fails AFTER its ProcessingJob row and
+    /// SPE upload exist, i.e. one that leaves its job neither Completed nor explicitly Failed unless the save
+    /// path marks it (task 039, finding 2).
+    /// </summary>
+    public bool FailNextDocumentCreate { get; set; }
 
     internal Microsoft.Xrm.Sdk.Entity RetrieveDocumentByItemId(string itemId)
     {
@@ -1499,6 +1534,12 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.GetProcessingJobByIdempotencyKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string key, CancellationToken _) => world.FindJobByIdempotencyKey(key));
+            // Task 039: the job's status is state the save path WRITES (Failed / Completed) and later READS back
+            // through the idempotency lookup, so the world records it rather than letting the loose mock drop it.
+            dataverse
+                .Setup(d => d.UpdateProcessingJobAsync(It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+                .Callback((Guid id, object update, CancellationToken _) => world.UpdateJob(id, update))
+                .Returns(Task.CompletedTask);
             dataverse
                 .Setup(d => d.RetrieveByAlternateKeyAsync(
                     "sprk_document", It.IsAny<Microsoft.Xrm.Sdk.KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -1739,5 +1780,283 @@ public class OfficeSaveAddInWireContractTests
         world.ReplaceCalls.Should().Be(0);
         world.SpeItems[seededItemId].Versions.Should().HaveCount(1, "the identified document's file is untouched");
         world.Jobs.Should().ContainSingle().Which.Name.Should().StartWith("Document Save - ");
+    }
+}
+
+// =====================================================================================================
+// SAVE-SPINE DEFECTS — spaarkeai-word-add-in-r1 task 039 (findings 1 and 3, plus the key-shape pins)
+// =====================================================================================================
+
+/// <summary>
+/// The idempotency-key contract and the job-status result of <c>POST /api/office/save</c>, after task 039:
+/// <list type="bullet">
+/// <item><b>Finding 1 — one authoritative source.</b> Whether a save runs is decided by the key in the request
+/// BODY (<c>idempotencyKey</c>), else by the server's own key, which is content-aware for every Document save.
+/// The <c>X-Idempotency-Key</c> header is never that key: it only names the 24-hour response-replay cache
+/// (<c>IdempotencyFilter</c>), and for a Document save that cache entry is bound to the exact request body, so a
+/// reused header can never replay a response for a different document. Email and Attachment keep today's
+/// header-keyed replay (their header already names the immutable message/attachment the server key names).</item>
+/// <item><b>Finding 3 — a completed job names its document.</b> Every save that completes carries
+/// <c>result.artifact.id</c>: the created document, the existing document a version was written to, or the
+/// canonical an immutable duplicate resolved to.</item>
+/// </list>
+/// </summary>
+/// <remarks>Same world and fixture as task 023/024 (<see cref="OfficeVersionSaveWorld"/>): module-boundary doubles
+/// only, and the REAL route — filters, <c>IdempotencyFilter</c> over the in-memory distributed cache, handler,
+/// <c>OfficeService</c>. No <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 B1).</remarks>
+[Trait("status", "repaired")]
+public class OfficeSaveSpineIdempotencyContractTests
+{
+    private static readonly byte[] InitialBytes = { 0x50, 0x4B, 0x03, 0x04, 0x41 };
+    private static readonly byte[] Revision2 = { 0x50, 0x4B, 0x03, 0x04, 0x42, 0x42 };
+    private static readonly byte[] Revision3 = { 0x50, 0x4B, 0x03, 0x04, 0x43, 0x43, 0x43 };
+
+    private static HttpRequestMessage Post(SaveRequest body, string? headerKey)
+    {
+        var message = new HttpRequestMessage(HttpMethod.Post, "/api/office/save") { Content = JsonContent.Create(body) };
+        if (headerKey is not null)
+            message.Headers.Add("X-Idempotency-Key", headerKey);
+        return message;
+    }
+
+    /// <summary>The server's key for a canonical string — <c>OfficeService.GenerateIdempotencyKey</c>'s final step.</summary>
+    internal static string ServerKey(string canonical) =>
+        Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+
+    /// <summary>The content component — SHA-256 (upper hex) of the base64 the request carries (task 023's hashing).</summary>
+    internal static string ContentHash(byte[] bytes) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Convert.ToBase64String(bytes))));
+
+    private static async Task<JobStatusResponse> PollAsync(HttpClient client, SaveResponse saved)
+    {
+        var response = await client.GetAsync($"/api/office/jobs/{saved.JobId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        return (await response.Content.ReadFromJsonAsync<JobStatusResponse>())!;
+    }
+
+    // ── Finding 1: which key decides ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VersionSaves_WhoseHeaderAndBodyKeysDisagree_AreDecidedByTheBodyKey_NotReplayedUnderTheReusedHeader()
+    {
+        // A client that keeps ONE header across revisions but sends a fresh body key per revision. Before task
+        // 039 the header answered the second revision from the response cache — its body key, the key the save
+        // spine treats as authoritative, was never consulted, and the new bytes were never written.
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var target = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() };
+
+        var second = OfficeVersionSaveWorld.VersionSave(documentId, Revision2) with { TargetEntity = target, IdempotencyKey = "body-r2" };
+        var third = OfficeVersionSaveWorld.VersionSave(documentId, Revision3) with { TargetEntity = target, IdempotencyKey = "body-r3" };
+
+        (await client.SendAsync(Post(second, "one-header"))).StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var response = await client.SendAsync(Post(third, "one-header"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        response.Headers.GetValues("X-Idempotency-Status").Should().Equal(new[] { "new" },
+            "a reused header never replays a response for a different Document body");
+        world.SpeItems[itemId].Versions.Should().HaveCount(3, "the third revision is written");
+        world.SpeItems[itemId].Versions[^1].Should().Equal(Revision3);
+        world.Jobs.Select(j => j.IdempotencyKey).Should().Equal(new[] { "body-r2", "body-r3" },
+            "the BODY key is the persistent key; the header never becomes it");
+    }
+
+    [Fact]
+    public async Task DocumentSave_WithAHeaderKeyOnly_IsKeyedByTheServer_NeverByTheHeader()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().SendAsync(
+            Post(OfficeVersionSaveWorld.NewDocumentSave("Brief.docx", InitialBytes), "pane-header-key"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.Jobs.Should().ContainSingle().Which.IdempotencyKey.Should().NotBe("pane-header-key");
+    }
+
+    [Fact]
+    public async Task EmailSave_UnderAReusedHeader_WithADifferentBody_IsStillReplayedFromTheResponseCache_AsBefore()
+    {
+        // Email/Attachment replay is deliberately UNCHANGED by task 039: the pane's Outlook header already names
+        // the immutable message (and record) the server key names, so a header hit is a request the persistent
+        // key would also have de-duplicated. The subject is the only thing that differs here.
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var target = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() };
+        SaveRequest Email(string subject) => new()
+        {
+            ContentType = SaveContentType.Email,
+            TargetEntity = target,
+            Email = new EmailMetadata { Subject = subject, SenderEmail = "sender@test.com", InternetMessageId = "<m1@test>" },
+        };
+
+        (await client.SendAsync(Post(Email("Filing"), "outlook-header"))).StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var replay = await client.SendAsync(Post(Email("Filing (renamed)"), "outlook-header"));
+
+        replay.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        replay.Headers.GetValues("X-Idempotency-Status").Should().Equal(new[] { "cached" });
+        world.DocumentCreates.Should().Be(1);
+        world.Jobs.Should().ContainSingle();
+    }
+
+    // ── The server key: create gains content, everything else is byte-for-byte unchanged ────────────
+
+    [Fact]
+    public async Task DocumentCreateKey_CarriesTheContentHash()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var request = OfficeVersionSaveWorld.NewDocumentSave("Brief.docx", InitialBytes);
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", request))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var canonical = $"Document|matter|{request.TargetEntity!.EntityId}|||Brief.docx||create-content:{ContentHash(InitialBytes)}";
+        world.Jobs.Should().ContainSingle().Which.IdempotencyKey.Should().Be(ServerKey(canonical));
+    }
+
+    [Fact]
+    public async Task VersionSaveKey_IsUnchangedByTask039()
+    {
+        // Task 023's shape, pinned: the create-key change must not move it.
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, _) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var request = OfficeVersionSaveWorld.VersionSave(documentId, Revision2);
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", request))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var canonical = $"Document|matter|{request.TargetEntity!.EntityId}|||Brief.docx|{documentId}|version-content:{ContentHash(Revision2)}";
+        world.Jobs.Should().ContainSingle().Which.IdempotencyKey.Should().Be(ServerKey(canonical));
+    }
+
+    [Theory]
+    [InlineData(SaveContentType.Email)]
+    [InlineData(SaveContentType.Attachment)]
+    public async Task EmailAndAttachmentKeys_AreUnchangedByTask039(SaveContentType contentType)
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var target = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() };
+        var request = new SaveRequest
+        {
+            ContentType = contentType,
+            TargetEntity = target,
+            Email = contentType == SaveContentType.Email
+                ? new EmailMetadata { Subject = "Filing", SenderEmail = "sender@test.com" }
+                : null,
+            Attachment = contentType == SaveContentType.Attachment
+                ? new AttachmentMetadata { AttachmentId = "att-1", FileName = "Exhibit A.pdf", ContentBase64 = Convert.ToBase64String(Revision2) }
+                : null,
+        };
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", request))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var canonical = contentType == SaveContentType.Email
+            ? $"Email|matter|{target.EntityId}|Filing|||"
+            : $"Attachment|matter|{target.EntityId}||att-1||";
+        world.Jobs.Should().ContainSingle().Which.IdempotencyKey.Should().Be(ServerKey(canonical),
+            "the Email/Attachment canonical string carries no content component, before or after task 039");
+    }
+
+    // ── Finding 3: a completed job names its document ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task CompletedCreateSave_JobStatusCarriesTheCreatedDocumentId()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", OfficeVersionSaveWorld.NewDocumentSave("Brief.docx", InitialBytes));
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var created = world.Documents.Values.Should().ContainSingle().Subject;
+
+        var job = await PollAsync(client, (await response.Content.ReadFromJsonAsync<SaveResponse>())!);
+
+        job.Status.Should().Be(JobStatus.Completed);
+        job.Result.Should().NotBeNull("the pane can only reach its success state when the completed job names the document");
+        job.Result!.Artifact!.Id.Should().Be(created.Id);
+        job.Result.Artifact.Type.Should().Be(ArtifactType.Document);
+        job.Result.Artifact.SpeFileId.Should().Be(created.ItemId);
+        job.Result.Artifact.WebUrl.Should().Be(created.FilePath);
+    }
+
+    [Fact]
+    public async Task CompletedVersionSave_JobStatusCarriesTheExistingDocumentId()
+    {
+        var world = new OfficeVersionSaveWorld();
+        var (documentId, itemId) = world.SeedDocument("b!doc-drive", "Brief.docx", InitialBytes);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, Revision2));
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var job = await PollAsync(client, (await response.Content.ReadFromJsonAsync<SaveResponse>())!);
+
+        job.Status.Should().Be(JobStatus.Completed);
+        job.Result!.Artifact!.Id.Should().Be(documentId, "a version is written to the EXISTING document");
+        job.Result.Artifact.Type.Should().Be(ArtifactType.Document);
+        job.Result.Artifact.SpeFileId.Should().Be(itemId);
+    }
+
+    [Fact]
+    public async Task CompletedEmailSave_JobStatusCarriesItsDocumentId()
+    {
+        // Finding 3 is equally a defect for Outlook: the same pane hook needs the id to reach its success state.
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var request = new SaveRequest
+        {
+            ContentType = SaveContentType.Email,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+            Email = new EmailMetadata { Subject = "Filing", SenderEmail = "sender@test.com" },
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/save", request);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var created = world.Documents.Values.Should().ContainSingle().Subject;
+
+        var job = await PollAsync(client, (await response.Content.ReadFromJsonAsync<SaveResponse>())!);
+
+        job.Result.Should().NotBeNull("the Outlook pane completes on result.artifact.id too");
+        job.Result!.Artifact!.Id.Should().Be(created.Id);
+    }
+
+    [Fact]
+    public async Task AttachmentDeduplicatedToAnExistingCanonical_JobStatusCarriesTheCanonicalId()
+    {
+        // The IMMUTABLE suppress branch (Email/Attachment only since task 028): no row is created, the transient
+        // upload is deleted, and the job completes "DeduplicatedToExisting". It now names the canonical it
+        // resolved to, so the pane can open that document instead of stalling on the job card.
+        var world = new OfficeVersionSaveWorld();
+        var (canonicalId, _) = world.SeedDocument("b!doc-drive", "Exhibit A.pdf", Revision2);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+        var request = new SaveRequest
+        {
+            ContentType = SaveContentType.Attachment,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+            Attachment = new AttachmentMetadata { AttachmentId = "att-1", FileName = "Exhibit A.pdf", ContentBase64 = Convert.ToBase64String(Revision2) },
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/save", request);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.DocumentCreates.Should().Be(0, "precondition: the immutable duplicate branch ran");
+        world.DeletedItemIds.Should().ContainSingle();
+
+        var job = await PollAsync(client, (await response.Content.ReadFromJsonAsync<SaveResponse>())!);
+
+        job.CurrentPhase.Should().Be("DeduplicatedToExisting");
+        job.Result.Should().NotBeNull("the pane completes on result.artifact.id");
+        job.Result!.Artifact!.Id.Should().Be(canonicalId);
+        job.Result.Artifact.SpeFileId.Should().BeNull("the transient upload was deleted; the canonical's own file is not re-read");
     }
 }
