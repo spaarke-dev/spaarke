@@ -1358,6 +1358,61 @@ public class OfficeService : IOfficeService
     };
 
     /// <inheritdoc />
+    public async Task<MatterTypeListResponse> GetMatterTypesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // No Dataverse client injected (bare test constructions) — mirror SearchEntitiesAsync's stub
+        // fallback with an empty list rather than throwing.
+        if (_dataverseClient is null)
+        {
+            return new MatterTypeListResponse { Results = Array.Empty<MatterTypeOption>() };
+        }
+
+        var rows = await _dataverseClient.QueryAsync<Dictionary<string, JsonElement>>(
+            "sprk_mattertype_refs",
+            filter: "statecode eq 0",
+            select: "sprk_mattertype_refid,sprk_mattertypename,sprk_mattertypecode",
+            top: 50,
+            cancellationToken: cancellationToken);
+
+        var options = new List<MatterTypeOption>(rows.Count);
+        foreach (var row in rows)
+        {
+            var mapped = MapMatterTypeRow(row);
+            if (mapped is not null)
+                options.Add(mapped);
+        }
+
+        return new MatterTypeListResponse
+        {
+            Results = options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList()
+        };
+    }
+
+    /// <summary>
+    /// Maps one Dataverse Web API JSON row from <c>sprk_mattertype_refs</c> to a <see cref="MatterTypeOption"/>,
+    /// or null when the row has no name or no parseable id (never surface an unusable reference row). Pure —
+    /// unit-tested (mirrors <see cref="MapSearchRow"/>'s shape).
+    /// </summary>
+    internal static MatterTypeOption? MapMatterTypeRow(Dictionary<string, JsonElement> row)
+    {
+        var name = GetJsonString(row, "sprk_mattertypename");
+        if (string.IsNullOrWhiteSpace(name))
+            return null;
+
+        var id = Guid.TryParse(GetJsonString(row, "sprk_mattertype_refid"), out var g) ? g : Guid.Empty;
+        if (id == Guid.Empty)
+            return null;
+
+        return new MatterTypeOption
+        {
+            Id = id,
+            Name = name!,
+            Code = GetJsonString(row, "sprk_mattertypecode")
+        };
+    }
+
+    /// <inheritdoc />
     public async Task<DocumentSearchResponse> SearchDocumentsAsync(
         DocumentSearchRequest request,
         string userId,

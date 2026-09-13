@@ -851,6 +851,22 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+        // GET /office/search/matter-types - List active Matter Type reference values (task 038)
+        // A small, load-once reference list (5 rows in dev) — sibling of /entities, not a filter on it:
+        // sprk_mattertype_ref is a reference table (not an association-target entity) and the caller
+        // loads it once, so the 2-character-minimum typeahead contract below does not fit.
+        // Authorization: OfficeAuthFilter validates user authentication
+        // Rate Limit: 30 requests/minute/user (reuses the Search category — same low-risk read shape)
+        search.MapGet("/matter-types", GetMatterTypesAsync)
+            .WithName("GetOfficeMatterTypes")
+            .WithSummary("List active Matter Type reference values")
+            .WithDescription("Returns the active sprk_mattertype_ref rows for the pane's required Matter Type field (spaarkeai-word-add-in-r1 task 038). A small, load-once reference list, not a typeahead search.")
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
+            .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
+            .Produces<MatterTypeListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
         // GET /office/search/documents - Search for documents to share
         // Authorization: OfficeAuthFilter validates user authentication
         // Rate Limit: 30 requests/minute/user (per spec.md)
@@ -995,6 +1011,65 @@ public static class OfficeEndpoints
             return Results.Problem(
                 title: "Search Failed",
                 detail: "An error occurred while searching for entities",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_INTERNAL",
+                    ["correlationId"] = traceId
+                });
+        }
+    }
+
+    /// <summary>
+    /// Matter-types list endpoint handler (task 038). No query, no pagination — the whole active set is
+    /// returned in one call for a dropdown loaded once.
+    /// </summary>
+    /// <param name="officeService">Office service for the matter-type reference read.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="context">HTTP context for user claims.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private static async Task<IResult> GetMatterTypesAsync(
+        IOfficeService officeService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? CallerResolution.ResolveObjectId(context.User);
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            logger.LogWarning("Matter-types list requested without valid user identity");
+            return Results.Problem(
+                title: "Unauthorized",
+                detail: "User identity could not be determined",
+                statusCode: StatusCodes.Status401Unauthorized,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_009",
+                    ["correlationId"] = traceId
+                });
+        }
+
+        try
+        {
+            var response = await officeService.GetMatterTypesAsync(cancellationToken);
+
+            logger.LogInformation(
+                "Matter-types list returned {ResultCount} results for user {UserId}",
+                response.Results.Count,
+                userId);
+
+            return TypedResults.Ok(response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error listing matter types for user {UserId}", userId);
+
+            return Results.Problem(
+                title: "Matter Types Unavailable",
+                detail: "An error occurred while listing matter types",
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?>
                 {
