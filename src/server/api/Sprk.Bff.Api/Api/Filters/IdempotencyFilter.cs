@@ -33,6 +33,36 @@ public static class IdempotencyFilterExtensions
     }
 
     /// <summary>
+    /// Adds idempotency support whose client-provided <c>X-Idempotency-Key</c> is BOUND to a value the route derives
+    /// from the BOUND request (<paramref name="bindClientKeyTo"/>): the cached response is replayed only when the
+    /// header AND that value match. A request for which the delegate returns <c>null</c> keeps the default behaviour.
+    /// </summary>
+    /// <remarks>
+    /// Exists for a client key that does not name its payload (spaarkeai-word-add-in-r1 task 039). Such a key lets
+    /// a DIFFERENT request under the same key be answered with the first one's cached response — the handler never
+    /// runs, and the second request is silently dropped. Binding makes the key able to split two requests, never to
+    /// merge them. The value comes from the bound endpoint ARGUMENTS, not the raw body: endpoint filters run after
+    /// parameter binding, when the JSON body has already been consumed. If the delegate throws, the response cache
+    /// is skipped for that request rather than replaying unverified.
+    /// </remarks>
+    /// <param name="builder">The route handler builder.</param>
+    /// <param name="bindClientKeyTo">Returns the value the client key is bound to for this request, or null.</param>
+    /// <returns>The builder for chaining.</returns>
+    public static RouteHandlerBuilder AddIdempotencyFilter(
+        this RouteHandlerBuilder builder,
+        Func<EndpointFilterInvocationContext, string?> bindClientKeyTo)
+    {
+        ArgumentNullException.ThrowIfNull(bindClientKeyTo);
+        return builder.AddEndpointFilter(async (context, next) =>
+        {
+            var cache = context.HttpContext.RequestServices.GetRequiredService<ITenantCache>();
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<IdempotencyFilter>>();
+            var filter = new IdempotencyFilter(cache, logger, bindClientKeyTo);
+            return await filter.InvokeAsync(context, next);
+        });
+    }
+
+    /// <summary>
     /// Adds idempotency support with custom TTL.
     /// </summary>
     /// <param name="builder">The route handler builder.</param>
@@ -94,6 +124,23 @@ public class IdempotencyFilter : IEndpointFilter
         _ttl = ttl;
     }
 
+    /// <summary>
+    /// A filter whose client-provided key is bound to the value <paramref name="bindClientKeyTo"/> derives from the
+    /// bound request — see
+    /// <see cref="IdempotencyFilterExtensions.AddIdempotencyFilter(RouteHandlerBuilder, Func{EndpointFilterInvocationContext, string})"/>.
+    /// </summary>
+    public IdempotencyFilter(
+        ITenantCache cache,
+        ILogger<IdempotencyFilter> logger,
+        Func<EndpointFilterInvocationContext, string?> bindClientKeyTo)
+        : this(cache, logger, DefaultTtl)
+    {
+        _bindClientKeyTo = bindClientKeyTo ?? throw new ArgumentNullException(nameof(bindClientKeyTo));
+    }
+
+    /// <summary>Null = the default behaviour: a client key alone names the cache entry.</summary>
+    private readonly Func<EndpointFilterInvocationContext, string?>? _bindClientKeyTo;
+
     public async ValueTask<object?> InvokeAsync(
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next)
@@ -127,6 +174,26 @@ public class IdempotencyFilter : IEndpointFilter
             // Use client-provided key scoped by user ID
             idempotencyKey = $"{userId}:{clientProvidedKey}";
             _logger.LogDebug("Using client-provided idempotency key: {IdempotencyKey}", clientProvidedKey);
+
+            // Opt-in (task 039): bind the client key to a value the route derives from the bound request, so a key
+            // reused for a DIFFERENT payload misses the cache and reaches the handler instead of being answered
+            // with the first payload's response.
+            if (_bindClientKeyTo is not null)
+            {
+                var (resolved, binding) = TryResolveBinding(context, _bindClientKeyTo);
+                if (!resolved)
+                {
+                    _logger.LogWarning(
+                        "Idempotency response cache skipped: the binding for key {IdempotencyKey} could not be resolved",
+                        clientProvidedKey);
+                    return await next(context);
+                }
+
+                if (binding is not null)
+                {
+                    idempotencyKey = $"{idempotencyKey}:{binding}";
+                }
+            }
         }
         else
         {
@@ -221,6 +288,29 @@ public class IdempotencyFilter : IEndpointFilter
 
             // On cache failure, proceed without idempotency (fail open)
             return await next(context);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the value the client key is bound to (hashed, so any string is a safe cache-key segment).
+    /// <c>Resolved = false</c> means the route's delegate threw — the caller then skips the response cache rather
+    /// than replay a request it could not classify.
+    /// </summary>
+    private (bool Resolved, string? Binding) TryResolveBinding(
+        EndpointFilterInvocationContext context,
+        Func<EndpointFilterInvocationContext, string?> bind)
+    {
+        try
+        {
+            var value = bind(context);
+            return value is null
+                ? (true, null)
+                : (true, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve the binding for the client idempotency key");
+            return (false, null);
         }
     }
 

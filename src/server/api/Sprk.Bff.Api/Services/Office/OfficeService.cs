@@ -227,10 +227,17 @@ public class OfficeService : IOfficeService
             request = await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
         }
 
+        // Declared outside the try (task 039, finding 2) so the outer catch can mark THIS save's ProcessingJob
+        // Failed. A job left Queued/Running by a save that threw was answered as the "duplicate" of every retry.
+        var jobId = Guid.Empty;
+
         try
         {
-            // Step 1: Generate or use provided idempotency key
-            var idempotencyKey = request.IdempotencyKey ?? GenerateIdempotencyKey(request);
+            // Step 1: The save's idempotency key — the ONE source that decides whether this save runs (task 039,
+            // finding 1): the BODY key when the client sends one, else the server's own key (content-aware for
+            // every Document save). The X-Idempotency-Key header never reaches here — it only names the response
+            // cache in IdempotencyFilter, which is bound to the body for Document saves.
+            var idempotencyKey = ResolveIdempotencyKey(request);
 
             // Step 2: Check for existing job with this idempotency key
             // TRACKED: GitHub #229 - Replace with Dataverse ProcessingJob query
@@ -292,9 +299,7 @@ public class OfficeService : IOfficeService
                 versionTarget = target;
             }
 
-            // Step 4: Create a new ProcessingJob record in Dataverse
-            var jobId = Guid.Empty;
-
+            // Step 4: Create a new ProcessingJob record in Dataverse (jobId is declared above the try — task 039)
             _logger.LogInformation(
                 "Creating ProcessingJob for {ContentType} save with association {AssociationType}:{AssociationId}",
                 request.ContentType,
@@ -494,6 +499,12 @@ public class OfficeService : IOfficeService
                 {
                     // Update job status to failed
                     await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, uploadError, cancellationToken);
+                    _jobStore[jobId] = jobRecord with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "UploadFailed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    };
 
                     return new SaveResponse
                     {
@@ -546,7 +557,10 @@ public class OfficeService : IOfficeService
                         Status = JobStatus.Completed,
                         Progress = 100,
                         CurrentPhase = "DeduplicatedToExisting",
-                        CompletedAt = DateTimeOffset.UtcNow
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        // Task 039 (finding 3): names the canonical this save resolved to. The transient upload was
+                        // just deleted, so no file id; the canonical's own file is not re-read here.
+                        Result = DocumentResult(documentId, speFileId: null, driveId: null, webUrl: null)
                     };
 
                     _logger.LogInformation(
@@ -622,7 +636,8 @@ public class OfficeService : IOfficeService
                     Status = JobStatus.Completed,
                     Progress = 100,
                     CurrentPhase = "Complete",
-                    CompletedAt = DateTimeOffset.UtcNow
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    Result = DocumentResult(documentId, itemId, driveId, webUrl) // task 039 (finding 3)
                 };
 
                 _logger.LogInformation(
@@ -653,6 +668,25 @@ public class OfficeService : IOfficeService
                 request.ContentType,
                 userId,
                 ex.Message);
+
+            // Task 039 (finding 2): a save that throws AFTER its ProcessingJob exists must not leave that job
+            // Queued/Running. The idempotency lookup answers any retry with a job that did not fail, so a job
+            // stranded mid-flight would make every retry a "duplicate" of a save that never finished. Recorded with
+            // CancellationToken.None so a client disconnect cannot skip it; the update itself is best-effort.
+            if (jobId != Guid.Empty)
+            {
+                await _documentPersistence.UpdateJobStatusInDataverseAsync(
+                    jobId, JobStatus.Failed, "Failed", 0, ex.Message, CancellationToken.None);
+                if (_jobStore.TryGetValue(jobId, out var strandedJob))
+                {
+                    _jobStore[jobId] = strandedJob with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "Failed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    };
+                }
+            }
 
             // Include the actual exception message to aid debugging
             // In production, consider returning a generic message and logging details server-side only
@@ -689,16 +723,45 @@ public class OfficeService : IOfficeService
         // document (same file name, same target, same existing id) produced the SAME key, and the persistent
         // ProcessingJob lookup in SaveAsync answered the SECOND revision "Duplicate" with the first save's job —
         // the new bytes were never written. With it, two different revisions are two operations while a retried
-        // identical request still de-duplicates. Every other request's canonical string is unchanged.
-        if (IsVersionSave(request))
+        // identical request still de-duplicates. The version string is unchanged by task 039.
+        //
+        // Task 039 (finding 4): a Document CREATE keys on its content too, with the SAME hashing. The create
+        // string used to be content-free, so a user who saved a new document to a record, edited it, and saved
+        // it again to the same record under the same name got the second save answered "Duplicate" from the
+        // first save's job — the edits were silently never written. Identical bytes still hash identically, so
+        // a true retry is still de-duplicated here (and a byte-identical but deliberate re-save is content
+        // dedup's job — link/graduate, task 028 — not this cache's). Email and Attachment keep their string
+        // byte-for-byte: they name an immutable message or attachment, never editable content.
+        if (request.ContentType == SaveContentType.Document)
         {
-            canonical += $"|version-content:{HashContent(request.Document!.ContentBase64)}";
+            var contentHash = HashContent(request.Document?.ContentBase64);
+            canonical += IsVersionSave(request)
+                ? $"|version-content:{contentHash}"
+                : $"|create-content:{contentHash}";
         }
 
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToBase64String(hashBytes);
     }
+
+    /// <summary>
+    /// Task 039 (finding 3): what a COMPLETED save's job carries — the <c>sprk_document</c> the save landed on.
+    /// The created document on the create path, the EXISTING document on the version path, and the canonical on
+    /// the immutable duplicate path. The task pane completes on <c>result.artifact.id</c>; without it the job
+    /// reported Completed with nothing to open and the pane stalled on its job card.
+    /// </summary>
+    private static JobResult DocumentResult(Guid documentId, string? speFileId, string? driveId, string? webUrl) => new()
+    {
+        Artifact = new CreatedArtifact
+        {
+            Type = ArtifactType.Document,
+            Id = documentId,
+            SpeFileId = speFileId,
+            ContainerId = driveId,
+            WebUrl = webUrl
+        }
+    };
 
     /// <summary>
     /// FR-11 (task 023): is this save a VERSION of an existing document? True only for
@@ -714,6 +777,17 @@ public class OfficeService : IOfficeService
         request.ContentType == SaveContentType.Document
         && request.Document?.ExistingDocumentId is { } existingDocumentId
         && existingDocumentId != Guid.Empty;
+
+    /// <summary>
+    /// Task 039 (finding 1): the save's AUTHORITATIVE idempotency key — the request BODY's
+    /// <c>idempotencyKey</c> when present, else the server's own (<see cref="GenerateIdempotencyKey"/>, content-aware
+    /// for every Document save). The ONE definition: <see cref="SaveAsync"/> de-duplicates on it, and the save
+    /// route binds its <c>X-Idempotency-Key</c> response cache to it for Document saves
+    /// (<c>OfficeEndpoints.DocumentSaveIdempotencyBinding</c>), so the two layers cannot disagree about which saves
+    /// are the same operation. The header itself is never this key.
+    /// </summary>
+    public static string ResolveIdempotencyKey(SaveRequest request) =>
+        request.IdempotencyKey ?? GenerateIdempotencyKey(request);
 
     private static string HashContent(string? contentBase64) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
@@ -863,7 +937,9 @@ public class OfficeService : IOfficeService
             Status = JobStatus.Completed,
             Progress = 100,
             CurrentPhase = "Complete",
-            CompletedAt = DateTimeOffset.UtcNow
+            CompletedAt = DateTimeOffset.UtcNow,
+            // Task 039 (finding 3): the EXISTING document — a version never creates one.
+            Result = DocumentResult(target.DocumentId, itemId, driveId, write.WebUrl)
         };
 
         _logger.LogInformation(
