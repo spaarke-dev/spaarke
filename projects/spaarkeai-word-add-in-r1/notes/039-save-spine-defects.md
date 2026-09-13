@@ -187,7 +187,11 @@ No Critical findings. ADR-001/007/008/010/013/028/038/044 compliant. NFR-07 and 
 - New: 17 (contract 11 incl. theory ×2; data-mutation 6).
 - Office/dedup/idempotency sweep: 368 passed / 0 failed / 10 skipped.
 - ArchTests: 191 / 191.
-- Full `Sprk.Bff.Api.Tests`: FULL_SUITE_RESULT
+- Full `Sprk.Bff.Api.Tests` at `dec051738`, **completed**: **12,289 total, 12,233 passed, 0 failed, 56 skipped**.
+  It ran as four foreground chunks under the 10-minute per-call cap. The chunk filters partition the suite exactly
+  (complement filter for the last one):
+  `Services.` 6,885 / 0 / 24 (58 s) · `Seam.` 1,685 / 0 / 0 (7 m 31 s) · `Api.` 1,449 / 0 / 23 (9 m 49 s) ·
+  everything else 2,214 / 0 / 9 (3 m 20 s). The 56 skips match task 016's recorded 56.
 
 ## 11. Deviations from the POML
 
