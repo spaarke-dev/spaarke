@@ -8,7 +8,7 @@
  * "New <type>" create form (`onCreateRecord`) — rather than the full `SaveFlow` tree, which the sibling
  * `SaveFlow.matterTypeQuickCreate.test.tsx` covers end to end for the POST body shape.
  */
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, configure } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { RelatedToPicker, type CreateRecordResult, type RelatedToPickerProps } from '../RelatedToPicker';
@@ -32,7 +32,11 @@ Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: 
 // testTimeout, especially under parallel-worker load (documented package characteristic — CLAUDE.md
 // "run-to-run count drift... bail at different points under load"). A longer budget for every test in
 // this file avoids that flakiness without touching shared jest config.
-jest.setTimeout(20000);
+// Widened 2026-09-15 (20 s -> 60 s per test, RTL waits 1 s -> 10 s): the suite passed alone every time
+// but failed in full, fully parallel jest runs under heavy machine load, taking 126 s for 9 tests. Every
+// dependency is mocked; no assertion depends on timing. `configure` is scoped to this test file.
+jest.setTimeout(60000);
+configure({ asyncUtilTimeout: 10000 });
 
 type PickerOverrides = Partial<
   Pick<

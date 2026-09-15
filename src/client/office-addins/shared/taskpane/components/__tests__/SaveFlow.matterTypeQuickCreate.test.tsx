@@ -21,11 +21,12 @@ jest.mock('../../services/SseClient', () => ({
 
 // Real-timer userEvent typing + a Dropdown popup interaction runs close to the file's default 10s
 // testTimeout; both tests here get a longer budget to avoid flakiness under load.
-const TEST_TIMEOUT_MS = 20000;
-// RTL's default wait is 1 s. This suite passes in isolation but lost one test in a full, fully
-// parallel jest run under heavy machine load (2026-09-15) — every fetch here is mocked, so the only
-// load-sensitive step is how long a render takes to appear. Each wait gets 5 s instead.
-const WAIT = { timeout: 5000 };
+// Budgets widened 2026-09-15. Alone, this suite takes ~8 s per test; in full, fully parallel jest runs
+// under heavy machine load it failed twice while passing alone every time, with the suite taking 98 s
+// (~33 s per test, over the old 20 s budget). Every fetch here is mocked, so the only load-sensitive
+// steps are real-timer typing and how long a render takes to appear. No assertion depends on timing.
+const TEST_TIMEOUT_MS = 60000;
+const WAIT = { timeout: 10000 };
 
 // jsdom has no ResizeObserver; Fluent's Dropdown/MessageBar need one to render.
 class ResizeObserverStub {
