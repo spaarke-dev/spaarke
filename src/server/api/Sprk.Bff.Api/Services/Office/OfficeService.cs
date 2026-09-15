@@ -1964,14 +1964,21 @@ public class OfficeService : IOfficeService
     };
 
     /// <summary>Friendly regarding type → (entity-specific <c>sprk_todo</c> lookup attribute, target logical name).
-    /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c> for the three types the add-in "Related to"
-    /// picker offers (Matter/Project/Invoice).</summary>
+    /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c>. The first three entries are the types
+    /// the add-in "Related to" picker offers (Matter/Project/Invoice) and are looked up via
+    /// <see cref="CreateTodoRequest.RegardingEntityType"/>. The <c>Document</c> / <c>Communication</c> entries
+    /// (FR-14, task 035) are the pane's independent "carrying" regarding — looked up via
+    /// <see cref="CreateTodoRequest.DocumentId"/> / <see cref="CreateTodoRequest.CommunicationId"/>, NOT via
+    /// <c>RegardingEntityType</c> — because both a carrier and a record may be set on the same call. See
+    /// <c>notes/035-todo-regarding-decision.md</c>.</summary>
     private static readonly IReadOnlyDictionary<string, (string LookupAttribute, string LogicalName)> _todoRegardingMap =
         new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
         {
             ["Matter"] = ("sprk_regardingmatter", "sprk_matter"),
             ["Project"] = ("sprk_regardingproject", "sprk_project"),
             ["Invoice"] = ("sprk_regardinginvoice", "sprk_invoice"),
+            ["Document"] = ("sprk_regardingdocument", "sprk_document"),
+            ["Communication"] = ("sprk_regardingcommunication", "sprk_communication"),
         };
 
     /// <inheritdoc />
@@ -2064,6 +2071,26 @@ public class OfficeService : IOfficeService
                     reg.LogicalName, regardingId, stamp.Error);
                 return null;
             }
+        }
+
+        // Carrying regarding (FR-14, task 035) — the open Word document or the Outlook email being filed.
+        // Independent of the record regarding above: both may be written to the same sprk_todo (constraint:
+        // "Setting only one when both are available is a defect, not a graceful degradation"). Does NOT touch
+        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md)
+        // and does NOT run the core-ancestor stamp (the stamp is a property of the record regarding above,
+        // unchanged by this task — a document/communication carrier alone needs no stamp of its own).
+        if (request.DocumentId is { } documentId
+            && documentId != Guid.Empty
+            && _todoRegardingMap.TryGetValue("Document", out var docCarrier))
+        {
+            entity[docCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(docCarrier.LogicalName, documentId);
+        }
+
+        if (request.CommunicationId is { } communicationId
+            && communicationId != Guid.Empty
+            && _todoRegardingMap.TryGetValue("Communication", out var commCarrier))
+        {
+            entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
         }
 
         // Owner attribution (ADR-024) — best-effort, same posture as QuickCreate.

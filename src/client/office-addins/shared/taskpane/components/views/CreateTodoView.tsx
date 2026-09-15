@@ -53,17 +53,37 @@ import {
 /** The record this email is filed to (from the Save flow) — the To Do's regarding. */
 export interface SavedTodoContext {
   /**
-   * `sprk_communicationid` of the saved email, when known. Optional — the To Do's regarding is the
-   * RECORD (below), not the communication, so a real save need not surface a communication id. The
-   * browser harness sets a `demo-…` value to route the create to a mocked success.
+   * `sprk_communicationid` of the saved email, when known — ALSO (FR-14, task 035) written to
+   * `sprk_regardingcommunication` as the Outlook counterpart of `documentId` below, when it is a real
+   * (non-`demo-`) id. The browser harness sets a `demo-…` value to route the create to a mocked success;
+   * that value is never sent to the server as a regarding.
    */
   communicationId?: string;
   /** Confirmed record's friendly type — "Matter" / "Project" / "Invoice" (the To Do regarding). */
   regardingEntity: string;
   /** Confirmed record id (the To Do regarding). */
   regardingRecordId: string;
-  /** Friendly label for the regarding record, shown in the pane + written to sprk_regardingrecordname. */
+  /**
+   * Friendly label for the regarding record — written to `sprk_regardingrecordname`. For Matter/Project
+   * this is the record's NUMBER (Dataverse primary-name quirk, not a display name — see
+   * `notes/026-slot-scope-decision.md` §3), which is why `regardingDisplayName` below is preferred for
+   * what the pane SHOWS; this field remains what the server writes as a fallback when no richer label
+   * is available.
+   */
   regardingName?: string;
+  /**
+   * The regarding record's DESCRIPTIVE display name (task 026's richer label,
+   * `RelatedRecordIdentity.displayName`) — preferred over `regardingName` for what the pane shows and
+   * what is sent as `regardingRecordName`. Absent (not just falsy) when not resolved via the document-
+   * identity path; a pane-created Matter can also have a blank/empty value here until it has a name.
+   */
+  regardingDisplayName?: string;
+  /**
+   * The open Word document's `sprk_document` id (task 013's resolved identity) — written to
+   * `sprk_regardingdocument` (FR-14, task 035). Independent of the record regarding: both may be set on
+   * the same create call.
+   */
+  documentId?: string;
 }
 
 /** A contact returned by the Assigned-To lookup. */
@@ -289,8 +309,12 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     }
   };
 
+  // Prefer the descriptive displayName (task 026) over the raw regardingName — which, for Matter/Project,
+  // is actually the record NUMBER (a Dataverse primary-name quirk, not a display name; see
+  // notes/026-slot-scope-decision.md §3) and can be blank for a pane-created Matter with no number yet.
+  // Falls through to regardingEntity so the card is never blank.
   const regardingLabel = useMemo(
-    () => savedContext?.regardingName ?? savedContext?.regardingEntity ?? '',
+    () => savedContext?.regardingDisplayName || savedContext?.regardingName || savedContext?.regardingEntity || '',
     [savedContext]
   );
 
