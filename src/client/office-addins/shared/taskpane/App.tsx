@@ -27,6 +27,7 @@ import {
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
 } from './services/documentIdentityService';
+import { cleanGuid } from './utils/cleanGuid';
 
 /**
  * Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved context may
@@ -325,6 +326,10 @@ export const App: React.FC<AppProps> = ({
         await new Promise(resolve => setTimeout(resolve, 600));
         return { ok: true };
       }
+      // FR-14 (task 035): carry the document/communication regarding alongside the record regarding
+      // when known. documentId is Word-only (task 013's resolved identity); communicationId is the
+      // Outlook counterpart. A demo-prefixed communicationId (browser harness) is never sent to the
+      // server — the real-communicationId path returns above before reaching this call.
       try {
         const token = await authService.getAccessToken();
         const res = await fetch(`${apiBaseUrl}/api/office/todo`, {
@@ -342,7 +347,10 @@ export const App: React.FC<AppProps> = ({
             effortScore: input.effortScore,
             regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
             regardingRecordId: savedContext.regardingRecordId,
-            regardingRecordName: savedContext.regardingName,
+            regardingRecordName: savedContext.relatedRecord?.displayName ?? savedContext.regardingName,
+            // ADR-044: canonicalize every GUID crossing this boundary to bare-lowercase.
+            ...(savedContext.documentId ? { documentId: cleanGuid(savedContext.documentId) } : {}),
+            ...(savedContext.communicationId ? { communicationId: cleanGuid(savedContext.communicationId) } : {}),
           }),
         });
         if (!res.ok) {
@@ -436,6 +444,13 @@ export const App: React.FC<AppProps> = ({
           regardingRecordId: savedContext.regardingRecordId,
           ...(savedContext.communicationId ? { communicationId: savedContext.communicationId } : {}),
           ...(savedContext.regardingName ? { regardingName: savedContext.regardingName } : {}),
+          // FR-14 (task 035): task 026's richer display label, when the document-identity path resolved
+          // it — preferred by CreateTodoView's regardingLabel over the (possibly number-shaped) regardingName.
+          ...(savedContext.relatedRecord?.displayName
+            ? { regardingDisplayName: savedContext.relatedRecord.displayName }
+            : {}),
+          // FR-14 (task 035): the open Word document (task 013), carried alongside the record regarding.
+          ...(savedContext.documentId ? { documentId: savedContext.documentId } : {}),
         }
       : undefined;
 
