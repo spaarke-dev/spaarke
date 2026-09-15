@@ -4,7 +4,7 @@
     <title>A version save that repeats an earlier version's content must be written, not answered "Duplicate"</title>
     <phase>2 Save flow</phase>
     <gate>039 merged (one authoritative idempotency key; Failed/Cancelled retryable; newest row wins)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Silent data loss on the save spine; modifies BFF .cs (and possibly the pane key) consumed by every Office Document save.</rigor-reason>
     <model-tier>opus</model-tier>

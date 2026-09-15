@@ -201,4 +201,63 @@ public class OfficeStorageUploader
             return new VersionWriteResult(false, null, null, null, "OFFICE_012", ex.Message);
         }
     }
+
+    /// <summary>
+    /// Task 047 (spaarkeai-word-add-in-r1): does drive item <paramref name="itemId"/> CURRENTLY hold exactly
+    /// <paramref name="expected"/>? <c>true</c> or <c>false</c> when its content was read and compared; <c>null</c>
+    /// when it could not be read (item missing, Graph failure). An unknown is never "the same".
+    /// </summary>
+    /// <remarks>
+    /// <para>Reads the item's current content through the facade (ADR-007; app-only, the identity the version path's
+    /// content-identity read already uses) and compares it byte for byte. It stops at the first difference and never
+    /// reads more than <c>expected.Length + 1</c> bytes. The content is compared, never returned.</para>
+    /// <para>Why bytes, not SPE's <c>quickXorHash</c>: comparing hashes would need the request's bytes hashed with
+    /// QuickXorHash here, and a local reimplementation that disagreed with SPE would fail silently. A byte compare
+    /// cannot disagree with what SPE holds.</para>
+    /// </remarks>
+    public async Task<bool?> ItemHoldsContentAsync(
+        string driveId,
+        string itemId,
+        ReadOnlyMemory<byte> expected,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var current = await _speFileStore.DownloadFileAsync(driveId, itemId, cancellationToken);
+            if (current is null)
+            {
+                return null;
+            }
+
+            return await ContentEqualsAsync(current, expected, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Could not read drive item {ItemId} on drive {DriveId} to compare its current content.", itemId, driveId);
+            return null;
+        }
+    }
+
+    private static async Task<bool> ContentEqualsAsync(Stream stream, ReadOnlyMemory<byte> expected, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[Math.Min(81920, expected.Length + 1)];
+        var offset = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0)
+            {
+                return offset == expected.Length;
+            }
+
+            if (offset + read > expected.Length
+                || !buffer.AsSpan(0, read).SequenceEqual(expected.Span.Slice(offset, read)))
+            {
+                return false;
+            }
+
+            offset += read;
+        }
+    }
 }

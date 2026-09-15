@@ -172,12 +172,16 @@ public static class OfficeEndpoints
         //   BODY idempotencyKey, else on the server's own key (content-aware for Document saves). IdempotencyFilter's
         //   X-Idempotency-Key response cache is bound to that same key for Document saves
         //   (DocumentSaveIdempotencyBinding), so a reused header can never replay a response for a different document.
+        //   A VERSION save is never replayed from that cache (task 047, SaveResponseMayBeReplayed): whether it repeats
+        //   a completed save depends on what the document holds now, which only the service can check.
         // Rate Limit: 10 requests/minute/user (per spec.md)
         group.MapPost("/save", SaveAsync)
             .WithName("OfficeSave")
             .WithDescription("Submit email, attachment, or document for saving to Spaarke DMS")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
-            .AddIdempotencyFilter(bindClientKeyTo: DocumentSaveIdempotencyBinding) // Task 030 + task 039 (finding 4)
+            .AddIdempotencyFilter( // Task 030 + task 039 (finding 4) + task 047
+                bindClientKeyTo: DocumentSaveIdempotencyBinding,
+                mayReplayResponse: SaveResponseMayBeReplayed)
             .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
             .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
             .AddOfficeVersionSaveAuthorizationFilter() // word-add-in-r1 task 023 - FR-11 version save: "write" on the existing sprk_document
@@ -217,6 +221,13 @@ public static class OfficeEndpoints
     /// to that same authoritative key (<see cref="DocumentSaveIdempotencyBinding"/>), so a reused header replays only
     /// a request the key would also de-duplicate. Email and Attachment keep the header-keyed replay unchanged: their
     /// header names the same immutable message/attachment the server key does.
+    /// </para>
+    /// <para>
+    /// <b>Version saves (task 047).</b> A version key names a document and its content, so it cannot tell a retry from
+    /// a later save of the same content (B, then A, then B again). A version save is therefore never replayed from the
+    /// response cache (<see cref="SaveResponseMayBeReplayed"/>; the in-flight lock still applies). A Completed job under
+    /// its key is its duplicate only while the document still holds exactly its content
+    /// (<c>OfficeService.IsStillTheSameOperationAsync</c>).
     /// </para>
     /// </remarks>
     /// <param name="request">The save request with content metadata.</param>
@@ -355,6 +366,22 @@ public static class OfficeEndpoints
         context.Arguments.OfType<SaveRequest>().FirstOrDefault() is { ContentType: SaveContentType.Document } request
             ? OfficeService.ResolveIdempotencyKey(request)
             : null;
+
+    /// <summary>
+    /// Task 047: may <c>IdempotencyFilter</c> answer this save from its response cache? Not a VERSION save
+    /// (<see cref="OfficeService.IsVersionSave"/>). Everything else may, exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// A version save's key names a document and its content. Whether a request under that key repeats a completed save
+    /// depends on what the document holds NOW: after B, then A, the content key of B names a save that no longer
+    /// describes the document. The cache cannot see that, so it replayed the first B save's 202 for 24 hours. The save
+    /// still takes the in-flight lock (a concurrent double submit gets 409). A sequential retry reaches
+    /// <c>OfficeService.SaveAsync</c>, which answers it with the first save's job when the document still holds these
+    /// bytes (<c>200</c>, <c>duplicate: true</c>).
+    /// </remarks>
+    internal static bool SaveResponseMayBeReplayed(EndpointFilterInvocationContext context) =>
+        context.Arguments.OfType<SaveRequest>().FirstOrDefault() is not { } request
+        || !OfficeService.IsVersionSave(request);
 
     /// <summary>
     /// Validates a save request for required fields and constraints.
