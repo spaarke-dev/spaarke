@@ -4,7 +4,7 @@
     <title>Re-profile and re-index a document after a version save (per-version analysis key)</title>
     <phase>2 Save flow</phase>
     <gate>023 merged (version save writes a new SPE version of the existing sprk_document)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF background-job path (idempotency of document analysis + indexing) consumed by every document-save surface; tags include bff-api, ai and jobs.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -47,6 +47,12 @@
     <constraint source="project">Scope: BFF hygiene (root CLAUDE.md §10) — publish size against a FRESH master build (Compress-Archive), CVE check, placement statement in notes.</constraint>
   </constraints>
 
+  <owner-decisions date="2026-09-15">
+    <decision name="index-replace">Option B from notes/029-version-ai-refresh.md: for a VERSION re-index only, upload the new chunks first, then delete that document's leftover chunks beyond the new chunk count, in the SAME index the path wrote to (the per-record index name, not the tenant default). One new `IRagService` method is allowed for this. The document must never be left without chunks. Every other re-index path keeps today's behaviour.</decision>
+    <decision name="existing-data">Stale chunks already in dev are dev data: no backfill or cleanup job.</decision>
+    <decision name="revert-case">Close it in this task: every genuinely new version refreshes, even when its content repeats an earlier version (B, then A, then B refreshes three times). Retries and Service Bus redeliveries of the SAME save still skip. A content hash alone cannot do this; prefer a discriminator that identifies the version the save wrote (for example the SPE version id or eTag the version write returned, or the save job's id), and prove both halves by test.</decision>
+    <decision name="check-the-save-first">Before building, verify whether the SAVE itself has the same revert problem: the version-save idempotency key includes a content hash (023 D-3 / 039), so a third save whose content matches an earlier save inside the idempotency window may be answered from the cache and never written to SPE. If it is, STOP and report with evidence and options - that is a silent lost edit on the save spine and needs its own decision; do not change the save key inside this task.</decision>
+  </owner-decisions>
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, `notes/023-save-path-trace.md`, the indexing-pipeline pattern and the document-profile architecture doc. Declare FULL, opus @ high, DIRECTIONAL. Run `/conflict-check` (BFF hot path).</step>
     <step order="1">Trace finalization → profile job → index job for a version save and a first save; write the trace (keys, skip checks, index replace semantics) to `notes/029-version-ai-refresh.md` before changing code.</step>
