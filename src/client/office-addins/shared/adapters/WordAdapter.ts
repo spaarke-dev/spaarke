@@ -33,6 +33,8 @@ import type {
   GetDocumentContentOptions,
   HostAdapterError,
   HostAdapterErrorCode,
+  EmailComposeContent,
+  ComposeEmailResult,
 } from './types';
 
 /**
@@ -394,6 +396,9 @@ export class WordAdapter implements IHostAdapter {
       canInsertLink: isApiSupported,
       canAttachFile: false,
       canOpenBrowserWindow,
+      // task 036 / FR-15: `Office.context.mailbox` does not exist in Word — always false. Never
+      // reachable via a `hostType` conditional in a view; the view reads this flag.
+      canComposeEmail: false,
       minApiVersion: MIN_WORD_API_VERSION,
       supportedRequirementSet: `WordApi ${MIN_WORD_API_VERSION}`,
     };
@@ -490,6 +495,24 @@ export class WordAdapter implements IHostAdapter {
     return {
       success: false,
       errorMessage: 'Attaching files is not supported in Word. This feature is only available in Outlook compose mode.',
+    };
+  }
+
+  /**
+   * Open a new-message compose window. Not supported for Word documents.
+   *
+   * `Office.context.mailbox` does not exist in Word — always returns a defined error result (never
+   * throws), mirroring {@link attachFile}'s convention for an Outlook-only capability called on the
+   * wrong host. Callers should already be gated on {@link HostCapabilities.canComposeEmail}, which
+   * is always `false` here, so this is a defensive fallback rather than the expected call path.
+   *
+   * @param _content - Ignored
+   * @returns Promise resolving to an error result
+   */
+  async composeNewEmail(_content: EmailComposeContent): Promise<ComposeEmailResult> {
+    return {
+      success: false,
+      errorMessage: 'Composing email is not supported in Word. This feature is only available in Outlook.',
     };
   }
 

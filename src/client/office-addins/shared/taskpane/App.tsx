@@ -1,9 +1,19 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { FluentProvider, Spinner, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  FluentProvider,
+  Spinner,
+  Button,
+  MessageBar,
+  MessageBarBody,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
+import { MailRegular } from '@fluentui/react-icons';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
 import { useLinkedTodosForCommunication } from './hooks';
+import { useAnnounce } from './hooks/useAnnounce';
 import { TaskPaneShell, type NavigationTab, type HostType } from './components/TaskPaneShell';
 import { getAvailableTabs } from './components/TaskPaneNavigation';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
@@ -27,6 +37,7 @@ import {
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
 } from './services/documentIdentityService';
+import { prepareSendEmail } from './services/sendEmailService';
 import { cleanGuid } from './utils/cleanGuid';
 
 /**
@@ -72,6 +83,12 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  sendEmailRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalS,
   },
 });
 
@@ -163,6 +180,19 @@ export const App: React.FC<AppProps> = ({
       regardingEntity: entity.entityType,
       regardingRecordId: entity.id,
       ...(entity.name ? { regardingName: entity.name } : {}),
+      // task 036 / FR-15: Send Email's record link needs the Dataverse LOGICAL name (`entity.logicalName`,
+      // e.g. `sprk_matter`) — `regardingEntity` above is the FRIENDLY type ("Matter") and cannot build a
+      // `main.aspx?etn=...` URL. `relatedRecord` is the same field task 013's document-identity resolver
+      // already populates for a resolved Word document (`ResolvedRelatedRecord`); populating it here too
+      // makes it the single source Send Email reads regardless of which path (URL resolution vs an
+      // explicit Save) produced the association, on either host.
+      relatedRecord: {
+        entityType: entity.logicalName,
+        id: cleanGuid(entity.id),
+        name: entity.name,
+        displayName: entity.name,
+        number: null,
+      },
     }));
   }, []);
 
@@ -402,6 +432,68 @@ export const App: React.FC<AppProps> = ({
     [savedContext, apiBaseUrl]
   );
 
+  // Send Email via Outlook (task 036 / FR-15). Capability-gated on `hostAdapter.getCapabilities().canComposeEmail`
+  // below (NFR-10) — never a `hostType` conditional. `Office.context.mailbox` does not exist in Word, so
+  // WordAdapter always reports the capability absent and this affordance never renders there; the deferred
+  // Spaarke-modal variant (design.md §4.2) is out of scope — this opens the HOST's own compose window only.
+  const [sendEmailStatus, setSendEmailStatus] = useState<'idle' | 'sending'>('idle');
+  const [sendEmailError, setSendEmailError] = useState<string | null>(null);
+  const { announce: announceSendEmail, liveRegion: sendEmailLiveRegion } = useAnnounce();
+
+  const handleSendEmail = useCallback(async () => {
+    setSendEmailStatus('sending');
+    setSendEmailError(null);
+    try {
+      const subject = await hostAdapter.getSubject();
+      const result = await prepareSendEmail({
+        document: savedContext?.documentId ? { documentId: savedContext.documentId } : null,
+        relatedRecord: savedContext?.relatedRecord
+          ? {
+              entityType: savedContext.relatedRecord.entityType,
+              id: savedContext.relatedRecord.id,
+              // `regardingEntity` is the FRIENDLY type ("Matter") set alongside `relatedRecord` by both
+              // producers (documentIdentityService's applyDocumentIdentityOutcome and handleSaved above) —
+              // reused here so the email link label reads "Matter: ..." rather than "sprk_matter: ...".
+              typeLabel: savedContext.regardingEntity ?? null,
+              displayName: savedContext.relatedRecord.displayName ?? savedContext.relatedRecord.name,
+              number: savedContext.relatedRecord.number ?? null,
+            }
+          : null,
+        subject,
+        orgUrl: process.env.ORG_URL,
+      });
+
+      if (result.kind === 'error') {
+        setSendEmailError(result.message);
+        announceSendEmail(result.message, 'assertive');
+        return;
+      }
+      if (result.kind === 'nothing-to-send') {
+        // Defensive only — the affordance is hidden whenever there is nothing to link (see canSendEmail
+        // below), so this should not be reachable from the UI.
+        return;
+      }
+
+      const composeResult = await hostAdapter.composeNewEmail({
+        subject: result.content.subject,
+        htmlBody: result.content.htmlBody,
+      });
+      if (!composeResult.success) {
+        const message = composeResult.errorMessage ?? 'Could not open the compose window.';
+        setSendEmailError(message);
+        announceSendEmail(message, 'assertive');
+        return;
+      }
+      announceSendEmail('Opened a new email with the document and record links.', 'polite');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not send email.';
+      setSendEmailError(message);
+      announceSendEmail(message, 'assertive');
+    } finally {
+      setSendEmailStatus('idle');
+    }
+  }, [hostAdapter, savedContext, announceSendEmail]);
+
   // Settings handler (placeholder)
   const handleSettings = () => {
     // Will open settings dialog in later tasks
@@ -432,6 +524,13 @@ export const App: React.FC<AppProps> = ({
     hostType === 'outlook' &&
     indicatorTargetId !== undefined &&
     (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
+
+  // Send Email (task 036 / FR-15, NFR-10): gated on the CAPABILITY, never on `hostType` — WordAdapter
+  // always reports `canComposeEmail: false` because `Office.context.mailbox` does not exist in Word, so
+  // this naturally never renders there without needing to branch on which host is running. Also requires
+  // at least one of a document or a related record to link — with neither, there is nothing to send.
+  const canSendEmail =
+    hostAdapter.getCapabilities().canComposeEmail && Boolean(savedContext?.documentId || savedContext?.relatedRecord);
 
   // `CreateTodoView.savedContext` expects the narrower `SavedTodoContext` shape (regardingEntity +
   // regardingRecordId required). `App.savedContext` (AppSavedContext) widens those to optional so a
@@ -519,6 +618,27 @@ export const App: React.FC<AppProps> = ({
         showErrorDetails={showErrorDetails}
         onError={handleError}
       >
+        {/* Send Email via Outlook (task 036 / FR-15) — capability-gated (NFR-10), visible on any tab once
+            there is a document and/or related record to link. */}
+        {canSendEmail && (
+          <div className={styles.sendEmailRow}>
+            {sendEmailLiveRegion}
+            <Button
+              appearance="secondary"
+              icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
+              onClick={handleSendEmail}
+              disabled={sendEmailStatus === 'sending'}
+            >
+              Send Email
+            </Button>
+            {sendEmailError && (
+              <MessageBar intent="error">
+                <MessageBarBody>{sendEmailError}</MessageBarBody>
+              </MessageBar>
+            )}
+          </div>
+        )}
+
         {/* Linked Spaarke to-dos banner (Outlook only, smart-todo-decoupling-r3 FR-28) */}
         {showLinkedTodosBanner && (
           <LinkedTodosBanner
@@ -561,6 +681,14 @@ export const App: React.FC<AppProps> = ({
             apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net'}
             onComplete={(docId, docUrl) => {
               console.log('Save complete:', docId, docUrl);
+              // task 036 / FR-15: Send Email needs a documentId on BOTH hosts. Word usually already has one
+              // from task 013's URL-based resolution (`savedContext.documentId`); Outlook has no such
+              // resolution path at all, so a completed save is the ONLY place it ever learns the id. Setting
+              // it here (rather than only via documentIdentityService) covers both — and for Word it is a
+              // same-value overwrite in the common case (the saved document IS the resolved one).
+              if (docId) {
+                setSavedContext(prev => ({ ...prev, documentId: cleanGuid(docId) }));
+              }
             }}
             onSaved={handleSaved}
             onQuickCreate={(entityType, searchQuery) => {
