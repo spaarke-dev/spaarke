@@ -243,6 +243,14 @@ public class OfficeService : IOfficeService
             // TRACKED: GitHub #229 - Replace with Dataverse ProcessingJob query
             var existingJob = await _documentPersistence.CheckForExistingJobAsync(idempotencyKey, cancellationToken);
 
+            // Task 047: a key names CONTENT, not a moment. For a version save, a Completed job under this key is the
+            // duplicate only while the document still holds exactly this content. Otherwise B, then A, then B again
+            // was answered with the first B save's job and never written.
+            if (existingJob is not null && !await IsStillTheSameOperationAsync(request, existingJob, cancellationToken))
+            {
+                existingJob = null;
+            }
+
             if (existingJob is not null)
             {
                 _logger.LogInformation(
@@ -808,6 +816,70 @@ public class OfficeService : IOfficeService
     /// </summary>
     public static string ResolveIdempotencyKey(SaveRequest request) =>
         request.IdempotencyKey ?? GenerateIdempotencyKey(request);
+
+    /// <summary>
+    /// Task 047: may the job found under this save's key still answer it as a duplicate? For a VERSION save, a
+    /// Completed job does so only while the target document still holds exactly this save's content.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> A version key (the pane's, or <see cref="GenerateIdempotencyKey"/>'s
+    /// <c>version-content</c> one) names a document and its content, not a moment. Neither layer used to tell a retry
+    /// of a save from a later save of the same content. B, then A, then B again, found the first B save's Completed job,
+    /// so the third save was never written: SPE kept A while the pane reported success. Checking what the document
+    /// holds is key-agnostic, so it holds for every client and for the server's own key.</para>
+    /// <para><b>The rule.</b> A duplicate is answered only when the document is proven to hold these bytes. Then a write
+    /// would only add an identical version, so skipping it loses nothing. When the content differs (a later save wrote
+    /// another version), or cannot be read, the save is a new operation. The worst case of an unreadable document is
+    /// one more identical version, never a lost one.</para>
+    /// <para><b>What is unchanged.</b> Email, Attachment and Document-create saves, and a version job still in flight
+    /// (Queued/Running: its write may not have landed, and a concurrent double submit must not write twice), are decided
+    /// by the key alone, as before. Failed and Cancelled jobs never reach here (task 039,
+    /// <see cref="OfficeDocumentPersistence.CheckForExistingJobAsync"/>).</para>
+    /// </remarks>
+    private async Task<bool> IsStillTheSameOperationAsync(
+        SaveRequest request,
+        JobStatusResponse existingJob,
+        CancellationToken cancellationToken)
+    {
+        if (!IsVersionSave(request) || existingJob.Status != JobStatus.Completed)
+        {
+            return true;
+        }
+
+        try
+        {
+            var content = Convert.FromBase64String(request.Document!.ContentBase64 ?? string.Empty);
+            var target = await _documentPersistence.ResolveVersionTargetAsync(
+                request.Document.ExistingDocumentId!.Value, cancellationToken);
+            var holdsContent = content.Length > 0 && target is { HasSpePointers: true }
+                ? await _storageUploader.ItemHoldsContentAsync(target.DriveId!, target.ItemId!, content, cancellationToken)
+                : null;
+
+            if (holdsContent == true)
+            {
+                return true;
+            }
+
+            _logger.LogInformation(
+                "Completed job {JobId} carries this version save's key, but document {DocumentId} {State}; " +
+                "treating the save as a new operation (task 047).",
+                existingJob.JobId,
+                request.Document.ExistingDocumentId,
+                holdsContent == false
+                    ? "now holds different content (a later save wrote another version)"
+                    : "could not be read to confirm it still holds this content");
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Not provably the same operation. The save proceeds, and its own validation refuses or writes.
+            _logger.LogWarning(ex,
+                "Could not confirm that completed job {JobId} still describes its document; treating the save as a new " +
+                "operation (task 047).",
+                existingJob.JobId);
+            return false;
+        }
+    }
 
     private static string HashContent(string? contentBase64) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(

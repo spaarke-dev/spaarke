@@ -1448,6 +1448,24 @@ public sealed class OfficeVersionSaveWorld
         }
     }
 
+    /// <summary>Task 047: how many times the save path READ an item's current content (the app-only download).</summary>
+    public int DownloadCalls { get; private set; }
+
+    /// <summary>Task 047: when set, every content read fails the way the facade does on a Graph error — it throws.</summary>
+    public bool FailDownloads { get; set; }
+
+    /// <summary>Task 047: the item's CURRENT content (its newest version); <c>null</c> for an unknown item (the facade's 404 shape).</summary>
+    internal Stream? Download(string itemId)
+    {
+        lock (_gate)
+        {
+            DownloadCalls++;
+            if (FailDownloads)
+                throw new InvalidOperationException("Test: Failed to download file: Graph refused the read.");
+            return SpeItems.TryGetValue(itemId, out var item) ? new MemoryStream(item.Versions[^1].ToArray()) : null;
+        }
+    }
+
     internal bool Delete(string itemId)
     {
         lock (_gate)
@@ -1617,6 +1635,10 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                     world.PutByItemId(driveId, itemId, OfficeVersionSaveWorld.ReadAll(content)));
             spe.Setup(s => s.GetQuickXorHashAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string itemId, CancellationToken _) => world.LiveHash(itemId));
+            // Task 047: a version save's duplicate check reads the item's CURRENT content to confirm the document still
+            // holds what the completed job wrote.
+            spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string itemId, CancellationToken _) => world.Download(itemId));
             spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string itemId, CancellationToken _) => world.Delete(itemId));
             services.RemoveAll<SpeFileStore>();

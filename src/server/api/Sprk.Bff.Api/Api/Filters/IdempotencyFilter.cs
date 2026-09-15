@@ -47,17 +47,24 @@ public static class IdempotencyFilterExtensions
     /// </remarks>
     /// <param name="builder">The route handler builder.</param>
     /// <param name="bindClientKeyTo">Returns the value the client key is bound to for this request, or null.</param>
+    /// <param name="mayReplayResponse">
+    /// Optional (task 047). Returns <c>false</c> for a request whose cached response must never be replayed, because
+    /// whether it repeats an earlier request depends on state its key cannot see. Such a request still takes the
+    /// in-flight lock, so a concurrent duplicate gets 409, but it is neither answered from nor written to the response
+    /// cache. If the delegate throws, the response is not replayed. Null means every response may be replayed.
+    /// </param>
     /// <returns>The builder for chaining.</returns>
     public static RouteHandlerBuilder AddIdempotencyFilter(
         this RouteHandlerBuilder builder,
-        Func<EndpointFilterInvocationContext, string?> bindClientKeyTo)
+        Func<EndpointFilterInvocationContext, string?> bindClientKeyTo,
+        Func<EndpointFilterInvocationContext, bool>? mayReplayResponse = null)
     {
         ArgumentNullException.ThrowIfNull(bindClientKeyTo);
         return builder.AddEndpointFilter(async (context, next) =>
         {
             var cache = context.HttpContext.RequestServices.GetRequiredService<ITenantCache>();
             var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<IdempotencyFilter>>();
-            var filter = new IdempotencyFilter(cache, logger, bindClientKeyTo);
+            var filter = new IdempotencyFilter(cache, logger, bindClientKeyTo, mayReplayResponse);
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -126,20 +133,26 @@ public class IdempotencyFilter : IEndpointFilter
 
     /// <summary>
     /// A filter whose client-provided key is bound to the value <paramref name="bindClientKeyTo"/> derives from the
-    /// bound request — see
-    /// <see cref="IdempotencyFilterExtensions.AddIdempotencyFilter(RouteHandlerBuilder, Func{EndpointFilterInvocationContext, string})"/>.
+    /// bound request, and whose response cache is skipped for requests <paramref name="mayReplayResponse"/> rejects —
+    /// see
+    /// <see cref="IdempotencyFilterExtensions.AddIdempotencyFilter(RouteHandlerBuilder, Func{EndpointFilterInvocationContext, string}, Func{EndpointFilterInvocationContext, bool})"/>.
     /// </summary>
     public IdempotencyFilter(
         ITenantCache cache,
         ILogger<IdempotencyFilter> logger,
-        Func<EndpointFilterInvocationContext, string?> bindClientKeyTo)
+        Func<EndpointFilterInvocationContext, string?> bindClientKeyTo,
+        Func<EndpointFilterInvocationContext, bool>? mayReplayResponse = null)
         : this(cache, logger, DefaultTtl)
     {
         _bindClientKeyTo = bindClientKeyTo ?? throw new ArgumentNullException(nameof(bindClientKeyTo));
+        _mayReplayResponse = mayReplayResponse;
     }
 
     /// <summary>Null = the default behaviour: a client key alone names the cache entry.</summary>
     private readonly Func<EndpointFilterInvocationContext, string?>? _bindClientKeyTo;
+
+    /// <summary>Null = every response may be replayed (task 047).</summary>
+    private readonly Func<EndpointFilterInvocationContext, bool>? _mayReplayResponse;
 
     public async ValueTask<object?> InvokeAsync(
         EndpointFilterInvocationContext context,
@@ -210,15 +223,21 @@ public class IdempotencyFilter : IEndpointFilter
 
         var correlationId = httpContext.TraceIdentifier;
 
+        // Task 047: a request the route marks non-replayable keeps the in-flight lock below, but never touches the
+        // response cache: it is neither answered from it nor written to it.
+        var replayable = _mayReplayResponse is null || MayReplayResponse(context, _mayReplayResponse);
+
         try
         {
             // Check for cached response
-            var cachedResponse = await _cache.GetAsync<string>(
-                tenantId,
-                resource: IdempotencyRequestResource,
-                id: idempotencyKey,
-                version: 1,
-                ct: httpContext.RequestAborted);
+            var cachedResponse = replayable
+                ? await _cache.GetAsync<string>(
+                    tenantId,
+                    resource: IdempotencyRequestResource,
+                    id: idempotencyKey,
+                    version: 1,
+                    ct: httpContext.RequestAborted)
+                : null;
             if (cachedResponse != null)
             {
                 _logger.LogInformation(
@@ -258,8 +277,8 @@ public class IdempotencyFilter : IEndpointFilter
                 // Execute the endpoint
                 var result = await next(context);
 
-                // Cache successful responses only
-                if (IsSuccessResponse(result))
+                // Cache successful responses only — and never one the route marked non-replayable (task 047)
+                if (replayable && IsSuccessResponse(result))
                 {
                     await CacheResponseAsync(tenantId, idempotencyKey, result, httpContext.RequestAborted);
                     _logger.LogDebug(
@@ -288,6 +307,25 @@ public class IdempotencyFilter : IEndpointFilter
 
             // On cache failure, proceed without idempotency (fail open)
             return await next(context);
+        }
+    }
+
+    /// <summary>
+    /// Task 047: whether the route allows this request's response to be replayed. A delegate that throws means
+    /// "no": a request that could not be classified is never answered with a replay it might not deserve.
+    /// </summary>
+    private bool MayReplayResponse(
+        EndpointFilterInvocationContext context,
+        Func<EndpointFilterInvocationContext, bool> mayReplay)
+    {
+        try
+        {
+            return mayReplay(context);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to decide whether the response may be replayed; it will not be");
+            return false;
         }
     }
 
