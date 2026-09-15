@@ -543,13 +543,25 @@ public class OfficeService : IOfficeService
                 // canonical document (returned as `documentId`). No second document was created — and there is
                 // nothing new to finalize: the canonical already carries its Email/Attachment artifacts + AI, so
                 // re-running finalization would only duplicate them and re-spend AI on identical bytes. Skip the
-                // whole downstream pipeline, CLEAN UP the transient upload blob (gate-after-write; it is now truly
-                // unreferenced — this is the item THIS request just uploaded, never the canonical's own), and
-                // complete the job. The detector already NOTIFIED the user of the canonical. Blob cleanup is
-                // best-effort (never fails the save). The `finally` below still disposes the content stream.
+                // whole downstream pipeline, clean up the upload (gate-after-write), and complete the job. The
+                // detector already NOTIFIED the user of the canonical. Cleanup is best-effort (never fails the save).
+                // The `finally` below still disposes the content stream.
+                //
+                // Task 046: the upload is deleted ONLY when no sprk_document points at it. The create upload above is
+                // path-keyed under ConflictBehavior.Replace, so a name that already exists in the container lands on
+                // THAT existing item — the canonical's own file (the detector's canonical lookup does not exclude the
+                // probed item's row) or another document's. "The item this request just uploaded" is then not a
+                // transient blob, and deleting it destroyed that document's file while this save reported success.
+                // The guard sits here, in the caller that deletes, not in the shared ContentDedupDetector: the
+                // detector's answer (the canonical for this content) is right; the delete assumed the rest.
                 if (wasContentDuplicate)
                 {
-                    await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+                    var uploadIsTransient = await _documentPersistence.IsUploadUnreferencedAsync(
+                        itemId, documentId, cancellationToken);
+                    if (uploadIsTransient)
+                    {
+                        await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+                    }
 
                     await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "DeduplicatedToExisting", 100, null, cancellationToken);
                     _jobStore[jobId] = _jobStore[jobId] with
@@ -558,14 +570,14 @@ public class OfficeService : IOfficeService
                         Progress = 100,
                         CurrentPhase = "DeduplicatedToExisting",
                         CompletedAt = DateTimeOffset.UtcNow,
-                        // Task 039 (finding 3): names the canonical this save resolved to. The transient upload was
-                        // just deleted, so no file id; the canonical's own file is not re-read here.
+                        // Task 039 (finding 3): names the canonical this save resolved to. No file id: the upload was
+                        // either deleted or is some document's own file, and the canonical's file is not re-read here.
                         Result = DocumentResult(documentId, speFileId: null, driveId: null, webUrl: null)
                     };
 
                     _logger.LogInformation(
-                        "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, transient blob cleaned up.",
-                        jobId, documentId);
+                        "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, upload cleanup attempted: {CleanupAttempted}.",
+                        jobId, documentId, uploadIsTransient);
 
                     return new SaveResponse
                     {
