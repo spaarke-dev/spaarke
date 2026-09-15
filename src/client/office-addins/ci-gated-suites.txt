@@ -85,6 +85,14 @@ shared/taskpane/hooks/__tests__/useSaveFlow.versionSave.test.ts
 shared/taskpane/components/__tests__/SaveModeSection.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
 
+# --- required Matter Type on quick-create (task 038) — green from creation --
+# Pins: a Matter cannot be created without a type; matterTypeId is sent
+# canonical; a failed type load offers Retry (never a dead field); the list is
+# cached only on success and cleared when the server says the type is gone.
+shared/taskpane/components/__tests__/RelatedToPicker.matterType.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.matterTypeQuickCreate.test.tsx
+shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts
+
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
