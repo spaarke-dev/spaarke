@@ -227,6 +227,8 @@ export class OutlookHostAdapter implements IHostAdapter {
       canSaveAsEml: hasMailbox18,
       canInsertLink: this.isComposeMode(),
       canAttachFile: this.isComposeMode(),
+      // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement.
+      canOpenBrowserWindow: this.checkRequirementSet('OpenBrowserWindowApi', '1.1'),
       minApiVersion: '1.3',
       supportedRequirementSet: hasMailbox18 ? 'Mailbox 1.8' : 'Mailbox 1.3',
     };

@@ -103,6 +103,19 @@ export class OutlookAdapter implements IHostAdapter {
   }
 
   /**
+   * Check if the `OpenBrowserWindowApi` requirement set is supported (task 027 / FR-10, NFR-10).
+   * Decided at runtime — never declared as a manifest requirement, which would stop the add-in
+   * loading on hosts without it. See {@link HostCapabilities.canOpenBrowserWindow}.
+   */
+  private isOpenBrowserWindowSupported(): boolean {
+    try {
+      return Office.context.requirements.isSetSupported('OpenBrowserWindowApi', '1.1');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Get the current mailbox item.
    *
    * @throws When no item is available or not initialized
@@ -556,6 +569,8 @@ export class OutlookAdapter implements IHostAdapter {
       canInsertLink: isComposeMode,
       // File attachment is available in compose mode
       canAttachFile: isComposeMode,
+      // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement.
+      canOpenBrowserWindow: this.isOpenBrowserWindowSupported(),
       // Minimum API version for basic functionality
       minApiVersion: '1.5',
       // Actual supported version

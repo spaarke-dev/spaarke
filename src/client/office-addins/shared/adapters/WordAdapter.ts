@@ -379,6 +379,9 @@ export class WordAdapter implements IHostAdapter {
    */
   getCapabilities(): HostCapabilities {
     const isApiSupported = this.checkRequirementSet('WordApi', MIN_WORD_API_VERSION);
+    // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement — see the
+    // HostCapabilities.canOpenBrowserWindow doc comment.
+    const canOpenBrowserWindow = this.checkRequirementSet('OpenBrowserWindowApi', '1.1');
 
     return {
       canGetAttachments: false,
@@ -390,6 +393,7 @@ export class WordAdapter implements IHostAdapter {
       canSaveAsEml: false,
       canInsertLink: isApiSupported,
       canAttachFile: false,
+      canOpenBrowserWindow,
       minApiVersion: MIN_WORD_API_VERSION,
       supportedRequirementSet: `WordApi ${MIN_WORD_API_VERSION}`,
     };

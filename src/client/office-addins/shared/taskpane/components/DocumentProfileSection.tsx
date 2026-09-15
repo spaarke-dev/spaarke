@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -107,6 +107,15 @@ export interface DocumentProfileSectionProps {
    * `cleanGuid`, ADR-044). `undefined` renders the no-identity state and makes no network call.
    */
   documentId?: string;
+  /**
+   * task 027 / FR-10 return-path signal: `SaveFlow` increments this counter on a
+   * focus/visibility-triggered pane return (after the user opened the `sprk_document` record or
+   * its related record via the browser-tab escape hatch — Spike-2 Option 3). Any change past the
+   * initial mount re-reads the profile via `useDocumentProfile`'s `refetch()` (task 033), so an
+   * edit made in the opened record is reflected here without a manual refresh. `undefined`/absent
+   * is a no-op — this section behaves exactly as before task 027 when no signal is threaded in.
+   */
+  refreshSignal?: number;
 }
 
 /** Splits the comma-separated `sprk_filekeywords` value into individual chip labels. */
@@ -117,9 +126,29 @@ function splitKeywords(keywords: string): string[] {
     .filter(k => k.length > 0);
 }
 
-export function DocumentProfileSection({ documentId }: DocumentProfileSectionProps): React.ReactElement {
+export function DocumentProfileSection({ documentId, refreshSignal }: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
-  const { outcome, generateProfile, isGenerating, generateError } = useDocumentProfile(documentId);
+  const { outcome, generateProfile, isGenerating, generateError, refetch } = useDocumentProfile(documentId);
+
+  // task 027 / FR-10 return path: re-read on every CHANGE of refreshSignal past the initial mount
+  // (`useDocumentProfile`'s own documentId-keyed effect already covers first load — calling
+  // refetch() again on mount would just be a redundant duplicate request). Deliberately depends
+  // ONLY on refreshSignal, not on refetch: refetch's identity is recreated whenever `documentId`
+  // changes (it is a useCallback keyed on documentId inside the hook), and documentId's OWN change
+  // is already handled by useDocumentProfile's internal effect — including refetch as a dependency
+  // here would re-fire this effect (and issue a DUPLICATE, racing fetch) on every documentId
+  // change too, not just on a genuine refreshSignal bump (caught by DocumentProfileSection.test.tsx
+  // "re-fetches when documentId changes" during this task's own verification).
+  const isFirstRefreshRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRefreshRender.current) {
+      isFirstRefreshRender.current = false;
+      return;
+    }
+    refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: refetch is
+    // intentionally excluded.
+  }, [refreshSignal]);
 
   // Disabled without a resolved identity (task 013 resolved nothing) or while a request is already
   // in flight. Never disabled merely because the current status is Completed — FR-08/spec

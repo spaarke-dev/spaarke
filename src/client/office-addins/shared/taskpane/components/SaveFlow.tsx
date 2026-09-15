@@ -32,6 +32,7 @@ import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
 import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
+import type { RelatedRecordView } from '../hooks/useRelatedRecord';
 import {
   useSaveFlow,
   type SaveFlowContext,
@@ -48,6 +49,7 @@ import {
   warningsIndicateMatterTypeNotFound,
   type MatterTypeChoice,
 } from '../services/matterTypeLookupService';
+import { openRecord } from '../services/openRecordLauncher';
 import { cleanGuid } from '../utils/cleanGuid';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
@@ -320,8 +322,17 @@ export interface SaveFlowProps {
    * override; `undefined` means identity does not apply (Outlook) → a plain create save, as before.
    */
   documentIdentity?: DocumentIdentityState;
-  /** Re-runs identity resolution ("Check again" / "Try again"). */
+  /** Re-runs identity resolution ("Check again" / "Try again"). Also the task 027 / FR-10
+   * return-path re-read for the related-record card, fired on focus/visibility after the pane
+   * regains focus following a record opened via the browser-tab escape hatch. */
   onRetryDocumentIdentity?: () => void;
+  /**
+   * task 027 / FR-10 (NFR-10): whether this host can open a browser tab
+   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `SaveView` from the live
+   * adapter — never a `hostType` check here). `false`/absent renders the related-record card and
+   * the Document-record affordance WITHOUT their open action — the fallback surface, not an error.
+   */
+  canOpenRecord?: boolean;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -393,6 +404,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     resolvedDocumentId,
     documentIdentity,
     onRetryDocumentIdentity,
+    canOpenRecord = false,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -558,6 +570,59 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         break;
     }
   }, [saveMode.view, saveMode.documentLabel, announce]);
+
+  // ── task 027 / FR-10: open the related record / Document record from the pane ──────────────────
+  // Spike-2 (notes/spikes/spike-2-dialog-api.md) selected Option 3 — a browser-tab escape hatch via
+  // Office.context.ui.openBrowserWindow, never the Office Dialog API. `canOpenRecord` (NFR-10) is a
+  // capability flag threaded from SaveView's hostAdapter.getCapabilities().canOpenBrowserWindow —
+  // gating happens here and in the JSX below, never on `hostType`.
+  const hasOpenedExternalRecordRef = useRef(false);
+  const [profileRefreshSignal, setProfileRefreshSignal] = useState(0);
+
+  const handleOpenRelatedRecord = useCallback((record: RelatedRecordView) => {
+    const result = openRecord({
+      orgUrl: process.env.ORG_URL,
+      entityType: record.entityType,
+      recordId: record.id,
+    });
+    if (result.opened) {
+      hasOpenedExternalRecordRef.current = true;
+    }
+  }, []);
+
+  const handleOpenDocumentRecord = useCallback(() => {
+    if (!resolvedDocumentId) return;
+    const result = openRecord({
+      orgUrl: process.env.ORG_URL,
+      entityType: 'sprk_document',
+      recordId: resolvedDocumentId,
+    });
+    if (result.opened) {
+      hasOpenedExternalRecordRef.current = true;
+    }
+  }, [resolvedDocumentId]);
+
+  // Return path (Spike-2 §d): an unmodified Dataverse form never calls `messageParent`, so every
+  // option Spike-2 compared — including this one — falls back to a focus/visibility-triggered
+  // re-read rather than a push notification. Weaker ("the user came back", not "the user saved a
+  // change") but explicit and the SAME limitation the spike found for every mechanism, not a
+  // shortcut taken here. Scoped to fire only once the user has actually opened a record via this
+  // pane (hasOpenedExternalRecordRef), so ordinary Word/pane focus churn never triggers a re-read.
+  useEffect(() => {
+    function handlePaneReturn(): void {
+      if (!hasOpenedExternalRecordRef.current) return;
+      if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return;
+      onRetryDocumentIdentity?.();
+      setProfileRefreshSignal(signal => signal + 1);
+      announce('Refreshed with the latest changes from the record.', 'polite');
+    }
+    document.addEventListener('visibilitychange', handlePaneReturn);
+    window.addEventListener('focus', handlePaneReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', handlePaneReturn);
+      window.removeEventListener('focus', handlePaneReturn);
+    };
+  }, [onRetryDocumentIdentity, announce]);
 
   // Build save context
   const buildSaveContext = useCallback(
@@ -970,8 +1035,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           filed-to card is the pane's only indication of the record in that common case. It stays visually and
           functionally distinct from RelatedToPicker (an INPUT for an unfiled document) even when both render
           together for an explicit "a new document" override. The click seam (`onOpenRecord`) is task 027 /
-          FR-10 — not implemented here. */}
-      <RelatedRecordCard {...(documentIdentity !== undefined ? { documentIdentity } : {})} />
+          FR-10 (NFR-10): supplied only when `canOpenRecord` is true — absent it, the card renders as
+          plain, non-interactive text (its own fallback, not a host-type branch here). */}
+      <RelatedRecordCard
+        {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+        {...(canOpenRecord ? { onOpenRecord: handleOpenRelatedRecord } : {})}
+      />
 
       {/* Related to + Document Details apply to a NEW document only. A version save (task 024) keeps the
           existing record's name and associations — the server never renames or re-associates on that path
@@ -1028,8 +1097,28 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
       {/* Profile — task 021 / FR-07. Read-only AI profile (sprk_filesummary, sprk_filetldr,
           sprk_filekeywords, sprk_documenttype) for the document identity task 013 resolved, or an
-          honest per-status / no-identity state. Threaded down rather than re-resolved. */}
-      <DocumentProfileSection {...(resolvedDocumentId !== undefined ? { documentId: resolvedDocumentId } : {})} />
+          honest per-status / no-identity state. Threaded down rather than re-resolved.
+          `refreshSignal` is the task 027 / FR-10 return-path re-read (see the effect above). */}
+      <div className={styles.section}>
+        <DocumentProfileSection
+          {...(resolvedDocumentId !== undefined ? { documentId: resolvedDocumentId } : {})}
+          refreshSignal={profileRefreshSignal}
+        />
+        {/* task 027 / FR-10: the Document-record affordance — opens the `sprk_document` record
+            itself, the same browser-tab escape hatch and the SAME capability gate (NFR-10) as the
+            related-record card above. Only rendered once there is a resolved document to open. */}
+        {canOpenRecord && resolvedDocumentId && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<OpenRegular />}
+            onClick={handleOpenDocumentRecord}
+            aria-label="Open this document's record in Dataverse"
+          >
+            Open document record
+          </Button>
+        )}
+      </div>
 
       {/* Attachment Selector (Outlook only) */}
       {hostType === 'outlook' && attachments.length > 0 && (
