@@ -13,7 +13,7 @@
     <parallel-group>phase3-wave4</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches Infrastructure/ExternalAccess/** (evaluator) — exclusive-file zone; must not run concurrently with 054 or 056.</parallel-reason>
-    <deps>054, 032, 037, 038</deps>
+    <deps>054, 032, 037, 038, 105</deps>
     <tags>bff-api, auth, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>

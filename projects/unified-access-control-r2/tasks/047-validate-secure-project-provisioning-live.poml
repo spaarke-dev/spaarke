@@ -12,7 +12,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Creates and provisions real records in live dev, and reads live Dataverse security state.</parallel-reason>
-    <deps>045, 046</deps>
+    <deps>045, 046, 093</deps>
     <tags>bff-api, auth, dataverse, security, deploy</tags>
     <estimated-effort>2-4 hours</estimated-effort>
     <origin>Filed 2026-08-25 at owner request ("note to run/validate after 045"). Task 021 shipped provisioning but it CANNOT be validated on the branch: the deployed BFF predates it, and dev contains ZERO secure projects — none has ever been successfully provisioned.</origin>

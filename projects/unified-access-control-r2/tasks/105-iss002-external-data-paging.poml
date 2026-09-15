@@ -12,7 +12,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project (project CLAUDE.md).</parallel-reason>
-    <deps>—</deps>
+    <deps>036</deps>
     <tags>bff-api, dataverse, testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
     <origin>Register ISS-002 / GitHub #963 — kept in the project under the owner's 2026-09-15 rule: material (this project's surface; :1034 is authorization-adjacent).</origin>

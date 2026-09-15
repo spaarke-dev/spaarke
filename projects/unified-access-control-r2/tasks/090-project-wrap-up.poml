@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Project-close task: reconciles the whole tree (test-diet, README, register) — nothing may run beside it.</parallel-reason>
-    <deps>050, 051, 052, 053, 054, 055, 056, 057, 058, 060, 061, 062, 063, 064, 065, 066, 067, 068, 069, 080, 081, 082, 083, 099, 101, 104, 105, 106, 107 (plus all Phase 0-2 tasks per TASK-INDEX)</deps>
+    <deps>050, 051, 052, 053, 054, 055, 056, 057, 058, 060, 061, 062, 063, 064, 065, 066, 067, 068, 069, 080, 081, 082, 083, 099, 101, 104, 105, 106, 107, 036, 043, 044, 047, 087, 088, 089, 093, 094, 095 (plus all Phase 0-2 tasks per TASK-INDEX)</deps>
     <tags>documentation, testing, wrap-up</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>

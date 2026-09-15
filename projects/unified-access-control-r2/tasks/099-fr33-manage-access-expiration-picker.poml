@@ -12,7 +12,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits AccessGrantModal.tsx, which task 065 also edits. Sequence with 065; never run both at once.</parallel-reason>
-    <deps>097, 098</deps>
+    <deps>097, 098, 065, 066</deps>
     <tags>pcf, react, fluent-ui, frontend, testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
     <origin>Owner 2026-09-10, with screenshot: "add to the toolbar a field 'Expiration' and a date picker so the write user can set it (and it applies to all sharing)"</origin>
@@ -79,7 +79,9 @@
     <criterion testable="true">`npm run build:prod` succeeds and the component tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Sequenced against task 065 (shared file + M8).</notes>
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Sequenced against task 065 (shared file + M8).
+
+ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed: AccessGrantModal.tsx:334 is still `return (await res.json()) as T` with no res.ok check, and the doc comment at :325 wrongly says it "throws (message-bearing) on failure". OWNER DECISION: option (a), wait for 065. This task now depends on 065, which lands M8 (and M2 on top of it); 065 is itself blocked behind 063. Do not take M8 here. Also correct when resuming: the justification's "every share would be rejected" is stale. Since task 097 the server defaults an absent expiry to today + 90, so shares work without the picker. What is missing is the user's ability to see and set the date.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

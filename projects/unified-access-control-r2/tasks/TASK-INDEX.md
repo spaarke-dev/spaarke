@@ -158,7 +158,7 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 |---|---|---|---|---|---|---|---|---|
 | ✅ [done] **045** | **auth-v4 integration / CI unblock — DONE** — merge master, migrate `CallerRecordAccessProbe` off its client secret, repair 5 Moq ctor sites | **BLOCKER** | 021 | ❌ | **opus** | **xhigh** | **COMPLETE 2026-08-25. `Router = SUCCESS` at `c5edf2448` — the FIRST CI-adjudicated state of this branch since `ffc2cb1de`; PR #812 is MERGEABLE.** Found TWO unpredicted causes beyond the two diagnosed: the probe had **ZERO test coverage** (every fixture substitutes it), and **master shipped 6 stale tests** asserting endpoints it had deleted — invisible to master's own gate because tier1 filters that project by changed surface and tier2 is advisory. PR #812 is `CONFLICTING`, and a conflicted PR dispatches **NO** workflows (not a red gate — *no* gate). Trial merge produced 22 failures: master's auth-v4 forcing functions FR-F1/FR-F2 fail on `CallerRecordAccessProbe.cs:134,137` (**D1 with its premise expired** — auth-v4 closed E-3 on 2026-08-24 without seeing an unmerged site), and master widened `DataverseWebApiClient`'s ctor so Moq class proxies throw. Fix for the former is a **faithful port of master's `DataverseUserClient`**, not new auth design. See [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](../notes/ci-dark-and-authv4-integration-2026-08-25.md) |
 | ✅ [done] **046** | **`Secure Project Owner` role — DONE** — created, assigned to the owner team, **System Administrator REMOVED** | High | 021 | ❌ | **opus** | **xhigh** | **COMPLETE 2026-08-25.** Role `e4ebabd9-…` holds **exactly ONE privilege — `prvReadsprk_Project` @ User (Basic) depth**; on that one team only (0 users, 0 other teams); team still has **0 members**; assignment re-proven **after** the SysAdmin removal. The hypothesis was wrong in every dimension — **7 privileges @ BU depth → 1 @ User depth**; Dataverse named the one it needed (*"is missing prvReadsprk_Project"*), and `Write` proved unnecessary (the team is an ownership anchor, never an actor). 🔴 **BUT: confirmed empirically that secure projects are NOT isolated** — `Test User 1`, an ordinary non-admin, **read a real secure project** owned by the secure team, because `Spaarke Basic User` holds `prvReadsprk_Project` at **`Deep`** and `Deep` at root reaches every descendant BU. That is **§5.2's unremediated prerequisite**, now proven end-to-end rather than inferred from a depth census. Negative control passed (a `Basic`-depth principal WAS denied), so BU containment works once depth is fixed. **Owner decision needed**: BU restructure (§5.2's decided fix) vs. narrow `Deep`→`Local` (zero measured blast radius today). Child-entity question answered: **18 entities / 19 lookups** (POML said 3), `sprk_document` has **two** — filed as its own task, not implemented. See [`notes/task-046-secure-project-owner-role.md`](../notes/task-046-secure-project-owner-role.md) |
-| 🔲 [open] **047** | **Validate provisioning END-TO-END against live dev** — deploy, create a real secure project, prove it gets its OWN container | High | **045, 046** | ❌ | **opus** | high | Provisioning has **never once run successfully in any environment** — dev holds **ZERO** secure projects. ⚠️ **Assert INEQUALITY, not presence**: three existing projects already carry `sprk_containerid = b!vzGDfDpd7km…`, identical to the ROOT BU's container, so "a container id is set" is precisely the false positive. Also verifies both DENY paths (absent BU → fail closed; re-post → 409) and the live proof the 409 regression is closed. Deploy is **operator-driven** (`Deploy BFF API` is `disabled_manually`). Does NOT prove document isolation — nothing reads the container yet |
+| 🔲 [open] **047** | **Validate provisioning END-TO-END against live dev** — deploy, create a real secure project, prove it gets its OWN container | High | **045, 046, 093** | ❌ | **opus** | high | Provisioning has **never once run successfully in any environment** — dev holds **ZERO** secure projects. ⚠️ **Assert INEQUALITY, not presence**: three existing projects already carry `sprk_containerid = b!vzGDfDpd7km…`, identical to the ROOT BU's container, so "a container id is set" is precisely the false positive. Also verifies both DENY paths (absent BU → fail closed; re-post → 409) and the live proof the 409 regression is closed. Deploy is **operator-driven** (`Deploy BFF API` is `disabled_manually`). Does NOT prove document isolation — nothing reads the container yet |
 
 ### 🔴 Phase 0c — Secure Documents (added 2026-08-25; owner decision: **broker-only for BOTH workforce and external contacts**)
 
@@ -612,7 +612,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 | ✅ [done] 052 | Server-writer audit + C# `CoreAncestorResolver` — **DONE**. 6 writers converged (TodoRegardingBuilder, CommunicationService ×3 call sites, IncomingAssociationResolver, OfficeService, TaskActionCore, EmailDraftToolHandler), 2 verified-trivial (CORE-only by construction — the first pass's "verified-trivial is empty" claim was FALSE), 3 reclassified (1 read, 1 emitter, 1 out-of-taxonomy host). See `notes/phase3-server-writers.md` §1 for the corrections | FR-26 | 050 soft | **P3-W1** | ❌ | sonnet | high |
 | ✅ [done] 053 | **Ancestor-stamp backfill script** (dry-run default, idempotent, resumable; never run live). Discovers ancestor columns from live metadata each run — which is how it caught that **`sprk_todo` DOES have `sprk_regardingservicerequest`** (two notes + `CoreAncestorResolver.cs:90/:287` say otherwise) and that **`sprk_document`/`sprk_invoice` carry NO `sprk_regarding{core}` columns at all**. Notes: [`notes/phase3-backfill-runbook.md`](../notes/phase3-backfill-runbook.md) | FR-26 | 050,052 | **P3-W2** | ✅ | sonnet | medium |
 | 🔲 [open] 054 | Root-set generalization (`sprk_servicerequest` 4th root) — ⚠️ **amended 2026-09-15: premise superseded by task 028 (service requests never externally grantable); re-scope to ISS-003 (#964) after the owner's product answer before executing** | FR-27 | 032,035,036 | — | ❌ | sonnet | high |
-| 🔲 [open] 055 | Evaluator child-inheritance term | FR-27 | 054,032,037,038 | — | ❌ | sonnet | high |
+| 🔲 [open] 055 | Evaluator child-inheritance term | FR-27 | 054,032,037,038,**105** | — | ❌ | sonnet | high |
 | 🔲 [open] 056 | Child-module registration (todo/event/communication) | FR-27 | 055,**009**,**018** | — | ❌ | sonnet | high |
 | 🔲 [open] 057 | Phase-3 seam tests | FR-26/27 | 052,055,056 | **P3-W6** | ✅ | sonnet | high |
 | 🔲 [open] 058 | Taxonomy + inheritance docs (**Matter ≠ Project**) | FR-26/27 | 056 | **P3-W6** | ✅ | sonnet | medium |
@@ -625,7 +625,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 | ✅ [done] 061 | Secure project: explicit creator share + reversible designation | FR-28 | 060,**008** | **P4-W2** | ❌ | sonnet | high |
 | ⚠️ [escalated] 062 | **NFR-05 role-depth standing assertion** | FR-28 | 034 | **P4-W2** | ✅ | sonnet | high | ✅ **PRIMARY FINDING REMEDIATED BY THE OWNER, 2026-09-09 — re-verified by the main session.** `System Administrator` was removed from the root BU's default team; that team now holds `roles=[]`, and the impersonated re-test returns **403 Forbidden** for `jake.schroeder@demo.spaarke.com` (previously 19/19 projects including the secure one). **The live exposure is closed.** ⚠️ Two residuals, neither a user-relocation question: (a) **`Spaarke Demo`'s default team still holds `System Administrator`** — no enabled interactive users sit there today, so it is not a live exposure, but it is the same trap armed in a second BU, and new users land in the ROOT BU by default so the class recurs on onboarding; (b) criterion 5 is still unmet — the live assertion cannot run in CI (no Dataverse credential; same blocker as 034). **Re-run the assertion to confirm the violation count before treating any of the original 14 as open.** Original finding, for the record: | **DELIVERED 2026-09-09, and it FAILED AGAINST LIVE DEV — 14 violations.** `SecureBuRoleDepthAssertion.cs` (pure evaluator) + 21 perturbation tests + 1 live-gated assertion. 🔴 **THE SECURE PROJECT IS READABLE BY USERS WHO HOLD NO ROLES — main-session verified by impersonated read**: `jake.schroeder@demo.spaarke.com` (0 directly-assigned roles) sees **19/19 projects including the secure one**; control `testuser1@spaarke.com` (relocated to a sibling BU by Fix A) sees **0**. **Root cause, NOT in the design**: the root BU's DEFAULT owner team `Spaarke` (`teamtype=0, isdefault=true`) holds **`System Administrator`**; default owner teams auto-contain every user in the BU and cannot be curated, so every root-BU human has Global read by membership. (`Spaarke Demo`'s default team too.) Also **Finding A**: Fix A relocated only `Test User 1` — `ralph.schroeder_hotmail.com#EXT#` is still in root BU with `Spaarke Basic User` @ **Deep**. Design §5.1a-2's census under-reported because it read `systemuserroles` (DIRECT assignment) only and never saw team-conferred roles. **Criterion 5 (live assertion in CI) NOT met and cannot be here** — no pipeline holds a Dataverse credential (same blocker as 034; one fix covers both). ⚠️ Operator: Azure.Identity 1.16 `DefaultAzureCredential` no longer falls through to the CLI — set `AZURE_TOKEN_CREDENTIALS=dev` or it fails looking like a permissions error (**affects 034 identically**). Perturbations 12, none zero. |
 | 🔲 [open] 063 | Internal system-user share endpoints (delegation-gated) | FR-29 | 060,**008**,010 | **P4-W3** | ❌ | sonnet | high |
-| 🔲 [open] 064 | Provenance read + deny-list endpoints | FR-30, FR-23 | 063,060,032,038,041,042 | **P4-W4** | ❌ | sonnet | high |
+| 🔲 [open] 064 | Provenance read + deny-list endpoints | FR-30, FR-23 | 063,060,032,038,041,042,**105** | **P4-W4** | ❌ | sonnet | high |
 | 🔲 [open] 065 | `AccessGrantModal` "+ User" picker | FR-29 | **063** | **P4-W4** | ✅ | sonnet | high |
 | 🔲 [open] 066 | Modal provenance rows + suppressed rendering | FR-30 | 064,065 | — | ❌ | sonnet | high |
 | 🔲 [open] 067 | Modal deny-list UI + standing-grant levels | FR-23/25 UI | 064,066 | — | ❌ | sonnet | high |
@@ -647,8 +647,8 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 > Internal deps were rewritten with it (087→086, 088→087, 089→087+088).
 
 | ✅ [done] 086 | `sprk_accessevent` schema + data-model doc | FR-32 | 032,038 | — | ✅ | sonnet | medium | **CLOSED 2026-09-09.** `scripts/Deploy-AccessEventEntity.ps1` (idempotent, `-DryRun` default-safe, `MSCRM.SolutionUniqueName`, asserts the `sprk_` prefix on read-back) + `docs/data-model/sprk_accessevent.md`. **CODE+DOCS ONLY — no live mutation** (AP-13). Subject/target modelled as `(kind + GUID string + name snapshot)`, NOT lookups: a `RemoveLink` lookup nulls itself on delete, destroying the history the table exists to hold. 🔔 **ESCALATION FIRED — owner action needed**: live audit is OFF on `sprk_externalrecordaccess` (entity), `sprk_noaccessentry` (entity) and `sprk_workassignment.sprk_accesspermission` (attribute) while the org switch is ON — **independently re-verified by the main session**. Audit history does NOT backfill, so task **088**'s replay would confidently report a revoked grant as still live. Must be fixed BEFORE UAT accrues history. Also found: `sprk_externalrecordaccess` is **UserOwned**, not Organization-owned as its schema doc claims (7th stale-doc defect). ⚠️ POML's Phase-5 cross-numbering is wrong throughout (real chain is 086→087→088; it says 080/081/082). |
-| 🔲 [open] 087 | Append hooks at every grant/deny choke point | FR-32 | 086,060,063,064 | — | ❌ | sonnet | high |
-| 🔲 [open] 088 | Evaluator versioning + point-in-time replay | FR-32 | 087,032 | — | ❌ | sonnet | **xhigh** |
+| 🔲 [open] 087 | Append hooks at every grant/deny choke point | FR-32 | 086,060,063,064,**106** | — | ❌ | sonnet | high |
+| 🔲 [open] 088 | Evaluator versioning + point-in-time replay | FR-32 | 087,032,**036**,**043**,**055**,**064** | — | ❌ | sonnet | **xhigh** |
 | 🔲 [open] 089 | Attestation seam tests + docs | FR-32 | 087,088 | — | ✅ | sonnet | medium |
 
 ## FR-33 — External grant expiry (6 tasks, added 2026-09-10 by owner decision)
@@ -665,9 +665,9 @@ estate-wide view.
 | ✅ [done] 096 | `BulkUpdateAsync` → `ExecuteTransactionRequest` — genuinely all-or-nothing, system-wide (ISS-005 / #970) | FR-33 | — | — | ❌ | sonnet | high |
 | ✅ [done] 097 | Every grant bounded: an absent `ExpiryDate` on `/grant` · `/invite` · `/invite-and-grant` is **defaulted server-side** (keep existing, else today + 90); a past one → 400; + dev backfill of unbounded grants *(amended session 7 — was "mandatory/400": no client sends an expiry)* | FR-33 | — | — | ❌ | sonnet | high |
 | ✅ [done] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) — `POST …/set-record-share-expiry`; lapsed shares renewed too *(owner 2026-09-11)*; contract for 099 in `notes/task-098-record-share-expiry.md` §6 | FR-33 | 096,097 | — | ❌ | **opus** | high |
-| 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
+| 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker — ⏸ **waits for 065's M8** (escalation fired 2026-09-15; owner chose to wait) | FR-33 | 097,098,**065**,**066** | — | ❌ | sonnet | high |
 | ✅ [done] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee. *Done 2026-09-15: `e7bd02189` + `521ab1b9a` + `46656864a`. Owner: granter → record owner → record creator (a person: enabled, interactive, accessmode 0–2), else unroutable; MDA bell (`NotificationService`); missed thresholds catch up (2026-09-14). Full suite 14,578/0/86; 13/13 perturbations.* | FR-33 | 097, **103** | — | ❌ | sonnet | high |
-| 🔲 [open] 101 | "External shares by expiration" Dataverse views (operator-applied) | FR-33 | 097 | FR33-late | ✅ | sonnet | medium |
+| 🔲 [open] 101 | "External shares by expiration" Dataverse views (operator-applied) | FR-33 | 097,**107** | FR33-late | ✅ | sonnet | medium |
 
 > ⚠️ **Sequencing the Deps column cannot express:**
 > - **099 ↔ 065** both edit `AccessGrantModal.tsx`, and 099 needs finding **M8** (owned by 065) so that a
@@ -710,9 +710,45 @@ fourth-root premise contradicted task 028's ruling.
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
 | 🔲 [open] 104 | `DataverseImpersonation` fails closed in the shared helper; Entra `oid` (`CallerObjectId`); NFR-04 canary on the helper path (ISS-013 / #990) — **runs before 036** | FR-20, NFR-04 | 035 | — | ❌ | **opus** | high |
-| 🔲 [open] 105 | External data plane: every collection read complete or visibly truncated — no silent `$top=200` (ISS-002 / #963) | NFR-03 | — | — | ❌ | sonnet | high |
+| 🔲 [open] 105 | External data plane: every collection read complete or visibly truncated — no silent `$top=200` (ISS-002 / #963) | NFR-03 | **036** | — | ❌ | sonnet | high |
 | 🔲 [open] 106 | Re-grant over an expired survivor judges "confers access" across every active row on the key (ISS-008 / #973) | FR-09 | — | — | ❌ | sonnet | high |
 | 🔲 [open] 107 | Grants written outside the BFF get the default expiry — Dataverse-side, every write path (ISS-009 / #974) | FR-33 | 097 | — | ✅ | sonnet | high |
+
+## Execution sequence — dependency-ordered (owner, 2026-09-15)
+
+Owner, 2026-09-15: *"we don't need to worry about shipping a feature — sequence the tasks so that they have
+full knowledge of dependent task builds."* The order below is a topological sort of every open POML's
+`<deps>` (the canonical source — the Deps columns above mirror it), after adding the dependencies in the
+second table that had never been written down. Within a wave, the task on the longest remaining chain goes
+first. Run them one at a time: most of them edit the evaluator core.
+
+| Wave | Order | Notes |
+|---|---|---|
+| 1 | **104** → 063 → 043 → 106 → 107 → 093 → 082 → 094 → 095 | 104 heads the longest chain (104 → 036 → 105 → 064 → 087 → 088 → 089 → 090). 082's external dep PR #832 is merged. |
+| 2 | 036 → 044 → 065 → 101 → 047 | 047 is live-dev validation — BLOCKED (not substituted) if no deployment is available |
+| 3 | 105 · 054 | 🔴 **054 is blocked** on the owner's ISS-003 product question (amended 2026-09-15); 055 / 056 / 057 / 058 wait with it |
+| 4 | 064 · 055 | |
+| 5 | 087 → 066 → 069 → 056 | |
+| 6 | 088 → 067 → 099 → 057 → 058 | 099 ⏸ waits for 065's M8 (owner chose to wait, 2026-09-15) |
+| 7 | 089 | |
+| 8 | 090 | wrap-up — its disposition gate + test-diet |
+
+**Dependencies added 2026-09-15** — in each, the later task builds on what the earlier one produces:
+
+| Task | + deps | Because |
+|---|---|---|
+| 099 | 065, 066 | M8 (`postJson` checks `res.ok`), and the Current Access row model the picker reads |
+| 105 | 036 | reuses 036's `Truncated` surfacing shape |
+| 101 | 107 | the views assume no undated grant; 107 enforces that on every write path |
+| 055, 064 | 105 | both add reads through `GetCollectionAsync`, which 105 rewrites |
+| 087 | 106 | hooks every grant state change, including the path 106 rewrites |
+| 088 | 036, 043, 055, 064 | versions every evaluator term and makes their inputs injectable — it must see all of them |
+| 047 | 093 | validates provisioning through the Create Project wizard, which 093 reorders |
+| 090 | 036, 043, 044, 047, 087, 088, 089, 093, 094, 095 | wrap-up follows everything (these were only implied) |
+
+Checked and deliberately NOT a dependency: 036 ↔ 043 both edit `AccessibleRecordSetService.cs`, but neither
+consumes the other's term — 043 goes first so 044's Phase 1–2 seam suite closes on it, and 044 excludes FR-20
+by design (its contract is task 034's canary). Shared test folders were ignored as a signal.
 
 ## Wrap-up
 

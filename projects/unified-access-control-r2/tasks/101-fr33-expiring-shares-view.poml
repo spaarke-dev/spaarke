@@ -12,7 +12,7 @@
     <parallel-group>FR33-late</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Touches no code file shared with another task; can run alongside 100.</parallel-reason>
-    <deps>097</deps>
+    <deps>097, 107</deps>
     <tags>dataverse, solution</tags>
     <estimated-effort>1-2 hours</estimated-effort>
     <origin>Owner 2026-09-10: "there will still need to be a view with external share expiration"</origin>
