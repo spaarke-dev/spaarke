@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-33 — expiry reminders at 30 / 14 / 7 / 3 / 1 days, to the granting internal user (never the grantee)</title>
     <phase>FR-33 External grant expiry</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New background work in the BFF; tags bff-api/background.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,7 +85,16 @@ AMENDED 2026-09-12 (session 9) — owner decisions and premise corrections; thes
 - The escalation fired: 20 of 28 live grants had no sprk_grantedby. Owner: recipient = sprk_grantedby → the record's owning user → the record's creator (the first ENABLED, NON-APPLICATION systemuser); otherwise "unroutable" (counted in the heartbeat + an Error log per grant). Never the grantee.
 - Channel: the MDA bell via the existing NotificationService (appnotification), NOT OutboxService. The POML's premise was wrong: the client KindRouter skips unknown outbox kinds, so an outbox reminder would reach no screen.
 - Scheduling: IScheduledJob on Spaarke.Scheduling (ADR-036), not a SessionFilesCleanupJob-style BackgroundService. Placement is governed by ADR-052 (task 102). Exactly-once across instances comes from task 103's lease, so this task now depends on 103.
-- Implemented in e7bd02189 (23 tests, full suite 12,327/0/58, ArchTests 197/197, publish 45.42 MB vs master 45.35). Outstanding review fixes are listed in notes/task-100-expiry-reminders.md and the session-9 handoff.</notes>
+- Implemented in e7bd02189 (23 tests, full suite 12,327/0/58, ArchTests 197/197, publish 45.42 MB vs master 45.35). Outstanding review fixes are listed in notes/task-100-expiry-reminders.md and the session-9 handoff.
+
+COMPLETED 2026-09-15 (session 12) — `e7bd02189` + `521ab1b9a` + `46656864a`. Full record: notes/task-100-expiry-reminders.md.
+- Owner decisions applied: recipient chain granter → record owner → record creator (first enabled, interactive, non-application user; accessmode 0/1/2), else unroutable; channel = NotificationService (MDA bell); CATCH-UP (2026-09-14) — the most urgent unsent threshold whose day has come, once per (grant, expiry date, threshold), including on the expiry day; criteria above amended accordingly.
+- Built on task 103: registered with AddScheduledJob; one instance per tick under the scheduler lease; JobRunContext.Attempt added so every attempt's heartbeat carries its attempt number.
+- ADR-036 A1: rule 3 claim → re-check under the claim → send → marker (read back) → release; rule 4 throws only for a failed query or a transient last-day failure / held claim; rule 5 heartbeat per attempt.
+- Acceptance: all criteria met (criterion 2 as amended). Reminder tests 48/48; Scheduling 75/75; ArchTests 323/323; full suite 14,578 / 0 / 86; publish 45.43 MB vs master 45.35 MB (214 files each; ≈0 for this task); no CVEs; 13/13 perturbations caught.
+- Step 9.5 (on 521ab1b9a): adr-check 1 violation (notes §8 cited ADR-001 → rewritten under ADR-052) + 8 warnings; code-review 0 High / 3 Medium / 16 Low — fixed in 46656864a except accepted L6/L13–L16 (notes §5).
+- Premise corrections this session: NotificationService wraps every exception, cancellation included (the job decides by its own token); IdempotencyService swallows marker-write failures (the job reads the marker back).
+- Also this session: #987 (H9 sets the slot guard, 6149edecf) and SchedulingSlotGuardKeyTests (the key in all four slot-deploy paths).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

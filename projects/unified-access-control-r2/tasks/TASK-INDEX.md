@@ -666,7 +666,7 @@ estate-wide view.
 | ✅ [done] 097 | Every grant bounded: an absent `ExpiryDate` on `/grant` · `/invite` · `/invite-and-grant` is **defaulted server-side** (keep existing, else today + 90); a past one → 400; + dev backfill of unbounded grants *(amended session 7 — was "mandatory/400": no client sends an expiry)* | FR-33 | — | — | ❌ | sonnet | high |
 | ✅ [done] 098 | One atomic "set the expiry of every share on this record" endpoint (reuses 096) — `POST …/set-record-share-expiry`; lapsed shares renewed too *(owner 2026-09-11)*; contract for 099 in `notes/task-098-record-share-expiry.md` §6 | FR-33 | 096,097 | — | ❌ | **opus** | high |
 | 🔲 [open] 099 | Manage Access toolbar **Expiration** date picker | FR-33 | 097,098 | — | ❌ | sonnet | high |
-| 🔲 [open] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee. *In progress: `e7bd02189`. Owner 2026-09-12: granter → record owner → record creator, else unroutable; MDA bell (`NotificationService`). **103 done 2026-09-14 — resume** (fix 7 done by 103; owner 2026-09-14: missed thresholds catch up).* | FR-33 | 097, **103** | — | ❌ | sonnet | high |
+| ✅ [done] 100 | Reminders at 30/14/7/3/1 days to the granting internal user — never the grantee. *Done 2026-09-15: `e7bd02189` + `521ab1b9a` + `46656864a`. Owner: granter → record owner → record creator (a person: enabled, interactive, accessmode 0–2), else unroutable; MDA bell (`NotificationService`); missed thresholds catch up (2026-09-14). Full suite 14,578/0/86; 13/13 perturbations.* | FR-33 | 097, **103** | — | ❌ | sonnet | high |
 | 🔲 [open] 101 | "External shares by expiration" Dataverse views (operator-applied) | FR-33 | 097 | FR33-late | ✅ | sonnet | medium |
 
 > ⚠️ **Sequencing the Deps column cannot express:**

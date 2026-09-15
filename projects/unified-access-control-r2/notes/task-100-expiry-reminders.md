@@ -1,6 +1,7 @@
 # Task 100 — expiry reminders at 30 / 14 / 7 / 3 / 1 days (FR-33 (d))
 
-> **Status**: implemented `e7bd02189` (2026-09-12); review fixes + catch-up `521ab1b9a` (2026-09-15). Verification in §9.
+> **Status**: ✅ **COMPLETE 2026-09-15** (session 12) — implemented `e7bd02189` (2026-09-12); review fixes + catch-up
+> `521ab1b9a`; Step 9.5 round 2 `46656864a`. Verification in §9.
 > **POML**: [`tasks/100-fr33-expiry-reminder-job.poml`](../tasks/100-fr33-expiry-reminder-job.poml)
 > **Code**: `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/GrantExpiryReminderJob.cs` ·
 > `Infrastructure/DI/ExternalAccessModule.cs` · tests
@@ -65,7 +66,7 @@ Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5**
 |---|---|
 | ~~**Exact days, no catch-up**~~ → **Catch-up** (owner decision 2026-09-14, session 12 rewrite) | Superseded. The job now queries every active grant expiring **today through today + 30** and sends the **most urgent threshold whose day has come** — the smallest of 30/14/7/3/1 that is ≥ the days left — once per (grant, expiry date, threshold). A missed day is caught up the next day; several missed thresholds collapse into the most urgent one; a missed 1-day reminder still goes out **on the expiry day** (access holds through it). Why: a Redis outage now means the tick is not dispatched at all (ADR-036 A1.1), deploys and exhausted retries also skip a day, and with exact-day matching each of those silently lost a reminder. The POML criterion "a grant expiring in 20 days produces no notification" is superseded: it now holds only when that grant's 30-day reminder was already sent. A grant first created 20 days out gets a reminder the next morning, worded with the real days left. |
 | **Wording by the days actually left** | Title "External access ends in N days / tomorrow / today"; body "Access for {grantee} to the {label} "{name}" ends after {date}." — access holds **through** the expiry date (read filter `ge today`), so "on {date}" was wrong. Priority from the days left. |
-| **Retry rule** (ADR-036 A1 rule 4) | The run throws **after its heartbeat** when it made no progress (the query failed) or a reminder failed on the grant's **last day** — no later run can send it. Other failed reminders are counted (`partial`) and tomorrow's run catches them up. Sent reminders are skipped on a retry by their markers. |
+| **Retry rule** (ADR-036 A1 rule 4) | The attempt throws **after its heartbeat** only when a retry in this run could send something no later run can: the query failed, or a reminder failed **transiently** on the grant's **last day** (or its claim was held by a leftover from a failed release). A **permanent** rejection (a Dataverse fault that is not throttling, e.g. a missing privilege) is counted, not retried. A cancelled run never throws. Other failed reminders are counted (`partial`) and tomorrow's run catches them up. Sent reminders are skipped on a retry by their markers. |
 | **Person** | Enabled ∧ no `applicationid` ∧ `accessmode` ∈ {0 Read-Write, 1 Administrative, 2 Read}. Live dev has Support (3) and Delegated Admin (5) users, who must not be the one reminded. |
 | **`DateOnly`, UTC calendar** | `sprk_expiresdate` is Date Only, TimeZoneIndependent. "Today" is `ExternalGrantLifecycle.TodayUtc`, the same calendar the read filter enforces expiry against (task 007/097). |
 | **ONE FetchXML query, all joins OUTER** | NFR-02. The one query returns every active grant expiring today through today + 30 (`ge` / `le` on the Date-Only column) plus the granter, the contact/organization name, and each root's name, owning user and creator, each user with `isdisabled` / `applicationid` / `accessmode`. That is 12 link-entities; Dataverse allows 15. Every join is **outer** (and many-to-one, so no row is duplicated), so grants with no granter or a team owner still come back — an inner join would silently lose exactly the grants the fallback chain exists for. Ordered by the grant id for stable paging; pages past 5,000 rows, capped at 20 pages (`truncated`). |
@@ -176,4 +177,23 @@ SpaarkeAi, CI, skill or root-CLAUDE change.
 
 ## 9. Verification
 
-_(filled in below as runs complete)_
+### 9.1 First implementation (`e7bd02189`, session 9)
+
+Suite 12,327 / 0 / 58 · ArchTests 197/197 · publish master `e0a6f87c4` 45.35 MB / pre-task `c3e85a6dc` 45.41 MB / task
+45.42 MB (214 files each; Compress-Archive; fresh short-path worktrees) · no vulnerable packages · FetchXML shape
+verified live (25 rows). Perturbations P2–P9 caught; P1 not a result (`MSB3030`).
+
+### 9.2 Review fixes + catch-up (session 12: `521ab1b9a`, round 2 `46656864a`)
+
+| Check | Result |
+|---|---|
+| `GrantExpiryReminderJobTests` (KEEP path `tests/integration/data-mutation`) | **48/48** — window and catch-up, thresholds across 30 daily runs (with the cache expiring on the job's clock), roots, the person test (accessmode 0–2 accepted, 3/5 not), claim race, held claim, marker read-back, paging and its cap, retry rules (query failure, transient vs permanent last-day failure, held claim on the last day, cancellation), one bad row, run record |
+| `Spaarke.Scheduling.Tests` | **75/75** (+ `TriggerNowAsync_RetriedRun_EachAttemptSeesItsAttemptNumber`) |
+| ArchTests | **323/323** (+ `SchedulingSlotGuardKeyTests` ×3) |
+| Live read-only FetchXML (dev, 2026-09-15) | Window shape and `accessmode` aliased — §6 |
+| Step 9.5 on `521ab1b9a` | adr-check: 1 violation (this note's §8 cited ADR-001 — rewritten to ADR-052) + 8 warnings (W1, W2, W4 fixed; W5 notes fixed; W3/W7/W8 accepted). code-review: 0 High / 3 Medium / 16 Low — M1–M3 and L1–L5, L7–L12 fixed in round 2; L6, L13–L16 accepted and recorded in §5 |
+| #987 (owner: "do not defer") | Fixed by a sub-agent in an isolated worktree, cherry-picked `6149edecf`; provisioning suite 1567/0/1 |
+| Perturbations (13, `scratchpad/p100.sh` against `46656864a`; each applied, confirmed changed, tested, restored) | **12 caught on the first run**: P1 sent marker never matches → 5 tests · P2 grantee addressed → 8 · P3 no re-check under the claim → the claim-race test · P4 a failed last-day reminder does not throw → 3 · P5 catch-up off → 8 · P6 accessmode ignored → 2 · P7 cancellation judged by exception type → 2 · P8 host does not pass the attempt → the host test · P9 marker keeps the service's 24 h default → the 30-day test (this is what M1 made catchable) · P10 every last-day failure treated as transient → the permanent-rejection test · P12 one bad row stops the run → the bad-row test · P13 a cancelled run still throws → the cancel-after-failure test. **P11** (a held claim counts as already sent): the first form left `ClaimHeld` never assigned → `CS0649` build error, not a result; re-run in a compiling form → **caught** by the two held-claim tests. **13/13 caught.** Earlier session-12 runs: P1 once hit `CS0006` and P3 once missed its anchor on CRLF endings — both re-run, not counted |
+| Full suite (`Spaarke.sln` at `46656864a`) | **14,578 passed / 0 failed / 86 skipped** across 8 test assemblies |
+| Publish size (Compress-Archive Optimal; fresh short-path worktree `C:\wt100b`) | branch `46656864a` **45.43 MB, 214 files** vs master `e0a6f87c4` **45.35 MB, 214 files**. The +0.08 MB is project-cumulative; task 103 closed at the same 45.43 MB, so task 100's round-2 changes add ≈ 0. Far under the 60 MB ceiling |
+| CVE (`--vulnerable --include-transitive`) | **No vulnerable packages** (`Sprk.Bff.Api`) |
