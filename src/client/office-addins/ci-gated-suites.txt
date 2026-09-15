@@ -129,6 +129,10 @@ shared/taskpane/components/__tests__/FindResultsList.test.tsx
 shared/adapters/__tests__/OutlookAdapter.composeEmail.test.ts
 shared/adapters/__tests__/WordAdapter.composeEmail.test.ts
 shared/taskpane/services/__tests__/sendEmailService.test.ts
+# --- host capabilities (task 040, FR-19/NFR-10) - green from creation ---------
+# Pins: each adapter reports its capability set honestly per host, so a view that
+# gates on a capability cannot silently enable a feature the host lacks.
+shared/adapters/__tests__/capabilities.test.ts
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
