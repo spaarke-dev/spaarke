@@ -269,6 +269,11 @@ export const SaveView: React.FC<SaveViewProps> = ({
     );
   }
 
+  // task 027 / FR-10 (NFR-10): decided from the live adapter's capabilities, never a `hostType`
+  // check — `false` (including while `hostAdapter` is absent/loading) renders SaveFlow's
+  // related-record card and Document-record affordance without their open action.
+  const canOpenRecord = hostAdapter?.getCapabilities().canOpenBrowserWindow ?? false;
+
   // Render SaveFlow with context
   return (
     <div className={styles.container}>
@@ -278,6 +283,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         getAccessToken={getAccessToken || defaultGetAccessToken}
         onViewDocument={handleViewDocument}
         showDocumentInfo
+        canOpenRecord={canOpenRecord}
         {...(itemId !== undefined ? { itemId } : {})}
         {...(itemName !== undefined ? { itemName } : {})}
         {...(senderEmail !== undefined ? { senderEmail } : {})}

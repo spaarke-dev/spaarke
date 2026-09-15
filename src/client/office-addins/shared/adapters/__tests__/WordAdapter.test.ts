@@ -413,6 +413,25 @@ describe('WordAdapter', () => {
         expect(capabilities.minApiVersion).toBe('1.3');
         expect(capabilities.supportedRequirementSet).toBe('WordApi 1.3');
       });
+
+      // task 027 / FR-10 (NFR-10): decided per requirement set, independent of the other
+      // capabilities on the same object — a host that lacks OpenBrowserWindowApi 1.1 but supports
+      // WordApi 1.3 must still report the other flags correctly.
+      it('canOpenBrowserWindow is true when OpenBrowserWindowApi 1.1 is supported', () => {
+        global.Office.context.requirements.isSetSupported = jest.fn().mockReturnValue(true);
+
+        expect(adapter.getCapabilities().canOpenBrowserWindow).toBe(true);
+      });
+
+      it('canOpenBrowserWindow is false when OpenBrowserWindowApi 1.1 is not supported, without affecting WordApi-gated flags', () => {
+        global.Office.context.requirements.isSetSupported = jest.fn((set: string) => set !== 'OpenBrowserWindowApi');
+
+        const capabilities = adapter.getCapabilities();
+
+        expect(capabilities.canOpenBrowserWindow).toBe(false);
+        expect(capabilities.canGetDocumentContent).toBe(true);
+        expect(capabilities.canInsertLink).toBe(true);
+      });
     });
 
     describe('getDocumentUrl (FR-01 / task 013)', () => {

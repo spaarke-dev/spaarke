@@ -40,6 +40,9 @@ global.Office = {
     ui: {
       displayDialogAsync: jest.fn(),
       messageParent: jest.fn(),
+      // task 027 / FR-10 — Spike-2's chosen mechanism (Option 3) opens a Dataverse record via
+      // OpenBrowserWindowApi 1.1, not the Dialog API.
+      openBrowserWindow: jest.fn(),
     },
     mailbox: {
       item: null,

@@ -85,6 +85,17 @@ export interface HostCapabilities {
   canInsertLink: boolean;
   /** Whether files can be attached (Outlook compose) */
   canAttachFile: boolean;
+  /**
+   * Whether the host can open a plain browser tab/window (`OpenBrowserWindowApi` 1.1).
+   * spaarkeai-word-add-in-r1 task 027 / FR-10 — Spike-2's chosen mechanism (Option 3: read-only
+   * detail in-pane + a browser-tab escape hatch) for opening a Dataverse record from the pane.
+   * Decided at runtime via `Office.context.requirements.isSetSupported('OpenBrowserWindowApi',
+   * '1.1')` — NOT declared as a manifest requirement (that would stop the add-in loading on hosts
+   * without it). Views MUST gate the open-record affordance on this flag, never on `hostType`
+   * (NFR-10) — when it is `false`, the related-record card and Document-record affordance render
+   * without their open action.
+   */
+  canOpenBrowserWindow: boolean;
   /** Minimum required Office.js API version */
   minApiVersion: string;
   /** Currently supported requirement set */

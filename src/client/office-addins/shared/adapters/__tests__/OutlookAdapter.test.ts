@@ -348,6 +348,25 @@ describe('OutlookAdapter', () => {
         expect(capabilities.canInsertLink).toBe(false); // Read mode
         expect(capabilities.canAttachFile).toBe(false); // Read mode
       });
+
+      // task 027 / FR-10 (NFR-10): decided per requirement set, independent of Mailbox-gated flags.
+      it('canOpenBrowserWindow is true when OpenBrowserWindowApi 1.1 is supported', () => {
+        global.Office.context.requirements.isSetSupported = jest.fn().mockReturnValue(true);
+
+        expect(adapter.getCapabilities().canOpenBrowserWindow).toBe(true);
+      });
+
+      it('canOpenBrowserWindow is false when OpenBrowserWindowApi 1.1 is not supported, without affecting Mailbox-gated flags', () => {
+        global.Office.context.requirements.isSetSupported = jest.fn((set: string) => set !== 'OpenBrowserWindowApi');
+
+        const capabilities = adapter.getCapabilities();
+
+        expect(capabilities.canOpenBrowserWindow).toBe(false);
+        // supportedRequirementSet is gated ONLY on isMailboxSupported('1.8'), never on
+        // `_currentMode` — unlike canGetAttachments/canSaveAsEml, so it isolates this assertion
+        // from the read/compose mode setup this describe block's own beforeEach controls.
+        expect(capabilities.supportedRequirementSet).toBe('Mailbox 1.8');
+      });
     });
 
     describe('getDocumentUrl (FR-01 / task 013) — Word-only capability', () => {
