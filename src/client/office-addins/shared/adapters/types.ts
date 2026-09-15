@@ -96,10 +96,46 @@ export interface HostCapabilities {
    * without their open action.
    */
   canOpenBrowserWindow: boolean;
+  /**
+   * Whether the host can open a native new-message compose window pre-populated with a subject and
+   * HTML body (`Office.context.mailbox.displayNewMessageForm`, `Mailbox` requirement set 1.6).
+   * spaarkeai-word-add-in-r1 task 036 / FR-15 — Send Email via Outlook.
+   *
+   * `Office.context.mailbox` does not exist in Word, so this is Outlook-only. Within Outlook it is
+   * further gated on the pane running in **read** mode — `displayNewMessageForm`'s documented
+   * applicable mode is Message Read; calling it from a compose surface is unsupported by the host
+   * API itself, not a Spaarke-side restriction. Views MUST gate the Send Email affordance on this
+   * flag, never on `hostType` (NFR-10) — when it is `false`, the affordance is hidden entirely.
+   */
+  canComposeEmail: boolean;
   /** Minimum required Office.js API version */
   minApiVersion: string;
   /** Currently supported requirement set */
   supportedRequirementSet: string;
+}
+
+/**
+ * Content for a new-message compose window (spaarkeai-word-add-in-r1 task 036 / FR-15).
+ * Mirrors the subset of `Office.context.mailbox.displayNewMessageForm`'s parameters this add-in
+ * uses — recipients are deliberately NOT included; the user addresses the message themselves.
+ */
+export interface EmailComposeContent {
+  /** The message subject. */
+  subject: string;
+  /** The message body as HTML. */
+  htmlBody: string;
+}
+
+/**
+ * Result of a {@link IHostAdapter.composeNewEmail} call — always a defined result, mirroring the
+ * `InsertLinkResult` / `AttachFileResult` convention (never throws for an expected "not supported"
+ * outcome; callers still SHOULD gate on {@link HostCapabilities.canComposeEmail} first).
+ */
+export interface ComposeEmailResult {
+  /** Whether the compose window was actually opened. */
+  success: boolean;
+  /** Error message if opening the compose window failed or is not supported. */
+  errorMessage?: string;
 }
 
 /**

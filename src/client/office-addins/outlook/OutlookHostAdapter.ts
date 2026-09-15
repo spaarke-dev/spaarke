@@ -9,6 +9,8 @@ import type {
   InsertLinkResult,
   AttachFileResult,
   GetDocumentContentOptions,
+  EmailComposeContent,
+  ComposeEmailResult,
 } from '@shared/adapters/types';
 
 /**
@@ -229,6 +231,12 @@ export class OutlookHostAdapter implements IHostAdapter {
       canAttachFile: this.isComposeMode(),
       // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement.
       canOpenBrowserWindow: this.checkRequirementSet('OpenBrowserWindowApi', '1.1'),
+      // task 036 / FR-15: Send Email via Outlook. This class is superseded by
+      // `shared/adapters/OutlookAdapter.ts` (task 010 consolidation) and is not constructed anywhere
+      // in the live app (`HostAdapterFactory`'s only reference to it is an illustrative doc comment) —
+      // added here only to keep this file conforming to `IHostAdapter`, mirroring the canonical
+      // adapter's read-mode + Mailbox-1.6 gate.
+      canComposeEmail: !this.isComposeMode() && this.checkRequirementSet('Mailbox', '1.6'),
       minApiVersion: '1.3',
       supportedRequirementSet: hasMailbox18 ? 'Mailbox 1.8' : 'Mailbox 1.3',
     };
@@ -310,6 +318,29 @@ export class OutlookHostAdapter implements IHostAdapter {
         }
       );
     });
+  }
+
+  /**
+   * Open a new-message compose window (task 036 / FR-15). See the `canComposeEmail` doc comment
+   * above — this class is not constructed anywhere in the live app; this method exists only to keep
+   * the class conforming to `IHostAdapter`.
+   */
+  async composeNewEmail(content: EmailComposeContent): Promise<ComposeEmailResult> {
+    if (this.isComposeMode() || !this.checkRequirementSet('Mailbox', '1.6') || !this.mailbox) {
+      return {
+        success: false,
+        errorMessage: 'Composing a new message is not supported in the current mode or client.',
+      };
+    }
+    try {
+      this.mailbox.displayNewMessageForm({ subject: content.subject, htmlBody: content.htmlBody });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        errorMessage: error instanceof Error ? error.message : 'Failed to open the compose window.',
+      };
+    }
   }
 
   // Legacy methods for backward compatibility

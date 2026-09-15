@@ -220,6 +220,9 @@ export function setupOutlookReadContext(item?: MockOfficeItem): void {
         emailAddress: 'testuser@example.com',
         timeZone: 'UTC',
       },
+      // task 036 / FR-15 — Send Email via Outlook (Mailbox 1.6). Read mode is the API's documented
+      // applicable surface, so the read-context mock is where tests exercise it.
+      displayNewMessageForm: jest.fn(),
     },
   };
 }
@@ -288,6 +291,9 @@ export function setupOutlookComposeContext(item?: MockOfficeItem): void {
         emailAddress: 'testuser@example.com',
         timeZone: 'UTC',
       },
+      // task 036 / FR-15: present for symmetry with the read-context mock, though
+      // `displayNewMessageForm`'s documented applicable mode is Message Read, not Compose.
+      displayNewMessageForm: jest.fn(),
     },
   };
 }
@@ -589,6 +595,8 @@ export function resetOfficeContext(): void {
     },
     mailbox: {
       item: null,
+      // task 036 / FR-15 — Send Email via Outlook (Mailbox 1.6).
+      displayNewMessageForm: jest.fn(),
     },
     document: null,
   };

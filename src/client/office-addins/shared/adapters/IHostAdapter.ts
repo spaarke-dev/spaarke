@@ -30,6 +30,8 @@ import type {
   InsertLinkResult,
   AttachFileResult,
   GetDocumentContentOptions,
+  EmailComposeContent,
+  ComposeEmailResult,
 } from './types';
 
 /**
@@ -209,6 +211,22 @@ export interface IHostAdapter {
    * @returns Promise resolving to the result of the attachment
    */
   attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult>;
+
+  /**
+   * Open a native new-message compose window pre-populated with a subject and HTML body
+   * (spaarkeai-word-add-in-r1 task 036 / FR-15 — Send Email via Outlook).
+   *
+   * Only supported when {@link HostCapabilities.canComposeEmail} is `true`. Callers MUST check the
+   * capability flag before calling — matching the {@link getAttachmentContent} / {@link getDocumentUrl}
+   * convention, an adapter that does not support this returns a DEFINED failure result rather than
+   * throwing, so a caller that skips the capability check still fails predictably instead of crashing.
+   *
+   * No recipients are pre-filled — the user addresses the message themselves in the opened form.
+   *
+   * @param content - The subject and HTML body to pre-populate.
+   * @returns Promise resolving to the result of the attempt.
+   */
+  composeNewEmail(content: EmailComposeContent): Promise<ComposeEmailResult>;
 }
 
 /**

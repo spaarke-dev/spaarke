@@ -46,6 +46,9 @@ global.Office = {
     },
     mailbox: {
       item: null,
+      // task 036 / FR-15 — Send Email via Outlook opens a new-message compose window via
+      // `Office.context.mailbox.displayNewMessageForm` (Mailbox 1.6).
+      displayNewMessageForm: jest.fn(),
     },
     document: null,
   },
