@@ -1,8 +1,39 @@
-# Task 034 — route-paging escalation (BLOCKING)
+# Task 034 — route-paging escalation (RESOLVED)
 
 > **Rigor**: FULL · **Model tier**: sonnet @ high · **Step mode**: DIRECTIONAL
-> **Status**: escalated per the orchestrator's binding correction #2, before any lazy-scroll code was
-> written. No `FindResultsList.tsx` / `useLazyResults.ts` implementation exists in this worktree.
+> **Status**: escalated per the orchestrator's binding correction #2 before any lazy-scroll code was
+> written; **resolved 2026-09-15 by the owner: Path 2.** `FindResultsList.tsx` and `useLazyResults.ts`
+> now exist, implementing Path 2 as decided below.
+
+## Owner decision (2026-09-15)
+
+**Path 2 — the documented, Find-only exception to ADR-051.** GET
+`/api/ai/visualization/related/{documentId}`'s single bounded response (at most 50 rows, after task
+032's per-row authorization) is treated as complete, not as the first page of a larger set. It is
+framed as a ranked "top matches" list ("Most similar documents" heading in `FindResultsList.tsx`), never
+implying further server pages exist. `IntersectionObserver` on a bottom sentinel (`useLazyResults.ts`)
+reveals more of the rows ALREADY IN HAND as the user scrolls — it is never a re-fetch trigger, and
+`hasMore` means only "rows not yet revealed to the DOM", becoming `false` once every row has been
+shown. The existing D-032-2 `PARTIAL_RESULTS` `MessageBar` (task 033) remains the honest "the server
+itself withheld rows past its authorization budget" signal — unrelated to, and unchanged by, this
+list's own `hasMore`.
+
+**Scope of the exception: the Find results list only** (`FindResultsList.tsx` / `useLazyResults.ts`,
+consumed from `FindView.tsx`'s `indexed` state). It does not generalize to any other list in this
+add-in or elsewhere in the codebase — a future list backed by a genuinely pageable data source still
+follows ADR-051 literally (real progressive fetch, page-fullness or server-flagged `hasMore`).
+
+**Path 1** (add real server-side paging to the hardened route) remains available as a future follow-on
+if the owner later wants true paging; it was not pursued here. **Path 3** (defer entirely) was
+superseded by this decision.
+
+**Where this is also recorded**: the main session records this exception in `design.md`'s ADR Tensions
+section (not edited by this task — see the boundary note in the task's execution instructions). This
+note is the task-level record of the decision, evidence, and scope.
+
+---
+
+## What follows below is the original escalation (evidence gathered before the decision)
 
 ## 🔔 Human Input Required
 
@@ -95,13 +126,27 @@ evaluated. Path 1 is the more "correct" long-term shape but is a BFF-contract ch
 scoped or authorized to make unilaterally (per CLAUDE.md §10 and the operator's explicit "STOP...
 BEFORE... (b) adding server-side paging to this security-hardened route").
 
-## What is NOT done because of this block
+## Post-decision: what was built (2026-09-15)
 
-- `FindResultsList.tsx` and `useLazyResults.ts` have **not** been written. Writing either before this
-  is resolved would mean committing to one of the two forbidden shapes ((a) or (b) as originally
-  conceived) or silently pre-deciding Path 2 without the operator's sign-off it was asked to have.
-- `FindView.tsx` has **not** been touched.
-- No test files for the results list exist yet.
+Per the owner's Path 2 decision above:
 
-Everything else in the task (the F-c records-bridge decision, this evidence-gathering) is complete
-and committed independently, since it does not depend on this blocker's resolution.
+- `shared/taskpane/hooks/useLazyResults.ts` — the progressive-reveal hook. No network calls; slices an
+  already-fetched array; `hasMore` means only "unrevealed items remain"; `IntersectionObserver` on a
+  bottom sentinel drives reveals, never fetches.
+- `shared/taskpane/components/FindResultsList.tsx` — renders the ranked "Most similar documents" list,
+  the empty state, the distinctly labeled hub-node section, and the `onOpenResult` seam (unwired — task
+  027 owns the actual launcher). The thin scrollbar is recreated locally here (no
+  `@spaarke/ui-components` dependency added).
+- `shared/taskpane/components/views/FindView.tsx` — the `indexed` state's `loaded` branch now renders
+  `FindResultsList`, passing the full node array from the single `GET
+  /api/ai/visualization/related/{documentId}` response and the SAME `announce` function the view
+  already owns. The D-032-2 `PARTIAL_RESULTS` `MessageBar` is unchanged.
+- Tests: `useLazyResults.test.tsx` (8 tests — hasMore semantics, sentinel-driven reveal via a mocked
+  `IntersectionObserver`, reveal-window reset on a new items array, clamping), `FindResultsList.test.tsx`
+  (11 tests — empty state + announcement, ranked-list framing, no-pager assertion, hub-node
+  distinctness, the `onOpenResult` seam), and 6 new/updated tests in `FindView.test.tsx`'s state-3
+  block (including an explicit "sentinel-driven reveal never issues a second call to the similarity
+  route" assertion).
+
+This section supersedes the "What is NOT done" note that originally closed this file — see the git
+history of this note for the pre-decision text if needed.

@@ -17,6 +17,7 @@ import { cleanGuid } from '../../utils/cleanGuid';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { useDocumentProfile } from '../../hooks/useDocumentProfile';
 import type { DocumentIdentityState } from '../../services/documentIdentityService';
+import { FindResultsList, type FindResultNode } from '../FindResultsList';
 
 /**
  * FindView — the Find tab's real three-state gate (spaarkeai-word-add-in-r1 task 033, FR-16b).
@@ -171,9 +172,11 @@ interface SendToIndexResponseShape {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// D-032-2 — GraphMetadata.warnings from GET /api/ai/visualization/related/{id}. Task 034 owns the
-// full results view (lazy-scroll + records bridge); this task's results container is intentionally
-// minimal (task 015 precedent), but MUST surface the PARTIAL_RESULTS warning per D-032-2.
+// D-032-2 — GraphMetadata.warnings from GET /api/ai/visualization/related/{id}. Task 034 (Path 2,
+// owner-approved 2026-09-15 — see notes/034-route-paging-escalation.md) renders the full results
+// list here via `FindResultsList`, and MUST keep surfacing the PARTIAL_RESULTS warning per D-032-2 —
+// it is the honest "the server itself withheld rows past its authorization budget" signal, unrelated
+// to `FindResultsList`'s own progressive-reveal `hasMore`.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const PARTIAL_RESULTS_CODE = 'PARTIAL_RESULTS';
@@ -184,7 +187,7 @@ interface GraphWarningShape {
 }
 
 interface RelatedDocumentsResponseShape {
-  nodes?: unknown[];
+  nodes?: FindResultNode[];
   metadata?: {
     totalResults?: number;
     warnings?: GraphWarningShape[] | null;
@@ -194,7 +197,7 @@ interface RelatedDocumentsResponseShape {
 type RelatedDocumentsState =
   | { kind: 'idle' }
   | { kind: 'loading' }
-  | { kind: 'loaded'; totalResults: number; partialResultsWarning: string | null }
+  | { kind: 'loaded'; totalResults: number; partialResultsWarning: string | null; nodes: FindResultNode[] }
   | { kind: 'error'; message: string };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -365,6 +368,7 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
           kind: 'loaded',
           totalResults: response.metadata?.totalResults ?? 0,
           partialResultsWarning: warning?.message ?? null,
+          nodes: response.nodes ?? [],
         });
       } catch (err) {
         if (cancelled) return;
@@ -570,12 +574,7 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
                   </MessageBarBody>
                 </MessageBar>
               )}
-              <Text>
-                {relatedState.totalResults > 0
-                  ? `${relatedState.totalResults} similar document${relatedState.totalResults === 1 ? '' : 's'} found.`
-                  : 'No similar documents found.'}
-              </Text>
-              <Body1>Similarity results are coming soon.</Body1>
+              <FindResultsList nodes={relatedState.nodes} announce={announce} />
             </div>
           )}
         </div>
