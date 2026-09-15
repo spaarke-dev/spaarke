@@ -292,6 +292,13 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         // (Office Add-in finalize, Email-to-Document, post-analysis re-index).
         try
         {
+            // Task 029: a version of an already-indexed item. Its key is per-save (the item-keyed one was marked
+            // by the item's earlier index and would skip this version for 7 days), and its job replaces the
+            // item's previous chunks. Absent for every other caller: key and payload unchanged.
+            var versionDiscriminator = string.IsNullOrWhiteSpace(request.VersionDiscriminator)
+                ? null
+                : request.VersionDiscriminator;
+
             var jobPayload = new RagIndexingJobPayload
             {
                 TenantId = request.TenantId,
@@ -303,6 +310,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 SearchIndexName = request.SearchIndexName,
                 Source = request.Source,
                 EnqueuedAt = DateTimeOffset.UtcNow,
+                ReplaceStaleChunks = versionDiscriminator is not null,
             };
 
             var job = new JobContract
@@ -311,7 +319,9 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 JobType = RagIndexingJobHandler.JobTypeName,
                 SubjectId = request.DocumentId ?? request.ItemId,
                 CorrelationId = request.CorrelationId,
-                IdempotencyKey = $"rag-index-{request.DriveId}-{request.ItemId}",
+                IdempotencyKey = versionDiscriminator is null
+                    ? $"rag-index-{request.DriveId}-{request.ItemId}"
+                    : $"rag-index-{request.DriveId}-{request.ItemId}-version-{versionDiscriminator}",
                 Attempt = 1,
                 MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,

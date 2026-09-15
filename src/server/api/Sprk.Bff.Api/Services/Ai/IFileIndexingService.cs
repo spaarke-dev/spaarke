@@ -160,6 +160,16 @@ public sealed record FileIndexRequest
     /// creation routes (Wizard OBO, Email-to-Document, Office Add-in).
     /// </summary>
     public string? SearchIndexName { get; init; }
+
+    /// <summary>
+    /// Task 029 (spaarkeai-word-add-in-r1, owner decision 2026-09-15): when true, after ALL new chunks are written
+    /// the file's chunks beyond the new chunk count are deleted from the same index
+    /// (<see cref="IRagService.DeleteChunksBeyondCountAsync"/>) — the leftovers of a previous, longer version, which
+    /// the id-keyed overwrite cannot reach. Upload first, then trim, so the file is never without chunks. A trim
+    /// failure fails the indexing result (retryable) with the new chunks already in place. Default false: every
+    /// existing caller (Compose save-back, manual Run Index, email / attachment) is unchanged.
+    /// </summary>
+    public bool ReplaceStaleChunks { get; init; }
 }
 
 /// <summary>

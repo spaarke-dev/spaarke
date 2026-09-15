@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
@@ -140,7 +141,11 @@ public class RagIndexingJobHandler : IJobHandler
                     KnowledgeSourceName = payload.KnowledgeSourceName,
                     Metadata = payload.Metadata,
                     ParentEntity = payload.ParentEntity,
-                    SearchIndexName = resolvedSearchIndexName
+                    SearchIndexName = resolvedSearchIndexName,
+                    // Task 029: only a version-save job sets this. The allow-list fallback below re-issues the
+                    // request with SearchIndexName=null and keeps the flag, so the leftover chunks are removed
+                    // from whichever index the new chunks actually landed in.
+                    ReplaceStaleChunks = payload.ReplaceStaleChunks
                 };
 
                 // Call FileIndexingService using app-only authentication.
@@ -398,4 +403,13 @@ public class RagIndexingJobPayload
     /// SdapProblemException(INDEX_NOT_ALLOWED) and retry with SearchIndexName=null).
     /// </summary>
     public string? SearchIndexName { get; set; }
+
+    /// <summary>
+    /// Task 029 (spaarkeai-word-add-in-r1): true only for the index job of an Office VERSION save. After the new
+    /// chunks are written, the file's leftover chunks from the previous (longer) version are deleted from the same
+    /// index (<see cref="FileIndexRequest.ReplaceStaleChunks"/>). False — every other producer — is omitted from
+    /// the JSON, so their payloads are byte-for-byte unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ReplaceStaleChunks { get; set; }
 }
