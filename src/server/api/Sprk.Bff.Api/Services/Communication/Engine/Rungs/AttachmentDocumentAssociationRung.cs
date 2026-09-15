@@ -54,29 +54,30 @@ public sealed class AttachmentDocumentAssociationRung : IAssociationRung
     private static readonly Regex KeywordPattern =
         new(@"\b[A-Za-z][A-Za-z0-9\-]{5,}\b", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
-    /// <summary>
-    /// <c>sprk_document</c> record-link field → the target entity logical name. The communication regarding
-    /// field is resolved from <see cref="RegardingFieldMap"/> (ADR-024 source of truth). "Related" links point
-    /// at the same target entity as their primary counterpart (a related matter is still a matter).
-    /// <para>
-    /// <b>Type-agnostic by design</b> (061 UAT round-2, 2026-07-30). F1 follows EVERY record link a document
-    /// carries — matter, project, invoice, work-assignment — never a hard-coded single type. Relevance is not
-    /// decided by hard-coding paths; it is decided by the smart layer: F1 emits at a suggest-band confidence and
-    /// its <see cref="RungKind.DocumentAssociation"/> matches are <b>surface-only</b> (candidates the reviewer
-    /// confirms/dismisses, NEVER written as "filed" — see <see cref="AssociationStatusMapper"/>), and the
-    /// Ambiguous headline guard (P2b) stops any candidate being crowned. So an attached invoice's invoice
-    /// surfaces as a dismissible SUGGESTION, not a filed association — without hard-coding invoices out.
-    /// </para>
-    /// </summary>
-    private static readonly IReadOnlyList<(string DocumentField, string TargetEntity)> DocumentLinkFields =
-    [
-        ("sprk_matter", "sprk_matter"),
-        ("sprk_relatedmatter", "sprk_matter"),
-        ("sprk_project", "sprk_project"),
-        ("sprk_relatedproject", "sprk_project"),
-        ("sprk_invoice", "sprk_invoice"),
-        ("sprk_workassignment", "sprk_workassignment"),
-    ];
+    // sprk_document record-link vocabulary — HOISTED to Spaarke.Dataverse.DocumentLinkFields
+    // (unified-access-control-r2, 2026-09-05) so this rung and
+    // ComposeService.DocumentAssociationLookupAttributes consume ONE list instead of two
+    // independently-drifting copies (root CLAUDE.md §11 — a third copy was about to be written).
+    // See that type for the full column table, the target-entity mapping, and the schema-name
+    // casing trap (the sprk_related* schema names are NOT uniformly cased — never derive one by
+    // convention). The communication regarding field is resolved from RegardingFieldMap (ADR-024
+    // source of truth) below; "related" links point at the same target entity as their primary
+    // counterpart (a related matter is still a matter).
+    //
+    // Type-agnostic by design (061 UAT round-2, 2026-07-30). F1 follows EVERY record link a
+    // document carries — matter, project, invoice, work-assignment, and now the full
+    // sprk_related* family — never a hard-coded single type. Relevance is not decided by
+    // hard-coding paths; it is decided by the smart layer: F1 emits at a suggest-band confidence
+    // and its RungKind.DocumentAssociation matches are surface-only (candidates the reviewer
+    // confirms/dismisses, NEVER written as "filed" — see AssociationStatusMapper), and the
+    // Ambiguous headline guard (P2b) stops any candidate being crowned. So an attached invoice's
+    // invoice surfaces as a dismissible SUGGESTION, not a filed association — without hard-coding
+    // invoices out.
+    //
+    // Not every target entity in the shared vocabulary has a RegardingFieldMap entry today
+    // (sprk_agreement, sprk_communication, sprk_todo are absent) — BuildMatches below already
+    // soft-skips a link whose target has no regarding field, so those three simply produce no
+    // candidate yet rather than an error. Widening RegardingFieldMap is a separate decision.
 
     public AttachmentDocumentAssociationRung(
         IGenericEntityService entityService,
@@ -181,7 +182,7 @@ public sealed class AttachmentDocumentAssociationRung : IAssociationRung
         IReadOnlyList<string> fileNames, IReadOnlyList<string> keywords, CancellationToken ct)
     {
         var columns = new List<string> { "sprk_filename", "sprk_documentname", "sprk_globalsearchextender" };
-        columns.AddRange(DocumentLinkFields.Select(f => f.DocumentField));
+        columns.AddRange(DocumentLinkFields.LogicalNames);
 
         var query = new QueryExpression("sprk_document")
         {
@@ -218,7 +219,7 @@ public sealed class AttachmentDocumentAssociationRung : IAssociationRung
                           ?? doc.GetAttributeValue<string>("sprk_documentname")
                           ?? docId.ToString("D");
 
-            foreach (var (documentField, targetEntity) in DocumentLinkFields)
+            foreach (var (documentField, _, targetEntity) in DocumentLinkFields.All)
             {
                 if (doc.GetAttributeValue<EntityReference>(documentField) is not { } link || link.Id == Guid.Empty)
                     continue;

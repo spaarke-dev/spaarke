@@ -31,7 +31,12 @@ public class ExternalParticipationService
     // cached grant set now ALSO includes records inherited via ORGANIZATION grants (Term 3 — org
     // memberships from sprk_contactorganization). The bump orphans any v2 entry (it expires on its 60s
     // TTL) so no stale pre-org-grant read can occur.
-    public const int CacheVersion = 3;
+    // CacheVersion 4 (unified-access-control-r2 task 032 / FR-19): matter + work-assignment grants are
+    // now cached as (id + LEVEL) instead of bare ids. The bump is LOAD-BEARING, not bookkeeping — a v3
+    // entry deserializes into the v4 shape with no level, so every matter/WA would resolve to
+    // AccessRights.None for one TTL after deploy: rights correct on a cache MISS, absent on a HIT, with
+    // the unit suite green throughout because unit tests bypass the cache.
+    public const int CacheVersion = 4;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Grant-query construction (extracted by task 007 / FR-06, finding A-5)
@@ -165,7 +170,7 @@ public class ExternalParticipationService
                 {
                     _logger.LogDebug(
                         "[EXT-ACCESS] Cache HIT for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment grants",
-                        contactId, cached.Projects.Count, cached.Matters.Count, cached.WorkAssignments.Count);
+                        contactId, cached.Projects.Count, cached.MatterGrants.Count, cached.WorkAssignmentGrants.Count);
                     return cached.ToGrantSet();
                 }
             }
@@ -201,7 +206,7 @@ public class ExternalParticipationService
     /// invalidates — an authorization DECISION (the yes/no record∈set outcome is recomputed live by
     /// <see cref="AccessibleRecordSetService"/> on every request per <c>.claude/constraints/auth.md</c>
     /// "MUST NOT cache authorization decisions"). The standing-grant flag itself is read live (never
-    /// cached) by <see cref="ContactStandingGrantReader"/>, so this invalidation is the defensive
+    /// cached) by <see cref="SubjectStandingGrantReader"/>, so this invalidation is the defensive
     /// belt-and-suspenders that also drops any co-cached per-contact grant data for the same subject.
     /// <para>
     /// <paramref name="tenantId"/> is explicit so an out-of-request caller (e.g. a future Dataverse
@@ -453,6 +458,343 @@ public class ExternalParticipationService
         }
     }
 
+    // ── Root-record veto flags (task 037 · FR-21 / FR-22) ────────────────────────────────────────
+
+    /// <summary>
+    /// Collection name + primary-key attribute for each root entity that carries the veto flags.
+    /// <b>Verified against live Dataverse metadata 2026-09-04</b>: all three carry BOTH
+    /// <c>sprk_issecure</c> (BIT) and <c>sprk_accesspermission</c> (CHOICE), with identical option sets.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, (string Collection, string IdAttribute)> RootFlagSources =
+        new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_project"] = ("sprk_projects", "sprk_projectid"),
+            ["sprk_matter"] = ("sprk_matters", "sprk_matterid"),
+            ["sprk_workassignment"] = ("sprk_workassignments", "sprk_workassignmentid"),
+        };
+
+    /// <summary>
+    /// The <c>sprk_accesspermission</c> option value meaning RESTRICTED.
+    /// <b>Verified live 2026-09-04</b> on all three root entities (Standard 100000000 / Limited 100000001 /
+    /// Restricted 100000002).
+    /// </summary>
+    /// <remarks>
+    /// The task brief cited <c>TrackingFieldTrio/index.ts</c> for this number, but that file documents the
+    /// <c>sprk_communication</c> option set and says so explicitly ("entity-specific: lives ONLY here …").
+    /// The value happens to match on all three roots — established by querying metadata, not by trusting
+    /// the citation.
+    /// </remarks>
+    internal const int AccessPermissionRestricted = 100000002;
+
+    /// <summary>Ids per flag query. Bounded so a large candidate set cannot produce an over-length URL.</summary>
+    private const int FlagQueryChunkSize = 50;
+
+    /// <summary>
+    /// Reads the veto flags for a batch of root records (NFR-02: batched — never a per-record round trip).
+    /// </summary>
+    /// <remarks>
+    /// <b>Fail-closed, per NFR-01.</b> Every id the caller asked about is present in the returned map. An id
+    /// the query did not return — deleted, filtered, or invisible to the app-only identity — is
+    /// indistinguishable from a read that failed, so it comes back as <b>secure AND restricted</b>. That is
+    /// the deny direction: unknown flags suppress derived terms and veto contact-sourced rights, rather than
+    /// defaulting a record to open. A transport fault or non-success status does the same for the whole chunk.
+    /// <para>
+    /// An entity type with no flag columns returns an empty map, meaning "no vetoes apply" — that is a
+    /// STATIC fact about the schema (verified above), not a failed read, so it is not a fail-closed case.
+    /// </para>
+    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        if (recordIds is null || recordIds.Count == 0)
+        {
+            return new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        if (!RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source))
+        {
+            // Not a flag-bearing root type. No veto applies — see the remarks.
+            return new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        var distinct = recordIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinct.Count == 0)
+        {
+            return new Dictionary<Guid, RootRecordFlags>();
+        }
+
+        var flags = new Dictionary<Guid, RootRecordFlags>();
+
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            var apiUrl = GetDataverseApiUrl();
+
+            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            {
+                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
+                var query = $"{apiUrl}/{source.Collection}" +
+                            $"?$filter=({idFilter})" +
+                            $"&$select={source.IdAttribute},sprk_issecure,sprk_accesspermission";
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, query);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                request.Headers.Add("OData-MaxVersion", "4.0");
+                request.Headers.Add("OData-Version", "4.0");
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                var response = await _httpClient.SendAsync(request, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError(
+                        "[EXT-ACCESS] Root-flag query FAILED for {EntityType} ({Count} ids): {Status}. "
+                        + "Failing CLOSED — every id in this chunk is treated as secure AND restricted (NFR-01).",
+                        entityType, chunk.Count, response.StatusCode);
+                    foreach (var id in chunk)
+                    {
+                        flags[id] = RootRecordFlags.Unreadable;
+                    }
+                    continue;
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(ct);
+                var byId = (result?.Value ?? new List<RootFlagRow>())
+                    .GroupBy(r => r.GetId(source.IdAttribute))
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                foreach (var id in chunk)
+                {
+                    flags[id] = byId.TryGetValue(id, out var row)
+                        ? new RootRecordFlags(
+                            IsSecure: row.sprk_issecure == true,
+                            IsRestricted: row.sprk_accesspermission == AccessPermissionRestricted)
+                        // Asked about, not returned. Cannot be distinguished from an unreadable row.
+                        : RootRecordFlags.Unreadable;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS] Root-flag query threw for {EntityType}. Failing CLOSED — all {Count} ids "
+                + "treated as secure AND restricted (NFR-01).", entityType, distinct.Count);
+            foreach (var id in distinct)
+            {
+                flags[id] = RootRecordFlags.Unreadable;
+            }
+        }
+
+        return flags;
+    }
+
+    /// <summary>Projection of the flag columns. Ids arrive as strings over OData.</summary>
+    private sealed class RootFlagRow
+    {
+        public string? sprk_projectid { get; set; }
+        public string? sprk_matterid { get; set; }
+        public string? sprk_workassignmentid { get; set; }
+        public bool? sprk_issecure { get; set; }
+        public int? sprk_accesspermission { get; set; }
+
+        public Guid GetId(string idAttribute)
+        {
+            var raw = idAttribute switch
+            {
+                "sprk_projectid" => sprk_projectid,
+                "sprk_matterid" => sprk_matterid,
+                "sprk_workassignmentid" => sprk_workassignmentid,
+                _ => null,
+            };
+            return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
+        }
+    }
+
+    // ── Referenced-organization resolution (task 039 · FR-23) ────────────────────────────────────
+
+    /// <summary>
+    /// Org-typed lookup columns per root entity — the record side of the FR-23 deny-list's ethical-wall
+    /// match. Enumerated from LIVE metadata (task 039 step 1, spaarkedev1, 2026-09-04) and recorded in
+    /// projects/unified-access-control-r2/notes/task-039-org-reference-inventory.md.
+    /// </summary>
+    /// <remarks>
+    /// All three roots are uniform TODAY (both carry exactly <c>sprk_assignedlawfirm1</c> +
+    /// <c>sprk_assignedlawfirm2</c> → <c>sprk_organization</c>) — but per the inventory notes this must
+    /// NOT be assumed forward. A future root (e.g. <c>sprk_servicerequest</c>) needs its own VERIFIED
+    /// entry here, never an inferred one.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> OrganizationLookupAttributes =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_project"] = new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" },
+            ["sprk_matter"] = new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" },
+            ["sprk_workassignment"] = new[] { "sprk_assignedlawfirm1", "sprk_assignedlawfirm2" },
+        };
+
+    /// <summary>
+    /// The <c>$select</c> fragment for a batch of org-typed lookups — <c>_{attribute}_value</c> per
+    /// column. Extracted as a PURE member (task 007 / A-5 precedent) so the over-match property (every
+    /// registered lookup is selected unconditionally — no narrowing to a conferring subset) is directly
+    /// assertable without an HTTP stack.
+    /// </summary>
+    internal static string BuildOrganizationReferenceSelect(IReadOnlyCollection<string> orgAttributes)
+        => string.Join(",", orgAttributes.Select(a => $"_{a}_value"));
+
+    /// <summary>
+    /// Resolves EVERY organization each candidate record references (task 039 / FR-23) — deliberately
+    /// ANY org-typed lookup, not narrowed to task 041's access-conferring registry (denial over-matches
+    /// on purpose; register B-10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="GetRootRecordFlagsAsync"/>'s batched-read shape (same
+    /// <see cref="FlagQueryChunkSize"/>, same per-root-entity-type source lookup) but answers a
+    /// DIFFERENT question — WHICH organizations a record references, not whether it is
+    /// secure/restricted — so it is a separate method rather than a widened <see cref="RootRecordFlags"/>
+    /// read: conflating the two would give one method two unrelated reasons to change.
+    /// </para>
+    /// <para>
+    /// <b>Fail-closed toward UNRESOLVED — the worst case for THIS read, mirroring
+    /// <see cref="GetRootRecordFlagsAsync"/>'s Unreadable contract.</b> A record whose org-reference
+    /// read faults must not silently resolve to "references no organizations": the caller (task 039's
+    /// veto wiring) would then have no way to know it missed a possible ethical-wall match — exactly
+    /// the "skipped record is an unevaluated wall" case this task's escalation trigger names. Every id
+    /// in a faulted chunk comes back with <see cref="ReferencedOrganizations.Unresolved"/>
+    /// (<c>Unreadable = true</c>); the caller treats that as a forced deny, independent of whatever the
+    /// deny-list reader itself would say.
+    /// </para>
+    /// <para>
+    /// An entity type with NO org-typed lookups returns a totally EMPTY map — a static SCHEMA fact, not
+    /// a failed read, mirroring <see cref="GetRootRecordFlagsAsync"/>'s "not a flag-bearing type"
+    /// branch. Callers must not confuse absence-because-no-columns with Unreadable; the two are only
+    /// comparable once the entity type is known to be org-bearing (i.e. once ANY id is present in the
+    /// returned map).
+    /// </para>
+    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        if (recordIds is null || recordIds.Count == 0)
+        {
+            return new Dictionary<Guid, ReferencedOrganizations>();
+        }
+
+        if (!RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source) ||
+            !OrganizationLookupAttributes.TryGetValue(entityType ?? string.Empty, out var orgAttributes) ||
+            orgAttributes.Count == 0)
+        {
+            // Not an org-bearing root type. No organization reference is possible — a static schema
+            // fact, not a failed read (see remarks).
+            return new Dictionary<Guid, ReferencedOrganizations>();
+        }
+
+        var distinct = recordIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinct.Count == 0)
+        {
+            return new Dictionary<Guid, ReferencedOrganizations>();
+        }
+
+        var result = new Dictionary<Guid, ReferencedOrganizations>();
+        var selectClause = BuildOrganizationReferenceSelect(orgAttributes);
+
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            var apiUrl = GetDataverseApiUrl();
+
+            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            {
+                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
+                var query = $"{apiUrl}/{source.Collection}" +
+                            $"?$filter=({idFilter})" +
+                            $"&$select={source.IdAttribute},{selectClause}";
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, query);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                request.Headers.Add("OData-MaxVersion", "4.0");
+                request.Headers.Add("OData-Version", "4.0");
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                var response = await _httpClient.SendAsync(request, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError(
+                        "[EXT-ACCESS] Org-reference query FAILED for {EntityType} ({Count} ids): {Status}. "
+                        + "Failing CLOSED — every id in this chunk is UNRESOLVED; task 039's caller denies them.",
+                        entityType, chunk.Count, response.StatusCode);
+                    foreach (var id in chunk)
+                    {
+                        result[id] = ReferencedOrganizations.Unresolved;
+                    }
+                    continue;
+                }
+
+                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(ct);
+                var byId = (payload?.Value ?? new List<OrganizationReferenceRow>())
+                    .GroupBy(r => r.GetId(source.IdAttribute))
+                    .ToDictionary(g => g.Key, g => g.First());
+
+                foreach (var id in chunk)
+                {
+                    result[id] = byId.TryGetValue(id, out var row)
+                        ? new ReferencedOrganizations(row.ReferencedOrganizationIds(), Unreadable: false)
+                        // Asked about, not returned. Cannot be distinguished from an unreadable row.
+                        : ReferencedOrganizations.Unresolved;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS] Org-reference query threw for {EntityType}. Failing CLOSED — all {Count} "
+                + "ids are UNRESOLVED; task 039's caller denies them.", entityType, distinct.Count);
+            foreach (var id in distinct)
+            {
+                result[id] = ReferencedOrganizations.Unresolved;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Projection of the org-typed lookup columns (task 039). Ids arrive as strings over OData.</summary>
+    private sealed class OrganizationReferenceRow
+    {
+        public string? sprk_projectid { get; set; }
+        public string? sprk_matterid { get; set; }
+        public string? sprk_workassignmentid { get; set; }
+
+        [JsonPropertyName("_sprk_assignedlawfirm1_value")]
+        public Guid? sprk_assignedlawfirm1 { get; set; }
+
+        [JsonPropertyName("_sprk_assignedlawfirm2_value")]
+        public Guid? sprk_assignedlawfirm2 { get; set; }
+
+        public Guid GetId(string idAttribute)
+        {
+            var raw = idAttribute switch
+            {
+                "sprk_projectid" => sprk_projectid,
+                "sprk_matterid" => sprk_matterid,
+                "sprk_workassignmentid" => sprk_workassignmentid,
+                _ => null,
+            };
+            return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
+        }
+
+        /// <summary>Every populated org-lookup slot on this row, in declaration order (task 039 over-match: both slots, unconditionally).</summary>
+        public IReadOnlyCollection<Guid> ReferencedOrganizationIds()
+        {
+            var ids = new List<Guid>(2);
+            if (sprk_assignedlawfirm1 is { } id1) ids.Add(id1);
+            if (sprk_assignedlawfirm2 is { } id2) ids.Add(id2);
+            return ids;
+        }
+    }
+
     private async Task<ExternalGrantSet> QueryGrantSetAsync(Guid contactId, CancellationToken ct)
     {
         try
@@ -490,22 +832,45 @@ public class ExternalParticipationService
 
             // Partition each grant into its root bucket by which typed lookup is populated. A project
             // grant keeps its access level; matter/WA grants contribute an id only.
+            // Task 037 (FR-22): DIRECT rows carry their level in BOTH slots. `DirectAccessLevel` is what
+            // survives Secure suppression; `AccessLevel` stays the all-sources effective level.
             var projects = rows
                 .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
                 .Select(r => new ExternalParticipation
                 {
                     ProjectId = r._sprk_project_value!.Value,
-                    AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
+                    AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value,
+                    DirectAccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
                 })
                 .ToList();
+            // Task 032 (FR-19): matter/WA grants now KEEP the level that was already on the row —
+            // GrantRowSelect has always $select'ed sprk_accesslevel; the partitioning simply discarded
+            // it, which is why these root types had no level anywhere downstream (register A-8 / B-8).
+            //
+            // ⚠️ NOTE THE ASYMMETRY WITH `projects` ABOVE, WHICH IS DELIBERATE. The project filter
+            // requires `sprk_accesslevel.HasValue` and drops rows without one. Copying that here would
+            // read as tidy symmetry and would be a SILENT REVOCATION: a matter/WA row with a null level
+            // grants access today, and would stop granting it. So the level is carried as NULLABLE and
+            // the row is kept — set membership is unchanged, and a null level contributes
+            // AccessRights.None, which the highest-wins max cannot widen.
             var matters = rows
                 .Where(r => r._sprk_matter_value.HasValue)
-                .Select(r => r._sprk_matter_value!.Value)
-                .ToHashSet();
+                .Select(r => new ExternalRootGrant
+                {
+                    RecordId = r._sprk_matter_value!.Value,
+                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                    DirectAccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                })
+                .ToList();
             var workAssignments = rows
                 .Where(r => r._sprk_workassignment_value.HasValue)
-                .Select(r => r._sprk_workassignment_value!.Value)
-                .ToHashSet();
+                .Select(r => new ExternalRootGrant
+                {
+                    RecordId = r._sprk_workassignment_value!.Value,
+                    AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                    DirectAccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel
+                })
+                .ToList();
 
             // Term 3 (task 073 #7): union ORGANIZATION grants — records granted to any organization the
             // contact is an ACTIVE member of (sprk_contactorganization junction). This mirrors the
@@ -515,26 +880,66 @@ public class ExternalParticipationService
             var orgRows = await QueryOrganizationGrantRowsAsync(contactId, token, apiUrl, ct);
             if (orgRows.Count > 0)
             {
+                // Task 037 (FR-22): ORG-INHERITED rows leave DirectAccessLevel NULL. That null is the
+                // provenance marker Secure suppression reads — an org row contributes to the effective
+                // level but never to the direct one.
                 projects.AddRange(orgRows
                     .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
                     .Select(r => new ExternalParticipation
                     {
                         ProjectId = r._sprk_project_value!.Value,
-                        AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
+                        AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value,
+                        DirectAccessLevel = null
                     }));
                 foreach (var r in orgRows.Where(r => r._sprk_matter_value.HasValue))
-                    matters.Add(r._sprk_matter_value!.Value);
+                    matters.Add(new ExternalRootGrant
+                    {
+                        RecordId = r._sprk_matter_value!.Value,
+                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                        DirectAccessLevel = null
+                    });
                 foreach (var r in orgRows.Where(r => r._sprk_workassignment_value.HasValue))
-                    workAssignments.Add(r._sprk_workassignment_value!.Value);
+                    workAssignments.Add(new ExternalRootGrant
+                    {
+                        RecordId = r._sprk_workassignment_value!.Value,
+                        AccessLevel = (ExternalAccessLevel?)r.sprk_accesslevel,
+                        DirectAccessLevel = null
+                    });
             }
 
             // Dedupe project grants by id, keeping the HIGHEST access level — a contact may hold a direct
             // project grant AND inherit one via an org grant; the strongest level wins (the enum orders
             // ViewOnly < Collaborate < FullAccess).
+            //
+            // ⚠️ Task 037: the dedupe MUST carry both levels forward. Collapsing to a single max would
+            // destroy exactly what Secure suppression needs — a ViewOnly DIRECT grant plus a Collaborate
+            // ORG grant would become "Collaborate", and once the org term is suppressed there would be no
+            // ViewOnly left to fall back to. `Max` over the nullable direct level skips org rows (null) and
+            // yields null only when EVERY contributing row was org-inherited.
             projects = projects
                 .GroupBy(p => p.ProjectId)
-                .Select(g => new ExternalParticipation { ProjectId = g.Key, AccessLevel = g.Max(x => x.AccessLevel) })
+                .Select(g => new ExternalParticipation
+                {
+                    ProjectId = g.Key,
+                    AccessLevel = g.Max(x => x.AccessLevel),
+                    DirectAccessLevel = g.Max(x => x.DirectAccessLevel)
+                })
                 .ToList();
+
+            // Task 032: the SAME highest-wins rule now applies to matters + work assignments, for the
+            // same reason — the org-grant union above adds rows from a SECOND source, so one id can
+            // arrive twice at different levels.
+            //
+            // This was invisible before: both were HashSet<Guid>, so duplicates silently collapsed and
+            // no level could disagree. Duplicates are real, not theoretical — one dev contact holds FIVE
+            // active grant rows on a single matter. Without this, once levels are carried the answer for
+            // such an id would depend on ROW ORDER.
+            //
+            // `Max` over `ExternalAccessLevel?` ignores nulls and yields null only when EVERY row for
+            // that id lacks a level, which maps to AccessRights.None — fail-closed, and never a level
+            // invented for a row that had none.
+            matters = DedupeByHighestLevel(matters);
+            workAssignments = DedupeByHighestLevel(workAssignments);
 
             _logger.LogInformation(
                 "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment (incl. {OrgRows} org-grant rows)",
@@ -543,8 +948,8 @@ public class ExternalParticipationService
             return new ExternalGrantSet
             {
                 Projects = projects,
-                Matters = matters,
-                WorkAssignments = workAssignments,
+                MatterGrants = matters,
+                WorkAssignmentGrants = workAssignments,
             };
         }
         catch (Exception ex)
@@ -553,6 +958,23 @@ public class ExternalParticipationService
             return ExternalGrantSet.Empty;
         }
     }
+
+    /// <summary>
+    /// Collapses repeated grants on one record id to a single grant at the HIGHEST level (task 032).
+    /// The non-project generalization of the <c>projects</c> <c>GroupBy(...).Max(...)</c> rule above.
+    /// </summary>
+    private static List<ExternalRootGrant> DedupeByHighestLevel(IEnumerable<ExternalRootGrant> grants) =>
+        grants
+            .GroupBy(g => g.RecordId)
+            .Select(g => new ExternalRootGrant
+            {
+                RecordId = g.Key,
+                // Max over a nullable enum skips nulls; all-null yields null -> AccessRights.None.
+                AccessLevel = g.Max(x => x.AccessLevel),
+                // Task 037: same rule for the direct-only level — null iff every row was org-inherited.
+                DirectAccessLevel = g.Max(x => x.DirectAccessLevel)
+            })
+            .ToList();
 
     /// <summary>
     /// Term 3 (task 073 #7) — the ORGANIZATION-grant rows a contact inherits: active org grants (contact
@@ -601,6 +1023,32 @@ public class ExternalParticipationService
             _logger.LogError(ex, "[EXT-ACCESS] Error querying org grants for Contact {ContactId}", contactId);
             return new List<ExternalAccessRow>();
         }
+    }
+
+    /// <summary>
+    /// Public entry point onto the private <see cref="QueryActiveOrgIdsAsync(Guid, string, string, CancellationToken)"/>
+    /// overload below, for the task 039 deny-list veto: the principal's own active organization
+    /// memberships are one of the two SUBJECT identities <see cref="INoAccessListReader"/> checks
+    /// (contact + organization). REUSED, not duplicated — resolves its own token/API-url so the caller
+    /// does not need this service's internal Dataverse plumbing.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to the SAME private query <see cref="QueryOrganizationGrantRowsAsync"/> already uses,
+    /// whose own internal try/catch fails toward an EMPTY org list on a query-level fault (correct for
+    /// that ADDITIVE caller — a fault there must not GRANT more access). Token/API-url acquisition here
+    /// is deliberately NOT separately guarded: if it throws, the exception propagates to
+    /// <c>AccessibleRecordSetService.ResolveDenyVetoAsync</c>, whose own catch-all denies every queried
+    /// candidate on ANY fault in the deny-veto resolution — the correct fail direction for a VETO
+    /// subject (unlike the additive org-grant caller above). A token-acquisition fault and a
+    /// query-level fault therefore resolve toward OPPOSITE defaults; both are deliberate for their
+    /// respective callers, not an inconsistency to "fix" by unifying them.
+    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+    {
+        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
+        var apiUrl = GetDataverseApiUrl();
+        return await QueryActiveOrgIdsAsync(contactId, token, apiUrl, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -661,8 +1109,14 @@ public class ExternalParticipationService
                 Projects = grantSet.Projects
                     .Select(p => new CachedParticipation { ProjectId = p.ProjectId, AccessLevel = (int)p.AccessLevel })
                     .ToList(),
-                Matters = grantSet.Matters.ToList(),
-                WorkAssignments = grantSet.WorkAssignments.ToList(),
+                // Task 032: persist matter/WA LEVELS, not just ids. Writing ids here (the prior shape)
+                // is what would have made rights correct on a miss and None on a hit.
+                MatterGrants = grantSet.MatterGrants
+                    .Select(g => new CachedRootGrant { RecordId = g.RecordId, AccessLevel = (int?)g.AccessLevel })
+                    .ToList(),
+                WorkAssignmentGrants = grantSet.WorkAssignmentGrants
+                    .Select(g => new CachedRootGrant { RecordId = g.RecordId, AccessLevel = (int?)g.AccessLevel })
+                    .ToList(),
             };
 
             await _cache.SetAsync(
@@ -671,7 +1125,7 @@ public class ExternalParticipationService
 
             _logger.LogDebug(
                 "[EXT-ACCESS] Cached grants for Contact {ContactId} (TTL: {Ttl}s): {Projects}p/{Matters}m/{Was}w",
-                idComponent, CacheTtl.TotalSeconds, cached.Projects.Count, cached.Matters.Count, cached.WorkAssignments.Count);
+                idComponent, CacheTtl.TotalSeconds, cached.Projects.Count, cached.MatterGrants.Count, cached.WorkAssignmentGrants.Count);
         }
         catch (Exception ex)
         {
@@ -763,17 +1217,56 @@ public class ExternalParticipationService
         };
     }
 
+    /// <summary>
+    /// A cached non-project (matter / work-assignment) grant: id + level (task 032).
+    /// <c>AccessLevel</c> is nullable for the same reason <see cref="ExternalRootGrant"/>'s is.
+    /// </summary>
+    private sealed class CachedRootGrant
+    {
+        public Guid RecordId { get; set; }
+        public int? AccessLevel { get; set; }
+
+        public ExternalRootGrant ToGrant() => new()
+        {
+            RecordId = RecordId,
+            AccessLevel = (ExternalAccessLevel?)AccessLevel
+        };
+    }
+
+    /// <summary>
+    /// The cached grant-set shape.
+    /// <para>
+    /// 🔴 Task 032 fixed a defect that would otherwise have shipped GREEN. This type stored projects as
+    /// (id + level) but matters/WAs as bare <c>List&lt;Guid&gt;</c>. Carrying levels only on the QUERY
+    /// path would therefore have produced correct matter rights on a cache MISS and
+    /// <c>AccessRights.None</c> on a cache HIT — i.e. for most of every 60-second TTL — while the unit
+    /// suite stayed green, because unit tests bypass the cache entirely. Silent, intermittent, and
+    /// invisible to CI.
+    /// </para>
+    /// <para>
+    /// <b><see cref="CacheVersion"/> MUST be bumped whenever this shape changes</b> (3 → 4 here).
+    /// Without the bump, entries written under the old shape deserialize into the new one with levels
+    /// absent, reproducing exactly the bug above for one TTL after every deploy.
+    /// </para>
+    /// <para>
+    /// ⚠️ It holds NO expiry dates — expiry is applied by the read <c>$filter</c> when an entry is built. The
+    /// write paths rely on that: <c>/set-record-share-expiry</c> (task 098) and <c>/grant</c> treat a failed
+    /// invalidation as a freshness issue only, because a changed date that is today or later cannot change
+    /// today's answer. If a date is ever cached here, a failed invalidation after a SHORTENING keeps the old
+    /// date for one TTL — revisit those invalidators when you change this shape.
+    /// </para>
+    /// </summary>
     private sealed class CachedGrantSet
     {
         public List<CachedParticipation> Projects { get; set; } = new();
-        public List<Guid> Matters { get; set; } = new();
-        public List<Guid> WorkAssignments { get; set; } = new();
+        public List<CachedRootGrant> MatterGrants { get; set; } = new();
+        public List<CachedRootGrant> WorkAssignmentGrants { get; set; } = new();
 
         public ExternalGrantSet ToGrantSet() => new()
         {
             Projects = Projects.Select(p => p.ToParticipation()).ToList(),
-            Matters = Matters.ToHashSet(),
-            WorkAssignments = WorkAssignments.ToHashSet(),
+            MatterGrants = MatterGrants.Select(g => g.ToGrant()).ToList(),
+            WorkAssignmentGrants = WorkAssignmentGrants.Select(g => g.ToGrant()).ToList(),
         };
     }
 }

@@ -80,11 +80,20 @@ public class DataverseEntitySchemaTests
         { "MatterLookup", new("sprk_matter", typeof(EntityReference)) },
         { "ProjectLookup", new("sprk_project", typeof(EntityReference)) },
         { "InvoiceLookup", new("sprk_invoice", typeof(EntityReference)) },
-        // Q4 widening 2026-09-03. Both columns already existed on sprk_document — verified against
-        // live Dataverse metadata — which is exactly why the gap was invisible: the write path had
-        // nothing to write, so a save filed to one produced no error and no association.
+        // Q4 widening 2026-09-03. The work-assignment column already existed on sprk_document, which
+        // is exactly why that gap was invisible: the write path had nothing to write, so a save filed
+        // to one produced no error and no association.
         { "WorkAssignmentLookup", new("sprk_workassignment", typeof(EntityReference)) },
-        { "EventLookup", new("sprk_event", typeof(EntityReference)) },
+        // ⚠️ CORRECTED 2026-09-04: this row said "sprk_event". There is no such column on
+        // sprk_document — `SELECT sprk_event FROM sprk_document` errors — so this census was pinning
+        // the very bug it exists to catch, and the write it mirrored failed every event-filed save.
+        // A census is only as good as the source it was built from; this one inherited a check that
+        // searched the bare sprk_{type} family and never looked at sprk_related*.
+        { "EventLookup", new("sprk_relatedevent", typeof(EntityReference)) },
+        // Added 2026-09-04. Both columns predate this code and were misrecorded as absent for the
+        // same reason as the event row above.
+        { "TodoLookup", new("sprk_relatedtodo", typeof(EntityReference)) },
+        { "ContactLookup", new("sprk_relatedcontact", typeof(EntityReference)) },
 
         // Document Source Tracking
         { "SourceType", new("sprk_sourcetype", typeof(OptionSetValue)) },

@@ -61,7 +61,8 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. No Azure Functions for gate resolution. Async-friendly contract.</constraint>
+    <constraint source="ADR-001">.NET 8 Minimal API; no Azure Functions inside the BFF assembly. Async-friendly contract.</constraint>
+    <constraint source="ADR-052">Gate resolution is in the BFF (ADR-013 below); where any background part of it runs is decided per workload under ADR-052. Inside the BFF, queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`.</constraint>
     <constraint source="ADR-008">Endpoint-filter authorization. Gate resolution endpoints (added by resolvers in 031–034) MUST use `.AddEndpointFilter&lt;&gt;()`.</constraint>
     <constraint source="ADR-010">Feature-module DI: `AddActionEngineModule()`. ≤15 non-framework registrations across all of ActionEngine.</constraint>
     <constraint source="ADR-013">AI Architecture (refined 2026-05-20). BFF placement; CRUD-side consumers reach `IGateResolver` via `PublicContracts/` facade only.</constraint>
@@ -75,7 +76,8 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
       <file>.claude/adr/ADR-008-endpoint-filter-authorization.md</file>
       <file>.claude/adr/ADR-010-di-minimalism.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>

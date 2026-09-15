@@ -3,8 +3,12 @@
 > **Status**: Researched 2026-05-19 for `projects/ai-spaarke-insights-engine-r1/`.
 > **Curator**: researcher subagent (auto-research, not yet senior-engineer-reviewed).
 > **Refresh cadence**: monthly per [`knowledge/REFRESH-PROCEDURE.md`](../REFRESH-PROCEDURE.md).
+>
+> **Spaarke's placement rule for Functions is [ADR-052](../../docs/adr/ADR-052-workload-placement.md).** This note is
+> platform research. Where it differs from ADR-052 §6 — notably the per-tenant UAMI below, where ADR-052 reuses the
+> stamp's managed identity — ADR-052 governs.
 
-The Insights Engine uses Azure Functions for the Dataverse-to-AI-Search sync pipeline (out-of-band, event-driven). ADR-001 was updated to permit Functions for this kind of out-of-band integration work. This document captures current best practices for Functions in an ISV multi-tenant context, with focus on the Spaarke deployment model: one set of resources per tenant, packaged via Bicep.
+The Insights Engine uses Azure Functions for the Dataverse-to-AI-Search sync pipeline (event-driven intake). Where such work runs is now decided per workload under ADR-052. This document captures current best practices for Functions in an ISV multi-tenant context, with focus on the Spaarke deployment model: one set of resources per tenant, packaged via Bicep.
 
 ---
 

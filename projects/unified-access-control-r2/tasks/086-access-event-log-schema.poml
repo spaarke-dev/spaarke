@@ -4,7 +4,7 @@
     <title>Access event log: sprk_accessevent table schema + data-model doc (FR-32)</title>
     <phase>5 Attestation</phase>
     <gate>startable after Phase 1 merges (the event vocabulary mirrors the evaluator's grant/deny state changes)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Schema + docs creation; no .cs/.ts behaviour change (write hooks are task 081).</rigor-reason>
     <model-tier>sonnet</model-tier>

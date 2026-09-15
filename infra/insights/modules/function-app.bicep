@@ -8,11 +8,14 @@
 // wired so a `func azure functionapp publish ...` from task 050 works
 // without infra changes.
 //
-// Per ADR-001 (updated 2026-05-19): Functions are permitted ONLY for
-// out-of-band integration work (SPE-upload event ingest is exactly
-// that). Per knowledge/azure-functions-isv/README.md §1: Flex
-// Consumption is the recommended 2026 default for ISV serverless.
-// Per §3: per-tenant UAMI is the auth boundary.
+// PRE-ADR-052: this shell predates ADR-052 (docs/adr/ADR-052-workload-
+// placement.md, 2026-09-12), which now governs where workloads run. Before
+// first use it MUST be aligned with ADR-052 §6: (1) reuse the stamp's
+// user-assigned managed identity app-only instead of a per-tenant UAMI
+// created for the Function; (2) identity-based AzureWebJobsStorage with no
+// shared keys — `allowSharedKeyAccess: true` below must go.
+// Per knowledge/azure-functions-isv/README.md §1: Flex Consumption is the
+// recommended 2026 default for ISV serverless.
 //
 // Storage: required by Flex Consumption for deployment artifacts +
 // runtime state. Created here (one per tenant) — small SKU, no

@@ -119,10 +119,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _cache = cache;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
-        _options = options.Value; // Consumed by ResolveByContactAsync's
-                                  // access-conferring role allowlist (NFR-05).
-                                  // Resolving here surfaces binding errors at
-                                  // construction rather than first call.
+        _options = options.Value; // Consumed by the access-conferring column registry filter
+                                  // (ADR-034 A1 / FR-24, NFR-05) — ResolveByContactAsync always;
+                                  // ResolveAsync when AccessConferringOnly is requested. Resolving
+                                  // here surfaces binding errors at construction, not first call.
     }
 
     /// <summary>
@@ -221,7 +221,17 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── a) Discovery ────────────────────────────────────────────────────
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var descriptors = FilterDescriptors(discovery.DiscoveredFields, effectiveOptions);
+
+        // ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041): when the caller opts
+        // in via AccessConferringOnly, apply the SAME registry filter ResolveByContactAsync always
+        // applies — BEFORE the Roles/IdentityTypes narrowing below, mirroring that method's order.
+        // Default false (the untouched path) makes this line a no-op — candidateFields IS
+        // discovery.DiscoveredFields, the same reference — so scoping output stays byte-identical to
+        // pre-task-041 behavior (AC pinned by ResolveAsync_AccessConferringOnlyDefaultsFalse_* tests).
+        var candidateFields = effectiveOptions.AccessConferringOnly
+            ? FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields)
+            : discovery.DiscoveredFields;
+        var descriptors = FilterDescriptors(candidateFields, effectiveOptions);
 
         // ── c) Identity normalization (started in parallel with discovery
         //     would also be valid, but discovery is typically cache-hot;
@@ -407,7 +417,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // contact roles before any options narrowing. Reuses the SAME metadata
         // discovery mechanism as the systemuser path — no second discovery engine.
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var allowlisted = FilterToAccessConferringContactRoles(discovery.DiscoveredFields);
+        var allowlisted = FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields);
         var descriptors = FilterDescriptors(allowlisted, effectiveOptions);
 
         // No access-conferring contact roles → empty response (NOT an error).
@@ -485,25 +495,32 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return response;
     }
 
-    // ── Access-conferring role allowlist (NFR-05 — security-load-bearing) ───
+    // ── Access-conferring column registry (ADR-034 Amendment A1 / spec FR-24 — security-load-bearing,
+    //    NFR-05) ────────────────────────────────────────────────────────────────────────────────────
     /// <summary>
-    /// Reduces discovered descriptors to ONLY the access-conferring contact
-    /// roles for the contact-anchored entry point. A descriptor qualifies when
-    /// ALL hold:
-    ///   (1) its <see cref="MembershipDescriptor.IdentityType"/> is
-    ///       <c>Contact</c> — org/systemuser/team/BU/account lookups (and
-    ///       polymorphic <c>sprk_regardingrecord*</c> fields resolved to a
-    ///       non-contact target) never confer contact-anchored access;
-    ///   (2) its logical field name starts with the configured convention
-    ///       prefix (default <c>sprk_assigned</c>, case-insensitive) — adverse
-    ///       contact lookups such as an opposing-counsel field fail here;
-    ///   (3) it is NOT on the config/data-driven exclusion list.
-    /// The allowlist is therefore derived from live metadata discovery + a
-    /// naming convention + a config exclusion list — never a hardcoded field
-    /// allowlist — so a newly-added <c>sprk_assigned*</c> contact lookup
-    /// auto-qualifies with no code change (NFR-05).
+    /// Reduces discovered descriptors to ONLY the access-conferring columns registered for
+    /// <paramref name="entityType"/> — consumed by the systemuser-plane opt-in gate
+    /// (<see cref="ResolveAsync"/>, when <see cref="MembershipResolveOptions.AccessConferringOnly"/> is
+    /// requested) AND the contact-anchored entry point (<see cref="ResolveByContactAsync"/>,
+    /// unconditionally). A descriptor qualifies when ALL hold:
+    ///   (1) <paramref name="entityType"/> has a registry entry naming its
+    ///       <see cref="MembershipDescriptor.Field"/> (<see cref="MembershipOptions.AccessConferringRoles"/>);
+    ///   (2) that entry's declared identity type is <c>Contact</c> or <c>Organization</c> — the two
+    ///       identity types the registry covers per ADR-034 Amendment A1 (org-typed lookups are
+    ///       allow-listed too, closing the disclosure where unrestricted org expansion would confer
+    ///       access from ANY organization referenced on the record, including opposing counsel);
+    ///   (3) that declared type matches what live metadata discovery ACTUALLY resolved for the field
+    ///       (<see cref="MembershipDescriptor.IdentityType"/>) — a mismatch is a stale/malformed entry.
+    /// Conferral is registry membership ONLY — there is no naming-convention fallback; the prefix check
+    /// is DELETED, not layered under the registry. An entity with NO registry entries (or an empty list)
+    /// confers NOTHING (fail-closed, spec NFR-01); a malformed entry (missing field, unsupported
+    /// identity type, or a declared type that disagrees with live discovery) is logged and ignored —
+    /// never widened. Adding a conferring column is therefore a reviewed registry edit; renaming a
+    /// column — or a maker naming a brand-new column to merely LOOK like an assignment field — has zero
+    /// effect on access, because only an explicit registry entry does.
     /// </summary>
-    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringContactRoles(
+    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringRoles(
+        string entityType,
         IReadOnlyList<MembershipDescriptor> discovered)
     {
         if (discovered.Count == 0)
@@ -511,16 +528,42 @@ public sealed class MembershipResolverService : IMembershipResolverService
             return Array.Empty<MembershipDescriptor>();
         }
 
-        var config = _options.AccessConferringRoles ?? new AccessConferringRoleOptions();
-        var prefix = string.IsNullOrWhiteSpace(config.ConventionPrefix)
-            ? AccessConferringRoleOptions.DefaultConventionPrefix
-            : config.ConventionPrefix.Trim();
+        var registry = _options.AccessConferringRoles ?? new AccessConferringRegistry();
+        if (!registry.Entities.TryGetValue(entityType, out var columns) ||
+            columns is null || columns.Count == 0)
+        {
+            // Fail-closed default (NFR-01): an entity absent from the registry confers nothing via the
+            // derived-member term — silence, not a wildcard grant, for any entity nobody has reviewed a
+            // conferring column onto yet.
+            return Array.Empty<MembershipDescriptor>();
+        }
 
-        var exclusions = new HashSet<string>(
-            (config.ExcludedFields ?? new List<string>())
-                .Where(f => !string.IsNullOrWhiteSpace(f))
-                .Select(f => f.Trim()),
-            StringComparer.OrdinalIgnoreCase);
+        // Validate + index the registry's declared columns for this entity. A malformed entry (blank
+        // Field, or an IdentityType outside {Contact, Organization}) is logged and dropped here — never
+        // widened, per NFR-01.
+        var byField = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in columns)
+        {
+            if (string.IsNullOrWhiteSpace(column.Field))
+            {
+                _logger.LogWarning(
+                    "MembershipResolverService: malformed AccessConferringRoles entry for entity={EntityType} " +
+                    "(blank Field) — ignored (fail-closed, never widened).",
+                    entityType);
+                continue;
+            }
+            if (!string.Equals(column.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(column.IdentityType, "Organization", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "MembershipResolverService: malformed AccessConferringRoles entry for entity={EntityType} " +
+                    "field={Field}: IdentityType={IdentityType} is neither Contact nor Organization — " +
+                    "ignored (fail-closed, never widened).",
+                    entityType, column.Field, column.IdentityType);
+                continue;
+            }
+            byField[column.Field.Trim()] = column.IdentityType.Trim();
+        }
 
         var result = new List<MembershipDescriptor>(discovered.Count);
         foreach (var d in discovered)
@@ -529,21 +572,25 @@ public sealed class MembershipResolverService : IMembershipResolverService
             {
                 continue;
             }
-            var field = d.Field.Trim();
 
-            // (1) Contact-typed person lookup only.
-            if (!string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase))
+            if (!byField.TryGetValue(d.Field.Trim(), out var registeredType))
             {
+                // Not in the registry — the FR-24 default. Adverse fields (opposing-counsel lookups),
+                // account/BU/systemuser/team-typed lookups, and any column nobody has reviewed onto the
+                // registry all end here, regardless of how their name reads.
                 continue;
             }
-            // (2) Access-conferring naming convention.
-            if (!field.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+
+            if (!string.Equals(registeredType, d.IdentityType, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
-            }
-            // (3) Config/data-driven exclusion list.
-            if (exclusions.Contains(field))
-            {
+                // The registry's assertion about this column's type disagrees with what live discovery
+                // just resolved (e.g. the column's target table changed since the registry was last
+                // reviewed). Malformed/stale — log and ignore rather than trust either side blindly.
+                _logger.LogWarning(
+                    "MembershipResolverService: AccessConferringRoles entry for entity={EntityType} " +
+                    "field={Field} declares IdentityType={RegisteredType} but live discovery resolved " +
+                    "{ActualType} — entry ignored (fail-closed, never widened).",
+                    entityType, d.Field, registeredType, d.IdentityType);
                 continue;
             }
 

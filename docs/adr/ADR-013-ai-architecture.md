@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted (refined 2026-05-20; amended 2026-07-01 — document-context invocation)** |
+| Status | **Accepted (refined 2026-05-20; amended 2026-07-01 — document-context invocation; 2026-09-12 — placement pointers → ADR-052)** |
 | Date | 2025-12-05 |
-| Updated | 2026-07-01 |
+| Updated | 2026-09-12 (where non-request AI work runs now points to [ADR-052](ADR-052-workload-placement.md); no AI rule changed) |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 7 - AI Foundation (R3 Phases 1-5 Complete); amendment lands with `spaarkeai-compose-r1` |
 
@@ -50,7 +50,7 @@ Without a clear architecture decision, we risk:
 4. Separation does **not require duplicating** latency-sensitive components in both processes
 
 Workloads currently meeting all four criteria:
-- **Azure Functions for sync/extraction/scheduled work** — already permitted by ADR-001. The Insights Engine sync pipelines (Dataverse → AI Search; closure-extraction triggers; scheduled re-indexing) are the canonical example.
+- **Background, scheduled and event-driven AI work that [ADR-052](ADR-052-workload-placement.md) places outside the BFF** — e.g. the Insights Engine sync pipelines (Dataverse → AI Search; closure-extraction triggers; scheduled re-indexing). *(Re-pointed 2026-09-12: this bullet previously cited ADR-001.)*
 - **MCP server (e.g., `Sprk.Insights.Mcp`)** — a thin facade over the Insights Engine designed for external consumers (M365 Copilot, declarative agents). This is a DESIGN-TIME consideration when Insights Engine Phase 1 lands; it is NOT pre-decided. A successor ADR or amendment is required before standing one up.
 
 **This decision supersedes the prior categorical rejection of "separate AI microservice."** The 2026-05-20 BFF AI extraction assessment ([`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../assessments/bff-ai-extraction-assessment-2026-05-20.md)) examined extraction with evidence (composition, coupling, operational profile, release cadence) and concluded that the categorical rejection had the right outcome but the wrong rationale. The current decision reflects the right rationale: separation is permitted but rare, governed by technical criteria, not by an absolute rule.
@@ -229,13 +229,10 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 
 **Decision:** Rejected for AI BFF endpoints — unified BFF approach per ADR-001.
 
-**Note (2026-05-19):** This rejection applies only to BFF endpoints. Azure Functions ARE permitted for **out-of-band AI integration work** that meets the criteria in ADR-001 — examples relevant to the AI subsystem include:
-- Dataverse → AI Search sync (event-driven + scheduled reconciliation)
-- Closure-extraction pipelines triggered by matter-lifecycle events
-- Scheduled re-indexers and embedding refresh jobs
-- Webhook receivers from external AI services
-
-These workloads are genuinely independent of the BFF request pipeline. See ADR-001 for the full criteria.
+**Note (2026-05-19; re-pointed 2026-09-12):** This rejection applies only to BFF endpoints. Where non-request AI
+work runs — for example Dataverse → AI Search sync, closure-extraction pipelines triggered by matter-lifecycle
+events, scheduled re-indexers and embedding refresh jobs, webhook receivers from external AI services — is decided
+per workload under [ADR-052](ADR-052-workload-placement.md).
 
 ---
 
@@ -397,24 +394,27 @@ public class AiAuthorizationFilter : IEndpointFilter
 ### Job Handler (ADR-004 Compliance)
 
 ```csharp
-public record AiIndexingJob(
+// The payload travels in JobContract.Payload (ADR-004: identifiers only, no document content)
+public record AiIndexingPayload(
     Guid TenantId,
     Guid ContainerId,
     string[] DriveItemIds,
-    string IndexName
-) : IJob;
+    string IndexName);
 
-public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
+// ServiceBusJobProcessor dispatches on JobType to the non-generic IJobHandler (ADR-004 A1 §3)
+public class AiIndexingJobHandler : IJobHandler
 {
     private readonly ISpeFileStore _fileStore;
     private readonly IDocumentProcessorService _processor;
     private readonly IEmbeddingService _embeddings;
     private readonly IAiSearchService _search;
 
-    public async Task<JobResult> HandleAsync(
-        AiIndexingJob job,
-        CancellationToken ct)
+    public string JobType => "ai-indexing";
+
+    public async Task<JobOutcome> ProcessAsync(JobContract contract, CancellationToken ct)
     {
+        var started = DateTimeOffset.UtcNow;
+        var job = contract.Payload!.Deserialize<AiIndexingPayload>()!;
         var indexed = 0;
         var errors = new List<string>();
 
@@ -446,11 +446,12 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
             }
         }
 
-        return new JobResult(
-            Success: errors.Count == 0,
-            Message: $"Indexed {indexed}/{job.DriveItemIds.Length} documents",
-            Errors: errors
-        );
+        var duration = DateTimeOffset.UtcNow - started;
+        return errors.Count == 0
+            ? JobOutcome.Success(contract.JobId, JobType, duration)
+            : JobOutcome.Failure(contract.JobId, JobType,
+                $"Indexed {indexed}/{job.DriveItemIds.Length} documents; {string.Join("; ", errors)}",
+                contract.Attempt, duration);
     }
 }
 ```

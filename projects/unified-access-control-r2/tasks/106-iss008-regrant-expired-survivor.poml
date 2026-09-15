@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-008 (#973) — a re-grant over an EXPIRED survivor judges "confers access" across every active row on the key before answering 409</title>
+    <phase>Register-driven (owner rule 2026-09-15)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Localized change to one endpoint's match path with existing expiry logic to reuse; the contract judgment point is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project (project CLAUDE.md).</parallel-reason>
+    <deps>—</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>Register ISS-008 / GitHub #973 — kept in the project under the owner's 2026-09-15 rule: material (a wrong access answer on this project's grant endpoint).</origin>
+  </metadata>
+
+  <prompt>In GrantExternalAccessEndpoint.CreateGrantAsync's match path, when the elected survivor (lowest id) is expired and the request carries no new expiry, the endpoint returns 409 sdap.grant.expired_not_restored ("still confers no access") BEFORE CollapseDuplicatesAsync runs. If another active row on the same key has a later or null expiry, the grantee does have access — the 409 is false. Duplicates are real in dev (task 097 notes: one contact, five rows, one matter).</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external grant lifecycle.</role>
+  <goal>The match path computes "does this grant confer access" across every active row on the key; 409 expired_not_restored is returned only when no active row on the key confers access; duplicate collapse never deactivates the row that confers access.</goal>
+
+  <context>
+    <background>Register ISS-008 (task 097 code review; pre-existing since task 023). The read side's definition of "expired" is task 007's ExpiryPredicate (DateOnly); sprk_expiresdate is Date Only and null means never-expiring on the read path.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs — CreateGrantAsync (:178), the 409 (:143), CollapseDuplicatesAsync (:402)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/task-023-grant-upsert-expiry.md and notes/task-097-*.md — the expired-survivor rule and the duplicates evidence</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="register ISS-008">Scope: the fix. NOT "collapse first" — collapsing onto an expired survivor would revoke live access.</constraint>
+    <constraint source="ADR-003">Scope: every answer. Fail closed: an outcome the endpoint cannot verify is never reported as success.</constraint>
+    <constraint source="project">Scope: expiry. Reuse the read path's expiry definition; do not write a second one.</constraint>
+    <constraint source="project">Scope: response contract. Status codes and reasonCodes are unchanged; needing a new one is an escalation.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification (existing endpoint); publish size against a fresh master.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read CreateGrantAsync end to end and verify the register's description against the code.</step>
+    <step order="1">Judge "confers access" across all active rows on the key — or elect the survivor with the latest effective expiry. Choose the option that keeps the response contract; record why in the notes.</step>
+    <step order="2">Make sure the collapse keeps the row that confers access.</step>
+    <step order="3">Tests (KEEP path) for the closed set below; perturbations; build, full suite, publish size; notes/task-106-regrant-expired-survivor.md; TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the honest response when a live duplicate exists needs a status code or reasonCode the contract does not have, STOP and escalate with options.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</output>
+    <output type="test">tests/ (KEEP path)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-106-regrant-expired-survivor.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Expired survivor plus an active duplicate with a LATER expiry, request without a new expiry → no 409; the response does not claim "no access".</criterion>
+    <criterion testable="true">Same with a NULL-expiry duplicate → no 409 (null is never-expiring on the read path).</criterion>
+    <criterion testable="true">Regression: expired survivor with no conferring duplicate → 409 sdap.grant.expired_not_restored, unchanged.</criterion>
+    <criterion testable="true">Negative: after the call the row that conferred access is still active (the collapse did not deactivate it).</criterion>
+    <criterion testable="true">Negative: a request that carries a new expiry behaves exactly as before (the task 023 path).</criterion>
+    <criterion testable="true">Perturbation: restoring the survivor-only check fails at least one test; collapsing onto the lowest id regardless of expiry fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; publish size reported against a fresh master and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register ISS-008; GitHub #973 (label unified-access-control-r2). Related: tasks 010, 023, 097.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

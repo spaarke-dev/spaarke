@@ -40,6 +40,13 @@ public class GrantLifecycleCharacterizationTests
     private static readonly Guid OtherContactId = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
     /// <summary>
+    /// A FIXED "today" for every date in this class. Since task 097 the grant core takes today as a
+    /// parameter instead of reading the wall clock, so these tests no longer depend on the day they run
+    /// (they previously derived every date from <c>DateTime.UtcNow</c>).
+    /// </summary>
+    private static readonly DateOnly Today = new(2026, 9, 10);
+
+    /// <summary>
     /// Config sufficient for the real <see cref="DataverseWebApiClient"/> constructor (Moq invokes it).
     /// ClientSecretCredential is constructed but never used — every method the code under test calls is
     /// overridden, so no token is requested and no network call occurs.
@@ -83,9 +90,13 @@ public class GrantLifecycleCharacterizationTests
         public int DeactivateCount { get; private set; }
         public int LevelUpdateCount { get; private set; }
 
+        /// <summary>How many UPDATEs carried an sprk_expiresdate (task 023).</summary>
+        public int ExpiryUpdateCount { get; private set; }
+
         public IReadOnlyList<ExternalGrantRow> ActiveRows => _rows.Where(r => r.IsActive).ToList();
 
-        public ExternalGrantRow Seed(Guid? contactId, Guid? organizationId, Guid projectId, int level)
+        public ExternalGrantRow Seed(
+            Guid? contactId, Guid? organizationId, Guid projectId, int level, DateOnly? expiresDate = null)
         {
             var row = new ExternalGrantRow
             {
@@ -94,6 +105,7 @@ public class GrantLifecycleCharacterizationTests
                 OrganizationId = organizationId,
                 ProjectId = projectId,
                 AccessLevel = level,
+                ExpiresDate = expiresDate,
                 StateCode = 0
             };
             _rows.Add(row);
@@ -157,6 +169,16 @@ public class GrantLifecycleCharacterizationTests
                             row.AccessLevel = int.Parse(level.Groups[1].Value);
                             LevelUpdateCount++;
                         }
+
+                        // Task 023: the match path now writes sprk_expiresdate as well. The double
+                        // models it so a test can observe whether the expiry actually landed — the
+                        // whole of finding H1 is that it silently did not.
+                        var expiry = Regex.Match(json, @"""sprk_expiresdate"":""(\d{4}-\d{2}-\d{2})""");
+                        if (expiry.Success)
+                        {
+                            row.ExpiresDate = DateOnly.Parse(expiry.Groups[1].Value);
+                            ExpiryUpdateCount++;
+                        }
                     }
                     return Task.CompletedTask;
                 });
@@ -199,6 +221,9 @@ public class GrantLifecycleCharacterizationTests
                 OrganizationId = BoundId(payload, "sprk_Organization@odata.bind"),
                 ProjectId = BoundId(payload, "sprk_Project@odata.bind"),
                 AccessLevel = payload.TryGetValue("sprk_accesslevel", out var lvl) ? (int?)lvl : null,
+                ExpiresDate = payload.TryGetValue("sprk_expiresdate", out var exp) && exp is string expText
+                    ? DateOnly.Parse(expText)
+                    : null,
                 StateCode = 0
             };
         }
@@ -207,19 +232,25 @@ public class GrantLifecycleCharacterizationTests
     private static GrantAccessRequest Request(
         ExternalAccessLevel level = ExternalAccessLevel.ViewOnly,
         Guid? contactId = null,
-        Guid? organizationId = null) =>
+        Guid? organizationId = null,
+        DateOnly? expiryDate = null) =>
         new(
             ContactId: contactId ?? ContactId,
             ProjectId: ProjectId,
             AccessLevel: level,
-            ExpiryDate: null,
+            ExpiryDate: expiryDate,
             OrganizationId: organizationId);
 
-    private static Task<Guid> Grant(Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
+    private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Grant(
+        Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
-            request, ExternalGrantRootType.Project, ProjectId,
+            request, ExternalGrantRootType.Project, ProjectId, Today,
             callerOid: null, client.Object, Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
+
+    /// <summary>The surviving row id — most tests care only about this half of the outcome.</summary>
+    private static async Task<Guid> GrantId(Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
+        (await Grant(client, request)).AccessRecordId;
 
     /// <summary>
     /// ContainerId is null throughout this class, so the SPE step is never attempted and the membership
@@ -323,7 +354,7 @@ public class GrantLifecycleCharacterizationTests
         var table = new FakeGrantTable();
         var client = table.BuildMock();
 
-        var firstId = await Grant(client, Request());
+        var firstId = await GrantId(client, Request());
         await Grant(client, Request());
 
         var result = await Revoke(client, firstId, ContactId);
@@ -549,7 +580,7 @@ public class GrantLifecycleCharacterizationTests
                 It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ExternalGrantRow> { new() { Id = Guid.Empty, StateCode = 0 } });
 
-        var id = await Grant(client, Request());
+        var id = await GrantId(client, Request());
 
         id.Should().NotBeEmpty("an unaddressable row must never be adopted as the existing grant");
         client.Verify(
@@ -663,5 +694,213 @@ public class GrantLifecycleCharacterizationTests
         var dict = payload.Should().BeAssignableTo<IDictionary<string, object?>>().Subject;
         dict.Should().NotContainKey("sprk_Contact@odata.bind");
         dict.Should().ContainKey("sprk_Project@odata.bind");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // H1 — TASK 023. The upsert's match path must write sprk_expiresdate.
+    //
+    // Before this task the match path wrote ONLY sprk_accesslevel, and RowSelect did not even select the
+    // expiry column. With task 007's read filter enforcing expiry server-side, that produced three silent
+    // wrong answers, all returning 200 + a record id. ExpiryDate appeared exactly ONCE in this whole
+    // suite — as null — which is why none of it was caught.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// null → date. Re-granting to ADD an expiry must persist it.
+    /// </summary>
+    /// <remarks>
+    /// The dangerous direction: the operator is bounding access that is currently unbounded. The old code
+    /// returned the row id and wrote nothing, so the grant stayed unbounded and the caller was told it had
+    /// worked — A-5's shape, resurrected on the WRITE path by the two tasks that closed it on the read path.
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_AddingAnExpiryToAnUnboundedGrant_PersistsIt()
+    {
+        var table = new FakeGrantTable();
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: null);
+        var client = table.BuildMock();
+        var expiry = Today.AddDays(30);
+
+        var outcome = await Grant(client, Request(expiryDate: expiry));
+
+        outcome.AccessRecordId.Should().Be(seeded.Id, "the existing row is updated in place, not replaced");
+        outcome.Warning.Should().BeNull();
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(expiry,
+            "re-granting to ADD an expiry must bound the access — writing nothing leaves it unbounded "
+            + "while reporting success");
+    }
+
+    /// <summary>date → later date. Extending an expiry must persist the later date.</summary>
+    [Fact]
+    public async Task Upsert_ExtendingAnExpiry_PersistsTheLaterDate()
+    {
+        var table = new FakeGrantTable();
+        var original = Today.AddDays(7);
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: original);
+        var client = table.BuildMock();
+        var extended = original.AddDays(30);
+
+        await Grant(client, Request(expiryDate: extended));
+
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(extended);
+    }
+
+    /// <summary>
+    /// The expiry write happens even when the ACCESS LEVEL is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// The old match path branched on level equality and treated "same level" as a pure no-op, so an
+    /// expiry change on an otherwise-identical grant hit the idempotent branch and was discarded. This
+    /// pins that the two fields are independent reasons to write.
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_ExpiryChangeAtTheSameAccessLevel_IsNotTreatedAsANoOp()
+    {
+        var table = new FakeGrantTable();
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: null);
+        var client = table.BuildMock();
+        var expiry = Today.AddDays(14);
+
+        await Grant(client, Request(level: ExternalAccessLevel.ViewOnly, expiryDate: expiry));
+
+        table.ExpiryUpdateCount.Should().Be(1,
+            "same level + new expiry is a real change; the pre-023 code took the idempotent branch here "
+            + "and silently discarded the expiry");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(expiry);
+    }
+
+    /// <summary>
+    /// date → null does NOT clear the expiry, and that is a deliberate contract choice.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The request cannot express "clear".</b> <c>GrantAccessRequest.ExpiryDate</c> is
+    /// <c>DateOnly?</c>, so an omitted field and an explicit <c>null</c> both deserialise to <c>null</c> —
+    /// indistinguishable, and no tri-state convention exists in this codebase to borrow.</para>
+    ///
+    /// <para><b>Of the two readings, only this one is safe.</b> Treating null as "clear" would silently
+    /// REMOVE an expiry whenever a caller re-granted without restating it — a level change through a UI
+    /// that does not round-trip the date, say — turning bounded access into unbounded access. That is the
+    /// same defect H1 is about, in the other direction.</para>
+    ///
+    /// <para>Making clearing possible is therefore a CONTRACT change (a new explicit field, or a dedicated
+    /// route), escalated per this task's trigger rather than decided here. This pins the safe default so
+    /// the behaviour is unambiguous meanwhile.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_WithNoExpiryInTheRequest_LeavesAnExistingExpiryIntact()
+    {
+        var table = new FakeGrantTable();
+        var existing = Today.AddDays(30);
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: existing);
+        var client = table.BuildMock();
+
+        await Grant(client, Request(level: ExternalAccessLevel.Collaborate, expiryDate: null));
+
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(existing,
+            "an omitted expiry must not silently unbound an already-bounded grant");
+    }
+
+    /// <summary>
+    /// ADR-003: re-granting over an EXPIRED row without a new expiry must not report success.
+    /// </summary>
+    /// <remarks>
+    /// The match filter selects on <c>statecode</c> only, so an expired row is still "active" to the
+    /// upsert. Task 007's read filter nonetheless excludes it, so the caller was told access was restored
+    /// while the grantee had none. The row id is still returned so the caller can act on it.
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_OverAnExpiredRowWithNoNewExpiry_DoesNotReportSuccess()
+    {
+        var table = new FakeGrantTable();
+        var expired = Today.AddDays(-1);
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: expired);
+        var client = table.BuildMock();
+
+        var outcome = await Grant(client, Request(expiryDate: null));
+
+        outcome.AccessRecordId.Should().Be(seeded.Id, "the caller needs the id to retry against it");
+        outcome.Warning.Should().NotBeNull(
+            "the grant confers no access, so reporting a bare success tells the operator the opposite of "
+            + "the truth (ADR-003)");
+    }
+
+    /// <summary>
+    /// The same case WITH a new expiry is a real restoration, and must report success.
+    /// </summary>
+    /// <remarks>
+    /// The negative above is only meaningful paired with this: a warning returned unconditionally on any
+    /// expired row would otherwise also pass.
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_OverAnExpiredRowWithANewExpiry_Succeeds()
+    {
+        var table = new FakeGrantTable();
+        var expired = Today.AddDays(-1);
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: expired);
+        var client = table.BuildMock();
+        var renewed = Today.AddDays(30);
+
+        var outcome = await Grant(client, Request(expiryDate: renewed));
+
+        outcome.Warning.Should().BeNull("the request supplied a future expiry, so access IS restored");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(renewed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FR-33 — TASK 097. Every grant is bounded: an ABSENT expiry is defaulted server-side.
+    //
+    // Owner decision 2026-09-10 ("Server fills +90"): no client sends an expiry today, so rejecting a
+    // missing one would break every sharing surface. The rule: keep the grant's existing expiry, else
+    // today + DefaultExpiryDays. Keeping is pinned in both directions — the existing +30 test above
+    // shows a shorter expiry is not EXTENDED; the +200 test below shows a longer one is not SHORTENED.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A NEW grant with no expiry is written with today + the default, never unbounded.</summary>
+    [Fact]
+    public async Task CreateGrant_NewGrantWithNoExpiry_StoresTodayPlusTheDefaultDays()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+
+        await Grant(client, Request(expiryDate: null));
+
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(
+            Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays),
+            "FR-33: a new grant is never written unbounded, whichever surface created it");
+    }
+
+    /// <summary>Re-granting an UNBOUNDED grant with no expiry bounds it at today + the default.</summary>
+    [Fact]
+    public async Task Upsert_NoExpiryOnAnUnboundedExistingGrant_StoresTodayPlusTheDefaultDays()
+    {
+        var table = new FakeGrantTable();
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: null);
+        var client = table.BuildMock();
+
+        await Grant(client, Request(expiryDate: null));
+
+        table.ExpiryUpdateCount.Should().Be(1, "an unbounded survivor is the one case the default writes to");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(
+            Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+    }
+
+    /// <summary>
+    /// Re-granting with no expiry never SHORTENS a longer expiry someone set — the twin of
+    /// <see cref="Upsert_WithNoExpiryInTheRequest_LeavesAnExistingExpiryIntact"/> (which shows a shorter
+    /// one is not extended).
+    /// </summary>
+    [Fact]
+    public async Task Upsert_NoExpiryOnAGrantWithALongerExpiry_LeavesItUnchanged()
+    {
+        var table = new FakeGrantTable();
+        var longer = Today.AddDays(200);
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: longer);
+        var client = table.BuildMock();
+
+        await Grant(client, Request(level: ExternalAccessLevel.Collaborate, expiryDate: null));
+
+        table.ExpiryUpdateCount.Should().Be(0,
+            "a re-grant from a surface with no date field must not move a date someone chose");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(longer);
     }
 }

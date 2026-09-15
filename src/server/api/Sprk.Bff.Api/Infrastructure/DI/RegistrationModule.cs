@@ -35,7 +35,7 @@ public static class RegistrationModule
         services.AddSingleton<EmailDomainValidator>();
         services.AddSingleton<DataverseEnvironmentService>();
 
-        // Background services (ADR-001: BackgroundService pattern)
+        // Hand-rolled timer BackgroundService (existing debt — migrates to an IScheduledJob when next touched, ADR-052 §1)
         services.AddHostedService<DemoExpirationService>();
 
         // ── ACS + Event Grid per-boundary provisioning (messaging-communication-app-r1, task 012, FR-18) ──

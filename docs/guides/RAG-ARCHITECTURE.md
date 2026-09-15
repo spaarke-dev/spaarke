@@ -821,7 +821,7 @@ The RAG pipeline supports async job processing via a single `sdap-jobs` Azure Se
 ┌─────────────────────────────────────────────────────────────────┐
 │  RagIndexingJobHandler                                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  Implements: IJobHandler<RagIndexingJobPayload>                  │
+│  Implements: IJobHandler (non-generic)                           │
 │  Job Type: "RagIndexing"                                         │
 │                                                                  │
 │  Processing Flow:                                                │

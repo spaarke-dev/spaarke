@@ -54,6 +54,16 @@ This directory contains authoritative documentation for Dataverse entity schemas
 | **[sprk_analysistool.md](sprk_analysistool.md)** | Closed tool catalog: namespaced `sprk_toolid`, row↔handler bijection health check, `side_effect_class` confirmation gate, seed mirrors | 2026-07-07 | 2026-07-07 | Current |
 | **[sprk_playbooknode.md](sprk_playbooknode.md)** | FROZEN playbook-engine node table (Insights family only; no new capability — new composites are `coded` workflows) | 2026-07-07 | 2026-07-07 | Frozen engine (as-is) |
 
+### Entity Documentation — Access Control
+
+> The three access-control tables are split across two locations for historical reasons: the two *current-state* tables are documented next to their solution under `src/solutions/SpaarkeCore/entities/`, the *history* table here. Listed together so a reader finds all three.
+
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| **[sprk_accessevent.md](sprk_accessevent.md)** | Append-only access event log (FR-32): grant/revoke, POA share/unshare, deny add/remove, secure/restricted/standing-grant flag flips. Create-only posture, event-kind × column coverage matrix, replay coverage boundary (BFF hooks vs Dataverse field audit), retention inheritance + GDPR known gap. **No derived-access columns, by rule** | 2026-09-09 | 2026-09-09 | Authored, not deployed |
+| [`src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md`](../../src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md) | Current-state external grants (contact/org → project/matter/work assignment + access level). No history | 2026-08-20 | 2026-08-20 | Current |
+| [`src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md`](../../src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md) | Current-state deny list (FR-23): ethical wall + per-child revocation. A veto, never a level. No history | 2026-09-04 | 2026-09-04 | Current |
+
 ### Entity Documentation — Matter / Event
 
 | Document | Description | Last Updated | Last Reviewed | Status |

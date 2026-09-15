@@ -2,10 +2,14 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted, as amended** |
 | Date | 2025-09-27 |
-| Updated | 2025-12-04 |
+| Updated | 2026-09-12 (Amendment A1) |
 | Authors | Spaarke Engineering |
+
+> ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-12-queue-driven-scope-orchestration-hosting-atomic-idempotency) FIRST.**
+> It scopes this ADR to **queue-driven** work (schedule-driven → ADR-036; where either runs → ADR-052), moves
+> orchestration hosting to ADR-052 §7, and makes receive-side idempotency atomic.
 
 ## Context
 
@@ -15,7 +19,7 @@ Ad-hoc background processing patterns cause inconsistent retries, missing idempo
 
 | Rule | Description |
 |------|-------------|
-| **One Job Contract** | Standard message format for all async work |
+| **One Job Contract** | Standard message format for all **queue-driven** async work *(scope narrowed by A1)* |
 | **BackgroundService workers** | `ServiceBusProcessor` per JobType |
 | **Idempotent handlers** | Handlers must be safe under at-least-once delivery (dedupe + safe replays) |
 | **Central retry policy** | Standard Polly retry/backoff/jitter policy applied consistently across handlers |
@@ -73,6 +77,7 @@ The implementation serializes using `camelCase` JSON.
 ## Alternatives Considered
 
 Durable Functions orchestration. **Rejected** due to host fragmentation and additional complexity.
+*(Superseded by A1: orchestration hosting is ADR-052 §7 — Durable Task in its own host, never inside the BFF.)*
 
 ## Operationalization
 
@@ -126,3 +131,55 @@ If third-party triggers are required, introduce a dedicated adapter that still p
 - [Jobs Constraints](../../.claude/constraints/jobs.md) - MUST/MUST NOT rules
 
 **When to load this full ADR**: Historical context, schema details, compliance checklists.
+
+---
+
+## Amendment A1 (2026-09-12): queue-driven scope, orchestration hosting, atomic idempotency
+
+> **Status**: Accepted (path **B**, root CLAUDE.md §6.5; owner decision 2026-09-12). **Driver**:
+> `unified-access-control-r2` task 102. **Evidence**:
+> [`workload-placement-policy-evaluation.md`](../../projects/unified-access-control-r2/notes/decisions/workload-placement-policy-evaluation.md).
+
+### 1. Scope
+
+This ADR governs **queue- and topic-driven** async work consumed from Service Bus. Schedule-driven work is
+[ADR-036](ADR-036-background-job-infrastructure.md). Where either runs — the BFF, Azure Functions or Container Apps
+Jobs — is [ADR-052](ADR-052-workload-placement.md). The Decision's "one Job Contract for all async work" reads
+"…for all **queue-driven** async work". A queue or topic consumer is ADR-004 work, never a "long-lived listener".
+
+### 2. Orchestration
+
+<!-- adr052-drift:allow reason="quotes the withdrawn rule" -->
+The concise ADR's former rule "MUST NOT use Durable Functions for orchestration", and the Durable rejection under
+Alternatives Considered above, are **withdrawn**.
+<!-- /adr052-drift:allow -->
+Multi-step orchestration follows ADR-052 §7: Durable Task on Durable Task Scheduler in its own host, never inside
+the BFF — or a hand-rolled state machine with a written reason. Job and orchestration payloads still carry no
+document content.
+
+### 3. Handler contract
+
+The handler interface is the non-generic `IJobHandler`
+([`Services/Jobs/IJobHandler.cs`](../../src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs)), dispatched by
+`ServiceBusJobProcessor` on `JobType`. Documents showing a generic form are stale.
+
+### 4. Receive-side idempotency (MUST)
+
+Take an **atomic** per-message marker before the side effect — Redis `SET NX`, or a conditional upsert on a
+natural key — and write a completion marker after it. `IIdempotencyService` as built is check-then-set and fails
+open when the cache is unavailable; it is not sufficient on its own until fixed (#984).
+
+### 5. Duplicate detection
+
+`MessageId = IdempotencyKey` de-duplicates only when the queue has duplicate detection enabled. Service Bus fixes
+that property **at queue creation** (Standard / Premium tiers), and it is off on the BFF queues
+(`service-bus.bicep`); enabling it means recreating the queues (#980). Until then,
+receive-side idempotency (§4) is the only de-duplication. Related: `MembershipEventPublisher` sets no `MessageId`
+(#981), and the BFF and L2 provisioning derive `MessageId`s differently (#982).
+
+### 6. Known non-conforming consumers
+
+The three Office workers and the membership topic consumer use bespoke message shapes. They are the only
+permitted exceptions to "a consumer is ADR-004 work", until migrated (#977). Two defects found in the same
+inventory: `IndexingWorkerHostedService` completes messages on failure (#978), and the `office-profile` queue has
+no sender (#979).

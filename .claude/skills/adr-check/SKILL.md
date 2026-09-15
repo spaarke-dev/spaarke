@@ -60,7 +60,8 @@ Quick reference of key constraints:
 
 | ADR | Key Constraint | Check For |
 |-----|----------------|-----------|
-| ADR-001 | BFF endpoints in Minimal API (Functions OK for narrow out-of-band integration) | `[FunctionName]` on BFF endpoints; Durable Functions; Functions duplicating BFF auth/correlation |
+| ADR-001 | BFF endpoints in Minimal API; no Functions / Durable Task inside the BFF | `[Function]`/`[FunctionName]`/`[HttpTrigger]` inside `Sprk.Bff.Api`; Functions or `DurableTask` packages in the BFF csproj; Functions duplicating BFF auth/correlation |
+| ADR-052 | Where background work runs — decided per workload (BFF / Functions / Container Apps Jobs) | Background work with no host decision in the Placement Justification; a new hand-rolled timer `BackgroundService`; a Functions project outside `src/server/functions/`, referencing `Sprk.Bff.Api`, or using MSAL confidential-client / OBO |
 | ADR-002 | Thin plugins | `HttpClient` in plugins, >50ms operations |
 | ADR-006 | PCF over webresources | New `.js` files in webresources |
 | ADR-007 | Graph isolation | `Microsoft.Graph` outside Infrastructure |
@@ -166,7 +167,7 @@ FOR EACH violation:
 
 ### ✅ Compliant ADRs
 
-- ADR-001: Minimal API + BackgroundService
+- ADR-001: Minimal API BFF runtime
 - ADR-007: Graph isolation
 - [list all compliant ADRs]
 

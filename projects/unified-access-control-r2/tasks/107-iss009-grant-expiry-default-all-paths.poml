@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="107" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-009 (#974) — grant rows written outside the BFF get an expiry too: a Dataverse-side default, so FR-33 holds on every write path</title>
+    <phase>FR-33 External grant expiry (register-driven, owner rule 2026-09-15)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse server-side logic (plugin or entity-scope rule) on an access-control table; tags dataverse/plugin.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small mechanism with a fixed default to match; the mechanism choice rests on a premise the task verifies first.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint from the BFF tasks: src/dataverse/** plus schema/admin docs.</parallel-reason>
+    <deps>097</deps>
+    <tags>dataverse, plugin, testing</tags>
+    <estimated-effort>3-5 hours + an operator step</estimated-effort>
+    <origin>Register ISS-009 / GitHub #974 — kept in the project under the owner's 2026-09-15 rule: material (FR-33 holds for BFF writes only).</origin>
+  </metadata>
+
+  <prompt>Since task 097 the BFF never writes a grant without sprk_expiresdate, but the column is optional in Dataverse and users hold Create on sprk_externalrecordaccess. A row created through a form, the Web API, a flow or an import can still have no expiry — and the read filter treats null as never-expiring. Close that gap on the Dataverse side.</prompt>
+  <role>SPAARKE platform developer, Dataverse server-side logic (plugins / business rules), ADR-002.</role>
+  <goal>Every sprk_externalrecordaccess row created without sprk_expiresdate, by ANY path, is stored with the BFF's default (DateOnly today + 90, UTC); a row created with an expiry keeps it; an update that clears the expiry is handled the same way; the mechanism and its operator step are documented; the read filter is unchanged.</goal>
+
+  <context>
+    <background>Register ISS-009 (task 097 code review). Premise to verify FIRST (this project's POMLs have been wrong 15 times): a column's requirement level alone does not stop a Web API / SDK create that omits the column — confirm on Microsoft Learn and cite it; if it does stop it, the answer may be schema-only. Mechanism options — choose the smallest that covers every write path and record why: (a) an ENTITY-scope business rule, if it can set today + 90 server-side (form-scope rules do not cover the Web API); (b) a thin pre-operation Create/Update plugin (ADR-002) that sets the default when the value is absent.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs — the BFF's default (task 097); the Dataverse default must equal it</file>
+      <file role="canonical-reference">src/dataverse/plugins/ — BaseProxyPlugin and the existing plugin project layout</file>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md — its "Expiry enforcement — NOT IMPLEMENTED" note (~:220) is stale since tasks 007 / 097 / 100</file>
+      <file role="modify">docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md — the operator step</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-04">Scope: deployment. Schema / plugin changes are code + docs; the live change (solution import or plugin-step registration) is an operator step — document it, do not execute it.</constraint>
+    <constraint source="ADR-002">Scope: a plugin, if chosen. Thin: no HttpClient, no external calls, well under 50 ms.</constraint>
+    <constraint source="project">Scope: the default. It equals the BFF's (DateOnly today + 90, UTC) — one definition, cited from the code.</constraint>
+    <constraint source="097 escalation trigger 2">Scope: the read filter. Its `eq null` clause stays as is; flipping it to fail-closed is the owner's call.</constraint>
+    <constraint source="owner directive">Scope: tests. No Dataverse test in CI — unit-test the mechanism with a fake execution context; the live check is a documented operator command.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Verify the premise and choose the mechanism (record the citation and the reason).</step>
+    <step order="1">Implement the default for create and for an update that clears the value.</step>
+    <step order="2">Tests; perturbation; build.</step>
+    <step order="3">Docs: entity-schema.md (fix the stale note), the admin guide's operator step; notes/task-107-grant-expiry-default.md; TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no mechanism covers every write path (e.g. imports bypass it), STOP and escalate with the gap named — do not ship a partial guard presented as complete.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/dataverse/ (the chosen mechanism)</output>
+    <output type="test">tests/ (KEEP path)</output>
+    <output type="doc">entity-schema.md, EXTERNAL-ACCESS-ADMIN-SETUP.md, notes/task-107-grant-expiry-default.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A create with no sprk_expiresdate is stored with today + 90 (UTC date), matching the BFF's default.</criterion>
+    <criterion testable="true">A create with an expiry keeps it unchanged.</criterion>
+    <criterion testable="true">An update that clears sprk_expiresdate is re-defaulted (or rejected — choose, and record why); an update that does not touch it is unaffected.</criterion>
+    <criterion testable="true">Negative: rows the BFF creates are unchanged (it always sends an expiry).</criterion>
+    <criterion testable="true">Negative: the read filter is unchanged (grep: the `eq null` clause is still there).</criterion>
+    <criterion testable="true">Perturbation: removing the default fails at least one test.</criterion>
+    <criterion testable="true">entity-schema.md no longer says expiry is enforced nowhere; the admin guide carries the operator step and the live-check command.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register ISS-009; GitHub #974 (label unified-access-control-r2). Related: tasks 097, 100, 101; DEF-001 (#961).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -4,7 +4,20 @@
 >
 > **Method**: full Fable-model analysis. Every claim below is either **VERIFIED** (file:line / commit SHA cited, checked from the repo ROOT `c:\code_files\spaarke-wt-unified-access-control-r2`) or explicitly marked **INFERRED** / "no evidence found". `Spaarke.UI.Components/dist/**` and `node_modules/**` were **excluded** everywhere — compiled copies there are build artifacts, not a third implementation.
 >
-> **Status**: ANALYSIS ONLY. Nothing was deleted, moved, or refactored. The plan in §E awaits owner approval.
+> **Status**: ~~ANALYSIS ONLY~~ → **EXECUTED.** Owner approved 2026-09-04: *"if there is deadcode then
+> remove it; we need to work from shared components where efficient."*
+>
+> | §E step | State |
+> |---|---|
+> | **Step 2** — delete the §B.3 DEAD set | ✅ Done **2026-09-01** as task 096 (`144ef43c4`, 27 files, already on master) |
+> | **Step 4** — collapse the `CloseProjectDialog` lockstep pair | ✅ Done **2026-09-04**. `WorkspaceGrid` now imports the **shared** component; the LW twin + its `closureService` are deleted. The pair had drifted — the shared copy was the better one (deps injected as props), so consolidating moved LW *forward*, not sideways |
+> | **shared `ProvisioningProgressStep`** (§B.4 — two copies, zero mounts) | ✅ Deleted 2026-09-04 with its barrel export |
+> | **Step 5** — doc drift | ⏳ Open (`WORKSPACE-ENTITY-CREATION-GUIDE.md:353-356`, `DATA-ACCESS-DECISION-CRITERIA.md:139-145`) |
+>
+> ⚠️ Verifying Step 4 surfaced an unrelated pre-existing defect: **the LegalWorkspace standalone Vite
+> build has been broken since 2026-07-02** — see
+> [`finding-legalworkspace-build-broken-since-2026-07-02.md`](finding-legalworkspace-build-broken-since-2026-07-02.md).
+> `tsc` passes; only the bundler fails, and nothing in CI runs it.
 
 ---
 

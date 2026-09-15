@@ -3,7 +3,7 @@
   <metadata>
     <title>Schema-truth doc repair: views-schema.md, the inverted expiry claim, the undocumented delegation rule (M4, M5)</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation only -- no code, no tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,7 +77,22 @@
     <criterion testable="true">A repo-wide grep finds no remaining doc repeating the corrected stale names.</criterion>
   </acceptance-criteria>
 
-  <notes>Review findings M4 and M5. Cheapest task of the seven and the only one addressing the root cause.</notes>
+  <notes>Review findings M4 and M5. Cheapest task of the seven and the only one addressing the root cause.
+
+**Completed 2026-09-08.** Files corrected: `src/solutions/SpaarkeCore/entities/sprk_project/secure-project-fields-schema.md`
+(`sprk_securitybuid`→`sprk_securitybu`, `sprk_externalaccountid`→`sprk_externalaccount`, `sprk_name`→`sprk_projectname`,
+added the undocumented `sprk_containerid` field, corrected retired-Power-Pages/unbuilt-AI-Search rows), and
+`src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md` (the file actually meant by the POML's
+`docs/data-model/views-schema.md`, which does not exist — `sprk_contactid`→`sprk_contact`, `sprk_projectid`→`sprk_project`,
+`sprk_expirydate`→`sprk_expiresdate`, `sprk_accountid`→`sprk_organization`). Both cross-verified against the corrected
+sibling `entity-schema.md` and against `ProvisionProjectEndpoint.cs`'s live-metadata-verified (2026-08-25) column comments
+— NOT independently re-queried against live Dataverse in this pass (MCP server unavailable this session); flagged
+UNVERIFIED-pending-re-check in both files. `docs/architecture/external-access-spa-architecture.md:110`'s inverted expiry
+claim corrected to describe task 007's actual enforce/exempt split. The delegation deny-code table was added to
+`docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md` §7.1a instead of the POML's named `FIELD-MAPPING-ADMIN-GUIDE.md`, which
+documents an unrelated feature (field-mapping profiles, not access/delegation) — a stale POML path, redirected to the
+actual external-access admin/troubleshooting guide, which also had its own instances of the same stale column names
+(§4.2, §7.3), now corrected. Full report in the task-026 handoff (session transcript / current-task.md).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

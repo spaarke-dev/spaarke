@@ -9,7 +9,7 @@
 #
 # CONTENTS (strict scope list — do not extend without spec amendment)
 #   1. compile                — Debug-only, no -warnaserror (<60s warm cache)
-#   2. arch-tests             — critical NetArchTest MUST-NOT subset (<30s)
+#   2. arch-tests             — the FULL NetArchTest suite, blocking (28-54s)
 #   3. changed-surface-smoke  — Spe.Integration.Tests filtered by changed src/ paths (60-90s)
 #   4. auth-smoke             — auth integration tests (conditional, <60s)
 #
@@ -38,8 +38,8 @@
 # REFERENCES
 #   - projects/ci-cd-unit-test-remediation-r1/spec.md FR-A02, NFR-01, NFR-03
 #   - .claude/adr/ADR-028-spaarke-auth-architecture.md (auth-smoke alignment)
-#   - tests/Spaarke.ArchTests/ — ArchTests source (MUST-NOT subset selected by
-#     name; rationale documented inline at the arch-tests job)
+#   - tests/Spaarke.ArchTests/ — ArchTests source. The FULL suite runs BLOCKING as of
+#     2026-09-10 (issue #969); the old 29-name inclusion filter is deleted.
 # ============================================================================
 
 name: CI Tier 1 (Blocking)
@@ -322,9 +322,33 @@ jobs:
   # ArchTests suite but carries continue-on-error at BOTH job and step level, so it can
   # never fail a build. A rule that cannot fail is documentation. (sdap-ci.yml is also
   # open in PR #806 and was deliberately not edited.)
+  #
+  # ───── +4 armed 2026-09-09 (unified-access-control-r2 task 024) ─────
+  # A worked demonstration of the sentence above. Task 035 added a 1:1 interface
+  # (IImpersonatedRootSetSource) WITHOUT raising ADR-010's ceiling. The full suite ran
+  # twice in CI on that push — sdap-ci code-quality and ci-tier2-advisory — and both
+  # carry continue-on-error, so the PR showed green everywhere and the miss survived a
+  # full session. The compensating control did not fire either: the newest ADR-validation
+  # comment on the PR predated the interface by two days and still reads "All ADR
+  # validations passed", which a reviewer reads as current.
+  #
+  #   ADR010_DITests.ServicesShouldBeConcreteUnlessSeamRequired
+  #     The ratchet that silently failed. It is a CEILING on 1:1 interface mappings; its
+  #     entire value is refusing to move without review, which requires that it can fail.
+  #
+  #   ExternalAccessQueryIntegrityGuardTests.* (3)
+  #     unified-access-control-r2's own source-level invariants (task 025 seams 3-4, task
+  #     024 seam 5). Each pins a defect that FAILED ZERO TESTS when reintroduced — that is
+  #     why they exist, and unarmed they reproduce the exact problem they were built for.
+  #     Source-scanning only, no assembly load, so they are cheap and CI-stable.
+  #
+  # Cost: ~0. This job is build-dominated (~2m of a 5m timeout); 4 more filtered tests do
+  # not move it. Precedent: PR #840 armed CallerIdentityGuardTests here the same way, was
+  # disclosed to ci-cd-unit-test-remediation-r1, and was adjudicated ACCEPTED — the CI
+  # freeze carries a GATE REPAIR carve-out, which is exactly what this is.
   # --------------------------------------------------------------------------
   arch-tests:
-    name: Arch Tests (MUST-NOT subset)
+    name: Arch Tests (full suite, blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -353,17 +377,39 @@ jobs:
       - name: Build ArchTests project (Debug)
         run: dotnet build tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj -c Debug --no-restore
 
-      - name: Run MUST-NOT arch tests
-        # xUnit --filter accepts pipe-separated ORs. Each fact name is the
-        # method-level test; FullyQualifiedName=<full>.<method> targets it
-        # exactly. (Display names are descriptive but FullyQualifiedName is
-        # the canonical xUnit filter target — display names contain spaces.)
+      - name: Run the FULL arch-test suite (blocking)
+        # ───── Filter DELETED 2026-09-10 (unified-access-control-r2, issue #969) ─────
+        # This step used to name 29 tests explicitly. Two problems, both fixed by
+        # running everything instead:
+        #
+        #   1. COVERAGE. 29 of 197 tests were blocking — 15%. Every other ratchet in
+        #      the suite (the god-class guard, the remaining ADR rules) could go red
+        #      with no consequence, because the two jobs that DO run the full suite
+        #      (sdap-ci code-quality, ci-tier2-advisory) both carry
+        #      continue-on-error. That is how task 035's ADR-010 violation survived a
+        #      whole session: CI ran it, saw it fail, and reported green.
+        #
+        #   2. SILENT UNARMING. A named clause that matches nothing passes. Rename a
+        #      test and it drops out of the gate invisibly — the same false-assurance
+        #      shape these ratchets exist to prevent. Nothing enforced that 29 clauses
+        #      still selected 29 tests; it had to be checked by hand.
+        #
+        # Running the whole suite has neither problem and needs no maintenance.
+        #
+        # Cost: measured 28-54s for all 197 tests. This job's budget is 5 minutes and
+        # it is build-dominated (~2m), so the filtered and unfiltered runs are
+        # indistinguishable in wall-clock.
+        #
+        # Safe when adopted: master was 191/191 green (run 34164761880) and this branch
+        # 197/197. If a legitimate need for an exclusion ever appears, add a NAMED list
+        # with a reason per entry — the shape CallerIdentityGuardTests' allowlist and
+        # RouteAuthorizationGuardTests' waivers already use, with a test asserting every
+        # entry still exists. Do NOT go back to an inclusion filter.
         run: |
           dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
             -c Debug \
             --no-build \
-            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule2_NoOwnershipPredicateGatedOnAGuidTryParse|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_TheRuleActuallyMatchesTheDefect|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_CommentStrippingRespectsStringLiterals|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryCarriesAReason|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryStillExists|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.NoAuthorizationFilterIsDecorative|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.ScannerAccountsForEveryRegistrationInTheGovernedFiles|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.TheEndpointFileCensusIsPinned|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B4_NoConstructorNullGuardTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B1_NoHttpMessageHandlerMocks|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B3_NoDiRegistrationAssertions|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B12_NoTrivialSnapshotTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B16_NoAutoPropertyRoundTripTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.NegativeControl_DetectorsMatchTheDefect|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.PositiveControl_DetectorsIgnoreSanctionedShapes|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.Control_ScannerSeesTheTestTree" \
-            --logger "trx;LogFileName=arch-must-not.trx" \
+            --logger "trx;LogFileName=arch-full.trx" \
             --results-directory ./TestResults
         shell: bash
 
@@ -371,8 +417,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: tier1-arch-must-not-results
-          path: ./TestResults/arch-must-not.trx
+          name: tier1-arch-full-results
+          path: ./TestResults/arch-full.trx
           if-no-files-found: warn
 
   # --------------------------------------------------------------------------

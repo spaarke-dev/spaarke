@@ -15,6 +15,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   1. Creating a sprk_externalrecordaccess record in Dataverse.
 ///   2. Invalidating the contact's participation cache in Redis.
 ///
+/// Every grant is time-bounded (spec FR-33, task 097): a requested expiry before today is rejected (400,
+/// <c>sdap.access.grant.expiry_in_past</c>); an ABSENT one keeps the grant's existing expiry, else becomes
+/// today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>. No client has to send a date.
+///
 /// Broker-only (ADR-028 Amendment A1): external users never authenticate to SPE
 /// directly — all external SPE access is app-only via the BFF — so no synthetic
 /// SPE container permission is written on grant.
@@ -51,6 +55,8 @@ public static class GrantExternalAccessEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            // 409: the upsert matched an EXPIRED row and the request supplied no new expiry (task 023).
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return group;
@@ -67,6 +73,7 @@ public static class GrantExternalAccessEndpoint
         HttpContext httpContext,
         ILogger<Program> logger,
         IConfiguration configuration,
+        TimeProvider timeProvider,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
@@ -89,6 +96,12 @@ public static class GrantExternalAccessEndpoint
             return ProblemDetailsHelper.ValidationError(
                 $"AccessLevel must be one of: {string.Join(", ", Enum.GetNames<ExternalAccessLevel>())}.");
 
+        // FR-33 (task 097): a past expiry is rejected before anything is written. An absent one is not an
+        // error — CreateGrantAsync defaults it.
+        var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
+        if (ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
+            return expiryProblem;
+
         // ── Resolve caller identity for granted-by reference ─────────────────
         var callerSystemUserId = ResolveCallerSystemUserId(httpContext);
 
@@ -97,10 +110,10 @@ public static class GrantExternalAccessEndpoint
             request.AccessLevel, request.ContactId, root.Type, root.Id);
 
         // ── Create the access record (Dataverse) + invalidate cache ──────────
-        Guid accessRecordId;
+        GrantUpsertOutcome outcome;
         try
         {
-            accessRecordId = await CreateGrantAsync(request, root.Type, root.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+            outcome = await CreateGrantAsync(request, root.Type, root.Id, today, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
@@ -114,8 +127,26 @@ public static class GrantExternalAccessEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
+        // ADR-003 (task 023): the upsert may have matched an EXPIRED row that this request did not
+        // resolve. The row exists, so this is not a server fault — but reporting a bare 200 would tell
+        // the operator access was restored when the grantee still has none. 409 says "your request was
+        // understood and did not take effect", and carries the row id so the caller can retry against it.
+        if (outcome.Warning is { } warning)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Grant did not take effect",
+                detail: warning,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["traceId"] = httpContext.TraceIdentifier,
+                    ["reasonCode"] = "sdap.grant.expired_not_restored",
+                    ["accessRecordId"] = outcome.AccessRecordId,
+                });
+        }
+
         // Broker-only: no synthetic SPE container membership is granted on the external path.
-        return TypedResults.Ok(new GrantAccessResponse(accessRecordId, SpeContainerMembershipGranted: false));
+        return TypedResults.Ok(new GrantAccessResponse(outcome.AccessRecordId, SpeContainerMembershipGranted: false));
     }
 
     // =========================================================================
@@ -128,7 +159,10 @@ public static class GrantExternalAccessEndpoint
     /// invalidation failure is non-fatal. Shared by <c>/grant</c> and <c>/invite-and-grant</c> (task 029)
     /// so both write an identical, audited grant.
     /// </summary>
-    /// <returns>The id of the single surviving active row for the logical grant.</returns>
+    /// <returns>
+    /// The id of the single surviving active row, and a <c>Warning</c> that is non-null when the grant
+    /// was written but does NOT currently confer access (task 023 / ADR-003 — see the expired-row branch).
+    /// </returns>
     /// <remarks>
     /// <para><b>Idempotent since task 010</b> (spec FR-09, finding A-11). This method previously CREATEd
     /// unconditionally, with no pre-existence check anywhere on the path — so granting the same contact
@@ -141,10 +175,11 @@ public static class GrantExternalAccessEndpoint
     /// existing id; a match at a different level updates that row IN PLACE. Any surplus active rows on
     /// the same key (pre-existing duplicates, or a lost create race) are collapsed onto the survivor.</para>
     /// </remarks>
-    internal static async Task<Guid> CreateGrantAsync(
+    internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
         Guid rootId,
+        DateOnly today,
         string? callerOid,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
@@ -166,26 +201,84 @@ public static class GrantExternalAccessEndpoint
             // QueryActiveRowsAsync's remarks.
             var survivor = existing[0];
 
-            if (survivor.AccessLevel == requestedLevel)
+            // ── Task 023 (finding H1): the match path must write the EXPIRY too ──────────────
+            //
+            // It previously wrote only sprk_accesslevel, so re-granting to ADD or EXTEND an expiry
+            // was silently a no-op while returning 200 + a record id. With task 007's read filter
+            // enforcing expiry server-side, that is A-5's shape resurrected on the WRITE path by the
+            // two tasks that closed it on the read path: the operator asks for bounded access, is told
+            // it worked, and access stays unbounded.
+            //
+            // NOTE on clearing: a null ExpiryDate does NOT clear an existing expiry here. The request
+            // contract cannot distinguish "omitted" from "explicitly null" (both deserialise to null on
+            // `DateOnly? ExpiryDate`), and of the two readings only this one is safe — treating null as
+            // "clear" would silently REMOVE an expiry whenever a caller re-granted without restating it,
+            // which is the same unbounded-access defect in the other direction. Making clearing possible
+            // is a CONTRACT change, escalated per this task's trigger; see
+            // notes/task-023-grant-upsert-expiry.md. (FR-33 / task 097 superseded that escalation: with
+            // every grant bounded, there is no "clear" left to design.)
+            //
+            // FR-33 (task 097): an absent expiry is DEFAULTED, never left unbounded. On a match, the default
+            // is to KEEP the survivor's existing expiry — a re-grant from a surface with no date field must
+            // never move a date someone set, in either direction. Only an UNBOUNDED survivor gets
+            // today + DefaultExpiryDays. (An EXPIRED survivor keeps its date too, and is reported by the
+            // ADR-003 check below rather than silently renewed.)
+            var requestedExpiry = request.ExpiryDate
+                ?? (survivor.ExpiresDate is null ? ExternalGrantLifecycle.DefaultExpiry(today) : null);
+            var expiryChanged = requestedExpiry.HasValue && requestedExpiry != survivor.ExpiresDate;
+            var levelChanged = survivor.AccessLevel != requestedLevel;
+
+            if (levelChanged || expiryChanged)
             {
+                var update = new Dictionary<string, object?>();
+
+                if (levelChanged)
+                    update["sprk_accesslevel"] = requestedLevel;
+
+                if (expiryChanged)
+                    update["sprk_expiresdate"] = FormatDateOnly(requestedExpiry!.Value);
+
+                await dataverseClient.UpdateAsync(EntitySet, survivor.Id, update, ct);
+
                 logger.LogInformation(
-                    "[EXT-GRANT] Grant {Key} already active at level {Level} — no-op (idempotent).",
-                    key, requestedLevel);
+                    "[EXT-GRANT] Grant {Key} updated in place on record {AccessRecordId}: " +
+                    "level {OldLevel} → {NewLevel}, expiry {OldExpiry} → {NewExpiry}.",
+                    key, survivor.Id,
+                    survivor.AccessLevel, levelChanged ? requestedLevel : survivor.AccessLevel,
+                    survivor.ExpiresDate, expiryChanged ? requestedExpiry : survivor.ExpiresDate);
             }
             else
             {
-                await dataverseClient.UpdateAsync(
-                    EntitySet, survivor.Id, new Dictionary<string, object?> { ["sprk_accesslevel"] = requestedLevel }, ct);
-
                 logger.LogInformation(
-                    "[EXT-GRANT] Grant {Key} level changed {Old} → {New} in place on record {AccessRecordId}.",
-                    key, survivor.AccessLevel, requestedLevel, survivor.Id);
+                    "[EXT-GRANT] Grant {Key} already active at level {Level} with expiry {Expiry} — " +
+                    "no-op (idempotent).", key, requestedLevel, survivor.ExpiresDate);
+            }
+
+            // ── ADR-003: do not report success over a grant that confers nothing ─────────────
+            //
+            // The match filter selects on statecode only, so an EXPIRED row is still "active" to this
+            // query. Re-granting over one without supplying a new expiry therefore returned 200 and a
+            // record id while task 007's read filter kept excluding the row — the caller is told access
+            // was restored, and the grantee still has none. If the request DID carry a new expiry, the
+            // write above has already resolved it and this does not fire.
+            var effectiveExpiry = requestedExpiry ?? survivor.ExpiresDate;
+            if (effectiveExpiry is { } expiry && expiry < today)
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] Grant {Key} matched record {AccessRecordId} whose expiry {Expiry} has " +
+                    "PASSED, and the request supplied no new expiry. Refusing to report success over a " +
+                    "grant that confers no access.", key, survivor.Id, expiry);
+
+                return new GrantUpsertOutcome(
+                    survivor.Id,
+                    $"The existing grant expired on {expiry:yyyy-MM-dd} and this request supplied no new "
+                    + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.");
             }
 
             await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, logger, ct);
             await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
 
-            return survivor.Id;
+            return new GrantUpsertOutcome(survivor.Id, null);
         }
 
         // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
@@ -193,7 +286,12 @@ public static class GrantExternalAccessEndpoint
         // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
         var grantedBySystemUserId = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
 
-        var payload = BuildGrantPayload(request, rootType, rootId, grantedBySystemUserId);
+        // FR-33 (task 097): a new grant is never written unbounded — an absent expiry becomes
+        // today + DefaultExpiryDays.
+        var createRequest = request.ExpiryDate is null
+            ? request with { ExpiryDate = ExternalGrantLifecycle.DefaultExpiry(today) }
+            : request;
+        var payload = BuildGrantPayload(createRequest, rootType, rootId, grantedBySystemUserId, today);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
@@ -224,8 +322,59 @@ public static class GrantExternalAccessEndpoint
 
         await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
 
-        return accessRecordId;
+        return new GrantUpsertOutcome(accessRecordId, null);
     }
+
+    /// <summary>
+    /// Result of the grant upsert: the surviving row id, plus a warning when the grant was written but
+    /// does not currently confer access.
+    /// </summary>
+    /// <remarks>
+    /// Added by task 023 (finding H1 / ADR-003). The method previously returned a bare <c>Guid</c>, so the
+    /// one case where a caller most needs to be told something — "this matched an EXPIRED row and you
+    /// supplied no new expiry, so the grantee still has nothing" — was indistinguishable from success.
+    /// </remarks>
+    internal sealed record GrantUpsertOutcome(Guid AccessRecordId, string? Warning);
+
+    /// <summary>Stable reason code for a requested expiry before today (spec FR-33, task 097).</summary>
+    internal const string ExpiryInPastReasonCode = "sdap.access.grant.expiry_in_past";
+
+    /// <summary>
+    /// Rejects a requested expiry BEFORE <paramref name="today"/>. Shared by <c>/grant</c> and
+    /// <c>/invite-and-grant</c>, which both call it before writing — or, for the latter, before onboarding.
+    /// </summary>
+    /// <remarks>
+    /// <para>Expiry = today is VALID — "access until 30 June means 30 June works" (task 007's Date Only
+    /// rule; the read filter uses <c>ge</c>). There is no maximum: the owner removed the cap.</para>
+    /// <para>An ABSENT expiry is not an error — <see cref="CreateGrantAsync"/> defaults it (owner decision
+    /// 2026-09-10: no client sends one, so rejecting it would break every sharing surface).</para>
+    /// </remarks>
+    /// <returns>A 400 ProblemDetails carrying <see cref="ExpiryInPastReasonCode"/>, or <c>null</c> when the
+    /// request's expiry is acceptable.</returns>
+    internal static IResult? ValidateRequestedExpiry(DateOnly? requested, DateOnly today, HttpContext httpContext)
+        => requested is { } expiry && expiry < today
+            ? Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Validation Error",
+                detail: $"ExpiryDate {expiry:yyyy-MM-dd} is in the past. Choose today ({today:yyyy-MM-dd}) or a " +
+                        "later date, or omit it: an existing grant then keeps its current expiry, and a new or " +
+                        $"unbounded grant gets today + {ExternalGrantLifecycle.DefaultExpiryDays} days.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["traceId"] = httpContext.TraceIdentifier,
+                    ["reasonCode"] = ExpiryInPastReasonCode,
+                })
+            : null;
+
+    /// <summary>
+    /// Formats a <see cref="DateOnly"/> for a Dataverse <b>Date Only</b> column.
+    /// </summary>
+    /// <remarks>
+    /// Both <c>sprk_granteddate</c> and <c>sprk_expiresdate</c> are Date Only in live metadata, and task
+    /// 007 compares <c>sprk_expiresdate</c> against a bare <c>yyyy-MM-dd</c> literal. Writing a full
+    /// round-trip timestamp into such a column was a recorded LOW finding.
+    /// </remarks>
+    private static string FormatDateOnly(DateOnly value) => value.ToString("yyyy-MM-dd");
 
     /// <summary>
     /// Derives the logical grant key this request targets: root × grantee, where the grantee is the
@@ -418,8 +567,14 @@ public static class GrantExternalAccessEndpoint
     /// assembly (<c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c>) can assert the typed-lookup bind
     /// contract directly — a wrong <c>@odata.bind</c> key silently breaks the grant.
     /// </summary>
+    /// <param name="today">
+    /// The grant date for <c>sprk_granteddate</c> — the same "today" the expiry was computed from (task 097),
+    /// so the two can never straddle a UTC midnight. Optional only for direct callers that build a payload
+    /// outside a request; they get the wall-clock UTC date.
+    /// </param>
     internal static object BuildGrantPayload(
-        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId)
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId,
+        DateOnly? today = null)
     {
         // Bind exactly ONE typed root lookup per record type (never two). Nav property is PascalCase
         // (sprk_Project / sprk_Matter / sprk_WorkAssignment), verified live — see ExternalGrantRoot.
@@ -432,7 +587,8 @@ public static class GrantExternalAccessEndpoint
         {
             [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
-            ["sprk_granteddate"] = DateTime.UtcNow.ToString("o")
+            // DATE ONLY column (live metadata) — a full timestamp was the recorded LOW finding; task 023.
+            ["sprk_granteddate"] = FormatDateOnly(today ?? DateOnly.FromDateTime(DateTime.UtcNow))
         };
 
         // Grantee: bind the Contact for a per-contact grant; OMIT it for an ORGANIZATION grant (task 073
@@ -457,7 +613,7 @@ public static class GrantExternalAccessEndpoint
         {
             // Bug fix (task 070): the grant table's expiry field is sprk_expiresdate (verified live via
             // describe), NOT sprk_expirydate — the prior name would 400 any grant that carries an expiry.
-            payload["sprk_expiresdate"] = request.ExpiryDate.Value.ToString("o");
+            payload["sprk_expiresdate"] = FormatDateOnly(request.ExpiryDate.Value);
         }
 
         // Firm/org association (task 070, owner steer 2026-08-11): bind the grantee's sprk_organization —

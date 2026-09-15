@@ -4,7 +4,17 @@
     <title>One-time backfill: stamp core ancestors onto existing child records (FR-26)</title>
     <phase>3 Child inheritance</phase>
     <gate>blocked — requires 050 + 052 (derivation rules finalized in both stacks) before the script's rules are authoritative</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <status-note>**Status corrected 2026-09-03 by a full project status audit.** The POML still read
+`pending` while `TASK-INDEX.md` marked it ✅ and git carried completion evidence — the task was DONE and
+only step 1 of root CLAUDE.md §7 ("update the task .poml status") had been skipped. This happened to **14
+tasks**, systematically, because the index is updated during execution while the POML status is a separate
+write that nothing enforces.
+
+Evidence for THIS task: 30dd5f397 (5-task parallel wave — 053 backfill)
+
+Two independent signals were required before flipping (git completion evidence AND the index marker); no
+status was changed on the index alone.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>New script file, no product-code change; data-mutating but idempotent + dry-run gated, executed by the operator, not CI.</rigor-reason>
     <model-tier>sonnet</model-tier>

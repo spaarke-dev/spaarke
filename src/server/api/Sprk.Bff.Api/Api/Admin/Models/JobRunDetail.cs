@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Api.Admin.Models;
 /// <param name="CorrelationId">Distributed-trace correlation id flowed to downstream telemetry per NFR-08.</param>
 /// <param name="StartedOn">When the run started executing.</param>
 /// <param name="CompletedOn">When the run completed, or <c>null</c> if still running.</param>
-/// <param name="Status">Run outcome (<c>"Succeeded"</c>, <c>"Failed"</c>, or <c>"InProgress"</c>).</param>
+/// <param name="Status">Run outcome (<c>"Succeeded"</c>, <c>"Failed"</c>, <c>"Skipped"</c> — the tick was not dispatched here because another run held the lease or another instance ran it — or <c>"InProgress"</c>).</param>
 /// <param name="ErrorMessage">Final failure message from <see cref="Spaarke.Scheduling.JobRunResult.ErrorMessage"/>, or <c>null</c> on success or while in-progress.</param>
 /// <param name="ProcessedItems">Optional item-processing count from <see cref="Spaarke.Scheduling.JobRunResult.ProcessedItems"/>.</param>
 /// <param name="DurationMs">Run duration in milliseconds (<c>null</c> while in-progress).</param>

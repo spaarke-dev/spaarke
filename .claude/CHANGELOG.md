@@ -7,6 +7,277 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-15 — ADR-052 §6 / ADR-028 A5: conditional Dataverse impersonation (owner-accepted)
+
+- **ADR-052** (concise + full): an Azure Function — or a BFF job handler — MAY impersonate a Dataverse user, but
+  only:
+  - for work that user started through an authenticated BFF request;
+  - with the caller id taken from a BFF-written, typed requester field on an Entra-only channel;
+  - with the impersonated user being the one the output is delivered or attributed to;
+  - through the shared fail-closed `Spaarke.Dataverse` helper.
+
+  §5's MUST NOT is narrowed to its real intent: the caller's **token** never leaves the BFF request. The rule is **not
+  usable until #988 (Service Bus Entra-only), #989 (typed requester field) and #990 (fail-closed helper) land**.
+- **ADR-028 A5**: its scope extends from "a BFF request" to "a BFF-initiated job". OBO, user tokens and confidential
+  clients stay forbidden.
+- **ArchTest** `WorkloadPlacementGuardTests`: under `src/server/functions/**`, impersonation passes only through
+  `DataverseImpersonation`. The raw `MSCRMCallerID` / `CallerObjectId` headers, and the ServiceClient's
+  `CallerAADObjectId` (newly listed), stay banned. A positive control covers the helper path.
+- **Why**: the blanket ban forced user-initiated async work to run app-only, bypassing the user's row-level security,
+  or to stay synchronous. Microsoft documents impersonation for background processing, and it cannot widen the app
+  identity's rights. Evidence: `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`.
+
+---
+###### 2026-09-14 — `unified-access-control-r2` task 103: scheduled jobs run once — lease, slot guard, `AddScheduledJob<TJob>`
+
+- **ADR-036 A1.1 (owner decision)**: a configured lease store that stays unreachable through the acquire retries
+  means the tick is **not dispatched**, and it is recorded as **failed**, not skipped: every instance loses the store
+  together, so nobody ran it. A1 rules 1, 2 and 6 are now implemented (full ADR §5).
+- **Pattern `api/scheduled-jobs.md`** rewritten to the shipped framework:
+  - register with `AddScheduledJob<TJob>` only;
+  - one dispatch per schedule is the host's job, not the job's;
+  - a manual trigger of a running job gets 409;
+  - the slot guard, and designing a job that must not lose a tick to catch up.
+- **Constraints**: `jobs.md` (the lease and the helper as built; `IScheduledJobLease` joins the host-neutrality list)
+  and `bff-extensions.md` §D (the registration helper named).
+- **Why**: every instance and slot ran its own cron, so the hourly notification scheduler sent duplicates on any
+  multi-instance stamp. Three copy-pasted bootstrap hosted services also depended on hosted-service start order.
+- **ArchTest**: `WorkloadPlacementGuardTests.ScheduledJobsRegisterThroughAddScheduledJobOnly`. Only
+  `SchedulingModule` and the admin `JobsEndpoints` may touch the registry or store, so a per-job bootstrap cannot
+  come back.
+
+---
+###### 2026-09-13 — `unified-access-control-r2` task 102: **new ADR-052 Workload placement** + ADR-001/004/013/036 amendments
+
+- **New ADR-052** (`docs/adr/` + `.claude/adr/`): where background, scheduled and event-driven work runs — the BFF,
+  Azure Functions or Container Apps Jobs — is decided **per workload** on stated signals (F1–F5 favour Functions,
+  B1–B4 favour the BFF) against named Spaarke costs; **tie-breaker = fewer moving parts**. A Function reuses the
+  stamp's user-assigned managed identity **app-only** (ADR-028 A4's app-only row: no new grants, no user sign-in),
+  never the BFF app registration (no confidential client, no OBO). Durable Task is permitted in its own host, never
+  inside the BFF. No new WebJobs; no new hand-rolled timer `BackgroundService`. Owner decisions D1–D7, 2026-09-12.
+- **Amended (path B, root CLAUDE.md §6.5)**: ADR-001 A1 (narrowed to the BFF runtime; its Functions and Durable
+  provisions superseded and kept as marked history) · ADR-004 A1 (queue-driven scope; the Durable prohibition
+  withdrawn; atomic receive-side idempotency; duplicate detection is a create-time queue property) · ADR-036 A1
+  (runtime as built; one dispatch per schedule via a distributed lease; slot guard; atomic per-unit claim; retry,
+  heartbeat, `AddScheduledJob<TJob>` and host-neutrality rules) · ADR-013 and ADR-002 (pointers).
+- **Why**: four directive eras contradicted each other on Functions, each deciding the host from the trigger. An
+  agent following the newest ADR was flagged for violating an older one, and the project-setup template seeded
+  every new project with a flat ban. `WorkloadPlacementDocDriftTests` (Tier 1) now fails the build when a
+  contradicting phrasing reappears outside a reasoned `adr052-drift:allow` region.
+- **Directives aligned (`.claude/**`)**: constraints `api.md`, `ai.md`, `plugins.md`, `jobs.md` (rewritten —
+  placement, queue vs schedule, atomic receive-side claim, the truth about Service Bus duplicate detection, a
+  non-generic `IJobHandler` sample, the scheduled-job rules) and `bff-extensions.md` (§A.1, §D, §E, the decision
+  table, the source list); patterns `api/background-workers.md`, `api/scheduled-jobs.md` (rewritten to the runtime
+  as built), `api/endpoint-definition.md`, `auth/graph-webhooks.md`, `testing/integration-tests.md`; skills
+  `code-review` (+ `references/review-checklist.md`), `adr-check` (+ `references/adr-validation-rules.md`),
+  `adr-aware`, `task-create`, `design-to-spec`, `mcp-tool-handler`, and `project-setup/references/claudemd-template.md`
+  (which had seeded every new project's CLAUDE.md with a flat ban); root `CLAUDE.md` §17 gains a pointer row.
+- **A generic `IJobHandler` never existed.** The contract is the non-generic `IJobHandler` (`Services/Jobs/IJobHandler.cs`);
+  every generic mention in directives, ADR samples and docs was corrected.
+- **ArchTests (Tier 1, blocking)**: `ADR001_MinimalApiTests` now reads method- and parameter-level attributes (the
+  class-level-only scan could never fire on a Function) and its message states the rule's real scope, the BFF
+  assembly. New `WorkloadPlacementDocDriftTests` (the drift guard, with reasoned `adr052-drift:allow` markers;
+  formatting-proof after its first run found bold text slipping past it) and `WorkloadPlacementGuardTests`
+  (timer-service ratchet at 14 · `IScheduledJob` host-neutrality · Functions-project location, references and
+  app-only identity). Every rule has negative and positive controls.
+- **Step 9.5 review fixes (same task)**: the drift guard's BFF-scope exemption now needs the scope phrase
+  immediately after the match (a later "in the BFF" no longer hides a flat ban); it catches the house
+  `MUST NOT use` / `never use` style, `///`- and `#`-wrapped lines, underscore emphasis, generic-`IJobHandler` crefs,
+  and comments that still attribute the timer-service pattern to the BFF-runtime ADR; an unclosed or nested marker now exempts
+  nothing. The Functions-project guard walks the whole repository, reads any attribute order, covers the in-process
+  SDK, WebJobs and a Durable Task worker, and bans `ClientAssertionCredential` / `ClientCertificateCredential` /
+  `ClientSecretCredential` and Dataverse caller impersonation, with a reasoned owner-approved exception list. The
+  ratchet baselines are exact. ADR-052 is **Accepted** (2026-09-13) and gains an explicit "no Dataverse
+  impersonation" rule (ADR-028 A5) in the Function identity row.
+- **Follow-ups filed**: #976–#986 — timer migration, non-conforming consumers, two Service Bus defects, duplicate
+  detection, MessageId gaps, `DataverseBackgroundJobStore`, atomic idempotency, the Insights Function Bicep, and
+  the SPE container-type grant reconciliation.
+- Evidence: `projects/unified-access-control-r2/notes/decisions/workload-placement-policy-evaluation.md`.
+
+---
+###### 2026-09-10 — `unified-access-control-r2`: root CLAUDE.md **§10 gains publish-size hazards THREE and FOUR**
+
+- **Root CLAUDE.md §10 only.** No skill, ADR, pattern or constraint changed. §10 already documented two
+  hazards that make a publish-size delta lie (the ageing baseline; the zip tool's ~1.3 MB spread on
+  byte-identical content). Two more were measured on this project and are now recorded there.
+- **Hazard 3 — the build environment.** A publish from a worktree you have been iterating in is not
+  comparable to one from a fresh worktree, **even at the same commit, even after an apparent clean**. It
+  produced a **+4.95 MB** delta that did not exist — plausible enough to send an agent auditing its code
+  instead of its measurement. §10 already prescribed a fresh worktree for *master*; the addition makes it
+  explicit that **the branch side needs the same discipline**, which the worked example had not said.
+- **Hazard 4 — deep paths break §10's own procedure.** Past `MAX_PATH`, MSBuild reports
+  `MSB3030: Could not copy … because it was not found` **for a file that exists**, and the resulting
+  partial publish **zips smaller** — so a broken measurement reads as a win. A 262-char scratchpad
+  worktree path triggered it; the `C:\` root is also not writable for the zip. The rule added: publish and
+  zip from a short path, and **sanity-check the FILE COUNT on both sides** — differing counts mean one
+  publish is incomplete and the delta is meaningless.
+- **Why this belongs in §10 rather than a note.** Both hazards make the measurement *silently wrong in the
+  direction of looking fine*, which is the same false-assurance class §10's existing two hazards guard
+  against. A hazard recorded only in a project note is a hazard the next project meets fresh.
+- Owner-directed 2026-09-10 ("follow the best practice"). Evidence:
+  `projects/unified-access-control-r2/notes/phase4-poa-consolidation.md` (hazard 3, with the
+  45.37/45.38 MB corroboration) and `notes/task-029-external-todo-parity.md` (hazard 4).
+
+---
+
+
+###### 2026-09-04 — `unified-access-control-r2`: **ADR-034 Amendment A1** — the access-conferring allow-list becomes first-class and per-surface (path B)
+
+- **Both ADR-034 versions amended.** Root CLAUDE.md §6.5 **path B**. Adds a distinction the ADR did not
+  originally make: discovery over the 6 identity tables stays **correct for AI scoping** and is
+  **over-inclusive for authorization**. Nothing is retired — A1 **narrows one consumer**.
+- **The prefix convention is replaced by an explicit registry**, covering **contact-typed AND
+  organization-typed** lookups. `sprk_assigned*` silently *admits* `sprk_assignedmonitor` (a watcher,
+  who should confer nothing) and silently *denies* `sprk_leadcontact` (who should confer access) —
+  nobody chose either outcome, a naming convention did. Worse: under a convention, **renaming a column
+  grants or revokes access**, so a schema edit no reviewer reads as a security change becomes one.
+  A1 makes adding a conferring column a **registry edit** (FR-24).
+- **Org-typed conferral was unfiltered.** M4 already resolves `sprk_assignedlawfirm1/2` to
+  `Organization` — the precedent exists — but the live filter
+  (`FilterToAccessConferringContactRoles`) covers contact-typed lookups **only**. Unfiltered org
+  expansion confers access from *any* organization named on a record, **including opposing counsel**.
+- **One mechanism, two policies.** The registry is a filter **inside** the canonical resolver (M1), an
+  extension — **not** a second membership engine, which this ADR forbids and A1 does not create.
+- **The 1-hop cap (M7/N4) is explicitly NOT amended, and needs no exception**: FR-26 denormalizes the
+  core ancestor, so every child→core chain is **one hop by construction**. The data model removed the
+  need rather than the rule being relaxed. M8/M9 event semantics and N2 unchanged (with the precision
+  that real `teammembership` **is** legitimately used — the ban is only on **non-existent** entities).
+- **Live-consumer check performed BEFORE amending**, since a per-surface split is only safe if nothing
+  else treats unfiltered descriptors as an access answer. All consumers enumerated and classified:
+  `AccessibleRecordSetService` (authorization — the one being rehomed), `MembershipEndpoints` (scoping;
+  the caller's **own** memberships under OBO — a self-query), the briefing + playbook-node collectors
+  (AI scoping), and `IThreadPrivateGrantProvider` (**not** a consumer — doc-comment reference only, no
+  code dependency). **No other surface's behaviour contract changes.**
+- **Three documented staleness items fixed in the concise ADR, each verified in source**: added
+  `ResolveByContactAsync` (`IMembershipResolverService.cs:104` — the contact plane's only membership
+  path; its absence implied the plane had none) and `MembershipResponse.RelatedByRole`; corrected the
+  identity contract to **`sprk_primarycontact` FIRST with the AAD-oid cross-ref as *fallback*** — the
+  table had documented only the fallback as if it were the primary.
+
+###### 2026-09-04 — `unified-access-control-r2`: **ADR-028 Amendment A5** — workforce `systemuser` root sets derive from Dataverse's impersonated answer (path B, narrow)
+
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md` gains Amendment A5** (concise-only; no full
+  `docs/adr/ADR-028-*.md` exists — re-confirmed, consistent with the A2/A3/A4 notes). Root CLAUDE.md
+  §6.5 **path B**, deliberately **narrow**: it amends **one clause** of A2 — the parenthesised
+  derivation on the `systemuser` branch — and nothing else.
+- **The change.** `systemuser` → ~~ADR-034 membership~~ → **Dataverse's own answer via app-only
+  impersonated read, ∪ contact grants**. The token model, client surface, plane selection and
+  Tier-1/Tier-2 split are all unchanged. A2's clause now carries an inline pointer to A5 so a reader of
+  A2 cannot apply the superseded rule.
+- **Why.** ADR-034 membership derivation approximates Dataverse by pattern-matching columns and is wrong
+  in **both** directions — granting BU-matched records to users whose role depth doesn't cover them, and
+  hiding records that were explicitly shared. Dataverse already computes this exactly (ownership, role
+  depth, BU, teams, POA shares, hierarchy), at the same 3 round trips. It also **removes the need for a
+  systemuser allow-list** — there is no approximation left to tame.
+- **Broker-only compliance is recorded IN THE ADR, not just in project notes.** Impersonation is **not**
+  OBO: it uses the BFF's **own app-only credential** plus an `MSCRMCallerID` header naming the user to
+  scope to. The caller's token is never exchanged or forwarded — satisfying broker-only exactly as the
+  implementing code defines it (`AccessibleRecordSetService.cs:22-24`: *"No caller-token exchange (no
+  OBO)"*). Recorded here because a future reader meeting "impersonation" on a plane whose defining
+  invariant is "no OBO" would otherwise have to re-derive whether they conflict — and could guess wrong.
+- **Two precision points that a careless reading gets backwards.** (1) `MSCRMCallerID` takes the Dataverse
+  **`systemuserid`**, *not* the AAD `oid` — `notes/access-model-decision.md` states the wrong pairing;
+  the live helper uses the right one. (2) The **fail-closed lives in the READ METHOD, not the helper**:
+  `RetrieveMultipleImpersonatedAsync` throws on `Guid.Empty` (`DataverseWebApiService.cs:978`), while
+  `DataverseImpersonation` deliberately adds *no header* for an empty id — so a **new** impersonated call
+  site that bypasses the read method would silently degrade to an unscoped app-only query. A5 requires
+  any new access-scoped impersonated path to carry its own refusal.
+- **Nothing weakened.** The A1/A2/A3 **no-OBO** prohibition is textually unchanged and still in force;
+  the **CIAM/contact plane derivation is untouched** (and impersonation is unavailable to it regardless —
+  a `contact` is not a security principal). ADR-034 is **not** amended. Blocking prerequisites recorded:
+  `prvActOnBehalfOfAnotherUser` on the BFF app user + the app user staying Organization-scoped, with the
+  **NFR-04 negative canary** (task 034) as the standing guard — impersonated reads must return strictly
+  fewer rows than app-only, and **equality fails the build**.
+
+###### 2026-09-04 — `unified-access-control-r2`: **ADR-003 Amendment A1** — two-surface authorization + the unified evaluator (path B)
+
+- **`.claude/adr/ADR-003-authorization-seams.md` rewritten; `docs/adr/ADR-003-lean-authorization-seams.md`
+  gains Amendment A1.** Root CLAUDE.md §6.5 **path B**. Retires **exactly four** rules that no longer
+  described the code: *"two seams only"*, *"new auth logic MUST be an `IAuthorizationRule`"*,
+  *"MUST NOT create new service layers for auth"*, and *"cache UAC snapshots per-request only"*.
+- **Why, verified in source rather than inferred from docs.** `CachedAccessDataSource` caches access
+  data in **`IDistributedCache`** at 2-minute (roles/teams) and 60-second (per-resource) TTLs — that is
+  cross-request *and* cross-instance, flatly contradicting "per-request only"; and the external stack
+  (`CallerPrincipalResolver` + `AccessibleRecordSetService`) is a **service layer, not a rule**. A rule
+  nobody follows is a trap for the next reader, not a guardrail.
+- **The replacement contract.** Two enforcement **surfaces** (Dataverse-native vs the BFF evaluator),
+  and one evaluator returning **`(recordId → rights)`** — a map, never a bare id set, because a
+  `HashSet<Guid>` structurally cannot carry a level (which is why matters and work assignments have
+  none today). Additive terms compose by **highest-wins `max()`**; vetoes apply **after** the max in
+  the order **deny-list → Restricted**; **Secure suppresses derived-member + org-expansion BEFORE the
+  max** for every principal kind; **`"No Access"` is a veto, never a level** — modelled as a level,
+  `max()` ignores it and an ethical wall fails silently in exactly the case it exists for.
+- **The surface rule agents get wrong.** Ask *"does this read go through the BFF?"*, **not** *"is this
+  the MDA?"* — an MDA-hosted PCF reading via the BFF is on the BFF surface, with SPA-equivalent
+  exposure. Demonstrated: a user denied Read on all 442 documents saw and downloaded a matter's files
+  through an MDA form's embedded PCF.
+- **Nothing was weakened.** Fail-closed, machine-readable deny codes, authorize-before-`SpeFileStore`,
+  and never-cache-**decisions** are all preserved verbatim. **`OperationAccessRule` is NOT orphaned** —
+  the single live `IAuthorizationRule` (registered `SpaarkeCore.cs:96`) stays valid and registered;
+  checked before amending, because retiring a MUST that a live consumer depends on would be an
+  amendment that breaks running code. Also fixed the concise ADR's dead
+  `patterns/auth/authorization-service.md` link (→ `uac-access-control.md`), logged as register §G row 2.
+- **Sequencing**: A1 merges **before** task 032 implements the evaluator, so the code lands under an ADR
+  that sanctions it rather than in violation of one.
+
+###### 2026-09-03 — `unified-access-control-r2`: task status gets a greppable ASCII token (owner-directed)
+
+- **`task-create`'s `TASK-INDEX.md` template now REQUIRES a bracketed ASCII token in the Status cell**
+  — `🔲 [open]` / `🔄 [wip]` / `✅ [done]` / `⚠️ [escalated]` / `🟡 [blocked]`, mapped 1:1 to the POML
+  `<status>` vocabulary. The emoji stays (a column of glyphs genuinely scans faster for a human); the
+  token is additive in the same cell, so the table shape is unchanged.
+- **Why: status is a DATA FIELD, and the emoji encoding made it unreadable by the default text tool.**
+  `grep` here silently returns **0** for any character above U+FFFF, and 🔲 is U+1F532 — so
+  `grep -c '🔲'` reported **zero open tasks on a project with 37**. ✅ (U+2705) is 3-byte and works,
+  which made the failure look like bad data rather than bad tooling; it cost three wrong measurements
+  in one session, one of them written into a recovery file as a false claim that the index was
+  corrupt. Mechanism: [`FAILURE-MODES.md` G-16](FAILURE-MODES.md#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji).
+- **Owner framing, which is the right one**: *"it might look nice but it needs to be grep'able —
+  otherwise we should have a field that is reliably greppable."* The deeper defect it exposes is that
+  status is stored **twice** (POML `<status>` + index marker) with nothing keeping them equal — the
+  same duplication that produced 17 disagreements across 92 tasks. The ASCII token does not fix the
+  duplication; `check-task-status-drift.ps1` is what detects it. Long-term direction: the index should
+  be **derived** from the POMLs rather than authored beside them.
+- **`check-task-status-drift.ps1` now prefers the token and falls back to the emoji**, so it works on
+  both new indexes and the ~150 pre-existing ones. Retrofitted this project's 92 rows; `grep -cF
+  '[open]'` now returns **37**, matching the Python-derived audit exactly.
+- 🔴 **A third defect caught by the script's own controls**: widening the row regex to span table
+  cells made it match rows whose first cell is a **wave label** (`**P0-W0**`) and report a phantom
+  drift on task 001. Reverted to the single-cell form with a "do not reintroduce a cell-spanning
+  pattern" note. Both controls (seeded drift; unparseable index) re-verified after the parser change —
+  that is the third time this guard's controls have caught a defect in the guard before it shipped.
+
+###### 2026-09-03 — `unified-access-control-r2`: task-status drift check — a forcing function for CLAUDE.md §7
+
+- **New `scripts/check-task-status-drift.ps1`**, wired into **`task-execute` Step 10** (the moment both
+  writes happen) and **`push-to-github` Step 1.65** (the last reliable hook before the state goes public).
+  Completion is recorded in TWO places — the task POML's `<status>` and its `TASK-INDEX.md` row marker —
+  and nothing kept them in agreement.
+- **The evidence**: a full audit of `unified-access-control-r2` on 2026-09-03 found **17 disagreements
+  across 92 tasks** — **14 tasks finished and merged whose POML still said `pending`**, plus one finished
+  task the index still showed as `🔄`. The index is updated as work proceeds; the POML status is a
+  separate write that nothing enforced, and it was skipped 14 times. A drift of 14 is a missing check,
+  not a discipline problem.
+- **Both artifacts drift, in both directions** (POML stale ×14, index stale ×1), so the script never
+  picks a winner — it names the task, says which side is behind, and tells the operator to resolve from
+  a git completion commit.
+- **Scoped to the CURRENT project, deliberately.** Repo-wide drift is **82 disagreements across 151
+  projects**, concentrated in archived `x-`-prefixed work. Gating on that total would be red on day one
+  and waived on day two — the failure that retired the God-class LOC ratchet (CLAUDE.md §11.5). `-All`
+  gives a non-blocking repo-wide observation report instead, mirroring `report-large-server-files.ps1`.
+- 🔴 **Two defects in the guard, caught by its own controls before it shipped** — the same pattern as
+  task 092's route-agreement guard:
+  1. **False positives on correct state.** v1 treated only `✅` as terminal, so it reported task 012
+     (`completed-with-escalation` / ⚠️) and 034 (`blocked-shipped` / 🟡) as drift on its very first run.
+     Both were correctly authored. The marker vocabulary is now matched, not narrowed — a gate that
+     cries wolf on correct state is a gate that gets waived.
+  2. **A parser that reads nothing must not report "clean".** 137 of 151 projects use an index row
+     format this parser does not recognise. Returning "no drift" for them would launder a broken
+     instrument into a green check, so POMLs-found-but-zero-index-rows is reported as **UNPARSEABLE**
+     and fails in gating mode. This is `FAILURE-MODES.md` AP-12 applied to the checker itself — a
+     lesson learned twice on 2026-09-03, when a `grep` with emoji patterns under a non-UTF-8 locale
+     reported "0 open tasks" on a 37-open project, and a `jest --rootDir` from the wrong directory
+     reported "232 failed suites / 0 tests".
 
 ###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
 

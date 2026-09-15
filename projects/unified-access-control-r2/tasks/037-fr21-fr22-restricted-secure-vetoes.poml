@@ -4,7 +4,7 @@
     <title>FR-21 + FR-22 — Restricted post-max veto and Secure pre-max suppression, for every principal kind</title>
     <phase>1 One evaluator</phase>
     <gate>after-032</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation of two security vetoes; tags bff-api/auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,7 +93,23 @@
     <criterion testable="true">Non-secure, non-restricted records: full existing suite behavior unchanged; build green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-21/FR-22; design §4.5 (vetoes 7-8) + §5.1; register B-9/B-10, C-10, F-4. The deny-list slot stays a no-op here — task 039 fills it. The org-EXPANSION membership term (Phase 2, task 043) must route through the same suppression hook; leave the hook plane-agnostic.</notes>
+  <notes>Spec FR-21/FR-22; design §4.5 (vetoes 7-8) + §5.1; register B-9/B-10, C-10, F-4. The deny-list slot stays a no-op here — task 039 fills it. The org-EXPANSION membership term (Phase 2, task 043) must route through the same suppression hook; leave the hook plane-agnostic.
+
+COMPLETED 2026-09-04. Full record: notes/task-037-restricted-secure-vetoes.md.
+
+Step 1 (live metadata): all THREE root types carry BOTH sprk_issecure and sprk_accesspermission, identical option sets, Restricted = 100000002. ESCALATION TRIGGER 1 DID NOT FIRE. ⚠️ The brief cited TrackingFieldTrio/index.ts for the raw value, but that file's own comment scopes those constants to sprk_communication ("entity-specific: lives ONLY here"). The value is right for all three roots — established by querying metadata, not by trusting the citation.
+
+DESIGN CRUX (and the reason this task was not mechanical): ExternalParticipationService merges org-grant rows into the direct lists and dedupes by record id keeping the MAX level. That destroys exactly what Secure suppression needs — a ViewOnly DIRECT grant plus a Collaborate ORG grant collapses to Collaborate, and no arithmetic recovers Read afterwards. Fixed with an ADDITIVE DirectAccessLevel on ExternalParticipation + ExternalRootGrant (null iff every contributing row was org-inherited). ESCALATION TRIGGER 2 DID NOT FIRE — the brief permits an additive provenance field, which is what this is.
+
+REJECTED ALTERNATIVE: deduping by (recordId, provenance) and keeping two entries. Duplicate ids would reach CallerPrincipal.ProjectAccess, whose GetEffectiveRights does FirstOrDefault — authorization that depends on list order.
+
+Suppression is STRUCTURAL, not subtractive: the org contribution is never added, so it cannot enter the max. Perturbation-verified — making suppression a no-op fails 3 of 37 tests (ordering proof, org-vs-direct survivor pair, Type-1-via-contact).
+
+Deviation from the brief's file list: Infrastructure/DI/ExternalAccessModule.cs was NOT modified. The flag read was added to the already-registered ExternalParticipationService (which owns the app-only read plumbing) rather than as a new service, so no DI change was needed — less surface, not more.
+
+Surfaced: FIVE existing ExternalParticipationService test doubles silently failed CLOSED (they construct with credential:null!, so the real flag read threw). That is the production fail-closed path working, seen from an unexpected direction; each double now supplies flags, and one keeps the fault deliberately to cover NFR-01.
+
+Verified: 12,082 unit passed / 0 failed; ArchTests 191/191; publish 45.47 MB vs a fresh same-day master build of 45.46 MB = +0.01 MB (ceiling 60); no vulnerable packages.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

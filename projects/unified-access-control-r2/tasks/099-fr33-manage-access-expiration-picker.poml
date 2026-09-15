@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="099" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-33 — "Expiration" date picker on the Manage Access toolbar, applying to every share on the record</title>
+    <phase>FR-33 External grant expiry</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared UI library; tags pcf/react; controls the lifetime of external access.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI change against an owner screenshot; the one real judgment point (M8 sequencing with task 065) is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AccessGrantModal.tsx, which task 065 also edits. Sequence with 065; never run both at once.</parallel-reason>
+    <deps>097, 098</deps>
+    <tags>pcf, react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Owner 2026-09-10, with screenshot: "add to the toolbar a field 'Expiration' and a date picker so the write user can set it (and it applies to all sharing)"</origin>
+  </metadata>
+
+  <prompt>Add an "Expiration" date picker to the Manage Access modal's toolbar — the "Add Access Permissions" header row that today holds only "+ Contact" and "+ Organization" (AccessGrantModal.tsx, ~:114 and ~:535). One date governs every share on the record. When the record has no active shares it defaults to today + 90 days and is sent with each new share. When shares exist it shows their expiry, and changing it calls task 098's endpoint to update them all atomically. Today the modal sends NO expiry at all.</prompt>
+  <role>SPAARKE frontend developer, React + Fluent UI v9 + the Spaarke shared component library.</role>
+  <goal>A Write user can see and set the one Expiration that applies to all sharing on a record, and every new share carries it.</goal>
+
+  <context>
+    <background>Owner decisions 2026-09-10: the Expiration is record-wide, not per contact; it is stored by reusing sprk_expiresdate on each grant row (no new column); the default is +90 days; the field is required server-side (task 097). Owner directive 2026-09-10 (recorded in task 065): a failed access operation must give the user a MESSAGE, not a bare error. ⚠️ AccessGrantModal.postJson (~:327-335) does `return (await res.json()) as T` with NO res.ok check — finding M8, owned by task 065 — so a failure from 098's endpoint would currently be read as success.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/tasks/065-access-modal-user-picker.poml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-10">Scope: placement and label. The control is labelled "Expiration" and sits on the "Add Access Permissions" toolbar row beside "+ Contact" / "+ Organization". It applies to ALL sharing on the record. There is no per-contact expiry control.</constraint>
+    <constraint source="owner 2026-09-10">Scope: value. No active shares → default today + 90 days. Active shares → show the EARLIEST active expiry (it governs the soonest lapse). If active shares carry DIFFERENT expiries (a manual edit or legacy data), show the earliest AND a visible divergence indicator — never silently pick one.</constraint>
+    <constraint source="task-097">Scope: adds. Every add (+ Contact / + Organization → Add) sends the picker's current value as ExpiryDate. Dates before today cannot be selected.</constraint>
+    <constraint source="task-098">Scope: changes. Changing the picker while active shares exist calls 098's endpoint ONCE with recordType + recordId (the explicit polymorphic root, per task 065's constraint (b)). On success, refresh Current Access. On failure, show a specific user-facing message and REVERT the picker to its prior value.</constraint>
+    <constraint source="owner 2026-09-10">Scope: failure messaging. A failure must produce a human-readable message saying what did not happen — not a generic "something went wrong", and not a silent success.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: components. Reuse the date picker already used elsewhere in Spaarke.UI.Components — search for it first. Do NOT add a new date library.</constraint>
+    <constraint source="ADR-021">Scope: styling. Fluent v9 only; theme tokens, no hard-coded colours; renders correctly in dark mode.</constraint>
+    <constraint source="task-065 / pcf-CLAUDE.md">Scope: release. Follow the host's release steps recorded in task 065 (TrackingFieldTrio version bump in 4 locations) and build with `npm run build:prod`, NOT `npm run build` (CLAUDE.md §12, FAILURE-MODES AP-1).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read AccessGrantModal.tsx (toolbar row, postJson, Current Access list) and task 065's POML. Determine whether 065 has landed M8. If it has not, fire the escalation below before writing code.</step>
+    <step order="1">Find and reuse the existing date picker.</step>
+    <step order="2">Implement the control, the default, the earliest-plus-divergence display, sending on add, and calling 098 on change.</step>
+    <step order="3">Tests per the closed set; build:prod; release steps.</step>
+    <step order="4">Update TASK-INDEX; record in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 065 has NOT landed the M8 fix (postJson checking res.ok) when this task starts, STOP and escalate the sequencing before writing code. This task needs failures from 098's endpoint to reach the user, and without M8 they are read as success. Options to put to the owner: (a) run this task after 065; or (b) take M8 into this task and update 065's POML to record that M8 moved. M8 on its own is SAFE — what task 065 forbids is shipping M2 (the 200→500 status change) BEFORE M8. Do NOT fix M8 silently here: two tasks owning the same fix is how it gets done twice, differently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>AccessGrantModal is the Manage Access surface; the date picker already exists in the shared library.</existing>
+    <extension>Modification of an existing component — one control added to an existing toolbar row.</extension>
+    <cost-of-doing-nothing>The server will require an expiry (097) and the UI never sends one — every share from Manage Access would be rejected. The owner's record-wide Expiration would exist only as an API.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An "Expiration" date picker appears on the "Add Access Permissions" toolbar row beside "+ Contact" / "+ Organization".</criterion>
+    <criterion testable="true">With no active shares, the picker defaults to today + 90 days.</criterion>
+    <criterion testable="true">With active shares, the picker shows the earliest active expiry; when they differ, a divergence indicator is visible.</criterion>
+    <criterion testable="true">Adding a contact or organization sends ExpiryDate equal to the picker's value (asserted on the request payload).</criterion>
+    <criterion testable="true">Changing the picker with active shares calls 098's endpoint exactly once with recordType + recordId, and refreshes Current Access on success.</criterion>
+    <criterion testable="true">Negative: when 098's endpoint fails, a specific user-facing message is shown and the picker reverts to its prior value.</criterion>
+    <criterion testable="true">Negative: dates before today cannot be selected.</criterion>
+    <criterion testable="true">Renders with theme tokens in light and dark mode (ADR-021).</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds and the component tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Sequenced against task 065 (shared file + M8).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

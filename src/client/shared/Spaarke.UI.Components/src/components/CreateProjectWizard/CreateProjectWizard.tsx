@@ -681,10 +681,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 1d. Provision Secure Project infrastructure when the Secure Project toggle is enabled:
-        //     assign the project to the canonical Secure Project business unit's owner team, then
-        //     provision its own SPE container and record it. No business unit or account is created
-        //     (BFF task 021, 2026-08-25).
+        //     assign the project to the canonical Secure Project business unit's owner team, share
+        //     it back to the creator (task 061 — the owner team is memberless, so without this the
+        //     record is unreachable), then provision its own SPE container and record it. No
+        //     business unit or account is created (BFF task 021, 2026-08-25).
         let provisioningWarning: string | undefined;
+        let provisioningSucceeded = false;
         if (mergedFormValues.isSecure && authFetch && bffBaseUrl) {
           const provisionResult = await provisionSecureProject(
             {
@@ -692,16 +694,31 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               // Only a fallback for the SPE container's display name; it no longer names anything
               // in Dataverse.
               projectRef: projectName,
+              // The wizard collects no colleagues, so no `sharePrincipalIds` are sent. The creator
+              // is shared to regardless — the server takes their identity from the token, not from
+              // this request. Colleagues are added afterwards through Manage Access (FR-29).
             },
             authFetch,
             bffBaseUrl
           );
 
+          provisioningSucceeded = provisionResult.success;
+
           if (!provisionResult.success) {
-            // Non-fatal — project record was created. Log the warning so it shows
-            // on the success screen. The admin can provision manually or retry.
+            // Non-fatal for the WIZARD — the project record exists either way, and the endpoint
+            // fails closed, so a refusal means nothing was moved and no container was orphaned.
+            // `errorMessage` is authored copy classified from the endpoint's `reasonCode`
+            // (task 068); the server's raw ProblemDetails detail never reaches this string.
             provisioningWarning = provisionResult.errorMessage;
           }
+        } else if (mergedFormValues.isSecure) {
+          // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
+          // authenticated fetch or a base URL. This branch used to fall through silently and then
+          // announce "Secure Project created!", which named a designation the record did not have.
+          // Same user-visible situation as an unconfigured environment, so it gets the same
+          // treatment: say what did not happen, in copy written for the person reading it.
+          provisioningWarning =
+            'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
         }
 
         // 2. Upload files to SPE + create document records
@@ -784,13 +801,15 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         }
 
-        // Include provisioning failure in warnings if present
+        // Surface a provisioning refusal as the designed state the service classified, VERBATIM.
+        //
+        // The old copy appended "the Business Unit, SPE container, and External Access Account may
+        // need to be provisioned manually" to every failure. Two of those three things are no longer
+        // created by anything (BFF task 021), and the sentence was appended even to refusals where
+        // nothing whatsoever had been attempted. `errorMessage` already says what happened and what
+        // to do about it, per failure kind — anything added here would contradict it.
         if (provisioningWarning) {
-          warnings.push(
-            `Secure Project provisioning failed: ${provisioningWarning} — ` +
-              'The project record was created but the Business Unit, SPE container, and External Access Account ' +
-              'may need to be provisioned manually.'
-          );
+          warnings.push(provisioningWarning);
         }
 
         const hasWarnings = warnings.length > 0;
@@ -810,9 +829,13 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
         return {
           icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
+          // The secure title is keyed on `provisioningSucceeded`, not on the toggle. The toggle only
+          // says what was ASKED for; calling the result a "Secure Project" when provisioning was
+          // refused would announce a designation the record does not have — and the refusal path is
+          // the normal one in an environment that has no secure topology yet.
           title: hasWarnings
             ? 'Project created with warnings'
-            : mergedFormValues.isSecure
+            : provisioningSucceeded
               ? 'Secure Project created!'
               : 'Project created!',
           body: (
@@ -821,8 +844,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               has been created
               {hasWarnings
                 ? ', though some operations could not complete. See details below.'
-                : mergedFormValues.isSecure
-                  ? ' with its Business Unit, document container, and external access account provisioned.'
+                : provisioningSucceeded
+                  ? ' with its own document container, and is shared with you. Anyone else who needs it has to be added explicitly.'
                   : ' and is ready to use.'}
             </Text>
           ),

@@ -56,7 +56,7 @@ public static class ComposeModule
         services.AddSingleton<ComposeDocxProjectionBuilder>();                // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — pure single-walk DOCX->editor projection (byte[]->paraId-tagged HTML + ordered paraId map + status/warnings): the ONE server engine that assigns w14:paraId and emits the editor block from the same paragraph instance, eliminating the mammoth-vs-OOXML two-engine drift. No external NuGet (DocumentFormat.OpenXml already referenced). Consumed by ComposeService.LoadAsync (supersedes ParaIdPreParser on the Load path); thread-safe stateless singleton (ADR-010); registered UNCONDITIONALLY (symmetric per bff-extensions.md §F.1)
 
         // R2 W1 SPE change-detection (FR-26, task 052) — subscription state machine +
-        // BackgroundService renewal (ADR-001 hosted service; ADR-007 Graph stays behind
+        // hand-rolled timer BackgroundService renewal (existing debt, ADR-052 §1; ADR-007 Graph stays behind
         // the SpeFileStore facade; ADR-009 Redis state). Orchestrator is Scoped (injects
         // scoped ISpeFileOperations); the hosted service resolves it via CreateScope.
         services.AddScoped<SpeSyncOrchestrator>();

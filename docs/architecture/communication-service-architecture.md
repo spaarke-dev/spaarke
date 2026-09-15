@@ -149,7 +149,7 @@ The rung ladder that replaces this (rung 0 explicit-ref → 1 thread-continuity 
 
 ## Background Services
 
-Three `BackgroundService` implementations following ADR-001:
+Three hand-rolled timer `BackgroundService` implementations (existing debt — each migrates to an `IScheduledJob` when next touched, ADR-052 §1):
 
 | Service | Interval | Startup Delay | Purpose |
 |---------|----------|---------------|---------|

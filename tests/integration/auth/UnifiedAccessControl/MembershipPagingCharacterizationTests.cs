@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Xunit;
 
+using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
@@ -570,22 +571,64 @@ public class MembershipPagingCharacterizationTests
             identity.Object,
             dataverse.Object,
             new NoOpTenantCache(),
-            Options.Create(new MembershipOptions()),
+            SeededOptions(),
             NullLogger<MembershipResolverService>.Instance);
+    }
+
+    /// <summary>
+    /// <see cref="MembershipOptions"/> seeded the way DI seeds it (task 041).
+    /// </summary>
+    /// <remarks>
+    /// This used to be a raw <c>Options.Create(new MembershipOptions())</c>, which worked only by
+    /// accident: the retired <c>ConventionPrefix</c> carried a property-level default (<c>"sprk_assigned"</c>)
+    /// that survived raw construction, so the allow-list still matched this file's mocked
+    /// <c>sprk_assignedattorney1</c> descriptor.
+    /// <para>
+    /// Task 041's <c>AccessConferringRegistry</c> deliberately CANNOT carry a property-level default —
+    /// <c>IConfiguration.Bind</c> APPENDS to List-typed values, so a default would double up an operator's
+    /// own entries. It is therefore seeded only by <see cref="MembershipOptionsDefaults"/> post-configure,
+    /// exactly as <c>IncludedIdentityTables</c> and <c>GlobalFieldExclusions</c> already were.
+    /// </para>
+    /// <para>
+    /// A raw options object consequently has an EMPTY registry, and the fail-closed filter then suppresses
+    /// every field — including this file's own. That is the veto working, not a regression: verified that
+    /// NO production path constructs <see cref="MembershipOptions"/> directly (DI-only, and
+    /// <c>MembershipModule</c> always registers the post-configure seeder), so the empty-registry state is
+    /// reachable only from a test double that bypasses seeding.
+    /// </para>
+    /// <para>
+    /// Seeding with the real defaults — rather than hand-building a registry entry — keeps these tests
+    /// about PAGING, which is what they characterize. A hand-built entry would pin a registry shape this
+    /// file does not care about and would break again on the next registry change.
+    /// </para>
+    /// </remarks>
+    private static IOptions<MembershipOptions> SeededOptions()
+    {
+        var options = new MembershipOptions();
+        new MembershipOptionsDefaults().PostConfigure(null, options);
+        return Options.Create(options);
     }
 
     private static AccessibleRecordSetService ComposerWith(
         IMembershipResolverService membership, bool standingGrant = false)
     {
-        var standing = new Mock<IContactStandingGrantReader>();
+        var standing = new Mock<ISubjectStandingGrantReader>();
         standing
-            .Setup(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(standingGrant);
+            .Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            // Task 042 (FR-25): the standing grant is now level-bearing. Collaborate is used
+            // deliberately — it is what MembershipTermRights contributed before, so this file keeps
+            // characterizing PAGING rather than accidentally re-characterizing the level arithmetic.
+            .ReturnsAsync(standingGrant
+                ? new StandingGrantState(true, ExternalAccessLevel.Collaborate)
+                : StandingGrantState.NotHeld);
 
+        // Task 039: this file characterizes MEMBERSHIP PAGING — an inert deny-list double keeps that
+        // scope, rather than letting the deny-veto's own subject/org resolution enter the picture.
         return new AccessibleRecordSetService(
             membership,
             new NoGrantsParticipationService(),
             standing.Object,
+            NeverDeniesReader(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 
@@ -631,12 +674,31 @@ public class MembershipPagingCharacterizationTests
             => Task.FromResult(new ExternalGrantSet
             {
                 Projects = Array.Empty<ExternalParticipation>(),
-                Matters = new HashSet<Guid>(),
-                WorkAssignments = new HashSet<Guid>(),
+                MatterGrants = NoRootGrants,
+                WorkAssignmentGrants = NoRootGrants,
             });
+
+        // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
+        // and fails CLOSED — every record would read as secure AND restricted and this double would
+        // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
+        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+                recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.None));
 
         public override Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)
             => Task.FromResult<Guid?>(null);
+
+        // Task 039: same reasoning as the RootRecordFlags override above — without these, the base
+        // implementations throw on `credential: null!`, and the deny-veto resolution would fail closed
+        // (deny everything), which is out of scope for a suite characterizing membership PAGING.
+        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
+        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
+                recordIds.Distinct().ToDictionary(id => id, _ => ReferencedOrganizations.None));
     }
 
     /// <summary>

@@ -6,13 +6,14 @@
 //
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live HTTP / Azure. Fakes replace the
-//   repository + all SIX collaborator seams (artifact manifest verifier,
-//   artifact downloader, Kudu zip-deployer, slot swapper, health probe,
-//   publish-size reporter) so the handler orchestration + §4C rollback
-//   classification + blue-green swap + rollback logic is exercised in
-//   isolation. Live-Azure coverage belongs in the dedicated collaborator
-//   test files (ArtifactManifestVerifierTests / BlobArtifactDownloaderTests /
-//   KuduZipDeployerTests / ArmSlotSwapperTests) which exercise the real SDK
+//   repository + all SEVEN collaborator seams (artifact manifest verifier,
+//   artifact downloader, scheduled-jobs slot guard, Kudu zip-deployer, slot
+//   swapper, health probe, publish-size reporter) so the handler orchestration
+//   + §4C rollback classification + blue-green swap + rollback logic is
+//   exercised in isolation. Live-Azure coverage belongs in the dedicated
+//   collaborator test files (ArtifactManifestVerifierTests /
+//   BlobArtifactDownloaderTests / KuduZipDeployerTests / ArmSlotSwapperTests /
+//   ArmSlotStickyAppSettingWriterTests) which exercise the real SDK
 //   call path against fake HTTP transports — parity with H2a/H4's split
 //   between handler-orchestration tests and collaborator-SDK-shape tests.
 //
@@ -73,6 +74,19 @@
 //   AC-17  Idempotency-key format determinism — bff-{customerId}-{buildId}.
 //   AC-18  Run not found → Resumable + RunNotFound.
 //   AC-19  HandlerId mismatch → throws InvalidOperationException.
+//   AC-20a Scheduled-jobs slot guard (ADR-036 A1 rule 2, GitHub #987) — set
+//          with Scheduling__RunScheduledJobs=false on the SAME slot the Kudu
+//          deploy targets, and BEFORE the zip-deploy (a shared call log
+//          asserts the order).
+//   AC-20b Slot guard Failure → RetryableWithCleanup +
+//          ScheduledJobsSlotGuardFailed; NO zip-deploy (fail closed), no
+//          probe, no size check, no swap.
+//   AC-20c Slot guard throws → RetryableWithCleanup +
+//          ScheduledJobsSlotGuardInfraFault; NO zip-deploy.
+//   AC-20d Negative control — the guard is NOT called when the deploy never
+//          reaches the App Service (artifact download failed). AC-1 asserts
+//          one call on the happy path; AC-16a asserts none on the idempotent
+//          no-op.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -133,7 +147,8 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         var swapper = FakeSlotSwapper.Success();
         var probe = FakeHealthProbe.Success();
         var sizer = FakeSizeReporter.Ok(bytes: 44_000_000L);
-        var handler = BuildHandler(repo, verifier, downloader, kudu, swapper, probe, sizer);
+        var guard = FakeSlotGuard.Success();
+        var handler = BuildHandler(repo, verifier, downloader, kudu, swapper, probe, sizer, slotGuard: guard);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -153,6 +168,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         probe.CallCount.Should().Be(2, "staging probe + production probe both fire on the happy path");
         swapper.CallCount.Should().Be(1, "swap runs exactly once on the happy path");
         sizer.CallCount.Should().Be(1);
+        guard.CallCount.Should().Be(1, "the scheduled-jobs slot guard is set once per deploy");
 
         swapper.LastRequests.Should().ContainSingle();
         swapper.LastRequests[0].SourceSlotName.Should().Be(StagingSlotName);
@@ -623,7 +639,9 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         });
         var repo = new FakeRepository(run, etag: "etag-16a");
         var seams = FreshGreenSeams();
-        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
+        var guard = FakeSlotGuard.Success();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            slotGuard: guard);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -635,6 +653,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         seams.Swapper.CallCount.Should().Be(0);
         seams.Probe.CallCount.Should().Be(0);
         seams.Sizer.CallCount.Should().Be(0);
+        guard.CallCount.Should().Be(0, "a re-run of a completed build touches nothing — not even the slot guard");
     }
 
     [Fact]
@@ -720,6 +739,110 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             .WithMessage("*mismatched HandlerId*");
     }
 
+    // ---------- AC-20 scheduled-jobs slot guard (ADR-036 A1 rule 2, GitHub #987) ----------
+
+    [Fact]
+    public async Task AC20a_SlotGuard_SetOnTheDeploySlot_BeforeKuduZipDeploy()
+    {
+        const string customSlot = "blue";
+        var run = BuildRun();
+        run.Parameters.NonSecret[H9BffDeployHandler.StagingSlotNameParameterKey] = customSlot;
+        var repo = new FakeRepository(run, etag: "etag-20a");
+        var callLog = new List<string>();
+        var guard = FakeSlotGuard.Success();
+        guard.CallLog = callLog;
+        var kudu = FakeKuduDeployer.Success();
+        kudu.CallLog = callLog;
+        var seams = FreshGreenSeams(overrideKudu: kudu);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            slotGuard: guard);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        callLog.Should().Equal(new[] { FakeSlotGuard.LogEntry, FakeKuduDeployer.LogEntry },
+            "the guard MUST be in place before the new build boots on the slot — a slot without it runs " +
+            "scheduled jobs against production data");
+
+        guard.CallCount.Should().Be(1);
+        var request = guard.LastRequest!;
+        request.SettingName.Should().Be("Scheduling__RunScheduledJobs",
+            "the BFF reads Scheduling:RunScheduledJobs (SchedulingModule.RunScheduledJobsSetting) — App Service form uses '__'");
+        request.SettingValue.Should().Be("false");
+        request.SlotName.Should().Be(customSlot, "the guard targets the run's staging slot, not a hard-coded name");
+        request.SlotName.Should().Be(kudu.LastRequest!.SlotName, "the guard targets the slot the zip-deploy targets");
+        request.AppServiceName.Should().Be(AppServiceName);
+        request.ResourceGroupName.Should().Be(ResourceGroupName);
+        request.SubscriptionId.Should().Be(SubscriptionId);
+    }
+
+    [Fact]
+    public async Task AC20b_SlotGuardFailure_BlocksKuduZipDeploy_FailsRetryableWithCleanup()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-20b");
+        var guard = FakeSlotGuard.Failure("ARM rejected setting slot-sticky app setting (HTTP 403, AuthorizationFailed)");
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            slotGuard: guard);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.RetryableWithCleanup,
+            "same class as the slot swap — an ARM config write whose merge converges on retry");
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.ScheduledJobsSlotGuardFailed);
+        failure.Diagnostic.Should().Contain("AuthorizationFailed");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed, "production is untouched — not a quarantine");
+
+        guard.CallCount.Should().Be(1);
+        seams.Kudu.CallCount.Should().Be(0,
+            "fail closed — no zip-deploy to a slot that would run scheduled jobs against production data");
+        seams.Probe.CallCount.Should().Be(0);
+        seams.Sizer.CallCount.Should().Be(0);
+        seams.Swapper.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC20c_SlotGuardThrows_BlocksKuduZipDeploy_FailsRetryableWithCleanup()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-20c");
+        var guard = FakeSlotGuard.Throws(new TimeoutException("ARM slot-sticky app-setting call timed out"));
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            slotGuard: guard);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.RetryableWithCleanup);
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.ScheduledJobsSlotGuardInfraFault);
+        failure.Diagnostic.Should().Contain("TimeoutException");
+        seams.Kudu.CallCount.Should().Be(0, "fail closed — an unconfirmed guard is no guard");
+        seams.Swapper.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC20d_NegativeControl_ArtifactDownloadFails_SlotGuardNotCalled()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-20d");
+        var guard = FakeSlotGuard.Success();
+        var downloader = FakeArtifactDownloader.Failure("Artifact blob not found (HTTP 404)");
+        var seams = FreshGreenSeams(overrideDownloader: downloader);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            slotGuard: guard);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>()
+            .Which.RejectionCode.Should().Be(BffDeployRejectionCodes.ArtifactDownloadFailed);
+        guard.CallCount.Should().Be(0,
+            "no artifact means no deploy — the customer's App Service is not touched, not even by the guard");
+        seams.Kudu.CallCount.Should().Be(0);
+    }
+
     // ---------- helpers ----------
 
     private H9BffDeployHandler BuildHandler(
@@ -730,6 +853,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         IAppServiceSlotSwapper swapper,
         IHealthProbe probe,
         IBffPublishSizeReporter sizer,
+        ISlotStickyAppSettingWriter? slotGuard = null,
         Action<BffDeployOptions>? configureOptions = null)
     {
         var options = new BffDeployOptions
@@ -745,7 +869,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         configureOptions?.Invoke(options);
 
         return new H9BffDeployHandler(
-            repo, verifier, downloader, kudu, swapper, probe, sizer,
+            repo, verifier, downloader, slotGuard ?? FakeSlotGuard.Success(), kudu, swapper, probe, sizer,
             Options.Create(options),
             NullLogger<H9BffDeployHandler>.Instance);
     }
@@ -907,9 +1031,14 @@ public sealed class H9BffDeployHandlerTests : IDisposable
 
     private sealed class FakeKuduDeployer : IKuduZipDeployer
     {
+        public const string LogEntry = "kudu-zip-deploy";
         private readonly KuduZipDeployResult? _result;
         private readonly Exception? _throwOnCall;
         public int CallCount { get; private set; }
+        public KuduZipDeployRequest? LastRequest { get; private set; }
+
+        /// <summary>Optional log shared with other fakes so a test can assert call ORDER across seams.</summary>
+        public List<string>? CallLog { get; set; }
 
         private FakeKuduDeployer(KuduZipDeployResult? result, Exception? throwOnCall)
         {
@@ -926,6 +1055,43 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         public Task<KuduZipDeployResult> DeployAsync(KuduZipDeployRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
+            CallLog?.Add(LogEntry);
+            if (_throwOnCall is not null) throw _throwOnCall;
+            return Task.FromResult(_result!);
+        }
+    }
+
+    private sealed class FakeSlotGuard : ISlotStickyAppSettingWriter
+    {
+        public const string LogEntry = "scheduled-jobs-slot-guard";
+        private readonly SlotStickyAppSettingResult? _result;
+        private readonly Exception? _throwOnCall;
+        public int CallCount { get; private set; }
+        public SlotStickyAppSettingRequest? LastRequest { get; private set; }
+
+        /// <summary>Optional log shared with other fakes so a test can assert call ORDER across seams.</summary>
+        public List<string>? CallLog { get; set; }
+
+        private FakeSlotGuard(SlotStickyAppSettingResult? result, Exception? throwOnCall)
+        {
+            _result = result;
+            _throwOnCall = throwOnCall;
+        }
+
+        public static FakeSlotGuard Success()
+            => new(new SlotStickyAppSettingResult.Success(StickyNameAdded: true, SettingWritten: true), null);
+
+        public static FakeSlotGuard Failure(string diagnostic)
+            => new(new SlotStickyAppSettingResult.Failure(diagnostic), null);
+
+        public static FakeSlotGuard Throws(Exception ex) => new(null, ex);
+
+        public Task<SlotStickyAppSettingResult> EnsureAsync(SlotStickyAppSettingRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            CallLog?.Add(LogEntry);
             if (_throwOnCall is not null) throw _throwOnCall;
             return Task.FromResult(_result!);
         }

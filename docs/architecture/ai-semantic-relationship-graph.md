@@ -220,7 +220,7 @@ Both frontends use `d3-force` simulation: link distance proportional to `1 - sim
 
 | ADR | Relevance |
 |-----|-----------|
-| **ADR-001** | Minimal API + BackgroundService — visualization is a BFF endpoint |
+| **ADR-001** | Minimal API — visualization is a BFF endpoint |
 | **ADR-006** | PCF for form controls, Code Pages for dialogs — both used here |
 | **ADR-008** | Endpoint filters for auth — `VisualizationAuthorizationFilter` |
 | **ADR-013** | AI Architecture — extends BFF, not separate service |

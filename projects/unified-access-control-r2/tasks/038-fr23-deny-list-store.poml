@@ -4,7 +4,17 @@
     <title>FR-23 — deny-list (No Access List) store: Dataverse schema + fail-closed BFF reader</title>
     <phase>1 One evaluator</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <status-note>**Status corrected 2026-09-03 by a full project status audit.** The POML still read
+`pending` while `TASK-INDEX.md` marked it ✅ and git carried completion evidence — the task was DONE and
+only step 1 of root CLAUDE.md §7 ("update the task .poml status") had been skipped. This happened to **14
+tasks**, systematically, because the index is updated during execution while the POML status is a separate
+write that nothing enforces.
+
+Evidence for THIS task: 30dd5f397 (5-task parallel wave — 038 deny-list)
+
+Two independent signals were required before flipping (git completion evidence AND the index marker); no
+status was changed on the index alone.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>New authorization data surface + .cs reader on the auth path; tags bff-api/auth/dataverse.</rigor-reason>
     <model-tier>sonnet</model-tier>
