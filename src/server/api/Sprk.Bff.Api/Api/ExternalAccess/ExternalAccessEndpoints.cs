@@ -135,6 +135,11 @@ public static class ExternalAccessEndpoints
         // record, all-or-nothing (spec FR-33, task 098: the Manage Access toolbar Expiration).
         adminGroup.MapSetRecordShareExpiryEndpoint();
 
+        // POST /share-user · POST /unshare-user · GET /user-shares — internal system-user shares on a record
+        // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so
+        // they inherit the same Write-on-the-record delegation gate as every route above.
+        adminGroup.MapInternalShareEndpoints();
+
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();
 

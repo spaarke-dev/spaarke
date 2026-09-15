@@ -641,5 +641,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     .Where(g => g.RecordId == recordId)
                     .Select(g => new DataversePrincipalAccess(g.Principal, 1, DateTimeOffset.UtcNow))
                     .ToList());
+
+        // Task 063 widened the seam. Provisioning creates shares and never changes one, so a call here means the
+        // endpoint's behaviour changed — fail loudly rather than record something no assertion expects.
+        public Task ModifyAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            string accessRightsCsv, CancellationToken ct = default)
+            => throw new NotSupportedException("Provisioning creates shares; it never modifies one.");
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
+            string entityLogicalName, Guid recordId, CancellationToken ct = default)
+            => GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
     }
 }

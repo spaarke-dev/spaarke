@@ -17,7 +17,8 @@ public static class DelegationRuleFilterExtensions
     /// </summary>
     /// <remarks>
     /// Applied at the GROUP rather than per route, deliberately. The group is a closed
-    /// mutation-only surface, and <see cref="DelegationRuleFilter"/> denies any request whose target
+    /// access-management surface — mutations, plus one read (task 063's share list, which discloses who
+    /// can reach a record) — and <see cref="DelegationRuleFilter"/> denies any request whose target
     /// it cannot identify — so a seventh route added tomorrow is gated from its first request
     /// instead of inheriting a hole. That failure is loud and immediate (the author hits 403 on the
     /// first call) rather than silent, which is the correct direction for an authorization default.
@@ -252,6 +253,20 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // shares are written. Without this case the route would deny every caller (default branch).
                 case SetRecordShareExpiryRequest shareExpiry:
                     return FromGrantRoot(SetRecordShareExpiryEndpoint.ResolveRoot(shareExpiry));
+
+                // ── /share-user, /unshare-user, /user-shares (task 063, FR-29) ─────
+                // Internal system-user shares change — or, for the list, disclose — who can reach a record, so they
+                // take the same Write-on-the-record check. Each target comes from the SAME explicit-root resolver its
+                // handler uses, and none of these requests has a legacy projectId, so the record authorized is the
+                // record whose shares are read or written. Without these cases every call would deny (default branch).
+                case ShareRecordWithUserRequest shareUser:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(shareUser.RecordType, shareUser.RecordId));
+
+                case UnshareRecordWithUserRequest unshareUser:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(unshareUser.RecordType, unshareUser.RecordId));
+
+                case RecordUserSharesQuery userShares:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(userShares.RecordType, userShares.RecordId));
             }
         }
 

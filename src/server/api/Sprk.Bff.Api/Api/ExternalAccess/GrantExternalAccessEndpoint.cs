@@ -563,6 +563,29 @@ public static class GrantExternalAccessEndpoint
     }
 
     /// <summary>
+    /// Resolves a root named ONLY by an explicit <c>recordType</c> + <c>recordId</c> — for the requests that carry no
+    /// legacy <c>projectId</c> shorthand (task 098's record-wide expiry, task 063's system-user shares). Each such
+    /// route's <see cref="DelegationRuleFilter"/> case and its handler both call this, so the record that is
+    /// authorized is the record that is read or written.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed: a missing or unknown type, or a missing id, returns <c>Ok == false</c>. There is no shorthand,
+    /// deliberately — a request carrying two ways to name a record could authorize one and write another.
+    /// </remarks>
+    internal static GrantRootResolution ResolveExplicitRoot(string? recordType, Guid? recordId)
+    {
+        if (!ExternalGrantRoot.TryParse(recordType, out var type))
+            return new GrantRootResolution(false, default, Guid.Empty,
+                "RecordType is required and must be one of: project, matter, workassignment.");
+
+        if (recordId is not { } id || id == Guid.Empty)
+            return new GrantRootResolution(false, default, Guid.Empty,
+                "RecordId is required and must be a valid GUID.");
+
+        return new GrantRootResolution(true, type, id, null);
+    }
+
+    /// <summary>
     /// Builds the <c>sprk_externalrecordaccess</c> create payload. Internal (not private) so the test
     /// assembly (<c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c>) can assert the typed-lookup bind
     /// contract directly — a wrong <c>@odata.bind</c> key silently breaks the grant.

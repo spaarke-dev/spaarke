@@ -457,6 +457,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Mock<ITenantCache> TenantCacheMock { get; } = new(MockBehavior.Loose);
     public StubDataverseWebApiClient Dataverse { get; } = new();
 
+    /// <summary>The POA share table behind task 063's system-user share routes (in memory; see its remarks).</summary>
+    public Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable RecordShares { get; } = new();
+
     /// <summary>
     /// The instant the fixture's clock is fixed at (task 097). Grant-expiry decisions read "today" from the
     /// injected <see cref="TimeProvider"/>, so every expiry assertion here is deterministic. Never advanced —
@@ -473,6 +476,7 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
         SpeFileOperationsMock.Reset();
         TenantCacheMock.Reset();
         Dataverse.Reset();
+        RecordShares.Reset();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -619,6 +623,11 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton<DataverseWebApiClient>(Dataverse);
+
+            // Task 063: the system-user share routes read and write POA shares through the one seam. In memory, so
+            // their wire contract can be asserted without a Dataverse.
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(RecordShares);
 
             // Fixed clock for grant-expiry decisions (task 097).
             services.RemoveAll<TimeProvider>();

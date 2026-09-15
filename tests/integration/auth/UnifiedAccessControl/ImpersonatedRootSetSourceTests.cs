@@ -240,6 +240,76 @@ public sealed class ImpersonatedRootSetSourceTests
     }
 
     // =====================================================================
+    // Invalidation (task 063) — a share change clears exactly the entry a read wrote
+    // =====================================================================
+
+    /// <summary>
+    /// The only way to know an invalidation works is to watch it hit the entry the READ path wrote. A removal keyed
+    /// on another tenant, id shape or version succeeds silently and removes nothing, and the user keeps being
+    /// answered from a set computed before their share changed.
+    /// </summary>
+    [Fact]
+    public async Task InvalidateAsync_RemovesTheEntryGetAsyncWrote_SoTheNextReadAsksDataverseAgain()
+    {
+        var query = new StubImpersonatedQuery { Rows = new[] { Row("sprk_matterid", Guid.NewGuid()) } };
+        var cache = new StubTenantCache();
+        var source = BuildFor(query, cache, TenantA);
+
+        await source.GetAsync(User, "sprk_matter");
+        await ImpersonatedRootSetSource.InvalidateAsync(cache, Principal(TenantA), User, "sprk_matter", NullLogger.Instance);
+        await source.GetAsync(User, "sprk_matter");
+
+        query.CallCount.Should().Be(2, "the second read found no cached set, so it asked Dataverse again");
+    }
+
+    [Theory]
+    [InlineData("other-user")]
+    [InlineData("other-type")]
+    [InlineData("other-tenant")]
+    public async Task InvalidateAsync_ForAnotherUserTypeOrTenant_LeavesTheEntry(string variant)
+    {
+        var query = new StubImpersonatedQuery { Rows = new[] { Row("sprk_matterid", Guid.NewGuid()) } };
+        var cache = new StubTenantCache();
+        var source = BuildFor(query, cache, TenantA);
+        await source.GetAsync(User, "sprk_matter");
+
+        await ImpersonatedRootSetSource.InvalidateAsync(
+            cache,
+            Principal(variant == "other-tenant" ? TenantB : TenantA),
+            variant == "other-user" ? OtherUser : User,
+            variant == "other-type" ? "sprk_project" : "sprk_matter",
+            NullLogger.Instance);
+        await source.GetAsync(User, "sprk_matter");
+
+        query.CallCount.Should().Be(1, "a removal aimed at another entry must not clear this user's set");
+    }
+
+    [Fact]
+    public async Task InvalidateAsync_WhenTheCacheFaults_DoesNotThrow()
+    {
+        var act = () => ImpersonatedRootSetSource.InvalidateAsync(
+            new StubTenantCache { FaultOnRemove = true }, Principal(TenantA), User, "sprk_matter", NullLogger.Instance);
+
+        await act.Should().NotThrowAsync(
+            "the share has already been written; a cache fault must not turn it into an error");
+    }
+
+    private const string TenantA = "00000000-0000-0000-0000-00000000000a";
+    private const string TenantB = "00000000-0000-0000-0000-00000000000b";
+
+    private static System.Security.Claims.ClaimsPrincipal Principal(string tenantId) =>
+        new(new System.Security.Claims.ClaimsIdentity(
+            new[] { new System.Security.Claims.Claim("tid", tenantId) }, "test"));
+
+    /// <summary>A source whose requests carry <paramref name="tenantId"/>, as a real request's token does.</summary>
+    private static ImpersonatedRootSetSource BuildFor(StubImpersonatedQuery query, ITenantCache cache, string tenantId) =>
+        new(query, cache, NullLogger<ImpersonatedRootSetSource>.Instance,
+            new Microsoft.AspNetCore.Http.HttpContextAccessor
+            {
+                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = Principal(tenantId) }
+            });
+
+    // =====================================================================
     // Helpers
     // =====================================================================
 
@@ -332,8 +402,15 @@ public sealed class ImpersonatedRootSetSourceTests
             TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)
             => Task.CompletedTask;
 
+        /// <summary>Makes <see cref="RemoveAsync"/> throw (task 063's invalidation must survive it).</summary>
+        public bool FaultOnRemove { get; set; }
+
         public Task RemoveAsync(string tenantId, string resource, string id, int version,
             string cacheInstance = "default", CancellationToken ct = default)
-            => Task.CompletedTask;
+        {
+            if (FaultOnRemove) throw new InvalidOperationException("simulated cache remove fault");
+            _store.Remove(Key(tenantId, resource, id, version));
+            return Task.CompletedTask;
+        }
     }
 }

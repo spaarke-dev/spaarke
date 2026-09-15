@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Access;
 
 /// <summary>
 /// The BFF's single seam over Dataverse's <c>principalobjectaccess</c> (POA) record-sharing surface:
-/// grant a principal access to a record, revoke it, and read back who currently holds a share.
+/// grant a principal access to a record, change or revoke it, and read back who currently holds a share.
 /// </summary>
 /// <remarks>
 /// <para><b>Why this interface exists (ADR-010)</b>: it is a testing seam, not an abstraction layer.
@@ -21,11 +21,25 @@ namespace Sprk.Bff.Api.Services.Access;
 /// "…AccessGrant…" because it no longer only grants, and moved out of <c>Services/Communication/Access/</c>
 /// because it is now cross-cutting — Communication threads, Ai playbooks, and Secure Projects
 /// (FR-28 / FR-29) all share records through it. <b>Do not add a second POA client.</b></para>
+///
+/// <para><b>Two reads, on purpose</b> (task 063). <see cref="GetPrincipalAccessAsync"/> fails soft — an empty list
+/// when the read fails — which suits callers that only display shares or grant from them.
+/// <see cref="GetPrincipalAccessOrThrowAsync"/> is the complete answer or an exception. A caller that decides a
+/// WRITE from the current shares (the FR-29 "+ User" endpoints) must use it: "no share" and "the read failed" call
+/// for different writes, and the soft read cannot tell them apart.</para>
 /// </remarks>
 public interface IDataverseRecordShareService
 {
     /// <inheritdoc cref="DataverseWebApiService.GrantAccessAsync"/>
     Task GrantAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        string accessRightsCsv,
+        CancellationToken ct = default);
+
+    /// <inheritdoc cref="DataverseWebApiService.ModifyAccessAsync"/>
+    Task ModifyAccessAsync(
         string entitySetName,
         Guid recordId,
         DataversePrincipalRef principal,
@@ -41,6 +55,12 @@ public interface IDataverseRecordShareService
 
     /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessAsync"/>
     Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct = default);
+
+    /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessOrThrowAsync"/>
+    Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
         string entityLogicalName,
         Guid recordId,
         CancellationToken ct = default);
@@ -70,6 +90,15 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         => _dataverse.GrantAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
 
     /// <inheritdoc />
+    public Task ModifyAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        string accessRightsCsv,
+        CancellationToken ct = default)
+        => _dataverse.ModifyAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+
+    /// <inheritdoc />
     public Task RevokeAccessAsync(
         string entitySetName,
         Guid recordId,
@@ -83,4 +112,11 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         Guid recordId,
         CancellationToken ct = default)
         => _dataverse.GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => _dataverse.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
 }

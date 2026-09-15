@@ -69,6 +69,8 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [InlineData("close-project")]
     [InlineData("provision-project")]
     [InlineData("set-record-share-expiry")]
+    [InlineData("share-user")]
+    [InlineData("unshare-user")]
     public async Task ExternalAccessMutation_ForCallerWithoutWriteOnTarget_DeniedForDelegationRule(string route)
     {
         // Arrange — a caller who can READ the record but not write it.
@@ -93,6 +95,8 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [Theory]
     [InlineData("grant")]
     [InlineData("invite-and-grant")]
+    [InlineData("share-user")]
+    [InlineData("unshare-user")]
     public async Task ExternalAccessMutation_ForCallerWithWriteOnTarget_ReachesHandlerValidation(string route)
     {
         // Arrange — Write on the target, but a body the handler itself rejects.
@@ -417,6 +421,126 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
         (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyTargetUnresolved);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FR-29 / task 063 — internal system-user shares
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private const string ShareUserPath = "/api/v1/external-access/share-user";
+    private const string UnshareUserPath = "/api/v1/external-access/unshare-user";
+    private const string UserSharesPath = "/api/v1/external-access/user-shares";
+
+    /// <summary>
+    /// The "+ User" button design.md §6 calls one-click privilege escalation without this gate. Asserting the
+    /// probed target proves the request type is mapped to THIS record, at its own entity set; asserting the share
+    /// table proves the denied request wrote nothing.
+    /// </summary>
+    [Fact]
+    public async Task PostShareUser_ForCallerWithoutWrite_IsDeniedChecksWriteOnThatRecordAndWritesNothing()
+    {
+        var matterId = Guid.NewGuid();
+        var writesBefore = _fixture.RecordShares.Writes.Count;
+        using var client = _fixture.CreateClientWithRights(ReadOnly);
+
+        var response = await client.PostAsJsonAsync(ShareUserPath, new
+        {
+            recordType = "matter",
+            recordId = matterId,
+            systemUserId = Guid.NewGuid(),
+            accessLevel = (int)ExternalAccessLevel.FullAccess
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+        _fixture.ProbedTargets.Should().Contain(("sprk_matters", matterId));
+        _fixture.RecordShares.Writes.Should().HaveCount(writesBefore, "a denied request never reaches the handler");
+    }
+
+    /// <summary>
+    /// The list discloses who can reach a record, so it takes the same gate. It is also the one route on this group
+    /// whose request type is bound from the QUERY STRING ([AsParameters]) — asserting the probed target proves the
+    /// filter sees that bound object, not a flattened argument list it cannot match.
+    /// </summary>
+    [Fact]
+    public async Task GetUserShares_ForCallerWithoutWrite_IsDeniedAndChecksWriteOnThatRecord()
+    {
+        var workAssignmentId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadOnly);
+
+        var response = await client.GetAsync($"{UserSharesPath}?recordType=workassignment&recordId={workAssignmentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+        _fixture.ProbedTargets.Should().Contain(("sprk_workassignments", workAssignmentId));
+    }
+
+    /// <summary>The twin: with Write the list is answered by the handler — here, a record nobody shares.</summary>
+    [Fact]
+    public async Task GetUserShares_WithWriteOnTheRecord_IsAnsweredByTheHandler()
+    {
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.GetAsync($"{UserSharesPath}?recordType=matter&recordId={Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("shares").GetArrayLength().Should().Be(0);
+    }
+
+    /// <summary>
+    /// These routes have NO legacy <c>projectId</c> shorthand. A request naming only one is unresolvable, so it is
+    /// denied by authorization — it can never be authorized against one record and written to another.
+    /// </summary>
+    [Theory]
+    [InlineData(ShareUserPath)]
+    [InlineData(UnshareUserPath)]
+    public async Task PostShareRoutes_WithOnlyALegacyProjectId_AreDeniedByAuthorization(string path)
+    {
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.PostAsJsonAsync(path, new
+        {
+            projectId = Guid.NewGuid(),
+            systemUserId = Guid.NewGuid(),
+            accessLevel = (int)ExternalAccessLevel.ViewOnly
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyTargetUnresolved);
+    }
+
+    [Fact]
+    public async Task GetUserShares_WithNoRecord_IsDeniedByAuthorization()
+    {
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.GetAsync(UserSharesPath);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyTargetUnresolved);
+    }
+
+    /// <summary>Acceptance criterion 3's first clause: with no credential at all, every share route is 401.</summary>
+    [Theory]
+    [InlineData(ShareUserPath)]
+    [InlineData(UnshareUserPath)]
+    [InlineData(UserSharesPath)]
+    public async Task ShareRoutes_WithNoCredential_Are401(string path)
+    {
+        using var client = _fixture.CreateClient();
+
+        var response = path == UserSharesPath
+            ? await client.GetAsync($"{path}?recordType=matter&recordId={Guid.NewGuid()}")
+            : await client.PostAsJsonAsync(path, new
+            {
+                recordType = "matter",
+                recordId = Guid.NewGuid(),
+                systemUserId = Guid.NewGuid(),
+                accessLevel = (int)ExternalAccessLevel.ViewOnly
+            });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     /// <summary>
     /// A body both /grant and /invite-and-grant accept (each ignores the other's fields), with an expiry
     /// that is in the past under any clock — so the test never reads the wall clock.
@@ -468,6 +592,19 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
             recordId = projectId,
             expiryDate = "2099-12-31"
         }),
+        "share-user" => (ShareUserPath, new
+        {
+            recordType = "project",
+            recordId = projectId,
+            systemUserId = Guid.NewGuid(),
+            accessLevel = (int)ExternalAccessLevel.ViewOnly
+        }),
+        "unshare-user" => (UnshareUserPath, new
+        {
+            recordType = "project",
+            recordId = projectId,
+            systemUserId = Guid.NewGuid()
+        }),
         _ => throw new ArgumentOutOfRangeException(nameof(route), route, "Unmapped route in this test's helper.")
     };
 
@@ -501,6 +638,20 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
             email = "",
             projectId,
             accessLevel = (int)ExternalAccessLevel.ViewOnly
+        }),
+        // Root resolves, but the access level is not one of the three share levels.
+        "share-user" => (ShareUserPath, new
+        {
+            recordType = "project",
+            recordId = projectId,
+            systemUserId = Guid.NewGuid(),
+            accessLevel = 7777
+        }),
+        // Root resolves, but no user is named.
+        "unshare-user" => (UnshareUserPath, new
+        {
+            recordType = "project",
+            recordId = projectId
         }),
         _ => throw new ArgumentOutOfRangeException(nameof(route), route, "Unmapped route in this test's helper.")
     };

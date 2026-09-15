@@ -148,14 +148,19 @@ public static class ProvisionProjectEndpoint
     /// and Assign are deliberately absent — a secure project leaves the secure business unit only
     /// through the explicit unsecure path, not by being reassigned out of it.
     /// </remarks>
-    internal const string CreatorAccessRights = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
+    internal const string CreatorAccessRights = RecordShareLevels.CollaborateRights + ",ShareAccess";
 
     /// <summary>
     /// Rights a named colleague receives at provisioning time: the same working access as the creator,
     /// WITHOUT <c>ShareAccess</c> — re-sharing stays with the creator so the access list cannot widen
     /// through a chain nobody reviewed.
     /// </summary>
-    internal const string CollaboratorAccessRights = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+    /// <remarks>
+    /// The Collaborate level of <see cref="RecordShareLevels"/> (task 063), the one level-to-rights table — so a
+    /// colleague shared at provisioning and one shared later at Collaborate through the "+ User" picker hold the
+    /// same rights, and the two cannot drift apart.
+    /// </remarks>
+    internal const string CollaboratorAccessRights = RecordShareLevels.CollaborateRights;
 
     /// <summary>
     /// The columns Step 1 reads from <c>sprk_project</c>.

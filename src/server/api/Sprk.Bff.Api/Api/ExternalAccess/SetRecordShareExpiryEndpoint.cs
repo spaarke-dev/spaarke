@@ -251,20 +251,11 @@ public static class SetRecordShareExpiryEndpoint
     /// <remarks>
     /// Fail-closed: a missing or unknown type, or a missing id, returns <c>Ok == false</c>. There is no legacy
     /// <c>projectId</c> shorthand here, deliberately — a request carrying both could authorize one record and
-    /// write another.
+    /// write another. The rule lives in <see cref="GrantExternalAccessEndpoint.ResolveExplicitRoot"/>, shared with
+    /// the system-user share routes (task 063).
     /// </remarks>
     internal static GrantExternalAccessEndpoint.GrantRootResolution ResolveRoot(SetRecordShareExpiryRequest request)
-    {
-        if (!ExternalGrantRoot.TryParse(request.RecordType, out var type))
-            return new GrantExternalAccessEndpoint.GrantRootResolution(false, default, Guid.Empty,
-                "RecordType is required and must be one of: project, matter, workassignment.");
-
-        if (request.RecordId is not { } recordId || recordId == Guid.Empty)
-            return new GrantExternalAccessEndpoint.GrantRootResolution(false, default, Guid.Empty,
-                "RecordId is required and must be a valid GUID.");
-
-        return new GrantExternalAccessEndpoint.GrantRootResolution(true, type, recordId, null);
-    }
+        => GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId);
 
     private static int RootLookupCount(ExternalGrantRow row)
         => (row.ProjectId.HasValue ? 1 : 0) + (row.MatterId.HasValue ? 1 : 0) + (row.WorkAssignmentId.HasValue ? 1 : 0);

@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -140,7 +141,7 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
         // a guard that drifts toward leniency on this path is an app-only query nobody intended.
 
         var tenantId = GetTenantId();
-        var cacheId = $"{systemUserId:D}:{entityType}";
+        var cacheId = CacheId(systemUserId, entityType);
 
         var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
@@ -188,15 +189,49 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
         return new RootIdSet(ids, truncated);
     }
 
+    private string GetTenantId() => CacheTenantFor(_httpContextAccessor?.HttpContext?.User);
+
     /// <summary>
     /// Tenant for the cache key. Falls back to <c>"anonymous"</c>, matching
     /// <c>MembershipResolverService.GetTenantId</c> — the key's SECURITY property is
     /// <c>systemUserId</c>, which is always present; tenant is a namespace, not the isolator.
     /// </summary>
-    private string GetTenantId()
-        => _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
-            ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+    /// <remarks>Static and shared with <see cref="InvalidateAsync"/> so a removal addresses the key a read wrote.</remarks>
+    internal static string CacheTenantFor(ClaimsPrincipal? user)
+        => user?.FindFirst("tid")?.Value
+            ?? user?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? "anonymous";
+
+    /// <summary>The cache id of one user's set for one root type — shared by <see cref="GetAsync"/> and <see cref="InvalidateAsync"/>.</summary>
+    internal static string CacheId(Guid systemUserId, string entityType) => $"{systemUserId:D}:{entityType}";
+
+    /// <summary>
+    /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
+    /// Dataverse again. Called after that user's POA share on a record of that type changes (task 063): the set is
+    /// answered by an impersonated query, which sees shares natively, so an answer cached before the change is stale.
+    /// </summary>
+    /// <remarks>
+    /// <para>Non-fatal, and not bound to the request's token: the share has already been written, and a client that
+    /// disconnects must not stop the clean-up half-way. A miss is bounded by <see cref="CacheTtl"/>.</para>
+    /// <para>The tenant comes from the CALLER's token. When the caller and the affected user sign in to the same Entra
+    /// tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests wrote
+    /// under; when they do not, the removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
+    /// </remarks>
+    internal static async Task InvalidateAsync(
+        ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType, ILogger logger)
+    {
+        var cacheId = CacheId(systemUserId, entityType);
+        try
+        {
+            await cache.RemoveAsync(
+                CacheTenantFor(caller), CacheResource, cacheId, CacheVersion, ct: CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[ROOT-SET] Could not invalidate the cached root set {CacheId}; it refreshes within {Ttl}.", cacheId, CacheTtl);
+        }
+    }
 
     // ── Cache: fail-open on the CACHE, never on the ANSWER ────────────────────────────────────────
     //

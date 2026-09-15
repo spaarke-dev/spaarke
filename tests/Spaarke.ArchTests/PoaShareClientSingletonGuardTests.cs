@@ -17,6 +17,11 @@ namespace Spaarke.ArchTests;
 /// A genuinely new POA construction site is not "make the test pass" — it is a design decision to be
 /// argued in review, and the fix is almost always to call the existing seam.</para>
 ///
+/// <para><b>Task 063 added a third POA action</b>, <c>ModifyAccess</c> (a level change replaces the rights; a
+/// GrantAccess on an existing share is not documented to). It was added to the canonical client, and the detector
+/// below now names it too — otherwise a second client could be born through the one action the guard did not
+/// know about.</para>
+///
 /// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): these scan text, not syntax. Each rule is
 /// paired with the negative control that proves the detector actually fires — verified by seeding a
 /// duplicate payload and watching the rule go red before the guard was committed.</para>
@@ -26,26 +31,29 @@ public class PoaShareClientSingletonGuardTests
     /// <summary>The one file allowed to build POA action payloads.</summary>
     private const string CanonicalClient = "src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs";
 
+    /// <summary>The Dataverse POA actions, as the quoted action names a POST argument carries.</summary>
+    private static readonly string[] PoaActions = { "\"GrantAccess\"", "\"ModifyAccess\"", "\"RevokeAccess\"" };
+
     private static string RelativePath(string fullPath) =>
         Path.GetRelativePath(SourceScan.RepoRoot, fullPath).Replace('\\', '/');
 
     /// <summary>
-    /// A file "builds a POA action payload" when it POSTs to the <c>GrantAccess</c> or <c>RevokeAccess</c>
-    /// Dataverse action. The action name in a POST argument is the narrowest signature of the thing being
-    /// forbidden — mentioning either word in prose or a method name is not a client and must not trip this.
+    /// A file "builds a POA action payload" when it POSTs to the <c>GrantAccess</c>, <c>ModifyAccess</c> or
+    /// <c>RevokeAccess</c> Dataverse action. The action name in a POST argument is the narrowest signature of the
+    /// thing being forbidden — mentioning any of these words in prose or a method name is not a client and must not
+    /// trip this.
     /// </summary>
     private static IEnumerable<string> FilesPostingPoaActions() =>
         SourceScan.ServerSourceFiles()
             .Where(file =>
             {
                 var text = File.ReadAllText(file);
-                return text.Contains("\"GrantAccess\"", StringComparison.Ordinal)
-                    || text.Contains("\"RevokeAccess\"", StringComparison.Ordinal);
+                return PoaActions.Any(action => text.Contains(action, StringComparison.Ordinal));
             })
             .Select(RelativePath)
             .OrderBy(p => p, StringComparer.Ordinal);
 
-    [Fact(DisplayName = "Task 060: exactly ONE server file constructs GrantAccess/RevokeAccess payloads")]
+    [Fact(DisplayName = "Task 060: exactly ONE server file constructs GrantAccess/ModifyAccess/RevokeAccess payloads")]
     public void PoaActionPayloadsAreBuiltInExactlyOnePlace()
     {
         var sites = FilesPostingPoaActions().ToList();
@@ -82,6 +90,23 @@ public class PoaShareClientSingletonGuardTests
             "Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(",
             text,
             StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Task 063: the POA seam exposes ModifyAccess and the strict read the share endpoints decide from")]
+    public void TheSeamExposesModifyAndTheStrictRead()
+    {
+        var text = File.ReadAllText(Path.Combine(
+            SourceScan.RepoRoot,
+            "src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs"));
+
+        Assert.True(
+            text.Contains("Task ModifyAccessAsync(", StringComparison.Ordinal),
+            "without ModifyAccess a level change goes through GrantAccess, which is not documented to replace "
+            + "an existing share's rights — a downgrade could silently keep Write and Delete");
+        Assert.True(
+            text.Contains("Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(", StringComparison.Ordinal),
+            "the soft read answers an empty list when it fails; a write decided from it cannot tell 'no share' "
+            + "from 'the read failed'");
     }
 
     [Fact(DisplayName = "Task 060: PlaybookSharingService holds no private POA client")]

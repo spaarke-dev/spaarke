@@ -654,7 +654,20 @@ public class RouteAuthorizationGuardTests
     //            AddDelegationRuleFilter() (Write on the record, evaluated as the CALLER over OBO), and
     //            DelegationRuleFilter's target map gained the matching SetRecordShareExpiryRequest case in
     //            the same change. Caught by this census at review time, before CI — it is doing its job.
-    private const int ExpectedEndpointFileCount = 118;
+    //
+    // 118 -> 119 (2026-09-15, unified-access-control-r2 task 063):
+    //
+    //   063  +1  Api/ExternalAccess/InternalShareEndpoints.cs ADDED — POST /share-user, POST /unshare-user and
+    //            GET /user-shares, the server half of the Manage Access "+ User" picker (spec FR-29): internal
+    //            system-user POA shares on a project, matter or work assignment. Classified per the maintenance
+    //            procedure: it serves NEITHER document metadata nor file bytes — it writes and lists POA shares on
+    //            root records — so there is no GovernedFiles entry to add; the count alone moves.
+    //
+    //            Same shape as 061 and 098: the routes sit in the external-access admin group and inherit
+    //            AddDelegationRuleFilter() (Write on the record, evaluated as the CALLER over OBO), and
+    //            DelegationRuleFilter's target map gained one case per request type in the same change —
+    //            ShareRecordWithUserRequest, UnshareRecordWithUserRequest and the GET's RecordUserSharesQuery.
+    private const int ExpectedEndpointFileCount = 119;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
