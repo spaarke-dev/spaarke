@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list) + ExternalAccessModule.cs.</parallel-reason>
-    <deps>032, 034, 035</deps>
+    <deps>032, 034, 035, 104</deps>
     <tags>bff-api, auth, security, dataverse, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -37,6 +37,7 @@
       <dependency task="032" status="pending">Rights-map evaluator (the Dataverse-answer term contributes into the additive max).</dependency>
       <dependency task="034" status="pending">NFR-04 negative canary — BLOCKING MERGE GATE for this PR; cite the green run in the PR description.</dependency>
       <dependency task="035" status="pending">ImpersonatedRootSetSource (the new source being swapped in).</dependency>
+      <dependency task="104" status="pending">Added 2026-09-15 (register ISS-013 / #990): the shared impersonation helper must fail closed before this task turns impersonated root sets on — otherwise a call site that bypasses RetrieveMultipleImpersonatedAsync silently runs an app-only, unscoped query. Re-derive the status from 104's own POML (these attributes drift).</dependency>
     </dependencies>
   </context>
 

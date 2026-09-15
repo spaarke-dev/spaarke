@@ -3,13 +3,44 @@
 > **Source of truth** for deferred work + newly-discovered issues in this project.
 > Each entry has a paired GitHub Issue. See `/project-defer-issue-tracking` skill for the protocol.
 >
-> **Rollup view**: ~~`gh issue list --label unified-access-control-r2`~~ ⚠️ **That label does not
-> exist in this repo**, so the command silently returns nothing — and every issue this file has filed
-> (#961, #962, #963) was created unlabelled, so it would find none of them even if it did. Use the
-> explicit list instead: `gh issue view 961 962 963`. Creating the label and back-applying it is a
-> two-minute fix nobody has done; recorded 2026-09-09 by task 029 rather than left as a command that
-> looks like it works.
+> **Rollup view**: `gh issue list --state all --label unified-access-control-r2`. The label was created
+> 2026-09-15 and applied to every issue this file tracks (the Disposition table below). Before that the
+> command returned nothing, because the label did not exist.
 > **CLAUDE.md §11 rule**: every entry MUST name a concrete behavior or contract that fails without it.
+
+## Disposition rule (owner, 2026-09-15)
+
+> *"Issues should only go past the project if they are not material to the project or they are
+> confirmed/validated as another project's subject matter."*
+
+An entry **stays and is fixed here** unless (a) it is shown **not material** to this project, with the
+evidence recorded below, or (b) another project's **ownership is confirmed** (named project + evidence).
+When materiality is unclear, it stays. A hand-off is recorded here AND as a comment on the issue. Task 090
+(wrap-up) cannot close the project while an entry material to it is open.
+
+## Disposition (reviewed 2026-09-15)
+
+| Entry | Issue | Disposition | Where / evidence |
+|---|---|---|---|
+| DEF-001 — FR-33 expiry | #961 | **In project** | Tasks 097 / 098 / 100 ✅; 099, 101, **107** open |
+| ISS-001 — group double-count | #962 | Handed off — not material | The only consumer is `RagService` (AI search trimming — out of scope, finding A-21); `Services/Ai/` internals belong to `spaarke-ai-architecture-redesign-r2` (`projects/INDEX.md`) |
+| ISS-002 — `$top=200` truncation | #963 | **In project** | Task **105** |
+| ISS-003 — requester PATCH on SR to-dos | #964 | **In project** — blocked on the owner's product question | Task **054**, amended 2026-09-15 (its fourth-root premise contradicts task 028's ruling) |
+| ISS-004 — org-revoke N+1 | #968 | ✅ Done | Task 024 |
+| ISS-005 — `BulkUpdateAsync` not atomic | #970 | ✅ Done | Task 096 |
+| ISS-006 — singleton `LastException` | #971 | Handed off — not material; **no confirmed owner** | No access-control path branches on exception text (grep of `ExternalAccess/**`, `Auth/**`, `PlaybookSharingService`); `AssociateAsync` callers are AI + Insights only; `BulkUpdateAsync` guarded by task 096 |
+| ISS-007 — layout defaults | #972 | Handed off — not material | Workspace layouts, not access control |
+| ISS-008 — re-grant 409 | #973 | **In project** | Task **106** |
+| ISS-009 — non-BFF grants unbounded | #974 | **In project** | Task **107** |
+| ISS-010 — H9 slot guard | #987 | **In project** — fixed `6149edecf` | Closes when #950 merges; real-ARM check before merge |
+| ISS-011 — Service Bus accepts SAS | #988 | Handed off — not material; **no confirmed owner** | Every job handler uses `SubjectId` for logs / telemetry only — none acts as that user, so a forged message cannot change an access decision in this project's evaluator. A standing security risk; ADR-052 §6 blocks Function impersonation until it lands |
+| ISS-012 — typed requester on `JobContract` | #989 | Handed off — not material | Needed only by a Function that impersonates; none is in scope. ADR-052 §6 makes it a prerequisite for the first project that builds one |
+| ISS-013 — impersonation helper fail-closed | #990 | **In project** | Task **104** (runs before 036) |
+| ISS-014 — TipTap 2.x advisory | #991 | Handed off — Compose confirmed as owner | LegalWorkspace gets TipTap only by transpiling `Spaarke.Compose.Components` (`composeEditor.registration.ts`); Compose owns the editor (ADR-049); next round `spaarkeai-compose-r7` |
+| ISS-015 — xmldom / dompurify | #992 | Handed off — not material | Same versions on master before this project; `@xmldom/xmldom` arrives via `mammoth`, declared by six packages |
+
+> Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
+> (`gh auth refresh -s read:project,project`).
 
 ---
 
@@ -420,6 +451,90 @@ is an operator step (owner directive 2026-09-04). Once no null can arrive from a
 `eq null` clause could flip to fail-closed — still the owner's call (097 escalation trigger 2).
 
 **Estimated effort**: small (+ operator step). **Blockers**: none. **Related**: task 097, FR-33.
+
+---
+
+### ISS-010 — H9 provisioning deploy does not set the scheduled-jobs slot guard
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed on the branch (`6149edecf`) — closes when PR #950 merges |
+| **Urgency** | now |
+| **Filed** | 2026-09-14 (entered here 2026-09-15) |
+| **Source** | Task 103 Step 9.5 code review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/987 |
+
+H9 Kudu-deployed to the staging slot without `Scheduling__RunScheduledJobs=false`, so the staging slot ran production's cron jobs. Owner (2026-09-15): *"do not defer"* — fixed here: H9 sets the guard slot-sticky, fail-closed, before the deploy; `SchedulingSlotGuardKeyTests` pins the key across all four slot-deploy paths. **Before merge**: verified against a fake ARM transport only — needs one real-ARM check.
+
+---
+
+### ISS-011 — The Service Bus namespace still accepts SAS keys
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed off (not material); **no confirmed owner** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-15 |
+| **Source** | Function-impersonation research (session 11); prerequisite P1 of ADR-052 §6 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/988 |
+
+A namespace-wide Send+Listen rule (`SpaarkeAppAccess`) and a connection-string fallback in `ServiceBusClientFactory`: anyone holding the string can enqueue any job. **Why not material here** (verified 2026-09-15): every job handler uses `JobContract.SubjectId` only for logs and telemetry — none acts as that user — so a forged message cannot change an access decision in this project's evaluator. A standing platform risk that needs an owner; ADR-052 §6 blocks Function impersonation until it lands. Full body on the issue.
+
+---
+
+### ISS-012 — `JobContract` has no typed, BFF-set requester field
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed off (not material) |
+| **Urgency** | someday (until a Function needs to impersonate) |
+| **Filed** | 2026-09-15 |
+| **Source** | Prerequisite P2 of ADR-052 §6 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/989 |
+
+A handler that impersonates the requester needs the JWT-validated `oid` + `tid`, written only by the BFF. **Why not material here**: needed only by an Azure Function that impersonates; none is in this project's scope. ADR-052 §6 makes it a prerequisite for the first project that builds one.
+
+---
+
+### ISS-013 — `DataverseImpersonation` degrades to app-only on an empty id
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project: task 104** (before 036) |
+| **Urgency** | now |
+| **Filed** | 2026-09-15 |
+| **Source** | Prerequisite P3 of ADR-052 §6; ADR-028 A5 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/990 |
+
+`Apply(null / Empty)` adds no header and returns, so a call site that bypasses `RetrieveMultipleImpersonatedAsync` silently runs an app-only, unscoped query. Material: the evaluator's impersonated root sets (task 036) rely on this helper. Entry-points and criteria: `tasks/104-iss013-impersonation-helper-fail-closed.poml`.
+
+---
+
+### ISS-014 — `@tiptap/core` 2.x carries GHSA-cp6q-959q-f8rh (fixed only in 3.30.4)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed off to Compose (ownership confirmed) |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-15 |
+| **Source** | Trivy code scanning on PR #950 (the LegalWorkspace build repair, `9edbb011c`, declared the TipTap packages) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/991 |
+
+MEDIUM: `mergeAttributes()` turns an own `__proto__` key into inherited executable DOM attributes. 2.27.2 on master (`Spaarke.Compose.Components`, `SpaarkeAi`), 2.27.3 on this branch (`LegalWorkspace`). **Owner confirmed**: LegalWorkspace gets TipTap only by transpiling Compose (`composeEditor.registration.ts`); Compose owns the editor (ADR-049). The fix is a TipTap 3 migration across all three packages together.
+
+---
+
+### ISS-015 — `@xmldom/xmldom` 0.8.13 and `dompurify` 3.4.7 in front-end lockfiles
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed off (not material) |
+| **Urgency** | next-round (8 HIGH) |
+| **Filed** | 2026-09-15 |
+| **Source** | Trivy code scanning on PR #950 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/992 |
+
+8 HIGH + 2 MEDIUM on xmldom (via `mammoth`; fixed 0.8.15), 2 MEDIUM + 3 LOW on dompurify (fixed 3.4.13). **Why not material here**: the same versions are on master in the same lockfile — PR #950 only edited it; `mammoth` is declared by six packages repo-wide. First question for the owner: is `mammoth` still needed at all (Compose R4.5 recorded it deleted)?
 
 ---
 
