@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 // `EntityReference` is ambiguous inside this namespace — Sprk.Bff.Api.Models.Office declares its own
 // (the SaveRequest target-entity DTO). Alias the Dataverse one so both stay readable at their use sites.
 using XrmEntityReference = Microsoft.Xrm.Sdk.EntityReference;
@@ -59,7 +60,8 @@ public class OfficeDocumentPersistence
     /// Creates a Document record in Dataverse with SPE pointers. Returns the document id AND whether the content
     /// was a byte-identical DUPLICATE (FR-C3): when <c>WasContentDuplicate</c> is true the returned
     /// <c>DocumentId</c> is the existing CANONICAL (no second document was created) — the caller MUST skip
-    /// finalization (no redundant artifacts / AI) and clean up the transient upload blob.
+    /// finalization (no redundant artifacts / AI), and deletes the upload only when
+    /// <see cref="IsUploadUnreferencedAsync"/> proves no document points at it (task 046).
     /// </summary>
     public async Task<(Guid DocumentId, bool WasContentDuplicate)> CreateDocumentWithSpePointersAsync(
         SaveRequest request,
@@ -159,7 +161,7 @@ public class OfficeDocumentPersistence
             if (dedup.IsDuplicate && dedup.CanonicalDocumentId is { } canonicalId)
             {
                 _logger.LogInformation(
-                    "Skipping duplicate document create for {FileName} (DriveId={DriveId}, ItemId={ItemId}); content matches canonical sprk_document {CanonicalId}. Caller skips finalization + cleans up the transient blob.",
+                    "Skipping duplicate document create for {FileName} (DriveId={DriveId}, ItemId={ItemId}); content matches canonical sprk_document {CanonicalId}. Caller skips finalization and deletes the upload only if no document points at it (task 046).",
                     fileName, driveId, itemId, canonicalId);
                 return (canonicalId, true);
             }
@@ -248,6 +250,76 @@ public class OfficeDocumentPersistence
             documentId, driveId, itemId);
 
         return (documentId, false);
+    }
+
+    /// <summary>
+    /// Task 046: may the SPE drive item an IMMUTABLE save just uploaded be deleted as a transient duplicate blob?
+    /// <c>true</c> ONLY when a successful lookup shows that NO <c>sprk_document</c> points at the item.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this exists.</b> On a byte-identical hit the suppress branch deletes the item this request
+    /// uploaded, on the premise that it is a transient blob and never a document's own file. The Office create upload
+    /// is PATH-keyed under <c>ConflictBehavior.Replace</c>, so an upload whose name already exists in the container
+    /// lands on THAT existing item, and the premise fails. The item is then the canonical's own file (the detector's
+    /// canonical lookup does not exclude the probed item's own row), a hash-linked copy's, or any other document's.
+    /// Deleting it destroyed that document's file while the save reported success (025 note, M9 / R3).</para>
+    /// <para><b>The check.</b> Any <c>sprk_document</c>, in ANY state, whose <c>sprk_graphitemid</c> equals the
+    /// uploaded item id. That includes the canonical row's own pointer, which is the comparison the defect needs, and
+    /// is widened to every row because the detector excludes hash-linked copies: the item the upload landed on can
+    /// belong to a row that a canonical-only comparison never sees. An inactive row still points at its file, so
+    /// state is not filtered.</para>
+    /// <para><b>Fail-safe.</b> A failed lookup, or an absent generic seam (the bare test constructor), answers
+    /// <c>false</c>: a leaked transient blob is recoverable; a deleted document file is not.</para>
+    /// <para><b>Caller-side by design.</b> <see cref="ContentDedupDetector"/> is shared with email-r2 and Compose and is
+    /// not changed. Its answer, "the canonical for this content", is correct; only this caller's delete assumed that
+    /// the uploaded item could not be a document's own file.</para>
+    /// </remarks>
+    /// <param name="itemId">The SPE drive-item id the upload returned.</param>
+    /// <param name="canonicalDocumentId">The canonical the dedup resolved to; used only to say, in the log, whether
+    /// the item turned out to be the canonical's own file or another document's.</param>
+    public async Task<bool> IsUploadUnreferencedAsync(
+        string itemId,
+        Guid canonicalDocumentId,
+        CancellationToken cancellationToken)
+    {
+        if (_genericEntityService is null || string.IsNullOrWhiteSpace(itemId))
+        {
+            _logger.LogWarning(
+                "Duplicate cleanup skipped for drive item {ItemId}: no document-reference lookup is available, so it " +
+                "cannot be proven unreferenced (fail-safe; the item is kept).",
+                itemId);
+            return false;
+        }
+
+        EntityCollection referencing;
+        try
+        {
+            var query = new QueryExpression(DocumentLogicalName)
+            {
+                ColumnSet = new ColumnSet(DocumentIdAttribute),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition(GraphItemIdAttribute, ConditionOperator.Equal, itemId);
+            referencing = await _genericEntityService.RetrieveMultipleAsync(query, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Duplicate cleanup skipped for drive item {ItemId}: the document-reference lookup failed, so it cannot " +
+                "be proven unreferenced (fail-safe; the item is kept and may be a leaked transient blob).",
+                itemId);
+            return false;
+        }
+
+        if (referencing.Entities.Count == 0)
+            return true;
+
+        var referencingId = referencing.Entities[0].Id;
+        _logger.LogWarning(
+            "Duplicate cleanup skipped: uploaded drive item {ItemId} is the file of sprk_document {DocumentId} ({Owner}). " +
+            "A same-name upload under ConflictBehavior.Replace landed on an existing item, so it is not a transient blob.",
+            itemId, referencingId, referencingId == canonicalDocumentId ? "the canonical" : "another document");
+        return false;
     }
 
     /// <summary>

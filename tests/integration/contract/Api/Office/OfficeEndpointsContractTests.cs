@@ -1330,10 +1330,21 @@ public sealed class OfficeVersionSaveWorld
     }
 
     /// <summary>
-    /// The one query shape the save path's content dedup issues (task 024): <c>ContentDedupDetector</c>'s
-    /// canonical lookup — an ACTIVE <c>sprk_document</c> whose <c>sprk_canonicalhash</c> equals the hash and whose
-    /// <c>sprk_canonicaldocument</c> is null (a true canonical, never a hash-linked copy), top 1. Every other
-    /// query answers empty, exactly as this fixture always did. Seeded rows are active.
+    /// When set, the task-046 file-reference lookup (the <c>sprk_graphitemid</c> query answered by
+    /// <see cref="RetrieveMultiple"/>) throws — a Dataverse read that fails.
+    /// </summary>
+    public bool FailDocumentReferenceLookup { get; set; }
+
+    /// <summary>
+    /// The two query shapes the save path issues; every other query answers empty, exactly as this fixture always
+    /// did. Seeded rows are active.
+    /// <list type="bullet">
+    /// <item>Task 024 — <c>ContentDedupDetector</c>'s canonical lookup: an ACTIVE <c>sprk_document</c> whose
+    /// <c>sprk_canonicalhash</c> equals the hash and whose <c>sprk_canonicaldocument</c> is null (a true canonical,
+    /// never a hash-linked copy), top 1.</item>
+    /// <item>Task 046 — the file-reference lookup: every <c>sprk_document</c> whose <c>sprk_graphitemid</c> equals the
+    /// item id, matched case-insensitively as Dataverse string equality is.</item>
+    /// </list>
     /// </summary>
     internal Microsoft.Xrm.Sdk.EntityCollection RetrieveMultiple(Microsoft.Xrm.Sdk.Query.QueryExpression query)
     {
@@ -1342,6 +1353,29 @@ public sealed class OfficeVersionSaveWorld
             return result;
 
         var conditions = query.Criteria.Conditions;
+
+        var itemCondition = conditions.FirstOrDefault(c =>
+            c.AttributeName == "sprk_graphitemid" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal);
+        if (itemCondition is not null && conditions.All(c => c.AttributeName != "sprk_canonicalhash"))
+        {
+            if (FailDocumentReferenceLookup)
+                throw new InvalidOperationException("Test: the sprk_document file-reference lookup failed.");
+
+            if (itemCondition.Values.Count == 1 && itemCondition.Values[0] is string itemId)
+            {
+                lock (_gate)
+                {
+                    foreach (var row in Documents.Values.Where(r =>
+                                 string.Equals(r.ItemId, itemId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        result.Entities.Add(new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, row.Id));
+                    }
+                }
+            }
+
+            return result;
+        }
+
         var hashCondition = conditions.FirstOrDefault(c =>
             c.AttributeName == "sprk_canonicalhash" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal);
         var excludesLinkedCopies = conditions.Any(c =>

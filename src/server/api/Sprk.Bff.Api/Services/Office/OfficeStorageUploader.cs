@@ -85,7 +85,9 @@ public class OfficeStorageUploader
     /// to be a byte-identical content DUPLICATE — the office save path suppressed the second document AND skips
     /// finalization, so this transient blob is now truly unreferenced (gate-after-write cleanup). Best-effort /
     /// non-fatal: a failed cleanup logs and returns false; it NEVER fails the save (the dedup already succeeded).
-    /// Only ever called with the drive item THIS request just uploaded — never the canonical's own item.
+    /// Called only after <see cref="OfficeDocumentPersistence.IsUploadUnreferencedAsync"/> has proven that no
+    /// <c>sprk_document</c> points at the item (task 046): under the path-keyed <c>Replace</c> upload, the item THIS
+    /// request uploaded can be an existing document's own file, and this method cannot tell the difference.
     /// </summary>
     public async Task<bool> DeleteFromSpeAsync(string driveId, string itemId, CancellationToken cancellationToken)
     {
