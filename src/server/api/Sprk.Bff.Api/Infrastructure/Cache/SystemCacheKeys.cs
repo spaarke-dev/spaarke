@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <para>
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
-/// 11 entries (see <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c>
+/// 14 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; see <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c>
 /// for the per-exception three-question justification).
 /// </para>
 /// <para>
@@ -67,6 +67,23 @@ public static class SystemCacheKeys
     /// fragment the bookmark and re-process records across tenants.
     /// </summary>
     public const string RecordSyncWatermark = "recordsync-watermark";
+
+    /// <summary>
+    /// Scheduled-job dispatch lease (cross-instance mutual exclusion — ADR-036 A1 rule 1, unified-access-control-r2
+    /// task 103). Site: <c>Infrastructure/Scheduling/RedisScheduledJobLease.cs</c>. Raw key:
+    /// <c>{InstanceName}scheduler:lease:{jobId}</c>.
+    /// Justification: a scheduled job runs for the whole BFF, not for a tenant; like <see cref="IdempotencyLock"/>
+    /// the lock must be tenant-agnostic so any instance can take and release it.
+    /// </summary>
+    public const string SchedulerLease = "scheduler-lease";
+
+    /// <summary>
+    /// The last dispatched cron occurrence per scheduled job (task 103). Site:
+    /// <c>Infrastructure/Scheduling/RedisScheduledJobLease.cs</c>. Raw key: <c>{InstanceName}scheduler:last-fire:{jobId}</c>.
+    /// Justification: it is what makes a tick run once across instances when a short run releases its lease before a
+    /// slower instance wakes; like <see cref="RecordSyncWatermark"/> it is a system-wide bookmark.
+    /// </summary>
+    public const string SchedulerLastFire = "scheduler-last-fire";
 
     // ---- Authentication & token caches ------------------------------------
 

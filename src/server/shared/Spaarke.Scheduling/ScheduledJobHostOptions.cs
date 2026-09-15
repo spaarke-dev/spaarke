@@ -38,4 +38,10 @@ public sealed class ScheduledJobHostOptions
     /// this for the whole run, so it only bounds how long a DEAD holder blocks the job, not how long a run may take.
     /// Default: 2 minutes.</summary>
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>The longest a run may hold its job's lease (ADR-036 A1 rule 1). Past it the host cancels the run and
+    /// stops renewing, so a hung run — one that ignores cancellation — blocks the job for at most this plus one
+    /// <see cref="LeaseDuration"/>, never indefinitely. A job that legitimately runs longer needs a larger value.
+    /// Default: 2 hours.</summary>
+    public TimeSpan MaxRunDuration { get; set; } = TimeSpan.FromHours(2);
 }

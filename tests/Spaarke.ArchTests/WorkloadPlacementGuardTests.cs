@@ -240,8 +240,8 @@ public class WorkloadPlacementGuardTests
 
         Assert.True(
             result.IsSuccessful,
-            "IScheduledJob implementations must not depend on ScheduledJobHost, IBackgroundJobStore or " +
-            "ScheduledJobRegistry (ADR-036 A1 rule 7, ADR-052 §5). Registration belongs in AddScheduledJob<TJob>, " +
+            "IScheduledJob implementations must not depend on ScheduledJobHost, IBackgroundJobStore, " +
+            "ScheduledJobRegistry, ScheduledJobRegistration or the dispatch lease (ADR-036 A1 rule 7, ADR-052 §5). Registration belongs in AddScheduledJob<TJob>, " +
             "not in the job. Failing: " + string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>()));
     }
 

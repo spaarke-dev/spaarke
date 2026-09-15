@@ -35,7 +35,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 
 ```xml
 <hot-path-declaration>
-  <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints -->
+  <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints; scheduler lease + admin jobs trigger (task 103) -->
   <spaarke-ai>N</spaarke-ai>
   <ci-workflows>N</ci-workflows>
   <skill-directives>N</skill-directives>

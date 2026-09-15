@@ -54,6 +54,8 @@ public class ScheduledJobLeaseTests
         (jobA.InvocationCount + jobB.InvocationCount).Should().Be(1);
         logA.Count(LogLevel.Information, "skipped").Should().Be(logB.Count(LogLevel.Information, "skipped") == 1 ? 0 : 1,
             "the host that did not run the occurrence MUST say so");
+        (logA.Count(LogLevel.Warning, "no distributed lease store") + logB.Count(LogLevel.Warning, "no distributed lease store"))
+            .Should().Be(0, "a distributed lease never triggers the single-instance warning");
     }
 
     [Fact]
@@ -144,32 +146,135 @@ public class ScheduledJobLeaseTests
     }
 
     [Fact]
-    public async Task HolderThatStopsRenewing_LeaseExpires_AndALaterTickRunsElsewhere()
+    public async Task HolderThatCannotRenew_IsCancelledWhenItsLeaseExpires_AndALaterTickRunsElsewhere()
     {
         var time = new FakeTimeProvider(Start);
         var lease = new FakeDistributedLease(time);
-        var jobA = new FakeScheduledJob("stuck-job", async (_, ct) =>
+        // The first run blocks until cancelled; any later run — on either host — completes at once. (Either host may
+        // win a later occurrence, so the assertions are on the lease's grants, not on which host ran.)
+        var blocked = 0;
+        Func<JobRunContext, CancellationToken, Task<JobRunResult>> body = async (_, ct) =>
+        {
+            if (Interlocked.Exchange(ref blocked, 1) == 0)
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+
+            return new JobRunResult(true, null, 0, TimeSpan.Zero);
+        };
+        var jobA = new FakeScheduledJob("stuck-job", body);
+        var jobB = new FakeScheduledJob("stuck-job", body);
+        var (hostA, storeA) = NewHost(jobA, time, lease);
+        var (hostB, _) = NewHost(jobB, time, lease);
+
+        await hostA.StartAsync(CancellationToken.None);
+        await AdvanceUntilAsync(time, () => jobA.InvocationCount == 1, "host A takes the lease and runs");
+        // Host A loses Redis — its renewals never land, while acquires still reach the store.
+        lease.RefuseRenewals = true;
+        await hostB.StartAsync(CancellationToken.None);
+        await AdvanceUntilAsync(time, () => jobA.InvocationCount + jobB.InvocationCount >= 2
+                && storeA.RunRecords.Any(r => r.Result is { Skipped: false, Success: false }),
+            "host A's run is cancelled once its lease has expired, and the job runs again");
+        await hostA.StopAsync(CancellationToken.None);
+        await hostB.StopAsync(CancellationToken.None);
+
+        var grants = lease.Grants.Where(g => g.JobId == "stuck-job").Select(g => g.At).ToList();
+        grants[1].Should().BeOnOrAfter(grants[0] + LeaseDuration,
+            "the job ran again only once the first lease had expired — never while it was live");
+        storeA.RunRecords.First(r => r.Result is { Skipped: false, Success: false }).Result!.ErrorMessage
+            .Should().Contain("could not be renewed", "a holder that cannot renew stops rather than overlap");
+    }
+
+    [Fact]
+    public async Task LeaseLapsedMidRun_WithNoOtherHolder_IsRetakenAndTheRunCompletes()
+    {
+        var time = new FakeTimeProvider(Start);
+        var lease = new FakeDistributedLease(time);
+        var log = new ListLogger<ScheduledJobHost>();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var job = new FakeScheduledJob("lapse-job", async (_, ct) =>
+        {
+            await release.Task.WaitAsync(ct);
+            return new JobRunResult(true, null, 1, TimeSpan.Zero);
+        });
+        var (host, store) = NewHost(job, time, lease, log);
+
+        await host.StartAsync(CancellationToken.None);
+        await AdvanceUntilAsync(time, () => job.InvocationCount == 1, "the run starts under the lease");
+        lease.Expire("lapse-job");
+        await AdvanceUntilAsync(time, () => lease.Grants.Count(g => g.JobId == "lapse-job") == 2,
+            "the next renewal is refused and the free lease is re-taken");
+        release.SetResult();
+        await AdvanceUntilAsync(time, () => store.RunRecords.Any(r => r.Result is { Skipped: false }), "the run completes");
+        await host.StopAsync(CancellationToken.None);
+
+        store.RunRecords.Single(r => r.Result is { Skipped: false }).Result!.Success.Should().BeTrue();
+        log.Count(LogLevel.Warning, "was re-taken").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task HungRunPastMaxRunDuration_StopsRenewing_SoTheJobRunsAgainWhileItIsStillHung()
+    {
+        var time = new FakeTimeProvider(Start);
+        var lease = new FakeDistributedLease(time);
+        var logA = new ListLogger<ScheduledJobHost>();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The first run hangs — it ignores its cancellation token. Any later run, on either host, completes at once.
+        var hung = 0;
+        Func<JobRunContext, CancellationToken, Task<JobRunResult>> body = async (_, _) =>
+        {
+            if (Interlocked.Exchange(ref hung, 1) == 0)
+            {
+                await release.Task;
+            }
+
+            return new JobRunResult(true, null, 0, TimeSpan.Zero);
+        };
+        var jobA = new FakeScheduledJob("hung-job", body);
+        var jobB = new FakeScheduledJob("hung-job", body);
+        var options = Options();
+        options.MaxRunDuration = TimeSpan.FromMinutes(1);
+        var (hostA, _) = NewHost(jobA, time, lease, logA, options);
+        var (hostB, _) = NewHost(jobB, time, lease, options: options);
+
+        await hostA.StartAsync(CancellationToken.None);
+        await AdvanceUntilAsync(time, () => jobA.InvocationCount == 1, "host A's run starts, and hangs");
+        await hostB.StartAsync(CancellationToken.None);
+        await AdvanceUntilAsync(time, () => jobA.InvocationCount + jobB.InvocationCount >= 2,
+            "past MaxRunDuration host A stops renewing, the lease expires, and the job runs again", maxSteps: 1000);
+        var stillHung = !release.Task.IsCompleted;
+        release.SetResult();
+        await hostA.StopAsync(CancellationToken.None);
+        await hostB.StopAsync(CancellationToken.None);
+
+        stillHung.Should().BeTrue("the job ran again while the first run was still hung");
+        var grants = lease.Grants.Where(g => g.JobId == "hung-job").Select(g => g.At).ToList();
+        grants[1].Should().BeOnOrAfter(grants[0] + options.MaxRunDuration,
+            "the hung run's lease was renewed until MaxRunDuration and never taken while live");
+        logA.Count(LogLevel.Error, "longer than MaxRunDuration").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ManualRun_HostShutdown_CancelsItAndReleasesTheLease()
+    {
+        var time = new FakeTimeProvider(Start);
+        var lease = new FakeDistributedLease(time);
+        var job = new FakeScheduledJob("manual-long", async (_, ct) =>
         {
             await Task.Delay(Timeout.Infinite, ct);
             return new JobRunResult(true, null, 0, TimeSpan.Zero);
         });
-        var jobB = new FakeScheduledJob("stuck-job");
-        var (hostA, _) = NewHost(jobA, time, lease);
-        var (hostB, storeB) = NewHost(jobB, time, lease);
+        var (host, store) = NewHost(job, time, lease);
 
-        await hostA.StartAsync(CancellationToken.None);
-        await AdvanceUntilAsync(time, () => jobA.InvocationCount == 1, "host A takes the lease and runs");
-        var acquiredAt = time.GetUtcNow();
-        lease.RefuseRenewals = true;
-        await hostB.StartAsync(CancellationToken.None);
-        await AdvanceUntilAsync(time, () => jobB.InvocationCount == 1,
-            "with no renewals the lease expires and a later occurrence runs on host B");
-        await hostA.StopAsync(CancellationToken.None);
-        await hostB.StopAsync(CancellationToken.None);
+        await host.StartAsync(CancellationToken.None);
+        var manual = await host.TriggerNowAsync("manual-long", parameters: null, CancellationToken.None);
+        await AdvanceUntilAsync(time, () => job.InvocationCount == 1, "the manual run starts");
+        await host.StopAsync(CancellationToken.None);
 
-        var bRun = storeB.RunRecords.Single(r => r.Result is null or { Skipped: false });
-        bRun.ScheduledFireUtc.Should().BeOnOrAfter(acquiredAt + LeaseDuration,
-            "host B ran only once the lease had expired — never while it was live");
+        var run = store.RunRecords.Single(r => r.RunId == manual.RunId);
+        run.Result.Should().NotBeNull("the drain waits for the cancelled run to record its completion");
+        run.Result!.ErrorMessage.Should().Contain("host shutdown");
+        lease.HolderOf("manual-long").Should().BeNull("a run that stops on shutdown gives its lease back");
     }
 
     [Fact]

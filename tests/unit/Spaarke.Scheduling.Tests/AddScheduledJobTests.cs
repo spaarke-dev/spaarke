@@ -1,7 +1,6 @@
 using Cronos;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Spaarke.Scheduling.Tests;
@@ -14,7 +13,7 @@ namespace Spaarke.Scheduling.Tests;
 public class AddScheduledJobTests
 {
     [Fact]
-    public async Task AddScheduledJob_JobIsRunnableWithItsSchedule_AndNoHostedServiceIsNeeded()
+    public async Task AddScheduledJob_RegistryAndStoreBuiltByTheContainer_HoldTheJobWithItsSchedule()
     {
         var services = new ServiceCollection();
         services.AddSingleton<ScheduledJobRegistry>();
@@ -32,8 +31,6 @@ public class AddScheduledJobTests
         definition.CronSchedule.Should().Be("0 2 * * *");
         definition.Enabled.Should().BeFalse();
         definition.DisplayName.Should().Be("Nightly");
-        services.Should().NotContain(d => d.ServiceType == typeof(IHostedService),
-            "registration needs no bootstrap hosted service, so there is no start order to get wrong");
     }
 
     [Fact]

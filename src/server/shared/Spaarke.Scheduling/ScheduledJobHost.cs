@@ -77,6 +77,10 @@ public sealed class ScheduledJobHost : BackgroundService
     private readonly IScheduledJobLease _lease;
 
     private readonly ConcurrentDictionary<Guid, Task> _inFlight = new();
+
+    // Cancelled by StopAsync. Manual runs deliberately ignore the admin's request token, but they must stop on host
+    // shutdown — otherwise a run (and its lease) outlives the drain and swallows the next tick on another instance.
+    private readonly CancellationTokenSource _stopping = new();
     private DateTimeOffset _lastRefreshUtc = DateTimeOffset.MinValue;
     private IReadOnlyDictionary<string, ScheduledJobState> _state =
         new Dictionary<string, ScheduledJobState>(StringComparer.Ordinal);
@@ -107,6 +111,12 @@ public sealed class ScheduledJobHost : BackgroundService
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options), _options.LeaseDuration, "ScheduledJobHostOptions.LeaseDuration must be positive.");
+        }
+
+        if (_options.MaxRunDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options), _options.MaxRunDuration, "ScheduledJobHostOptions.MaxRunDuration must be positive.");
         }
     }
 
@@ -171,6 +181,10 @@ public sealed class ScheduledJobHost : BackgroundService
             "ScheduledJobHost stopping — waiting up to {DrainTimeout} for {InFlightCount} in-flight job(s)",
             _options.ShutdownDrainTimeout, _inFlight.Count);
 
+        // Manual runs are linked to _stopping (scheduled runs to the stopping token below), so every in-flight run
+        // observes cancellation.
+        _stopping.Cancel();
+
         // Triggers ExecuteAsync to exit; the per-job tokens are linked to it, so in-flight jobs
         // observe cancellation through their context tokens.
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -225,8 +239,8 @@ public sealed class ScheduledJobHost : BackgroundService
     /// <para><b>Cancellation (NFR-07)</b>: <paramref name="cancellationToken"/> cancels the
     /// <i>dispatch path</i> (registry lookup, lease, run-start record). Once the background task is
     /// kicked off, caller cancellation does NOT interrupt the in-flight job (that would lose the run on a Ctrl-C
-    /// from the admin client); the run is cancelled only if another holder takes its lease. The host's shutdown
-    /// drain (NFR-07: 30s) waits for it.</para>
+    /// from the admin client). The run is cancelled by host shutdown (then drained, NFR-07: 30s) or by its lease
+    /// hold (lost lease, renewal failing for a full lease duration, or <see cref="ScheduledJobHostOptions.MaxRunDuration"/>).</para>
     /// <para><b>Background task tracking</b>: the dispatched task is added to <see cref="_inFlight"/>
     /// so <see cref="StopAsync"/>'s drain logic waits for it (NFR-07).</para>
     /// </remarks>
@@ -362,10 +376,11 @@ public sealed class ScheduledJobHost : BackgroundService
         JobRunResult result;
         try
         {
-            // Only a lost lease cancels a manual run (see TriggerNowAsync remarks).
+            // A lost lease or host shutdown cancels a manual run — never the admin's request (see TriggerNowAsync).
+            using var runCts = CancellationTokenSource.CreateLinkedTokenSource(hold.LostToken, _stopping.Token);
             result = await ExecuteWithRetryAsync(
-                    handler, context, "manual-trigger job", hold.LostToken,
-                    () => hold.IsLost ? LeaseLostMessage : ManualCancelledMessage)
+                    handler, context, "manual-trigger job", runCts.Token,
+                    () => hold.LostReason ?? (_stopping.IsCancellationRequested ? ShutdownCancelledMessage : ManualCancelledMessage))
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -741,7 +756,7 @@ public sealed class ScheduledJobHost : BackgroundService
             using var runCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, hold.LostToken);
             result = await ExecuteWithRetryAsync(
                     entry.Handler, context, "scheduled job", runCts.Token,
-                    () => hold.IsLost ? LeaseLostMessage : ShutdownCancelledMessage)
+                    () => hold.LostReason ?? ShutdownCancelledMessage)
                 .ConfigureAwait(false);
         }
         finally
@@ -909,7 +924,8 @@ public sealed class ScheduledJobHost : BackgroundService
                         return new LeaseAcquisition(
                             LeaseOutcome.Acquired,
                             Hold: new ScheduledJobLeaseHold(
-                                _lease, jobId, token, _options.LeaseDuration, _timeProvider, _logger));
+                                _lease, jobId, token, _options.LeaseDuration, _options.MaxRunDuration,
+                                _timeProvider, _logger));
                     }
 
                     case ScheduledJobLeaseStatus.OccurrenceAlreadyDispatched:

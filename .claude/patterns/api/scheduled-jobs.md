@@ -25,7 +25,7 @@ Adding **schedule-driven** background work (cron, interval, daily-at-time) that 
 - **ADR-036 A1.1**: if Redis is down at tick time the tick is NOT dispatched (recorded failed). A job that must not lose a tick catches up on its next one — design for that
 - **ADR-052**: where scheduled work runs is decided per workload; this pattern is the in-BFF mechanism
 - **ADR-010**: Job class is Singleton; use `IServiceScopeFactory.CreateScope()` per ExecuteAsync if you depend on Scoped services (Dataverse client, OBO token cache, MembershipResolver)
-- **NFR-07**: Honor `CancellationToken` end-to-end; StopAsync drains within 30s. The token is also cancelled if another holder takes the job's lease mid-run
+- **NFR-07**: Honor `CancellationToken` end-to-end; StopAsync drains within 30s. The token is also cancelled when the run can no longer hold its lease — another holder took it, Redis was unreachable for a full lease duration, or the run passed `ScheduledJobHostOptions.MaxRunDuration` (2 h; a job that legitimately runs longer needs a larger value)
 - **NFR-08**: Every run records `correlationId`; for fan-out, every child gets a fresh per-child correlationId (Q1)
 - **bff-extensions.md §A**: Pre-merge checklist applies (publish-size + CVE + tests)
 - **MUST NOT**: extend `sprk_processingjob` for scheduled work; that entity is Office-scoped

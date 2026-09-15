@@ -780,7 +780,6 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
                 Duration: TimeSpan.FromSeconds(1))));
     }
 
-    /// <summary>Test-only no-op <see cref="IScheduledJob"/> for registry seeding.</summary>
     /// <summary>Runs until <c>release</c> completes — keeps a job "already running" for the 409 test.</summary>
     private sealed class BlockingScheduledJob(string jobId, Task release) : IScheduledJob
     {
@@ -795,6 +794,7 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         }
     }
 
+    /// <summary>Test-only no-op <see cref="IScheduledJob"/> for registry seeding.</summary>
     private sealed class FakeScheduledJob : IScheduledJob
     {
         public FakeScheduledJob(string jobId, string displayName, string description)

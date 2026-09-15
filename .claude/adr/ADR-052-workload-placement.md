@@ -47,7 +47,7 @@ provisioning + CI/CD); Flex cost and limits.
 - **MUST** record the host decision in the Placement Justification (`bff-extensions.md` §A), citing signals and costs
 - **MUST** give scheduled work that must not run concurrently **one dispatch per schedule across instances** — a Functions timer, or an `IScheduledJob` under `ScheduledJobHost`'s distributed lease (ADR-036 A1). Never a per-instance timer. Execution stays at-least-once under retry
 - **MUST** make every background handler idempotent per unit of work
-- **MUST** keep `IScheduledJob` implementations free of `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry` dependencies
+- **MUST** keep `IScheduledJob` implementations free of `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry` / dispatch-lease dependencies
 - **MUST** place a Functions project under `src/server/functions/<Name>/` so the `src/server/**` ArchTests cover it (credential guards and I2/I3 as of 2026-09-13; the first Function's setup widens I4–I6)
 
 ### ❌ MUST NOT

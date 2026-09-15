@@ -272,7 +272,10 @@ public static class MembershipModule
 
         // Registered through AddScheduledJob (ADR-036 A1 rule 6). Cron + Enabled
         // come from Membership:Reconciliation at startup, as the deleted bootstrap
-        // read them; a change needs a restart. The admin enable/disable applies to
+        // read them; a change needs a restart. An unparseable CronSchedule now
+        // FAILS STARTUP (it used to disable only this job, with a log line) —
+        // deliberately: a deployment error surfaces at the slot's health check,
+        // the way CacheModule treats a broken Redis setting. The admin enable/disable applies to
         // the instance that served it until DataverseBackgroundJobStore exists
         // (ADR-036 A1 §2).
         var reconciliation = configuration

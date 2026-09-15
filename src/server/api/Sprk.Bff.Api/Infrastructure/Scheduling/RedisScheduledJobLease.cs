@@ -22,6 +22,10 @@ namespace Sprk.Bff.Api.Infrastructure.Scheduling;
 /// </list>
 /// <para><b>Failures</b> — every Redis failure surfaces as <see cref="ScheduledJobLeaseUnavailableException"/>; the
 /// host then applies the owner decision of 2026-09-14 (retry briefly, then do not dispatch; record the tick failed).</para>
+/// <para><b>One scheduler fleet per key prefix.</b> The keys carry no app or environment name. Two BFF deployments that
+/// share one Redis must use different <c>Redis:InstanceName</c> values, or their schedulers suppress each other. The
+/// slots of one app deliberately share the prefix, so a manual trigger on a slot is exclusive with production. System
+/// keys: <c>SystemCacheKeys.SchedulerLease</c> / <c>SchedulerLastFire</c> (ADR-009).</para>
 /// </remarks>
 public sealed class RedisScheduledJobLease : IScheduledJobLease
 {
@@ -86,7 +90,8 @@ public sealed class RedisScheduledJobLease : IScheduledJobLease
         {
             var occurrenceKey = OccurrenceKey(jobId);
             var last = await db.StringGetAsync(occurrenceKey).ConfigureAwait(false);
-            if (last.HasValue && (long)last >= occurrence.UtcTicks)
+            // A value that is not a number (never written by this code) counts as no marker.
+            if (last.TryParse(out long lastTicks) && lastTicks >= occurrence.UtcTicks)
             {
                 await db.LockReleaseAsync(leaseKey, token).ConfigureAwait(false);
                 return ScheduledJobLeaseGrant.AlreadyDispatched;
@@ -96,10 +101,10 @@ public sealed class RedisScheduledJobLease : IScheduledJobLease
                 .ConfigureAwait(false);
             return ScheduledJobLeaseGrant.Granted(token);
         }
-        catch (Exception ex) when (IsStoreFailure(ex))
+        catch (Exception ex)
         {
-            // Give the lease back rather than leave it until it expires; if Redis is down this fails too, and the
-            // expiry covers it.
+            // Whatever failed, give back the lease just taken — otherwise this instance's own retries find it held
+            // and record the tick Skipped. If Redis is down this fails too, and the expiry covers it.
             try
             {
                 await db.LockReleaseAsync(leaseKey, token).ConfigureAwait(false);
@@ -109,7 +114,12 @@ public sealed class RedisScheduledJobLease : IScheduledJobLease
                 // The lease expires on its own.
             }
 
-            throw Unavailable(jobId, "record the occurrence for", ex);
+            if (IsStoreFailure(ex))
+            {
+                throw Unavailable(jobId, "record the occurrence for", ex);
+            }
+
+            throw;
         }
     }
 

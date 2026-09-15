@@ -284,10 +284,10 @@ misstated ADR-001 and is withdrawn.
    retry cannot help.
 5. **Heartbeat (MUST).** Every attempt emits one structured heartbeat carrying its counts and attempt number,
    including an attempt with nothing to do, so a missed run is detectable while run history is process-local.
-6. **Registration (MUST).** `services.AddScheduledJob<TJob>(cron, enabled)` — one shared bootstrap, no per-job
-   bootstrap class. (The helper is introduced by task 103.)
-7. **Host-neutrality (MUST).** Jobs do not depend on `ScheduledJobHost`, `IBackgroundJobStore` or
-   `ScheduledJobRegistry` (ADR-052 §5).
+6. **Registration (MUST).** `services.AddScheduledJob<TJob>(cron, enabled)` — no per-job bootstrap class. (As
+   built by task 103, there is no bootstrap at all; see §5.)
+7. **Host-neutrality (MUST).** Jobs do not depend on `ScheduledJobHost`, `IBackgroundJobStore`,
+   `ScheduledJobRegistry` or the dispatch lease (ADR-052 §5).
 
 ### 4. Corrections
 
@@ -311,6 +311,19 @@ misstated ADR-001 and is withdrawn.
     same occurrence. So the lease also records the last dispatched occurrence and refuses any occurrence earlier
     than or equal to it — the same device the Functions timer trigger uses (its schedule status).
   - **Lost lease.** A run whose lease another holder takes is cancelled.
+  - **Renewal failing.** A run whose renewals cannot reach Redis continues while its lease is still live. Once renewal
+    has failed for a full `LeaseDuration`, the lease has expired and another instance may take it — only this instance
+    may have lost Redis — so the run is cancelled.
+  - **Maximum run time.** Past `ScheduledJobHostOptions.MaxRunDuration` (default 2 h) the run is cancelled and its lease
+    is no longer renewed, so a hung run (one that ignores cancellation) blocks the job for at most that plus one
+    `LeaseDuration`, never indefinitely.
+  - **Host shutdown** cancels manual runs as well as scheduled ones, so a run and its lease do not outlive the drain.
+  - **The remaining overlap window.** A cancelled run that ignores its cancellation token keeps running. And if Redis
+    loses the key (a failover without persistence) while a run continues, another instance can take the lease for a
+    **later** occurrence until the first holder's next renewal finds it held and cancels — at most a third of
+    `LeaseDuration`, about 40 s. Execution stays at-least-once; per-unit idempotency (rule 3) is the backstop.
+  - **At most one dispatch per occurrence.** The occurrence marker is written when the lease is taken, before the
+    run. An instance that dies between the two loses that occurrence; the next one runs normally.
   - **Manual trigger.** Triggering a job that is already running gets 409.
 - **Rule 2.** `ScheduledJobHostOptions.RunScheduledJobs` reads `Scheduling:RunScheduledJobs`.
   `scripts/Deploy-BffApi.ps1 -UseSlotDeploy` sets `Scheduling__RunScheduledJobs=false` on the slot as a slot

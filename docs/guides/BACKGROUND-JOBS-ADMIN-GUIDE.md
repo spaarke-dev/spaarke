@@ -222,7 +222,7 @@ The response also includes a `Location: /api/admin/jobs/membership-reconciliatio
   - **HTTP 409:** the job is already running — a scheduled tick or another trigger — and no second run starts.
   - **HTTP 503:** Redis, the lease store, is down.
   - Once a run completes you can trigger again: two triggers one after another give two runs.
-- **Admin client cancellation does NOT interrupt the run**. Once dispatch is complete, only host shutdown can stop the in-flight job (and even then it has a 30-second drain window).
+- **Admin client cancellation does NOT interrupt the run**. Once dispatch is complete, the in-flight job stops only on host shutdown (it is cancelled, then drained for up to 30 seconds), or when its lease can no longer be held: another holder took it, Redis was unreachable for a full lease duration, or the run passed `MaxRunDuration` (2 hours).
 - **HTTP 404** if `jobId` is not registered.
 
 ### `POST /api/admin/jobs/{jobId}/enable` — Resume scheduled execution
@@ -521,7 +521,7 @@ curl -s -H "Authorization: Bearer {token}" \
 1. *(Optional today — the tables are unused until the Dataverse store ships.)* Run the idempotent Dataverse schema scripts ([`Create-BackgroundJobEntity.ps1`](../../scripts/Create-BackgroundJobEntity.ps1) + [`Create-BackgroundJobRunEntity.ps1`](../../scripts/Create-BackgroundJobRunEntity.ps1)) against the target environment and add both entities to the active unmanaged Spaarke solution (per ADR-027).
 2. Deploy the BFF (no `appsettings.json` changes required — defaults are spec-correct).
 3. Run the [verifying the framework is healthy](#verifying-the-framework-is-healthy) smoke test.
-4. Deploy through a staging slot only with `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`, which sets the slot guard (`Scheduling__RunScheduledJobs=false`, slot-sticky). A slot deployed any other way runs scheduled jobs against production data. To set the guard by hand: `az webapp config appsettings set -g <rg> -n <app> --slot staging --slot-settings Scheduling__RunScheduledJobs=false`.
+4. Deploy through a staging slot only with `scripts/Deploy-BffApi.ps1 -UseSlotDeploy` or the `deploy-bff-api.yml` workflow; both set the slot guard (`Scheduling__RunScheduledJobs=false`, slot-sticky). A slot deployed any other way — including, for now, the L2 control plane's H9 deploy (#987) — runs scheduled jobs against production data. To set the guard by hand: `az webapp config appsettings set -g <rg> -n <app> --slot staging --slot-settings Scheduling__RunScheduledJobs=false`.
 
 ---
 

@@ -117,27 +117,40 @@ public class RedisScheduledJobLeaseTests
     }
 
     [Fact]
-    public async Task Renew_LeaseNoLongerHeldByThisToken_ReturnsFalse()
+    public async Task TryAcquire_FailureAfterTakingTheLease_GivesItBackAndReportsUnavailable()
     {
         var (lease, db) = Create();
-        db.Setup(d => d.LockExtendAsync(LeaseKey, (RedisValue)"old-token", Duration, It.IsAny<CommandFlags>()))
-            .ReturnsAsync(false);
+        RedisValue taken = default;
+        db.Setup(d => d.LockTakeAsync(LeaseKey, It.IsAny<RedisValue>(), Duration, It.IsAny<CommandFlags>()))
+            .Callback<RedisKey, RedisValue, TimeSpan, CommandFlags>((_, token, _, _) => taken = token)
+            .ReturnsAsync(true);
+        db.Setup(d => d.StringGetAsync(OccurrenceKey, It.IsAny<CommandFlags>()))
+            .ThrowsAsync(new RedisTimeoutException("timed out", CommandStatus.Sent));
+        db.Setup(d => d.LockReleaseAsync(LeaseKey, It.IsAny<RedisValue>(), It.IsAny<CommandFlags>()))
+            .ReturnsAsync(true);
 
-        var renewed = await lease.RenewAsync(JobId, "old-token", Duration, CancellationToken.None);
+        var acquire = async () => await lease.TryAcquireAsync(JobId, Occurrence, Duration, CancellationToken.None);
 
-        renewed.Should().BeFalse();
+        await acquire.Should().ThrowAsync<ScheduledJobLeaseUnavailableException>();
+        db.Verify(d => d.LockReleaseAsync(LeaseKey, taken, It.IsAny<CommandFlags>()), Times.Once,
+            "a lease left behind would make this instance's own retries find it held and record the tick Skipped");
     }
 
     [Fact]
-    public async Task Release_DeletesOnlyThroughTheHoldersToken()
+    public async Task TryAcquire_UnreadableOccurrenceMarker_CountsAsNoMarker()
     {
         var (lease, db) = Create();
-        db.Setup(d => d.LockReleaseAsync(LeaseKey, (RedisValue)"my-token", It.IsAny<CommandFlags>()))
+        db.Setup(d => d.LockTakeAsync(LeaseKey, It.IsAny<RedisValue>(), Duration, It.IsAny<CommandFlags>()))
+            .ReturnsAsync(true);
+        db.Setup(d => d.StringGetAsync(OccurrenceKey, It.IsAny<CommandFlags>()))
+            .ReturnsAsync("not-a-number");
+        db.Setup(d => d.StringSetAsync(
+                OccurrenceKey, Occurrence.UtcTicks, It.IsAny<TimeSpan?>(), false, It.IsAny<When>(), It.IsAny<CommandFlags>()))
             .ReturnsAsync(true);
 
-        await lease.ReleaseAsync(JobId, "my-token", CancellationToken.None);
+        var grant = await lease.TryAcquireAsync(JobId, Occurrence, Duration, CancellationToken.None);
 
-        db.Verify(d => d.LockReleaseAsync(LeaseKey, (RedisValue)"my-token", It.IsAny<CommandFlags>()), Times.Once);
+        grant.Status.Should().Be(ScheduledJobLeaseStatus.Granted);
     }
 
     private static (RedisScheduledJobLease Lease, Mock<IDatabase> Db) Create(bool connected = true)

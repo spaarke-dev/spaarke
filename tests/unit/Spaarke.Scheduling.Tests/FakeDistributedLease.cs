@@ -33,6 +33,18 @@ internal sealed class FakeDistributedLease : IScheduledJobLease
 
     public ConcurrentQueue<TimeSpan> RequestedDurations { get; } = new();
 
+    /// <summary>Every grant, with the virtual time it was made — assert against this, not the test thread's clock.</summary>
+    public ConcurrentQueue<(string JobId, string Token, DateTimeOffset At)> Grants { get; } = new();
+
+    /// <summary>The lease lapses — as if Redis restarted empty — without anyone else taking it.</summary>
+    public void Expire(string jobId)
+    {
+        lock (_gate)
+        {
+            _leases.Remove(jobId);
+        }
+    }
+
     /// <summary>The next <paramref name="count"/> acquires find the store down; later ones reach it.</summary>
     public void FailNextAcquires(int count) => Volatile.Write(ref _failNextAcquires, count);
 
@@ -94,7 +106,9 @@ internal sealed class FakeDistributedLease : IScheduledJobLease
             }
 
             var token = Guid.NewGuid().ToString("N");
-            _leases[jobId] = (token, _time.GetUtcNow() + duration);
+            var now = _time.GetUtcNow();
+            _leases[jobId] = (token, now + duration);
+            Grants.Enqueue((jobId, token, now));
             return Task.FromResult(ScheduledJobLeaseGrant.Granted(token));
         }
     }
