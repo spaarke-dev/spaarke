@@ -325,9 +325,11 @@ misstated ADR-001 and is withdrawn.
   - **At most one dispatch per occurrence.** The occurrence marker is written when the lease is taken, before the
     run. An instance that dies between the two loses that occurrence; the next one runs normally.
   - **Manual trigger.** Triggering a job that is already running gets 409.
-- **Rule 2.** `ScheduledJobHostOptions.RunScheduledJobs` reads `Scheduling:RunScheduledJobs`.
-  `scripts/Deploy-BffApi.ps1 -UseSlotDeploy` sets `Scheduling__RunScheduledJobs=false` on the slot as a slot
-  setting, so it never swaps into production.
+- **Rule 2.** `ScheduledJobHostOptions.RunScheduledJobs` reads `Scheduling:RunScheduledJobs`. Every path that
+  deploys to a staging slot sets `Scheduling__RunScheduledJobs=false` on the slot as a slot setting, before the
+  deploy, so it never swaps into production: `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`,
+  `.github/workflows/deploy-bff-api.yml`, and the L2 control plane's H9 provisioning deploy
+  (`H9BffDeployHandler`, #987). `infrastructure/bicep/modules/deployment-slot.bicep` sets it when it creates a slot.
 - **Rule 6.** Jobs register with `AddScheduledJob<TJob>(cron, enabled)`, and `ScheduledJobRegistry` and
   `InMemoryBackgroundJobStore` read the registrations in their constructors. The three per-job bootstrap hosted
   services are deleted, and `WorkloadPlacementGuardTests.ScheduledJobsRegisterThroughAddScheduledJobOnly` keeps them

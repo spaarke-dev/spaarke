@@ -769,7 +769,9 @@ builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 builder.Services.AddH14IntegrationWiringHandler(builder.Configuration);
 
 // Task 052 (Batch 4B) / task 132 (Wave G-3, Option D hybrid, DS-4 §5
-// re-scope): H9 BFF-deploy handler + SIX collaborator seams. Task 132
+// re-scope): H9 BFF-deploy handler + SEVEN collaborator seams (the seventh,
+// ISlotStickyAppSettingWriter = ArmSlotStickyAppSettingWriter, is the
+// scheduled-jobs slot guard added for GitHub #987 — registered below). Task 132
 // replaced the two shell-out collaborators (DotnetR3GateVerifier /
 // DeployBffApiScriptRunner — both RETIRED, kept on disk unregistered per
 // their retirement banners) AND the ARM-adjacent-but-CLI AzCliAppServiceSlotSwapper
@@ -830,6 +832,17 @@ builder.Services.AddSingleton<IAppServiceSlotSwapper>(sp =>
     var options = sp.GetRequiredService<IOptions<BffDeployOptions>>();
     var logger = sp.GetRequiredService<ILogger<ArmSlotSwapper>>();
     return new ArmSlotSwapper(armClient, options, logger);
+});
+// GitHub #987 (ADR-036 A1 rule 2): the scheduled-jobs slot guard H9 sets on the
+// staging slot before its zip-deploy — same ArmClient-from-shared-TokenCredential
+// path as the swapper above (ADR-028 MI-outbound, no stored key).
+builder.Services.AddSingleton<ISlotStickyAppSettingWriter>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<BffDeployOptions>>();
+    var logger = sp.GetRequiredService<ILogger<ArmSlotStickyAppSettingWriter>>();
+    return new ArmSlotStickyAppSettingWriter(armClient, options, logger);
 });
 builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();

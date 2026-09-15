@@ -521,7 +521,7 @@ curl -s -H "Authorization: Bearer {token}" \
 1. *(Optional today — the tables are unused until the Dataverse store ships.)* Run the idempotent Dataverse schema scripts ([`Create-BackgroundJobEntity.ps1`](../../scripts/Create-BackgroundJobEntity.ps1) + [`Create-BackgroundJobRunEntity.ps1`](../../scripts/Create-BackgroundJobRunEntity.ps1)) against the target environment and add both entities to the active unmanaged Spaarke solution (per ADR-027).
 2. Deploy the BFF (no `appsettings.json` changes required — defaults are spec-correct).
 3. Run the [verifying the framework is healthy](#verifying-the-framework-is-healthy) smoke test.
-4. Deploy through a staging slot only with `scripts/Deploy-BffApi.ps1 -UseSlotDeploy` or the `deploy-bff-api.yml` workflow; both set the slot guard (`Scheduling__RunScheduledJobs=false`, slot-sticky). A slot deployed any other way — including, for now, the L2 control plane's H9 deploy (#987) — runs scheduled jobs against production data. To set the guard by hand: `az webapp config appsettings set -g <rg> -n <app> --slot staging --slot-settings Scheduling__RunScheduledJobs=false`.
+4. Deploy through a staging slot only with `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`, the `deploy-bff-api.yml` workflow, or the L2 control plane's H9 provisioning deploy; all three set the slot guard (`Scheduling__RunScheduledJobs=false`, slot-sticky) before deploying, and H9 deploys nothing if it cannot. A slot deployed any other way runs scheduled jobs against production data. To set the guard by hand: `az webapp config appsettings set -g <rg> -n <app> --slot staging --slot-settings Scheduling__RunScheduledJobs=false`.
 
 ---
 
