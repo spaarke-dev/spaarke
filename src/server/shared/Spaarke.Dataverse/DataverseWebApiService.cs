@@ -42,20 +42,30 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// Nullable with a null default so existing fixtures constructing this type directly keep
     /// compiling (NFR-04); a null provider is fatal only if that branch is actually taken.
     /// </param>
-    /// <param name="credential">
-    /// Optional pre-built credential. When supplied, credential SELECTION is bypassed: neither the
-    /// managed-identity nor the ordered-provider branch runs. Mirrors the same parameter on the sibling
-    /// <see cref="DataverseWebApiClient"/>. Added by unified-access-control-r2 task 104 so tests can send a
-    /// real request through the production request builder without a network token. The BFF registers this
-    /// type through a factory lambda (<c>GraphModule</c>) that never passes it, so the singleton
-    /// <c>TokenCredential</c> in the service container cannot reach it.
-    /// </param>
     public DataverseWebApiService(
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
-        IConfidentialClientProvider? confidentialClients = null,
-        TokenCredential? credential = null)
+        IConfidentialClientProvider? confidentialClients = null)
+        : this(httpClient, configuration, logger, confidentialClients, credential: null)
+    {
+    }
+
+    /// <summary>
+    /// Test seam (unified-access-control-r2 task 104). A non-null <paramref name="credential"/> bypasses
+    /// credential SELECTION: neither the managed-identity nor the ordered-provider branch runs. Tests use it to
+    /// send a real request through the production request builder without a network token.
+    /// <para><b>Protected on purpose.</b> Dependency injection only considers public constructors, so the
+    /// container's singleton <c>TokenCredential</c> (<c>Program.cs</c>) can never be injected here, however this
+    /// type is registered. The public optional parameter on <see cref="DataverseWebApiClient"/> does not have
+    /// that protection. Tests reach this constructor through a subclass.</para>
+    /// </summary>
+    protected DataverseWebApiService(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<DataverseWebApiService> logger,
+        IConfidentialClientProvider? confidentialClients,
+        TokenCredential? credential)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -74,7 +84,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         if (credential is not null)
         {
-            // Explicitly supplied: selection is bypassed. See the ctor's <param> doc.
+            // Explicitly supplied (tests only): selection is bypassed. See this protected ctor's summary.
             _credential = credential;
             _logger.LogInformation(
                 "DataverseWebApiService using an injected TokenCredential (selection bypassed) for {ApiUrl}", _apiUrl);
@@ -1242,13 +1252,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         CancellationToken ct = default,
         Guid? impersonateSystemUserId = null)
     {
-        // Task 104: refuse an empty caller id BEFORE the metadata read below. An impersonated write must never
-        // degrade to app-only, and nothing (not even the EntitySetName lookup) is sent for a refused call.
-        if (impersonateSystemUserId == Guid.Empty)
-            throw new ArgumentException(
-                "An impersonated write requires a non-empty caller systemuserid; refusing to send it app-only (fail closed).",
-                nameof(impersonateSystemUserId));
-
+        // An empty caller id is refused by CreateAuthenticatedRequestAsync (task 104) before the PATCH is sent. That
+        // request builder is the single enforcement point for every impersonated request, so there is deliberately
+        // no second guard here to mask it; only the app-only EntitySetName lookup below may run first.
         if (fields.Count == 0)
         {
             _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);

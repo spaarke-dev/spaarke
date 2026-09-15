@@ -23,7 +23,8 @@ namespace Spaarke.Dataverse;
 ///     Use <see cref="ApplyAsEntraUser"/>.</item>
 ///   <item><c>MSCRMCallerID</c> = the Dataverse <b>systemuserid</b>. Microsoft marks this header <b>legacy</b>;
 ///     the BFF read path already resolves the caller's systemuserid, so it stays.
-///     Use <see cref="ApplyAsSystemUser"/>.</item>
+///     Use <see cref="ApplyAsSystemUser"/>. (<c>notes/access-model-decision.md</c> pairs <c>MSCRMCallerID</c> with
+///     the Entra oid. That pairing is wrong: the oid belongs in <c>CallerObjectId</c>.)</item>
 /// </list>
 /// A request carries exactly ONE of the two: Microsoft does not document what Dataverse does when both are
 /// present, so each entry point removes the other header before stamping its own.
@@ -32,10 +33,12 @@ namespace Spaarke.Dataverse;
 /// <b>What the helper cannot check, and why.</b> Microsoft does not document what Dataverse returns for an
 /// unknown, disabled or unlicensed user, or for an object id from another tenant, so the helper cannot rely on
 /// Dataverse to refuse those. It checks what it can know: a non-empty id and, for an Entra object id, that the
-/// token's tenant is the Dataverse org's tenant (the caller supplies both, so the helper takes no configuration
-/// dependency). It does not check the target environment: <c>DataverseWebApiService</c> sends relative URIs on
-/// an <c>HttpClient</c> whose base address is the configured org, so the environment is fixed by construction,
-/// and the helper has no configured org to compare against.
+/// token's tenant is the Dataverse org's tenant. The caller supplies both tenant ids, so the helper takes no
+/// configuration dependency, and <b>the check is only as strong as the caller's sources</b>: the token tenant
+/// must come from the validated token's <c>tid</c>, and the org tenant from configuration, never from the
+/// same value twice. It does not check the target environment: <c>DataverseWebApiService</c> sends relative URIs
+/// on an <c>HttpClient</c> whose base address is the configured org, so the environment is fixed by
+/// construction there. A direct caller that builds its own request owns the environment choice.
 /// </para>
 /// <para>
 /// Requires the calling application user to hold <c>prvActOnBehalfOfAnotherUser</c> (the Delegate role; it

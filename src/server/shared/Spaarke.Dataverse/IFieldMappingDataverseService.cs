@@ -34,8 +34,9 @@ public interface IFieldMappingDataverseService
     /// OPTIONAL Dataverse <c>systemuserid</c> to run the write AS (via <c>MSCRMCallerID</c> impersonation —
     /// effective privileges = intersection of the app user and the impersonated user; honest <c>modifiedby</c>).
     /// Null = app-only (existing callers byte-unchanged). <see cref="Guid.Empty"/> is refused with an
-    /// <see cref="ArgumentException"/> before anything is sent (unified-access-control-r2 task 104, fail closed):
-    /// it used to be read as app-only, which silently dropped the caller's row-level security from the write.
+    /// <see cref="ArgumentException"/> before the write is sent (unified-access-control-r2 task 104, fail closed;
+    /// the app-only EntitySetName metadata lookup may already have run). It used to be read as app-only, which
+    /// silently dropped the caller's row-level security from the write.
     /// Added for the Job B apply path (task 031); the confirming user's identity is threaded here so the field
     /// update is attributed to and gated by them.
     /// </param>

@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///   <item><b>Perturbation (always runs, no tenant).</b> Feeds the invariant the exact fail-OPEN state
 ///   and asserts it reports failure. This is what makes the gate real on every CI run: an assertion
 ///   nobody has watched fail is an assertion nobody has verified.</item>
-///   <item><b>Live tenant (Tests 1–3).</b> The actual row-set comparison against a provisioned canary
+///   <item><b>Live tenant (Tests 1–4).</b> The actual row-set comparison against a provisioned canary
 ///   user. FAILS — never quietly passes — when the canary is absent AND the gate is open (spec
 ///   NFR-01); see <c>TryAcquireCanary</c> for how "open" is decided.</item>
 ///   <item><b>Config tripwire (always runs, no tenant).</b> The FR-20 flag cannot be turned on in
@@ -223,7 +223,7 @@ public class ImpersonationNegativeCanaryTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
-    // Layer 2 — LIVE TENANT. Tests 1–3 from investigation 08 §3d.
+    // Layer 2 — LIVE TENANT. Tests 1–3 from investigation 08 §3d; Test 4 (the helper path) from task 104.
     //
     // These require the provisioned canary user. See TryAcquireCanary for how "must not skip"
     // (spec NFR-01) is honored without turning every credential-less CI run permanently red.
@@ -537,8 +537,9 @@ public class ImpersonationNegativeCanaryTests
     }
 
     /// <summary>
-    /// The app-only side — the CONTROL, issued directly so it shares no code path with the impersonated
-    /// read beyond the credential. Same entity set, same <c>$select</c>, same <c>$top</c>; the ONLY
+    /// The app-only side — the CONTROL. Against Test 1 it shares no code path with the impersonated read (which
+    /// goes through <c>RetrieveMultipleImpersonatedAsync</c>) beyond the credential; against Test 4 it shares the raw
+    /// read with the helper-path read, so the two differ only by the header the helper writes. Same entity set, same <c>$select</c>, same <c>$top</c>; the ONLY
     /// difference is the absent <c>MSCRMCallerID</c> header.
     /// </summary>
     private static Task<IReadOnlyCollection<Guid>> ReadAppOnlyMatterIdsAsync(

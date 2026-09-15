@@ -33,7 +33,10 @@ public class DataverseImpersonationHelperTests
 
         DataverseImpersonation.ApplyAsSystemUser(request, SystemUserId);
 
-        request.Headers.GetValues(DataverseImpersonation.CallerIdHeader)
+        // The wire value is the contract Dataverse reads. Pinned as a literal so a typo in the constant fails here,
+        // not only in the live canary.
+        DataverseImpersonation.CallerIdHeader.Should().Be("MSCRMCallerID");
+        request.Headers.GetValues("MSCRMCallerID")
             .Should().ContainSingle().Which.Should().Be(SystemUserId.ToString());
         request.Headers.Contains(DataverseImpersonation.CallerObjectIdHeader).Should().BeFalse();
     }
