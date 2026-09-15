@@ -575,10 +575,16 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {/* Find tab (task 015 / FR-03) — frame only, no similarity/search call. Tasks
-            033-034 mount the real view here (task 032's per-row authorization, plan.md
-            finding F-b, is already in place). */}
-        {currentTab === 'find' && <FindView />}
+        {/* Find tab (task 015 / FR-03; real three-state gate wired by task 033 / FR-16b). Task 034
+            still owns the full similarity results view (lazy-scroll + the records bridge) — this
+            mount point is unchanged from task 015. */}
+        {currentTab === 'find' && (
+          <FindView
+            {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+            onRetryDocumentIdentity={retryDocumentIdentity}
+            onGoToSave={() => setCurrentTab('save')}
+          />
+        )}
 
         {currentTab === 'share' && (
           <ShareView

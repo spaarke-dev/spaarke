@@ -629,7 +629,6 @@ public static class RagEndpoints
         }
 
         var results = new List<SendToIndexDocumentResult>();
-        var indexName = searchIndexNameResolver.GetDefaultIndexName();
 
         foreach (var documentId in request.DocumentIds)
         {
@@ -687,6 +686,19 @@ public static class RagEndpoints
                     );
                 }
 
+                // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE
+                // building the index request. Previously this handler called ONLY
+                // searchIndexNameResolver.GetDefaultIndexName() (the tenant default), so a document
+                // whose own sprk_searchindexname (or a parent/BU's AI Search Index lookup) named a
+                // different index was silently routed to the tenant-default index instead — the
+                // write landed in the wrong place, not just the wrong tracking stamp. Mirrors
+                // RagIndexingJobHandler's precedence exactly: resolver chain (document's own
+                // sprk_ai_search_index lookup, falling back to the legacy sprk_searchindexname text
+                // column → parent → parent's owning BU) first; GetDefaultIndexName() is now only the
+                // final fallback when the chain resolves nothing.
+                var resolvedIndexName = await searchIndexNameResolver.ResolveAsync(
+                    documentId, parentEntity?.EntityType, parentEntity?.EntityId, cancellationToken);
+
                 // Step 4: Build file index request
                 var indexRequest = new FileIndexRequest
                 {
@@ -695,7 +707,11 @@ public static class RagEndpoints
                     ItemId = document.GraphItemId,
                     FileName = document.FileName ?? document.Name,
                     DocumentId = documentId,
-                    ParentEntity = parentEntity
+                    ParentEntity = parentEntity,
+                    // Null/whitespace here falls through to IRagService's own tenant-default chain
+                    // (byte-for-byte backward compatible), so the ACTUAL write — not just the
+                    // Dataverse stamp below — honors the per-record index.
+                    SearchIndexName = resolvedIndexName
                 };
 
                 // Step 5: Index via OBO authentication
@@ -707,6 +723,11 @@ public static class RagEndpoints
                     // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
                     // sprk_searchindexed=true + sprk_searchindexedon for the transition window
                     // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
+                    //
+                    // Stamp the index the file actually landed in (task 033 fix, mirrors
+                    // RagIndexingJobHandler): the per-record resolved value when the chain found
+                    // one, otherwise the single canonical tenant default.
+                    var stampedIndexName = resolvedIndexName ?? searchIndexNameResolver.GetDefaultIndexName();
                     var completedAt = DateTime.UtcNow;
                     var updateRequest = new UpdateDocumentRequest
                     {
@@ -715,22 +736,22 @@ public static class RagEndpoints
                         // Legacy dual-write (preserved during transition)
                         SearchIndexed = true,
                         SearchIndexedOn = completedAt,
-                        // Index routing (unchanged)
-                        SearchIndexName = indexName
+                        // Index routing (task 033: per-record when resolved, else tenant default)
+                        SearchIndexName = stampedIndexName
                     };
 
                     await dataverseService.UpdateDocumentAsync(documentId, updateRequest, cancellationToken);
 
                     logger.LogInformation(
                         "Document {DocumentId} indexed successfully: {ChunksIndexed} chunks to {IndexName}",
-                        documentId, indexResult.ChunksIndexed, indexName);
+                        documentId, indexResult.ChunksIndexed, stampedIndexName);
 
                     results.Add(new SendToIndexDocumentResult
                     {
                         DocumentId = documentId,
                         Success = true,
                         ChunksIndexed = indexResult.ChunksIndexed,
-                        IndexName = indexName,
+                        IndexName = stampedIndexName,
                         ParentEntityType = parentEntity?.EntityType,
                         ParentEntityId = parentEntity?.EntityId
                     });
