@@ -23,4 +23,10 @@ metadata:
 
 **Open questions**: Which user service-protection limits are charged to under impersonation (undocumented). Whether revocation between enqueue and execution should be re-checked (disabled user → Dataverse rejects? not documented; test it).
 
+## 2026-09-15 follow-up: header semantics + failure modes (for DataverseImpersonation.cs hardening, GH #990)
+- Web API page wording: "**Preferred:** ... Microsoft Entra ID object ID ... header `CallerObjectId`" / "**Legacy:** ... systemuserid, use `MSCRMCallerID`". Concept page: CallerObjectId value = the oid "included in the SystemUser.AzureActiveDirectoryObjectId" (i.e. resolved against the ORG's systemuser rows).
+- NOT documented anywhere: both-headers precedence/error; whether impersonating a missing/disabled/unlicensed user fails closed or open; cross-tenant (home-tenant) oid behaviour.
+- Error catalog (web-service-error-codes, not tied to impersonation in docs except InvalidCallerId): `InvalidCallerId` 0x80048d1A "CallerId provided for impersonation is invalid... NULL or empty"; `UserDirectoryObjectIdNotFoundInAAD` 0x80041d28; `unManagedidsusernotenabled` 0x80040225 "specified user(Id={0}) is disabled"; `UserNotAssignedLicense` 0x8004D24B; `UserDisabledAndUnlicensed` 0x8004D24D; `CannotActOnBehalfOfAnotherUser` 0x8004A110.
+- B2B guests get a separate user object in the resource tenant (Entra user-properties); Dataverse `restrictGuestUserAccess` (default true new envs) blocks guest "API calls" — impersonation of a guest not addressed. MUST empirically test all 4 failure modes.
+
 Related: [[dataverse-record-access-security-2026-07-16]], [[dataverse-record-restriction-secure-project-2026-08-20]], [[background-work-hosting-best-practice-2026-09-12]]

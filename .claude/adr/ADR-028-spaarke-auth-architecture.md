@@ -285,10 +285,12 @@ allow-list**: there is no approximation left to tame.
   union (register B-17).
 - **MUST** fail **closed** on an absent caller id. `RetrieveMultipleImpersonatedAsync` throws on
   `Guid.Empty` — *"refusing to issue an app-only query on the access-scoped read path"*
-  (`DataverseWebApiService.cs:978`). ⚠️ **The enforcement is in the READ method, not in the helper**:
-  `DataverseImpersonation` deliberately adds no header for a null/empty id, so a *new* impersonated call
-  site that skips the read method would silently degrade to an app-only (unscoped) query. Any new
-  access-scoped impersonated path MUST carry its own equivalent refusal.
+  (`DataverseWebApiService.cs`). **Since `unified-access-control-r2` task 104 (#990, 2026-09-15) the
+  helper refuses too.** `DataverseImpersonation.ApplyAsSystemUser` / `ApplyAsEntraUser` take a non-nullable
+  id and throw on `Guid.Empty` (the Entra-oid path also on a tenant mismatch), and a request carries exactly
+  one impersonation header. Until then the helper silently added no header for an empty id, so a call site
+  that skipped the read method degraded to an app-only (unscoped) query. Any new access-scoped impersonated
+  path MUST carry its own equivalent refusal.
 - **MUST** keep the **NFR-04 negative canary** (task 034) as the standing guard: an impersonated
   low-privilege read must return a **strict subset** of the app-only result **and strictly fewer rows**.
   **Equality means impersonation is inert and MUST fail the build** — that is the exact signature of a

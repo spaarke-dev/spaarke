@@ -7,6 +7,20 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-15 — ADR-028 A5: the impersonation helper fails closed (task 104, #990)
+
+- **ADR-028 A5** (concise): a factual correction; no rule changes. The warning that "the enforcement is in
+  the READ method, not in the helper" now says that the helper refuses too:
+  - `DataverseImpersonation.ApplyAsSystemUser` / `ApplyAsEntraUser` throw on an empty id;
+  - the Entra-oid path also throws on a tenant mismatch;
+  - a request carries exactly one impersonation header.
+
+  This implements ADR-052 §6 prerequisite **P3** on `work/unified-access-control-r2`. #990 closes when that branch merges. The
+  MUST that a new impersonated path carry its own refusal is unchanged.
+- **Why**: the helper used to add no header for an empty id. A call site that bypassed
+  `RetrieveMultipleImpersonatedAsync` therefore ran app-only, unscoped, and still returned HTTP 200.
+
+---
 ###### 2026-09-15 — ADR-052 §6 / ADR-028 A5: conditional Dataverse impersonation (owner-accepted)
 
 - **ADR-052** (concise + full): an Azure Function — or a BFF job handler — MAY impersonate a Dataverse user, but
