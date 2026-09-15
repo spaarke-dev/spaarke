@@ -4,7 +4,7 @@
     <title>Re-profile and re-index a document after a version save (per-version analysis key)</title>
     <phase>2 Save flow</phase>
     <gate>023 merged (version save writes a new SPE version of the existing sprk_document)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in the BFF background-job path (idempotency of document analysis + indexing) consumed by every document-save surface; tags include bff-api, ai and jobs.</rigor-reason>
     <model-tier>opus</model-tier>

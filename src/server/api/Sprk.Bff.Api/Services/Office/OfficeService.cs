@@ -646,6 +646,7 @@ public class OfficeService : IOfficeService
                     fileName,
                     fileSize,
                     documentId,
+                    isVersionSave: false,
                     cancellationToken);
 
                 // Mark job as complete - background workers will process asynchronously
@@ -937,6 +938,8 @@ public class OfficeService : IOfficeService
 
         // The EXISTING document id and the SAME drive item: downstream artifacts and AI attach to this record.
         // The file name is SPE's (a PUT by item id does not rename the item), falling back to the row's.
+        // Task 029: isVersionSave stamps THIS save's job id on the payload, so the profile and index refresh for the
+        // version just written instead of being answered "already processed" by the first save's keys.
         await _jobQueue.QueueUploadFinalizationAsync(
             jobId,
             idempotencyKey,
@@ -948,6 +951,7 @@ public class OfficeService : IOfficeService
             write.ItemName ?? target.FileName ?? sanitizedFileName,
             fileSize,
             target.DocumentId,
+            isVersionSave: true,
             cancellationToken);
 
         await _documentPersistence.UpdateJobStatusInDataverseAsync(
