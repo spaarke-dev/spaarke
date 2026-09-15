@@ -20,8 +20,10 @@ namespace Spaarke.ArchTests;
 ///   <item><b>Functions projects</b> (ADR-052 §5–§6) — a project that hosts Azure Functions or a Durable Task
 ///   worker lives under <c>src/server/functions/</c> (so the <c>src/server/**</c> ArchTests — credential guards,
 ///   tenant-isolation invariants — cover it), never references <c>Sprk.Bff.Api</c>, and authenticates app-only as
-///   the stamp's managed identity: no confidential client, client-assertion or certificate credential, OBO, or
-///   Dataverse caller impersonation — the ways a Function would act as the BFF app registration or as a user.</item>
+///   the stamp's managed identity: no confidential client, client-assertion or certificate credential, or OBO — the
+///   ways a Function would act as the BFF app registration. Dataverse impersonation of the user who started the work
+///   is permitted (owner-accepted 2026-09-15, ADR-052 §6) but only through the shared <c>DataverseImpersonation</c>
+///   helper, so the raw headers stay banned.</item>
 /// </list>
 /// <para>Per <c>tests/CLAUDE.md</c> "Structural fitness functions" this file is MAINTAIN-class: it is the
 /// mechanism, not scaffolding.</para>
@@ -373,14 +375,21 @@ public class WorkloadPlacementGuardTests
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// The types a Function would need to act as an app registration (ADR-028 A4's confidential-client row) or as a
-    /// user (ADR-028 A5 impersonation) rather than app-only as the managed identity. The stamp's UAMI can mint the
-    /// MI-FIC assertion for the BFF app registration and can send the impersonation headers, so the rule is
-    /// enforced here rather than trusted. <c>CredentialCensusTests</c> would also see a new confidential client, but
-    /// a reasoned census entry could admit it without anyone noticing that ADR-052 §6 forbids it in a Function.
+    /// The types a Function would need to act as an app registration (ADR-028 A4's confidential-client row), and the
+    /// raw impersonation headers and SDK properties that would let it act as a user WITHOUT the shared fail-closed
+    /// helper. The stamp's UAMI can mint the MI-FIC assertion for the BFF app registration and can send the headers,
+    /// so the rule is enforced here rather than trusted. <c>CredentialCensusTests</c> would also see a new
+    /// confidential client, but a reasoned census entry could admit it without anyone noticing that ADR-052 §6
+    /// forbids it in a Function.
     /// </summary>
+    /// <remarks>
+    /// Impersonation itself is permitted in a Function since 2026-09-15 (owner-accepted, ADR-052 §6 / ADR-028 A5):
+    /// only for work a user started through the BFF, and only through <c>Spaarke.Dataverse.DataverseImpersonation</c>.
+    /// That helper is therefore not banned — the raw <c>MSCRMCallerID</c> / <c>CallerObjectId</c> headers and the
+    /// ServiceClient's <c>CallerAADObjectId</c> are, because each bypasses the helper's refusal of an empty id.
+    /// </remarks>
     private static readonly Regex ConfidentialClientUse = new(
-        @"\b(?:ConfidentialClientApplicationBuilder|ManagedIdentityClientAssertion|WithClientAssertion|AcquireTokenOnBehalfOf|OnBehalfOfCredential|ClientAssertionCredential|ClientCertificateCredential|ClientSecretCredential|DataverseImpersonation|MSCRMCallerID|CallerObjectId)\b",
+        @"\b(?:ConfidentialClientApplicationBuilder|ManagedIdentityClientAssertion|WithClientAssertion|AcquireTokenOnBehalfOf|OnBehalfOfCredential|ClientAssertionCredential|ClientCertificateCredential|ClientSecretCredential|MSCRMCallerID|CallerObjectId|CallerAADObjectId)\b",
         RegexOptions.CultureInvariant);
 
     /// <summary>
@@ -406,7 +415,7 @@ public class WorkloadPlacementGuardTests
         Assert.True(findings.Count == 0, string.Join("\n", findings));
     }
 
-    [Fact(DisplayName = "ADR-052 §6: code under src/server/functions/ authenticates app-only — no confidential client, credential, OBO or impersonation")]
+    [Fact(DisplayName = "ADR-052 §6: code under src/server/functions/ authenticates app-only — no confidential client, credential or OBO; impersonation only through the shared helper")]
     public void FunctionsAuthenticateAppOnly()
     {
         // Until the first Function exists this scans nothing; the controls below are what prove the rule.
@@ -457,12 +466,29 @@ public class WorkloadPlacementGuardTests
              "var obo = await app.AcquireTokenOnBehalfOf(scopes, userAssertion).ExecuteAsync();\n" +
              "var asApp = new ClientAssertionCredential(tenantId, bffAppId, ct => GetMiTokenAsync(ct));\n" +
              "var cert = new ClientCertificateCredential(tenantId, clientId, certificate);\n" +
-             "request.Headers.Add(\"MSCRMCallerID\", systemUserId.ToString());\n"),
+             "request.Headers.Add(\"MSCRMCallerID\", systemUserId.ToString());\n" +
+             "request.Headers.Add(\"CallerObjectId\", oid.ToString());\n" +
+             "serviceClient.CallerAADObjectId = oid;\n"),
         });
-        foreach (var banned in new[] { "ConfidentialClientApplicationBuilder", "WithClientAssertion", "AcquireTokenOnBehalfOf", "ClientAssertionCredential", "ClientCertificateCredential", "MSCRMCallerID" })
+        foreach (var banned in new[] { "ConfidentialClientApplicationBuilder", "WithClientAssertion", "AcquireTokenOnBehalfOf", "ClientAssertionCredential", "ClientCertificateCredential", "MSCRMCallerID", "CallerObjectId", "CallerAADObjectId" })
         {
             Assert.Contains(identity, f => f.Contains(banned, StringComparison.Ordinal));
         }
+    }
+
+    [Fact(DisplayName = "ADR-052 §6: positive control — impersonation through the shared fail-closed helper is not flagged")]
+    public void FunctionsGuard_PositiveControl_ImpersonationThroughTheSharedHelperPasses()
+    {
+        // The owner-accepted rule (2026-09-15): a Function MAY impersonate the user who started the work, only
+        // through Spaarke.Dataverse.DataverseImpersonation. The raw headers stay banned (negative control above).
+        var findings = CheckFunctionsIdentity(new[]
+        {
+            ("src/server/functions/Sprk.Sync/Handler.cs",
+             "using Spaarke.Dataverse;\n" +
+             "DataverseImpersonation.Apply(request, message.Requester.ObjectId);\n"),
+        });
+
+        Assert.Empty(findings);
     }
 
     [Fact(DisplayName = "ADR-052 §5-§6: positive control — the sanctioned Functions project and app-only credential pass")]

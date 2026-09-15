@@ -1,12 +1,16 @@
 # Proposal: may an Azure Function impersonate a Dataverse user?
 
-> **Status**: 🔔 **AWAITING OWNER SIGN-OFF** — auth ADR change (CLAUDE.md §6.5 path B; §6 security-sensitive).
+> **Status**: ✅ **ACCEPTED by the owner 2026-09-15** ("yes accept the recommendation") — auth ADR change (CLAUDE.md
+> §6.5 path B). Applied: ADR-052 §5/§6 (concise + full), ADR-028 A5 scope extension, `WorkloadPlacementGuardTests`
+> (impersonation only through the shared helper; raw headers + `CallerAADObjectId` banned). Prerequisites filed:
+> **P1 #988** (Service Bus Entra-only), **P2 #989** (typed requester field), **P3 #990** (fail-closed helper).
+> The rule is **not usable until those land**; P4/P5 apply before the first Model 1 / first real use.
 > **Asked**: 2026-09-14, session 11. The owner answered the carried task-102 question ("confirm the Function
 > no-impersonation MUST NOT") with: *"which is the correct approach that allows the functions to work; the best
 > technical approach"*.
 > **Evidence**: researcher report 2026-09-14 (Microsoft Learn; memory
 > `.claude/agent-memory/researcher/dataverse-impersonation-async-functions-2026-09-14.md`).
-> **Nothing canonical has changed.** ADR-052 §6 still carries the blanket MUST NOT until this is signed off.
+> ~~Nothing canonical has changed.~~ Superseded by the acceptance above.
 
 ## 1. The answer in one paragraph
 

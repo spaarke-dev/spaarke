@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (2026-09-13) — owner-approved direction 2026-09-12 (decisions D1–D7) and identity wording 2026-09-13; lands with `unified-access-control-r2` (PR #950) |
 | Date | 2026-09-12 |
-| Updated | 2026-09-13 (identity wording: ADR-028 A4 app-only row, no A5 impersonation; app-registration-bound access named; ArchTest coverage of Functions projects stated exactly) |
+| Updated | 2026-09-13 (identity wording: ADR-028 A4 app-only row; app-registration-bound access named; ArchTest coverage of Functions projects stated exactly) · 2026-09-15 (Dataverse impersonation permitted under conditions — owner-accepted; §5 MUST NOT narrowed to the caller's token) |
 | Authors | Spaarke Engineering — `unified-access-control-r2` task 102 |
 | Supersedes | ADR-001's Azure Functions and Durable Functions provisions (ADR-001 Amendment A1); ADR-004's Durable Functions prohibition (ADR-004 Amendment A1) |
 | Amends | ADR-013 (placement pointers), ADR-036 (placement statement + runtime rules) |
@@ -153,7 +153,11 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 
 **MUST NOT**
 - **MUST NOT** host user-facing BFF API endpoints in Azure Functions.
-- **MUST NOT** run work that needs the calling user's identity outside the BFF request that holds it.
+- **MUST NOT** let the calling user's **token** (OBO, user tokens) leave the BFF request that holds it. Acting for
+  that user outside the request is permitted only as §6's conditional impersonation (ADR-028 A5), which uses the
+  host's own app-only identity and never the user's token. (Until 2026-09-15 this line read "run work that needs the
+  calling user's identity outside the BFF request" — which, taken literally, forbade even a BFF job handler from
+  impersonating the user who started the work.)
 - **MUST NOT** add new Azure WebJobs.
 - **MUST NOT** add a new hand-rolled timer `BackgroundService` (§1).
 
@@ -165,7 +169,7 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 | Tenancy — Model 2 | A Function app per customer stamp. |
 | Tenancy — Model 1 | A shared multi-tenant Function app is acceptable. It carries the same tenant-isolation invariants as the shared BFF — `tenantId` on every AI Search query and Cosmos partition key, per-tenant SPE containers and Graph tokens (deployment guide §8, invariants I2–I5) — enforced by the `src/server/**` ArchTests (I2/I3 as of 2026-09-13; I4, I5 and the ArchTest-only I6 once widened, §10). |
 | Tenancy — fleet-scoped | Platform-level work that is not per customer (e.g. the provisioning control plane) runs in the platform subscription under the platform's identity, never a customer stamp's. |
-| Identity | **Reuse the stamp's user-assigned managed identity by default** — attach the UAMI the BFF runs as (Model 1: the shared BFF UAMI; Model 2: the stamp UAMI) and authenticate **app-only** as it (`DefaultAzureCredential` pinned to the UAMI's client ID, e.g. `AZURE_CLIENT_ID`). This is ADR-028 A4's **app-only** row, so it needs no new grants (§4). The Function **MUST NOT** use A4's **confidential-client** row: no MSAL confidential client, no client-assertion or certificate credential to act as the BFF app registration, no OBO, no accepting or exchanging user tokens. It **MUST NOT** impersonate a Dataverse caller (the ADR-028 A5 `MSCRMCallerID` / `CallerObjectId` headers): that is acting as a user outside the user's request (§5). (The UAMI is technically able to mint the assertion and to send those headers, so the Functions-project ArchTest bans the confidential-client, credential, OBO and impersonation types under `src/server/functions/**`.) It **MUST NOT** call BFF endpoints. A dedicated identity only when isolation is the reason for the Function, or when it needs access bound to another app registration (owner approval, §10). No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
+| Identity | **Reuse the stamp's user-assigned managed identity by default** — attach the UAMI the BFF runs as (Model 1: the shared BFF UAMI; Model 2: the stamp UAMI) and authenticate **app-only** as it (`DefaultAzureCredential` pinned to the UAMI's client ID, e.g. `AZURE_CLIENT_ID`). This is ADR-028 A4's **app-only** row, so it needs no new grants (§4). The Function **MUST NOT** use A4's **confidential-client** row: no MSAL confidential client, no client-assertion or certificate credential to act as the BFF app registration, no OBO, no accepting or exchanging user tokens. **Impersonating a Dataverse user (ADR-028 A5) is permitted only under these conditions** (owner-accepted 2026-09-15; `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`): (1) only for a unit of work that user started through an authenticated BFF request — never for timer, webhook or system-triggered work, which runs app-only with explicit filtering; contacts and CIAM users are never impersonated; (2) the caller id comes from a typed requester field (`oid` + `tid`) the BFF writes from the validated token into the job message (#989), on a channel only the stamp identity can write — Entra-only Service Bus (`disableLocalAuth`), *Data Sender* held only by the stamp identity (#988) — never from a client payload, a webhook body or Dataverse data; (3) the impersonated user is the user the output is delivered or attributed to, and writes are impersonated only where attributing the record to that user is intended; (4) only through the shared fail-closed helper in `Spaarke.Dataverse` (#990), with the NFR-04 canary extended to it; (5) only the stamp's application user holds `prvActOnBehalfOfAnotherUser`, assigned directly. **Not usable until #988, #989 and #990 land.** Model 1 additionally binds the message's tenant to the Dataverse environment URL. Impersonation cannot widen what the identity can already do app-only — the effective rights are the overlap — so the controls are about *which* user, not *how much*. (The UAMI is technically able to mint the assertion and to send the headers, so the Functions-project ArchTest bans the confidential-client, credential and OBO types and the raw impersonation headers under `src/server/functions/**`; impersonation passes only through the helper.) It **MUST NOT** call BFF endpoints. A dedicated identity only when isolation is the reason for the Function, or when it needs access bound to another app registration (owner approval, §10). No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
 | Inbound HTTP | Webhook-shaped triggers only, and each MUST validate its sender (Graph `clientState`, Event Grid subscription validation, or an Entra app role). A Function never serves an interactive API. |
 | Deployment | Bicep inside the stamp's provisioning (Model 1 / Model 2 stacks); same repo, same CI/CD. |
 | Configuration | Key Vault references. |
@@ -253,13 +257,13 @@ does not go stale as the inventory changes.
 | `WorkloadPlacementDocDriftTests` | Contradicting placement phrasings do not reappear outside marked historical regions |
 | `WorkloadPlacementGuardTests` — timer ratchet | No new hand-rolled timer `BackgroundService`; the allow-listed existing set may only shrink |
 | `WorkloadPlacementGuardTests` — host-neutrality | `IScheduledJob` implementations do not depend on `ScheduledJobHost`, `IBackgroundJobStore` or `ScheduledJobRegistry` |
-| `WorkloadPlacementGuardTests` — Functions projects | A project referencing the Functions worker SDK lives under `src/server/functions/`, does not reference `Sprk.Bff.Api`, and uses no confidential-client, client-assertion, certificate-credential, OBO or Dataverse-impersonation types |
+| `WorkloadPlacementGuardTests` — Functions projects | A project referencing the Functions worker SDK lives under `src/server/functions/`, does not reference `Sprk.Bff.Api`, uses no confidential-client, client-assertion, certificate-credential or OBO types, and impersonates only through the shared `Spaarke.Dataverse` helper |
 | Credential guards and I2/I3 tenant-isolation ArchTests | Cover Functions projects automatically, because they scan `src/server/**`. As of 2026-09-13, I4–I6 scan BFF and shared paths and are widened by the first Function's setup (§10) |
 | Placement Justification + `code-review` / `adr-check` | Host recorded with signals and costs; routing to ADR-052 / ADR-036 / ADR-004 |
 
 **Review checklist**
 - [ ] Host chosen with §3 signals and §4 costs recorded; tie-breaker applied where close
-- [ ] Nothing that needs the caller's identity runs outside the BFF request
+- [ ] The caller's token never leaves the BFF request; any impersonation meets §6's conditions (BFF-initiated work, BFF-written requester field, shared helper)
 - [ ] Scheduled work that must not run concurrently gets one dispatch per schedule (timer trigger or lease)
 - [ ] Handlers idempotent with an atomic per-unit claim; dead-letter queue monitored
-- [ ] For a Function: §6 guardrails met (Flex, tenancy row, managed identity app-only, no impersonation, no secrets, sender validation, Bicep, Key Vault, telemetry, shared code only) and §10 approval obtained where required
+- [ ] For a Function: §6 guardrails met (Flex, tenancy row, managed identity app-only, impersonation only per §6's conditions, no secrets, sender validation, Bicep, Key Vault, telemetry, shared code only) and §10 approval obtained where required

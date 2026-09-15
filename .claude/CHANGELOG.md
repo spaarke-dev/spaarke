@@ -7,6 +7,27 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-15 — ADR-052 §6 / ADR-028 A5: conditional Dataverse impersonation (owner-accepted)
+
+- **ADR-052** (concise + full): an Azure Function — or a BFF job handler — MAY impersonate a Dataverse user, but
+  only:
+  - for work that user started through an authenticated BFF request;
+  - with the caller id taken from a BFF-written, typed requester field on an Entra-only channel;
+  - with the impersonated user being the one the output is delivered or attributed to;
+  - through the shared fail-closed `Spaarke.Dataverse` helper.
+
+  §5's MUST NOT is narrowed to its real intent: the caller's **token** never leaves the BFF request. The rule is **not
+  usable until #988 (Service Bus Entra-only), #989 (typed requester field) and #990 (fail-closed helper) land**.
+- **ADR-028 A5**: its scope extends from "a BFF request" to "a BFF-initiated job". OBO, user tokens and confidential
+  clients stay forbidden.
+- **ArchTest** `WorkloadPlacementGuardTests`: under `src/server/functions/**`, impersonation passes only through
+  `DataverseImpersonation`. The raw `MSCRMCallerID` / `CallerObjectId` headers, and the ServiceClient's
+  `CallerAADObjectId` (newly listed), stay banned. A positive control covers the helper path.
+- **Why**: the blanket ban forced user-initiated async work to run app-only, bypassing the user's row-level security,
+  or to stay synchronous. Microsoft documents impersonation for background processing, and it cannot widen the app
+  identity's rights. Evidence: `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`.
+
+---
 ###### 2026-09-14 — `unified-access-control-r2` task 103: scheduled jobs run once — lease, slot guard, `AddScheduledJob<TJob>`
 
 - **ADR-036 A1.1 (owner decision)**: a configured lease store that stays unreachable through the acquire retries

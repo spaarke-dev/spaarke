@@ -323,6 +323,22 @@ to re-derive whether the two conflict, and may reasonably guess wrong.
   for every non-root-set use. A5 changes which *source* answers "which records may this systemuser see",
   not the membership engine.
 
+### Scope extension (2026-09-15, owner-accepted): work a user started through the BFF
+
+A5's impersonated read was scoped to **a BFF request**. It now also covers **a job the BFF enqueued for that
+user** — a BFF `IJobHandler` or an Azure Function (ADR-052 §6) — because running such work app-only would ignore
+the user's row-level security, and OBO would need stored refresh tokens. Impersonation cannot widen what the app
+identity can already do; the effective rights are the overlap of both. The conditions are ADR-052 §6's, in short:
+- only for work the user started through an authenticated BFF request — never timer, webhook or system-triggered work;
+- the caller id from a typed requester field the BFF writes from the validated token, on a channel only the stamp
+  identity can write (Entra-only Service Bus) — never from a client payload, a webhook body or Dataverse data;
+- the impersonated user is the one the output is delivered or attributed to;
+- only through the shared, fail-closed `Spaarke.Dataverse` helper (`CallerObjectId` + `oid` preferred);
+- **not usable until prerequisites P1–P3 land** (ADR-052 §6 lists the issues).
+
+OBO, user tokens and confidential clients remain forbidden everywhere this extension applies. Evidence:
+`projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`.
+
 ### Deployment prerequisites (register E-2 / E-3)
 
 Both are **blocking** — without them the impersonated read cannot work correctly:
