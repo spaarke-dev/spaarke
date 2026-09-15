@@ -3,7 +3,7 @@
   <metadata>
     <title>Scheduled jobs run exactly once — distributed lease in ScheduledJobHost, staging-slot guard, AddScheduledJob&lt;TJob&gt; registration helper</title>
     <phase>Governance — background-work placement</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the shared scheduling framework and the BFF DI surface; concurrency semantics.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -78,7 +78,15 @@
     <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Created 2026-09-12. Blocks task 100's completion (100 must be live by 2026-11-10).</notes>
+  <notes>Created 2026-09-12. Blocks task 100's completion (100 must be live by 2026-11-10).
+
+COMPLETED 2026-09-14 (session 11) — `a9c538c72` + Step 9.5 fixes `0f1414c37`. Full record: notes/task-103-scheduled-jobs-exactly-once.md.
+- Escalation answered by the owner (ADR-036 A1.1): a configured lease store that stays unreachable through the acquire retries → the tick is NOT dispatched and is recorded FAILED (not skipped).
+- Built: IScheduledJobLease (Redis SET NX PX via LockTakeAsync + last-dispatched-occurrence marker; process-local when Redis is off), renewed through every retry; cancelled on lost lease, renewal failing for a full lease duration, MaxRunDuration (2 h) or host shutdown. Slot guard Scheduling:RunScheduledJobs (set slot-sticky by Deploy-BffApi.ps1 -UseSlotDeploy and deploy-bff-api.yml; H9 provisioning deploy → #987). AddScheduledJob&lt;TJob&gt;: registry + store fill themselves; all three per-job bootstraps deleted; ArchTest rule 2b. Admin trigger 409 busy / 503 store down.
+- Beyond the literal criteria: the occurrence marker (a lease alone lets a short run release before a slower instance wakes for the same tick) — POML premise gap 15; premise gap 14: IConnectionMultiplexer is always registered (Null-Object when Redis is off).
+- Acceptance: all 10 criteria met. Scheduler tests 74/74 (x3); ArchTests 319/319; full suite 14,540 passed / 0 failed / 86 skipped; publish master 45.35 MB vs task 45.43 MB, 214 files each (+0.01 MB own increment); no CVEs; perturbations P1-P8 all caught.
+- Step 9.5: adr-check 4 violations (V1, V2 fixed; V3, V4 path A — test location per this POML's output, wall-clock helper waits on completion only); code-review H1 + M2-M4 fixed, M5 kept deliberately (fail-fast on bad cron config), M6 documented.
+- Task 100 fix 7 (registration onto the helper) done here.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

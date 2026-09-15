@@ -1,6 +1,6 @@
 # Task 103 — Scheduled jobs run exactly once: lease, slot guard, `AddScheduledJob<TJob>`
 
-> **Status**: implementation committed `a9c538c72` (2026-09-14, session 11). Verification in §6; quality gates in §7.
+> **Status**: ✅ **COMPLETE 2026-09-14** (session 11) — `a9c538c72` + Step 9.5 fixes `0f1414c37`. Verification in §6; quality gates in §7.
 > **Rules implemented**: ADR-036 A1 rules 1 (one dispatch per schedule), 2 (slots) and 6 (registration), plus the
 > new **A1.1** owner decision.
 
@@ -126,13 +126,13 @@ these was inserted at index 0 of the hosted-services list, because otherwise the
 
 | Check | Result |
 |---|---|
-| Spaarke.Scheduling.Tests | **71/71** (58 existing + 13 new) |
-| Sprk.Bff.Api.Tests — lease + admin jobs (filtered) | **41/41** |
+| Spaarke.Scheduling.Tests | **71/71** at `a9c538c72`; **74/74 three runs in a row** after the Step 9.5 fixes (`0f1414c37`) — two host tests that raced on which host won a later tick were rewritten to assert on the lease's grant times |
+| Sprk.Bff.Api.Tests — lease + admin jobs (filtered) | **41/41** (at both commits) |
 | Integration — admin jobs (filtered) | **18/18** |
 | ArchTests | **319/319** (drift guard green over the doc edits) |
-| Full suite | PENDING |
+| Full suite (`Spaarke.sln`, at `0f1414c37`) | **14,540 passed / 0 failed / 86 skipped** across 8 test assemblies |
 | Publish size | master `e0a6f87c4` **45.35 MB** vs task `a9c538c72` **45.43 MB** — **214 files each side** (Compress-Archive Optimal; fresh short-path worktrees `C:\wt103m`, `C:\wt103b`). The +0.08 MB is project-cumulative: the branch also carries tasks 096–102 and task 100's job, which measured 45.42 MB at `e7bd02189`, so task 103's own increment is ≈ **+0.01 MB**. Far under the 60 MB ceiling |
-| CVE (`--vulnerable --include-transitive`) | **No vulnerable packages** (`Sprk.Bff.Api`) |
+| CVE (`--vulnerable --include-transitive`) | **No vulnerable packages** — `Sprk.Bff.Api` and `Spaarke.Scheduling.Tests` (the test-only DI package; ADR-check W11) |
 | Perturbations | PENDING (§6.1) |
 
 ### 6.1 Perturbations (`/tmp/p103.sh` — each applied, confirmed to have changed the file, tested, restored)
@@ -148,7 +148,20 @@ these was inserted at index 0 of the hosted-services list, because otherwise the
 | P7 | Registry ignores registrations | ✅ caught — both `AddScheduledJobTests` DI tests |
 | P8 | Manual trigger ignores a held lease | ✅ caught — `ManualTrigger_WhileAScheduledRunIsInFlight_IsRefusedAsBusy` |
 
-### 6.2 After the Step 9.5 fixes — PENDING (P2 re-run; all eight re-run against the fixed code)
+### 6.2 After the Step 9.5 fixes — all eight re-run against `0f1414c37`, nothing else building
+
+| # | Result |
+|---|---|
+| P1 | ✅ caught — 6 `RedisScheduledJobLeaseTests` fail (now including the post-take-failure test) |
+| P2 | ✅ **caught — valid this time**: 6 host tests fail, including `TwoHostsSharingALease_…`, `LeaseSpansEveryRetryAndBackoff_…` and `LeaseStoreUnavailable_…` |
+| P3 | ✅ caught — `LeaseStoreUnavailable_…` |
+| P4 | ✅ caught — `SlotGuard_…` |
+| P5 | ✅ caught — 5 tests, including the new re-take and hung-run tests |
+| P6 | ✅ caught — `OccurrenceAnotherInstanceAlreadyDispatched_…` |
+| P7 | ✅ caught — both `AddScheduledJobTests` DI tests |
+| P8 | ✅ caught — `ManualTrigger_WhileAScheduledRunIsInFlight_IsRefusedAsBusy` |
+
+The tree was clean after the run (every perturbation restored). ArchTests **319/319** against `0f1414c37`.
 
 ## 7. Step 9.5 quality gates
 
@@ -166,7 +179,7 @@ Both gates ran as sub-agents that read the **commit** via `git show` (the workin
 | W5–W7 stale / lagging docs | fixed | ADR-036 rules 6–7, the ADR-010 row, ADR-052 concise, the ArchTest message, the architecture doc |
 | W9 hot-path comment | fixed | `design.md` |
 | W10 B3 container assertion; B7/B9 wrapper tests | fixed | Assertion removed; `Renew_`/`Release_` tests replaced by post-take-failure and bad-marker tests |
-| W11 test-only package CVE | PENDING | |
+| W11 test-only package CVE | done | No vulnerable packages |
 | W3 ProblemDetails media type · W4 Options pattern · W12 rule 2b scans the BFF only · W13 commit scope | accepted | They match the file's existing pattern, or are noted |
 
 ### code-review — sound design; 1 High, 7 Medium, 14 Low
