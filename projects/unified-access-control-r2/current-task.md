@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-15, session 12** (by `task-execute` Step 11) — task **100 ✅ COMPLETE** (catch-up reminders; full suite 14,578/0/86; 13/13 perturbations) · **#987 fixed** (H9 slot guard) · **Function impersonation accepted** (ADR-052 §6 / ADR-028 A5; prerequisites #988–#990) · **register triage** under the owner's 2026-09-15 rule (issues stay in the project unless not material or another project's ownership is confirmed) → tasks **104–107** added, **054** amended, **090** gated · **tasks re-sequenced by dependency** (owner) · **104 ✅** (impersonation helper fails closed, #990; full suite 14,590/0/86; 6/6 perturbations). Next = task **063** (wave 1 of TASK-INDEX § Execution sequence).
+> **Last Updated**: **2026-09-15, session 12** (by `context-handoff`, mid-task 063: Step 0 done, design decided, no code yet) — task **100 ✅ COMPLETE** (catch-up reminders; full suite 14,578/0/86; 13/13 perturbations) · **#987 fixed** (H9 slot guard) · **Function impersonation accepted** (ADR-052 §6 / ADR-028 A5; prerequisites #988–#990) · **register triage** under the owner's 2026-09-15 rule (issues stay in the project unless not material or another project's ownership is confirmed) → tasks **104–107** added, **054** amended, **090** gated · **tasks re-sequenced by dependency** (owner) · **104 ✅** (impersonation helper fails closed, #990; full suite 14,590/0/86; 6/6 perturbations). Next = task **063** (wave 1 of TASK-INDEX § Execution sequence).
 > **Sessions 9–12 PUSHED 2026-09-15** (`c3e85a6dc..fe67eb1c2`, 17 commits) to PR **#950**, plus the session-12 handoff commits; PR description extended (sessions 9–12 summary, `Closes #987`, before-merge real-Dataverse smoke note). 0 behind master at the 2026-09-15 fetch. **CI on `fe67eb1c2`: Tier 1 green** — details in the Branch row.
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
@@ -23,7 +23,59 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **063 — Internal system-user share endpoints, delegation-gated (FR-29)** · `tasks/063-internal-user-share-endpoints.poml` · **NEXT** (wave 1 of TASK-INDEX § Execution sequence; deps 060 / 008 / 010 done). **104 ✅ COMPLETE 2026-09-15** (`6be320e82` + `134bdb73e` + `43ac00a18`): the shared impersonation helper fails closed (`ApplyAsSystemUser` / `ApplyAsEntraUser`, exactly one header, tenant check); the request builder is the single enforcement point; a protected test ctor that DI cannot reach. Perturbations 6/6 · full suite 14,590/0/86 · ArchTests 323 · publish 45.43 MB vs master 45.35 (≈0 for 104) · no CVEs. Residuals on #990; side finding ISS-016 / #993 handed off. Record: `notes/task-104-impersonation-helper-fail-closed.md`. **099 ⏸** waits for 065 + 066 (owner chose to wait; escalation fired, no code written). **101** runs after 107. **100 ✅ 2026-09-15**, **103 ✅ 2026-09-14.** |
+| **Task** | **063 — Internal system-user share endpoints, delegation-gated (FR-29)** · `tasks/063-internal-user-share-endpoints.poml` · **IN PROGRESS (started 2026-09-15, session 12) — Step 0 DONE, design DECIDED, NO CODE WRITTEN YET.** FULL · sonnet@high (run on Opus) · wave 1 of TASK-INDEX § Execution sequence; deps 060 / 008 / 010 done.
+
+**RESUME HERE, at Step 2 (implement the design below). Do not redo the research.**
+
+**Premises verified:**
+1. **Delegation filter** (`Api/ExternalAccess/DelegationRuleFilter.cs`): resolves its target by request DTO type; the default denies. Each new DTO needs a `case`, resolved through a shared `ResolveRoot` from `recordType` + `recordId` (with no legacy `projectId`), copying `SetRecordShareExpiryEndpoint.ResolveRoot`. **The escalation trigger does NOT fire**: `DelegationTarget(EntitySet, RecordId)` is generic.
+2. **Premise error #16:** the seam is `Services/Access/IDataverseRecordShareService.cs` (Grant, Revoke, GetPrincipalAccess), not `Services/Communication/Access/`.
+3. **Premise error #17:** there is NO "060 seam mapping" from level to rights. What exists: literal rights strings in `ProvisionProjectEndpoint` (`CollaboratorAccessRights` = Read, Write, Append, AppendTo; `CreatorAccessRights` adds Share) and `PlaybookSharingService`; and the evaluator's `ExternalAccessLevels.ToAccessRights`, whose Create is meaningless on a share.
+4. **No endpoint writes system-user shares today.** Confirmed.
+
+**Owner decision 2026-09-15, "No re-share at any level":**
+- View Only = `ReadAccess`.
+- Collaborate = `ReadAccess,WriteAccess,AppendAccess,AppendToAccess`, the same value as `ProvisionProjectEndpoint.CollaboratorAccessRights`; point that constant at the new single definition.
+- Full Access = Collaborate + `DeleteAccess`.
+- `ShareAccess` / `AssignAccess` at no level.
+- Put the mapping in ONE place (e.g. `Services/Access/RecordShareLevels.cs`, keyed by the existing `ExternalAccessLevel` enum: 100000000 / 1 / 2).
+
+**Microsoft Learn (researcher; memory `.claude/agent-memory/researcher/dataverse-poa-grant-modify-revoke-semantics-2026-09-15.md`):**
+- `ModifyAccess` **replaces** the mask. Documented. Same payload shape as GrantAccess (`Target` + `PrincipalAccess{Principal, AccessMask}`), 204.
+- `GrantAccess` on an existing share: NOT documented; likely additive, so a downgrade through Grant would silently keep Write/Delete.
+- `RevokeAccess` with no share: NOT documented. `DataverseWebApiService.RevokeAccessAsync`'s doc claims "no-op", which is **unverified** and should be corrected.
+- Sharing to a disabled or application user: NOT documented.
+
+**SDK AccessRights values** (reflection, `Microsoft.Crm.Sdk.Proxy` 1.2.26): Read 1 · Write 2 · Append 4 · AppendTo 16 · Create 32 · Delete 65536 · Share 262144 · Assign 524288.
+- **Side finding to register** (hand-off, AI-owned): `PlaybookSharingService.MapFromDataverseAccessRights` reads bit 524288 as Share. That bit is **Assign**; Share is 262144.
+
+**Design:**
+- **Routes**, on the existing `/api/v1/external-access` admin group, so they inherit `AddDelegationRuleFilter()` (Write on the record, OBO):
+  - `POST /share-user` `{recordType, recordId, systemUserId, accessLevel}`;
+  - `POST /unshare-user` `{recordType, recordId, systemUserId}`;
+  - `GET /user-shares?recordType=&recordId=` (an `[AsParameters]` DTO, so the filter case matches);
+  - new file `Api/ExternalAccess/InternalShareEndpoints.cs`, mapped in `ExternalAccessEndpoints.MapInternalManagementEndpoints`.
+- **Share:**
+  1. Validate the target systemuser in ONE read: it exists; `isdisabled` = false; `accessmode` 0–2; no `applicationid`; `sprk_isexternal` ≠ true. Otherwise a 4xx with a stable reason code.
+  2. Read the existing shares (`GetPrincipalAccessAsync(logicalName, id)`, filtered to that SystemUser).
+  3. No share → `GrantAccessAsync`; a share exists → **new** `ModifyAccessAsync`, added to `DataverseWebApiService` and `IDataverseRecordShareService`.
+  4. **Read back** and require the exact mask. Otherwise 500 "not confirmed".
+- **Unshare:** read first. No share → 200 `removed = false` and no Revoke call. Otherwise `RevokeAccessAsync`, then read back to confirm it is gone.
+- **GET:** SystemUser shares only; `{systemUserId, fullName (one batched read), accessRightsMask, accessLevel (exact match or null), modifiedOn}`. No provenance, which is task 064's.
+- **Cache:** after share or unshare, remove the `ImpersonatedRootSetSource` entry `{systemUserId:D}:{logicalName}` (resource `impersonated-root-set`, v1). Make `CacheVersion` internal and add a `CacheId` helper. It is non-fatal, and after task 036 it is the systemuser term that sees POA.
+- **Helper:** add `ExternalGrantRoot.LogicalNameFor(type)` (`sprk_project` / `sprk_matter` / `sprk_workassignment`).
+- **Check first:** `DataverseWebApiClient`'s read API for the systemuser row (grep found only `CreateAsync` as a public virtual method; look for `QueryAsync<T>` / `RetrieveRowAsync` usage in `ExternalGrantLifecycle`).
+
+**Tests** (auth KEEP path):
+- New `tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs`, with a fake POA table behind `IDataverseRecordShareService` that models Grant as additive and Modify as replacing.
+- `DelegationRuleCharacterizationTests`: add InlineData plus the `RequestFor` mapping for the 3 routes.
+- An `ExternalAccessContractTests` case.
+- ArchTest `RouteAuthorizationGuardTests.ExpectedEndpointFileCount` 118 → 119, with a census comment entry.
+- `PoaShareClientSingletonGuardTests` is fine: ModifyAccess lives in the canonical file.
+
+**Then:** perturbations → build / full suite / publish size → Step 9.5 → notes `notes/task-063-internal-user-share-endpoints.md` (the route decision + the contract for task 065).
+
+**Conflict check:** silent pass (0 behind; no PR overlap on `Api/ExternalAccess`). **104 ✅ COMPLETE 2026-09-15** (`6be320e82` + `134bdb73e` + `43ac00a18`): the shared impersonation helper fails closed (`ApplyAsSystemUser` / `ApplyAsEntraUser`, exactly one header, tenant check); the request builder is the single enforcement point; a protected test ctor that DI cannot reach. Perturbations 6/6 · full suite 14,590/0/86 · ArchTests 323 · publish 45.43 MB vs master 45.35 (≈0 for 104) · no CVEs. Residuals on #990; side finding ISS-016 / #993 handed off. Record: `notes/task-104-impersonation-helper-fail-closed.md`. **099 ⏸** waits for 065 + 066 (owner chose to wait; escalation fired, no code written). **101** runs after 107. **100 ✅ 2026-09-15**, **103 ✅ 2026-09-14.** |
 | **Branch** | `work/unified-access-control-r2` · PR **#950** · pushed through `fe67eb1c2` + the session-12 handoff commits (2026-09-15). **CI on `fe67eb1c2`: Tier 1 GREEN** — `Router` and all 8 Tier-1 checks pass; legacy Build & Test Debug + Release pass (30 pass · 1 fail · 1 skipping). The one red is **Trivy** code scanning — not a required check (`mergeStateStatus: UNSTABLE`): 15 of its 16 alerts are **pre-existing on master** (xmldom via `mammoth` + dompurify, same versions in master's LegalWorkspace lockfile → **#992**, handed off), 1 is TipTap 2.x from the session-8 LegalWorkspace build repair (→ **#991**, Compose owns it). **Before merge**: real-Dataverse smoke of the reminder `appnotification` write (task-100 notes §7) and a real-ARM check of H9's slot guard (#987). Portfolio sync skipped — `gh` token lacks `read:project` (`gh auth refresh -s read:project,project`). |
 | **Next Action** | **task-execute 063**, then continue TASK-INDEX § Execution sequence (a dependency-ordered topological sort, owner 2026-09-15). Wave 1: 104 ✅ → **063 → 043 → 106 → 107 → 093 → 082 → 094 → 095**. Verify each POML's premises against the code before obeying them — this project's task files have been wrong 15 times. 🔴 **054 is blocked** on the owner's ISS-003 answer, and 055 / 056 / 057 / 058 wait with it. **Register triage 2026-09-15 (owner rule: an issue leaves the project only if it is not material or another project's ownership is confirmed — `notes/defer-issues.md` Disposition table)**: new tasks **104** (#990 impersonation helper fail-closed — **before 036**), **105** (#963 `$top=200`), **106** (#973 re-grant 409), **107** (#974 non-BFF grants unbounded); **054 amended** (its fourth-root premise contradicts task 028 — re-scope to ISS-003 #964 after the owner's answer); **090** now gates on the Disposition table; label `unified-access-control-r2` on all 17 issues (#961–#993); every open issue carries its disposition comment. **Open items for the owner (non-blocking)**: (1) ISS-003's product question — what may a service-request requester DO to its to-dos (blocks 054); (2) **#988 (Service Bus SAS), #971 (singleton `LastException`) and #993 (`DataverseWebApiClient` credential injection) are handed off with NO confirmed owner** — they need assigning; (3) Insights Engine D-20 (carried); (4) #987 is fixed on the branch but not verified against real ARM (fake transport only). **Push only when asked.** |
 | **Task status** | **72 done · 28 open (063 next; 104 ✅ 2026-09-15) · 3 escalated / blocked** (counts read from TASK-INDEX 2026-09-15). Status-drift check green 2026-09-15. |
