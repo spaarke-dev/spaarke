@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Visualization;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -533,6 +534,30 @@ public static class VisualizationEndpoints
                 permittedRowCount, resultRows.Count, toCheck.Count, unresolvable, budgetExhausted);
         }
 
+        // D-032-2 (task 033): rows past MaxDocumentAuthorizationChecks are dropped UNEVALUATED — never
+        // checked, never served, which is the correct fail-closed behaviour (task 032 §5/§6 item 5). What
+        // was missing is that the drop was silent: a page truncated by the budget is indistinguishable,
+        // by inspection, from "these are all the related documents there are". Reachable, not
+        // theoretical — five hardcoded relationship queries at TopCount=50 each can present up to 250
+        // candidate rows against this 100-check budget. Mirrors
+        // SemanticSearchEndpoints.AuthorizeRowsByParentAsync's PARTIAL_RESULTS exactly (same warning
+        // code, same channel shape) — the fail-closed drop itself is UNCHANGED; only the silence is
+        // fixed.
+        List<SearchWarning>? warnings = null;
+        if (budgetExhausted)
+        {
+            warnings =
+            [
+                new SearchWarning
+                {
+                    Code = SearchWarningCode.PartialResults,
+                    Message = "Some related documents were not evaluated because there were more "
+                              + "candidates than could be checked in this request, and further matches "
+                              + "may exist beyond what was examined. Narrow the search or try again."
+                }
+            ];
+        }
+
         return response with
         {
             Nodes = keptNodes,
@@ -550,7 +575,8 @@ public static class VisualizationEndpoints
                 NodesPerLevel = permittedRowCount > 0 || hubCount > 0
                     ? new List<int> { 1, hubCount, permittedRowCount }
                     : new List<int> { 1 },
-                MaxDepthReached = hubCount > 0 ? 2 : (permittedRowCount > 0 ? 1 : 0)
+                MaxDepthReached = hubCount > 0 ? 2 : (permittedRowCount > 0 ? 1 : 0),
+                Warnings = warnings
             }
         };
     }
