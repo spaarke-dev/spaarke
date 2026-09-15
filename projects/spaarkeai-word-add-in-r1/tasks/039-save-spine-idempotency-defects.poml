@@ -4,7 +4,7 @@
     <title>Save-spine server defects found by task 024: idempotency header, failed-job replay, content-blind create key, job completion without a document id</title>
     <phase>2 Save flow</phase>
     <gate>023 + 024 merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the BFF save spine (`POST /api/office/save`) — idempotency and job status shared by Email, Attachment and Document saves. One finding is a silent data-loss path.</rigor-reason>
     <model-tier>opus</model-tier>

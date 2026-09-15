@@ -4,7 +4,7 @@
     <title>Un-skip /api/office/save contract tests and cover the identity route</title>
     <phase>1 Foundation</phase>
     <gate>012 complete — the identity route must exist before contract coverage can be written for it</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override row, root CLAUDE.md §8: any task that modifies `tests/**` or carries the `testing` tag runs code-review plus adr-check at Step 9.5 UNCONDITIONALLY (binding since 2026-06-26 per ci-cd-unit-test-remediation-r1 spec FR-B07 and ADR-038). This overrides the default STANDARD skip.</rigor-reason>
     <model-tier>sonnet</model-tier>

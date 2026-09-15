@@ -4,7 +4,7 @@
     <title>FR-16b: Find view three-state gating and Run Index</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>032 complete (the similarity surface is per-row authorized), 015 complete (tab shell), 013 complete (client document identity)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF handler code (`RagEndpoints` index-name resolution) and adds a new React view; tags include bff-api, frontend and fluent-ui; modifies `.tsx`. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
     <model-tier>sonnet</model-tier>

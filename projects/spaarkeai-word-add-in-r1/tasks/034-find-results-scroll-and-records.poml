@@ -4,7 +4,7 @@
     <title>FR-16c: Find results, lazy-scroll, records bridge decision</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>033 complete — the Find view and its three-state gate exist</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.tsx` in the add-in and consumes a security-hardened BFF surface; tags include frontend and fluent-ui; carries an architectural decision (the records bridge) that must be recorded. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
     <model-tier>sonnet</model-tier>

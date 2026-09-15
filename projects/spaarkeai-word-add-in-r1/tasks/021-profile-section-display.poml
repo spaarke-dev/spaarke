@@ -4,7 +4,7 @@
     <title>FR-07: Description becomes Profile, populated from the record</title>
     <phase>2 Save flow</phase>
     <gate>013+015 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts client code and reads a new field set across the BFF Office surface; tags include frontend + bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>

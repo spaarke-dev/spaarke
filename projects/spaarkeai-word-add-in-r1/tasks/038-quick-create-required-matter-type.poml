@@ -4,7 +4,7 @@
     <title>Pane quick-create: required Matter Type field, sent as matterTypeId</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>030 merged (the server accepts `matterTypeId`); 021 merged (it edits the same `SaveFlow.tsx`)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in the pane's save/create flow and possibly adds or extends a BFF lookup route; tags include frontend and bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>

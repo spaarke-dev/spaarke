@@ -4,7 +4,7 @@
     <title>FR-08: Generate Profile button and BFF trigger</title>
     <phase>2 Save flow</phase>
     <gate>013 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a new BFF trigger route on `/api/office` and modifies .tsx/.ts client code; tags include bff-api + frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>

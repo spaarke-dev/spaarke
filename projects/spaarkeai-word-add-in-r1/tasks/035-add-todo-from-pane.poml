@@ -4,7 +4,7 @@
     <title>FR-14: Add To Do carrying document and related record</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>013 complete (client document identity), 026 complete (related-record card)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF service code and `.tsx`; tags include bff-api and dataverse; writes production Dataverse rows with a fail-closed core-ancestor stamp. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
     <model-tier>sonnet</model-tier>

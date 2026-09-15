@@ -4,7 +4,7 @@
     <title>FR-11 client: default to version, override routes through link/graduate</title>
     <phase>2 Save flow</phase>
     <gate>023 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Save-path change with a named data-loss failure mode (NFR-08); modifies `.ts`/`.tsx` and touches the BFF dedup routing decision.</rigor-reason>
     <model-tier>opus</model-tier>

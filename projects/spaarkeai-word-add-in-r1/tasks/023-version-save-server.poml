@@ -4,7 +4,7 @@
     <title>FR-11 server: make ExistingDocumentId/IsNewVersion real in SaveAsync</title>
     <phase>2 Save flow</phase>
     <gate>012 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data-integrity change on the BFF save spine (`POST /api/office/save`); modifies `.cs` on the write path where the failure mode is a duplicate or a lost `sprk_document` row.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>FR-09: related-to record card honoring the two-slot model</title>
     <phase>2 Save flow</phase>
     <gate>013 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts client code and reads Dataverse lookup slots through the BFF; tags include frontend + bff-api + dataverse.</rigor-reason>
     <model-tier>sonnet</model-tier>

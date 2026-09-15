@@ -4,7 +4,7 @@
     <title>FR-01 client: getDocumentUrl capability and identity threading</title>
     <phase>1 Foundation</phase>
     <gate>010,012 complete — the consolidated adapter must exist and the resolver route must be live</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx on the shared host-abstraction contract (`IHostAdapter`, `HostCapabilities`) consumed by both hosts, and threads new state through the app shell. Tags include frontend. Depends on two tasks.</rigor-reason>
     <model-tier>sonnet</model-tier>

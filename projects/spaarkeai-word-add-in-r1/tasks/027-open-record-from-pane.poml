@@ -4,7 +4,7 @@
     <title>FR-10: open the related record and the Document record from the pane</title>
     <phase>2 Save flow</phase>
     <gate>003+026 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts client code, introduces a host-integration mechanism (Office Dialog API) with an auth boundary, and touches the BFF read surface; tags include frontend + office-addins.</rigor-reason>
     <model-tier>sonnet</model-tier>

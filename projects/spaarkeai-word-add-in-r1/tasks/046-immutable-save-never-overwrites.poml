@@ -4,7 +4,7 @@
     <title>Email/Attachment saves never overwrite or delete another document's file (canonical-delete guard + unique .eml suffix)</title>
     <phase>2 Save flow</phase>
     <gate>039 merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the BFF save spine; one path deletes another document's file today (live on master).</rigor-reason>
     <model-tier>opus</model-tier>
