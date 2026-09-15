@@ -115,11 +115,45 @@ describe('resolveDocumentIdentity', () => {
           entityType: 'sprk_matter',
           id: '11111111-2222-3333-4444-555555555555',
           name: 'PAT-191111',
+          // task 026: absent on the wire (a server that predates the extension) defaults to null, not
+          // undefined — the card treats the two the same, but the shape is asserted here.
+          displayName: null,
+          number: null,
         },
       });
       expect(mockPost).toHaveBeenCalledWith('/api/documents/resolve-identity', {
         documentUrl: 'https://contoso.sharepoint.com/sites/legal/x.docx',
       });
+    });
+
+    it('task 026: passes displayName and number through when the server supplies them', async () => {
+      mockPost.mockResolvedValueOnce({
+        resolved: true,
+        documentId: '8c135b45-5da8-f111-aaab-7ced8ddc4a05',
+        documentName: 'Examiner report draft',
+        fileName: 'Examiner report draft.docx',
+        relatedRecord: {
+          entityType: 'sprk_matter',
+          id: '11111111-2222-3333-4444-555555555555',
+          name: 'PAT-191111',
+          displayName: 'Acme v Globex',
+          number: 'PAT-191111',
+        },
+        reason: null,
+      });
+
+      const outcome = await resolveDocumentIdentity('https://contoso.sharepoint.com/sites/legal/x.docx');
+
+      expect(outcome.kind).toBe('resolved');
+      if (outcome.kind === 'resolved') {
+        expect(outcome.relatedRecord).toEqual({
+          entityType: 'sprk_matter',
+          id: '11111111-2222-3333-4444-555555555555',
+          name: 'PAT-191111',
+          displayName: 'Acme v Globex',
+          number: 'PAT-191111',
+        });
+      }
     });
 
     it('maps a resolved response with no related record (unassociated document)', async () => {

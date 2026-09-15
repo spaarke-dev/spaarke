@@ -98,8 +98,29 @@ public record RelatedRecordIdentity(
     string EntityType,
     /// <summary>Record id, bare lowercase (ADR-044).</summary>
     string Id,
-    /// <summary>The record's primary name, when Dataverse supplied it.</summary>
-    string? Name
+    /// <summary>
+    /// The record's PRIMARY NAME attribute value, unchanged since task 012 (existing consumers — e.g. the
+    /// Create-To-Do "regarding" fields — read this). NOT reliable as a display name on its own: for
+    /// <c>sprk_matter</c>/<c>sprk_project</c> the primary name attribute IS the record's NUMBER, so this is a
+    /// number for those two types and a descriptive name for Invoice/WorkAssignment. New callers that need
+    /// BOTH a descriptive name and a number (task 026's related-record card) should use
+    /// <see cref="DisplayName"/> and <see cref="Number"/> instead, which are correctly labeled regardless of
+    /// entity type.
+    /// </summary>
+    string? Name,
+    /// <summary>
+    /// The record's DESCRIPTIVE name (task 026 / FR-09) — always the human-readable name, never a number,
+    /// regardless of which attribute happens to be the entity's Dataverse primary name. Null when the related
+    /// record could not supply one.
+    /// </summary>
+    string? DisplayName = null,
+    /// <summary>
+    /// The record's NUMBER (task 026 / FR-09) — e.g. <c>sprk_matternumber</c>, <c>sprk_invoicenumber</c>.
+    /// Null when the entity type has no number field, or the record has none set (a pane-created Matter has no
+    /// number until the separate numbering project ships — <c>notes/030-numbering-handoff.md</c>). The card
+    /// MUST render this blank gracefully, never as an error.
+    /// </summary>
+    string? Number = null
 );
 
 public record UpdateFileRequest(

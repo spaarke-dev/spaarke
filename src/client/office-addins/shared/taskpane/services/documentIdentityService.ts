@@ -22,14 +22,34 @@ import { ACCESS_SYSTEM_FAILURE_REASON_CODE } from '../utils/errorMessages';
  * re-deriving the rule from HTTP status codes.
  */
 
-/** The record a resolved document is associated with (mirrors the BFF's `RelatedRecordIdentity`). */
+/**
+ * The record a resolved document is associated with (mirrors the BFF's `RelatedRecordIdentity`).
+ *
+ * `name` is kept for backward compatibility (the existing Create-To-Do "regarding" wiring reads it) but is NOT
+ * reliable as a display name on its own: it is the record's Dataverse PRIMARY NAME attribute, which for
+ * `sprk_matter`/`sprk_project` IS the record's NUMBER (verified live 2026-09-14 — see
+ * `projects/spaarkeai-word-add-in-r1/notes/026-slot-scope-decision.md` §3), and for `sprk_invoice`/
+ * `sprk_workassignment` is the descriptive name. Task 026's related-record card uses `displayName` and
+ * `number` instead — both correctly labeled regardless of entity type.
+ */
 export interface ResolvedRelatedRecord {
   /** Dataverse logical name, e.g. `sprk_matter`. */
   entityType: string;
   /** Record id, canonicalized bare-lowercase (ADR-044). */
   id: string;
-  /** The record's primary name, when Dataverse supplied it. */
+  /** The record's primary name attribute value. See the type doc — NOT always a "name". Kept for back-compat. */
   name: string | null;
+  /**
+   * The record's DESCRIPTIVE name — always a human-readable name, never a number. Optional (not just
+   * nullable) so existing literals built before task 026 — e.g. `{ entityType, id, name }` alone — remain
+   * valid; `useRelatedRecord` treats an absent value the same as `null`.
+   */
+  displayName?: string | null;
+  /**
+   * The record's NUMBER, e.g. `sprk_matternumber`. Null/absent when the type has none, or none is set yet
+   * (a pane-created Matter has no number until the separate numbering project ships).
+   */
+  number?: string | null;
 }
 
 /**
@@ -93,6 +113,8 @@ interface BffRelatedRecord {
   entityType: string;
   id: string;
   name?: string | null;
+  displayName?: string | null;
+  number?: string | null;
 }
 
 /** @internal Response shape returned by the BFF resolver. */
@@ -171,6 +193,8 @@ export async function resolveDocumentIdentity(
               entityType: response.relatedRecord.entityType,
               id: cleanGuid(response.relatedRecord.id),
               name: response.relatedRecord.name ?? null,
+              displayName: response.relatedRecord.displayName ?? null,
+              number: response.relatedRecord.number ?? null,
             }
           : null,
       };

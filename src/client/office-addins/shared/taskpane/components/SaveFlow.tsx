@@ -27,6 +27,7 @@ import {
   EditRegular,
 } from '@fluentui/react-icons';
 import { RelatedToPicker, type CreateRecordResult } from './RelatedToPicker';
+import { RelatedRecordCard } from './RelatedRecordCard';
 import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
 import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
@@ -961,6 +962,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           </div>
         </div>
       )}
+
+      {/* Filed-to card — task 026 / FR-09. A READ-BACK of what the identified document is ALREADY filed to,
+          sourced from the SAME resolved identity SaveModeSection reads (no second network call, so the pane
+          never shows two different answers). Deliberately OUTSIDE the `!isVersionMode` gate below: a resolved
+          identity DEFAULTS to a version save (task 024), which is exactly when RelatedToPicker is hidden — the
+          filed-to card is the pane's only indication of the record in that common case. It stays visually and
+          functionally distinct from RelatedToPicker (an INPUT for an unfiled document) even when both render
+          together for an explicit "a new document" override. The click seam (`onOpenRecord`) is task 027 /
+          FR-10 — not implemented here. */}
+      <RelatedRecordCard {...(documentIdentity !== undefined ? { documentIdentity } : {})} />
 
       {/* Related to + Document Details apply to a NEW document only. A version save (task 024) keeps the
           existing record's name and associations — the server never renames or re-associates on that path
