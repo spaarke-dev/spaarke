@@ -171,7 +171,22 @@ _Recorded when the runs completed — see the session record in `current-task.md
 
 ### 7.1 Final numbers
 
-_(filled in at task close)_
+- **Publish size** — measured per root CLAUDE.md §10: both sides from FRESH worktrees at SHORT paths
+  (`C:\wt063m`, `C:\wt063b`), published and zipped in the same run with the pinned tool
+  (`Compress-Archive -CompressionLevel Optimal`).
+
+  | Side | Commit | Compressed | Files |
+  |---|---|---|---|
+  | master | `origin/master` | **45.35 MB** | 214 |
+  | this branch | `d47b586eb` | **45.45 MB** | 214 |
+
+  **+0.10 MB project-cumulative**, against a 60 MB ceiling and a +5 MB per-task escalation threshold.
+  **The file counts are equal on both sides** — the check that makes the delta meaningful (an unequal
+  count means one publish is incomplete and the number is noise). Task 063's own increment is
+  ≈ **+0.02 MB**: this branch's previous measurement, at task 104, was 45.43 MB against the same
+  freshly-measured 45.35 MB master. Master had not moved (0 commits ahead at the close fetch), so the
+  master side is a re-measurement rather than a recorded baseline — the hazard §10 warns about.
+- Full suite and Step 9.5 code-review: recorded below as they completed.
 
 ### 7.2 Step 9.5 — adr-check
 
@@ -193,6 +208,45 @@ No code change was required to clear compliance. Dispositions:
 | W6 | Publish-size delta not yet recorded | §7.1. |
 | W7 | `InternalShareEndpoints.cs` is 616 lines; §11.5 asks that the complexity evaluation be STATED | **Cohesion holds, and here is the statement:** one reason to change (the FR-29 share surface), three handlers over one refusal shape, one strict-read helper, one eligibility predicate — and roughly half the file is the documentation of the undocumented-Dataverse decisions. No LOC gate exists (the ratchet was retired 2026-08-20). If task 064 grows this file, the natural seam is extracting `SystemUserEligibility` plus the systemuser reads. |
 | W8 | The handler tests do not mirror the source path | **Accept.** `tests/integration/auth/UnifiedAccessControl/` is this project's existing auth cluster (six sibling files); the contract test mirrors the source path. |
+
+### 7.3 Step 9.5 — code-review
+
+**approve-with-changes**, 22 findings. None contradicted the design's core: the review independently
+confirmed the read-back confirmation, the entity-set / logical-name split, the concurrency interleavings
+(given level nesting), that the cache invalidation hits the entry the read path writes, that the gate
+covers all three routes — including the `[AsParameters]` GET — with non-vacuous positive twins, that
+`share-user` cannot be aimed at a team, that §F.1 does not fire, that the masks are Dataverse's
+vocabulary and not Spaarke's, that no OData injection vector exists, and that these test files are
+genuinely compiled into the assembly rather than stranded. It also found one scenario this record had
+missed completely (§9 item 2).
+
+Triage, blockers first:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Write confers Delete, including via a self-share | **Owner decision** — §9 item 1, strengthened with the two concrete closes the review named |
+| 2 | Any Write-holder can revoke the creator's share → lockout on a share-only secure project | **Owner decision** — §9 item 2, NEW; the review found it |
+| 3 | The live check as first scoped could not detect an additive `ModifyAccess` | **Fixed in this record** — §9 item 4 is now a DOWNGRADE check asserting a stored mask of 1 |
+| 4, 16 | Unshare's six-column read couples removal to `sprk_isexternal`; `fullname` is read and never used | **Fix in code** — unshare reads `systemuserid` only; the eligibility read drops `fullname` |
+| 7 | The new ArchTest rule has no control and asserts source text this same commit added | **Fix in code** — delete it. The compiler already enforces the seam; the detector rule (negative control P10) carries the real invariant |
+| 11 | `CurrentCultureIgnoreCase` makes the list order host-dependent | **Fix in code** — `OrdinalIgnoreCase` |
+| 12 | The strict read fabricates `modifiedon` where it throws for every other unreadable field | **Fix in code** — throw in strict mode; the soft read keeps its behaviour |
+| 14 | The `CollaboratorAccessRights` assertion is a compile-time identity | **Fix in code** — assert the literal CSV, so the shared table cannot drift through the provisioning path |
+| 18 | `write_not_confirmed` carries no machine-readable state | **Fix in code** — add the observed mask as a ProblemDetails extension when it was readable |
+| 10 | Two level tables share three level names and disagree on their contents | **Fix in tests** — a cross-table guard pinning the invariants that ARE meant to hold |
+| 15 | `ReadNamesAsync` batching is untested | **Fix in tests** — a 51-share list exercises `Chunk` / filter / `top` |
+| 19 | Level nesting is a load-bearing concurrency invariant | **Fix in docs** — stated in `RecordShareLevels`' remarks so a future non-nested level confronts it |
+| 8 | The wire test is a hand-written `HttpMessageHandler` — ADR-038 ban B1's rationale, not its wording | **Restate as an explicit path-A exception** in the file and the PR description. The strict read's `nextLink`, unreadable-row and non-success branches are unreachable through `WebApplicationFactory`, and task 104 set the same precedent in this folder |
+| 13 | `record_unresolved` is unreachable through the route (the gate denies first) | **Fix in docs** — §5 marks it defence-in-depth, so task 065 builds no branch for it |
+| 5 | No rate limiting | **Recorded, not changed** — §9 item 5, now carrying the review's amplification figures |
+| 6 | A record with >5000 POA rows refuses on all three routes | **Recorded, not changed** — §9 item 6, with why the principal-filter fix waits for the live check |
+| 9 | Publish size and full suite missing from the commit | **Closed** — §7.1 |
+| 17 | `Refused` omits the RFC 7807 `type`; `reasonCode` vs ADR-019's `errorCode` | **Accept** — matches the sibling handler on this group (`SetRecordShareExpiryEndpoint`); the key itself is §7.2 W1 |
+| 20 | Entries written under the `"anonymous"` tenant are never invalidated | **Accept** — already in the source remarks and TTL-bounded |
+| 21 | Cancellation mid-write yields no ProblemDetails | **Accept** — the `finally` still clears the cache, which is the part that matters |
+| 22 | The contract fixture's Dataverse stub ignores entity set and filter | **Accept** — that discrimination is owned by the auth suite's strict double |
+
+_The code, test and doc fixes above are applied in a follow-up commit; §7.4 records the result._
 
 ## 8. Premises the task file got wrong (16 and 17 for this project, found at Step 0)
 
@@ -216,17 +270,49 @@ resolve through the same helper `/set-record-share-expiry` uses.
    colleague, or to themselves, and thereby gain a right they did not have. Dataverse's own sharing model
    would not allow that (a sharer can only pass on rights they hold), but the write here is app-only, so
    Dataverse does not enforce it. This is a direct consequence of two decisions already made, so it is
-   surfaced rather than changed unilaterally. Closing it would mean either intersecting the requested
-   level with the caller's own rights, or refusing self-shares (the narrow half). **Not implemented;
-   awaiting a decision.**
-2. **Sharing with an external licensed system user is refused** (`user_not_internal`). An external person
+   surfaced rather than changed unilaterally. Two ways to close it, both small: intersect the requested
+   level with the caller's own rights — the delegation filter already computes them and then discards
+   them — or refuse a self-share, the narrow half (`CallerRecordAccessProbe.GetCallerSystemUserIdAsync`
+   already resolves the caller's systemuserid). **Not implemented; awaiting a decision.** The Step 9.5
+   review rates this a merge blocker.
+2. **Any Write-holder can remove the creating attorney's share — and on a share-only secure project that
+   locks them out with no recovery path.** Found by the Step 9.5 review; not previously recorded. On a
+   secure project every human's access IS an explicit share and no security role reaches the secure
+   business unit (design §5.1 / NFR-05). A colleague shared at Collaborate holds Write, so they pass the
+   gate and may `unshare-user` the creator — who then has no role, no business-unit path, and no way back,
+   because they can no longer pass the gate either. Three candidate floors, each an owner decision:
+   refuse to revoke the last share carrying `ShareAccess`; refuse to revoke the record owner's or
+   creator's share; or require the caller to hold `ShareAccess` before removing someone else's.
+   **Not implemented; awaiting a decision.**
+3. **Sharing with an external licensed system user is refused** (`user_not_internal`). An external person
    is expected to arrive through a contact grant, which carries an expiry and reminders. If the product
    intends to allow a licensed external system user to be shared with directly, this rule needs to change.
-3. **Before merge: confirm the stored masks against real Dataverse.** Every read-back comparison assumes
-   Dataverse stores exactly the mask that was sent (1 / 23 / 65559). No live test can run in CI (owner
-   directive), and the offline tests pin our end of the wire only. If Dataverse normalises a mask, every
-   share would answer "not confirmed" — loud, not silent, but 100% broken. One create + read against a
-   real environment settles it.
+4. **Before merge: confirm against real Dataverse with a DOWNGRADE, not a create.** Rewritten after the
+   Step 9.5 review, which caught that the check as first scoped could not detect the failure the design
+   hinges on. A create-and-read exercises `GrantAccess` on a principal with no share — the one case
+   Microsoft Learn effectively covers. The load-bearing assumption is that **`ModifyAccess` REPLACES**.
+   If it is additive instead, a downgrade stores the union: the read-back refuses with
+   `write_not_confirmed` — loud on the wire — while the user silently KEEPS Write and Delete, and nothing
+   rolls back. The operator is told "could not be confirmed", not "this user still has Full Access".
+   So the check is: seed Full Access on a scratch record, call `share-user` at View Only, then read
+   `accessrightsmask` directly and assert **1**. Worth adding in the same pass: `RevokeAccess` for a
+   principal holding no share, and `ModifyAccess` for a principal holding no share — both are modelled
+   as throwing, and the endpoints are built on that reading.
+5. **No rate-limiting policy on this admin surface** (§7.2 W2). The review priced the amplification: a
+   DENIED request still costs an OBO exchange, a `WhoAmI`, and up to three `RetrievePrincipalAccess`
+   calls with 400 ms + 1200 ms of built-in retry — roughly five Dataverse calls and 1.6 s of held request
+   per attempt, because a random record id is indistinguishable from replication lag. Drivable by any
+   authenticated caller against `GET /user-shares`. A policy on the group is the right shape; it would
+   change nine existing routes, so it is not done in this task.
+6. **A record with more than one page of POA rows (5000) refuses on all three routes.** The strict read
+   throws rather than answer from a partial list, so `share-user`, `unshare-user` and `user-shares` all
+   answer 500 `read_failed` — including the unshare that would bring the record back under the cap. The
+   review's fix — filter the write-path read to the single principal (`principalid eq`) — would remove
+   the paging question from both write paths and take the 5000-row read off every write's hot path.
+   **Deliberately not done here**: it changes a query shape that is proven in production (the same
+   `objectid` + `objecttypecode` filter has served `PlaybookSharingService` and `DirectThreadAccessService`
+   since task 060), and if `principalid` turned out not to be filterable on `principalobjectaccessset`,
+   the resulting 400 would break every share. It belongs with the live check in item 4.
 
 ## 10. Registered findings
 
