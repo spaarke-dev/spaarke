@@ -122,6 +122,13 @@ shared/taskpane/components/__tests__/SaveFlow.openRecord.test.tsx
 # hasMore means only "unrevealed rows", and there is no pager of any kind.
 shared/taskpane/hooks/__tests__/useLazyResults.test.tsx
 shared/taskpane/components/__tests__/FindResultsList.test.tsx
+# --- Send Email via Outlook (task 036, FR-15) - green from creation -----------
+# Pins: the document link is minted only through the existing share-link route
+# (no expiry override), a failed mint opens no compose window, the record link
+# reuses 027's URL builder, and Word reports the capability absent.
+shared/adapters/__tests__/OutlookAdapter.composeEmail.test.ts
+shared/adapters/__tests__/WordAdapter.composeEmail.test.ts
+shared/taskpane/services/__tests__/sendEmailService.test.ts
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
