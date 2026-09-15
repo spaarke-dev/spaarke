@@ -100,6 +100,12 @@ shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts
 shared/taskpane/components/__tests__/RelatedRecordCard.test.tsx
 shared/taskpane/hooks/__tests__/useRelatedRecord.test.ts
 
+# --- Find view (task 033, FR-16b) - green from creation ----------------------
+# Pins: the six identity outcomes map to honest Find states (only `new` shows
+# the save prompt), Run Index sends a lowercased documentId, and a 200 with
+# ChunksIndexed = 0 is shown as a failure, never as success.
+shared/taskpane/components/views/__tests__/FindView.test.tsx
+
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
