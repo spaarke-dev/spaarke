@@ -39,15 +39,17 @@ public static class SystemCacheKeys
     // ---- Job / idempotency infrastructure ---------------------------------
 
     /// <summary>
-    /// Service Bus event idempotency marker ("event already processed").
+    /// Per-unit job idempotency marker ("this unit of work was already done").
     /// Site: <c>Services/Jobs/IdempotencyService.cs</c>. Raw key: <c>idempotency:processed:{eventId}</c>.
-    /// Justification: event IDs are cross-tenant Service Bus message IDs; tenant-scoping
-    /// would break the exactly-once invariant.
+    /// Justification: the ids are system-level — Service Bus message IDs for the queue handlers, and per-unit keys
+    /// built by scheduled jobs from Dataverse record ids (e.g. <c>GrantExpiryReminderJob</c>'s
+    /// <c>grant-expiry-reminder:{grantId}:{expiry}:{threshold}</c>, task 100). The unit, not a tenant, is what
+    /// must happen exactly once, so tenant-scoping would break the invariant.
     /// </summary>
     public const string IdempotencyProcessed = "idempotency-processed";
 
     /// <summary>
-    /// Service Bus event processing lock (cross-instance mutual exclusion).
+    /// Per-unit job claim (cross-instance mutual exclusion) — Service Bus handlers and scheduled jobs alike.
     /// Site: <c>Services/Jobs/IdempotencyService.cs</c>. Raw key: <c>idempotency:lock:{eventId}</c>.
     /// Justification: lock semantics must be tenant-agnostic so any worker can acquire/release.
     /// </summary>

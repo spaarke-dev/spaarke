@@ -33,10 +33,10 @@
   </context>
 
   <constraints>
-    <constraint source="owner 2026-09-10">Scope: thresholds. Exactly 30, 14, 7, 3 and 1 days before sprk_expiresdate, computed in DateOnly (no time-zone arithmetic).</constraint>
+    <constraint source="owner 2026-09-10; AMENDED by the owner 2026-09-14">Scope: thresholds. 30, 14, 7, 3 and 1 days before sprk_expiresdate, computed in DateOnly (no time-zone arithmetic). AMENDED (catch-up): a missed threshold is sent later — the most urgent unsent threshold whose day has come, once per threshold, while the grant has not expired (access holds through the expiry date).</constraint>
     <constraint source="spec FR-33 (d)">Scope: recipient. The granting internal user / matter owner. NEVER the external grantee — they cannot renew their own access, so notifying them only creates pressure with no action available.</constraint>
     <constraint source="CLAUDE.md §11">Scope: machinery. Reuse SessionFilesCleanupJob's scheduling pattern, OutboxService for notifications and IIdempotencyService for de-duplication. Build no scheduler, no notification channel, no de-dup store.</constraint>
-    <constraint source="project">Scope: idempotency. Each (grant, threshold) pair is notified at most once, including across restarts and across multiple App Service instances.</constraint>
+    <constraint source="project">Scope: idempotency. Each (grant, expiry date, threshold) is notified at most once, including across restarts and across multiple App Service instances (the expiry date is in the key so renewing restarts the reminders).</constraint>
     <constraint source="spec FR-33 known debt">Scope: heartbeat. Every run emits a structured log line / metric with its counts, INCLUDING runs where nothing is due, so "nothing due" and "the job died" are distinguishable.</constraint>
     <constraint source="NFR-02">Scope: cost. ONE query per run for active grants expiring within 30 days — no per-grant query.</constraint>
     <constraint source="ADR-010 / ADR-032">Scope: DI. Register the concrete type. If the job is feature-flagged, follow the ADR-032 null-object kill-switch with UNCONDITIONAL registration.</constraint>
@@ -69,7 +69,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">A grant expiring in exactly 30, 14, 7, 3 or 1 days produces exactly one notification for that threshold, to the granting internal user.</criterion>
-    <criterion testable="true">Negative: a grant expiring in 20 days produces no notification that run.</criterion>
+    <criterion testable="true">Negative: a grant expiring in 20 days whose 30-day reminder was already sent produces no notification that run. (AMENDED 2026-09-14 by the owner's catch-up decision — a grant never reminded gets its 30-day reminder at 20 days, worded with the days actually left.)</criterion>
     <criterion testable="true">Negative: the external grantee never receives a notification.</criterion>
     <criterion testable="true">Negative: an inactive or revoked grant produces no notification.</criterion>
     <criterion testable="true">Running the job twice on the same day sends no duplicates.</criterion>

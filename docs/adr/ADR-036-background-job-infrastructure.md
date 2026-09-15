@@ -67,7 +67,8 @@ public record JobRunContext(
     Guid RunId,
     string CorrelationId,
     JobRunTrigger Trigger,                  // Scheduled | ManualAdmin | OnStartup
-    IDictionary<string, object> Parameters);
+    IDictionary<string, object> Parameters,
+    int Attempt = 1);                       // set by the host per retry of the same run (A1 rule 5; task 100, 2026-09-15)
 
 public record JobRunResult(
     bool Success,

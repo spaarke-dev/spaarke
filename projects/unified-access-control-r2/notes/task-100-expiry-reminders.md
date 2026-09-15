@@ -1,6 +1,6 @@
 # Task 100 — expiry reminders at 30 / 14 / 7 / 3 / 1 days (FR-33 (d))
 
-> **Status**: implemented `e7bd02189` (2026-09-12). Verification in §8.
+> **Status**: implemented `e7bd02189` (2026-09-12); review fixes + catch-up `521ab1b9a` (2026-09-15). Verification in §9.
 > **POML**: [`tasks/100-fr33-expiry-reminder-job.poml`](../tasks/100-fr33-expiry-reminder-job.poml)
 > **Code**: `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/GrantExpiryReminderJob.cs` ·
 > `Infrastructure/DI/ExternalAccessModule.cs` · tests
@@ -10,19 +10,24 @@
 
 ## 1. What it does
 
-Once a day (06:00 UTC), on the existing in-process `Spaarke.Scheduling` host, the job finds every **active**
-external grant (`sprk_externalrecordaccess`) whose `sprk_expiresdate` is **exactly** 30, 14, 7, 3 or 1 days
-away. For each one it writes one in-app notification (Dataverse `appnotification`, the model-driven app's
-bell) to the internal user who can renew it. It then logs a heartbeat with its counts, even when nothing is due.
+Once a day (06:00 UTC), on the existing in-process `Spaarke.Scheduling` host and under its distributed lease (one
+instance per tick — task 103), the job finds every **active** external grant (`sprk_externalrecordaccess`) whose
+`sprk_expiresdate` falls **from today through 30 days out**. For each, the due reminder is the **most urgent
+threshold whose day has come** — the smallest of 30/14/7/3/1 that is at least the days left — and it is sent
+**once** per (grant, expiry date, threshold): one in-app notification (Dataverse `appnotification`, the model-driven
+app's bell) to the internal user who can renew it. A missed day is caught up the next morning; a missed 1-day
+reminder still goes out on the expiry day (access holds through it). Every attempt logs a heartbeat with its counts
+and attempt number, even when there is nothing to send.
 
 The reminder reads, for example:
 
-> **External access expires in 7 days**
-> Jane Doe will lose access to the matter "Smith v. Smith" on 2026-09-19. To keep it, set a new expiration
-> date in Manage Access on the matter.
+> **External access ends in 7 days**
+> Access for Jane Doe to the matter "Smith v. Smith" ends after 2026-09-19. To keep it, set a new expiration date
+> in Manage Access on the matter.
 
-An organization grant reads "Members of {organization} will lose access…". The notification deep-links to the
-record. Priority is Informational at 30 and 14 days, Warning at 7 and 3, and Critical at 1.
+An organization grant reads "Access for members of {organization} …". The title uses the days actually left —
+"ends in N days", "ends tomorrow", "ends today". The notification deep-links to the record. Priority is
+Informational above 7 days left, Warning from 7 to 2, and Critical at 1 or 0.
 
 ---
 
@@ -44,9 +49,10 @@ record. Priority is Informational at 30 and 14 days, Warning at 7 and 3, and Cri
 | When `sprk_grantedby` is empty, who gets the reminder? | **"Fall back to a person"**: `sprk_grantedby`, else the record's owner **if it is a person**, else the record's creator **if it is a person** (not an app identity). If none exists, the grant is **unroutable**: counted in the heartbeat and logged at Error, which can be alerted on. |
 | Which channel? | **"MDA notification bell"**: the existing `NotificationService` (`appnotification`). It needs in-app notifications switched on for the model-driven apps (**operator step**, §7). |
 
-"Person" in code means: the joined `systemuser` row positively reports `isdisabled = false` **and** has no
-`applicationid`. If the join columns are absent, the candidate is treated as "not established" and the chain
-falls through to the next one.
+"Person" in code means: the joined `systemuser` row positively reports `isdisabled = false`, has no
+`applicationid`, **and** has an `accessmode` of 0 Read-Write, 1 Administrative or 2 Read (session 12 — live dev has
+Support (3) and Delegated Admin (5) users, who can see the bell but are not the people who renew shares). If the
+join columns are absent, the candidate is treated as "not established" and the chain falls through to the next one.
 
 Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5** route to the granter and
 **20** to the record's creator. **0** are unroutable.
@@ -62,12 +68,12 @@ Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5**
 | **Retry rule** (ADR-036 A1 rule 4) | The run throws **after its heartbeat** when it made no progress (the query failed) or a reminder failed on the grant's **last day** — no later run can send it. Other failed reminders are counted (`partial`) and tomorrow's run catches them up. Sent reminders are skipped on a retry by their markers. |
 | **Person** | Enabled ∧ no `applicationid` ∧ `accessmode` ∈ {0 Read-Write, 1 Administrative, 2 Read}. Live dev has Support (3) and Delegated Admin (5) users, who must not be the one reminded. |
 | **`DateOnly`, UTC calendar** | `sprk_expiresdate` is Date Only, TimeZoneIndependent. "Today" is `ExternalGrantLifecycle.TodayUtc`, the same calendar the read filter enforces expiry against (task 007/097). |
-| **ONE FetchXML query, all joins OUTER** | NFR-02. The one query returns the grant plus the granter, the contact/organization name, and each root's name, owning user and creator, each user with `isdisabled` / `applicationid`. That is 12 link-entities; Dataverse allows 15. Every join is **outer**, so grants with no granter or a team owner still come back. An inner join would silently lose exactly the grants the fallback chain exists for. The query pages only past 5,000 grants due on the same day. |
-| **FetchXML, not `QueryExpression`** | The **same string** can be executed live through the Web API (`?fetchXml=`), and it was (§6). That verifies column names, aliases and the `in`-over-date operator against real Dataverse, not against our assumptions. |
-| **Idempotency key = (grant, expiry date, threshold)** | Via `IIdempotencyService`: check, then lock, then send, then mark (35-day marker), then release. The expiry date is part of the key, so **renewing restarts the reminders**. Across days, exact-day matching already prevents repeats. The marker guards same-day re-runs (restart, admin trigger-now, a second instance). |
-| **Unroutable ≠ run failure** | The run still reports `Success = true`, with `unroutable = N` and an Error log per grant. A **failed write** makes the run `partial` (`Success = false`). A **failed query** makes it `error`. |
-| **Heartbeat** | One structured log line per run (`[GRANT-EXPIRY-REMINDER] heartbeat status= today= due= sent= alreadySent= unroutable= failed= skipped=`), at Information when `ok` and Warning otherwise, plus the same counts in `JobRunResult.ResultJson`. The scheduler keeps that JSON as run history (`/api/admin/jobs`). "Nothing due" is `status=ok due=0`; "died" is `status=error`, or no heartbeat that day. |
-| **Registration: unconditional** | All dependencies (`NotificationService`, `IIdempotencyService`, `IGenericEntityService`, `TimeProvider`) are unconditional. The operator's pause is the scheduler's admin enable/disable, so ADR-032 needs no Null-Object. |
+| **ONE FetchXML query, all joins OUTER** | NFR-02. The one query returns every active grant expiring today through today + 30 (`ge` / `le` on the Date-Only column) plus the granter, the contact/organization name, and each root's name, owning user and creator, each user with `isdisabled` / `applicationid` / `accessmode`. That is 12 link-entities; Dataverse allows 15. Every join is **outer** (and many-to-one, so no row is duplicated), so grants with no granter or a team owner still come back — an inner join would silently lose exactly the grants the fallback chain exists for. Ordered by the grant id for stable paging; pages past 5,000 rows, capped at 20 pages (`truncated`). |
+| **FetchXML, not `QueryExpression`** | The **same string** can be executed live through the Web API (`?fetchXml=`), and it was (§6, twice). That verifies column names, aliases and the date-range operators against real Dataverse, not against our assumptions. |
+| **Idempotency key = (grant, expiry date, threshold)** | Via `IIdempotencyService` (ADR-036 A1 rule 3): already sent? → claim → **check again under the claim** → send → mark (35-day marker, written with `CancellationToken.None`) → release. The expiry date is part of the key, so **renewing restarts the reminders**. With catch-up, the marker is what stops the same threshold going out again on later days in the window, as well as same-day re-runs (restart, a retry attempt, admin trigger-now). |
+| **Unroutable ≠ run failure** | The run still reports `Success = true`. `unroutable` is counted in **every** heartbeat while the grant is in the window; the Error log is written **once per threshold** (its own marker), so an alert fires when a reminder would have gone out, not every morning for 30 days. A **failed write** makes the run `partial` (`Success = false`); a **failed query** makes it `error` and throws. |
+| **Heartbeat** | One structured log line **per attempt** (`[GRANT-EXPIRY-REMINDER] heartbeat status= today= attempt= inWindow= sent= alreadySent= unroutable= failed= lastDayFailed= skipped= truncated=`), at Information when `ok` and Warning otherwise, plus the counts in `JobRunResult.ResultJson`, which the scheduler keeps as run history (`/api/admin/jobs`). The host passes the attempt number on each retry (`JobRunContext.Attempt`). "Nothing to send" is `status=ok sent=0`; "died" is `status=error`, or no heartbeat that day. |
+| **Registration: unconditional** | `AddScheduledJob<GrantExpiryReminderJob>` in `ExternalAccessModule` (task 103). All dependencies (`NotificationService`, `IIdempotencyService`, `IGenericEntityService`, `TimeProvider`) are unconditional, so ADR-032 needs no Null-Object. There is **no durable pause**: the admin disable applies to the one instance that served it, and a restart re-enables the job (ADR-036 A1 §2). |
 
 ---
 
@@ -86,6 +92,21 @@ Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5**
    and the per-app setting could not be read back (settingdefinition query returned nothing). **Operator step**, §7.
 6. **Only BFF-written expiries are bounded** (#974). A grant created outside the BFF with no expiry is never
    reminded, because it never expires.
+7. **A burst on the first morning.** Every active grant expiring within 30 days gets a catch-up reminder the first
+   time the job runs, and again once if a Redis failover without persistence loses the markers (the accepted
+   fail-open behaviour, #984).
+8. **At-least-once around a timeout.** A send that times out after Dataverse already created the notification is
+   counted failed and re-sent (by the expiry-day retry, or by tomorrow's catch-up) — a duplicate, never a miss.
+9. **UTC calendar.** 06:00 UTC is 23:00 Pacific the previous evening, and "ends today / ends after {date}" are UTC
+   dates — the same calendar the read filter enforces expiry against. Accepted; the date shown is exact in UTC.
+10. **The last-resort recipient may have lost access.** The record's creator receives the record's and the
+    external user's names even if they no longer have access to the record. The `appnotification` row is visible
+    only to them; accepted, because the alternative is telling nobody.
+11. **Log volume.** `IdempotencyService` logs an Information line for every "already sent" check — one per grant
+    in the window per day. Accepted for now; it is the shared service's logging, not this job's.
+12. **Transient vs permanent** is decided by the exception chain: a Dataverse fault that is not throttling
+    (e.g. a missing privilege) is permanent and not retried; timeouts, network failures, throttling and anything
+    unrecognised are treated as transient.
 
 ---
 
@@ -99,6 +120,8 @@ Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5**
 | Primary-name columns | `sprk_project` → `sprk_projectnumber` (display name used: `sprk_projectname`, exists) · `sprk_matter` → `sprk_matternumber` (`sprk_mattername` used, exists) · `sprk_workassignment` → `sprk_name` · `sprk_organization` → `sprk_organizationname` · `contact` → `fullname` |
 | Columns exist | `systemuser.applicationid` (Uniqueidentifier), `systemuser.isdisabled` (Boolean), `owninguser` on all three roots |
 | The job's FetchXML, run via Web API `?fetchXml=` with `in (2026-12-10, 2026-10-12)` | **25 rows**, aliased columns `gb.isdisabled`, `mt.createdby`, `mtc.isdisabled`, `ct.fullname`, `mt.sprk_mattername` returned exactly as the job reads them; human users carry no `applicationid` |
+
+| **Session 12 (2026-09-15)** — the rewritten window FetchXML (`statecode eq 0`, `sprk_expiresdate ge today`, `le today+30`, `accessmode` on every systemuser join), run via Web API `?fetchXml=` | **0 rows** in the 2026-09-15 → 2026-10-15 window (correct: the 28 active grants all expire 2026-12-10); **28 rows** when the upper bound is widened to 2026-12-31. The aliased columns `gb.accessmode`, `mtc.accessmode`, `gb.isdisabled`, `mt.createdby`, `ct.fullname`, `mt.sprk_mattername` come back as the job reads them; every `accessmode` seen is 0 |
 
 No live writes.
 
@@ -117,11 +140,25 @@ No live writes.
 
 ## 8. Placement Justification (root CLAUDE.md §10, `.claude/constraints/bff-extensions.md`)
 
-| Criterion | Answer |
+**Host decision under [ADR-052](../../../.claude/adr/ADR-052-workload-placement.md)** (re-stated 2026-09-15; the
+first version of this section weighed Functions against ADR-001, which ADR-052 superseded):
+
+| ADR-052 signal / cost | Answer |
+|---|---|
+| **F1** event intake that must not depend on BFF availability | No — a daily timer; a late run is caught up the next day. |
+| **F2** independent scaling | No — one query and at most a few hundred notifications a day. |
+| **F3** one dispatch per schedule without building coordination | Met **in place**: the scheduler's distributed lease (task 103) gives one dispatch per schedule across instances and slots. |
+| **F4** isolation (failure / security / release cadence) | No need — same identity, same release cadence as the grant endpoints it complements. |
+| **F5** multi-step durable orchestration | No. |
+| **B2** uses BFF domain code | Yes — `ExternalGrantLifecycle` (the expiry calendar the read filter uses), `NotificationService`, `IIdempotencyService`. |
+| **B3** low volume; same scale signal, identity, release cadence | Yes. |
+| Costs of moving it | Extracting those services to shared libraries, a Functions app per stamp (host storage, provisioning, CI/CD) — for one query a day. |
+| **Decision** | **The BFF**, as an `IScheduledJob` registered with `AddScheduledJob` (ADR-036). Tie-breaker: fewer moving parts. |
+
+| Other §10 criterion | Answer |
 |---|---|
 | Latency budget against BFF state? | No. It is a daily batch. |
 | Writes BFF session/audit state in the same request? | No. |
-| Event-driven (timer) with no user wait → Functions per ADR-001? | Timer-driven, **but kept in the BFF**. It reuses the BFF-owned grant-table knowledge (`ExternalGrantLifecycle`), the BFF's `NotificationService` and `IIdempotencyService`, and the in-process `Spaarke.Scheduling` host that the platform adopted for exactly this class of job (R3 FR-2.x; `MembershipReconciliationJob` is the nightly precedent). A Function would duplicate Dataverse auth, configuration and the notification code for one query a day. ADR-001 *permits* Functions for narrow out-of-band work; it does not require them. |
 | New packages? | **None.** |
 | CRUD→AI dependency? | **None.** No AI-internal type is referenced. |
 | DI convention | Registered in the existing `ExternalAccessModule`. No `Program.cs` line. |

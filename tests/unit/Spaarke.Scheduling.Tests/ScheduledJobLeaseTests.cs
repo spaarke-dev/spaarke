@@ -255,7 +255,7 @@ public class ScheduledJobLeaseTests
     }
 
     [Fact]
-    public async Task RetriedRun_EachAttemptSeesItsAttemptNumber()
+    public async Task TriggerNowAsync_RetriedRun_EachAttemptSeesItsAttemptNumber()
     {
         // ADR-036 A1 rule 5: a job's heartbeat carries its attempt number, so the host must pass it on each retry.
         var time = new FakeTimeProvider(Start);

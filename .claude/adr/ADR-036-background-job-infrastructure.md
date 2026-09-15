@@ -55,7 +55,7 @@ A shared library `src/server/shared/Spaarke.Scheduling/` provides a uniform cont
 
 - **MUST** implement `IScheduledJob` (JobId, DisplayName, Description, `ExecuteAsync(JobRunContext, CancellationToken)`) for new schedule-driven work that ADR-052 places in the BFF. No new hand-rolled timer `BackgroundService`.
 - **MUST (A1-1) one dispatch per schedule** for jobs that must not run concurrently: a distributed lease that outlives the whole run including every retry, and makes a manual trigger and a scheduled tick mutually exclusive; a host without the lease records **skipped**. No lease store configured → dispatch + warn once. Store configured but unavailable → retry the acquire with the job backoff, then **do not dispatch**; record the tick **failed** and log an error (**A1.1**, owner decision 2026-09-14). As built: `ScheduledJobHost` + `RedisScheduledJobLease`; a manual trigger of a running job gets 409; a run is cancelled when another holder takes its lease, when renewal fails for a full lease duration, past `MaxRunDuration` (2 h), or on host shutdown.
-- **MUST (A1-2) slots**: non-production deployment slots do not run scheduled jobs (slot-sticky `Scheduling__RunScheduledJobs=false`, set by `scripts/Deploy-BffApi.ps1 -UseSlotDeploy` and `.github/workflows/deploy-bff-api.yml`; the L2 H9 provisioning deploy does not yet — #987).
+- **MUST (A1-2) slots**: non-production deployment slots do not run scheduled jobs (slot-sticky `Scheduling__RunScheduledJobs=false`, set by every slot-deploy path — `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`, `.github/workflows/deploy-bff-api.yml` and the L2 H9 provisioning deploy (#987, fails closed: no guard → no deploy)).
 - **MUST (A1-3) idempotency**: an **atomic claim** per unit of work before its side effect, a **completion marker** after it; a failed unit releases its claim.
 - **MUST (A1-4) retry**: throw from `ExecuteAsync` when a retry could complete work this tick would otherwise lose (no progress possible, or transient unit failures no later tick revisits); otherwise count failures and complete. New jobs; existing jobs when next touched.
 - **MUST (A1-5) heartbeat**: one structured heartbeat per attempt with its counts and attempt number, including an attempt with nothing to do.
@@ -96,7 +96,8 @@ public record JobRunContext(
     Guid RunId,
     string CorrelationId,
     JobRunTrigger Trigger,
-    IDictionary<string, object> Parameters);
+    IDictionary<string, object> Parameters,
+    int Attempt = 1);  // set by the host per retry of the same run (A1 rule 5 heartbeat)
 
 public record JobRunResult(
     bool Success,

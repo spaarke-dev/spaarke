@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.ExceptionServices;
+using System.ServiceModel;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
@@ -39,30 +40,36 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// Days are <see cref="DateOnly"/> on the UTC calendar the read filter enforces expiry against.</para>
 ///
 /// <para><b>At most once</b> (ADR-036 A1 rule 3): "already sent?" → take a claim → check again under the claim →
-/// send → write the completion marker → release. <see cref="IIdempotencyService"/>'s claim is check-then-set
-/// (#984), but this job only ever runs on one instance at a time — the scheduler's lease (ADR-036 A1 rule 1,
-/// task 103) — and the second check closes the gap between the first check and the claim. The completion marker
-/// is written without the run's cancellation token, so a reminder that went out is recorded even when the host is
-/// stopping.</para>
+/// send → write the completion marker → confirm it stuck → release. <see cref="IIdempotencyService"/>'s claim is
+/// check-then-set and it fails open (#984), but this job runs on one instance at a time — the scheduler's lease
+/// (ADR-036 A1 rule 1, task 103), apart from the documented overlap window after a Redis failover (A1 §5) — and the
+/// second check closes the gap between the first check and the claim. The completion marker is written without the
+/// run's cancellation token, so a reminder that went out is recorded even when the host is stopping; a marker that
+/// did not stick is counted (<c>markFailed</c>), because the service swallows its own write failures.</para>
 ///
-/// <para><b>Retry</b> (ADR-036 A1 rule 4): the run throws — after its heartbeat — when it could not make progress
-/// (the query failed) or when a reminder failed on the grant's last day, which no later run can send. The
-/// scheduler's retry policy then re-runs it; sent reminders are skipped by their markers. Any other failed
-/// reminder is counted and left to tomorrow's run, which catches it up.</para>
+/// <para><b>Retry</b> (ADR-036 A1 rule 4): the attempt throws — after its heartbeat — only when a retry in this run
+/// could send something no later run can: the query failed, or a reminder failed <i>transiently</i> on the grant's
+/// last day (or its claim was held by a leftover from a failed release). A permanent rejection on the last day is
+/// counted, not retried — another attempt would be refused the same way. The scheduler's retry policy re-runs the
+/// attempt; reminders already sent are skipped by their markers. Any other failed reminder is counted and left to
+/// tomorrow's run, which catches it up. A cancelled run never throws.</para>
 ///
 /// <para><b>Cost</b> (NFR-02): ONE FetchXML query per run returns every grant in the window with everything
-/// needed to route and word its reminder — no per-grant query. It pages past <see cref="PageSize"/> rows and stops
-/// at <see cref="MaxPages"/> pages, reporting the run as truncated.</para>
+/// needed to route and word its reminder — no per-grant query. It is ordered by the grant's id for stable paging,
+/// pages past <see cref="PageSize"/> rows and stops at <see cref="MaxPages"/> pages, reporting the run as
+/// truncated. One unexpected failure on a row is counted and the run carries on with the rest.</para>
 ///
 /// <para><b>Heartbeat</b> (spec FR-33 known debt; ADR-036 A1 rule 5): every attempt logs one structured line with
-/// its counts and attempt number — including an attempt with nothing to send — and returns them in
-/// <see cref="JobRunResult.ResultJson"/>. "Nothing to send" (status <c>ok</c>) and "the job died" (status
-/// <c>error</c>, or no heartbeat that day) do not look alike.</para>
+/// its counts and attempt number — including an attempt with nothing to send. An attempt that completes also
+/// returns the counts in <see cref="JobRunResult.ResultJson"/> (an attempt that throws leaves only its heartbeat).
+/// "Nothing to send" (status <c>ok</c>) and "the job died" (status <c>error</c>, or no heartbeat that day) do not
+/// look alike.</para>
 ///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF, on the in-process <c>Spaarke.Scheduling</c> host,
 /// registered with <c>AddScheduledJob</c> in <c>ExternalAccessModule</c>. Low volume, BFF identity and release
 /// cadence, BFF domain code (ADR-052 B2/B3); the one Functions signal, one dispatch per schedule (F3), is met in
-/// place by the scheduler's lease. No new scheduler, channel, store or package.</para>
+/// place by the scheduler's lease. Moving it would cost a deployable per stamp and extracting that domain code, for
+/// one query a day. No new scheduler, channel, store or package.</para>
 /// </remarks>
 public sealed class GrantExpiryReminderJob : IScheduledJob
 {
@@ -94,6 +101,10 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     // The interactive systemuser access modes: 0 Read-Write, 1 Administrative, 2 Read. Excludes 3 Support User,
     // 4 Non-interactive and 5 Delegated Admin — live dev has Support and Delegated Admin users (task 100 review).
     private const int LastPersonAccessMode = 2;
+
+    // Dataverse service-protection (throttling) fault codes — a retry after the backoff can succeed.
+    // https://learn.microsoft.com/power-apps/developer/data-platform/api-limits
+    private static readonly HashSet<int> ThrottlingErrorCodes = new() { -2147015902, -2147015903, -2147015898 };
 
     // Outlives the 30-day window, so a marker is still present on any later day its key could recur.
     private static readonly TimeSpan SentMarkerLifetime = TimeSpan.FromDays(35);
@@ -151,7 +162,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         var today = ExternalGrantLifecycle.TodayUtc(_timeProvider);
         var counts = new RunCounts();
         var status = StatusOk;
-        string? error = null;
+        var problems = new List<string>();
         ExceptionDispatchInfo? noProgress = null;
 
         try
@@ -168,14 +179,24 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             foreach (var row in rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await RemindAsync(row, today, notifications, idempotency, counts, context.CorrelationId, cancellationToken)
-                    .ConfigureAwait(false);
+                try
+                {
+                    await RemindAsync(row, today, notifications, idempotency, counts, context.CorrelationId, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // One bad row must not stop every other grant's reminder, day after day.
+                    counts.Failed++;
+                    _logger.LogWarning(ex,
+                        "[GRANT-EXPIRY-REMINDER] Grant {GrantId} could not be processed; continuing with the rest. correlationId={CorrelationId}",
+                        row.Id, context.CorrelationId);
+                }
             }
 
             if (truncated)
             {
-                status = StatusPartial;
-                error = $"Stopped after {MaxPages} pages of {PageSize} grants; later grants in the window were not reminded.";
+                problems.Add($"Stopped after {MaxPages} pages of {PageSize} grants; later grants in the window were not reminded.");
                 _logger.LogError(
                     "[GRANT-EXPIRY-REMINDER] The window query still had more rows after {MaxPages} pages — stopped. correlationId={CorrelationId}",
                     MaxPages, context.CorrelationId);
@@ -183,19 +204,28 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
 
             if (counts.Failed > 0)
             {
+                problems.Add($"{counts.Failed} reminder(s) could not be written; see the per-grant warnings.");
+            }
+
+            if (counts.ClaimHeld > 0)
+            {
+                problems.Add($"{counts.ClaimHeld} reminder(s) were skipped because a claim was still held.");
+            }
+
+            if (problems.Count > 0)
+            {
                 status = StatusPartial;
-                error = $"{counts.Failed} reminder(s) could not be written; see the per-grant warnings.";
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             status = StatusCancelled;
-            error = "Cancelled before every grant in the window was processed.";
+            problems.Add("Cancelled before every grant in the window was processed.");
         }
         catch (Exception ex)
         {
             status = StatusError;
-            error = ex.Message;
+            problems.Add(ex.Message);
             noProgress = ExceptionDispatchInfo.Capture(ex);
             _logger.LogError(ex,
                 "[GRANT-EXPIRY-REMINDER] Run failed before completing — grants in the window may not have been reminded. attempt={Attempt} correlationId={CorrelationId}",
@@ -208,24 +238,24 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         _logger.Log(
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "[GRANT-EXPIRY-REMINDER] heartbeat status={Status} today={Today} attempt={Attempt} inWindow={InWindow} sent={Sent} " +
-            "alreadySent={AlreadySent} unroutable={Unroutable} failed={Failed} lastDayFailed={LastDayFailed} skipped={Skipped} " +
-            "truncated={Truncated} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
+            "alreadySent={AlreadySent} unroutable={Unroutable} failed={Failed} lastDayFailed={LastDayFailed} claimHeld={ClaimHeld} " +
+            "markFailed={MarkFailed} skipped={Skipped} truncated={Truncated} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             status, today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), context.Attempt, counts.InWindow, counts.Sent,
-            counts.AlreadySent, counts.Unroutable, counts.Failed, counts.LastDayFailed, counts.Skipped, counts.Truncated,
-            (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
+            counts.AlreadySent, counts.Unroutable, counts.Failed, counts.LastDayFailed, counts.ClaimHeld, counts.MarkFailed,
+            counts.Skipped, counts.Truncated, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
-        // ADR-036 A1 rule 4: throw only when a retry could complete work this run would otherwise lose.
+        // ADR-036 A1 rule 4: throw only when a retry in this run could send something no later run can.
         noProgress?.Throw();
-        if (counts.LastDayFailed > 0)
+        if (counts.LastDayFailed > 0 && status != StatusCancelled)
         {
             throw new InvalidOperationException(
-                $"{counts.LastDayFailed} reminder(s) for grants expiring today could not be written, and no later run can send them — " +
+                $"{counts.LastDayFailed} reminder(s) for grants expiring today failed transiently, and no later run can send them — " +
                 "failing the attempt so the scheduler retries it (ADR-036 A1 rule 4).");
         }
 
         return new JobRunResult(
             Success: status == StatusOk,
-            ErrorMessage: error,
+            ErrorMessage: problems.Count > 0 ? string.Join(" ", problems) : null,
             ProcessedItems: counts.Sent,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(
@@ -239,6 +269,9 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                     counts.AlreadySent,
                     counts.Unroutable,
                     counts.Failed,
+                    counts.LastDayFailed,
+                    counts.ClaimHeld,
+                    counts.MarkFailed,
                     counts.Skipped,
                     counts.Truncated,
                     sentTo = new { granter = counts.SentToGranter, recordOwner = counts.SentToOwner, recordCreator = counts.SentToCreator },
@@ -277,12 +310,13 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
 
     /// <summary>
     /// The window FetchXML. Every join is OUTER: a grant with no granter, a team owner or no contact must still come
-    /// back, or the fallback chain — and the unroutable count — would silently lose it.
+    /// back, or the fallback chain — and the unroutable count — would silently lose it. Ordered by the grant's id so
+    /// paging is stable.
     /// </summary>
     /// <remarks>
-    /// Column names and aliased result names verified against live dev metadata and data on 2026-09-12 (task 100
-    /// notes §6). The date range uses <c>ge</c>/<c>le</c> over bare <c>yyyy-MM-dd</c> values on this Date-Only column,
-    /// the same comparison the read filter makes (<c>ExternalParticipationService.ExpiryPredicate</c>).
+    /// Verified against live dev data: column names and aliased result names on 2026-09-12, and this shape — the
+    /// <c>ge</c>/<c>le</c> date range and <c>accessmode</c> on every systemuser join — on 2026-09-15 (task 100 notes
+    /// §6). The range uses the same comparison as the read filter (<c>ExternalParticipationService.ExpiryPredicate</c>).
     /// </remarks>
     internal static string BuildWindowFetchXml(DateOnly today, int page, string? pagingCookie)
     {
@@ -301,6 +335,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         var entity = new XElement("entity", new XAttribute("name", GrantEntity),
             Attributes("sprk_externalrecordaccessid", "sprk_expiresdate", "sprk_contact", "sprk_organization",
                 "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_grantedby"),
+            new XElement("order", new XAttribute("attribute", "sprk_externalrecordaccessid")),
             new XElement("filter", new XAttribute("type", "and"),
                 Condition("statecode", "eq", "0"),
                 Condition("sprk_expiresdate", "ge", today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
@@ -342,7 +377,10 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             return;
         }
 
-        var key = $"grant-expiry-reminder:{grant.Id:N}:{grant.ExpiresDate:yyyyMMdd}:{grant.Threshold}";
+        // Invariant formatting: the key must not change with the server's culture, or every marker would be missed.
+        var key = string.Create(
+            CultureInfo.InvariantCulture,
+            $"grant-expiry-reminder:{grant.Id:N}:{grant.ExpiresDate:yyyyMMdd}:{grant.Threshold}");
 
         if (grant.Recipient is not { } recipient)
         {
@@ -362,10 +400,25 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             return;
         }
 
-        if (await idempotency.IsEventProcessedAsync(key, ct).ConfigureAwait(false)
-            || !await idempotency.TryAcquireProcessingLockAsync(key, SendLockDuration, ct).ConfigureAwait(false))
+        if (await idempotency.IsEventProcessedAsync(key, ct).ConfigureAwait(false))
         {
             counts.AlreadySent++;
+            return;
+        }
+
+        if (!await idempotency.TryAcquireProcessingLockAsync(key, SendLockDuration, ct).ConfigureAwait(false))
+        {
+            // Under the scheduler's lease no other run is sending it, so a held claim with no marker is a leftover from
+            // a release that failed. It expires on its own; on the grant's last day the attempt is retried for it.
+            counts.ClaimHeld++;
+            if (grant.DaysLeft == 0)
+            {
+                counts.LastDayFailed++;
+            }
+
+            _logger.LogWarning(
+                "[GRANT-EXPIRY-REMINDER] The {Threshold}-day reminder for grant {GrantId} was not sent: its claim is still held. correlationId={CorrelationId}",
+                grant.Threshold, grant.Id, correlationId);
             return;
         }
 
@@ -407,15 +460,19 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             {
                 // Includes a timeout, which also surfaces as a cancellation — but not of our token.
                 counts.Failed++;
-                if (grant.DaysLeft == 0)
+                var retryable = grant.DaysLeft == 0 && IsTransient(ex);
+                if (retryable)
                 {
                     counts.LastDayFailed++;
                 }
 
                 _logger.LogWarning(ex,
-                    "[GRANT-EXPIRY-REMINDER] Could not write the {Threshold}-day reminder for grant {GrantId} to user {UserId} ({DaysLeft} days left){Retry}. correlationId={CorrelationId}",
+                    "[GRANT-EXPIRY-REMINDER] Could not write the {Threshold}-day reminder for grant {GrantId} to user {UserId} ({DaysLeft} days left){Next}. correlationId={CorrelationId}",
                     grant.Threshold, grant.Id, recipient.UserId, grant.DaysLeft,
-                    grant.DaysLeft == 0 ? "; the run will be retried" : "; tomorrow's run catches it up", correlationId);
+                    grant.DaysLeft > 0 ? "; tomorrow's run catches it up"
+                        : retryable ? "; the attempt will be retried"
+                        : "; the rejection is permanent, so it is not retried",
+                    correlationId);
                 return;
             }
 
@@ -427,15 +484,25 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 default: counts.SentToCreator++; break;
             }
 
+            // The reminder went out: record it even if the host is stopping. IIdempotencyService swallows its own write
+            // failures, so read the marker back — a marker that did not stick means a later run may send this again.
+            bool marked;
             try
             {
-                // The reminder went out: record it even if the host is stopping.
                 await idempotency.MarkEventAsProcessedAsync(key, SentMarkerLifetime, CancellationToken.None).ConfigureAwait(false);
+                marked = await idempotency.IsEventProcessedAsync(key, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,
-                    "[GRANT-EXPIRY-REMINDER] Sent the {Threshold}-day reminder for grant {GrantId} but could not record it; a re-run may repeat it. correlationId={CorrelationId}",
+                marked = false;
+                _logger.LogDebug(ex, "[GRANT-EXPIRY-REMINDER] Marker write for {Key} threw", key);
+            }
+
+            if (!marked)
+            {
+                counts.MarkFailed++;
+                _logger.LogWarning(
+                    "[GRANT-EXPIRY-REMINDER] Sent the {Threshold}-day reminder for grant {GrantId} but could not record it; a later run may repeat it. correlationId={CorrelationId}",
                     grant.Threshold, grant.Id, correlationId);
             }
         }
@@ -450,6 +517,27 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 _logger.LogWarning(ex, "[GRANT-EXPIRY-REMINDER] Could not release the claim on {Key}; it expires on its own", key);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether another attempt in this run could plausibly succeed. A Dataverse fault that is not throttling is a
+    /// rejection (privilege, validation) and is permanent; timeouts, network failures, throttling and anything
+    /// unrecognised are treated as transient — a retry costs seconds, a lost last-day reminder costs the warning.
+    /// </summary>
+    private static bool IsTransient(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case TimeoutException or TaskCanceledException or HttpRequestException or IOException:
+                    return true;
+                case FaultException<OrganizationServiceFault> fault:
+                    return ThrottlingErrorCodes.Contains(fault.Detail?.ErrorCode ?? 0);
+            }
+        }
+
+        return true;
     }
 
     private static IEnumerable<XElement> Attributes(params string[] names)
@@ -589,6 +677,8 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         public int Unroutable;
         public int Failed;
         public int LastDayFailed;
+        public int ClaimHeld;
+        public int MarkFailed;
         public int Skipped;
         public bool Truncated;
         public int SentToGranter;
