@@ -345,15 +345,12 @@ public static class ExternalAccessModule
         services.AddSingleton<CiamUserProvisioningService>();
 
         // FR-33 (d), task 100 — reminders 30/14/7/3/1 days before an external grant expires, to the granter
-        // (else the record's owner, else its creator), never the grantee. A job on the existing in-process
-        // Spaarke.Scheduling host, following MembershipReconciliationJob: concrete singleton + forwarded
-        // IScheduledJob + a bootstrap that registers the handler and seeds its schedule before the host's
-        // first tick. UNCONDITIONAL: its dependencies (NotificationService, IIdempotencyService,
-        // IGenericEntityService, TimeProvider) are all unconditional, and operators pause it through the
-        // scheduler's admin enable/disable rather than a feature flag (ADR-032 needs no Null-Object here).
-        services.AddSingleton<GrantExpiryReminderJob>();
-        services.AddSingleton<IScheduledJob>(sp => sp.GetRequiredService<GrantExpiryReminderJob>());
-        services.AddHostedService<GrantExpiryReminderBootstrapHostedService>();
+        // (else the record's owner, else its creator), never the grantee. A job on the in-process
+        // Spaarke.Scheduling host, registered through AddScheduledJob (ADR-036 A1 rule 6). UNCONDITIONAL: its
+        // dependencies (NotificationService, IIdempotencyService, IGenericEntityService, TimeProvider) are all
+        // unconditional, so ADR-032 needs no Null-Object here. There is no durable pause: the admin disable applies
+        // to the one instance that served it and a restart re-enables the job (ADR-036 A1 §2).
+        services.AddScheduledJob<GrantExpiryReminderJob>(GrantExpiryReminderJob.DefaultCronSchedule);
 
         return services;
     }
@@ -373,62 +370,5 @@ public static class ExternalAccessModule
         ArgumentNullException.ThrowIfNull(descriptor);
         services.AddSingleton(descriptor);
         return services;
-    }
-
-    /// <summary>
-    /// Startup hook that registers <see cref="GrantExpiryReminderJob"/> with the scheduler and seeds its daily
-    /// schedule. Mirrors <c>MembershipModule.MembershipReconciliationBootstrapHostedService</c>: it runs before
-    /// <see cref="ScheduledJobHost"/> (registered later, by <c>AddSchedulingModule</c>) takes its first tick, and
-    /// is idempotent on restart.
-    /// </summary>
-    internal sealed class GrantExpiryReminderBootstrapHostedService : IHostedService
-    {
-        private readonly ScheduledJobRegistry _registry;
-        private readonly InMemoryBackgroundJobStore _store;
-        private readonly GrantExpiryReminderJob _job;
-        private readonly ILogger<GrantExpiryReminderBootstrapHostedService> _logger;
-
-        public GrantExpiryReminderBootstrapHostedService(
-            ScheduledJobRegistry registry,
-            InMemoryBackgroundJobStore store,
-            GrantExpiryReminderJob job,
-            ILogger<GrantExpiryReminderBootstrapHostedService> logger)
-        {
-            _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-            _store = store ?? throw new ArgumentNullException(nameof(store));
-            _job = job ?? throw new ArgumentNullException(nameof(job));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
-
-        public Task StartAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                _registry.Register(_job);
-                _logger.LogInformation(
-                    "Registered IScheduledJob '{JobId}' with ScheduledJobRegistry", GrantExpiryReminderJob.JobIdConstant);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already registered", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogDebug(
-                    "IScheduledJob '{JobId}' already registered — skipping", GrantExpiryReminderJob.JobIdConstant);
-            }
-
-            var definition = new BackgroundJobDefinition(
-                JobId: GrantExpiryReminderJob.JobIdConstant,
-                DisplayName: _job.DisplayName,
-                Description: _job.Description,
-                Enabled: true,
-                CronSchedule: GrantExpiryReminderJob.DefaultCronSchedule,
-                ConfigJson: null);
-            _store.AddOrReplaceJob(definition);
-            _logger.LogInformation(
-                "Seeded BackgroundJobDefinition '{JobId}' (cron='{Cron}', enabled={Enabled})",
-                definition.JobId, definition.CronSchedule, definition.Enabled);
-
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

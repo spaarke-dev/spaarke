@@ -94,12 +94,14 @@ public static class JobsEndpoints
         group.MapPost("/{jobId}/trigger", TriggerJobAsync)
             .WithName("AdminJobsTrigger")
             .WithSummary("Manually trigger a registered background job (R3 task 021)")
-            .WithDescription("Dispatches the named IScheduledJob out-of-band with Trigger=ManualAdmin and a fresh correlationId (NFR-08). Returns 202 Accepted immediately with the persistent run id and dispatch timestamp — the admin client polls GET /api/admin/jobs/{jobId}/status for run outcome. 404 when the jobId is not registered.")
+            .WithDescription("Dispatches the named IScheduledJob out-of-band with Trigger=ManualAdmin and a fresh correlationId (NFR-08). Returns 202 Accepted immediately with the persistent run id and dispatch timestamp — the admin client polls GET /api/admin/jobs/{jobId}/status for run outcome. 404 when the jobId is not registered. 409 when the job is already running (a scheduled tick or another trigger holds its lease — ADR-036 A1 rule 1). 503 when the scheduler lease store is unavailable.")
             .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // ============================================================================
         // ===== Task 022 — GET /api/admin/jobs/{jobId}/history?limit=N ===============
@@ -333,6 +335,24 @@ public static class JobsEndpoints
                 Detail = ex.Message,
                 Status = StatusCodes.Status404NotFound
             });
+        }
+        catch (ScheduledJobBusyException ex)
+        {
+            // ADR-036 A1 rule 1: a job never runs twice at once — not even at an admin's request.
+            return Results.Conflict(new ProblemDetails
+            {
+                Title = "Job Already Running",
+                Detail = ex.Message,
+                Status = StatusCodes.Status409Conflict
+            });
+        }
+        catch (ScheduledJobLeaseUnavailableException ex)
+        {
+            logger.LogError(ex, "Admin trigger for job '{JobId}' refused: the scheduler lease store is unavailable", jobId);
+            return Results.Problem(
+                title: "Scheduler Unavailable",
+                detail: "The scheduler cannot take the job's lease right now, so it will not run the job. Try again shortly.",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

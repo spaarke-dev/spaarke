@@ -7,6 +7,25 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-14 — `unified-access-control-r2` task 103: scheduled jobs run once — lease, slot guard, `AddScheduledJob<TJob>`
+
+- **ADR-036 A1.1 (owner decision)**: a configured lease store that stays unreachable through the acquire retries
+  means the tick is **not dispatched**, and it is recorded as **failed**, not skipped: every instance loses the store
+  together, so nobody ran it. A1 rules 1, 2 and 6 are now implemented (full ADR §5).
+- **Pattern `api/scheduled-jobs.md`** rewritten to the shipped framework:
+  - register with `AddScheduledJob<TJob>` only;
+  - one dispatch per schedule is the host's job, not the job's;
+  - a manual trigger of a running job gets 409;
+  - the slot guard, and designing a job that must not lose a tick to catch up.
+- **Constraints**: `jobs.md` (the lease and the helper as built; `IScheduledJobLease` joins the host-neutrality list)
+  and `bff-extensions.md` §D (the registration helper named).
+- **Why**: every instance and slot ran its own cron, so the hourly notification scheduler sent duplicates on any
+  multi-instance stamp. Three copy-pasted bootstrap hosted services also depended on hosted-service start order.
+- **ArchTest**: `WorkloadPlacementGuardTests.ScheduledJobsRegisterThroughAddScheduledJobOnly`. Only
+  `SchedulingModule` and the admin `JobsEndpoints` may touch the registry or store, so a per-job bootstrap cannot
+  come back.
+
+---
 ###### 2026-09-13 — `unified-access-control-r2` task 102: **new ADR-052 Workload placement** + ADR-001/004/013/036 amendments
 
 - **New ADR-052** (`docs/adr/` + `.claude/adr/`): where background, scheduled and event-driven work runs — the BFF,

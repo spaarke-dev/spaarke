@@ -2,7 +2,7 @@
 
 > **Status**: Accepted, as amended (A1, 2026-09-12) — shipped in R3 (2026-06-22)
 > **Domain**: BFF API / Background Workers / Shared Library
-> **Last Updated**: 2026-09-12 (Amendment A1 — placement, runtime as built, one dispatch per schedule)
+> **Last Updated**: 2026-09-14 (A1.1 — a lease store that is down means no dispatch; task 103 implemented rules 1, 2 and 6)
 > **Source project**: `spaarke-platform-foundations-r3` Part 2 (closes the "28 BackgroundService implementations with no shared framework" gap surfaced during R2 UAT)
 > **Cross-references**: **where** scheduled work runs → [ADR-052](ADR-052-workload-placement.md); this ADR = **how** it runs inside the BFF. Reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library convention); aligns with CLAUDE.md §10.
 
@@ -33,7 +33,7 @@ A shared library `src/server/shared/Spaarke.Scheduling/` provides a uniform cont
 ## Runtime as built (A1 §2 — verified in code 2026-09-12)
 
 - The only store is `InMemoryBackgroundJobStore`; no `DataverseBackgroundJobStore` exists. Cron and enablement are set in code at registration.
-- `ScheduledJobHost` starts on **every App Service instance and every deployment slot**, with no lease — each tick dispatches once **per instance** (until task 103 adds the lease).
+- `ScheduledJobHost` starts on every instance, and every dispatch runs under a distributed lease (Redis, `IScheduledJobLease`) that also records the last dispatched occurrence — so each tick runs **once across instances**. Non-production slots run no ticks (`Scheduling__RunScheduledJobs=false`, slot-sticky). Task 103, 2026-09-14.
 - `HasRunForScheduledTimeAsync` is **inert** for its stated purpose (memory is lost on restart; `AdvanceNextFire` already prevents in-process re-fire).
 - Admin `disable` changes the store on the one instance that served the request; a restart re-seeds the registration default. Neither durable nor fleet-wide.
 
@@ -54,12 +54,12 @@ A shared library `src/server/shared/Spaarke.Scheduling/` provides a uniform cont
 ### ✅ MUST
 
 - **MUST** implement `IScheduledJob` (JobId, DisplayName, Description, `ExecuteAsync(JobRunContext, CancellationToken)`) for new schedule-driven work that ADR-052 places in the BFF. No new hand-rolled timer `BackgroundService`.
-- **MUST (A1-1) one dispatch per schedule** for jobs that must not run concurrently: a distributed lease that outlives the whole run including every retry, and makes a manual trigger and a scheduled tick mutually exclusive; a host without the lease records **skipped**. No lease store configured → dispatch + warn once. Store configured but unavailable → per the task 103 owner decision.
-- **MUST (A1-2) slots**: non-production deployment slots do not run scheduled jobs (slot-sticky setting).
+- **MUST (A1-1) one dispatch per schedule** for jobs that must not run concurrently: a distributed lease that outlives the whole run including every retry, and makes a manual trigger and a scheduled tick mutually exclusive; a host without the lease records **skipped**. No lease store configured → dispatch + warn once. Store configured but unavailable → retry the acquire with the job backoff, then **do not dispatch**; record the tick **failed** and log an error (**A1.1**, owner decision 2026-09-14). As built: `ScheduledJobHost` + `RedisScheduledJobLease`; a manual trigger of a running job gets 409.
+- **MUST (A1-2) slots**: non-production deployment slots do not run scheduled jobs (slot-sticky `Scheduling__RunScheduledJobs=false`, set by `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`).
 - **MUST (A1-3) idempotency**: an **atomic claim** per unit of work before its side effect, a **completion marker** after it; a failed unit releases its claim.
 - **MUST (A1-4) retry**: throw from `ExecuteAsync` when a retry could complete work this tick would otherwise lose (no progress possible, or transient unit failures no later tick revisits); otherwise count failures and complete. New jobs; existing jobs when next touched.
 - **MUST (A1-5) heartbeat**: one structured heartbeat per attempt with its counts and attempt number, including an attempt with nothing to do.
-- **MUST (A1-6) registration**: `services.AddScheduledJob<TJob>(cron, enabled)` — one shared bootstrap, no per-job bootstrap class (helper introduced by task 103).
+- **MUST (A1-6) registration**: `services.AddScheduledJob<TJob>(cron, enabled)` — no per-job bootstrap class; the registry and the in-memory store fill themselves from the registrations (`WorkloadPlacementGuardTests.ScheduledJobsRegisterThroughAddScheduledJobOnly`).
 - **MUST (A1-7) host-neutrality**: jobs do not depend on `ScheduledJobHost`, `IBackgroundJobStore` or `ScheduledJobRegistry` (ADR-052 §5).
 - **MUST** honor `CancellationToken` end-to-end; `ScheduledJobHost.StopAsync` drains in-flight jobs within 30s (NFR-07).
 - **MUST** apply `JobRetryPolicy` (default: 3 attempts; no delay before attempt 1, then `BaseDelay·2^(attempt-2)` — 5s, 10s — capped at 2min). It retries only when `ExecuteAsync` throws.
@@ -127,7 +127,7 @@ public interface IBackgroundJobStore
 | GET | `/api/admin/jobs` | List registered jobs + status (last run, next scheduled) |
 | GET | `/api/admin/jobs/{jobId}/status` | Detailed status + last 10 runs |
 | GET | `/api/admin/jobs/{jobId}/history?limit=50` | Run history (default 50, max 500) |
-| POST | `/api/admin/jobs/{jobId}/trigger` | Run NOW; returns 202 + `{runId, status, startedAt}` |
+| POST | `/api/admin/jobs/{jobId}/trigger` | Run NOW; returns 202 + `{runId, status, startedAt}` · 409 if the job is running · 503 if the lease store is down |
 | POST | `/api/admin/jobs/{jobId}/enable` | Enable scheduled execution; 204 |
 | POST | `/api/admin/jobs/{jobId}/disable` | Disable without removing; 204 |
 

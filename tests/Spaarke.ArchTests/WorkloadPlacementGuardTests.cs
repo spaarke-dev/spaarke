@@ -13,7 +13,10 @@ namespace Spaarke.ArchTests;
 ///   timer services are listed with reasons and the list may only shrink.</item>
 ///   <item><b>Host-neutrality</b> (ADR-052 §5, ADR-036 A1 rule 7) — no <c>IScheduledJob</c> depends on
 ///   <c>ScheduledJobHost</c>, <c>IBackgroundJobStore</c> or <c>ScheduledJobRegistry</c>, so a job can move to
-///   another host without being rewritten.</item>
+///   another host without being rewritten — nor on the dispatch lease, which belongs to the host.</item>
+///   <item><b>One registration path</b> (ADR-036 A1 rule 6, task 103) — only the scheduling module and the admin
+///   surface touch <c>ScheduledJobRegistry</c> / <c>InMemoryBackgroundJobStore</c>; every job registers with
+///   <c>AddScheduledJob&lt;TJob&gt;</c>, so no per-job bootstrap class comes back.</item>
 ///   <item><b>Functions projects</b> (ADR-052 §5–§6) — a project that hosts Azure Functions or a Durable Task
 ///   worker lives under <c>src/server/functions/</c> (so the <c>src/server/**</c> ArchTests — credential guards,
 ///   tenant-isolation invariants — cover it), never references <c>Sprk.Bff.Api</c>, and authenticates app-only as
@@ -211,6 +214,11 @@ public class WorkloadPlacementGuardTests
         "Spaarke.Scheduling.IBackgroundJobStore",
         "Spaarke.Scheduling.InMemoryBackgroundJobStore",
         "Spaarke.Scheduling.ScheduledJobRegistry",
+        "Spaarke.Scheduling.ScheduledJobRegistration",
+        // The lease belongs to the host, never the job (task 103; ADR-036 A1 rule 1).
+        "Spaarke.Scheduling.IScheduledJobLease",
+        "Spaarke.Scheduling.ProcessLocalScheduledJobLease",
+        "Sprk.Bff.Api.Infrastructure.Scheduling.RedisScheduledJobLease",
     };
 
     [Fact(DisplayName = "ADR-052 §5 / ADR-036 A1: no IScheduledJob depends on the scheduler host, store or registry")]
@@ -264,6 +272,79 @@ public class WorkloadPlacementGuardTests
 
         Assert.True(result.IsSuccessful);
     }
+
+    // =============================================================================================
+    // RULE 2b — ONE REGISTRATION PATH: AddScheduledJob<TJob> (ADR-036 A1 rule 6, task 103)
+    // ---------------------------------------------------------------------------------------------
+    // MAINTENANCE PROCEDURE: a failure names a BFF type that depends on ScheduledJobRegistry or
+    // InMemoryBackgroundJobStore. A per-job bootstrap needs one of them — to register its handler or seed its
+    // definition — which is exactly what task 103 deleted. Register the job with
+    // services.AddScheduledJob<TJob>(cron, enabled) instead; the registry and store fill themselves from it.
+    // Add a type to RegistrationSurfaceUsers only if it is part of the scheduling framework or the admin surface,
+    // with a reason. A stale entry (the type no longer touches the surface) also fails: delete it.
+    // =============================================================================================
+    private static readonly string[] SchedulerRegistrationSurface =
+    {
+        "Spaarke.Scheduling.ScheduledJobRegistry",
+        "Spaarke.Scheduling.InMemoryBackgroundJobStore",
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> RegistrationSurfaceUsers =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Sprk.Bff.Api.Infrastructure.DI.SchedulingModule"] =
+                "Registers the framework singletons that AddScheduledJob feeds (ADR-036).",
+            ["Sprk.Bff.Api.Api.Admin.JobsEndpoints"] =
+                "The admin surface lists, inspects and triggers registered jobs (ADR-036 admin endpoints).",
+        };
+
+    [Fact(DisplayName = "ADR-036 A1 rule 6: no per-job bootstrap — only the scheduling module and the admin surface touch the registry or store")]
+    public void ScheduledJobsRegisterThroughAddScheduledJobOnly()
+    {
+        var users = RegistrationSurfaceUsersIn(typeof(Program).Assembly);
+
+        var unsanctioned = users.Where(u => !RegistrationSurfaceUsers.ContainsKey(u)).ToList();
+        Assert.True(
+            unsanctioned.Count == 0,
+            "These BFF types depend on ScheduledJobRegistry or InMemoryBackgroundJobStore — a per-job bootstrap. Register " +
+            "the job with services.AddScheduledJob<TJob>(cron, enabled) instead (ADR-036 A1 rule 6): " +
+            string.Join(", ", unsanctioned));
+
+        var stale = RegistrationSurfaceUsers.Keys.Where(k => !users.Contains(k)).ToList();
+        Assert.True(
+            stale.Count == 0,
+            "Stale RegistrationSurfaceUsers entries — these types no longer touch the registry or store; delete them: " +
+            string.Join(", ", stale));
+    }
+
+    [Fact(DisplayName = "ADR-036 A1 rule 6: negative control — a per-job bootstrap is flagged")]
+    public void RegistrationPath_NegativeControl_FlagsAPerJobBootstrap()
+    {
+        var users = RegistrationSurfaceUsersIn(typeof(WorkloadPlacementGuardTests).Assembly, nameof(Adr036SeededPerJobBootstrap));
+
+        Assert.Equal(new[] { typeof(Adr036SeededPerJobBootstrap).FullName! }, users);
+        Assert.False(RegistrationSurfaceUsers.ContainsKey(users.Single()));
+    }
+
+    [Fact(DisplayName = "ADR-036 A1 rule 6: positive control — a job that only implements IScheduledJob is not flagged")]
+    public void RegistrationPath_PositiveControl_PassesAPlainJob()
+    {
+        var users = RegistrationSurfaceUsersIn(typeof(WorkloadPlacementGuardTests).Assembly, nameof(Adr052SanctionedJob));
+
+        Assert.Empty(users);
+    }
+
+    /// <summary>Top-level names of the types in <paramref name="assembly"/> that depend on the registration surface
+    /// (nested and compiler-generated types — lambdas, async state machines — count as their declaring type).</summary>
+    private static IReadOnlyList<string> RegistrationSurfaceUsersIn(System.Reflection.Assembly assembly, string? onlyTypeName = null)
+        => Types.InAssembly(assembly)
+            .That().HaveDependencyOnAny(SchedulerRegistrationSurface)
+            .GetTypes()
+            .Where(t => onlyTypeName is null || t.Name == onlyTypeName)
+            .Select(t => (t.FullName ?? t.Name).Split('+')[0])
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
 
     // =============================================================================================
     // RULE 3 — FUNCTIONS PROJECTS: location, references, identity
@@ -514,6 +595,16 @@ internal sealed class Adr052SeededCoupledJob : IScheduledJob
 
     public Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
         => Task.FromResult(new JobRunResult(true, null, 0, TimeSpan.Zero));
+}
+
+/// <summary>What task 103 deleted three of: a startup hook that registers one job with the scheduler by hand.</summary>
+internal sealed class Adr036SeededPerJobBootstrap
+{
+    private readonly ScheduledJobRegistry _registry;
+
+    public Adr036SeededPerJobBootstrap(ScheduledJobRegistry registry) => _registry = registry;
+
+    public void Register(IScheduledJob job) => _registry.Register(job);
 }
 
 internal sealed class Adr052SanctionedJob : IScheduledJob

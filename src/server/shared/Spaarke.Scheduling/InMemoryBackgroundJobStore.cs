@@ -25,6 +25,25 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
     private readonly ConcurrentDictionary<string, BackgroundJobDefinition> _jobs = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, RunRecord> _runs = new();
 
+    /// <summary>An empty store; seed definitions with <see cref="AddOrReplaceJob"/>.</summary>
+    public InMemoryBackgroundJobStore()
+    {
+    }
+
+    /// <summary>
+    /// A store seeded with the definition of every job registered with <c>AddScheduledJob</c> — the constructor
+    /// dependency injection uses (ADR-036 A1 rule 6). Process memory is empty at start, so this is the same
+    /// re-seed-on-every-start the per-job bootstraps did.
+    /// </summary>
+    public InMemoryBackgroundJobStore(IEnumerable<ScheduledJobRegistration> registrations)
+    {
+        ArgumentNullException.ThrowIfNull(registrations);
+        foreach (var registration in registrations)
+        {
+            AddOrReplaceJob(registration.ToDefinition());
+        }
+    }
+
     /// <summary>Seed or replace a job definition by <see cref="BackgroundJobDefinition.JobId"/>.</summary>
     public void AddOrReplaceJob(BackgroundJobDefinition definition)
     {
@@ -185,12 +204,15 @@ public sealed class InMemoryBackgroundJobStore : IBackgroundJobStore
     private static BackgroundJobRunRecord ToPublicProjection(RunRecord record)
     {
         // Canonicalize Status. In-progress = RecordRunStartAsync called but RecordRunCompleteAsync
-        // never observed (CompletedAtUtc null + Result null). Otherwise derive from Result.Success.
+        // never observed (CompletedAtUtc null + Result null). Skipped = the host did not dispatch the
+        // tick (ADR-036 A1 rule 1). Otherwise derive from Result.Success.
         var status = record.CompletedAtUtc is null
             ? "InProgress"
-            : record.Result is { Success: true }
-                ? "Succeeded"
-                : "Failed";
+            : record.Result is { Skipped: true }
+                ? "Skipped"
+                : record.Result is { Success: true }
+                    ? "Succeeded"
+                    : "Failed";
 
         return new BackgroundJobRunRecord(
             RunId: record.RunId,

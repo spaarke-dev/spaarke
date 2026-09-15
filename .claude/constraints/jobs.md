@@ -42,11 +42,11 @@ Load when:
 ### Scheduled Jobs — schedule-driven work in the BFF (ADR-036 A1)
 
 - ✅ **MUST** implement `IScheduledJob` (see [`scheduled-jobs.md`](../patterns/api/scheduled-jobs.md))
-- ✅ **MUST** get one dispatch per schedule across instances (distributed lease — task 103) for jobs that must not run concurrently
+- ✅ **MUST** get one dispatch per schedule across instances for jobs that must not run concurrently — `ScheduledJobHost`'s lease does this for every `IScheduledJob`; a lease store that is down means the tick is not dispatched (ADR-036 A1.1), so a job that must not lose a tick catches up on its next one
 - ✅ **MUST** take an atomic claim per unit of work before its side effect, and write a completion marker after it
 - ✅ **MUST** throw from `ExecuteAsync` when a retry could complete work this tick would otherwise lose; otherwise count failures and complete
 - ✅ **MUST** emit one structured heartbeat log per attempt, including an attempt with nothing to do
-- ✅ **MUST** register via `AddScheduledJob<TJob>(cron, enabled)` (task 103) and stay host-neutral (no `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry` dependency)
+- ✅ **MUST** register via `AddScheduledJob<TJob>(cron, enabled)` — no per-job bootstrap — and stay host-neutral (no `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry` / `IScheduledJobLease` dependency)
 
 ### Job Status (ADR-017)
 

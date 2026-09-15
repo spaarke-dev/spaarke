@@ -270,8 +270,8 @@ misstated ADR-001 and is withdrawn.
    makes a manual trigger and a scheduled tick of the same job mutually exclusive. A host that does not obtain the
    lease records the tick as **skipped**, not failed. When **no lease store is configured** (single-instance
    development), the host dispatches and logs a warning once. When a lease store **is configured but
-   unavailable**, behaviour follows the owner decision recorded in task 103 (A1.1) — this amendment does not
-   prescribe it. Execution remains at-least-once under retry.
+   unavailable**, the host retries the acquire with the job backoff, then does **not** dispatch and records the
+   tick as failed (A1.1, owner decision 2026-09-14). Execution remains at-least-once under retry.
 2. **Slots (MUST).** Deployment slots other than production do not run scheduled jobs (a slot-sticky setting the
    host honours).
 3. **Idempotency (MUST).** Each unit of work takes an **atomic claim** before its side effect and writes a
@@ -296,12 +296,52 @@ misstated ADR-001 and is withdrawn.
 - §6 above calls the other services' migration "opportunistic". ADR-052 §1 now makes it **when next touched**, held
   by an ArchTest ratchet.
 
-### 5. Until task 103 merges
+### 5. Implemented — `unified-access-control-r2` task 103 (2026-09-14)
 
-The three shipped jobs still dispatch once per instance and rely on per-unit idempotency (owner 2026-09-12: the
-work is in dev only, so no formal exception is recorded).
+§2's "no lease — each tick dispatched once per instance" is no longer true:
+
+- **Rule 1.** `IScheduledJobLease` (Spaarke.Scheduling):
+  - **The two implementations.** In the BFF, `RedisScheduledJobLease` runs over the existing Redis connection. It
+    takes the lease with `SET NX PX` (`LockTakeAsync`), and only the holder can extend or release it.
+    `ProcessLocalScheduledJobLease` applies when Redis is off, which is only in Development and Testing: deployed
+    environments cannot start without Redis.
+  - **Renewal.** The lease is renewed every third of `ScheduledJobHostOptions.LeaseDuration` (2 minutes) for the
+    whole run, so the duration bounds only how long a dead holder can block the job.
+  - **Occurrence marker.** A lease alone lets a short run finish and release before a slower instance wakes for the
+    same occurrence. So the lease also records the last dispatched occurrence and refuses any occurrence earlier
+    than or equal to it — the same device the Functions timer trigger uses (its schedule status).
+  - **Lost lease.** A run whose lease another holder takes is cancelled.
+  - **Manual trigger.** Triggering a job that is already running gets 409.
+- **Rule 2.** `ScheduledJobHostOptions.RunScheduledJobs` reads `Scheduling:RunScheduledJobs`.
+  `scripts/Deploy-BffApi.ps1 -UseSlotDeploy` sets `Scheduling__RunScheduledJobs=false` on the slot as a slot
+  setting, so it never swaps into production.
+- **Rule 6.** Jobs register with `AddScheduledJob<TJob>(cron, enabled)`, and `ScheduledJobRegistry` and
+  `InMemoryBackgroundJobStore` read the registrations in their constructors. The three per-job bootstrap hosted
+  services are deleted, and `WorkloadPlacementGuardTests.ScheduledJobsRegisterThroughAddScheduledJobOnly` keeps them
+  from coming back.
 
 ### 6. Still deferred
 
 `DataverseBackgroundJobStore` — durable history, fleet-wide enable/disable (#983). Migrating the 14 hand-rolled timer
 services is tracked in #976.
+
+### A1.1 (2026-09-14): a lease store that is configured but unavailable
+
+**Owner decision** (the task 103 escalation). When the lease store is configured but cannot be reached, the host:
+
+1. retries the acquire with the job retry policy's backoff (by default no delay, then 5 s, then 10 s);
+2. then does **not** dispatch the tick;
+3. records the tick as **failed** and logs an error.
+
+The tick is recorded as failed rather than skipped because every instance loses the store at the same time, so nobody
+runs the tick; "skipped" would make a fleet-wide miss look healthy. A manual trigger fails at once with 503: the admin
+is waiting on the request and can retry.
+
+**Rejected alternatives:**
+- **Dispatch anyway.** Every instance runs the tick. Per-unit idempotency also lives in Redis and fails open (#984),
+  so notifications would duplicate.
+- **Record the tick as skipped.** It hides a fleet-wide miss.
+
+**Cost accepted:** a tick missed during an outage. A job that must not lose one catches up on its next run:
+`PlaybookSchedulerJob` already does (`sprk_lastrundate`), and `GrantExpiryReminderJob` will send the most urgent
+unsent threshold (owner decision, same date; task 100).

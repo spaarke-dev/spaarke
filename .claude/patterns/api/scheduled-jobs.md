@@ -1,9 +1,9 @@
 # Scheduled-Jobs Pattern (Spaarke.Scheduling Framework)
 
-> **Last Reviewed**: 2026-09-12
-> **Reviewed By**: unified-access-control-r2 task 102 (aligned to ADR-036 A1 + ADR-052)
+> **Last Reviewed**: 2026-09-14
+> **Reviewed By**: unified-access-control-r2 task 103 (lease, slot guard, `AddScheduledJob<TJob>` shipped)
 > **Status**: Verified
-> **Source**: ADR-036 (+ Amendment A1) · ADR-052 · R3 spec Part 2
+> **Source**: ADR-036 (+ Amendment A1, A1.1) · ADR-052 · R3 spec Part 2
 
 ## When
 Adding **schedule-driven** background work (cron, interval, daily-at-time) that [ADR-052](../../adr/ADR-052-workload-placement.md) places **in the BFF**. Use `IScheduledJob` + `Spaarke.Scheduling`. For **queue-driven** workers (Service Bus / event-triggered), see [`background-workers.md`](background-workers.md) instead. If ADR-052 places the work elsewhere (e.g. a Functions timer), this pattern does not apply.
@@ -11,19 +11,21 @@ Adding **schedule-driven** background work (cron, interval, daily-at-time) that 
 ## Read These Files
 1. `src/server/shared/Spaarke.Scheduling/IScheduledJob.cs` — contract (JobId, DisplayName, Description, ExecuteAsync)
 2. `src/server/shared/Spaarke.Scheduling/JobRunContext.cs` + `JobRunResult.cs` — input/output records
-3. `src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs` — BackgroundService that ticks; you do NOT write a host
-4. `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs` — worked example: single-row fan-out across N child runs with fresh correlationIds (Q1)
-5. `src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs` — worked example: discovery-driven Dataverse scan + dispatch via shared handler
-6. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs` + `MembershipModule.cs` — host registration + the current per-job bootstrap (replaced by `AddScheduledJob<TJob>`, task 103)
-7. `.claude/adr/ADR-036-background-job-infrastructure.md` — binding rules, **Amendment A1 first**
-8. `.claude/patterns/ai/node-executor-authoring.md` — companion pattern (Singleton+Scoped DI applies)
+3. `src/server/shared/Spaarke.Scheduling/ScheduledJobRegistration.cs` — `AddScheduledJob<TJob>(cron, enabled)`, the only way a job reaches the scheduler
+4. `src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs` — the BackgroundService that ticks, takes the lease and retries; you do NOT write a host
+5. `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs` — worked example: single-row fan-out across N child runs with fresh correlationIds (Q1)
+6. `src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs` — worked example: discovery-driven Dataverse scan + dispatch via shared handler
+7. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs` — host, lease (`RedisScheduledJobLease`) and slot guard wiring; `MembershipModule.cs` — a job registered from config
+8. `.claude/adr/ADR-036-background-job-infrastructure.md` — binding rules, **Amendment A1 first**
+9. `.claude/patterns/ai/node-executor-authoring.md` — companion pattern (Singleton+Scoped DI applies)
 
 ## Constraints
 - **ADR-036**: Implement `IScheduledJob`; do NOT add a hand-rolled timer `BackgroundService` for cron-style work (ADR-052 §1)
-- **ADR-036 A1**: one dispatch per schedule (distributed lease — task 103) · an **atomic claim** per unit of work before its side effect + a completion marker after · **throw** from `ExecuteAsync` when a retry could complete work this tick would otherwise lose, otherwise count failures and complete · one structured heartbeat log per attempt (including "nothing to do") · register via `AddScheduledJob<TJob>` (task 103) · no dependency on `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry`
+- **ADR-036 A1**: one dispatch per schedule is the **host's** job — its lease; you write nothing for it · an **atomic claim** per unit of work before its side effect + a completion marker after · **throw** from `ExecuteAsync` when a retry could complete work this tick would otherwise lose, otherwise count failures and complete · one structured heartbeat log per attempt (including "nothing to do") · register via `AddScheduledJob<TJob>` · no dependency on `ScheduledJobHost` / `IBackgroundJobStore` / `ScheduledJobRegistry` / `IScheduledJobLease`
+- **ADR-036 A1.1**: if Redis is down at tick time the tick is NOT dispatched (recorded failed). A job that must not lose a tick catches up on its next one — design for that
 - **ADR-052**: where scheduled work runs is decided per workload; this pattern is the in-BFF mechanism
 - **ADR-010**: Job class is Singleton; use `IServiceScopeFactory.CreateScope()` per ExecuteAsync if you depend on Scoped services (Dataverse client, OBO token cache, MembershipResolver)
-- **NFR-07**: Honor `CancellationToken` end-to-end; StopAsync drains within 30s
+- **NFR-07**: Honor `CancellationToken` end-to-end; StopAsync drains within 30s. The token is also cancelled if another holder takes the job's lease mid-run
 - **NFR-08**: Every run records `correlationId`; for fan-out, every child gets a fresh per-child correlationId (Q1)
 - **bff-extensions.md §A**: Pre-merge checklist applies (publish-size + CVE + tests)
 - **MUST NOT**: extend `sprk_processingjob` for scheduled work; that entity is Office-scoped
@@ -31,19 +33,19 @@ Adding **schedule-driven** background work (cron, interval, daily-at-time) that 
 ## Key Rules
 
 ### Contract
-- Implement `IScheduledJob`. The framework owns the host, the cron tick and `JobRetryPolicy` (which retries only when `ExecuteAsync` throws). **You own per-unit idempotency** — the store's `HasRunForScheduledTimeAsync` is process-local and does not protect you (ADR-036 A1 §2)
-- `JobId` is the unique key — also used in `/api/admin/jobs/{jobId}/*` endpoints
-- Return `JobRunResult` with `Success`, `ErrorMessage`, `ProcessedItems`, `Duration`, optional `ResultJson` (e.g., per-child correlationIds for fan-out)
+- Implement `IScheduledJob`. The framework owns the host, the cron tick, the lease and `JobRetryPolicy` (which retries only when `ExecuteAsync` throws). **You own per-unit idempotency** — the lease makes a tick run once, but a retry re-runs units, and the store's `HasRunForScheduledTimeAsync` is process-local
+- `JobId` is the unique key — also used in `/api/admin/jobs/{jobId}/*` endpoints and in the lease's Redis key
+- Return `JobRunResult` with `Success`, `ErrorMessage`, `ProcessedItems`, `Duration`, optional `ResultJson` (e.g., per-child correlationIds for fan-out). Never set `Skipped` — the host sets it
 
 ### DI Lifetime (Singleton + Scoped)
-- Register your `IScheduledJob` impl as Singleton
+- `AddScheduledJob<TJob>` registers your job as a Singleton
 - Inject `IServiceScopeFactory`; per ExecuteAsync invocation: `using var scope = _scopeFactory.CreateScope();` then resolve Scoped dependencies from `scope.ServiceProvider`
 - Mirror `PlaybookSchedulerJob` + `MembershipReconciliationJob` exactly — do NOT invent a new lifetime pattern
 
 ### Registration
-- Target: `services.AddScheduledJob<TJob>(cron, enabled)` — one shared bootstrap (ADR-036 A1 rule 6, task 103)
-- Until that helper lands, mirror `MembershipModule`'s bootstrap hosted service (registers the job and seeds a `BackgroundJobDefinition`)
-- Definitions live in the in-memory store and are re-seeded on every start — there are no Dataverse rows yet (target state)
+- `services.AddScheduledJob<TJob>(cron, enabled)` from the module that owns the job — any module, any order. That is all: the registry and the in-memory store fill themselves from it. No bootstrap hosted service (an ArchTest fails on one)
+- An unparseable cron fails the app at startup
+- Definitions are re-seeded on every start — there are no Dataverse rows yet (target state)
 - Cron schedules use Cronos syntax (5-field standard; `0 2 * * *` = daily at 02:00 UTC)
 
 ### Reuse over duplicate
@@ -59,10 +61,11 @@ Adding **schedule-driven** background work (cron, interval, daily-at-time) that 
 - `ExecuteAsync_PerRowError_LogsAndContinues_*` (don't fail whole job on one bad row)
 - `ExecuteAsync_Result_ContainsExpectedBreakdown` (verify ResultJson shape for admin visibility)
 - A claim test: a unit whose side effect failed is applied exactly once across a re-run
+- The lease, slot guard and registration are covered once, in `tests/unit/Spaarke.Scheduling.Tests` — do not re-test them per job
 
 ### Admin surface (free, by registering)
-- `GET /api/admin/jobs/{jobId}/status` — last run + history
-- `POST /api/admin/jobs/{jobId}/trigger` — run NOW without redeploy
+- `GET /api/admin/jobs/{jobId}/status` — last run + history (a tick another instance ran shows here as `Skipped`)
+- `POST /api/admin/jobs/{jobId}/trigger` — run NOW without redeploy; 409 if the job is already running, 503 if the lease store is down
 - `POST /api/admin/jobs/{jobId}/enable|disable` — pause without redeploy
 - All gated by existing `SystemAdmin` policy (Q6 — do NOT create new policy)
 - ⚠️ As built, each answers for the **one instance** that served the request, and enable/disable does not survive a restart (ADR-036 A1 §2)

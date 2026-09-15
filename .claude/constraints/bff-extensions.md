@@ -62,7 +62,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 ### D. New Background Work
 
 - **MUST** decide the host — the BFF, Azure Functions or Container Apps Jobs — under [ADR-052](../adr/ADR-052-workload-placement.md), and record it in the Placement Justification (§A).
-- Inside the BFF, the mechanism follows the trigger: queue/topic message → Service Bus + `IJobHandler` via `ServiceBusJobProcessor` (ADR-004); schedule → `IScheduledJob` on `ScheduledJobHost` (ADR-036); startup, or a long-lived connection that is not a message consumer → plain `IHostedService`. A queue or topic consumer is never a "long-lived listener". **MUST NOT** add a hand-rolled timer `BackgroundService`.
+- Inside the BFF, the mechanism follows the trigger: queue/topic message → Service Bus + `IJobHandler` via `ServiceBusJobProcessor` (ADR-004); schedule → `IScheduledJob` on `ScheduledJobHost`, registered with `AddScheduledJob<TJob>` (ADR-036 — the host's lease gives one dispatch per schedule); startup, or a long-lived connection that is not a message consumer → plain `IHostedService`. A queue or topic consumer is never a "long-lived listener". **MUST NOT** add a hand-rolled timer `BackgroundService`.
 - **MUST** keep AI-coupled job handlers in `Services/Ai/Jobs/` (post-Outcome E reorganization) — NOT in `Services/Jobs/Handlers/`
 - **MUST NOT** add new direct LLM/Azure-OpenAI calls outside `Services/Ai/`
 - **MUST** if the background work reads an SPE file, verify the SPE writer-identity rule (Pattern 4):
