@@ -142,6 +142,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
   sentinel: {
     height: '1px',
   },
@@ -207,7 +212,7 @@ function ResultRow({
   }
 
   return (
-    <div className={`${styles.row} ${styles.rowStatic}`} role="listitem">
+    <div className={`${styles.row} ${styles.rowStatic}`}>
       <Text className={styles.rowLabel}>{label}</Text>
       {meta && <Text className={styles.rowMeta}>{meta}</Text>}
     </div>
@@ -282,10 +287,18 @@ export const FindResultsList: React.FC<FindResultsListProps> = ({ nodes, announc
       <Text className={styles.heading}>Most similar documents</Text>
       {hubNodes.length > 0 && <HubSection hubNodes={hubNodes} styles={styles} />}
       <div className={styles.scrollArea} data-testid="find-results-scroll-area">
-        {visibleItems.map(node => (
-          <ResultRow key={node.id} node={node} onOpenResult={onOpenResult} styles={styles} />
-        ))}
-        {hasMore && <div ref={sentinelRef} className={styles.sentinel} data-testid="find-results-sentinel" />}
+        {/* A real list for screen readers (NFR-11). The sentinel sits outside the list, but must stay
+            inside the scroll area: the observer only sees it once it scrolls into view there. */}
+        <div role="list" aria-label="Most similar documents" className={styles.list}>
+          {visibleItems.map(node => (
+            <div key={node.id} role="listitem">
+              <ResultRow node={node} onOpenResult={onOpenResult} styles={styles} />
+            </div>
+          ))}
+        </div>
+        {hasMore && (
+          <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" data-testid="find-results-sentinel" />
+        )}
       </div>
     </div>
   );

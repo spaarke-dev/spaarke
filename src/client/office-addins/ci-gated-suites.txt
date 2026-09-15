@@ -111,6 +111,17 @@ shared/taskpane/components/views/__tests__/FindView.test.tsx
 # typed is sent as typed (isNameSystemDerived = false) and never changed.
 shared/taskpane/hooks/__tests__/useSaveFlow.emailName.test.ts
 
+# --- open a record from the pane (task 027, FR-10) - green from creation ------
+# Pins: the record opens in a browser tab (never the Dialog API), the URL is
+# built from ORG_URL + a canonical id, and an unset ORG_URL opens nothing.
+shared/taskpane/services/__tests__/openRecordLauncher.test.ts
+shared/taskpane/components/__tests__/SaveFlow.openRecord.test.tsx
+
+# --- Find results list (task 034, FR-16c) - green from creation ---------------
+# Pins: rows already fetched are revealed on scroll with no second request,
+# hasMore means only "unrevealed rows", and there is no pager of any kind.
+shared/taskpane/hooks/__tests__/useLazyResults.test.tsx
+shared/taskpane/components/__tests__/FindResultsList.test.tsx
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20

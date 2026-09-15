@@ -72,10 +72,44 @@ function resolvedWithRelatedRecord(): DocumentIdentityState {
   };
 }
 
+const ORG_URL = 'https://contoso.crm.dynamics.com';
+const originalOrgUrl = process.env.ORG_URL;
+
 describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockOpenRecord.mockReturnValue({ opened: true });
+    process.env.ORG_URL = ORG_URL;
+  });
+
+  afterAll(() => {
+    if (originalOrgUrl === undefined) {
+      delete process.env.ORG_URL;
+    } else {
+      process.env.ORG_URL = originalOrgUrl;
+    }
+  });
+
+  describe('ORG_URL gating — no button that does nothing', () => {
+    it('renders neither open affordance when ORG_URL is not configured, even on a capable host', () => {
+      delete process.env.ORG_URL;
+      render(
+        <TestWrapper>
+          <SaveFlow
+            hostType="word"
+            itemId="word-doc-1"
+            itemName="Examiner report draft.docx"
+            resolvedDocumentId="11111111-1111-1111-1111-111111111111"
+            documentIdentity={resolvedWithRelatedRecord()}
+            canOpenRecord
+            getAccessToken={mockGetAccessToken}
+          />
+        </TestWrapper>
+      );
+
+      expect(screen.queryByRole('button', { name: /open.*gamma merger/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /open this document's record/i })).not.toBeInTheDocument();
+    });
   });
 
   describe('capability gating (NFR-10) — no-capability rendering', () => {
@@ -138,7 +172,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
 
       expect(mockOpenRecord).toHaveBeenCalledTimes(1);
       expect(mockOpenRecord).toHaveBeenCalledWith({
-        orgUrl: undefined,
+        orgUrl: ORG_URL,
         entityType: 'sprk_matter',
         recordId: '22222222-2222-2222-2222-222222222222',
       });
@@ -164,7 +198,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
 
       expect(mockOpenRecord).toHaveBeenCalledTimes(1);
       expect(mockOpenRecord).toHaveBeenCalledWith({
-        orgUrl: undefined,
+        orgUrl: ORG_URL,
         entityType: 'sprk_document',
         recordId: '11111111-1111-1111-1111-111111111111',
       });

@@ -576,6 +576,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Office.context.ui.openBrowserWindow, never the Office Dialog API. `canOpenRecord` (NFR-10) is a
   // capability flag threaded from SaveView's hostAdapter.getCapabilities().canOpenBrowserWindow —
   // gating happens here and in the JSX below, never on `hostType`.
+  // The Open buttons also need ORG_URL. Unset, `openRecord` can only no-op, so a visible button would
+  // do nothing when clicked; hide it instead. The deploy workflow sets ORG_URL.
+  const openRecordAvailable = canOpenRecord && Boolean(process.env.ORG_URL);
   const hasOpenedExternalRecordRef = useRef(false);
   const [profileRefreshSignal, setProfileRefreshSignal] = useState(0);
 
@@ -1039,7 +1042,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           plain, non-interactive text (its own fallback, not a host-type branch here). */}
       <RelatedRecordCard
         {...(documentIdentity !== undefined ? { documentIdentity } : {})}
-        {...(canOpenRecord ? { onOpenRecord: handleOpenRelatedRecord } : {})}
+        {...(openRecordAvailable ? { onOpenRecord: handleOpenRelatedRecord } : {})}
       />
 
       {/* Related to + Document Details apply to a NEW document only. A version save (task 024) keeps the
@@ -1107,7 +1110,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         {/* task 027 / FR-10: the Document-record affordance — opens the `sprk_document` record
             itself, the same browser-tab escape hatch and the SAME capability gate (NFR-10) as the
             related-record card above. Only rendered once there is a resolved document to open. */}
-        {canOpenRecord && resolvedDocumentId && (
+        {openRecordAvailable && resolvedDocumentId && (
           <Button
             appearance="subtle"
             size="small"

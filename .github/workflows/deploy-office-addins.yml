@@ -67,6 +67,9 @@ jobs:
           TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
           BFF_API_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
           BFF_API_BASE_URL: https://spaarke-bff-dev.azurewebsites.net
+          # Dataverse org the pane's "Open" buttons (task 027) and the Quick Create deep link
+          # point at. Unset, the pane hides the Open buttons rather than showing ones that do nothing.
+          ORG_URL: https://spaarkedev1.crm.dynamics.com
 
       - name: Deploy to Azure Static Web App
         uses: Azure/static-web-apps-deploy@v1
