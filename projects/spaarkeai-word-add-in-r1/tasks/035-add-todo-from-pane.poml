@@ -182,6 +182,7 @@
 
   <notes>
     spec.md FR-14 and the Owner Clarification "To Do only; defer Event". `design.md` §9 raised an association-widening concern against `UploadFinalizationWorker`; the as-built has since consolidated that logic into `DocumentAssociationMap.TryApply` (`Models.cs:47`), where `sprk_workassignment` and `sprk_event` are already handled and `sprk_todo` is deliberately excluded — the constraint above reflects the corrected location and the corrected conclusion. No `&lt;justification&gt;` block: this is an adaptation of the shipped `POST /api/office/todo` + `CreateTodoView`, not new surface.
+    ADDED 2026-09-14 (from task 026, verified live via EntityDefinitions PrimaryNameAttribute): for `sprk_matter` and `sprk_project` the PRIMARY NAME attribute is the NUMBER (`sprk_matternumber` / `sprk_projectnumber`), so `EntityReference.Name` for those two types is the number, not the descriptive name. The Create-To-Do "regarding" wiring reads `relatedRecord.name` → `regardingName` shows the NUMBER for Matter/Project today (and a BLANK for pane-created Matters until the separate numbering project ships). Task 026 added `relatedRecord.displayName` and `relatedRecord.number` to the resolve-identity response (see `notes/026-slot-scope-decision.md`); this task should use `displayName` for the regarding label.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

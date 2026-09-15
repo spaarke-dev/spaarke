@@ -93,6 +93,13 @@ shared/taskpane/components/__tests__/RelatedToPicker.matterType.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.matterTypeQuickCreate.test.tsx
 shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts
 
+# --- related-record card (task 026, FR-09) - green from creation ----------
+# Pins: the card reads only the four direct slots (never sprk_related* or the
+# non-existent sprk_event), shows descriptive name AND number per type, and is
+# absent when the document has no resolved identity.
+shared/taskpane/components/__tests__/RelatedRecordCard.test.tsx
+shared/taskpane/hooks/__tests__/useRelatedRecord.test.ts
+
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
