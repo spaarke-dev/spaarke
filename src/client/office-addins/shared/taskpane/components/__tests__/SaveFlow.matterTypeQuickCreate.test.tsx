@@ -22,6 +22,10 @@ jest.mock('../../services/SseClient', () => ({
 // Real-timer userEvent typing + a Dropdown popup interaction runs close to the file's default 10s
 // testTimeout; both tests here get a longer budget to avoid flakiness under load.
 const TEST_TIMEOUT_MS = 20000;
+// RTL's default wait is 1 s. This suite passes in isolation but lost one test in a full, fully
+// parallel jest run under heavy machine load (2026-09-15) — every fetch here is mocked, so the only
+// load-sensitive step is how long a render takes to appear. Each wait gets 5 s instead.
+const WAIT = { timeout: 5000 };
 
 // jsdom has no ResizeObserver; Fluent's Dropdown/MessageBar need one to render.
 class ResizeObserverStub {
@@ -82,8 +86,12 @@ function renderPane() {
 }
 
 async function quickCreateCall(entityType: 'matter' | 'project') {
-  await waitFor(() =>
-    expect(mockFetch.mock.calls.some(([u]) => String(u).includes(`/api/office/quickcreate/${entityType}`))).toBe(true)
+  await waitFor(
+    () =>
+      expect(mockFetch.mock.calls.some(([u]) => String(u).includes(`/api/office/quickcreate/${entityType}`))).toBe(
+        true
+      ),
+    WAIT
   );
   const [, init] = mockFetch.mock.calls.find(([u]) => String(u).includes(`/api/office/quickcreate/${entityType}`))!;
   return JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>;
@@ -96,12 +104,12 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
       renderPane();
 
       // Matter is the default chip; the picker loads its matter-type list on mount.
-      await userEvent.click(await screen.findByRole('button', { name: 'New' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'New' }, WAIT));
       await userEvent.type(screen.getByLabelText('New Matter name'), 'Acme Litigation');
 
-      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled(), WAIT);
       await userEvent.click(screen.getByRole('combobox', { name: 'Matter Type' }));
-      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }));
+      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }, WAIT));
       await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
       const body = await quickCreateCall('matter');
@@ -157,15 +165,15 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
 
       renderPane();
 
-      await userEvent.click(await screen.findByRole('button', { name: 'New' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'New' }, WAIT));
       await userEvent.type(screen.getByLabelText('New Matter name'), 'Acme Litigation');
-      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled(), WAIT);
       await userEvent.click(screen.getByRole('combobox', { name: 'Matter Type' }));
-      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }));
+      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }, WAIT));
       await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
       await quickCreateCall('matter');
-      await waitFor(() => expect(window.localStorage.getItem(MATTER_TYPES_CACHE_KEY)).toBeNull());
+      await waitFor(() => expect(window.localStorage.getItem(MATTER_TYPES_CACHE_KEY)).toBeNull(), WAIT);
     },
     TEST_TIMEOUT_MS
   );
