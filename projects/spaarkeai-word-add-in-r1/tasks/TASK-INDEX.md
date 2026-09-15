@@ -218,6 +218,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 | 046 | 🔴 **Email/Attachment saves must never overwrite or delete another document's file** — **done 2026-09-15**: (a) `9b58c6d9b` (merged `dbcb4c18f`) — the dedup cleanup deletes an upload only when no document points at it (and nothing if that lookup fails); it also caught a hash-linked copy's file; (b) `5bbdbacca` (merged `eda1e2f75`) — owner decision B2: a unique suffix only on system-derived `.eml` names via a new optional `email.isNameSystemDerived` flag (older clients are treated as typed), on the stored file only; the inbound Exchange/Graph path was already unique. Full suite 12,249/0/56. Follow-ups owned here: a test pinning the inbound id prefix; the add-ins must be redeployed before the flag takes effect | ✅ | FULL | opus / high | — | 039 ✅ |
 | 047 | 🔴 A version save that repeats an earlier version's content was answered "Duplicate" and never written — **done 2026-09-15** (`0d95c50e5`, merged `b07e4772e`): a Completed version job is a duplicate only while the document still holds exactly those bytes (app-only byte compare); version saves skip the 24 h response cache but keep the in-flight lock; server-side, so every client is fixed; +2,885 B. Finding for 025: create B → A → B hits the same loss through D1 | ✅ | FULL | opus / high | — | 039 ✅ |
 | 048 | Replace a document's search chunks on every re-index (Compose save-back, manual Run Index), not only version saves — owner 2026-09-15: new task here; reuses 029's trim | 🔲 | FULL | sonnet / high | — | 029 ✅ |
+| 049 | Create To Do is a shared capability but its tab is still Outlook-only (stale gate; found by 040) — flip the tab table, update the test that pins the wrong behaviour, and make the "file this email first" copy host-neutral | 🔲 | FULL | sonnet / high | — | 035 ✅, 040 ✅ |
 
 **Gate**: identified document saves as a version, not a duplicate row · override creates a linked copy · profile displays · record card opens the record.
 
@@ -245,7 +246,7 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 
 | # | Task | Status | Rigor | Tier / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 040 | FR-19: Outlook parity pass and capability-gating audit | 🔲 | FULL | sonnet / high | — | 033, 035, 036 |
+| 040 | FR-19: Outlook parity pass and capability-gating audit — **done 2026-09-15** (`a20daea69`): two real gates became capabilities (`canShowLinkedTodos`, `canSuggestRelatedRecords`), a no-op ternary removed, nine remaining `hostType` reads classified as host-shaped data with reasons, `notes/parity-checklist.md` lists every capability per host with evidence and a "live check: pending — 042 UAT" column. Found the stale Create To Do tab gate → task 049 | ✅ | FULL | sonnet / high | — | 033 ✅, 035 ✅, 036 ✅ |
 | 041 | NFR-09: per-env Entra SPA redirects + deploy-workflow trigger | 🔲 | STANDARD | opus / high | — | 011 |
 | 042 | Deploy the add-in and BFF; run UAT against the acceptance set | 🔲 | STANDARD | sonnet / high | — | 040, 041 |
 | 043 | CI gate for the office-addins jest suite (runs nightly, **cannot fail a PR**) | ✅ | FULL | opus / high | `notes/043-office-addins-ci-gate.md` | 010, 018 |

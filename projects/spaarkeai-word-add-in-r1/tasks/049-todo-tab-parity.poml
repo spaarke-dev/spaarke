@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Create To Do is a shared capability, but its tab is still Outlook-only (stale gate)</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>035 merged (To Do carries document + record), 040 merged (parity audit found this)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx view data and user-visible copy in both hosts; changes what a Word user can reach.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified change with a named mechanism; the judgment (is To Do shared?) is already settled by the spec and task 035.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>035, 040</deps>
+    <tags>frontend, office-addin, parity</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`TaskPaneNavigation`'s `TAB_CONFIGS` still restricts the Create To Do tab to Outlook, with the comment "a To Do is created from an email". Task 035 (FR-14) made To Do a genuinely shared capability — the server writes a document carrier for Word exactly as it writes a communication carrier for Outlook, and `CreateTodoView` contains no host logic. The spec lists To Do in the both-hosts set and FR-14's acceptance names Word explicitly. Make the tab match, and fix the Outlook-only wording that a Word user would otherwise see.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the add-in's tab shell and the To Do create flow. Follow ADRs strictly.</role>
+
+  <goal>A Word user can open Create To Do from the pane and create a To Do carrying the open document and its record. An Outlook user sees exactly what they see today. No copy tells a Word user to "file this email".</goal>
+
+  <context>
+    <background>
+      Found by task 040's audit (`notes/parity-checklist.md` §2), which did NOT fix it: `TaskPaneNavigation.test.tsx`'s test "renders only the Save tab for Word" pins the current behaviour, and 040 was forbidden to weaken a test.
+      **That test pins behaviour the spec contradicts, so this task changes the gate AND the test together — that is the point of this task, not a violation.** Note the test's name is already wrong: Word also gets the Find tab (task 015). Rename it to what it actually checks.
+      The Word path already works: `App.tsx`'s `handleCreateTodo` needs `savedContext.regardingEntity` + `regardingRecordId` (a filed record, which task 013/026 identity resolution supplies for a Word document) and sends `documentId` as the carrier (task 035). `CreateTodoView` takes a generic `IHostAdapter` and calls only `getSubject()`.
+      Copy to fix: `App.tsx`'s guard returns "File this email to Spaarke first (Save tab)."; `CreateTodoView`'s empty state prompts the user to file the email. Make both host-neutral (e.g. "Save this to Spaarke first (Save tab)") — do NOT add a host-type conditional to produce different wording (NFR-10); host-neutral copy is the point.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/TaskPaneNavigation.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/035-todo-regarding-decision.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-10">No host-type conditional may be added to a view. The tab table (`availableFor`) is the sanctioned mechanism; copy must be host-neutral rather than branched.</constraint>
+    <constraint source="project">Outlook behaviour must not change: same tabs, same order, same default tab, same wording for an Outlook user beyond the shared-neutral copy.</constraint>
+    <constraint source="project">A Word user with no filed record must still be told what to do, and the form stays disabled — the same guard as Outlook, in neutral words.</constraint>
+    <constraint source="ADR-021">Fluent v9 + theme tokens; no styling regressions. NFR-11: the new tab must be keyboard-reachable and announced like the others.</constraint>
+    <constraint source="ADR-012">Consume `@spaarke/auth` only; no `@spaarke/ui-components` import.</constraint>
+    <constraint source="ADR-038">Update `TaskPaneNavigation.test.tsx` deliberately (rename the Word test to what it checks; assert Save, Find and Create To Do for Word). Add a test that a Word To Do create sends the document carrier, or state why the existing 035 coverage is sufficient. No `Mock&lt;HttpMessageHandler&gt;`-equivalent stubs of the fetch layer beyond the package's existing pattern.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md, `notes/parity-checklist.md` §2 and `spec.md` FR-14 + FR-19 + Assumptions. Declare FULL, sonnet @ high, DIRECTIONAL.</step>
+    <step order="1">Confirm in code that the Word path supplies the To Do's regarding and carrier (App.tsx + CreateTodoView + 035's server contract). Record what you confirmed in `notes/049-todo-tab-parity.md`.</step>
+    <step order="2">Flip `TAB_CONFIGS.createTodo.availableFor` to both hosts; update the tab table's comment; update `TaskPaneNavigation.test.tsx` in the same change.</step>
+    <step order="3">Make the two guard/empty-state strings host-neutral.</step>
+    <step order="4">Run the add-in gates; report per-suite before/after for any red suite you touched.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Word path turns out NOT to produce a usable To Do (for example the record regarding is never populated for a Word document in practice), STOP and report rather than shipping a tab that leads to a dead end.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The tab table and the To Do create flow both exist; only the tab's host list and two strings are wrong.</existing>
+    <extension>Yes - data and copy change; no new component, service or route.</extension>
+    <cost-of-doing-nothing>A Word user cannot reach a capability the spec promises and the server already supports; FR-19's parity claim is false while the gate stands.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/049-todo-tab-parity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Rendering the tab shell with `hostType="word"` shows Save, Find and Create To Do; with `hostType="outlook"` it shows exactly what it shows today.</criterion>
+    <criterion testable="true">`TaskPaneNavigation.test.tsx` no longer contains a test asserting Create To Do is absent for Word, and its Word test name describes what it checks.</criterion>
+    <criterion testable="true">A Word To Do create carries the document id and the record, proven by test (new, or an existing 035 test cited).</criterion>
+    <criterion testable="true">Negative: no view gained a host-type conditional (grep), and the guard/empty-state copy mentions neither "email" nor a host name.</criterion>
+    <criterion testable="true">Negative: Outlook's tabs, default tab and order are unchanged, proven by the existing Outlook tests still passing unmodified.</criterion>
+    <criterion testable="true">`npx tsc --noEmit` production stays 0; `npm run build` exits 0; every gated suite passes; the full-suite failing set is not larger than the documented ten.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-15 by the main session from task 040's headline finding. The spec (Assumptions: To Do is in the both-hosts set) and FR-14's acceptance ("both Word (document + record) and Outlook (communication + record)") settle the question; no owner decision is needed.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
