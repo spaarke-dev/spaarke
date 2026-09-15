@@ -713,6 +713,7 @@ fourth-root premise contradicted task 028's ruling.
 | 🔲 [open] 105 | External data plane: every collection read complete or visibly truncated — no silent `$top=200` (ISS-002 / #963) | NFR-03 | **036** | — | ❌ | sonnet | high |
 | 🔲 [open] 106 | Re-grant over an expired survivor judges "confers access" across every active row on the key (ISS-008 / #973) | FR-09 | — | — | ❌ | sonnet | high |
 | 🔲 [open] 107 | Grants written outside the BFF get the default expiry — Dataverse-side, every write path (ISS-009 / #974) | FR-33 | 097 | — | ✅ | sonnet | high |
+| 🔲 [open] 108 | Unsecure-project must not report a failed share read as "0 shares revoked" (ISS-018 / #995) | NFR-01 | **063** | — | ❌ | sonnet | high |
 
 ## Execution sequence — dependency-ordered (owner, 2026-09-15)
 
@@ -726,7 +727,7 @@ first. Run them one at a time: most of them edit the evaluator core.
 |---|---|---|
 | 1 | **104** → 063 → 043 → 106 → 107 → 093 → 082 → 094 → 095 | 104 heads the longest chain (104 → 036 → 105 → 064 → 087 → 088 → 089 → 090). 082's external dep PR #832 is merged. |
 | 2 | 036 → 044 → 065 → 101 → 047 | 047 is live-dev validation — BLOCKED (not substituted) if no deployment is available |
-| 3 | 105 · 054 | 🔴 **054 is blocked** on the owner's ISS-003 product question (amended 2026-09-15); 055 / 056 / 057 / 058 wait with it |
+| 3 | 105 · 054 · **108** | 🔴 **054 is blocked** on the owner's ISS-003 product question (amended 2026-09-15); 055 / 056 / 057 / 058 wait with it. **108** (ISS-018 / #995) needs only 063's strict share read, so it can run any time after 063. |
 | 4 | 064 · 055 | |
 | 5 | 087 → 066 → 069 → 056 | |
 | 6 | 088 → 067 → 099 → 057 → 058 | 099 ⏸ waits for 065's M8 (owner chose to wait, 2026-09-15) |
@@ -754,7 +755,7 @@ by design (its contract is task 034's canary). Shared test folders were ignored 
 
 | # | Task | Deps | Safe |
 |---|---|---|---|
-| 🔲 [open] 090 | `/test-diet` · **defer/issue disposition gate** (2026-09-15) · H-8a/H-8b closeout · lessons-learned · README → Complete | all (incl. 099, 101, 104–107) | ❌ |
+| 🔲 [open] 090 | `/test-diet` · **defer/issue disposition gate** (2026-09-15) · H-8a/H-8b closeout · lessons-learned · README → Complete | all (incl. 099, 101, 104–108) | ❌ |
 
 ---
 

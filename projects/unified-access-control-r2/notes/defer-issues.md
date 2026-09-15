@@ -39,6 +39,8 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-014 — TipTap 2.x advisory | #991 | Handed off — Compose confirmed as owner | LegalWorkspace gets TipTap only by transpiling `Spaarke.Compose.Components` (`composeEditor.registration.ts`); Compose owns the editor (ADR-049); next round `spaarkeai-compose-r7` |
 | ISS-015 — xmldom / dompurify | #992 | Handed off — not material | Same versions on master before this project; `@xmldom/xmldom` arrives via `mammoth`, declared by six packages |
 | ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
+| ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
+| ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -554,6 +556,44 @@ MEDIUM: `mergeAttributes()` turns an own `__proto__` key into inherited executab
 **Why not material here**: it is SpeAdmin's audit and dashboard REST client, not an access-control path. The injected credential (a `DefaultAzureCredential` pinned to the configured managed identity and tenant) is equivalent in deployed environments, where managed identity is on. It differs only where managed identity is off (local/dev).
 
 **Suggested fix**: register it through a factory lambda, or make the credential constructor protected, as task 104 did for `DataverseWebApiService`.
+
+---
+
+### ISS-017 — `PlaybookSharingService` reads AccessRights bit 524288 as Share
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed off (not material) |
+| **Urgency** | someday |
+| **Filed** | 2026-09-15 |
+| **Source** | Task 063: establishing the Dataverse AccessRights values for the FR-29 internal share endpoints |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/994 |
+
+`MapFromDataverseAccessRights` (`Services/Ai/PlaybookSharingService.cs:461`) maps POA `accessrightsmask` bit **524288** to `PlaybookAccessRights.Share`, commented `// ShareAccess`. That bit is **AssignAccess**; `ShareAccess` is **262144**. Values read by reflection from `Microsoft.Crm.Sdk.Proxy` 1.2.26: Read 1, Write 2, Append 4, AppendTo 16, Create 32, Delete 65536, Share 262144, Assign 524288.
+
+Wrong in both directions: a playbook shared with Assign is displayed as re-shareable, and a genuine Share right is not displayed at all.
+
+**Why not material here**: the projection is display-only and lives in `Services/Ai/**`, the AI line's surface (`projects/INDEX.md`); no access decision in this project's evaluator reads it. This project's own level→rights table (`Services/Access/RecordShareLevels.cs`, task 063) holds the correct values and pins them in tests as literals.
+
+**Suggested fix**: `262144` for Share; add `524288` as Assign only if that right is meant to be surfaced at all.
+
+---
+
+### ISS-018 — unsecure-project cannot see a failed share read, and reports "0 shares revoked" as success
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; task 108 |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-15 |
+| **Source** | Task 063: adding the strict share read |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/995 |
+
+`UnsecureProjectEndpoint.RevokeAllSharesAsync` (`:301-340`) reads the project's POA shares inside a `try/catch` whose `catch` logs *"Could not read the shares on project {ProjectId}; none were revoked"*. **That catch cannot fire for the failure it names**: `GetPrincipalAccessAsync` fails SOFT — a non-success status, or an unreadable object type code, returns an EMPTY LIST. So a failed read is indistinguishable from "this project has no shares": nothing is revoked, the endpoint answers success with `sharesRevoked: 0`, and the warning is never written. Unsecuring can leave every POA share in place, silently. Ownership has already moved by then, so the record is reachable regardless — but the stale access path the code's own comment promises to report is not reported.
+
+**Why it stays in the project** (owner rule 2026-09-15): this is the project's own code (task 061), on an access-control path.
+
+**Fix**: the strict read task 063 added (`GetPrincipalAccessOrThrowAsync`), so the existing `catch` starts working — plus a report the caller can see, not only a log line. Two behaviour changes need review, which is why 063 did not apply it as a drive-by: the strict read also refuses a record whose shares span more than one page (>5000 rows) or that carries an unreadable row, where the soft read would have revoked the rows it could see. For a "revoke everything" sweep, partial progress may be preferable to none. Task **108** carries that decision and an escalation trigger for it.
 
 ---
 
