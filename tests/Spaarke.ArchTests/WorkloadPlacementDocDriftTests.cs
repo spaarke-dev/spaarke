@@ -39,8 +39,18 @@ public class WorkloadPlacementDocDriftTests
     //      before the next opener of its kind is a failure, and exempts nothing.
     //
     //   3. NEVER widen the path excludes to make a directive pass. The excludes are records that are not
-    //      directives: .claude/archive, .claude/agent-memory, knowledge/, and projects/ other than the
-    //      CLAUDE.md of an active project (a row in projects/INDEX.md).
+    //      directives: .claude/archive, .claude/agent-memory, knowledge/, and projects/ other than, for an
+    //      active project (a row in projects/INDEX.md), its CLAUDE.md and its tasks/*.poml files that are still
+    //      to run.
+    //
+    //      A task POML is history — not scanned — only when its first <status> says the task is done or will
+    //      never run: it starts with complete / completed / done (so completed-partial, complete-merged and
+    //      done-with-exception count), is ✅, or starts with cancelled / superseded / skipped / closed
+    //      (HistoricalTaskStatus). Everything else is scanned: not-started, pending, in-progress, deferred,
+    //      blocked, partial, authoring-complete-…-pending, n/a, and a POML with NO <status> (fail closed).
+    //      A task that will still be executed is a directive whatever its status is called — do not add a status
+    //      to the historical list to make a POML pass; reword the constraint. In a POML, use the Markdown
+    //      (XML comment) marker form; an XML comment cannot contain "--", so keep that out of the reason.
     //
     //   4. Adding a banned pattern: add a sample for it to BannedSamples. BannedSamplesCoverEveryPattern fails
     //      until you do. Write multi-word patterns with \s+ between words (see BannedPhrasings).
@@ -142,7 +152,18 @@ public class WorkloadPlacementDocDriftTests
         Assert.Contains("tests/Spaarke.ArchTests/ADR001_MinimalApiTests.cs", scanned);
         Assert.Contains(scanned, f => f.StartsWith("src/server/", StringComparison.Ordinal) && f.EndsWith(".cs", StringComparison.Ordinal));
         Assert.Contains(scanned, f => f.StartsWith("projects/", StringComparison.Ordinal) && f.EndsWith("/CLAUDE.md", StringComparison.Ordinal));
+        Assert.Contains(scanned, f => f.StartsWith("projects/", StringComparison.Ordinal) && f.EndsWith(".poml", StringComparison.Ordinal));
         Assert.DoesNotContain(GuardRelativePath, scanned);
+
+        // The status filter must actually filter: every scanned task POML is still to run, and some active-project
+        // POMLs (the completed ones) were left out as history.
+        var scannedTasks = scanned.Where(f => f.EndsWith(".poml", StringComparison.Ordinal)).ToList();
+        Assert.All(scannedTasks, f => Assert.False(
+            PlacementRepoFiles.IsHistoricalTask(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, f))),
+            $"{f} is a historical (completed) task but was scanned"));
+        Assert.True(
+            PlacementRepoFiles.ActiveProjectTaskFiles().Count() > scannedTasks.Count,
+            "No active-project task POML was left out as history — the status filter is not filtering.");
 
         Assert.True(findings.Count == 0, Guidance + string.Join("\n", findings));
     }
@@ -277,6 +298,75 @@ public class WorkloadPlacementDocDriftTests
         Assert.Equal(2, findings.Count);
         Assert.Contains(findings, f => f.StartsWith("x.md:4:", StringComparison.Ordinal));
         Assert.Contains(findings, f => f.StartsWith("x.md:6:", StringComparison.Ordinal));
+    }
+
+    /// <summary>A task POML in the shape <c>task-create</c> writes, with the given status and constraint.</summary>
+    private static string SamplePoml(string? status, string constraint) =>
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<task id=\"042\" project=\"sample-r1\">\n  <metadata>\n" +
+        "    <title>Sample task</title>\n" +
+        (status is null ? string.Empty : $"    <status>{status}</status>\n") +
+        "  </metadata>\n  <constraints>\n" +
+        $"    <constraint source=\"ADR-001\">{constraint}</constraint>\n" +
+        "  </constraints>\n  <dependencies>\n    <dependency task=\"020\" status=\"completed\">v1.0 endpoints.</dependency>\n" +
+        "  </dependencies>\n</task>\n";
+
+    private const string SamplePomlPath = "projects/sample-r1/tasks/042-sample.poml";
+
+    [Theory(DisplayName = "ADR-052 drift guard: negative control — a task POML still to run is scanned, and its flat ban is reported")]
+    [InlineData("not-started")]
+    [InlineData("pending")]
+    [InlineData("in-progress")]
+    [InlineData("deferred")]
+    [InlineData("blocked")]
+    [InlineData("blocked-shipped")]
+    [InlineData("partial")]
+    [InlineData("🔲")]
+    [InlineData("n/a")]
+    [InlineData("operator-pending")]
+    [InlineData("authoring-complete-live-verification-pending")]
+    [InlineData("scaffolding-complete-owner-invocation-pending")]
+    [InlineData(null)]
+    public void NegativeControl_ATaskStillToRunIsScanned(string? status)
+    {
+        var poml = SamplePoml(status, ".NET 8 Minimal API + BackgroundService. No Azure Functions for in-proc execution.");
+
+        // A <dependency status="completed"> attribute further down is not the task's status.
+        Assert.False(PlacementRepoFiles.IsHistoricalTask(poml), $"A task with status '{status ?? "(none)"}' was treated as history");
+        Assert.Contains(Scan(SamplePomlPath, poml), f => f.Contains("flat 'no Azure Functions'", StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "ADR-052 drift guard: positive control — a completed or never-to-run task POML is history, not scanned")]
+    [InlineData("completed")]
+    [InlineData("complete")]
+    [InlineData("Completed")]
+    [InlineData("done")]
+    [InlineData("done-with-exception")]
+    [InlineData("completed-partial")]
+    [InlineData("completed-with-escalation")]
+    [InlineData("complete-merged")]
+    [InlineData("completed-2026-06-01 (all phases ✅)")]
+    [InlineData("✅")]
+    [InlineData("cancelled-no-scope")]
+    [InlineData("superseded")]
+    [InlineData("skipped-as-redundant")]
+    [InlineData("closed-no-action")]
+    public void PositiveControl_AHistoricalTaskIsNotScanned(string status)
+    {
+        var poml = SamplePoml(status, ".NET 8 Minimal API + BackgroundService. No Azure Functions for in-proc execution.");
+
+        Assert.True(PlacementRepoFiles.IsHistoricalTask(poml), $"A task with status '{status}' was not treated as history");
+    }
+
+    [Fact(DisplayName = "ADR-052 drift guard: positive control — a task POML still to run with the aligned wording is not reported")]
+    public void PositiveControl_AnAlignedTaskIsNotReported()
+    {
+        var poml = SamplePoml(
+            "not-started",
+            ".NET 8 Minimal API; no Azure Functions inside the BFF assembly. Background work placement per ADR-052 " +
+            "(decided per workload; inside the BFF, queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`).");
+
+        Assert.False(PlacementRepoFiles.IsHistoricalTask(poml));
+        Assert.Empty(Scan(SamplePomlPath, poml));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -457,6 +547,18 @@ internal static class PlacementRepoFiles
 
     private static readonly Regex RegistryRow = new(@"^\|\s*`(?<name>[A-Za-z0-9._-]+)`\s*\|", RegexOptions.CultureInvariant);
 
+    /// <summary>The task's own status: the first <c>&lt;status&gt;</c> element (never a <c>status="…"</c> attribute).</summary>
+    private static readonly Regex TaskStatusElement = new(@"<status>(?<s>[^<]*)</status>", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Statuses that make a task POML history: done (complete / completed / done and their suffixed variants, ✅)
+    /// or never to run (cancelled / superseded / skipped / closed). Anything else — including no status — is
+    /// still to run and is scanned. See the maintenance procedure, step 3, before adding to this.
+    /// </summary>
+    private static readonly Regex HistoricalTaskStatus = new(
+        @"^\s*(?:✅|(?:completed?|done|cancell?ed|superseded|skipped|closed)(?![A-Za-z]))",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     internal static string Relative(string file) => SourceScan.Relative(file).Replace('\\', '/');
 
     /// <summary>Every file under <paramref name="root"/>, skipping build output, package folders and links.</summary>
@@ -488,7 +590,10 @@ internal static class PlacementRepoFiles
         }
     }
 
-    /// <summary>The drift guard's scope: directives and documentation, plus active projects' CLAUDE.md.</summary>
+    /// <summary>
+    /// The drift guard's scope: directives and documentation, plus each active project's CLAUDE.md and the task
+    /// POMLs it has still to run.
+    /// </summary>
     internal static IEnumerable<string> DriftScanFiles()
     {
         var repo = SourceScan.RepoRoot;
@@ -536,6 +641,41 @@ internal static class PlacementRepoFiles
                 yield return path;
             }
         }
+
+        // A task POML still to run is a directive: task-execute hands its <constraints> to the agent verbatim.
+        // A completed one is a record of what was done — history (maintenance procedure, step 3).
+        foreach (var task in ActiveProjectTaskFiles())
+        {
+            if (!IsHistoricalTask(File.ReadAllText(task)))
+            {
+                yield return task;
+            }
+        }
+    }
+
+    /// <summary>Every <c>projects/&lt;active project&gt;/tasks/*.poml</c>, whatever its status.</summary>
+    internal static IEnumerable<string> ActiveProjectTaskFiles()
+    {
+        foreach (var project in ActiveProjects())
+        {
+            var tasks = Path.Combine(SourceScan.RepoRoot, "projects", project, "tasks");
+            if (!Directory.Exists(tasks))
+            {
+                continue;
+            }
+
+            foreach (var poml in Directory.EnumerateFiles(tasks, "*.poml"))
+            {
+                yield return poml;
+            }
+        }
+    }
+
+    /// <summary>True when the POML's own status marks it done or never to run; false (scan it) otherwise.</summary>
+    internal static bool IsHistoricalTask(string pomlText)
+    {
+        var status = TaskStatusElement.Match(pomlText);
+        return status.Success && HistoricalTaskStatus.IsMatch(status.Groups["s"].Value);
     }
 
     /// <summary>Project folder names listed as rows in <c>projects/INDEX.md</c> (the active-project registry).</summary>
