@@ -47,6 +47,12 @@ describe('buildEmailSaveRequest', () => {
     expect(req.idempotencyKey).toBe('idem-key-1');
   });
 
+  it("marks the name system-derived: the ribbon files under the email's own subject, never a typed name (task 046)", () => {
+    const req = buildEmailSaveRequest(context, target, 'idem-key-1');
+
+    expect(req.email.isNameSystemDerived).toBe(true);
+  });
+
   it('falls back to a placeholder subject/sender when the email lacks them', () => {
     const bare: QuickSaveEmailContext = { internetMessageId: '<x@y>', subject: '' };
     const req = buildEmailSaveRequest(bare, target, 'k');

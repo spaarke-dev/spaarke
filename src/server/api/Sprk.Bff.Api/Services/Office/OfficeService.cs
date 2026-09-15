@@ -402,6 +402,9 @@ public class OfficeService : IOfficeService
             // 1. Create Document → 2. Upload to SPE → 3. Associate Document to SPE → 4. Trigger AI
             Stream? contentStream = null;
             string fileName;
+            // Task 046 (b): the name the document is SHOWN under (sprk_documentname). Null means "the stored file
+            // name", which is the case for every branch except Email.
+            string? documentName = null;
             long fileSize = 0;
 
             try
@@ -412,7 +415,11 @@ public class OfficeService : IOfficeService
                     case SaveContentType.Email when request.Email != null:
                         // Build .eml file from email metadata using MimeKit
                         contentStream = OfficeEmailEnricher.BuildEmlFromMetadata(request.Email);
-                        fileName = OfficeEmailEnricher.GenerateEmlFileName(request.Email);
+                        // Task 046 (b): a SYSTEM-DERIVED name is stored with a short unique suffix, because the
+                        // path-keyed Replace upload below would otherwise let a second same-subject, same-date
+                        // email overwrite the first. A name the user typed is stored exactly as today.
+                        // sprk_documentname keeps the readable name either way.
+                        (documentName, fileName) = OfficeEmailEnricher.GenerateEmlNames(request.Email);
                         fileSize = contentStream.Length;
                         break;
 
@@ -535,6 +542,7 @@ public class OfficeService : IOfficeService
                     itemId,
                     webUrl,
                     fileName,
+                    documentName ?? fileName,
                     fileSize,
                     userId,
                     cancellationToken);

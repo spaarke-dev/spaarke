@@ -196,6 +196,19 @@ public record EmailMetadata
     /// Used to respect user's attachment selection in the add-in UI.
     /// </summary>
     public List<string>? SelectedAttachmentFileNames { get; init; }
+
+    /// <summary>
+    /// Task 046 (b): <c>true</c> when <see cref="Subject"/> — and so the generated <c>.eml</c> name — is
+    /// SYSTEM-DERIVED (the email's own subject); <c>false</c> when the user TYPED it in the pane's "Document Name"
+    /// box. Only a system-derived name is STORED with a short unique suffix, so two emails with the same subject and
+    /// date never share a file. A name the user typed is never changed automatically (owner, 2026-09-15).
+    /// </summary>
+    /// <remarks>
+    /// Absent (an older client) reads as <c>false</c>, i.e. "typed": an older pane may be sending a typed name, and
+    /// that must never be changed. The cost is only that such a client keeps today's same-name collision exposure
+    /// until it updates; for typed names that exposure is task 025's refuse-and-ask to close.
+    /// </remarks>
+    public bool IsNameSystemDerived { get; init; }
 }
 
 /// <summary>

@@ -968,6 +968,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
           serverRequest.email = {
             subject: effectiveDocumentName || 'Untitled Email',
+            // Task 046 (b): says whether that subject, which becomes the .eml name, is the email's own
+            // (system-derived) or the Document Name the user TYPED. The server stores a system-derived name
+            // with a short unique suffix, so two same-subject, same-date emails never share a file. A typed
+            // name is stored exactly as typed; it is never changed.
+            isNameSystemDerived: !context.documentName,
             senderEmail: context.senderEmail || 'unknown@placeholder.com',
             senderName: context.senderDisplayName,
             recipients,

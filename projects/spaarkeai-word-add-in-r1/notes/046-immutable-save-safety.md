@@ -9,9 +9,113 @@
 | Defect | Reproduced? | Fixed? | Failing → passing test |
 |---|---|---|---|
 | **(a)** The immutable dedup cleanup deletes a document's own SPE file | **Yes**, plus a second shape (a hash-linked copy's file) | **Yes** | `OfficeImmutableSaveFileSafetyTests.ByteIdenticalAttachmentSave_UnderTheCanonicalsNameInItsContainer_LeavesTheCanonicalsFileIntact`, `…_UnderAHashLinkedCopysName_LeavesThatCopysFileIntact`, `DuplicateAttachmentCleanup_WhenTheFileReferenceCannotBeChecked_DeletesNothing` |
-| **(b)** Two same-subject, same-date emails get one `.eml` name; the second overwrites the first | **Yes** | **No: escalation trigger fired** (§4) | reproduction below; not committed |
+| **(b)** Two same-subject, same-date emails get one `.eml` name; the second overwrites the first | **Yes** | **Yes, 2026-09-15** (owner decision B2; §0.1). First escalated (§4). | `OfficeEmailSaveNamingTests.TwoSystemNamedEmailSaves_WithTheSameSubjectAndDate_ToTheSameContainer_ProduceTwoDistinctFiles` |
 
 Guard that passes both before and after: `…_UnderTheCanonicalsNameInItsContainer_IsStillSuppressedAsADuplicate` (AC2).
+
+## 0.1 Update 2026-09-15: defect (b) implemented (owner decision B2)
+
+**Owner decisions.**
+1. Only a SYSTEM-DERIVED `.eml` name gets the short unique suffix. A name the user typed in the pane's Document Name
+   box is never changed. Typed-name collisions are left exactly as today until task 025's refuse-and-ask prompt.
+2. Most emails arrive through the Exchange/Graph integration, and their names are system-derived, so they need the
+   protection too.
+
+**Inbound investigation (done first).** The premise behind decision 2 does not hold, in the safe direction: the
+server-side paths are already collision-proof, by a different mechanism.
+- **(a) Generator.** The inbound path (`IncomingCommunicationProcessor.ArchiveEmlAsync`) does NOT use
+  `OfficeEmailEnricher.GenerateEmlFileName`. It uses its own `GraphMessageToEmlConverter`
+  (`{subject≤50}_{yyyyMMdd_HHmmss}.eml`). The outbound archive (`CommunicationService.ArchiveToSpeAsync`) uses
+  `EmlGenerationService`, with the same shape. The old Email-to-Document `.eml` builder was deleted 2026-08-14.
+- **(b) Upload.** Both are the same path-keyed `UploadSmallAsync` (`Replace`), but the path is
+  **`{communicationId:N}_{fileName}`**. The communication id is a fresh `sprk_communication` per message, so the
+  stored name is already unique per email. The inbound document's `sprk_documentname` is `"Archived: {subject}"`.
+- **(c) Collision today.** None. Two inbound emails with the same subject and date get different communication ids,
+  so they get different paths. The outbound twin is pinned by
+  `SpeFlatUploadPathTests.ArchiveExisting_ForTwoCommunicationsWithTheSameSubject_PersistsBothAndOverwritesNeither`.
+  The inbound prefix is verified by reading the code only: its sole harness (`InboundPipelineTests`) mocks Graph
+  request builders, so a pin there would be almost all plumbing. A small pinning test is recommended for email-r2.
+- **Not changed.** Moving these paths onto the Office generator would change shipped, test-pinned email-r2 names
+  (the cross-project STOP case) and buys no protection they lack. **Only the Office pane and ribbon path stored a bare
+  `{date}_{subject}.eml`**, and that is the only path changed.
+
+**Design.**
+- **Signal.** New optional request field `EmailMetadata.IsNameSystemDerived` (JSON `isNameSystemDerived`, default
+  `false`).
+  - The pane sends `!context.documentName`. `documentName` starts empty and is set only by the Document Name box's
+    `onChange`, so it is `true` unless the user typed a name.
+  - The ribbon quick-save always sends `true`: it files under `item.subject`.
+- **Old clients.** A client that does not send the flag is treated as **typed (no suffix)**. An older pane may be
+  sending a typed name, which must never be changed. The cost is only that such a client keeps today's collision
+  until it is redeployed.
+- **One generator for this path.** `OfficeEmailEnricher.GenerateEmlNames(metadata)` returns `(DocumentName,
+  StoredFileName)`.
+  - `DocumentName` is the unchanged `GenerateEmlFileName` output, `{yyyy-MM-dd}_{subject}.eml`.
+  - `StoredFileName` adds `_{8 hex}` before `.eml` for a system-derived name only (random per save,
+    `Guid.NewGuid().ToString("N")[..8]`). Otherwise it equals `DocumentName`.
+- **Suffix on the stored file only.** The SPE path and `sprk_filename` get the suffix. `sprk_documentname` stays the
+  readable name, passed through a new `OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync` overload that
+  takes `documentName` separately. The old overload delegates with the same value twice, so its 13 positional
+  unit-test call sites are untouched. The dedup notification also uses the readable name, so its text is unchanged.
+  `sprk_filename` stays equal to the SPE item's name, so the filename-keyed `AttachmentDocumentAssociationRung` keeps
+  its semantics. `sprk_filename` MaxLength is 1000; the longest stored name is 104 characters.
+- **Idempotency.** The Email key (`…|messageId-or-subject|…`) does not include the name; it is unchanged.
+
+**Reproduction (at `9b58c6d9b`, no production change).** The parked §1 test, with no flag, failed:
+`Expected world.SpeItems.Values.Where(i => i.Name.EndsWith(".eml", …)) to contain 2 item(s) because two different
+emails are two files; the second must not overwrite the first, but found 1`. After the fix, the same scenario with
+`isNameSystemDerived: true` passes. Without the flag it still produces one file, by design: an absent flag means
+"typed".
+
+**Tests.**
+- **Server** (`tests/integration/data-mutation/OfficeVersionSave/OfficeEmailSaveNamingTests.cs`, 4 cases):
+  - Two system-named saves produce two distinct files. Each has 1 version and its own body, and each row points at
+    its own file.
+  - A typed name (`false`) and an old client (the field removed from the raw JSON) are stored as exactly
+    `2026-09-14_Re Filing.eml`, with the same `sprk_documentname` and `sprk_filename`.
+  - A system-named save has a suffixed stored name that equals `sprk_filename`, and a readable `sprk_documentname`.
+- **Client:**
+  - new `shared/taskpane/hooks/__tests__/useSaveFlow.emailName.test.ts` (own subject → `true`; typed Document Name →
+    subject unchanged and `false`);
+  - one new case in the gated `quickSaveHelpers.test.ts` (the ribbon sends `true`).
+
+**Consequences to know.**
+- **Retry after a post-create failure.** A system-named Email save that fails after its row exists and is retried now
+  gets a new name, so it creates a second archive row. Before, it replaced the first file, hit `sprk_graphitemid_uk`,
+  errored, and left an orphan pointerless row (025 M7).
+- **Retry after an upload with no row.** If the upload succeeded but the save threw before a row existed, a retry
+  leaves the first upload as an unreferenced blob.
+- **Where the suffixed name shows.** The finalization worker uses the stored name as the RAG index file name and in
+  the attachment children's "Email attachment from {parent}" description and ParentFileName.
+- **Probability.** Two same-date, same-subject system-named emails in one container share a suffix with probability
+  2^-32.
+
+**What stays open.**
+- Typed-name collisions: task 025 closes them.
+- Old clients: they are protected only after the pane and ribbon are redeployed.
+- A test pinning the inbound id-prefix: recommended for email-r2.
+- The new pane suite is not in `ci-gated-suites.txt` (not edited here). It is green; recommend promoting it.
+
+**Gates (046b).**
+
+| Gate | Result |
+|---|---|
+| BFF build | green, 0 warnings, 0 errors |
+| Office/Email/Communication/ContentDedup/Idempotency/DuplicateDetection sweep | 1,859 total, 1,836 passed, 0 failed, 23 skipped |
+| ArchTests | 191/191 |
+| Full `Sprk.Bff.Api.Tests` (6 chunks) | **12,305 total, 12,249 passed, 0 failed, 56 skipped** (+4 = the new cases) |
+| Add-in `npm run typecheck` | 111 errors (= baseline). 0 production: the 24 outside test files are all `shared/__mocks__/office-js.ts`. None in touched files. |
+| Add-in `npm run build` (placeholder env) | exit 0 |
+| Add-in jest | 10 failed / 22 passed suites; 84 failed / 438 passed tests. The 10 failing suites and 84 failing tests are exactly the pre-existing baseline. All 21 gated suites pass by path; the new suite passes. |
+| CVE | no vulnerable packages |
+| Format | production + new test file clean; contract file's 14 findings pre-existing (two shifted +8 lines by the world addition) |
+| Publish (Compress-Archive Optimal, PDBs incl.) | **47,607,901 B**: **+135 B vs `9b58c6d9b`**; +52,016 B vs master `e0a6f87c4` (47,555,885 B) |
+
+**Step 9.5 (046b).** No Critical findings. ADR-001/007/008/010/019/038/044 are compliant; the add-in jest tests fall
+under the project's ADR-038 Path A. NFR-07 holds. The request change is additive and optional (absent = today's
+behaviour). Warnings: the retry and orphan-blob consequences above (accepted, documented); old clients unprotected
+until redeploy (by design); the suffixed name in finalization's descriptive fields (accepted: it is the file's name).
+Suggestions: the 2^-32 bound; the added overload (chosen over churning 13 test call sites); the new suite not gated.
 
 ## 1. Reproduction evidence (production code at `f8c20b7c2`, untouched)
 

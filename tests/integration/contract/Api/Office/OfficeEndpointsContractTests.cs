@@ -1183,6 +1183,13 @@ public sealed class OfficeVersionSaveWorld
 
     // ── Dataverse ─────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The <c>sprk_documentname</c> each <c>CreateDocumentAsync</c> wrote, in order (task 046 (b)). The row's
+    /// <see cref="DocumentRow.FileName"/> is later overwritten by the pointer update's <c>sprk_filename</c>, so it
+    /// cannot tell the two names apart.
+    /// </summary>
+    public List<string> CreatedDocumentNames { get; } = new();
+
     internal string CreateDocument(CreateDocumentRequest request)
     {
         lock (_gate)
@@ -1194,6 +1201,7 @@ public sealed class OfficeVersionSaveWorld
             }
 
             DocumentCreates++;
+            CreatedDocumentNames.Add(request.Name);
             var id = Guid.NewGuid();
             Documents[id] = new DocumentRow { Id = id, FileName = request.Name };
             return id.ToString("D");

@@ -47,6 +47,8 @@ export interface OfficeSaveRequestBody {
     sentDate?: string;
     body: undefined;
     isBodyHtml: true;
+    /** Task 046 (b): always true here; the ribbon files under the email's own subject and never takes a typed name. */
+    isNameSystemDerived: true;
     internetMessageId: string;
     selectedAttachmentFileNames: undefined;
   };
@@ -91,6 +93,8 @@ export function buildEmailSaveRequest(
         ...(r.displayName ? { name: r.displayName } : {}),
       })),
       ...(context.sentDate ? { sentDate: context.sentDate.toISOString() } : {}),
+      // Task 046 (b): the subject is the email's own, so the server stores it with a short unique suffix.
+      isNameSystemDerived: true,
       body: undefined,
       isBodyHtml: true,
       internetMessageId: context.internetMessageId,
