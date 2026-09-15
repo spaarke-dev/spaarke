@@ -878,6 +878,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // (selectedAttachmentFileNames controls which attachments become Documents server-side); there
         // is no client-side 'Attachment' content type. The type reflects that (finding recorded in
         // notes/typecheck-fix-patterns.md — a stale 'Attachment'-only branch was removed as unreachable).
+        //
+        // task 040 / FR-19 audit: `context.hostType` here selects WHICH REQUEST SHAPE to build
+        // (Email vs Document) — host-shaped DATA, not a feature on/off gate — so it is intentionally
+        // NOT converted to a capability read (see the "which save content type to send" example in
+        // the task's own scoping note). See notes/parity-checklist.md.
         let contentType: 'Email' | 'Document';
         if (context.hostType === 'outlook') {
           // Always save as Email when in Outlook
@@ -1006,6 +1011,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
 
         // Build legacy request for idempotency key computation (keep format stable)
+        // task 040 / FR-19 audit: `context.hostType` below is the SAME host-shaped-data case as
+        // `contentType` above — selecting which request shape's hash to compute, not gating a
+        // feature — so it stays as-is (see notes/parity-checklist.md).
         const request: SaveRequest = {
           sourceType:
             context.hostType === 'outlook'

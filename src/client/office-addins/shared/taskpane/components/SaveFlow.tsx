@@ -333,6 +333,14 @@ export interface SaveFlowProps {
    * the Document-record affordance WITHOUT their open action — the fallback surface, not an error.
    */
   canOpenRecord?: boolean;
+  /**
+   * task 040 / FR-19 (NFR-10): whether this host can fetch the Association Engine's "Related to"
+   * auto-match candidates (`hostAdapter.getCapabilities().canSuggestRelatedRecords`, decided by
+   * `SaveView` from the live adapter — never a `hostType` check here). `false`/absent skips the
+   * fetch entirely — the "Related to" picker still works via manual search/create, just without
+   * pre-ranked suggestion cards.
+   */
+  canSuggestRelatedRecords?: boolean;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -405,6 +413,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     documentIdentity,
     onRetryDocumentIdentity,
     canOpenRecord = false,
+    canSuggestRelatedRecords = false,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -699,12 +708,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   );
 
   // Fetch the engine's ranked "Related to" candidates for the auto-match cards.
-  // Reuses the SHARED derivePrimaryReview model (no fork; ADR-045). Outlook only,
-  // best-effort: a 404 (email not captured) / failure → no cards (the user searches
-  // instead — never an auto-filed guess). The browser test harness seeds demo
-  // candidates so the card UX is iterable.
+  // Reuses the SHARED derivePrimaryReview model (no fork; ADR-045). Capability-gated (task 040 /
+  // FR-19, NFR-10) — never a `hostType` check: `canSuggestRelatedRecords` is always false on Word
+  // (no captured-communication record for the engine to key off), so this is a no-op there without
+  // needing to know which host is running. Best-effort: a 404 (email not captured) / failure → no
+  // cards (the user searches instead — never an auto-filed guess). The browser test harness seeds
+  // demo candidates so the card UX is iterable.
   useEffect(() => {
-    if (hostType !== 'outlook' || !itemId) return;
+    if (!canSuggestRelatedRecords || !itemId) return;
     let cancelled = false;
     setCandidatesLoading(true);
     (async () => {
@@ -723,7 +734,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [hostType, itemId]);
+  }, [canSuggestRelatedRecords, itemId]);
 
   // §C — when a save completes, hand the selected "Related to" record to the host once so it can
   // seed the Create To Do tab's regarding. Reset on a fresh save (idle/selecting) so a second save
@@ -1004,6 +1015,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   );
 
   // Render main form
+  //
+  // task 040 / FR-19 audit: the `hostType === 'outlook'` reads below (label, sender, sent date,
+  // attachments) are host-shaped DATA, not feature gates — by the time these props reach SaveFlow,
+  // SaveView has already capability-gated WHICH VALUES got populated (canGetSender/canGetAttachments/
+  // etc.), so senderEmail/senderDisplayName/sentDate/attachments are already empty on Word regardless
+  // of this check. Left as-is (documented in notes/parity-checklist.md) rather than threading a
+  // separate `itemType` prop through for a condition the data already enforces.
   const renderForm = () => (
     <>
       {/* Document Info */}

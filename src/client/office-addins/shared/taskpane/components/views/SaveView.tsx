@@ -153,7 +153,13 @@ export const SaveView: React.FC<SaveViewProps> = ({
         const subject = await hostAdapter.getSubject();
         setItemName(subject);
 
-        // Get host-specific data
+        // Get host-specific data.
+        // task 040 / FR-19 audit: this `type === 'outlook'` scaffold decides WHICH host-specific
+        // IHostAdapter methods to call at all (getAttachments/getSenderEmail/getRecipients on
+        // Outlook vs getDocumentContent on Word) — the actual value-producing calls inside each
+        // branch are ALREADY capability-gated (canGetAttachments/canGetSender/canGetRecipients/
+        // canGetDocumentContent). Left as-is (documented in notes/parity-checklist.md) rather than
+        // converting the outer scaffold itself, which would only relabel this same branch.
         if (type === 'outlook') {
           // Get attachments
           if (hostAdapter.getCapabilities().canGetAttachments) {
@@ -274,6 +280,11 @@ export const SaveView: React.FC<SaveViewProps> = ({
   // related-record card and Document-record affordance without their open action.
   const canOpenRecord = hostAdapter?.getCapabilities().canOpenBrowserWindow ?? false;
 
+  // task 040 / FR-19 (NFR-10): same pattern as canOpenRecord above — decided from the live
+  // adapter's capabilities, never a `hostType` check. `false` (including while `hostAdapter` is
+  // absent/loading) skips SaveFlow's "Related to" auto-match candidates fetch entirely.
+  const canSuggestRelatedRecords = hostAdapter?.getCapabilities().canSuggestRelatedRecords ?? false;
+
   // Render SaveFlow with context
   return (
     <div className={styles.container}>
@@ -284,6 +295,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         onViewDocument={handleViewDocument}
         showDocumentInfo
         canOpenRecord={canOpenRecord}
+        canSuggestRelatedRecords={canSuggestRelatedRecords}
         {...(itemId !== undefined ? { itemId } : {})}
         {...(itemName !== undefined ? { itemName } : {})}
         {...(senderEmail !== undefined ? { senderEmail } : {})}

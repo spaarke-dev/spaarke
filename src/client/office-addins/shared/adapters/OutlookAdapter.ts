@@ -587,6 +587,17 @@ export class OutlookAdapter implements IHostAdapter {
       canOpenBrowserWindow: this.isOpenBrowserWindowSupported(),
       // task 036 / FR-15: Mailbox 1.6 + read mode — see isComposeNewMessageSupported().
       canComposeEmail: this.isComposeNewMessageSupported(),
+      // task 040 / FR-19: linked-todos (spec.md Assumptions Outlook-only list) — unconditionally
+      // true here, matching the pre-existing `hostType === 'outlook'` gate this formalizes
+      // (`App.tsx`'s LinkedTodosBanner visibility). The banner itself stays inert without a
+      // `communicationId` (see `useLinkedTodosForCommunication`'s own undefined-id no-op), so this
+      // capability need not additionally restrict by mode.
+      canShowLinkedTodos: true,
+      // task 040 / FR-19: triage/auto-match suggestions (spec.md Assumptions Outlook-only list) —
+      // unconditionally true here, matching the pre-existing `hostType !== 'outlook'` guard this
+      // formalizes (`SaveFlow.tsx`'s related-candidates fetch). The fetch is itself best-effort and
+      // already no-ops without an `itemId`, so this capability need not additionally restrict by mode.
+      canSuggestRelatedRecords: true,
       // Minimum API version for basic functionality
       minApiVersion: '1.5',
       // Actual supported version
