@@ -7,9 +7,11 @@ namespace Spaarke.Scheduling;
 /// or admin-trigger request body).
 /// </summary>
 /// <remarks>Per spec.md FR-2.1 (R3 Background-Job Infrastructure). NFR-08 requires
-/// <see cref="CorrelationId"/> to flow through to downstream logs and events.</remarks>
+/// <see cref="CorrelationId"/> to flow through to downstream logs and events. <see cref="Attempt"/> is set by the
+/// host for each retry of the same run (1 = the first call), so a job's heartbeat can carry it (ADR-036 A1 rule 5).</remarks>
 public record JobRunContext(
     Guid RunId,
     string CorrelationId,
     JobRunTrigger Trigger,
-    IDictionary<string, object> Parameters);
+    IDictionary<string, object> Parameters,
+    int Attempt = 1);

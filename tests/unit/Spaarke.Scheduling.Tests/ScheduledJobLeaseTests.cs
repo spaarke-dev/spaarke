@@ -255,6 +255,34 @@ public class ScheduledJobLeaseTests
     }
 
     [Fact]
+    public async Task RetriedRun_EachAttemptSeesItsAttemptNumber()
+    {
+        // ADR-036 A1 rule 5: a job's heartbeat carries its attempt number, so the host must pass it on each retry.
+        var time = new FakeTimeProvider(Start);
+        var lease = new FakeDistributedLease(time);
+        var attempts = new List<int>();
+        var job = new FakeScheduledJob("retry-job", (ctx, _) =>
+        {
+            lock (attempts)
+            {
+                attempts.Add(ctx.Attempt);
+            }
+
+            return ctx.Attempt == 1
+                ? throw new InvalidOperationException("transient")
+                : Task.FromResult(new JobRunResult(true, null, 1, TimeSpan.Zero));
+        });
+        var (host, store) = NewHost(job, time, lease);
+
+        var run = await host.TriggerNowAsync("retry-job", parameters: null, CancellationToken.None);
+        await AdvanceUntilAsync(time, () => store.RunRecords.Any(r => r.RunId == run.RunId && r.Result is not null),
+            "the second attempt succeeds after the retry backoff");
+
+        attempts.Should().Equal(1, 2);
+        store.RunRecords.Single(r => r.RunId == run.RunId).Result!.Success.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ManualRun_HostShutdown_CancelsItAndReleasesTheLease()
     {
         var time = new FakeTimeProvider(Start);

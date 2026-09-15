@@ -830,7 +830,8 @@ public sealed class ScheduledJobHost : BackgroundService
                     "Dispatching {JobKind} '{JobId}' runId={RunId} correlationId={CorrelationId} attempt={Attempt}/{MaxAttempts}",
                     jobKind, jobId, context.RunId, context.CorrelationId, attempt, maxAttempts);
 
-                var result = await handler.ExecuteAsync(context, runToken).ConfigureAwait(false);
+                // Same run, same correlation id; the attempt number tells the job which retry this is (A1 rule 5).
+                var result = await handler.ExecuteAsync(context with { Attempt = attempt }, runToken).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "{JobKind} '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms attempt={Attempt}",

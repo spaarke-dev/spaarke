@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
@@ -21,38 +22,47 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// <para><b>Who is reminded — never the grantee.</b> An external contact cannot renew their own access, so a
 /// reminder to them is pressure with no action available (spec FR-33 (d)). The recipient is the first PERSON
 /// in this chain (owner decision 2026-09-11): <c>sprk_grantedby</c> → the record's owning user → the record's
-/// creator. A "person" is an enabled systemuser that is not an application user — every grant row's own
-/// <c>createdby</c>/<c>ownerid</c> is the BFF's service identity, and most records are owned by a business-unit
-/// team, which is why the chain exists at all (task 100 notes: 20 of 28 live grants had no
+/// creator. A "person" is an enabled, interactive systemuser: not disabled, no <c>applicationid</c>, and an
+/// <c>accessmode</c> of Read-Write, Administrative or Read — never a Support or Delegated Admin user. Every grant
+/// row's own <c>createdby</c>/<c>ownerid</c> is the BFF's service identity, and most records are owned by a
+/// business-unit team, which is why the chain exists at all (task 100 notes: 20 of 28 live grants had no
 /// <c>sprk_grantedby</c>; 10 of 11 root records were team-owned). A grant with no person anywhere in the chain
-/// is <b>unroutable</b>: it is counted in the heartbeat and logged at Error for each occurrence. It is never
-/// silently dropped and never redirected to the grantee.</para>
+/// is <b>unroutable</b>: counted in every heartbeat and logged at Error once per threshold. It is never silently
+/// dropped and never redirected to the grantee.</para>
 ///
-/// <para><b>Which day.</b> A grant is reminded only on the exact days 30/14/7/3/1 before expiry, computed in
-/// <see cref="DateOnly"/> on the UTC calendar that the read filter enforces expiry against. There is no
-/// catch-up: a missed day stays missed, and a grant whose expiry is first set 20 days out gets its first
-/// reminder at 14. The heartbeat is what makes a missed day visible.</para>
+/// <para><b>Which reminder (owner decision 2026-09-14: catch up).</b> Each run looks at every active grant that
+/// expires within the next 30 days — access holds <i>through</i> the expiry date, so a grant expiring today is
+/// still in. A grant's due threshold is the most urgent one whose day has come: the smallest of 30/14/7/3/1 that is
+/// at least the days left. It is sent once per (grant, expiry date, threshold). So a missed day is caught up the
+/// next day, several missed thresholds collapse into the most urgent one, and a missed 1-day reminder still goes
+/// out on the expiry day itself. The expiry date is part of the key, so renewing a grant restarts its reminders.
+/// Days are <see cref="DateOnly"/> on the UTC calendar the read filter enforces expiry against.</para>
 ///
-/// <para><b>At most once per (grant, expiry date, threshold)</b> — across re-runs, restarts and instances —
-/// through <see cref="IIdempotencyService"/>. The expiry date is part of the key, so renewing a grant restarts
-/// its reminders. Two limits of that service are accepted and documented in the task notes: it fails OPEN when
-/// the cache is unreachable, and its lock is check-then-set rather than atomic, so two instances firing in the
-/// same instant can each send once. Either way the result is a duplicate reminder, never a missing one.</para>
+/// <para><b>At most once</b> (ADR-036 A1 rule 3): "already sent?" → take a claim → check again under the claim →
+/// send → write the completion marker → release. <see cref="IIdempotencyService"/>'s claim is check-then-set
+/// (#984), but this job only ever runs on one instance at a time — the scheduler's lease (ADR-036 A1 rule 1,
+/// task 103) — and the second check closes the gap between the first check and the claim. The completion marker
+/// is written without the run's cancellation token, so a reminder that went out is recorded even when the host is
+/// stopping.</para>
 ///
-/// <para><b>Cost</b> (NFR-02): ONE FetchXML query per run returns every due grant together with everything
-/// needed to route and word the reminder — no per-grant query. It pages only past <see cref="PageSize"/> grants
-/// due on the same day.</para>
+/// <para><b>Retry</b> (ADR-036 A1 rule 4): the run throws — after its heartbeat — when it could not make progress
+/// (the query failed) or when a reminder failed on the grant's last day, which no later run can send. The
+/// scheduler's retry policy then re-runs it; sent reminders are skipped by their markers. Any other failed
+/// reminder is counted and left to tomorrow's run, which catches it up.</para>
 ///
-/// <para><b>Heartbeat</b> (spec FR-33 known debt): every run logs one structured line with its counts —
-/// including a run with nothing due — and returns them in <see cref="JobRunResult.ResultJson"/>, which the
-/// scheduler keeps as run history. "Nothing due" (status <c>ok</c>, due 0) and "the job died" (status
+/// <para><b>Cost</b> (NFR-02): ONE FetchXML query per run returns every grant in the window with everything
+/// needed to route and word its reminder — no per-grant query. It pages past <see cref="PageSize"/> rows and stops
+/// at <see cref="MaxPages"/> pages, reporting the run as truncated.</para>
+///
+/// <para><b>Heartbeat</b> (spec FR-33 known debt; ADR-036 A1 rule 5): every attempt logs one structured line with
+/// its counts and attempt number — including an attempt with nothing to send — and returns them in
+/// <see cref="JobRunResult.ResultJson"/>. "Nothing to send" (status <c>ok</c>) and "the job died" (status
 /// <c>error</c>, or no heartbeat that day) do not look alike.</para>
 ///
-/// <para><b>Placement</b> (CLAUDE.md §10): in the BFF, on the existing in-process <c>Spaarke.Scheduling</c>
-/// host — the same home as <c>MembershipReconciliationJob</c>. It reads the BFF-owned grant table and writes
-/// through the existing <see cref="NotificationService"/> (Dataverse <c>appnotification</c>, the model-driven
-/// app's bell). No new scheduler, channel, store or package. Registered unconditionally in
-/// <c>ExternalAccessModule</c>; operators pause it with the scheduler's admin enable/disable, not a flag.</para>
+/// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF, on the in-process <c>Spaarke.Scheduling</c> host,
+/// registered with <c>AddScheduledJob</c> in <c>ExternalAccessModule</c>. Low volume, BFF identity and release
+/// cadence, BFF domain code (ADR-052 B2/B3); the one Functions signal, one dispatch per schedule (F3), is met in
+/// place by the scheduler's lease. No new scheduler, channel, store or package.</para>
 /// </remarks>
 public sealed class GrantExpiryReminderJob : IScheduledJob
 {
@@ -62,11 +72,14 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     /// <summary>Daily at 06:00 UTC.</summary>
     internal const string DefaultCronSchedule = "0 6 * * *";
 
-    /// <summary>The owner-confirmed reminder days (2026-09-10): exactly these, nothing in between.</summary>
+    /// <summary>The owner-confirmed reminder thresholds (2026-09-10), most distant first.</summary>
     internal static readonly IReadOnlyList<int> ReminderDays = new[] { 30, 14, 7, 3, 1 };
 
-    /// <summary>Rows per page of the single due-grants query.</summary>
+    /// <summary>Rows per page of the single window query.</summary>
     internal const int PageSize = 5000;
+
+    /// <summary>The paging loop's ceiling — 100,000 grants in one 30-day window. Past it the run reports truncated.</summary>
+    internal const int MaxPages = 20;
 
     internal const string StatusOk = "ok";
     internal const string StatusPartial = "partial";
@@ -78,9 +91,15 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     private const int PriorityWarning = 200000001;
     private const int PriorityCritical = 200000002;
 
+    // The interactive systemuser access modes: 0 Read-Write, 1 Administrative, 2 Read. Excludes 3 Support User,
+    // 4 Non-interactive and 5 Delegated Admin — live dev has Support and Delegated Admin users (task 100 review).
+    private const int LastPersonAccessMode = 2;
+
     // Outlives the 30-day window, so a marker is still present on any later day its key could recur.
     private static readonly TimeSpan SentMarkerLifetime = TimeSpan.FromDays(35);
     private static readonly TimeSpan SendLockDuration = TimeSpan.FromMinutes(5);
+
+    private static readonly int WindowDays = ReminderDays.Max();
 
     private const string GrantEntity = "sprk_externalrecordaccess";
     private const string GrantedByAlias = "gb";
@@ -120,7 +139,8 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     /// <inheritdoc />
     public string Description =>
         "Reminds the internal user who granted an external share (else the record's owner, else its creator) " +
-        "30, 14, 7, 3 and 1 days before the share expires (spec FR-33). Never notifies the external grantee.";
+        "30, 14, 7, 3 and 1 days before the share expires, catching up a missed reminder (spec FR-33). " +
+        "Never notifies the external grantee.";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -132,6 +152,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         var counts = new RunCounts();
         var status = StatusOk;
         string? error = null;
+        ExceptionDispatchInfo? noProgress = null;
 
         try
         {
@@ -140,14 +161,24 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             var notifications = scope.ServiceProvider.GetRequiredService<NotificationService>();
             var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
 
-            var rows = await QueryDueGrantsAsync(entityService, today, cancellationToken).ConfigureAwait(false);
-            counts.Due = rows.Count;
+            var (rows, truncated) = await QueryWindowAsync(entityService, today, cancellationToken).ConfigureAwait(false);
+            counts.InWindow = rows.Count;
+            counts.Truncated = truncated;
 
             foreach (var row in rows)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await RemindAsync(row, today, notifications, idempotency, counts, context.CorrelationId, cancellationToken)
                     .ConfigureAwait(false);
+            }
+
+            if (truncated)
+            {
+                status = StatusPartial;
+                error = $"Stopped after {MaxPages} pages of {PageSize} grants; later grants in the window were not reminded.";
+                _logger.LogError(
+                    "[GRANT-EXPIRY-REMINDER] The window query still had more rows after {MaxPages} pages — stopped. correlationId={CorrelationId}",
+                    MaxPages, context.CorrelationId);
             }
 
             if (counts.Failed > 0)
@@ -159,27 +190,38 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             status = StatusCancelled;
-            error = "Cancelled by host shutdown before every due grant was processed.";
+            error = "Cancelled before every grant in the window was processed.";
         }
         catch (Exception ex)
         {
             status = StatusError;
             error = ex.Message;
+            noProgress = ExceptionDispatchInfo.Capture(ex);
             _logger.LogError(ex,
-                "[GRANT-EXPIRY-REMINDER] Run failed before completing — due grants may not have been reminded. correlationId={CorrelationId}",
-                context.CorrelationId);
+                "[GRANT-EXPIRY-REMINDER] Run failed before completing — grants in the window may not have been reminded. attempt={Attempt} correlationId={CorrelationId}",
+                context.Attempt, context.CorrelationId);
         }
 
         var duration = _timeProvider.GetElapsedTime(started);
 
-        // THE HEARTBEAT. Emitted on every run, whatever happened above — including a run with nothing due.
+        // THE HEARTBEAT. Emitted on every attempt, whatever happened above — including one with nothing to send.
         _logger.Log(
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
-            "[GRANT-EXPIRY-REMINDER] heartbeat status={Status} today={Today} due={Due} sent={Sent} alreadySent={AlreadySent} " +
-            "unroutable={Unroutable} failed={Failed} skipped={Skipped} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
-            status, today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), counts.Due, counts.Sent, counts.AlreadySent,
-            counts.Unroutable, counts.Failed, counts.Skipped, (long)duration.TotalMilliseconds, context.Trigger,
-            context.RunId, context.CorrelationId);
+            "[GRANT-EXPIRY-REMINDER] heartbeat status={Status} today={Today} attempt={Attempt} inWindow={InWindow} sent={Sent} " +
+            "alreadySent={AlreadySent} unroutable={Unroutable} failed={Failed} lastDayFailed={LastDayFailed} skipped={Skipped} " +
+            "truncated={Truncated} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
+            status, today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), context.Attempt, counts.InWindow, counts.Sent,
+            counts.AlreadySent, counts.Unroutable, counts.Failed, counts.LastDayFailed, counts.Skipped, counts.Truncated,
+            (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
+
+        // ADR-036 A1 rule 4: throw only when a retry could complete work this run would otherwise lose.
+        noProgress?.Throw();
+        if (counts.LastDayFailed > 0)
+        {
+            throw new InvalidOperationException(
+                $"{counts.LastDayFailed} reminder(s) for grants expiring today could not be written, and no later run can send them — " +
+                "failing the attempt so the scheduler retries it (ADR-036 A1 rule 4).");
+        }
 
         return new JobRunResult(
             Success: status == StatusOk,
@@ -191,56 +233,58 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 {
                     status,
                     today = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    counts.Due,
+                    attempt = context.Attempt,
+                    counts.InWindow,
                     counts.Sent,
                     counts.AlreadySent,
                     counts.Unroutable,
                     counts.Failed,
                     counts.Skipped,
+                    counts.Truncated,
                     sentTo = new { granter = counts.SentToGranter, recordOwner = counts.SentToOwner, recordCreator = counts.SentToCreator },
                 },
                 ResultJsonOptions));
     }
 
     /// <summary>
-    /// The run's ONE query: active grants whose expiry is exactly one reminder day away, joined to everything
-    /// needed to route and word the reminder. Pages only past <see cref="PageSize"/> rows.
+    /// The run's ONE query: active grants expiring from today through today + 30, joined to everything needed to
+    /// route and word the reminder. Pages past <see cref="PageSize"/> rows, up to <see cref="MaxPages"/>.
     /// </summary>
-    private static async Task<List<Entity>> QueryDueGrantsAsync(
+    private static async Task<(List<Entity> Rows, bool Truncated)> QueryWindowAsync(
         IGenericEntityService entityService, DateOnly today, CancellationToken ct)
     {
         var rows = new List<Entity>();
-        var page = 1;
         string? pagingCookie = null;
 
-        while (true)
+        for (var page = 1; page <= MaxPages; page++)
         {
             var result = await entityService
-                .RetrieveMultipleAsync(new FetchExpression(BuildDueGrantsFetchXml(today, page, pagingCookie)), ct)
+                .RetrieveMultipleAsync(new FetchExpression(BuildWindowFetchXml(today, page, pagingCookie)), ct)
                 .ConfigureAwait(false);
 
             rows.AddRange(result.Entities);
 
             if (!result.MoreRecords)
             {
-                return rows;
+                return (rows, false);
             }
 
-            page++;
             pagingCookie = result.PagingCookie;
         }
+
+        return (rows, true);
     }
 
     /// <summary>
-    /// The due-grants FetchXML. Every join is OUTER: a grant with no granter, a team owner or no contact must
-    /// still come back, or the fallback chain — and the unroutable count — would silently lose it.
+    /// The window FetchXML. Every join is OUTER: a grant with no granter, a team owner or no contact must still come
+    /// back, or the fallback chain — and the unroutable count — would silently lose it.
     /// </summary>
     /// <remarks>
-    /// Verified against live dev metadata and data on 2026-09-12 (task 100 notes): the column names, the
-    /// <c>in</c> operator over bare <c>yyyy-MM-dd</c> values on this Date-Only column, and the aliased result
-    /// names this class reads.
+    /// Column names and aliased result names verified against live dev metadata and data on 2026-09-12 (task 100
+    /// notes §6). The date range uses <c>ge</c>/<c>le</c> over bare <c>yyyy-MM-dd</c> values on this Date-Only column,
+    /// the same comparison the read filter makes (<c>ExternalParticipationService.ExpiryPredicate</c>).
     /// </remarks>
-    internal static string BuildDueGrantsFetchXml(DateOnly today, int page, string? pagingCookie)
+    internal static string BuildWindowFetchXml(DateOnly today, int page, string? pagingCookie)
     {
         var fetch = new XElement("fetch",
             new XAttribute("version", "1.0"),
@@ -259,11 +303,8 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_grantedby"),
             new XElement("filter", new XAttribute("type", "and"),
                 Condition("statecode", "eq", "0"),
-                new XElement("condition",
-                    new XAttribute("attribute", "sprk_expiresdate"),
-                    new XAttribute("operator", "in"),
-                    ReminderDays.Select(days => new XElement("value",
-                        today.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))))),
+                Condition("sprk_expiresdate", "ge", today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                Condition("sprk_expiresdate", "le", today.AddDays(WindowDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))),
             PersonLink("sprk_grantedby", GrantedByAlias),
             OuterLink("contact", "contactid", "sprk_contact", ContactAlias, Attributes("fullname")),
             OuterLink("sprk_organization", "sprk_organizationid", "sprk_organization", OrganizationAlias,
@@ -296,22 +337,30 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         {
             counts.Skipped++;
             _logger.LogWarning(
-                "[GRANT-EXPIRY-REMINDER] Skipped grant {GrantId}: no expiry on a reminder day or no root record, so it cannot be reminded. correlationId={CorrelationId}",
+                "[GRANT-EXPIRY-REMINDER] Skipped grant {GrantId}: no expiry inside the window or no root record, so it cannot be reminded. correlationId={CorrelationId}",
                 row.Id, correlationId);
             return;
         }
 
+        var key = $"grant-expiry-reminder:{grant.Id:N}:{grant.ExpiresDate:yyyyMMdd}:{grant.Threshold}";
+
         if (grant.Recipient is not { } recipient)
         {
             counts.Unroutable++;
-            _logger.LogError(
-                "[GRANT-EXPIRY-REMINDER] UNROUTABLE grant {GrantId} on {RootEntity} {RootId}: expires {ExpiresDate} ({DaysLeft} days) and nobody can be told — " +
-                "sprk_grantedby, the record's owner and the record's creator are each empty or not an enabled person. correlationId={CorrelationId}",
-                grant.Id, grant.Root.EntityName, grant.RootId, grant.ExpiresDateText, grant.DaysLeft, correlationId);
+            // Counted on every run while the grant is in the window; logged at Error once per threshold, so an alert
+            // on it fires when a reminder would have gone out, not every morning for 30 days.
+            var reportKey = key + ":unroutable";
+            if (!await idempotency.IsEventProcessedAsync(reportKey, ct).ConfigureAwait(false))
+            {
+                _logger.LogError(
+                    "[GRANT-EXPIRY-REMINDER] UNROUTABLE grant {GrantId} on {RootEntity} {RootId}: expires {ExpiresDate} ({DaysLeft} days, {Threshold}-day reminder) and nobody can be told — " +
+                    "sprk_grantedby, the record's owner and the record's creator are each empty or not an enabled person. correlationId={CorrelationId}",
+                    grant.Id, grant.Root.EntityName, grant.RootId, grant.ExpiresDateText, grant.DaysLeft, grant.Threshold, correlationId);
+                await idempotency.MarkEventAsProcessedAsync(reportKey, SentMarkerLifetime, CancellationToken.None).ConfigureAwait(false);
+            }
+
             return;
         }
-
-        var key = $"grant-expiry-reminder:{grant.Id:N}:{grant.ExpiresDate:yyyyMMdd}:{grant.DaysLeft}";
 
         if (await idempotency.IsEventProcessedAsync(key, ct).ConfigureAwait(false)
             || !await idempotency.TryAcquireProcessingLockAsync(key, SendLockDuration, ct).ConfigureAwait(false))
@@ -322,18 +371,53 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
 
         try
         {
-            await notifications.CreateNotificationAsync(
-                userId: recipient.UserId,
-                title: grant.DaysLeft == 1 ? "External access expires tomorrow" : $"External access expires in {grant.DaysLeft} days",
-                body: $"{grant.GranteeText} will lose access to the {grant.Root.Label} \"{grant.RootName}\" on {grant.ExpiresDateText}. " +
-                      $"To keep it, set a new expiration date in Manage Access on the {grant.Root.Label}.",
-                category: NotificationCategory,
-                priority: grant.DaysLeft <= 1 ? PriorityCritical : grant.DaysLeft <= 7 ? PriorityWarning : PriorityInformational,
-                actionUrl: $"/main.aspx?etn={grant.Root.EntityName}&id={grant.RootId}&pagetype=entityrecord",
-                regardingId: grant.RootId,
-                cancellationToken: ct).ConfigureAwait(false);
+            // Check again under the claim: a holder that sent and marked between the first check and the claim is
+            // visible now (ADR-036 A1 rule 3 — the claim itself is check-then-set, #984).
+            if (await idempotency.IsEventProcessedAsync(key, ct).ConfigureAwait(false))
+            {
+                counts.AlreadySent++;
+                return;
+            }
 
-            await idempotency.MarkEventAsProcessedAsync(key, SentMarkerLifetime, ct).ConfigureAwait(false);
+            try
+            {
+                await notifications.CreateNotificationAsync(
+                    userId: recipient.UserId,
+                    title: grant.DaysLeft switch
+                    {
+                        0 => "External access ends today",
+                        1 => "External access ends tomorrow",
+                        var days => $"External access ends in {days} days",
+                    },
+                    body: $"Access for {grant.GranteeText} to the {grant.Root.Label} \"{grant.RootName}\" ends after {grant.ExpiresDateText}. " +
+                          $"To keep it, set a new expiration date in Manage Access on the {grant.Root.Label}.",
+                    category: NotificationCategory,
+                    priority: grant.DaysLeft <= 1 ? PriorityCritical : grant.DaysLeft <= 7 ? PriorityWarning : PriorityInformational,
+                    actionUrl: $"/main.aspx?etn={grant.Root.EntityName}&id={grant.RootId}&pagetype=entityrecord",
+                    regardingId: grant.RootId,
+                    cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ct.IsCancellationRequested)
+            {
+                // Stopping. NotificationService wraps whatever the write threw, so our cancellation cannot be told
+                // apart by exception type — it is OUR token that says so.
+                throw new OperationCanceledException("Cancelled while writing a reminder.", ex, ct);
+            }
+            catch (Exception ex)
+            {
+                // Includes a timeout, which also surfaces as a cancellation — but not of our token.
+                counts.Failed++;
+                if (grant.DaysLeft == 0)
+                {
+                    counts.LastDayFailed++;
+                }
+
+                _logger.LogWarning(ex,
+                    "[GRANT-EXPIRY-REMINDER] Could not write the {Threshold}-day reminder for grant {GrantId} to user {UserId} ({DaysLeft} days left){Retry}. correlationId={CorrelationId}",
+                    grant.Threshold, grant.Id, recipient.UserId, grant.DaysLeft,
+                    grant.DaysLeft == 0 ? "; the run will be retried" : "; tomorrow's run catches it up", correlationId);
+                return;
+            }
 
             counts.Sent++;
             switch (recipient.Source)
@@ -342,17 +426,29 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 case RecipientSource.RecordOwner: counts.SentToOwner++; break;
                 default: counts.SentToCreator++; break;
             }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            counts.Failed++;
-            _logger.LogWarning(ex,
-                "[GRANT-EXPIRY-REMINDER] Could not write the {DaysLeft}-day reminder for grant {GrantId} to user {UserId}; it will not be retried today. correlationId={CorrelationId}",
-                grant.DaysLeft, grant.Id, recipient.UserId, correlationId);
+
+            try
+            {
+                // The reminder went out: record it even if the host is stopping.
+                await idempotency.MarkEventAsProcessedAsync(key, SentMarkerLifetime, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[GRANT-EXPIRY-REMINDER] Sent the {Threshold}-day reminder for grant {GrantId} but could not record it; a re-run may repeat it. correlationId={CorrelationId}",
+                    grant.Threshold, grant.Id, correlationId);
+            }
         }
         finally
         {
-            await idempotency.ReleaseProcessingLockAsync(key, CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await idempotency.ReleaseProcessingLockAsync(key, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[GRANT-EXPIRY-REMINDER] Could not release the claim on {Key}; it expires on its own", key);
+            }
         }
     }
 
@@ -371,9 +467,9 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             new XAttribute("alias", alias),
             content);
 
-    /// <summary>Joins a systemuser lookup to the two columns that decide whether it is a person to remind.</summary>
+    /// <summary>Joins a systemuser lookup to the columns that decide whether it is a person to remind.</summary>
     private static XElement PersonLink(string lookupAttribute, string alias)
-        => OuterLink("systemuser", "systemuserid", lookupAttribute, alias, Attributes("isdisabled", "applicationid"));
+        => OuterLink("systemuser", "systemuserid", lookupAttribute, alias, Attributes("isdisabled", "applicationid", "accessmode"));
 
     private sealed record RootSpec(string EntityName, string IdAttribute, string NameAttribute, string Alias, string Label)
     {
@@ -390,11 +486,12 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
 
     private readonly record struct Recipient(Guid UserId, RecipientSource Source);
 
-    /// <summary>One due grant, read from a row of the due-grants query.</summary>
+    /// <summary>One grant in the window, read from a row of the window query.</summary>
     private sealed record DueGrant(
         Guid Id,
         DateOnly ExpiresDate,
         int DaysLeft,
+        int Threshold,
         RootSpec Root,
         Guid RootId,
         string RootName,
@@ -403,7 +500,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     {
         public string ExpiresDateText => ExpiresDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-        /// <returns><c>null</c> when the row has no expiry on a reminder day or no root record.</returns>
+        /// <returns><c>null</c> when the row has no expiry inside the window or no root record.</returns>
         public static DueGrant? Read(Entity row, DateOnly today)
         {
             if (row.GetAttributeValue<DateTime?>("sprk_expiresdate") is not { } expiresValue)
@@ -413,10 +510,13 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
 
             var expires = DateOnly.FromDateTime(expiresValue);
             var daysLeft = expires.DayNumber - today.DayNumber;
-            if (!ReminderDays.Contains(daysLeft))
+            if (daysLeft < 0 || daysLeft > WindowDays)
             {
                 return null;
             }
+
+            // The most urgent threshold whose day has come (catch-up, owner 2026-09-14).
+            var threshold = ReminderDays.Where(days => days >= daysLeft).Min();
 
             var root = Roots.FirstOrDefault(r => AsId(row.Contains(r.EntityName) ? row[r.EntityName] : null) is not null);
             if (root is null)
@@ -430,8 +530,8 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
             var contactName = Aliased(row, ContactAlias, "fullname") as string;
             var organizationName = Aliased(row, OrganizationAlias, "sprk_organizationname") as string;
             var granteeText = !string.IsNullOrWhiteSpace(contactName) ? contactName!
-                : !string.IsNullOrWhiteSpace(organizationName) ? $"Members of {organizationName}"
-                : "An external user";
+                : !string.IsNullOrWhiteSpace(organizationName) ? $"members of {organizationName}"
+                : "an external user";
 
             // The owner decision's chain, in order. The grantee is not in it and cannot be: a contact is not a
             // systemuser, and only systemuser lookups are candidates.
@@ -448,6 +548,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 row.Id,
                 expires,
                 daysLeft,
+                threshold,
                 root,
                 rootId,
                 string.IsNullOrWhiteSpace(rootName) ? "(unnamed)" : rootName!,
@@ -456,13 +557,14 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         }
 
         /// <summary>
-        /// A candidate counts only when its joined systemuser row positively says it is an enabled, non-application
-        /// user. Absent join columns mean "not established", which falls through to the next candidate.
+        /// A candidate counts only when its joined systemuser row positively says it is an enabled, interactive,
+        /// non-application user. Absent join columns mean "not established", which falls through to the next one.
         /// </summary>
         private static Guid? Person(Guid? userId, Entity row, string alias)
             => userId is { } id
                && Aliased(row, alias, "isdisabled") is false
                && AsId(Aliased(row, alias, "applicationid")) is null
+               && Aliased(row, alias, "accessmode") is OptionSetValue { Value: >= 0 and <= LastPersonAccessMode }
                 ? id
                 : null;
 
@@ -481,12 +583,14 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
 
     private sealed class RunCounts
     {
-        public int Due;
+        public int InWindow;
         public int Sent;
         public int AlreadySent;
         public int Unroutable;
         public int Failed;
+        public int LastDayFailed;
         public int Skipped;
+        public bool Truncated;
         public int SentToGranter;
         public int SentToOwner;
         public int SentToCreator;

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
@@ -21,25 +22,26 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 
 /// <summary>
-/// Expiry reminders — spec FR-33 (d), task 100: 30/14/7/3/1 days before an external grant lapses, the internal
-/// user who can renew it gets an in-app notification; the external grantee never does.
+/// Expiry reminders — spec FR-33 (d), task 100: before an external grant lapses, the internal user who can renew it
+/// gets an in-app notification at 30/14/7/3/1 days; the external grantee never does.
 ///
-/// <para><b>In scope</b> (the task's closed acceptance set plus the owner's 2026-09-11 recipient decision):
-/// which grants are reminded (exactly the five days; active only), who is reminded (granter → record owner →
-/// record creator, each only if an enabled non-application user; otherwise counted unroutable; never the
-/// grantee), at most once per day across runs, one query per run, the reminder names who loses what and when,
-/// and a heartbeat on every run that separates "nothing due" from "the run failed".</para>
+/// <para><b>In scope</b> (the task's closed acceptance set, the owner's 2026-09-11 recipient decision and the
+/// 2026-09-14 catch-up decision): which grants are reminded (active, expiring from today through 30 days out), which
+/// reminder (the most urgent threshold whose day has come, once per threshold — so a missed day is caught up and a
+/// missed 1-day reminder still goes out on the expiry day), who is reminded (granter → record owner → record creator,
+/// each only if an enabled interactive non-application user; otherwise unroutable; never the grantee), what it says,
+/// once only (re-runs, a lost race for the claim), one query per run with a paging cap, which failures make the run
+/// throw so the scheduler retries (a failed query, a failed last-day reminder) and which do not, and a heartbeat on
+/// every attempt.</para>
 ///
-/// <para><b>Why the fake is strict.</b> <see cref="FakeDataverse"/> evaluates the job's FetchXML the way
-/// Dataverse would — its filter conditions, its joins (an inner join drops rows, an outer one does not), and
-/// the columns it asks for — against a model of the live schema (verified 2026-09-12). It THROWS on a condition,
-/// join or column it does not model. So a query that lost <c>statecode eq 0</c> hands back revoked grants, one
-/// that turned a join inner loses the grants the fallback chain exists for, and one that names a column that is
-/// not there fails instead of passing against a fake that ignored it.</para>
+/// <para><b>Why the fake is strict.</b> <see cref="FakeDataverse"/> evaluates the job's FetchXML the way Dataverse
+/// would — its filter conditions, its joins (an inner join drops rows, an outer one does not), the columns it asks for,
+/// and paging — against a model of the live schema (verified 2026-09-12). It THROWS on a condition, join or column it
+/// does not model, so a query that lost <c>statecode eq 0</c> hands back revoked grants and one that names a missing
+/// column fails instead of passing.</para>
 ///
-/// <para>Real collaborators: <see cref="NotificationService"/> and <see cref="IdempotencyService"/> (over an
-/// in-memory distributed cache). The one seam is <see cref="IGenericEntityService"/>, mocked STRICT — any call
-/// other than the FetchXML query and the notification create throws.</para>
+/// <para>Real collaborators: <see cref="NotificationService"/> and <see cref="IdempotencyService"/> (over an in-memory
+/// distributed cache). The one seam is <see cref="IGenericEntityService"/>, mocked STRICT.</para>
 /// </summary>
 public class GrantExpiryReminderJobTests
 {
@@ -51,13 +53,18 @@ public class GrantExpiryReminderJobTests
     private static readonly Guid RecordCreator = Guid.Parse("a0000000-0000-0000-0000-000000000003");
     private static readonly Guid DisabledUser = Guid.Parse("a0000000-0000-0000-0000-000000000004");
     private static readonly Guid ApplicationUser = Guid.Parse("a0000000-0000-0000-0000-000000000005");
+    private static readonly Guid SupportUser = Guid.Parse("a0000000-0000-0000-0000-000000000006");
+    private static readonly Guid DelegatedAdmin = Guid.Parse("a0000000-0000-0000-0000-000000000007");
     private static readonly Guid ContactId = Guid.Parse("c0000000-0000-0000-0000-000000000001");
     private static readonly Guid OrganizationId = Guid.Parse("d0000000-0000-0000-0000-000000000001");
 
     private readonly FakeDataverse _dataverse = new();
     private readonly Mock<IGenericEntityService> _entityService = new(MockBehavior.Strict);
     private readonly List<Entity> _notifications = new();
+    private readonly Queue<Exception> _createFailures = new();
     private readonly CapturingLogger _log = new();
+    private readonly FakeTimeProvider _time = new(Now);
+    private readonly IDistributedCache _cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
     private readonly GrantExpiryReminderJob _job;
     private int _queries;
 
@@ -68,6 +75,8 @@ public class GrantExpiryReminderJobTests
         _dataverse.Users[RecordCreator] = new UserRow(IsDisabled: false, IsApplication: false);
         _dataverse.Users[DisabledUser] = new UserRow(IsDisabled: true, IsApplication: false);
         _dataverse.Users[ApplicationUser] = new UserRow(IsDisabled: false, IsApplication: true);
+        _dataverse.Users[SupportUser] = new UserRow(IsDisabled: false, IsApplication: false, AccessMode: 3);
+        _dataverse.Users[DelegatedAdmin] = new UserRow(IsDisabled: false, IsApplication: false, AccessMode: 5);
         _dataverse.Contacts[ContactId] = "Jane Doe";
         _dataverse.Organizations[OrganizationId] = "Morrison Foerster LLP";
 
@@ -82,24 +91,19 @@ public class GrantExpiryReminderJobTests
             .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity entity, CancellationToken _) =>
             {
+                if (_createFailures.TryDequeue(out var failure))
+                {
+                    throw failure;
+                }
+
                 _notifications.Add(entity);
                 return Guid.NewGuid();
             });
 
-        var services = new ServiceCollection();
-        services.AddSingleton(_entityService.Object);
-        services.AddSingleton(new NotificationService(_entityService.Object, NullLogger<NotificationService>.Instance));
-        services.AddSingleton<IDistributedCache>(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())));
-        services.AddScoped<IIdempotencyService>(sp =>
-            new IdempotencyService(sp.GetRequiredService<IDistributedCache>(), NullLogger<IdempotencyService>.Instance));
-
-        _job = new GrantExpiryReminderJob(
-            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            new FakeTimeProvider(Now),
-            _log);
+        _job = BuildJob(sp => new IdempotencyService(_cache, NullLogger<IdempotencyService>.Instance));
     }
 
-    // ── Which grants ────────────────────────────────────────────────────────────────────────────
+    // ── Which grants, and which reminder ────────────────────────────────────────────────────────
 
     [Theory]
     [InlineData(30)]
@@ -107,7 +111,7 @@ public class GrantExpiryReminderJobTests
     [InlineData(7)]
     [InlineData(3)]
     [InlineData(1)]
-    public async Task ExecuteAsync_GrantExpiringOnAReminderDay_SendsOneReminderToTheGranter(int daysLeft)
+    public async Task ExecuteAsync_GrantOnAThresholdDay_SendsOneReminderToTheGranter(int daysLeft)
     {
         Seed(daysLeft, grantedBy: Granter, owner: RecordOwner, creator: RecordCreator);
 
@@ -116,18 +120,15 @@ public class GrantExpiryReminderJobTests
         _notifications.Should().ContainSingle();
         _notifications[0].LogicalName.Should().Be("appnotification");
         RecipientOf(_notifications[0]).Should().Be(Granter);
-        _notifications[0].GetAttributeValue<string>("title").Should().Be(
-            daysLeft == 1 ? "External access expires tomorrow" : $"External access expires in {daysLeft} days");
+        TitleOf(_notifications[0]).Should().Be(
+            daysLeft == 1 ? "External access ends tomorrow" : $"External access ends in {daysLeft} days");
     }
 
     [Theory]
-    [InlineData(20)]
     [InlineData(31)]
-    [InlineData(29)]
-    [InlineData(15)]
-    [InlineData(2)]
-    [InlineData(0)]
-    public async Task ExecuteAsync_GrantNotOnAReminderDay_SendsNothing(int daysLeft)
+    [InlineData(45)]
+    [InlineData(-1)]
+    public async Task ExecuteAsync_GrantOutsideTheWindowOrAlreadyExpired_SendsNothing(int daysLeft)
     {
         Seed(daysLeft, grantedBy: Granter);
 
@@ -137,13 +138,68 @@ public class GrantExpiryReminderJobTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_InactiveGrantOnAReminderDay_SendsNothing()
+    public async Task ExecuteAsync_InactiveGrantInTheWindow_SendsNothing()
     {
         Seed(7, grantedBy: Granter, stateCode: 1);
 
         await RunAsync();
 
         _notifications.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DailyRunsAcrossThirtyDays_SendEachThresholdExactlyOnce()
+    {
+        Seed(30, grantedBy: Granter);
+
+        // Every morning from 30 days out to the expiry day.
+        for (var day = 0; day <= 30; day++)
+        {
+            await RunAsync();
+            _time.Advance(TimeSpan.FromDays(1));
+        }
+
+        _notifications.Select(TitleOf).Should().Equal(
+            "External access ends in 30 days",
+            "External access ends in 14 days",
+            "External access ends in 7 days",
+            "External access ends in 3 days",
+            "External access ends tomorrow");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MissedThresholdDay_IsCaughtUpOnceWithTheDaysActuallyLeft()
+    {
+        Seed(13, grantedBy: Granter); // its 14-day reminder never went out
+
+        await RunAsync();
+        await RunAsync();
+
+        _notifications.Select(TitleOf).Should().Equal("External access ends in 13 days");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SeveralThresholdsMissed_SendsOnlyTheMostUrgent()
+    {
+        Seed(5, grantedBy: Granter); // 30, 14 and 7 have all come and gone
+
+        await RunAsync();
+        _time.Advance(TimeSpan.FromDays(2));
+        await RunAsync();
+
+        _notifications.Select(TitleOf).Should().Equal("External access ends in 5 days", "External access ends in 3 days");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MissedLastDayReminder_IsSentOnTheExpiryDayOnly_Once()
+    {
+        Seed(0, grantedBy: Granter); // expires today; access holds through today
+
+        await RunAsync();
+        await RunAsync();
+
+        _notifications.Should().ContainSingle();
+        TitleOf(_notifications[0]).Should().Be("External access ends today");
     }
 
     // ── Who is reminded ─────────────────────────────────────────────────────────────────────────
@@ -186,9 +242,18 @@ public class GrantExpiryReminderJobTests
     [Theory]
     [InlineData("application user")]
     [InlineData("disabled user")]
-    public async Task ExecuteAsync_GranterIsNotAnEnabledPerson_FallsThroughToTheRecordOwner(string granterKind)
+    [InlineData("support user")]
+    [InlineData("delegated admin")]
+    public async Task ExecuteAsync_GranterIsNotAPersonToRemind_FallsThroughToTheRecordOwner(string granterKind)
     {
-        Seed(7, grantedBy: granterKind == "application user" ? ApplicationUser : DisabledUser, owner: RecordOwner);
+        var granter = granterKind switch
+        {
+            "application user" => ApplicationUser,
+            "disabled user" => DisabledUser,
+            "support user" => SupportUser,
+            _ => DelegatedAdmin,
+        };
+        Seed(7, grantedBy: granter, owner: RecordOwner);
 
         await RunAsync();
 
@@ -196,34 +261,60 @@ public class GrantExpiryReminderJobTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_NoPersonAnywhereInTheChain_CountsUnroutableAndLogsAnError()
+    public async Task ExecuteAsync_DisabledRecordOwner_RemindsTheRecordCreator()
     {
-        Seed(7, grantedBy: ApplicationUser, owner: DisabledUser, creator: ApplicationUser);
+        Seed(7, grantedBy: null, owner: DisabledUser, creator: RecordCreator);
 
-        var result = await RunAsync();
+        await RunAsync();
+
+        _notifications.Select(RecipientOf).Should().Equal(RecordCreator);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoPersonAnywhereInTheChain_CountsUnroutableEveryRunAndLogsAnErrorOncePerThreshold()
+    {
+        Seed(7, grantedBy: ApplicationUser, owner: DisabledUser, creator: SupportUser);
+
+        var first = await RunAsync();
+        var second = await RunAsync();
 
         _notifications.Should().BeEmpty("an unroutable grant is never redirected — least of all to the grantee");
-        Heartbeat()["Unroutable"].Should().Be(1);
-        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("UNROUTABLE"));
-        result.Success.Should().BeTrue("the run itself worked; the unroutable grant is reported, not a run failure");
+        _log.Entries.Where(e => e.Message.Contains("heartbeat")).Select(e => e.State["Unroutable"]).Should().Equal(1, 1);
+        _log.Entries.Count(e => e.Level == LogLevel.Error && e.Message.Contains("UNROUTABLE")).Should().Be(1);
+        first.Success.Should().BeTrue("the run itself worked; the unroutable grant is reported, not a run failure");
+        second.Success.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("sprk_project", "project")]
+    [InlineData("sprk_matter", "matter")]
+    [InlineData("sprk_workassignment", "work assignment")]
+    public async Task ExecuteAsync_EachGrantableRoot_RemindsItsOwnerAndLinksToIt(string rootEntity, string label)
+    {
+        var rootId = Seed(7, grantedBy: null, owner: RecordOwner, rootEntity: rootEntity, rootName: "Harbor Tower");
+
+        await RunAsync();
+
+        _notifications.Select(RecipientOf).Should().Equal(RecordOwner);
+        BodyOf(_notifications[0]).Should().StartWith($"Access for Jane Doe to the {label} \"Harbor Tower\" ends after ");
+        _notifications[0].GetAttributeValue<string>("data").Should()
+            .Contain($"/main.aspx?etn={rootEntity}\\u0026id={rootId}\\u0026pagetype=entityrecord");
     }
 
     // ── What it says ────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ExecuteAsync_Reminder_NamesWhoLosesAccessToWhichRecordAndWhen()
+    public async Task ExecuteAsync_Reminder_SaysWhoLosesAccessToWhichRecordAndThroughWhichDate()
     {
-        var matterId = Seed(14, grantedBy: Granter, rootName: "Smith v. Smith");
+        Seed(14, grantedBy: Granter, rootName: "Smith v. Smith");
         Seed(14, grantedBy: Granter, rootName: "Smith v. Smith", organizationGrant: true);
 
         await RunAsync();
 
         var expires = Today.AddDays(14).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        _notifications.Select(n => n.GetAttributeValue<string>("body")).Should().BeEquivalentTo(
-            $"Jane Doe will lose access to the matter \"Smith v. Smith\" on {expires}. To keep it, set a new expiration date in Manage Access on the matter.",
-            $"Members of Morrison Foerster LLP will lose access to the matter \"Smith v. Smith\" on {expires}. To keep it, set a new expiration date in Manage Access on the matter.");
-        _notifications[0].GetAttributeValue<string>("data").Should()
-            .Contain($"/main.aspx?etn=sprk_matter\\u0026id={matterId}\\u0026pagetype=entityrecord");
+        _notifications.Select(BodyOf).Should().BeEquivalentTo(
+            $"Access for Jane Doe to the matter \"Smith v. Smith\" ends after {expires}. To keep it, set a new expiration date in Manage Access on the matter.",
+            $"Access for members of Morrison Foerster LLP to the matter \"Smith v. Smith\" ends after {expires}. To keep it, set a new expiration date in Manage Access on the matter.");
     }
 
     // ── Once, and cheaply ───────────────────────────────────────────────────────────────────────
@@ -243,7 +334,20 @@ public class GrantExpiryReminderJobTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ManyDueGrants_IssuesExactlyOneQuery()
+    public async Task ExecuteAsync_ClaimShowsTheReminderWasSentAfterTheFirstCheck_DoesNotSendIt()
+    {
+        // Another holder sends and marks the reminder between this run's first check and its claim.
+        var job = BuildJob(_ => new LosesTheRaceIdempotency());
+        Seed(7, grantedBy: Granter);
+
+        await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        _notifications.Should().BeEmpty("the check under the claim sees the marker the other holder wrote");
+        Heartbeat()["AlreadySent"].Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ManyGrantsInTheWindow_IssuesExactlyOneQuery()
     {
         foreach (var days in new[] { 30, 14, 7, 3, 1 })
         {
@@ -257,21 +361,136 @@ public class GrantExpiryReminderJobTests
         await RunAsync();
 
         _queries.Should().Be(1);
-        _notifications.Should().HaveCount(15);
+        _notifications.Should().HaveCount(16, "fifteen on their threshold day, one caught up at 20 days; 45 days out is outside the window");
     }
 
-    // ── Heartbeat ───────────────────────────────────────────────────────────────────────────────
+    [Fact]
+    public async Task ExecuteAsync_MoreGrantsThanOnePage_PagesAndRemindsEveryGrant()
+    {
+        for (var i = 0; i <= GrantExpiryReminderJob.PageSize; i++)
+        {
+            Seed(7, grantedBy: Granter);
+        }
+
+        await RunAsync();
+
+        _queries.Should().Be(2);
+        _notifications.Should().HaveCount(GrantExpiryReminderJob.PageSize + 1);
+    }
 
     [Fact]
-    public async Task ExecuteAsync_NothingDue_StillEmitsAHeartbeatThatSaysOk()
+    public async Task ExecuteAsync_PagingThatNeverEnds_StopsAtTheCapAndReportsTruncated()
     {
-        Seed(20, grantedBy: Granter);
+        _dataverse.AlwaysMoreRecords = true;
+
+        var result = await RunAsync();
+
+        _queries.Should().Be(GrantExpiryReminderJob.MaxPages);
+        result.Success.Should().BeFalse();
+        Heartbeat()["Truncated"].Should().Be(true);
+        Heartbeat()["Status"].Should().Be("partial");
+    }
+
+    // ── Failures: which ones the scheduler retries ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_WriteFailsThenTheJobRunsAgainTheSameDay_SendsExactlyOnce()
+    {
+        Seed(7, grantedBy: Granter);
+        _createFailures.Enqueue(new InvalidOperationException("Dataverse rejected the write."));
+
+        var first = await RunAsync();
+        await RunAsync();
+
+        first.Success.Should().BeFalse();
+        Heartbeat(last: false, index: 0)["Failed"].Should().Be(1);
+        _notifications.Should().ContainSingle("the failed reminder released its claim and was not marked sent");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LastDayWriteFails_EmitsTheHeartbeatThenThrowsSoTheSchedulerRetries()
+    {
+        Seed(0, grantedBy: Granter);
+        _createFailures.Enqueue(new InvalidOperationException("Dataverse rejected the write."));
+
+        var act = async () => await RunAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*no later run can send them*");
+        Heartbeat()["LastDayFailed"].Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_EarlierDayWriteFails_CompletesWithoutThrowingForTomorrowToCatchUp()
+    {
+        Seed(3, grantedBy: Granter);
+        _createFailures.Enqueue(new InvalidOperationException("Dataverse rejected the write."));
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Heartbeat()["Status"].Should().Be("partial");
+        Heartbeat()["LastDayFailed"].Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_QueryFails_EmitsAnErrorHeartbeatThenThrows()
+    {
+        Seed(7, grantedBy: Granter);
+        _dataverse.QueryFailure = new InvalidOperationException("Dataverse is unavailable.");
+
+        var act = async () => await RunAsync(attempt: 2);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Dataverse is unavailable.");
+        var heartbeat = _log.Entries.Single(e => e.Message.Contains("heartbeat"));
+        heartbeat.State["Status"].Should().Be("error");
+        heartbeat.State["Attempt"].Should().Be(2);
+        heartbeat.Level.Should().Be(LogLevel.Warning);
+        _notifications.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancelledDuringASend_ReportsCancelledNotFailed()
+    {
+        Seed(7, grantedBy: Granter);
+        using var cts = new CancellationTokenSource();
+        _entityService
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity _, CancellationToken _) =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            });
+
+        var result = await _job.ExecuteAsync(Context(), cts.Token);
+
+        ResultOf(result).GetProperty("status").GetString().Should().Be("cancelled");
+        ResultOf(result).GetProperty("failed").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SendTimesOut_CountsAsFailedNotCancelled()
+    {
+        Seed(7, grantedBy: Granter);
+        _createFailures.Enqueue(new TaskCanceledException("The request timed out."));
+
+        var result = await RunAsync();
+
+        ResultOf(result).GetProperty("status").GetString().Should().Be("partial");
+        ResultOf(result).GetProperty("failed").GetInt32().Should().Be(1);
+    }
+
+    // ── Heartbeat and run record ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_NothingToSend_StillEmitsAHeartbeatThatSaysOk()
+    {
+        Seed(45, grantedBy: Granter);
 
         var result = await RunAsync();
 
         var heartbeat = Heartbeat();
         heartbeat["Status"].Should().Be("ok");
-        heartbeat["Due"].Should().Be(0);
+        heartbeat["InWindow"].Should().Be(0);
         heartbeat["Sent"].Should().Be(0);
         heartbeat["Today"].Should().Be("2026-09-12");
         result.Success.Should().BeTrue();
@@ -279,29 +498,50 @@ public class GrantExpiryReminderJobTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_QueryFails_HeartbeatSaysErrorNotOk()
+    public async Task ExecuteAsync_RunRecord_BreaksDownWhereTheRemindersWent()
     {
         Seed(7, grantedBy: Granter);
-        _dataverse.QueryFailure = new InvalidOperationException("Dataverse is unavailable.");
+        Seed(7, grantedBy: null, owner: RecordOwner);
+        Seed(7, grantedBy: null, creator: RecordCreator);
+        Seed(7, grantedBy: ApplicationUser);
 
-        var result = await RunAsync();
+        var result = await RunAsync(attempt: 2);
 
-        var entry = _log.Entries.Single(e => e.Message.Contains("heartbeat"));
-        entry.State["Status"].Should().Be("error");
-        entry.Level.Should().Be(LogLevel.Warning);
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("Dataverse is unavailable.");
-        _notifications.Should().BeEmpty();
+        var run = ResultOf(result);
+        run.GetProperty("status").GetString().Should().Be("ok");
+        run.GetProperty("attempt").GetInt32().Should().Be(2);
+        run.GetProperty("inWindow").GetInt32().Should().Be(4);
+        run.GetProperty("sent").GetInt32().Should().Be(3);
+        run.GetProperty("unroutable").GetInt32().Should().Be(1);
+        var sentTo = run.GetProperty("sentTo");
+        sentTo.GetProperty("granter").GetInt32().Should().Be(1);
+        sentTo.GetProperty("recordOwner").GetInt32().Should().Be(1);
+        sentTo.GetProperty("recordCreator").GetInt32().Should().Be(1);
+        Heartbeat()["Attempt"].Should().Be(2);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────
 
-    private Task<JobRunResult> RunAsync()
-        => _job.ExecuteAsync(
-            new JobRunContext(Guid.NewGuid(), "test-correlation", JobRunTrigger.Scheduled, new Dictionary<string, object>()),
-            CancellationToken.None);
+    private GrantExpiryReminderJob BuildJob(Func<IServiceProvider, IIdempotencyService> idempotency)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(_entityService.Object);
+        services.AddSingleton(new NotificationService(_entityService.Object, NullLogger<NotificationService>.Instance));
+        services.AddScoped(idempotency);
 
-    /// <summary>Adds one grant on its own matter. Returns the matter id.</summary>
+        return new GrantExpiryReminderJob(
+            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            _time,
+            _log);
+    }
+
+    private static JobRunContext Context(int attempt = 1)
+        => new(Guid.NewGuid(), "test-correlation", JobRunTrigger.Scheduled, new Dictionary<string, object>(), attempt);
+
+    private Task<JobRunResult> RunAsync(int attempt = 1)
+        => _job.ExecuteAsync(Context(attempt), CancellationToken.None);
+
+    /// <summary>Adds one grant on its own root record. Returns the root id.</summary>
     private Guid Seed(
         int daysLeft,
         Guid? grantedBy,
@@ -309,29 +549,57 @@ public class GrantExpiryReminderJobTests
         Guid? creator = null,
         int stateCode = 0,
         bool organizationGrant = false,
+        string rootEntity = "sprk_matter",
         string rootName = "Real Estate Transaction Matter")
     {
-        var matterId = Guid.NewGuid();
-        _dataverse.Roots[("sprk_matter", matterId)] = new RootRow(rootName, owner, creator);
+        var rootId = Guid.NewGuid();
+        _dataverse.Roots[(rootEntity, rootId)] = new RootRow(rootName, owner, creator);
         _dataverse.Grants.Add(new GrantRow(
             Id: Guid.NewGuid(),
             StateCode: stateCode,
             Expires: Today.AddDays(daysLeft),
-            RootEntity: "sprk_matter",
-            RootId: matterId,
+            RootEntity: rootEntity,
+            RootId: rootId,
             ContactId: organizationGrant ? null : ContactId,
             OrganizationId: organizationGrant ? OrganizationId : null,
             GrantedBy: grantedBy));
-        return matterId;
+        return rootId;
     }
 
     private static Guid RecipientOf(Entity notification) => notification.GetAttributeValue<EntityReference>("ownerid").Id;
 
-    private IReadOnlyDictionary<string, object?> Heartbeat(bool last = false)
+    private static string TitleOf(Entity notification) => notification.GetAttributeValue<string>("title");
+
+    private static string BodyOf(Entity notification) => notification.GetAttributeValue<string>("body");
+
+    private static JsonElement ResultOf(JobRunResult result) => JsonDocument.Parse(result.ResultJson!).RootElement;
+
+    private IReadOnlyDictionary<string, object?> Heartbeat(bool last = false, int? index = null)
     {
         var heartbeats = _log.Entries.Where(e => e.Message.Contains("heartbeat")).ToList();
-        heartbeats.Should().NotBeEmpty("every run must emit a heartbeat");
-        return last ? heartbeats[^1].State : heartbeats.Single().State;
+        heartbeats.Should().NotBeEmpty("every attempt must emit a heartbeat");
+        return index is { } i ? heartbeats[i].State : last ? heartbeats[^1].State : heartbeats.Single().State;
+    }
+
+    /// <summary>
+    /// Says "not sent" at the first check and "sent" at the check made under the claim — the interleaving where
+    /// another holder sends between the two.
+    /// </summary>
+    private sealed class LosesTheRaceIdempotency : IIdempotencyService
+    {
+        private int _checks;
+
+        public Task<bool> IsEventProcessedAsync(string eventId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Interlocked.Increment(ref _checks) > 1);
+
+        public Task MarkEventAsProcessedAsync(string eventId, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class CapturingLogger : ILogger<GrantExpiryReminderJob>
@@ -354,11 +622,12 @@ public class GrantExpiryReminderJobTests
 
     private sealed record RootRow(string Name, Guid? OwningUser, Guid? CreatedBy);
 
-    private sealed record UserRow(bool IsDisabled, bool IsApplication);
+    /// <summary>A systemuser. <c>AccessMode</c>: 0 Read-Write, 1 Administrative, 2 Read, 3 Support, 5 Delegated Admin.</summary>
+    private sealed record UserRow(bool IsDisabled, bool IsApplication, int AccessMode = 0);
 
     /// <summary>
-    /// Evaluates the job's FetchXML against in-memory tables shaped like the live schema (task 100 notes).
-    /// Throws on anything it does not model.
+    /// Evaluates the job's FetchXML against in-memory tables shaped like the live schema (task 100 notes), including
+    /// <c>count</c>/<c>page</c> paging. Throws on anything it does not model.
     /// </summary>
     private sealed class FakeDataverse
     {
@@ -386,6 +655,9 @@ public class GrantExpiryReminderJobTests
         public Dictionary<Guid, string> Organizations { get; } = new();
         public Exception? QueryFailure { get; set; }
 
+        /// <summary>A server whose paging never ends — every page is empty and says there is more.</summary>
+        public bool AlwaysMoreRecords { get; set; }
+
         public EntityCollection Execute(string fetchXml)
         {
             if (QueryFailure is not null)
@@ -393,8 +665,16 @@ public class GrantExpiryReminderJobTests
                 throw QueryFailure;
             }
 
-            var entity = XElement.Parse(fetchXml).Element("entity")
-                ?? throw new InvalidOperationException("FetchXML has no <entity>.");
+            var fetch = XElement.Parse(fetchXml);
+            var pageSize = int.Parse(fetch.Attribute("count")!.Value, CultureInfo.InvariantCulture);
+            var page = int.Parse(fetch.Attribute("page")!.Value, CultureInfo.InvariantCulture);
+
+            if (AlwaysMoreRecords)
+            {
+                return new EntityCollection { EntityName = "sprk_externalrecordaccess", MoreRecords = true, PagingCookie = $"<cookie page=\"{page}\" />" };
+            }
+
+            var entity = fetch.Element("entity") ?? throw new InvalidOperationException("FetchXML has no <entity>.");
             if (entity.Attribute("name")?.Value != "sprk_externalrecordaccess")
             {
                 throw new InvalidOperationException($"Unexpected entity '{entity.Attribute("name")?.Value}'.");
@@ -415,7 +695,7 @@ public class GrantExpiryReminderJobTests
             }
 
             var selected = entity.Elements("attribute").Select(a => a.Attribute("name")!.Value).ToList();
-            var result = new EntityCollection { EntityName = "sprk_externalrecordaccess", MoreRecords = false };
+            var matched = new List<Entity>();
 
             foreach (var row in rows)
             {
@@ -432,10 +712,14 @@ public class GrantExpiryReminderJobTests
                     .All(link => ApplyLink(output, link, GrantJoinValue(row, link.Attribute("to")!.Value)));
                 if (keep)
                 {
-                    result.Entities.Add(output);
+                    matched.Add(output);
                 }
             }
 
+            var result = new EntityCollection { EntityName = "sprk_externalrecordaccess" };
+            result.Entities.AddRange(matched.Skip((page - 1) * pageSize).Take(pageSize));
+            result.MoreRecords = matched.Count > page * pageSize;
+            result.PagingCookie = result.MoreRecords ? $"<cookie page=\"{page}\" />" : null;
             return result;
         }
 
@@ -452,13 +736,15 @@ public class GrantExpiryReminderJobTests
             return (attribute, op) switch
             {
                 ("statecode", "eq") => rows.Where(r => r.StateCode == int.Parse(condition.Attribute("value")!.Value, CultureInfo.InvariantCulture)),
-                ("sprk_expiresdate", "in") => rows.Where(r => r.Expires is { } expires && condition.Elements("value")
-                    .Select(v => DateOnly.ParseExact(v.Value, "yyyy-MM-dd", CultureInfo.InvariantCulture))
-                    .Contains(expires)),
+                ("sprk_expiresdate", "ge") => rows.Where(r => r.Expires is { } expires && expires >= DateValue(condition)),
+                ("sprk_expiresdate", "le") => rows.Where(r => r.Expires is { } expires && expires <= DateValue(condition)),
                 _ => throw new InvalidOperationException(
                     $"This fake does not model the condition '{attribute} {op}' — extend it deliberately rather than let it pass unevaluated."),
             };
         }
+
+        private static DateOnly DateValue(XElement condition)
+            => DateOnly.ParseExact(condition.Attribute("value")!.Value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         private static object? GrantValue(GrantRow row, string column) => column switch
         {
@@ -536,6 +822,7 @@ public class GrantExpiryReminderJobTests
                     {
                         "isdisabled" => user.IsDisabled,
                         "applicationid" => user.IsApplication ? Guid.Parse("b0000000-0000-0000-0000-00000000a991") : null,
+                        "accessmode" => new OptionSetValue(user.AccessMode),
                         _ => throw new InvalidOperationException($"systemuser column '{column}' is not modelled."),
                     };
                 case "contact":

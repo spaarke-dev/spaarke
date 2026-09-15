@@ -32,6 +32,7 @@ record. Priority is Informational at 30 and 14 days, Warning at 7 and 3, and Cri
 |---|---|---|---|
 | 1 | Step 0: "determine how the granting internal user is recorded on the grant row" — implying it is there | **20 of 28** active dev grants have **no `sprk_grantedby`** — every grant created 2026-08-11 → 08-25; grants from 2026-09-09 on have it. Every grant row's `createdby`/`ownerid` is a **BFF service identity** (`# mi-bff-api-dev`, `SDAP-BFF-SPE-API`). The spec's fallback "matter owner" is a **business-unit team** on **10 of 11** root records (`Spaarke Business Unit 1`). Read-only Web API queries, 2026-09-11. | **Escalation trigger fired** → owner decision (§3). |
 | 2 | Use `OutboxService` (`sprk_notificationoutbox`) for the notification | The outbox's `kind` taxonomy is closed, and the client's `Spaarke.Notifications` `KindRouter` **skips unknown kinds** with only a `console.warn`. SpaarkeAi registers handlers for only the three active kinds. A reminder written there would reach **no screen**. Making it visible needs client work outside this task. | **Owner decision** (§3): use the existing `NotificationService` (`appnotification`). |
+| — | (session 12) The job's own catch assumed a cancelled send surfaces as `OperationCanceledException` | `NotificationService.CreateNotificationAsync` catches every exception except `ArgumentNullException`, logs it, and throws `InvalidOperationException("Failed to create notification …", ex)` — cancellation included (`NotificationService.cs:119-127`). A host shutdown mid-send was therefore counted as a **failed write**. Found by the new test `ExecuteAsync_CancelledDuringASend_ReportsCancelledNotFailed`. | The job now decides by **its own token** (`ct.IsCancellationRequested`), whatever the exception type; a timeout (token not cancelled) still counts as failed. |
 | — | Scheduling pattern: `SessionFilesCleanupJob` (a raw `BackgroundService` + `PeriodicTimer`) | Not wrong, but the BFF has a canonical cron framework, `Spaarke.Scheduling` (`IScheduledJob` + `ScheduledJobHost` + admin run history / trigger-now / enable-disable). `MembershipReconciliationJob` and `PlaybookSchedulerJob` use it. | Directional deviation (steps are `mode="directional"`): used `IScheduledJob`. It gives run history and an operator pause switch for free, so no feature flag is needed. |
 
 ---
@@ -56,7 +57,10 @@ Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5**
 
 | Decision | Why |
 |---|---|
-| **Exact days, no catch-up** | The acceptance criterion "a grant expiring in 20 days produces no notification" forbids catch-up. Otherwise a grant first seen at 20 days would get a late "30-day" reminder. The cost: a day the job does not run is a missed reminder for that threshold. The heartbeat is what makes a missed day visible. |
+| ~~**Exact days, no catch-up**~~ → **Catch-up** (owner decision 2026-09-14, session 12 rewrite) | Superseded. The job now queries every active grant expiring **today through today + 30** and sends the **most urgent threshold whose day has come** — the smallest of 30/14/7/3/1 that is ≥ the days left — once per (grant, expiry date, threshold). A missed day is caught up the next day; several missed thresholds collapse into the most urgent one; a missed 1-day reminder still goes out **on the expiry day** (access holds through it). Why: a Redis outage now means the tick is not dispatched at all (ADR-036 A1.1), deploys and exhausted retries also skip a day, and with exact-day matching each of those silently lost a reminder. The POML criterion "a grant expiring in 20 days produces no notification" is superseded: it now holds only when that grant's 30-day reminder was already sent. A grant first created 20 days out gets a reminder the next morning, worded with the real days left. |
+| **Wording by the days actually left** | Title "External access ends in N days / tomorrow / today"; body "Access for {grantee} to the {label} "{name}" ends after {date}." — access holds **through** the expiry date (read filter `ge today`), so "on {date}" was wrong. Priority from the days left. |
+| **Retry rule** (ADR-036 A1 rule 4) | The run throws **after its heartbeat** when it made no progress (the query failed) or a reminder failed on the grant's **last day** — no later run can send it. Other failed reminders are counted (`partial`) and tomorrow's run catches them up. Sent reminders are skipped on a retry by their markers. |
+| **Person** | Enabled ∧ no `applicationid` ∧ `accessmode` ∈ {0 Read-Write, 1 Administrative, 2 Read}. Live dev has Support (3) and Delegated Admin (5) users, who must not be the one reminded. |
 | **`DateOnly`, UTC calendar** | `sprk_expiresdate` is Date Only, TimeZoneIndependent. "Today" is `ExternalGrantLifecycle.TodayUtc`, the same calendar the read filter enforces expiry against (task 007/097). |
 | **ONE FetchXML query, all joins OUTER** | NFR-02. The one query returns the grant plus the granter, the contact/organization name, and each root's name, owning user and creator, each user with `isdisabled` / `applicationid`. That is 12 link-entities; Dataverse allows 15. Every join is **outer**, so grants with no granter or a team owner still come back. An inner join would silently lose exactly the grants the fallback chain exists for. The query pages only past 5,000 grants due on the same day. |
 | **FetchXML, not `QueryExpression`** | The **same string** can be executed live through the Web API (`?fetchXml=`), and it was (§6). That verifies column names, aliases and the `in`-over-date operator against real Dataverse, not against our assumptions. |
@@ -69,14 +73,14 @@ Live effect in dev (FetchXML run 2026-09-12, 25 grants due on 2026-12-10): **5**
 
 ## 5. Known limits (accepted, stated rather than hidden)
 
-1. **`IIdempotencyService` fails OPEN.** If the distributed cache is unreachable, the check says "not sent",
-   and a same-day re-run can send a duplicate. Duplicate > missing.
-2. **Its lock is check-then-set, not atomic.** Two instances firing in the same instant can each send once.
-   Same trade-off. The BFF has no atomic de-dup primitive short of raw Redis `SET NX`, and the POML forbids
-   building a de-dup store.
-3. **Without Redis** (`IDistributedCache` falls back to in-memory), the marker does not survive a restart or
-   cross instances. Same-day duplicates become possible on restart.
-4. **No catch-up** (§4). The heartbeat is the detection.
+1. **`IIdempotencyService` fails OPEN** (#984). If the distributed cache is unreachable the check says "not
+   sent". In practice this job is not dispatched at all while Redis is down (ADR-036 A1.1 — the scheduler lease
+   lives in the same Redis), so the window is a cache that fails *between* the lease and the send.
+2. **Its lock is check-then-set, not atomic** (#984). No longer a live risk for this job: the scheduler's lease
+   (task 103) runs it on one instance at a time, and the job checks "already sent" again under the claim.
+3. **Without Redis** (`IDistributedCache` falls back to in-memory — Development/Testing only), the marker does
+   not survive a restart. Deployed environments refuse to start without Redis (`CacheModule`).
+4. ~~No catch-up~~ — catch-up is now the design (§4). A missed day costs one day's delay, not the reminder.
 5. **The bell must be switched on.** `appnotification` rows exist regardless, but the model-driven app shows
    them only when in-app notifications are enabled for that app. Dev has **zero** `appnotification` rows today,
    and the per-app setting could not be read back (settingdefinition query returned nothing). **Operator step**, §7.
