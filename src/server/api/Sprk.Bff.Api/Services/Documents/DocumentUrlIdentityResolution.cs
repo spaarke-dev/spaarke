@@ -58,8 +58,11 @@ public static class DocumentUrlIdentityResolution
 
     /// <summary>
     /// The DIRECT association slots, in the regarding priority of the polymorphic-resolver pattern (matter &gt;
-    /// project &gt; invoice &gt; work assignment). The Office save path writes only this family; the
-    /// <c>sprk_related*</c> family belongs to task 026's two-slot record card.
+    /// project &gt; invoice &gt; work assignment). The Office save path writes only this family — task 026's
+    /// related-record card reads this SAME family (not <c>sprk_related*</c>, which the save path never writes;
+    /// see <c>notes/026-slot-scope-decision.md</c>). Corrected 2026-09-14 — an earlier comment here pointed at
+    /// <c>sprk_related*</c>, which was wrong and would have shown a blank card on every document the add-in
+    /// itself filed.
     /// </summary>
     private static readonly string[] RelatedRecordAttributes =
         { "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment" };
@@ -68,6 +71,85 @@ public static class DocumentUrlIdentityResolution
         new[] { "sprk_documentid", GraphDriveIdAttribute, DocumentNameAttribute, FileNameAttribute }
             .Concat(RelatedRecordAttributes)
             .ToArray();
+
+    /// <summary>
+    /// Per-type field semantics for task 026's related-record card: which attribute is NOT already carried by
+    /// <see cref="EntityReference.Name"/> (Dataverse populates that from the entity's PRIMARY NAME attribute),
+    /// and whether the primary name IS the number or the descriptive name.
+    /// </summary>
+    /// <remarks>
+    /// Verified live 2026-09-14 (<c>EntityDefinitions(LogicalName='…')?$select=PrimaryNameAttribute</c>):
+    /// <c>sprk_matter</c> and <c>sprk_project</c>'s PRIMARY NAME attribute IS their NUMBER
+    /// (<c>sprk_matternumber</c> / <c>sprk_projectnumber</c>) — so <c>EntityReference.Name</c> is ALREADY the
+    /// number for those two; their descriptive name (<c>sprk_mattername</c> / <c>sprk_projectname</c>) is a
+    /// separate, non-primary column. <c>sprk_invoice</c> and <c>sprk_workassignment</c> are the opposite: their
+    /// primary name IS the descriptive name (<c>sprk_name</c>), and the number
+    /// (<c>sprk_invoicenumber</c> / <c>sprk_workassignmentnumber</c>) is the separate column. A card that read
+    /// only <c>EntityReference.Name</c> would show a NUMBER labeled as a name for half the direct family, and a
+    /// NAME with no number at all for the other half — this map is what closes that trap
+    /// (<c>notes/026-slot-scope-decision.md</c> §3).
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, (string ComplementaryColumn, bool PrimaryNameIsTheNumber)>
+        ComplementaryDisplayFieldMap = new Dictionary<string, (string, bool)>(StringComparer.Ordinal)
+        {
+            ["sprk_matter"] = ("sprk_mattername", true),
+            ["sprk_project"] = ("sprk_projectname", true),
+            ["sprk_invoice"] = ("sprk_invoicenumber", false),
+            ["sprk_workassignment"] = ("sprk_workassignmentnumber", false),
+        };
+
+    /// <summary>The related record's descriptive name and number (task 026), resolved together so a caller never
+    /// sees one without having tried the other.</summary>
+    public sealed record RelatedRecordDisplay(string? DisplayName, string? Number);
+
+    /// <summary>
+    /// Resolves the descriptive-name/number pair for a direct-slot related record (task 026 / FR-09). Called
+    /// from the <c>resolve-identity</c> HANDLER — i.e. only AFTER <c>DocumentAuthorizationFilter</c> has already
+    /// allowed <c>read</c> on the <c>sprk_document</c> — never from <see cref="ResolveAsync"/> itself, which
+    /// runs before that check. The access model makes the document check equivalent to authorizing the related
+    /// record too (record access &#8660; document access, enforced by <c>AuthorizationService</c>; see the
+    /// slot-scope decision note §6), so no second authorization check is re-derived here.
+    /// </summary>
+    /// <remarks>
+    /// Best-effort: if the complementary column cannot be read (the related record was deleted since the
+    /// document row was stamped, a transient fault), this logs a warning and returns the half it does have
+    /// rather than failing the whole identity response — a missing NUMBER (e.g. a pane-created Matter with no
+    /// number yet, per the numbering hand-off, <c>notes/030-numbering-handoff.md</c>) is a card-rendering
+    /// concern, not a 503.
+    /// </remarks>
+    public static async Task<RelatedRecordDisplay> ResolveRelatedRecordDisplayAsync(
+        EntityReference relatedRecord,
+        IGenericEntityService dataverse,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!ComplementaryDisplayFieldMap.TryGetValue(relatedRecord.LogicalName, out var mapping))
+        {
+            // Not one of the four direct slots this task scopes to — defensive only; FirstRelatedRecord never
+            // returns anything outside RelatedRecordAttributes today.
+            return new RelatedRecordDisplay(relatedRecord.Name, null);
+        }
+
+        string? complementary = null;
+        try
+        {
+            var entity = await dataverse.RetrieveAsync(
+                relatedRecord.LogicalName, relatedRecord.Id, new[] { mapping.ComplementaryColumn }, ct);
+            complementary = entity.GetAttributeValue<string>(mapping.ComplementaryColumn);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ct.ThrowIfCancellationRequested();
+            logger.LogWarning(ex,
+                "Document identity: could not read {Column} for {EntityType} {Id} for the related-record card; " +
+                "it will render that field blank.",
+                mapping.ComplementaryColumn, relatedRecord.LogicalName, relatedRecord.Id);
+        }
+
+        return mapping.PrimaryNameIsTheNumber
+            ? new RelatedRecordDisplay(complementary, relatedRecord.Name)
+            : new RelatedRecordDisplay(relatedRecord.Name, complementary);
+    }
 
     /// <summary>A resolved identity. Carries metadata the caller must not emit until authorization has allowed it.</summary>
     public sealed record Resolution(Guid DocumentId, string? DocumentName, string? FileName, EntityReference? RelatedRecord);

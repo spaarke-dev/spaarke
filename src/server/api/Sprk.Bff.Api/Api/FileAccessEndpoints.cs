@@ -233,14 +233,22 @@ public static class FileAccessEndpoints
         // Static local functions (method groups)
 
         /// <summary>
-        /// POST /api/documents/resolve-identity (task 012). Reached only after <see cref="DocumentUrlIdentityFilter"/>
-        /// resolved an identity AND <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it. Both are
-        /// filter-enforced (ADR-008), so the handler performs no check of its own. <paramref name="request"/> is bound
-        /// here so the filter can read it from the invocation arguments.
+        /// POST /api/documents/resolve-identity (task 012; task 026 / FR-09 extended the related-record shape).
+        /// Reached only after <see cref="DocumentUrlIdentityFilter"/> resolved an identity AND
+        /// <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it. Both are filter-enforced (ADR-008),
+        /// so the handler performs no access check of its own — including for the related-record display fields
+        /// this method now also resolves: the access model treats record access as equivalent to document access
+        /// (see <c>DocumentUrlIdentityResolution.ResolveRelatedRecordDisplayAsync</c> and
+        /// <c>notes/026-slot-scope-decision.md</c> §6), so a SECOND authorization check on the related record
+        /// itself would be redundant, not defense-in-depth. <paramref name="request"/> is bound here so the filter
+        /// can read it from the invocation arguments.
         /// </summary>
-        static IResult ResolveIdentity(
+        static async Task<IResult> ResolveIdentity(
             ResolveDocumentIdentityRequest? request,
-            HttpContext context)
+            IGenericEntityService dataverse,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
         {
             if (context.Items[DocumentUrlIdentityFilter.ResolutionItemKey]
                 is not Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity)
@@ -251,14 +259,21 @@ public static class FileAccessEndpoints
             }
 
             var related = identity.RelatedRecord;
+            RelatedRecordIdentity? relatedRecordResponse = null;
+            if (related is not null)
+            {
+                var display = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
+                    .ResolveRelatedRecordDisplayAsync(related, dataverse, logger, ct);
+                relatedRecordResponse = new RelatedRecordIdentity(
+                    related.LogicalName, related.Id.ToString("D"), related.Name, display.DisplayName, display.Number);
+            }
+
             return TypedResults.Ok(new DocumentIdentityResponse(
                 Resolved: true,
                 DocumentId: identity.DocumentId.ToString("D"),
                 DocumentName: identity.DocumentName,
                 FileName: identity.FileName,
-                RelatedRecord: related is null
-                    ? null
-                    : new RelatedRecordIdentity(related.LogicalName, related.Id.ToString("D"), related.Name),
+                RelatedRecord: relatedRecordResponse,
                 Reason: null));
         }
 
