@@ -35,9 +35,10 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-010 — H9 slot guard | #987 | **In project** — fixed `6149edecf` | Closes when #950 merges; real-ARM check before merge |
 | ISS-011 — Service Bus accepts SAS | #988 | Handed off — not material; **no confirmed owner** | Every job handler uses `SubjectId` for logs / telemetry only — none acts as that user, so a forged message cannot change an access decision in this project's evaluator. A standing security risk; ADR-052 §6 blocks Function impersonation until it lands |
 | ISS-012 — typed requester on `JobContract` | #989 | Handed off — not material | Needed only by a Function that impersonates; none is in scope. ADR-052 §6 makes it a prerequisite for the first project that builds one |
-| ISS-013 — impersonation helper fail-closed | #990 | **In project** | Task **104** (runs before 036) |
+| ISS-013 — impersonation helper fail-closed | #990 | **In project** — ✅ implemented by task **104** on the branch; closes when #950 merges | Residuals recorded on #990: the service's `Guid?` still means impersonate-or-app-only for writes; `ApplyAsEntraUser` has no production caller yet |
 | ISS-014 — TipTap 2.x advisory | #991 | Handed off — Compose confirmed as owner | LegalWorkspace gets TipTap only by transpiling `Spaarke.Compose.Components` (`composeEditor.registration.ts`); Compose owns the editor (ADR-049); next round `spaarkeai-compose-r7` |
 | ISS-015 — xmldom / dompurify | #992 | Handed off — not material | Same versions on master before this project; `@xmldom/xmldom` arrives via `mammoth`, declared by six packages |
+| ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -500,7 +501,7 @@ A handler that impersonates the requester needs the JWT-validated `oid` + `tid`,
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project: task 104** (before 036) |
+| **Status** | ✅ **Implemented by task 104** on the branch (2026-09-15): `6be320e82` + `134bdb73e` (Step 9.5 fixes) + `43ac00a18` (ADR-028 A5). #990 closes when PR #950 merges. Residuals are recorded on #990 and in `notes/task-104-impersonation-helper-fail-closed.md` §5 |
 | **Urgency** | now |
 | **Filed** | 2026-09-15 |
 | **Source** | Prerequisite P3 of ADR-052 §6; ADR-028 A5 |
@@ -535,6 +536,24 @@ MEDIUM: `mergeAttributes()` turns an own `__proto__` key into inherited executab
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/992 |
 
 8 HIGH + 2 MEDIUM on xmldom (via `mammoth`; fixed 0.8.15), 2 MEDIUM + 3 LOW on dompurify (fixed 3.4.13). **Why not material here**: the same versions are on master in the same lockfile — PR #950 only edited it; `mammoth` is declared by six packages repo-wide. First question for the owner: is `mammoth` still needed at all (Compose R4.5 recorded it deleted)?
+
+---
+
+### ISS-016 — `DataverseWebApiClient` receives the container's singleton `TokenCredential`
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed off (not material); **no confirmed owner** |
+| **Urgency** | someday |
+| **Filed** | 2026-09-15 |
+| **Source** | Task 104: its Step 9.5 review of the sibling `DataverseWebApiService` test seam |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/993 |
+
+`DataverseWebApiClient` has a public optional `TokenCredential? credential = null` constructor parameter that bypasses credential selection. It is registered as `AddSingleton<DataverseWebApiClient>()` (`SpeAdminModule.cs:71`), and the container holds a singleton `TokenCredential` (`Program.cs:48`). DI fills optional parameters from registered services, so the client always gets that credential.
+
+**Why not material here**: it is SpeAdmin's audit and dashboard REST client, not an access-control path. The injected credential (a `DefaultAzureCredential` pinned to the configured managed identity and tenant) is equivalent in deployed environments, where managed identity is on. It differs only where managed identity is off (local/dev).
+
+**Suggested fix**: register it through a factory lambda, or make the credential constructor protected, as task 104 did for `DataverseWebApiService`.
 
 ---
 

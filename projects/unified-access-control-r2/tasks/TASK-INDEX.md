@@ -709,7 +709,7 @@ fourth-root premise contradicted task 028's ruling.
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 [open] 104 | `DataverseImpersonation` fails closed in the shared helper; Entra `oid` (`CallerObjectId`); NFR-04 canary on the helper path (ISS-013 / #990) — **runs before 036** | FR-20, NFR-04 | 035 | — | ❌ | **opus** | high |
+| ✅ [done] 104 | `DataverseImpersonation` fails closed in the shared helper; Entra `oid` (`CallerObjectId`); NFR-04 canary on the helper path (ISS-013 / #990) — **runs before 036**. *Done 2026-09-15: `6be320e82` + `134bdb73e` + `43ac00a18`; perturbations 6/6; full suite 14,590/0/86; residuals on #990.* | FR-20, NFR-04 | 035 | — | ❌ | **opus** | high |
 | 🔲 [open] 105 | External data plane: every collection read complete or visibly truncated — no silent `$top=200` (ISS-002 / #963) | NFR-03 | **036** | — | ❌ | sonnet | high |
 | 🔲 [open] 106 | Re-grant over an expired survivor judges "confers access" across every active row on the key (ISS-008 / #973) | FR-09 | — | — | ❌ | sonnet | high |
 | 🔲 [open] 107 | Grants written outside the BFF get the default expiry — Dataverse-side, every write path (ISS-009 / #974) | FR-33 | 097 | — | ✅ | sonnet | high |
