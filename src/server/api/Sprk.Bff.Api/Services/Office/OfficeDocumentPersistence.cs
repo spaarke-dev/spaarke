@@ -63,12 +63,32 @@ public class OfficeDocumentPersistence
     /// finalization (no redundant artifacts / AI), and deletes the upload only when
     /// <see cref="IsUploadUnreferencedAsync"/> proves no document points at it (task 046).
     /// </summary>
+    public Task<(Guid DocumentId, bool WasContentDuplicate)> CreateDocumentWithSpePointersAsync(
+        SaveRequest request,
+        string driveId,
+        string itemId,
+        string? webUrl,
+        string fileName,
+        long fileSize,
+        string userId,
+        CancellationToken cancellationToken)
+        => CreateDocumentWithSpePointersAsync(
+            request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken);
+
+    /// <summary>
+    /// Task 046 (b): the same create, with the name the document is SHOWN under (<paramref name="documentName"/>,
+    /// written to <c>sprk_documentname</c>) kept separate from the name its file is STORED under
+    /// (<paramref name="fileName"/>: the SPE item and <c>sprk_filename</c>). The two differ only for a system-named
+    /// Office email, whose stored name carries a unique suffix. Every other save passes the same value twice, which
+    /// is exactly what the overload above does.
+    /// </summary>
     public async Task<(Guid DocumentId, bool WasContentDuplicate)> CreateDocumentWithSpePointersAsync(
         SaveRequest request,
         string driveId,
         string itemId,
         string? webUrl,
         string fileName,
+        string documentName,
         long fileSize,
         string userId,
         CancellationToken cancellationToken)
@@ -157,7 +177,8 @@ public class OfficeDocumentPersistence
         }
         else
         {
-            var dedup = await _dedupDetector.ReconcileAsync(driveId, itemId, userId, fileName, cancellationToken);
+            // The notification names the document by its readable name (task 046 (b)), exactly as before the suffix.
+            var dedup = await _dedupDetector.ReconcileAsync(driveId, itemId, userId, documentName, cancellationToken);
             if (dedup.IsDuplicate && dedup.CanonicalDocumentId is { } canonicalId)
             {
                 _logger.LogInformation(
@@ -172,7 +193,7 @@ public class OfficeDocumentPersistence
         // Create base document record
         var createRequest = new CreateDocumentRequest
         {
-            Name = fileName,
+            Name = documentName, // task 046 (b): the readable name; only the stored file (sprk_filename) carries a suffix
             ContainerId = driveId,
             Description = request.ContentType switch
             {
