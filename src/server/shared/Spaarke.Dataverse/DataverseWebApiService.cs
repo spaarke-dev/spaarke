@@ -42,11 +42,20 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// Nullable with a null default so existing fixtures constructing this type directly keep
     /// compiling (NFR-04); a null provider is fatal only if that branch is actually taken.
     /// </param>
+    /// <param name="credential">
+    /// Optional pre-built credential. When supplied, credential SELECTION is bypassed: neither the
+    /// managed-identity nor the ordered-provider branch runs. Mirrors the same parameter on the sibling
+    /// <see cref="DataverseWebApiClient"/>. Added by unified-access-control-r2 task 104 so tests can send a
+    /// real request through the production request builder without a network token. The BFF registers this
+    /// type through a factory lambda (<c>GraphModule</c>) that never passes it, so the singleton
+    /// <c>TokenCredential</c> in the service container cannot reach it.
+    /// </param>
     public DataverseWebApiService(
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
-        IConfidentialClientProvider? confidentialClients = null)
+        IConfidentialClientProvider? confidentialClients = null,
+        TokenCredential? credential = null)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -63,7 +72,14 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var useManagedIdentity = string.Equals(
             configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (useManagedIdentity)
+        if (credential is not null)
+        {
+            // Explicitly supplied: selection is bypassed. See the ctor's <param> doc.
+            _credential = credential;
+            _logger.LogInformation(
+                "DataverseWebApiService using an injected TokenCredential (selection bypassed) for {ApiUrl}", _apiUrl);
+        }
+        else if (useManagedIdentity)
         {
             var miClientId = configuration["ManagedIdentity:ClientId"]
                 ?? configuration["Graph:ManagedIdentity:ClientId"];
@@ -160,23 +176,41 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// </summary>
     /// <param name="impersonateSystemUserId">
     /// OPTIONAL Dataverse <c>systemuserid</c> to impersonate for this request (adds the <c>MSCRMCallerID</c>
-    /// header via <see cref="DataverseImpersonation"/>). <c>null</c>/<see cref="Guid.Empty"/> (the default) leaves
-    /// the request app-only and byte-unchanged — existing consumers pass nothing and are unaffected. Added for the
-    /// messaging read path (messaging-communication-app-r1), where Dataverse does row-level filtering natively.
+    /// header via <see cref="DataverseImpersonation.ApplyAsSystemUser"/>). <c>null</c> (the default) leaves the
+    /// request app-only and byte-unchanged — existing consumers pass nothing and are unaffected.
+    /// <see cref="Guid.Empty"/> is REFUSED (task 104, fail closed): it used to be read as "no impersonation",
+    /// which turned a missing caller id into a silent app-only request. Added for the messaging read path
+    /// (messaging-communication-app-r1), where Dataverse does row-level filtering natively.
     /// </param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="impersonateSystemUserId"/> is <see cref="Guid.Empty"/>. Thrown before a token is acquired
+    /// or anything is sent.
+    /// </exception>
     private async Task<HttpRequestMessage> CreateAuthenticatedRequestAsync(
         HttpMethod method, string url, CancellationToken cancellationToken = default, Guid? impersonateSystemUserId = null)
     {
-        var token = await GetAccessTokenAsync(cancellationToken);
         var request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        DataverseImpersonation.Apply(request, impersonateSystemUserId);
-        return request;
+        try
+        {
+            // Impersonation first, so an empty caller id is refused before any I/O.
+            if (impersonateSystemUserId is { } callerSystemUserId)
+                DataverseImpersonation.ApplyAsSystemUser(request, callerSystemUserId);
+
+            var token = await GetAccessTokenAsync(cancellationToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return request;
+        }
+        catch
+        {
+            request.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
-    /// Sends a GET request with per-request auth headers. When <paramref name="impersonateSystemUserId"/> is a real
-    /// user id the request runs AS that Dataverse user (MSCRMCallerID impersonation); otherwise it is app-only.
+    /// Sends a GET request with per-request auth headers. When <paramref name="impersonateSystemUserId"/> is
+    /// supplied the request runs AS that Dataverse user (MSCRMCallerID impersonation; <see cref="Guid.Empty"/> is
+    /// refused). When it is null the request is app-only.
     /// </summary>
     private async Task<HttpResponseMessage> SendGetAsync(string url, CancellationToken ct = default, Guid? impersonateSystemUserId = null)
     {
@@ -198,7 +232,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// Sends a PATCH request with JSON body and per-request auth headers. When
     /// <paramref name="impersonateSystemUserId"/> is a real Dataverse <c>systemuserid</c>, the PATCH runs AS that
     /// user (<c>MSCRMCallerID</c> impersonation — effective privileges = intersection of app user + impersonated
-    /// user, honest <c>modifiedby</c>); null/empty = app-only (existing callers byte-unchanged). This is the
+    /// user, honest <c>modifiedby</c>); null = app-only (existing callers byte-unchanged); <see cref="Guid.Empty"/>
+    /// is refused (task 104). This is the
     /// write-plane counterpart of the impersonated read (<see cref="RetrieveMultipleImpersonatedAsync"/>), added
     /// for the Job B apply path (task 031).
     /// </summary>
@@ -1207,6 +1242,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         CancellationToken ct = default,
         Guid? impersonateSystemUserId = null)
     {
+        // Task 104: refuse an empty caller id BEFORE the metadata read below. An impersonated write must never
+        // degrade to app-only, and nothing (not even the EntitySetName lookup) is sent for a refused call.
+        if (impersonateSystemUserId == Guid.Empty)
+            throw new ArgumentException(
+                "An impersonated write requires a non-empty caller systemuserid; refusing to send it app-only (fail closed).",
+                nameof(impersonateSystemUserId));
 
         if (fields.Count == 0)
         {

@@ -485,7 +485,7 @@ public class WorkloadPlacementGuardTests
         {
             ("src/server/functions/Sprk.Sync/Handler.cs",
              "using Spaarke.Dataverse;\n" +
-             "DataverseImpersonation.Apply(request, message.Requester.ObjectId);\n"),
+             "DataverseImpersonation.ApplyAsEntraUser(request, message.Requester.ObjectId, message.Requester.TenantId, dataverseTenantId);\n"),
         });
 
         Assert.Empty(findings);

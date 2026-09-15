@@ -3,51 +3,120 @@ using System.Net.Http;
 namespace Spaarke.Dataverse;
 
 /// <summary>
-/// Web API impersonation helper: stamps a per-request Dataverse impersonation header so a query runs AS the
-/// calling user (effective privileges = INTERSECTION of the app user's and the impersonated user's), letting
-/// Dataverse do row-level filtering natively in one query. Additive + opt-in: callers that do NOT impersonate
-/// are byte-unchanged (no header added).
+/// Web API impersonation helper: stamps a per-request Dataverse impersonation header so a query runs AS a
+/// user (effective privileges = INTERSECTION of the app user's and the impersonated user's), letting
+/// Dataverse do row-level filtering natively in one query.
 /// <para>
-/// <b>Header / value contract (verified against MS Learn):</b>
-/// <list type="bullet">
-///   <item><c>MSCRMCallerID</c> = the target <b>systemuserid</b> (a Dataverse user GUID). This is the header this
-///     helper stamps, because the Spaarke read path already resolves the caller's <c>systemuserid</c>
-///     (Azure AD <c>oid</c> → <c>systemuserid</c> via <c>azureactivedirectoryobjectid</c>, per
-///     <see cref="DataverseAccessDataSource"/> / <c>UserPrivilegeChecker</c>).</item>
-///   <item><c>CallerObjectId</c> = the target user's <b>Entra (Azure AD) object id</b>. The alternative when only
-///     the AAD oid is known; NOT used here to avoid a per-value ambiguity.</item>
-/// </list>
-/// (Note: <c>notes/access-model-decision.md</c> pairs <c>MSCRMCallerID</c> with the AAD oid — that pairing is
-/// incorrect per MS Learn; <c>MSCRMCallerID</c> takes the <c>systemuserid</c>. This helper uses the correct pairing.)
+/// <b>Fail closed (unified-access-control-r2 task 104, #990).</b> Both entry points take a non-nullable id and
+/// THROW on <see cref="Guid.Empty"/> before touching the request, so a caller that asks to impersonate can never
+/// produce an app-only (unscoped) request. There is deliberately no "impersonate if I have an id" overload: a
+/// caller that does not impersonate does not call this helper at all. Until task 104 the helper silently added
+/// no header for a null or empty id, and only <c>DataverseWebApiService.RetrieveMultipleImpersonatedAsync</c>
+/// refused one — so a new call site that skipped that method degraded to an app-only query with HTTP 200.
 /// </para>
 /// <para>
-/// Requires the BFF application user to hold the Delegate role privilege <c>prvActOnBehalfOfAnotherUser</c>
-/// (owner / Dataverse-admin config; a go-live prerequisite). Until that is configured, an impersonated call fails
-/// at Dataverse rather than silently widening access — the correct fail direction.
+/// <b>Header / value contract</b> (Microsoft Learn, "Impersonate another user using the Web API", checked
+/// 2026-09-15):
+/// <list type="bullet">
+///   <item><c>CallerObjectId</c> = the user's <b>Microsoft Entra object id</b>
+///     (<c>systemuser.azureactivedirectoryobjectid</c>). Microsoft marks this header <b>preferred</b>.
+///     Use <see cref="ApplyAsEntraUser"/>.</item>
+///   <item><c>MSCRMCallerID</c> = the Dataverse <b>systemuserid</b>. Microsoft marks this header <b>legacy</b>;
+///     the BFF read path already resolves the caller's systemuserid, so it stays.
+///     Use <see cref="ApplyAsSystemUser"/>.</item>
+/// </list>
+/// A request carries exactly ONE of the two: Microsoft does not document what Dataverse does when both are
+/// present, so each entry point removes the other header before stamping its own.
+/// </para>
+/// <para>
+/// <b>What the helper cannot check, and why.</b> Microsoft does not document what Dataverse returns for an
+/// unknown, disabled or unlicensed user, or for an object id from another tenant, so the helper cannot rely on
+/// Dataverse to refuse those. It checks what it can know: a non-empty id and, for an Entra object id, that the
+/// token's tenant is the Dataverse org's tenant (the caller supplies both, so the helper takes no configuration
+/// dependency). It does not check the target environment: <c>DataverseWebApiService</c> sends relative URIs on
+/// an <c>HttpClient</c> whose base address is the configured org, so the environment is fixed by construction,
+/// and the helper has no configured org to compare against.
+/// </para>
+/// <para>
+/// Requires the calling application user to hold <c>prvActOnBehalfOfAnotherUser</c> (the Delegate role; it
+/// cannot be inherited through a team). Without it Dataverse returns <c>CannotActOnBehalfOfAnotherUser</c>
+/// (0x8004A110) rather than widening access.
 /// </para>
 /// </summary>
 public static class DataverseImpersonation
 {
-    /// <summary>The Web API impersonation header that carries the target <c>systemuserid</c>.</summary>
+    /// <summary>The legacy Web API impersonation header. It carries the target <c>systemuserid</c>.</summary>
     public const string CallerIdHeader = "MSCRMCallerID";
 
+    /// <summary>The preferred Web API impersonation header. It carries the target's Microsoft Entra object id.</summary>
+    public const string CallerObjectIdHeader = "CallerObjectId";
+
     /// <summary>
-    /// Adds the <see cref="CallerIdHeader"/> impersonation header for <paramref name="impersonatedSystemUserId"/>
-    /// when it is a real user id. A <c>null</c> or <see cref="System.Guid.Empty"/> value adds NO header — the request
-    /// is left exactly as an app-only request (existing consumers unchanged). The header is set (not appended) so a
-    /// re-used request message cannot accumulate duplicate impersonation identities.
+    /// Makes <paramref name="request"/> run AS the Dataverse user <paramref name="systemUserId"/>
+    /// (<c>MSCRMCallerID</c>). Replaces any impersonation identity already on the request.
     /// </summary>
-    /// <param name="request">The per-request message to stamp.</param>
-    /// <param name="impersonatedSystemUserId">The target Dataverse <c>systemuserid</c>, or null/empty for none.</param>
-    public static void Apply(HttpRequestMessage request, Guid? impersonatedSystemUserId)
+    /// <exception cref="ArgumentException">
+    /// <paramref name="systemUserId"/> is <see cref="Guid.Empty"/>. Refused, never sent app-only.
+    /// </exception>
+    public static void ApplyAsSystemUser(HttpRequestMessage request, Guid systemUserId)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (impersonatedSystemUserId is null || impersonatedSystemUserId.Value == Guid.Empty)
-            return;
+        if (systemUserId == Guid.Empty)
+            throw new ArgumentException(
+                "Impersonation requires a non-empty systemuserid; refusing to send the request app-only (fail closed).",
+                nameof(systemUserId));
 
-        // Replace any prior impersonation identity so the value is unambiguous.
+        Stamp(request, CallerIdHeader, systemUserId);
+    }
+
+    /// <summary>
+    /// Makes <paramref name="request"/> run AS the user whose Microsoft Entra object id is
+    /// <paramref name="entraObjectId"/> (<c>CallerObjectId</c>). Replaces any impersonation identity already on
+    /// the request.
+    /// </summary>
+    /// <param name="request">The per-request message to stamp.</param>
+    /// <param name="entraObjectId">The user's Entra object id (<c>oid</c>) from a validated token.</param>
+    /// <param name="callerTenantId">The <c>tid</c> of the validated token the object id came from.</param>
+    /// <param name="dataverseTenantId">The tenant the target Dataverse org belongs to.</param>
+    /// <exception cref="ArgumentException">Any of the three ids is <see cref="Guid.Empty"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The token's tenant is not the Dataverse org's tenant. Refused, because Microsoft does not document what
+    /// Dataverse does with a foreign object id.
+    /// </exception>
+    public static void ApplyAsEntraUser(
+        HttpRequestMessage request,
+        Guid entraObjectId,
+        Guid callerTenantId,
+        Guid dataverseTenantId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (entraObjectId == Guid.Empty)
+            throw new ArgumentException(
+                "Impersonation requires a non-empty Entra object id; refusing to send the request app-only (fail closed).",
+                nameof(entraObjectId));
+        if (callerTenantId == Guid.Empty)
+            throw new ArgumentException(
+                "Impersonation by Entra object id requires the token's tenant id (fail closed).",
+                nameof(callerTenantId));
+        if (dataverseTenantId == Guid.Empty)
+            throw new ArgumentException(
+                "Impersonation by Entra object id requires the Dataverse org's tenant id (fail closed).",
+                nameof(dataverseTenantId));
+        if (callerTenantId != dataverseTenantId)
+            throw new InvalidOperationException(
+                $"Refusing to impersonate an Entra object id from tenant {callerTenantId} against a Dataverse org in "
+                + $"tenant {dataverseTenantId} (fail closed).");
+
+        Stamp(request, CallerObjectIdHeader, entraObjectId);
+    }
+
+    /// <summary>Exactly one impersonation identity per request: clears both headers, then sets one.</summary>
+    private static void Stamp(HttpRequestMessage request, string header, Guid id)
+    {
         request.Headers.Remove(CallerIdHeader);
-        request.Headers.Add(CallerIdHeader, impersonatedSystemUserId.Value.ToString());
+        request.Headers.Remove(CallerObjectIdHeader);
+        request.Headers.Add(header, id.ToString());
     }
 }
