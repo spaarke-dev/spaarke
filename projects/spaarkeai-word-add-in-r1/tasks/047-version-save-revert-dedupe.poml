@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>A version save that repeats an earlier version's content must be written, not answered "Duplicate"</title>
+    <phase>2 Save flow</phase>
+    <gate>039 merged (one authoritative idempotency key; Failed/Cancelled retryable; newest row wins)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Silent data loss on the save spine; modifies BFF .cs (and possibly the pane key) consumed by every Office Document save.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Idempotency semantics across two layers (the response cache and the persistent job lookup); getting it wrong either double-writes on retries or keeps losing edits.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>039</deps>
+    <tags>bff-api, save-flow, idempotency, data-loss, integration-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>A user saves version B of a Word document, then version A, then B again. The third save is answered "Duplicate" with the first B save's job and the bytes are never written: SPE stays at A while the pane reports success. Make every deliberate save that follows a different written version get written, while a true retry of the SAME save is still de-duplicated.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Office save spine (tasks 023, 024, 039), request idempotency and SPE versioning. Follow ADRs strictly.</role>
+
+  <goal>For Document version saves: B then A then B writes three versions; a network retry or double-submit of one save writes one version; Email and Attachment saves and every Document create behave exactly as today.</goal>
+
+  <context>
+    <background>
+      Found by the main session on 2026-09-15 while scoping task 029's revert case (owner: "close it"). Verified by reading code; not yet reproduced by a test - reproduce it first (a failing test) before changing anything.
+      - The pane's version-save key is `sha256(existingDocumentId, fileName, contentSha256, failedAttempts)` (`useSaveFlow.ts` `computeIdempotencyKey` / `buildIdempotencyCanonical`, `VersionIdempotencyParts`). It is sent in the BODY (`serverRequest.idempotencyKey`) AND in the `X-Idempotency-Key` header.
+      - The server uses the body key when present, else its own (`OfficeService.ResolveIdempotencyKey` / `GenerateIdempotencyKey`, which also appends `|version-content:{hash}` for a version save) - so older clients have the same defect.
+      - `OfficeDocumentPersistence.CheckForExistingJobAsync` returns the NEWEST ProcessingJob with the key, with NO time window; a Completed job makes the request a Duplicate. Failed/Cancelled do not (task 039).
+      - The header key also names the response cache in `IdempotencyFilter` (Redis). Check whether that cache can replay the third save too, and for how long - both layers must be covered.
+      - A content-only key cannot tell "a retry of this save" from "a later save that happens to have the same content". Something that identifies the individual save, or the document's state when the save was made, has to enter the decision.
+    </background>
+    <options>
+      Evaluate at least these and record the choice with evidence in `notes/047-revert-save-dedupe.md`:
+      (a) Server-side: a Completed job counts as a duplicate only while the document is still at the version that job wrote (for example compare the SPE version id or eTag the job recorded with the drive item's current one; if a newer version exists, the request is a new save). Key-agnostic, so older clients are fixed too.
+      (b) The pane adds the document version it last saw (its base version / eTag) to the key, so B-after-A has a different key from the first B.
+      (c) The pane adds a per-Save-click id, reused only by retries of that click.
+      Main-session leaning: (a), if the job can record what it wrote without a Dataverse schema change.
+    </options>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/039-save-spine-defects.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/023-save-path-trace.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/029-version-ai-refresh.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: Document VERSION saves. Email and Attachment keys and behaviour stay byte-for-byte. Document creates stay as 039 left them unless the same defect is proven there too - then say so and include it.</constraint>
+    <constraint source="project">A true retry of the same save (network retry, double submit, a replayed request) must still write at most one version. Task 039's rules stay: Failed/Cancelled attempts are retryable, and the newest row wins.</constraint>
+    <constraint source="project">Parallel work: task 029 is changing `UploadFinalizationWorker`, `PostUploadIndexingEnqueuer` and `IRagService`/RAG code - do not touch those. Task 036 is changing the add-in's `App.tsx`, adapters and a new `sendEmailService.ts` - if option (b)/(c) needs a pane change, keep it inside `useSaveFlow.ts` and its tests.</constraint>
+    <constraint source="ADR-038">Tests: first a failing test that proves B, A, B loses the third save; then prove (1) all three are written, (2) a retry of one save writes once, (3) an Email and an Attachment save produce the same keys as before. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size against a FRESH master build (Compress-Archive, short paths), CVE check, placement statement in the note.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md and the notes above. Declare FULL, opus @ high, DIRECTIONAL. Run `/conflict-check` (BFF hot path).</step>
+    <step order="1">Trace both de-duplication layers for a version save (response cache and persistent job lookup), write the trace to `notes/047-revert-save-dedupe.md`, and add the failing test.</step>
+    <step order="2">Choose an option with evidence; implement it.</step>
+    <step order="3">Add the remaining tests; run the BFF build, affected Office/Documents/idempotency tests, ArchTests and the full `Sprk.Bff.Api.Tests` once; if the pane changed, the add-in typecheck, build and gated jest list.</step>
+    <step order="4">Publish size + CVE; record deviations in the note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the fix needs a new Dataverse column or any schema change, STOP and escalate (CLAUDE.md §6: DB schema).</trigger>
+    <trigger>If no option keeps a true retry at one write while writing B, A, B three times, STOP and escalate with the trade-off.</trigger>
+    <trigger>If the fix would change Email or Attachment de-duplication, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The save spine already has both de-duplication layers (tasks 023, 039); the defect is that their key cannot distinguish a later save from a retry.</existing>
+    <extension>Yes - adjust the existing duplicate decision or key; no new route, job type or service.</extension>
+    <cost-of-doing-nothing>A user who returns a document to an earlier version and saves loses that save silently: Spaarke keeps the other version while the pane says "saved".</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/047-revert-save-dedupe.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test that fails on the code before this task proves B, A, B loses the third save.</criterion>
+    <criterion testable="true">Given version saves B, then A, then B of one document, then three versions are written and none is answered Duplicate.</criterion>
+    <criterion testable="true">Negative: given the same save sent twice (retry or double submit), then exactly one version is written and the second request returns the first save's job.</criterion>
+    <criterion testable="true">Negative: Email and Attachment saves produce the same idempotency keys and duplicate behaviour as before.</criterion>
+    <criterion testable="true">039's behaviour holds: a retry after a Failed or Cancelled attempt runs again.</criterion>
+    <criterion testable="true">`dotnet build` green; affected tests, ArchTests and the full suite pass; publish size vs a fresh master build and the CVE result are recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-15 by the main session. Related: 029 (its per-save refresh relies on each genuinely new save getting its own job), 039, 024, 023.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
