@@ -24,7 +24,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { FindView, resolveFindState, type FindState } from '../FindView';
@@ -45,6 +45,32 @@ class ResizeObserverMock {
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverMock;
+
+// jsdom doesn't implement IntersectionObserver either — FindResultsList's useLazyResults uses one for
+// its sentinel-driven, NEVER-refetching reveal (task 034, Path 2). This mock captures every
+// constructed observer's callback so a test can simulate the sentinel intersecting the viewport.
+let intersectionCallbacks: IntersectionObserverCallback[] = [];
+class IntersectionObserverMock {
+  constructor(callback: IntersectionObserverCallback) {
+    intersectionCallbacks.push(callback);
+  }
+  observe(): void {
+    /* no-op */
+  }
+  unobserve(): void {
+    /* no-op */
+  }
+  disconnect(): void {
+    /* no-op */
+  }
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IntersectionObserver = IntersectionObserverMock;
+
+function fireSentinelIntersection(): void {
+  const entry = { isIntersecting: true } as IntersectionObserverEntry;
+  intersectionCallbacks.forEach(cb => cb([entry], {} as IntersectionObserver));
+}
 
 jest.mock('@shared/services', () => {
   const actual = jest.requireActual('@shared/services');
@@ -99,8 +125,20 @@ function profileEnvelope(fields: {
   return { data: fields };
 }
 
-function relatedDocumentsEnvelope(totalResults: number, warnings?: { code: string; message: string }[]) {
-  return { nodes: [], metadata: { totalResults, warnings: warnings ?? null } };
+function relatedDocumentsEnvelope(
+  totalResults: number,
+  warnings?: { code: string; message: string }[],
+  nodes: unknown[] = []
+) {
+  return { nodes, metadata: { totalResults, warnings: warnings ?? null } };
+}
+
+function resultNode(id: string, label: string, similarity = 0.9) {
+  return { id, type: 'related', data: { label, documentType: 'Contract', similarity } };
+}
+
+function matterHubNode(id: string, label: string) {
+  return { id, type: 'matter', data: { label } };
 }
 
 describe('resolveFindState (pure)', () => {
@@ -188,6 +226,7 @@ describe('FindView (component)', () => {
     mockPost.mockReset();
     mockGetAccount.mockReset();
     mockGetAccount.mockReturnValue({ tenantId: TENANT_ID });
+    intersectionCallbacks = [];
   });
 
   describe('state 1 — no sprk_document', () => {
@@ -313,18 +352,21 @@ describe('FindView (component)', () => {
     });
   });
 
-  describe('state 3 — indexed', () => {
-    it('renders a results container and surfaces the D-032-2 PARTIAL_RESULTS warning', async () => {
+  describe('state 3 — indexed (task 034, Path 2 — FindResultsList)', () => {
+    it('renders the results list and surfaces the D-032-2 PARTIAL_RESULTS warning', async () => {
       mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
       mockGet.mockResolvedValueOnce(
-        relatedDocumentsEnvelope(3, [
-          { code: 'PARTIAL_RESULTS', message: 'Some related documents were not evaluated…' },
-        ])
+        relatedDocumentsEnvelope(
+          3,
+          [{ code: 'PARTIAL_RESULTS', message: 'Some related documents were not evaluated…' }],
+          [resultNode('doc-1', 'MSA Draft')]
+        )
       );
 
       renderWithProvider(<FindView documentIdentity={RESOLVED} />);
 
-      await waitFor(() => expect(screen.getByText('3 similar documents found.')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('Most similar documents')).toBeTruthy());
+      expect(screen.getByText('MSA Draft')).toBeTruthy();
       expect(screen.getByText('Results may be incomplete')).toBeTruthy();
       expect(screen.getByText('Some related documents were not evaluated…')).toBeTruthy();
 
@@ -333,12 +375,78 @@ describe('FindView (component)', () => {
 
     it('renders no warning when the graph metadata carries none', async () => {
       mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
-      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(1));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(1, undefined, [resultNode('doc-1', 'MSA Draft')]));
 
       renderWithProvider(<FindView documentIdentity={RESOLVED} />);
 
-      await waitFor(() => expect(screen.getByText('1 similar document found.')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('MSA Draft')).toBeTruthy());
       expect(screen.queryByText('Results may be incomplete')).toBeNull();
+    });
+
+    it('renders the explicit, announced empty state when there are no similar documents', async () => {
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(0));
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('No similar documents found')).toBeTruthy());
+    });
+
+    it('hub nodes render distinctly from ranked results, never as similarity matches', async () => {
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      mockGet.mockResolvedValueOnce(
+        relatedDocumentsEnvelope(1, undefined, [
+          resultNode('doc-1', 'MSA Draft'),
+          matterHubNode('matter-1', 'Smith v Smith'),
+        ])
+      );
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('MSA Draft')).toBeTruthy());
+      expect(screen.getByText(/Matter: Smith v Smith/)).toBeTruthy();
+      expect(screen.getByTestId('find-results-scroll-area').textContent).not.toContain('Smith v Smith');
+    });
+
+    it('no pager control of any kind renders, even with many results', async () => {
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      const nodes = Array.from({ length: 45 }, (_, i) => resultNode(`doc-${i}`, `Document ${i}`));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(45, undefined, nodes));
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('Most similar documents')).toBeTruthy());
+      expect(screen.queryByText(/load more/i)).toBeNull();
+      expect(screen.queryByText(/next page/i)).toBeNull();
+      expect(screen.queryByRole('navigation')).toBeNull();
+    });
+
+    it('scrolling (sentinel-driven reveal) never issues a second call to the similarity route', async () => {
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      const nodes = Array.from({ length: 45 }, (_, i) => resultNode(`doc-${i}`, `Document ${i}`));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(45, undefined, nodes));
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('Most similar documents')).toBeTruthy());
+
+      const relatedCallsBefore = mockGet.mock.calls.filter(call =>
+        String(call[0]).includes('/api/ai/visualization/related/')
+      ).length;
+      expect(relatedCallsBefore).toBe(1);
+
+      // Simulate the sentinel entering the viewport twice (reveals two more chunks).
+      await act(async () => {
+        fireSentinelIntersection();
+      });
+      await act(async () => {
+        fireSentinelIntersection();
+      });
+
+      const relatedCallsAfter = mockGet.mock.calls.filter(call =>
+        String(call[0]).includes('/api/ai/visualization/related/')
+      ).length;
+      expect(relatedCallsAfter).toBe(1); // still exactly one — reveal is DOM-only, never a re-fetch
     });
   });
 
