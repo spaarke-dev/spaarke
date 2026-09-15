@@ -506,14 +506,19 @@ export const App: React.FC<AppProps> = ({
     // Could send to telemetry service here
   };
 
-  // Determine title and host type
-  const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
+  // Determine title and host type. `getHostType()` already returns the narrow `HostType` union —
+  // no ternary/normalization needed (task 040 / FR-19 audit: the prior form was a no-op host-name
+  // comparison left over from before the return type was this precise).
+  const hostType: HostType = hostAdapter.getHostType();
   const displayTitle = title || 'Spaarke Add-in';
 
-  // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1).
-  // The hook is inert when communicationId is undefined / not Outlook, so it
-  // safely no-ops on the Word add-in.
-  const indicatorTargetId = hostType === 'outlook' ? communicationId : undefined;
+  // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1). Capability-gated
+  // (task 040 / FR-19, NFR-10) — never a `hostType` conditional: `canShowLinkedTodos` is always
+  // false on Word (no `sprk_communication` counterpart), so this is a no-op there without needing
+  // to know which host is running. The hook is ALSO inert when communicationId is undefined
+  // (belt-and-suspenders — see useLinkedTodosForCommunication's own undefined-id no-op).
+  const canShowLinkedTodos = hostAdapter.getCapabilities().canShowLinkedTodos;
+  const indicatorTargetId = canShowLinkedTodos ? communicationId : undefined;
   const linkedTodos = useLinkedTodosForCommunication(indicatorTargetId);
   const handleViewLinkedTodos = useCallback(() => {
     if (indicatorTargetId && onViewLinkedTodos) {
@@ -521,7 +526,7 @@ export const App: React.FC<AppProps> = ({
     }
   }, [indicatorTargetId, onViewLinkedTodos]);
   const showLinkedTodosBanner =
-    hostType === 'outlook' &&
+    canShowLinkedTodos &&
     indicatorTargetId !== undefined &&
     (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
 

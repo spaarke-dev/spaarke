@@ -4,7 +4,7 @@
     <title>FR-19: Outlook parity pass and capability-gating audit</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>033 complete (Find view), 035 complete (Add To Do), 036 complete (Send Email)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactors host branching across many `.tsx` views; tags include frontend; a wrong capability gate silently disables a working feature in one host. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -157,6 +157,28 @@
 
   <notes>
     spec.md FR-19, NFR-10 and the Assumptions parity boundary. plan.md §4 Phase 4 task 040. `notes/parity-checklist.md` is the artifact task 042's UAT verifies against — it is a deliverable, not a byproduct.
+
+    **Completed 2026-09-15 (no live Office host available — main-session override; see final agent report).**
+    Two genuine capability conversions landed: `canShowLinkedTodos` (App.tsx LinkedTodosBanner) and
+    `canSuggestRelatedRecords` (SaveFlow.tsx triage/auto-match fetch), both new `HostCapabilities` fields,
+    evidenced by a new `shared/adapters/__tests__/capabilities.test.ts` (5/5 passing, not yet in
+    `ci-gated-suites.txt`). Nine remaining `hostType`-comparisons under `shared/taskpane/**` were deliberately
+    left as host-shaped DATA (not capability gates) with documented reasoning — see
+    `notes/parity-checklist.md` §3. Grep acceptance is NOT literally zero-hits; see checklist §6 for the
+    actual output and reasoning.
+
+    **Headline finding, NOT fixed**: `TaskPaneNavigation.tsx`'s `createTodo` tab is still `availableFor:
+    ['outlook']` even though FR-14/task 035 made Add To Do a genuinely shared (both-host) capability at the
+    server + CreateTodoView level — this looks like a stale gate hiding an already-working capability on
+    Word. Not changed because the existing test `TaskPaneNavigation.test.tsx` ("renders only the Save tab
+    for Word") pins the current behavior and this task's hard rule forbids weakening an existing test.
+    Flagged in-code, in the checklist (§2), and in the final agent report for an explicit owner decision.
+
+    All gates green and matching documented baselines exactly: typecheck 111 total / 0 production (baseline
+    111/0); build exit 0; full jest run 10 failing suites / 84 failing tests on the second of two runs
+    (baseline exactly matches — first run had 2 additional transient failures in suites not touched by this
+    task, consistent with the documented "matter-type suites can blip under load" note); all 32
+    `ci-gated-suites.txt` suites green (412/412 tests). Zero server-side files touched.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

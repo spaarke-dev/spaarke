@@ -108,6 +108,30 @@ export interface HostCapabilities {
    * flag, never on `hostType` (NFR-10) — when it is `false`, the affordance is hidden entirely.
    */
   canComposeEmail: boolean;
+  /**
+   * Whether the host can show the linked-to-dos indicator banner (`LinkedTodosBanner`, count of
+   * `sprk_todo` rows carrying `sprk_regardingcommunication` for the current item) —
+   * spaarkeai-word-add-in-r1 task 040 / FR-19, formalizing smart-todo-decoupling-r3 FR-28 / A-1.
+   *
+   * Spec's parity boundary (spec.md Assumptions) lists "linked-todos" under Outlook-only, alongside
+   * email/attachment save and triage. A Word document has no `sprk_communication` counterpart, so
+   * there is nothing for the banner's query to key off. Views MUST gate the banner on this flag,
+   * never on `hostType` (NFR-10) — when it is `false`, the banner never renders, however
+   * `communicationId` was sourced.
+   */
+  canShowLinkedTodos: boolean;
+  /**
+   * Whether the host can fetch the Association Engine's ranked "Related to" auto-match candidates
+   * for the Save tab's reconciliation-style cards (`communicationSuggestionsService.fetchRelatedCandidates`,
+   * `GET /api/office/communications/by-message-id/{id}/suggestions`) — spaarkeai-word-add-in-r1 task
+   * 040 / FR-19, formalizing the pre-existing "Outlook only" gate `SaveFlow.tsx` already carried.
+   *
+   * Spec's parity boundary (spec.md Assumptions) lists "triage" under Outlook-only. The engine keys
+   * off the captured email's sender/recipients/thread signals (`internetMessageId`) — a Word document
+   * has no equivalent captured-communication record to look up. Views MUST gate the auto-match fetch
+   * on this flag, never on `hostType` (NFR-10).
+   */
+  canSuggestRelatedRecords: boolean;
   /** Minimum required Office.js API version */
   minApiVersion: string;
   /** Currently supported requirement set */

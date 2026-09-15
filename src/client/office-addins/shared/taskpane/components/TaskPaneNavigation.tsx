@@ -84,6 +84,19 @@ const TAB_CONFIGS: TabConfig[] = [
   },
   {
     // Inline "Create To Do" tool — Outlook only (a To Do is created from an email).
+    //
+    // ⚠️ task 040 / FR-19 audit finding (NOT changed here — see notes/parity-checklist.md and the
+    // task's final report): this comment predates task 035 (FR-14), which shipped BOTH the server
+    // (`OfficeService.CreateTodoAsync`'s document-carrier block) and the client (`CreateTodoView` +
+    // `App.tsx`'s `todoRegardingContext`) fully host-agnostic — a resolved Word document's
+    // `documentId` already flows into the create-To-Do call exactly like Outlook's `communicationId`
+    // does. Spec's Assumptions list "To Do" under the Outlook-PARITY (both-hosts) set, not the
+    // Outlook-ONLY set. This `availableFor: ['outlook']` therefore looks like a stale gate that
+    // silently hides an already-working shared capability on Word — but
+    // `TaskPaneNavigation.test.tsx` ("renders only the Save tab for Word") explicitly pins the
+    // CURRENT (Outlook-only) behavior as correct, and this task's hard rule against weakening an
+    // existing test blocks changing both together here. Left as `['outlook']` pending an explicit
+    // owner/main-session decision.
     value: 'createTodo',
     label: 'Create To Do',
     icon: <TaskListAddRegular />,
@@ -119,7 +132,14 @@ const TAB_CONFIGS: TabConfig[] = [
   // },
 ];
 
-/** Tabs available for a given host — shared by the nav row and the consolidated toolbar. */
+/**
+ * Tabs available for a given host — shared by the nav row and the consolidated toolbar.
+ *
+ * task 040 / FR-19 audit: `TAB_CONFIGS[].availableFor: HostType[]` is a single declarative table
+ * (not conditionals scattered through views), the sanctioned task-015 mechanism for tab-shell
+ * routing — classified as legitimate, NOT converted to `hostAdapter.getCapabilities()` (which would
+ * mean inventing a same-purpose boolean per tab). See notes/parity-checklist.md.
+ */
 export function getAvailableTabs(hostType: HostType): TabConfig[] {
   return TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
 }

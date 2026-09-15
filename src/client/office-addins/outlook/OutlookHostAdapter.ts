@@ -237,6 +237,11 @@ export class OutlookHostAdapter implements IHostAdapter {
       // added here only to keep this file conforming to `IHostAdapter`, mirroring the canonical
       // adapter's read-mode + Mailbox-1.6 gate.
       canComposeEmail: !this.isComposeMode() && this.checkRequirementSet('Mailbox', '1.6'),
+      // task 040 / FR-19: same "keep this dead file conforming to IHostAdapter" reason as
+      // canComposeEmail above — mirrors the canonical `shared/adapters/OutlookAdapter.ts`'s
+      // unconditional-true values (not exercised by any live code path).
+      canShowLinkedTodos: true,
+      canSuggestRelatedRecords: true,
       minApiVersion: '1.3',
       supportedRequirementSet: hasMailbox18 ? 'Mailbox 1.8' : 'Mailbox 1.3',
     };

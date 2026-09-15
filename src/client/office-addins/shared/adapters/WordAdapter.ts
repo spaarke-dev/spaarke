@@ -399,6 +399,12 @@ export class WordAdapter implements IHostAdapter {
       // task 036 / FR-15: `Office.context.mailbox` does not exist in Word — always false. Never
       // reachable via a `hostType` conditional in a view; the view reads this flag.
       canComposeEmail: false,
+      // task 040 / FR-19: linked-todos is spec'd Outlook-only (spec.md Assumptions) — Word has no
+      // `sprk_communication` counterpart for the banner's query to key off.
+      canShowLinkedTodos: false,
+      // task 040 / FR-19: triage/auto-match suggestions is spec'd Outlook-only — the engine keys off
+      // a captured email's sender/recipients/thread signals, which a Word document has none of.
+      canSuggestRelatedRecords: false,
       minApiVersion: MIN_WORD_API_VERSION,
       supportedRequirementSet: `WordApi ${MIN_WORD_API_VERSION}`,
     };
