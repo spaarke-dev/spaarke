@@ -343,10 +343,13 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
 
       {!isFiled ? (
         <>
+          {/* Host-neutral (task 049 / NFR-10): Create To Do is a shared capability, so this prompt must
+              read correctly for a saved Word document as well as a filed Outlook email — no host-type
+              conditional, just wording that avoids naming either concept. */}
           <MessageBar intent="warning" role="status">
             <MessageBarBody>
-              <MessageBarTitle>File this email first</MessageBarTitle>A To Do is related to the record you file the
-              email to. Save it on the <strong>Save</strong> tab, then come back here.
+              <MessageBarTitle>Save this to Spaarke first</MessageBarTitle>A To Do is related to the record this is
+              saved to. Save it on the <strong>Save</strong> tab, then come back here.
             </MessageBarBody>
           </MessageBar>
           {onGoToSave && (
