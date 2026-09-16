@@ -123,11 +123,14 @@ public interface IPostUploadIndexingEnqueuer
 /// or <c>Activity.Current?.Id</c>).</param>
 /// <param name="VersionDiscriminator">Task 029 (spaarkeai-word-add-in-r1): set ONLY when the file is a new
 /// VERSION of an already-indexed item (an Office version save) — to a value that identifies that individual
-/// save (the save's ProcessingJob id). On the app-only path it (a) appends <c>-version-{value}</c> to the
-/// idempotency key, so the new version is indexed instead of being skipped as the item's earlier index, and
-/// (b) sets <see cref="RagIndexingJobPayload.ReplaceStaleChunks"/>, so the job removes the previous version's
-/// leftover chunks after writing the new ones. Null (the default, and every other caller) keeps the key and
-/// the payload byte-for-byte. The OBO path does not read it.</param>
+/// save (the save's ProcessingJob id). On the app-only path it appends <c>-version-{value}</c> to the
+/// idempotency key, so the new version is indexed instead of being skipped as the item's earlier index. Null
+/// (the default, and every other caller) keeps the key byte-for-byte. The OBO path does not read it.
+/// <b>Task 048</b>: <see cref="RagIndexingJobPayload.ReplaceStaleChunks"/> is no longer gated on this value —
+/// it is now set on EVERY app-only enqueue through <see cref="IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/>
+/// (and every OBO enqueue through <see cref="IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync"/>), so the
+/// stale-tail trim runs after every successful re-index of an existing item, not only a version save.
+/// <see cref="VersionDiscriminator"/>'s remaining, sole role is the idempotency-key suffix described above.</param>
 public sealed record PostUploadIndexingRequest(
     string TenantId,
     string DriveId,

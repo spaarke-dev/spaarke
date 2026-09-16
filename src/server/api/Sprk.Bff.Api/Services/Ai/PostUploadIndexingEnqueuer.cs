@@ -178,6 +178,14 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 DocumentId = request.DocumentId,
                 ParentEntity = request.ParentEntity,
                 SearchIndexName = request.SearchIndexName,
+                // Task 048 (spaarkeai-word-add-in-r1): this is the single seam every OBO upload/re-index
+                // caller converges on (Compose save-back, the Create* wizards, SprkChat persist, the
+                // "LinearDocumentProfile" direct-Action re-index). A first index has nothing to trim
+                // (IRagService.DeleteChunksBeyondCountAsync finds no tail and deletes nothing); a re-index
+                // of an item that already has chunks — e.g. every Compose save of the same document — no
+                // longer leaves a stale tail behind. Does not change this method's idempotency behaviour:
+                // it has none (no key/skip check here today).
+                ReplaceStaleChunks = true,
             };
 
             _logger.LogInformation(
@@ -310,7 +318,15 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 SearchIndexName = request.SearchIndexName,
                 Source = request.Source,
                 EnqueuedAt = DateTimeOffset.UtcNow,
-                ReplaceStaleChunks = versionDiscriminator is not null,
+                // Task 048 (spaarkeai-word-add-in-r1): unconditional as of this task (was
+                // `versionDiscriminator is not null`, task 029) — every app-only producer through this
+                // seam (Office create + version save, Email-to-Document, outbound-email enrichment,
+                // post-AI-analysis re-index) now replaces the item's stale tail after a successful
+                // upload, not only a version save. A first index has nothing to trim. The
+                // IdempotencyKey ternary immediately below is UNCHANGED: versionDiscriminator still
+                // governs ONLY the key suffix (so a version is not skipped as a duplicate of the
+                // item's earlier index) — this task does not touch key or skip behaviour.
+                ReplaceStaleChunks = true,
             };
 
             var job = new JobContract
