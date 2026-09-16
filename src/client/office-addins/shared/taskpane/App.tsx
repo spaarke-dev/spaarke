@@ -348,7 +348,8 @@ export const App: React.FC<AppProps> = ({
   const handleCreateTodo = useCallback(
     async (input: CreateTodoInput): Promise<CreateTodoResult> => {
       if (!savedContext || !savedContext.regardingEntity || !savedContext.regardingRecordId) {
-        return { ok: false, error: 'File this email to Spaarke first (Save tab).' };
+        // Host-neutral (task 049 / NFR-10): a Word document is "saved", not "filed as an email".
+        return { ok: false, error: 'Save this to Spaarke first (Save tab).' };
       }
       // Browser test harness: a demo context id → mock success so the UX is iterable
       // without a real Dataverse write.

@@ -25,9 +25,10 @@ import type { HostType } from './TaskPaneHeader';
  * task resolved. `getAvailableTabs` and `getDefaultTab` are the parts of this module
  * that ARE consumed live (by `TaskPaneToolbar` and `TaskPaneShell` respectively).
  *
- * r1 tabs (spec.md FR-03): Save + Find, available in both Outlook and Word. Create To
- * Do is Outlook-only. Share / Search / Recent remain modeled in `NavigationTab` but
- * stay commented out of `TAB_CONFIGS` — hidden, unbuilt, r1 placeholders. Note `search`
+ * r1 tabs (spec.md FR-03/FR-14): Save, Find and Create To Do are all available in both
+ * Outlook and Word (task 049 made Create To Do parity-correct; see the `TAB_CONFIGS`
+ * entry below). Share / Search / Recent remain modeled in `NavigationTab` but stay
+ * commented out of `TAB_CONFIGS` — hidden, unbuilt, r1 placeholders. Note `search`
  * is NOT `find`: `search` is a pre-existing, still-hidden placeholder wired (in App.tsx)
  * to a job-status view, unrelated to the new Find frame this task adds.
  *
@@ -72,7 +73,7 @@ export interface TabConfig {
 
 /**
  * All available tabs with their configuration.
- * r1 (FR-03): Save + Find are enabled in both hosts; Create To Do is Outlook-only.
+ * r1 (FR-03/FR-14): Save, Find and Create To Do are all enabled in both hosts (task 049).
  * Share, Search, Recent stay commented out — hidden r1 placeholders (spec.md Assumptions).
  */
 const TAB_CONFIGS: TabConfig[] = [
@@ -83,24 +84,23 @@ const TAB_CONFIGS: TabConfig[] = [
     availableFor: ['outlook', 'word'],
   },
   {
-    // Inline "Create To Do" tool — Outlook only (a To Do is created from an email).
+    // Inline "Create To Do" tool — a SHARED capability (task 049 / FR-14 / FR-19), available in both
+    // hosts. `CreateTodoView` contains zero host-type logic and `OfficeService.CreateTodoAsync` (task
+    // 035) writes a document-carrier block for Word exactly parallel to the communication-carrier
+    // block for Outlook — see `App.tsx`'s `handleCreateTodo` / `todoRegardingContext` and
+    // `notes/035-todo-regarding-decision.md`. Spec's Assumptions list "To Do" under the
+    // Outlook-PARITY (both-hosts) set, not the Outlook-only set, and FR-14's acceptance names Word
+    // explicitly ("both Word (document + record) and Outlook (communication + record)").
     //
-    // ⚠️ task 040 / FR-19 audit finding (NOT changed here — see notes/parity-checklist.md and the
-    // task's final report): this comment predates task 035 (FR-14), which shipped BOTH the server
-    // (`OfficeService.CreateTodoAsync`'s document-carrier block) and the client (`CreateTodoView` +
-    // `App.tsx`'s `todoRegardingContext`) fully host-agnostic — a resolved Word document's
-    // `documentId` already flows into the create-To-Do call exactly like Outlook's `communicationId`
-    // does. Spec's Assumptions list "To Do" under the Outlook-PARITY (both-hosts) set, not the
-    // Outlook-ONLY set. This `availableFor: ['outlook']` therefore looks like a stale gate that
-    // silently hides an already-working shared capability on Word — but
-    // `TaskPaneNavigation.test.tsx` ("renders only the Save tab for Word") explicitly pins the
-    // CURRENT (Outlook-only) behavior as correct, and this task's hard rule against weakening an
-    // existing test blocks changing both together here. Left as `['outlook']` pending an explicit
-    // owner/main-session decision.
+    // History: this was `availableFor: ['outlook']` from task 015 through task 040. Task 040's parity
+    // audit (`notes/parity-checklist.md` §2) flagged it as a stale gate but could not fix it without
+    // also changing `TaskPaneNavigation.test.tsx`'s "renders only the Save tab for Word" test, which
+    // its own hard rule against weakening a test blocked. Task 049 changes the gate and the test
+    // together (that test now asserts Save + Find + Create To Do for Word, renamed accordingly).
     value: 'createTodo',
     label: 'Create To Do',
     icon: <TaskListAddRegular />,
-    availableFor: ['outlook'],
+    availableFor: ['outlook', 'word'],
   },
   {
     // Find frame (task 015 / FR-03) — both hosts. The Find VIEW (similarity results,
