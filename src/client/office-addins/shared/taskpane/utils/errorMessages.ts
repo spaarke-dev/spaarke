@@ -20,6 +20,11 @@ export interface ProblemDetails {
   instance?: string;
   correlationId?: string;
   errorCode?: string;
+  /**
+   * Authorization reason code. Present on 403s issued by the BFF authorization filters
+   * (`ProblemDetailsHelper.Forbidden`), which carry no `errorCode`.
+   */
+  reasonCode?: string;
   errors?: Record<string, string[]>;
 }
 
@@ -39,6 +44,11 @@ export interface ErrorMessage {
   recoverable: boolean;
   /** Suggested action for the user */
   action?: string;
+  /**
+   * The failed save was a VERSION save (FR-11) that the server refused for a reason tied to the existing
+   * document it named — so "Save as new document" is a way forward, and the pane offers it (task 024).
+   */
+  offerSaveAsNew?: boolean;
 }
 
 /**
@@ -150,6 +160,38 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     recoverable: true,
     action: 'Wait a few minutes and try again.',
   },
+
+  // FR-11 version save refusals (spaarkeai-word-add-in-r1 task 023 server, task 024 pane). Each is
+  // refused BEFORE anything is written ("Nothing was saved" is literal), and each is about the EXISTING
+  // document the save named — which is why the pane offers "Save as new document" for them.
+  OFFICE_016: {
+    title: 'Document Not Found',
+    message: 'The document this save was meant to add a version to could not be found. Nothing was saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Save your changes as a new document instead.',
+  },
+  OFFICE_017: {
+    title: 'Document Has No File',
+    message: 'The document this save was meant to add a version to has no file in storage. Nothing was saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Save your changes as a new document instead.',
+  },
+  OFFICE_018: {
+    title: 'Version Request Rejected',
+    message: 'The save named an existing document without asking for a new version. Nothing was saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Save your changes as a new document instead.',
+  },
+  OFFICE_019: {
+    title: 'Document Locked',
+    message: 'The document is locked for editing, so a new version could not be written. Nothing was saved.',
+    type: 'error',
+    recoverable: true,
+    action: 'Try again when it is released, or save your changes as a new document.',
+  },
 };
 
 /**
@@ -180,8 +222,8 @@ const DEFAULT_ERROR: ErrorMessage = {
  */
 export function mapProblemDetailsToMessage(problem: ProblemDetails): ErrorMessage {
   // Check if we have a known error code
-  if (problem.errorCode && ERROR_CODE_MAP[problem.errorCode]) {
-    const mapped = ERROR_CODE_MAP[problem.errorCode];
+  const mapped = problem.errorCode ? ERROR_CODE_MAP[problem.errorCode] : undefined;
+  if (mapped) {
     // Prefer the API's detail if it's more specific
     return {
       ...mapped,
@@ -195,6 +237,65 @@ export function mapProblemDetailsToMessage(problem: ProblemDetails): ErrorMessag
     title: problem.title || DEFAULT_ERROR.title,
     message: problem.detail || DEFAULT_ERROR.message,
   };
+}
+
+/**
+ * `AuthorizationService` denies with this reason code when Dataverse is unavailable DURING the
+ * authorization check — a transient failure, not a decision about the caller. The one client-side
+ * definition: `documentIdentityService` classifies the same code as `indeterminate`.
+ */
+export const ACCESS_SYSTEM_FAILURE_REASON_CODE = 'sdap.access.error.system_failure';
+
+/**
+ * Codes whose refusal is about the EXISTING document a version save named: the save cannot be completed as
+ * a version, but the user's changes can still be saved as a new document. OFFICE_009 is here because on the
+ * version path it means SharePoint Embedded refused the caller's write to that document's file.
+ */
+const VERSION_TARGET_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'OFFICE_009',
+  'OFFICE_016',
+  'OFFICE_017',
+  'OFFICE_018',
+  'OFFICE_019',
+]);
+
+/**
+ * Maps a refused FR-11 VERSION save (task 024) to a message the pane can act on.
+ *
+ * The version path's own refusals (OFFICE_016–019, plus OFFICE_009 from SPE) keep their catalog message and
+ * gain `offerSaveAsNew`. A 403 with NO `errorCode` comes from the version-save authorization filter (ADR-008),
+ * which deliberately answers "you may not write this document" and "no such document" identically — the
+ * anti-enumeration rule — so the message covers both, and never claims which one it was. A 403 whose
+ * `reasonCode` is the authorization system-failure code is transient: it is retryable, and does NOT push the
+ * user toward a new document.
+ */
+export function describeVersionSaveFailure(problem: ProblemDetails): ErrorMessage {
+  if (problem.status === 403 && !problem.errorCode) {
+    if (problem.reasonCode === ACCESS_SYSTEM_FAILURE_REASON_CODE) {
+      return {
+        title: 'Could Not Check Access',
+        message: 'Spaarke could not check your access to this document right now. Nothing was saved.',
+        type: 'error',
+        recoverable: true,
+        action: 'Wait a moment and try again.',
+      };
+    }
+    return {
+      title: 'Cannot Add a Version',
+      message:
+        'You can’t add a version to this document: you don’t have permission to change it, or it is no longer ' +
+        'available in Spaarke. Nothing was saved.',
+      type: 'error',
+      recoverable: false,
+      action: 'Save your changes as a new document instead.',
+      offerSaveAsNew: true,
+    };
+  }
+
+  const mapped = mapProblemDetailsToMessage(problem);
+  return problem.errorCode !== undefined && VERSION_TARGET_REFUSAL_CODES.has(problem.errorCode)
+    ? { ...mapped, offerSaveAsNew: true }
+    : mapped;
 }
 
 /**
@@ -214,8 +315,9 @@ export function mapErrorCodeToMessage(errorCode: string): ErrorMessage {
  * @returns true if the user can retry the operation
  */
 export function isRecoverableError(problem: ProblemDetails): boolean {
-  if (problem.errorCode && ERROR_CODE_MAP[problem.errorCode]) {
-    return ERROR_CODE_MAP[problem.errorCode].recoverable;
+  const mapped = problem.errorCode ? ERROR_CODE_MAP[problem.errorCode] : undefined;
+  if (mapped) {
+    return mapped.recoverable;
   }
   // Default to recoverable for 5xx errors
   return problem.status >= 500;
@@ -341,4 +443,8 @@ export const ERROR_CODES = {
   GRAPH_API_ERROR: 'OFFICE_013',
   DATAVERSE_ERROR: 'OFFICE_014',
   PROCESSING_UNAVAILABLE: 'OFFICE_015',
+  VERSION_TARGET_NOT_FOUND: 'OFFICE_016',
+  VERSION_TARGET_HAS_NO_FILE: 'OFFICE_017',
+  VERSION_INTENT_MISMATCH: 'OFFICE_018',
+  VERSION_TARGET_LOCKED: 'OFFICE_019',
 } as const;

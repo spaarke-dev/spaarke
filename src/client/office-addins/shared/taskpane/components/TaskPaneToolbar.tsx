@@ -26,6 +26,7 @@ import {
 import { getAvailableTabs, type NavigationTab } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
 import type { ThemePreference } from '../hooks/useTheme';
+import { useAnnounce } from '../hooks/useAnnounce';
 
 /**
  * TaskPaneToolbar — the single Spaarke row beneath Microsoft's add-in chrome.
@@ -118,13 +119,23 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   const tabs = getAvailableTabs(hostType);
   const hasOverflow = Boolean(onThemeChange || onSettings || (isAuthenticated && (userName || userEmail)));
 
+  // NFR-11: announce tab changes to screen readers via the React-owned live region
+  // (task 018 pattern) — `liveRegion` must be rendered here, not created out-of-tree.
+  const { announce, liveRegion } = useAnnounce();
+
   return (
     <header className={styles.toolbar} role="banner">
+      {liveRegion}
       {showTabs && isAuthenticated && tabs.length > 0 && (
         <div className={styles.tabs}>
           <TabList
             selectedValue={selectedTab}
-            onTabSelect={(_, data) => onTabChange?.(data.value as NavigationTab)}
+            onTabSelect={(_, data) => {
+              const tab = data.value as NavigationTab;
+              onTabChange?.(tab);
+              const label = tabs.find(t => t.value === tab)?.label ?? tab;
+              announce(`${label} tab selected`);
+            }}
             size="small"
           >
             {tabs.map(tab => (

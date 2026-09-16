@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Legacy XML (OfficeApp) manifest for Word — retained for M365 Admin Center
+  upload and as the sideload rollback path while the unified JSON manifest
+  (`manifest.json`, same directory) is verified installing and running on
+  BOTH Word desktop and Word on the web (project spaarkeai-word-add-in-r1
+  task 011 / FR-05). `manifest.json` mirrors this file's ribbon/save-button
+  behavior and additionally declares `webApplicationInfo` (SSO identity
+  binding), which this XML manifest does not carry. Do not delete this file
+  ahead of that verification passing on both surfaces — see
+  projects/spaarkeai-word-add-in-r1/notes/011-word-manifest-migration.md.
+-->
 <OfficeApp
   xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -8,7 +19,7 @@
 
   <!-- Basic Identity -->
   <Id>b3965ea0-6942-4f17-81b3-2c645bd05ebf</Id>
-  <Version>1.0.6.0</Version>
+  <Version>1.0.8.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Word"/>
@@ -29,9 +40,31 @@
   </Hosts>
 
   <!-- Requirements -->
+  <!--
+    Requirements. MUST stay in step with the `capabilities` array in
+    `word/manifest.json` (task 019). Both are HARD INSTALL GATES: a host that
+    lacks a declared set refuses to install, which is the honest failure mode
+    (better than a runtime `undefined`).
+
+    - WordApi 1.3 - the true floor for `Word.DocumentProperties.title/author/
+      creationDate` used by `shared/adapters/WordAdapter.getItemId()`
+      (reconciled in task 011). Deliberately NOT raised to 1.4: that would move
+      the Windows floor from Version 1612 to Version 2208, and the volume-
+      licensed/LTSC floor from Office 2019 to Office 2024 - dropping Office 2019
+      AND Office 2021 LTSC.
+    - CustomXmlParts (Common API set; all Common sets are version 1.1) - gates
+      `Office.context.document.customXmlParts`, the FR-02 identity-stamp READ
+      (task 014). Chosen over `Word.Document.customXmlParts` precisely to avoid
+      the WordApi 1.4 bump. Its floor (Word web / Windows M365 sub + perpetual
+      Office 2016 / Mac / iPad) is BELOW the WordApi 1.3 floor already declared,
+      so this line excludes no host the add-in could otherwise reach.
+
+    See projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md
+  -->
   <Requirements>
     <Sets>
-      <Set Name="WordApi" MinVersion="1.1"/>
+      <Set Name="WordApi" MinVersion="1.3"/>
+      <Set Name="CustomXmlParts" MinVersion="1.1"/>
     </Sets>
   </Requirements>
 

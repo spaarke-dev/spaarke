@@ -389,7 +389,12 @@ public static class KnowledgeBaseEndpoints
                     DriveId = request.DriveId ?? string.Empty,
                     ItemId = documentId,
                     DocumentId = documentId,
-                    FileName = request.FileName ?? string.Empty
+                    FileName = request.FileName ?? string.Empty,
+                    // Task 048 (spaarkeai-word-add-in-r1): this route's entire purpose is re-indexing a
+                    // document that may already be indexed ("Triggers a background re-indexing job for
+                    // the specified document") — always remove any leftover tail after the new chunks
+                    // land. A first index finds nothing to trim.
+                    ReplaceStaleChunks = true,
                 }));
 
             var job = new JobContract

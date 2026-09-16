@@ -42,10 +42,40 @@
     false greens that are nothing of the sort, and the window can never close.
     Verified empirically on first run: 5 such rows, all dated 08-18 to 08-26.
 
-    Default is immediately after PR #841 (router concurrency keyed per-SHA)
-    merged, which is the last change to the CI configuration under observation.
-    Starting earlier would measure a configuration that no longer exists --
-    the same reason the window must not be edited while it runs.
+    Default is immediately after the LAST change to the CI configuration under
+    observation. Starting earlier would measure a configuration that no longer
+    exists -- the same reason the window must not be edited while it runs.
+
+    ADVANCED 2026-09-10 (was 2026-08-27T20:47:00Z, immediately after PR #841,
+    router concurrency keyed per-SHA). PR #944 / ce5c2c3d7, merged
+    2026-09-04T22:13:10Z, widened Tier 1's compile step from
+    `Sprk.Bff.Api.csproj` to `dotnet build Spaarke.sln`. That IS a change to the
+    configuration under observation, so by this parameter's own doctrine the
+    window restarts after it.
+
+    Why it had to move: PR #934 (2026-09-03) merged a solution that did not
+    compile -- `Phase2EndToEndFixture.cs(443,17) CS1503` -- and Router reported
+    SUCCESS, because Tier 1 then built only the production BFF project and
+    Router excludes Tier 2 by construction. A genuine ROUTER DEFECT, and one
+    whose class was 5 of 8 test projects; #944 is its fix. Measuring across
+    #944 compares two different Tier 1s, which is precisely what this parameter
+    exists to prevent. Diagnosis:
+    `projects/spaarkeai-word-add-in-r1/notes/044-false-green-diagnosis.md`.
+
+    Cost of the advance, stated plainly: 6 comparable PRs and 1.1 calendar days
+    of accumulated agreement are discarded. Post-advance the window is clean --
+    0 false greens, 0 false reds.
+
+    KNOWN LIMITATION, deliberately NOT fixed here. `$falseGreens` (line ~149) is
+    computed over the ENTIRE window and `$ready` (line ~189) gates on
+    `$falseGreens.Count -eq 0` WITHOUT filtering by `$countingFrom`, even though
+    the agreeing count IS filtered. So a false green latches permanently and the
+    window can never close, which contradicts this script's own printed line
+    "the count above restarts from the most recent one". Advancing -Since sidesteps
+    that latch for #934 rather than repairing it; the next false green will latch
+    the same way. Repairing it is a separate decision about what the exit
+    criterion MEANS -- a hard stop, or a reset -- and belongs to whoever owns the
+    cutover, not to a `-Since` bump.
 
 .EXAMPLE
     pwsh scripts/ci/shadow-window-status.ps1
@@ -63,7 +93,7 @@ param(
     [int] $Limit = 60,
 
     # See .PARAMETER Since -- do not lower this casually.
-    [datetime] $Since = '2026-08-27T20:47:00Z'
+    [datetime] $Since = '2026-09-04T22:13:10Z'
 )
 
 $ErrorActionPreference = 'Stop'

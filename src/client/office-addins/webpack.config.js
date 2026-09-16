@@ -201,8 +201,12 @@ module.exports = async (env, options) => {
             },
           },
           {
-            // Word manifest (task 040 / FR-B0): parameterized to the same unified
-            // form as the Outlook manifest above — no hardcoded SWA origin. The
+            // Legacy XML (OfficeApp) manifest for Word — retained for M365 Admin
+            // Center upload + as the sideload rollback path until the unified JSON
+            // manifest below is verified on both Word desktop and Word on the web
+            // (project spaarkeai-word-add-in-r1 task 011 / FR-05). Do not delete
+            // ahead of that verification. Parameterized to the same unified form
+            // as the Outlook manifest above — no hardcoded SWA origin. The
             // dev-authored source uses the `https://localhost:3000` placeholder
             // (parity with the Outlook manifest's convention); this substitutes
             // the resolved per-mode `ADDIN_BASE_URL` (localhost for dev, deployed
@@ -212,6 +216,39 @@ module.exports = async (env, options) => {
             from: './word/word-manifest.xml',
             to: 'word/manifest.xml',
             transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
+          },
+          {
+            // Unified JSON manifest for Word (task 011 / FR-05) — mirrors the
+            // Outlook unified-manifest handling above: same client-id/resource/
+            // base-URL substitution mechanism, applied to Word's own placeholder
+            // GUID (`b3965ea0-6942-4f17-81b3-2c645bd05ebf`, shared by both the
+            // top-level `id` and `webApplicationInfo.id`) and Word's own
+            // `webApplicationInfo.resource`. Reuses the SAME `ADDIN_CLIENT_ID` /
+            // `BFF_API_CLIENT_ID` env vars as Outlook — one Azure AD app
+            // registration + one BFF API app registration cover the whole add-in
+            // package (both hosts), confirmed via `.env.example` and
+            // `word/taskpane/index.tsx`'s config defaults.
+            from: './word/manifest.json',
+            to: 'word/manifest.json',
+            transform: (content) => {
+              let manifest = content.toString();
+              // Replace the placeholder app ID in top-level "id" and
+              // "webApplicationInfo.id" (both share the same literal value, so
+              // the global regex substitutes both in one pass).
+              manifest = manifest.replace(
+                /"id":\s*"b3965ea0-6942-4f17-81b3-2c645bd05ebf"/g,
+                `"id": "${ENV_CONFIG.ADDIN_CLIENT_ID}"`
+              );
+              // Replace the placeholder resource URI (api://{BFF_API_CLIENT_ID}).
+              manifest = manifest.replace(
+                /"resource":\s*"api:\/\/[a-f0-9-]+"/,
+                `"resource": "api://${ENV_CONFIG.BFF_API_CLIENT_ID}"`
+              );
+              // Replace the manifest's dev-authored base URL with the resolved
+              // per-mode ADDIN_BASE_URL (localhost for dev, deployed SWA for prod).
+              manifest = manifest.split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL);
+              return manifest;
+            },
           },
           {
             // Legacy XML (OfficeApp/MailApp) manifest for Outlook — the format the M365 admin

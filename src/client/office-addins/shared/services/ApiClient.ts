@@ -52,11 +52,11 @@ export interface ApiError {
 
 class ApiClient implements IApiClient {
   private baseUrl: string = '';
-  private bffApiClientId: string = '';
 
   configure(config: ApiClientConfig): void {
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
-    this.bffApiClientId = config.bffApiClientId;
+    // Note: config.bffApiClientId is accepted (and required by ApiClientConfig) but not stored here —
+    // AuthService owns bffApiClientId for token-scope purposes; this client never read its own copy.
   }
 
   async get<T>(endpoint: string): Promise<T> {

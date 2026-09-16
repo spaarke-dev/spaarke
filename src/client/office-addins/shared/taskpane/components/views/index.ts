@@ -1,5 +1,5 @@
 export { SaveView } from './SaveView';
-export type { SaveViewProps, SaveOptions } from './SaveView';
+export type { SaveViewProps } from './SaveView';
 
 export { ShareView } from './ShareView';
 export type { ShareViewProps, DocumentSearchResult, SharePermissions } from './ShareView';
@@ -20,3 +20,6 @@ export type {
   CreateTodoResult,
   ContactOption,
 } from './CreateTodoView';
+
+// Find tab frame (task 015 / FR-03) — placeholder mount point; the real view is Phase 3.
+export { FindView } from './FindView';

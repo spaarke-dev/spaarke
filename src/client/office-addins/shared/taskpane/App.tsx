@@ -1,16 +1,28 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { FluentProvider, Spinner, makeStyles, tokens } from '@fluentui/react-components';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  FluentProvider,
+  Spinner,
+  Button,
+  MessageBar,
+  MessageBarBody,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
+import { MailRegular } from '@fluentui/react-icons';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
-import { useOfficeTheme, useLinkedTodosForCommunication } from './hooks';
+import { useLinkedTodosForCommunication } from './hooks';
+import { useAnnounce } from './hooks/useAnnounce';
 import { TaskPaneShell, type NavigationTab, type HostType } from './components/TaskPaneShell';
+import { getAvailableTabs } from './components/TaskPaneNavigation';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
+import { FindView } from './components/views/FindView';
 import type {
   SavedTodoContext,
   CreateTodoInput,
@@ -18,6 +30,36 @@ import type {
   ContactOption,
 } from './components/views/CreateTodoView';
 import type { EntitySearchResult } from './hooks/useEntitySearch';
+import {
+  resolveDocumentIdentity,
+  applyDocumentIdentityOutcome,
+  type DocumentIdentityContext,
+  type DocumentIdentityOutcome,
+  type DocumentIdentityState,
+} from './services/documentIdentityService';
+import { prepareSendEmail } from './services/sendEmailService';
+import { cleanGuid } from './utils/cleanGuid';
+
+/**
+ * Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved context may
+ * carry either the friendly type or the Dataverse logical name depending on the Save-flow wiring; normalize
+ * defensively so both work. Module-scoped (pure) so the identity-resolution callback can depend on it
+ * without re-creating itself every render.
+ */
+function toFriendlyRegardingType(entity: string): string {
+  const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
+  return map[entity] ?? entity;
+}
+
+/**
+ * `App.savedContext`'s actual shape (spaarkeai-word-add-in-r1 FR-01 / task 013). Extends the
+ * Create-To-Do "filed to" shape (`SavedTodoContext`, still populated by `SaveView.onSaved`) with
+ * the resolved document identity from task 012's resolver (`DocumentIdentityContext`) — the SAME
+ * state, not a parallel store (task 013 step 6). `Partial<SavedTodoContext>` is deliberate: a
+ * resolved Word document may have no related record at all (unassociated), in which case only the
+ * document fields are known and the Create-To-Do "regarding" fields stay unset.
+ */
+type AppSavedContext = Partial<SavedTodoContext> & DocumentIdentityContext;
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -41,6 +83,12 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  sendEmailRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    marginBottom: tokens.spacingVerticalS,
   },
 });
 
@@ -105,37 +153,65 @@ export const App: React.FC<AppProps> = ({
   const styles = useStyles();
 
   // Theme management - combines Office detection with user preference
-  const { theme, preference, setPreference, isDarkMode } = useTheme();
+  const { theme, preference, setPreference } = useTheme();
 
   // State
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [hostContext, setHostContext] = useState<IHostContext | null>(null);
+  const [, setHostContext] = useState<IHostContext | null>(null);
   const [currentTab, setCurrentTab] = useState<NavigationTab>(
     initialAction === 'createTodo' ? 'createTodo' : initialTab
   );
 
   // The record this email is filed to — drives the inline "Create To Do" tool. Seeded from
   // initialSavedContext (browser-test demo) and set live when a real save completes (§C — the
-  // SaveView's onSaved hands us the selected "Related to" record).
-  const [savedContext, setSavedContext] = useState<SavedTodoContext | undefined>(initialSavedContext);
+  // SaveView's onSaved hands us the selected "Related to" record). Also carries the FR-01 resolved
+  // document identity (task 013) — see AppSavedContext.
+  const [savedContext, setSavedContext] = useState<AppSavedContext | undefined>(initialSavedContext);
 
   // §C — a successful save makes the email "filed to" the selected record; seed the Create To Do
-  // regarding from it so the To Do tab goes live (no more "file this email first" prompt).
+  // regarding from it so the To Do tab goes live (no more "file this email first" prompt). Merges
+  // into the existing savedContext (rather than replacing it) so a document identity already
+  // resolved by task 013 for this pane session survives an explicit Save.
   const handleSaved = useCallback((entity: EntitySearchResult) => {
-    setSavedContext({
+    setSavedContext(prev => ({
+      ...prev,
       regardingEntity: entity.entityType,
       regardingRecordId: entity.id,
       ...(entity.name ? { regardingName: entity.name } : {}),
-    });
+      // task 036 / FR-15: Send Email's record link needs the Dataverse LOGICAL name (`entity.logicalName`,
+      // e.g. `sprk_matter`) — `regardingEntity` above is the FRIENDLY type ("Matter") and cannot build a
+      // `main.aspx?etn=...` URL. `relatedRecord` is the same field task 013's document-identity resolver
+      // already populates for a resolved Word document (`ResolvedRelatedRecord`); populating it here too
+      // makes it the single source Send Email reads regardless of which path (URL resolution vs an
+      // explicit Save) produced the association, on either host.
+      relatedRecord: {
+        entityType: entity.logicalName,
+        id: cleanGuid(entity.id),
+        name: entity.name,
+        displayName: entity.name,
+        number: null,
+      },
+    }));
   }, []);
 
-  // Save operation state
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveProgress, setSaveProgress] = useState(0);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  // Guards the FR-01 document-identity resolution (below) to run at most once per pane session —
+  // "do not resolve on every render" (task 013 step 6). A user-initiated retry bypasses it on purpose.
+  const identityResolutionAttempted = useRef(false);
+
+  // FR-11 (task 024): the open document's identity as the Save tab consumes it. Seeded 'checking' for a
+  // host that CAN resolve identity, so Save can never be pressed in the window before resolution starts —
+  // a create in that window could mint a duplicate record. `undefined` = identity does not apply (Outlook).
+  const [documentIdentity, setDocumentIdentity] = useState<DocumentIdentityState | undefined>(() => {
+    try {
+      return hostAdapter.getCapabilities().canGetDocumentUrl ? 'checking' : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  // Monotonic attempt counter: a resolution result is applied only if no newer attempt has started.
+  const identityAttemptRef = useRef(0);
 
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -201,46 +277,79 @@ export const App: React.FC<AppProps> = ({
     setCurrentTab('save'); // Reset to default tab
   };
 
-  // Save handler (placeholder - will connect to API in later tasks)
-  const handleSave = async () => {
-    setIsSaving(true);
-    setSaveError(null);
-    setSaveSuccess(null);
-    setSaveProgress(0);
-
-    try {
-      // Simulate save progress
-      for (let i = 0; i <= 100; i += 20) {
-        setSaveProgress(i);
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      setSaveSuccess('Document saved successfully to Spaarke');
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   // Inline "Create To Do" — POST the human-authored form to the BFF `POST /api/office/todo`
   // endpoint, creating a first-class sprk_todo regarding the filed record (owner 2026-09-02:
   // "we are not using the sprk-event type 'to do' anymore"; "the To Do should be created Related
   // to the record that the email has been Related to"). Returns a plain ok/error the view renders.
   const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net';
 
-  // Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved
-  // context may carry either the friendly type or the Dataverse logical name depending on the Save-
-  // flow wiring; normalize defensively so both work.
-  const toFriendlyRegardingType = (entity: string): string => {
-    const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
-    return map[entity] ?? entity;
-  };
+  // FR-01 document-identity resolution (task 013), now also the input to the Save tab's FR-11 save mode
+  // (task 024). Capability-gated (NFR-10) — no `hostType` conditional: Outlook's `canGetDocumentUrl` is
+  // always false, so this is a no-op there without needing to know which host it's running in.
+  //
+  // Every attempt ends in a DEFINED outcome in `documentIdentity`, which the Save tab acts on:
+  // 'resolved' defaults Save to a new version; 'new' is a plain create; 'conflict' / 'indeterminate' /
+  // 'denied' / 'error' never silently create — the user retries (`retryDocumentIdentity`) or explicitly
+  // chooses "a new document" (SaveModeSection). A superseded attempt (a retry started before an earlier
+  // one returned) is ignored, so a stale answer can never overwrite a newer one.
+  const resolveOpenDocumentIdentity = useCallback(async () => {
+    const attempt = ++identityAttemptRef.current;
+    const settle = (outcome: DocumentIdentityOutcome) => {
+      if (attempt !== identityAttemptRef.current) {
+        return;
+      }
+      setDocumentIdentity(outcome);
+      // applyDocumentIdentityOutcome is pure + independently unit-tested (documentIdentityService test
+      // suite) — it merges into the existing state (never replaces) and returns `prev` by reference,
+      // unchanged, for every non-'resolved' outcome.
+      setSavedContext(prev => applyDocumentIdentityOutcome(prev, outcome, toFriendlyRegardingType));
+      if (outcome.kind !== 'resolved' && outcome.kind !== 'new') {
+        console.warn(`[Spaarke] Document identity ${outcome.kind}`, outcome);
+      }
+    };
+
+    setDocumentIdentity('checking');
+    try {
+      const url = await hostAdapter.getDocumentUrl();
+      if (!url) {
+        // Unsaved document (no URL yet) — a defined, expected "new document" case. No network call,
+        // per task 012's notes §2 rule 3.
+        settle({ kind: 'new', reason: 'not_cloud_document' });
+        return;
+      }
+      settle(await resolveDocumentIdentity(url));
+    } catch (err) {
+      // getDocumentUrl()/resolveDocumentIdentity() are designed not to throw for expected outcomes. An
+      // unexpected throw is an 'error' outcome — NOT "new": it says nothing about whether Spaarke already
+      // tracks this file. The pane stays usable (retry, or an explicit save-as-new).
+      console.warn('[Spaarke] Document identity resolution failed', err);
+      settle({ kind: 'error', message: err instanceof Error ? err.message : 'Document identity resolution failed.' });
+    }
+  }, [hostAdapter]);
+
+  // Runs once per pane session, after authentication (the resolver call needs a token), so it also covers
+  // the "sign in after pane load" path — "do not resolve on every render" (task 013 step 6).
+  useEffect(() => {
+    if (!isAuthenticated || identityResolutionAttempted.current) {
+      return;
+    }
+    if (!hostAdapter.getCapabilities().canGetDocumentUrl) {
+      return;
+    }
+    identityResolutionAttempted.current = true;
+    void resolveOpenDocumentIdentity();
+  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity]);
+
+  // "Check again" / "Try again" in the Save tab (task 024).
+  const retryDocumentIdentity = useCallback(() => {
+    void resolveOpenDocumentIdentity();
+  }, [resolveOpenDocumentIdentity]);
 
   const handleCreateTodo = useCallback(
     async (input: CreateTodoInput): Promise<CreateTodoResult> => {
-      if (!savedContext) {
-        return { ok: false, error: 'File this email to Spaarke first (Save tab).' };
+      if (!savedContext || !savedContext.regardingEntity || !savedContext.regardingRecordId) {
+        // Host-neutral (task 049 / NFR-10): a Word document is "saved", not "filed as an email".
+        return { ok: false, error: 'Save this to Spaarke first (Save tab).' };
       }
       // Browser test harness: a demo context id → mock success so the UX is iterable
       // without a real Dataverse write.
@@ -248,6 +357,10 @@ export const App: React.FC<AppProps> = ({
         await new Promise(resolve => setTimeout(resolve, 600));
         return { ok: true };
       }
+      // FR-14 (task 035): carry the document/communication regarding alongside the record regarding
+      // when known. documentId is Word-only (task 013's resolved identity); communicationId is the
+      // Outlook counterpart. A demo-prefixed communicationId (browser harness) is never sent to the
+      // server — the real-communicationId path returns above before reaching this call.
       try {
         const token = await authService.getAccessToken();
         const res = await fetch(`${apiBaseUrl}/api/office/todo`, {
@@ -265,7 +378,10 @@ export const App: React.FC<AppProps> = ({
             effortScore: input.effortScore,
             regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
             regardingRecordId: savedContext.regardingRecordId,
-            regardingRecordName: savedContext.regardingName,
+            regardingRecordName: savedContext.relatedRecord?.displayName ?? savedContext.regardingName,
+            // ADR-044: canonicalize every GUID crossing this boundary to bare-lowercase.
+            ...(savedContext.documentId ? { documentId: cleanGuid(savedContext.documentId) } : {}),
+            ...(savedContext.communicationId ? { communicationId: cleanGuid(savedContext.communicationId) } : {}),
           }),
         });
         if (!res.ok) {
@@ -317,6 +433,68 @@ export const App: React.FC<AppProps> = ({
     [savedContext, apiBaseUrl]
   );
 
+  // Send Email via Outlook (task 036 / FR-15). Capability-gated on `hostAdapter.getCapabilities().canComposeEmail`
+  // below (NFR-10) — never a `hostType` conditional. `Office.context.mailbox` does not exist in Word, so
+  // WordAdapter always reports the capability absent and this affordance never renders there; the deferred
+  // Spaarke-modal variant (design.md §4.2) is out of scope — this opens the HOST's own compose window only.
+  const [sendEmailStatus, setSendEmailStatus] = useState<'idle' | 'sending'>('idle');
+  const [sendEmailError, setSendEmailError] = useState<string | null>(null);
+  const { announce: announceSendEmail, liveRegion: sendEmailLiveRegion } = useAnnounce();
+
+  const handleSendEmail = useCallback(async () => {
+    setSendEmailStatus('sending');
+    setSendEmailError(null);
+    try {
+      const subject = await hostAdapter.getSubject();
+      const result = await prepareSendEmail({
+        document: savedContext?.documentId ? { documentId: savedContext.documentId } : null,
+        relatedRecord: savedContext?.relatedRecord
+          ? {
+              entityType: savedContext.relatedRecord.entityType,
+              id: savedContext.relatedRecord.id,
+              // `regardingEntity` is the FRIENDLY type ("Matter") set alongside `relatedRecord` by both
+              // producers (documentIdentityService's applyDocumentIdentityOutcome and handleSaved above) —
+              // reused here so the email link label reads "Matter: ..." rather than "sprk_matter: ...".
+              typeLabel: savedContext.regardingEntity ?? null,
+              displayName: savedContext.relatedRecord.displayName ?? savedContext.relatedRecord.name,
+              number: savedContext.relatedRecord.number ?? null,
+            }
+          : null,
+        subject,
+        orgUrl: process.env.ORG_URL,
+      });
+
+      if (result.kind === 'error') {
+        setSendEmailError(result.message);
+        announceSendEmail(result.message, 'assertive');
+        return;
+      }
+      if (result.kind === 'nothing-to-send') {
+        // Defensive only — the affordance is hidden whenever there is nothing to link (see canSendEmail
+        // below), so this should not be reachable from the UI.
+        return;
+      }
+
+      const composeResult = await hostAdapter.composeNewEmail({
+        subject: result.content.subject,
+        htmlBody: result.content.htmlBody,
+      });
+      if (!composeResult.success) {
+        const message = composeResult.errorMessage ?? 'Could not open the compose window.';
+        setSendEmailError(message);
+        announceSendEmail(message, 'assertive');
+        return;
+      }
+      announceSendEmail('Opened a new email with the document and record links.', 'polite');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not send email.';
+      setSendEmailError(message);
+      announceSendEmail(message, 'assertive');
+    } finally {
+      setSendEmailStatus('idle');
+    }
+  }, [hostAdapter, savedContext, announceSendEmail]);
+
   // Settings handler (placeholder)
   const handleSettings = () => {
     // Will open settings dialog in later tasks
@@ -329,14 +507,19 @@ export const App: React.FC<AppProps> = ({
     // Could send to telemetry service here
   };
 
-  // Determine title and host type
-  const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
+  // Determine title and host type. `getHostType()` already returns the narrow `HostType` union —
+  // no ternary/normalization needed (task 040 / FR-19 audit: the prior form was a no-op host-name
+  // comparison left over from before the return type was this precise).
+  const hostType: HostType = hostAdapter.getHostType();
   const displayTitle = title || 'Spaarke Add-in';
 
-  // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1).
-  // The hook is inert when communicationId is undefined / not Outlook, so it
-  // safely no-ops on the Word add-in.
-  const indicatorTargetId = hostType === 'outlook' ? communicationId : undefined;
+  // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1). Capability-gated
+  // (task 040 / FR-19, NFR-10) — never a `hostType` conditional: `canShowLinkedTodos` is always
+  // false on Word (no `sprk_communication` counterpart), so this is a no-op there without needing
+  // to know which host is running. The hook is ALSO inert when communicationId is undefined
+  // (belt-and-suspenders — see useLinkedTodosForCommunication's own undefined-id no-op).
+  const canShowLinkedTodos = hostAdapter.getCapabilities().canShowLinkedTodos;
+  const indicatorTargetId = canShowLinkedTodos ? communicationId : undefined;
   const linkedTodos = useLinkedTodosForCommunication(indicatorTargetId);
   const handleViewLinkedTodos = useCallback(() => {
     if (indicatorTargetId && onViewLinkedTodos) {
@@ -344,9 +527,37 @@ export const App: React.FC<AppProps> = ({
     }
   }, [indicatorTargetId, onViewLinkedTodos]);
   const showLinkedTodosBanner =
-    hostType === 'outlook' &&
+    canShowLinkedTodos &&
     indicatorTargetId !== undefined &&
     (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
+
+  // Send Email (task 036 / FR-15, NFR-10): gated on the CAPABILITY, never on `hostType` — WordAdapter
+  // always reports `canComposeEmail: false` because `Office.context.mailbox` does not exist in Word, so
+  // this naturally never renders there without needing to branch on which host is running. Also requires
+  // at least one of a document or a related record to link — with neither, there is nothing to send.
+  const canSendEmail =
+    hostAdapter.getCapabilities().canComposeEmail && Boolean(savedContext?.documentId || savedContext?.relatedRecord);
+
+  // `CreateTodoView.savedContext` expects the narrower `SavedTodoContext` shape (regardingEntity +
+  // regardingRecordId required). `App.savedContext` (AppSavedContext) widens those to optional so a
+  // resolved-but-unassociated FR-01 document can still carry documentId/documentName/fileName with
+  // no regarding record at all — narrow back here rather than passing a partially-populated object.
+  const todoRegardingContext: SavedTodoContext | undefined =
+    savedContext?.regardingEntity && savedContext?.regardingRecordId
+      ? {
+          regardingEntity: savedContext.regardingEntity,
+          regardingRecordId: savedContext.regardingRecordId,
+          ...(savedContext.communicationId ? { communicationId: savedContext.communicationId } : {}),
+          ...(savedContext.regardingName ? { regardingName: savedContext.regardingName } : {}),
+          // FR-14 (task 035): task 026's richer display label, when the document-identity path resolved
+          // it — preferred by CreateTodoView's regardingLabel over the (possibly number-shaped) regardingName.
+          ...(savedContext.relatedRecord?.displayName
+            ? { regardingDisplayName: savedContext.relatedRecord.displayName }
+            : {}),
+          // FR-14 (task 035): the open Word document (task 013), carried alongside the record regarding.
+          ...(savedContext.documentId ? { documentId: savedContext.documentId } : {}),
+        }
+      : undefined;
 
   // Get user info
   const account = authService.getAccount();
@@ -373,7 +584,7 @@ export const App: React.FC<AppProps> = ({
           hostType={hostType}
           isAuthenticated={false}
           version={version}
-          buildDate={buildDate}
+          {...(buildDate !== undefined ? { buildDate } : {})}
           connectionStatus={connectionStatus}
           showNavigation={false}
           themePreference={preference}
@@ -393,15 +604,19 @@ export const App: React.FC<AppProps> = ({
       <TaskPaneShell
         title={displayTitle}
         hostType={hostType}
-        userName={userName}
-        userEmail={userEmail}
+        {...(userName !== undefined ? { userName } : {})}
+        {...(userEmail !== undefined ? { userEmail } : {})}
         isAuthenticated={true}
         onSignOut={handleSignOut}
         onSettings={handleSettings}
         version={version}
-        buildDate={buildDate}
+        {...(buildDate !== undefined ? { buildDate } : {})}
         connectionStatus={connectionStatus}
-        showNavigation={hostType === 'outlook'}
+        // FR-03 / task 015: navigation is no longer Outlook-only. Visibility is derived
+        // from the shared tab-availability check (getAvailableTabs) rather than a
+        // hostType conditional (NFR-10) — Word now gets Save + Find; Outlook keeps
+        // Save + Create To Do + Find.
+        showNavigation={getAvailableTabs(hostType).length > 0}
         selectedTab={currentTab}
         onTabChange={setCurrentTab}
         themePreference={preference}
@@ -409,6 +624,27 @@ export const App: React.FC<AppProps> = ({
         showErrorDetails={showErrorDetails}
         onError={handleError}
       >
+        {/* Send Email via Outlook (task 036 / FR-15) — capability-gated (NFR-10), visible on any tab once
+            there is a document and/or related record to link. */}
+        {canSendEmail && (
+          <div className={styles.sendEmailRow}>
+            {sendEmailLiveRegion}
+            <Button
+              appearance="secondary"
+              icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
+              onClick={handleSendEmail}
+              disabled={sendEmailStatus === 'sending'}
+            >
+              Send Email
+            </Button>
+            {sendEmailError && (
+              <MessageBar intent="error">
+                <MessageBarBody>{sendEmailError}</MessageBarBody>
+              </MessageBar>
+            )}
+          </div>
+        )}
+
         {/* Linked Spaarke to-dos banner (Outlook only, smart-todo-decoupling-r3 FR-28) */}
         {showLinkedTodosBanner && (
           <LinkedTodosBanner
@@ -426,7 +662,7 @@ export const App: React.FC<AppProps> = ({
             onCreateTodo={handleCreateTodo}
             onSearchContacts={handleSearchContacts}
             onGoToSave={() => setCurrentTab('save')}
-            {...(savedContext ? { savedContext } : {})}
+            {...(todoRegardingContext ? { savedContext: todoRegardingContext } : {})}
           />
         )}
 
@@ -434,6 +670,14 @@ export const App: React.FC<AppProps> = ({
         {currentTab === 'save' && (
           <SaveView
             hostAdapter={hostAdapter}
+            // Task 021 / FR-07: thread task 013's resolved document identity into the Profile
+            // section rather than re-resolving it there.
+            {...(savedContext?.documentId ? { resolvedDocumentId: savedContext.documentId } : {})}
+            // Task 024 / FR-11: the identity STATE (not just the resolved id) decides the save mode —
+            // version by default when resolved; conflict / indeterminate / denied / error never create
+            // silently. The retry re-runs task 013's resolution.
+            {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+            onRetryDocumentIdentity={retryDocumentIdentity}
             getAccessToken={async () => {
               // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
               // scope argument (see AuthService.ts) — removed as dead code.
@@ -443,6 +687,14 @@ export const App: React.FC<AppProps> = ({
             apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net'}
             onComplete={(docId, docUrl) => {
               console.log('Save complete:', docId, docUrl);
+              // task 036 / FR-15: Send Email needs a documentId on BOTH hosts. Word usually already has one
+              // from task 013's URL-based resolution (`savedContext.documentId`); Outlook has no such
+              // resolution path at all, so a completed save is the ONLY place it ever learns the id. Setting
+              // it here (rather than only via documentIdentityService) covers both — and for Word it is a
+              // same-value overwrite in the common case (the saved document IS the resolved one).
+              if (docId) {
+                setSavedContext(prev => ({ ...prev, documentId: cleanGuid(docId) }));
+              }
             }}
             onSaved={handleSaved}
             onQuickCreate={(entityType, searchQuery) => {
@@ -469,6 +721,17 @@ export const App: React.FC<AppProps> = ({
               window.open(createUrl, '_blank', 'width=600,height=700');
               console.log('Quick create:', entityType, searchQuery);
             }}
+          />
+        )}
+
+        {/* Find tab (task 015 / FR-03; real three-state gate wired by task 033 / FR-16b). Task 034
+            still owns the full similarity results view (lazy-scroll + the records bridge) — this
+            mount point is unchanged from task 015. */}
+        {currentTab === 'find' && (
+          <FindView
+            {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+            onRetryDocumentIdentity={retryDocumentIdentity}
+            onGoToSave={() => setCurrentTab('save')}
           />
         )}
 

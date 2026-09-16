@@ -39,7 +39,32 @@ import type {
   GetDocumentContentOptions,
   HostAdapterError,
   HostAdapterErrorCode,
+  EmailComposeContent,
+  ComposeEmailResult,
 } from './types';
+
+/**
+ * Type augmentation: `MessageRead.importance` and `MailboxEnums.Importance` are part of the real
+ * Outlook Mailbox 1.1+ JS API surface (see Microsoft Learn's `office.mailboxenums.importance` enum),
+ * but are absent from the installed `@types/office-js` (1.0.568) ambient declarations. This block is
+ * `declare global` — an ambient declaration, erased entirely at compile time — so it adds ONLY type
+ * information for the type checker; `getImportance()` below still reads the exact same runtime
+ * `Office.MailboxEnums.Importance` object office.js supplies, unchanged.
+ */
+declare global {
+  namespace Office {
+    namespace MailboxEnums {
+      enum Importance {
+        Low = 'low',
+        Normal = 'normal',
+        High = 'high',
+      }
+    }
+    interface MessageRead {
+      importance: MailboxEnums.Importance;
+    }
+  }
+}
 
 /**
  * Represents the mode the Outlook item is in.
@@ -77,6 +102,31 @@ export class OutlookAdapter implements IHostAdapter {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Check if the `OpenBrowserWindowApi` requirement set is supported (task 027 / FR-10, NFR-10).
+   * Decided at runtime — never declared as a manifest requirement, which would stop the add-in
+   * loading on hosts without it. See {@link HostCapabilities.canOpenBrowserWindow}.
+   */
+  private isOpenBrowserWindowSupported(): boolean {
+    try {
+      return Office.context.requirements.isSetSupported('OpenBrowserWindowApi', '1.1');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Whether `Office.context.mailbox.displayNewMessageForm` can be called right now (task 036 / FR-15).
+   * Requires Mailbox requirement set 1.6, AND the pane running in **read** mode — the API's documented
+   * applicable Outlook mode is Message Read (Microsoft Learn: `Office.context.mailbox.displayNewMessageForm`,
+   * `[Api set: Mailbox 1.6]`). Compose-mode panes are excluded deliberately, not just conservatively: the
+   * host does not document compose-surface support for this call, so treating it as unsupported there
+   * matches the API's own contract rather than guessing.
+   */
+  private isComposeNewMessageSupported(): boolean {
+    return this._currentMode === 'read' && this.isMailboxSupported('1.6');
   }
 
   /**
@@ -261,7 +311,10 @@ export class OutlookAdapter implements IHostAdapter {
    * @inheritdoc
    */
   async getBody(preferredType: 'html' | 'text' = 'html'): Promise<BodyContent> {
-    const item = this.getCurrentItem();
+    // `.body` is declared individually on Office.MessageRead and Office.MessageCompose (both expose
+    // an identical `body: Body`), not lifted onto the base Office.Item type. getBody() is valid in
+    // either mode, so narrow to that union rather than a single mode — same runtime object either way.
+    const item = this.getCurrentItem() as Office.MessageRead | Office.MessageCompose;
 
     const coercionType = preferredType === 'html' ? Office.CoercionType.Html : Office.CoercionType.Text;
 
@@ -423,9 +476,13 @@ export class OutlookAdapter implements IHostAdapter {
         }
       }
 
-      // BCC recipients (if available - may not be for received emails)
-      if (item.bcc) {
-        for (const bcc of item.bcc) {
+      // BCC recipients (if available - may not be for received emails). `bcc` is not part of the
+      // officially typed Office.MessageRead surface (Outlook generally hides BCC on read items),
+      // but it is present at runtime for some contexts (e.g. viewing a Sent item). Narrow via an
+      // explicit extension type rather than an untyped/`any` access so this stays a real type check.
+      const itemWithBcc = item as Office.MessageRead & { bcc?: Office.EmailAddressDetails[] };
+      if (itemWithBcc.bcc) {
+        for (const bcc of itemWithBcc.bcc) {
           recipients.push({
             email: bcc.emailAddress,
             displayName: bcc.displayName,
@@ -485,6 +542,22 @@ export class OutlookAdapter implements IHostAdapter {
 
   /**
    * @inheritdoc
+   *
+   * Outlook has no open document — this capability is Word-only (`canGetDocumentUrl` is always
+   * `false` here). Rejects with a typed `CAPABILITY_NOT_SUPPORTED` `HostAdapterError`, matching
+   * `getAttachmentContent`'s convention on `WordAdapter` for an Outlook-only capability called on
+   * the wrong host. Deliberately NOT `undefined`, NOT a raw thrown `Error`, and NOT a silent empty
+   * string — a caller that skips the `canGetDocumentUrl` capability check gets a loud, typed failure.
+   */
+  async getDocumentUrl(): Promise<string | null> {
+    throw createHostAdapterError(
+      'CAPABILITY_NOT_SUPPORTED',
+      'Outlook has no open document. getDocumentUrl() is only supported in Word.'
+    );
+  }
+
+  /**
+   * @inheritdoc
    */
   getCapabilities(): HostCapabilities {
     const hasMailbox18 = this.isMailboxSupported('1.8');
@@ -500,6 +573,8 @@ export class OutlookAdapter implements IHostAdapter {
       canGetSender: true,
       // Document content is not available for emails
       canGetDocumentContent: false,
+      // No open document in Outlook — FR-01 / task 013 is Word-only
+      canGetDocumentUrl: false,
       // PDF conversion is server-side, so we can indicate support
       canSaveAsPdf: true,
       // EML saving requires Mailbox 1.8 for full attachment support
@@ -508,6 +583,21 @@ export class OutlookAdapter implements IHostAdapter {
       canInsertLink: isComposeMode,
       // File attachment is available in compose mode
       canAttachFile: isComposeMode,
+      // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement.
+      canOpenBrowserWindow: this.isOpenBrowserWindowSupported(),
+      // task 036 / FR-15: Mailbox 1.6 + read mode — see isComposeNewMessageSupported().
+      canComposeEmail: this.isComposeNewMessageSupported(),
+      // task 040 / FR-19: linked-todos (spec.md Assumptions Outlook-only list) — unconditionally
+      // true here, matching the pre-existing `hostType === 'outlook'` gate this formalizes
+      // (`App.tsx`'s LinkedTodosBanner visibility). The banner itself stays inert without a
+      // `communicationId` (see `useLinkedTodosForCommunication`'s own undefined-id no-op), so this
+      // capability need not additionally restrict by mode.
+      canShowLinkedTodos: true,
+      // task 040 / FR-19: triage/auto-match suggestions (spec.md Assumptions Outlook-only list) —
+      // unconditionally true here, matching the pre-existing `hostType !== 'outlook'` guard this
+      // formalizes (`SaveFlow.tsx`'s related-candidates fetch). The fetch is itself best-effort and
+      // already no-ops without an `itemId`, so this capability need not additionally restrict by mode.
+      canSuggestRelatedRecords: true,
       // Minimum API version for basic functionality
       minApiVersion: '1.5',
       // Actual supported version
@@ -594,8 +684,17 @@ export class OutlookAdapter implements IHostAdapter {
 
     const item = this.getComposeItem();
 
+    // `addFileAttachmentFromBase64Async`'s typed options are `AsyncContextOptions & { isInline: boolean }`
+    // only — `contentType` is not part of the declared shape. Passing it through an explicitly-typed
+    // variable (rather than a fresh object literal) keeps the exact same runtime object we always sent,
+    // without tripping the object-literal excess-property check.
+    const attachmentOptions: Office.AsyncContextOptions & { isInline: boolean; contentType?: string } = {
+      isInline: false,
+      contentType,
+    };
+
     return new Promise(resolve => {
-      item.addFileAttachmentFromBase64Async(content, fileName, { isInline: false, contentType }, result => {
+      item.addFileAttachmentFromBase64Async(content, fileName, attachmentOptions, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           resolve({
             success: true,
@@ -609,6 +708,43 @@ export class OutlookAdapter implements IHostAdapter {
         }
       });
     });
+  }
+
+  /**
+   * @inheritdoc
+   *
+   * Opens `Office.context.mailbox.displayNewMessageForm` (Mailbox 1.6) with the given subject and
+   * HTML body. No recipients are pre-filled. Gated on {@link isComposeNewMessageSupported} — mirrors
+   * the {@link insertLink} / {@link attachFile} convention of returning a defined failure result
+   * rather than throwing when the capability isn't actually available, even though callers SHOULD
+   * already have checked {@link HostCapabilities.canComposeEmail} first.
+   *
+   * `displayNewMessageForm` itself is synchronous and throws if a parameter exceeds its size limit —
+   * wrapped in try/catch so that throw becomes the same defined result shape as every other failure.
+   */
+  async composeNewEmail(content: EmailComposeContent): Promise<ComposeEmailResult> {
+    // Both checks are required: `isComposeNewMessageSupported()` alone would let a null `_mailbox`
+    // (not actually initialized) slip through as a silent no-op success via optional chaining below —
+    // an honest failure result here, not a false "success: true".
+    if (!this.isComposeNewMessageSupported() || !this._mailbox) {
+      return {
+        success: false,
+        errorMessage: 'Composing a new message is not supported in the current mode or client.',
+      };
+    }
+
+    try {
+      this._mailbox.displayNewMessageForm({
+        subject: content.subject,
+        htmlBody: content.htmlBody,
+      });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        errorMessage: error instanceof Error ? error.message : 'Failed to open the compose window.',
+      };
+    }
   }
 
   // ============================================================

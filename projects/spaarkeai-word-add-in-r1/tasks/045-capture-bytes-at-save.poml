@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Capture the Word document's bytes when Save is pressed, not when the Save tab mounts</title>
+    <phase>2 Save flow</phase>
+    <gate>025 (collision fix) merged — fresh bytes make the same-name collision reachable, so this lands WITH or AFTER it</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx on the pane's save path; the failure mode is silent lost edits.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The defect site and the fix are named exactly (025 analysis M12/O5); the judgment boundary (ordering against 025) is an explicit gate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `SaveView.tsx` / `SaveFlow.tsx` / `useSaveFlow.ts` — the files 020, 026 and 025's pane prompt also edit. Run alone on the save pane.</parallel-reason>
+    <deps>025</deps>
+    <tags>frontend, office-addins, save-flow, data-integrity, unit-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The Word pane reads the open document's bytes ONCE, when the Save tab mounts, and never again when the user presses Save, retries, or uses "Save Another". Any edit the user makes after opening the tab is silently never uploaded, while the pane reports success. Capture the bytes at the moment of saving.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19 effects, Office.js `getFileAsync` slice assembly, and the add-in's save flow. Follow ADRs strictly.</role>
+
+  <goal>Every save attempt — first Save, a retry, and "Save Another" — uploads the document's bytes as they are at that moment. No save ever uploads bytes captured earlier. The `.docx` extraction path (task 010: `getFileAsync(Compressed)` slice assembly, never `body.getOoxml()`) is unchanged.</goal>
+
+  <context>
+    <background>
+      Source: `notes/025-residual-collision-surface.md` M12 / R5 / RC-5 / option O5 (2026-09-13). As reported — verify by symbol, line numbers drift:
+      - `SaveView.tsx:132-231` (capture at `:202-219`) reads the bytes in a mount effect with deps `[hostAdapter]`.
+      - It is not re-read at Save press, on retry, or on "Save Another" (`SaveFlow.tsx:490-530`, `useSaveFlow.ts:982-995`, `:1155-1159`). The tab re-mounts on a tab switch (`App.tsx:529-530`), which is the only thing that refreshes the bytes today.
+      - Task 039 fixed the SERVER half of lost edits (a content-blind create key); this is the CLIENT half, which 039 explicitly did not touch.
+      Ordering: once fresh bytes reach the server, an edited re-save of a new document under the same name hits the same-name collision (D-ii). That is why this lands with or after task 025.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/025-residual-collision-surface.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: byte capture only. MUST NOT change `WordAdapter.getDocumentContent()`'s extraction (task 010's byte-identical `getFileAsync(Compressed)` path, guarded by the gated `WordAdapter.test.ts`).</constraint>
+    <constraint source="project">Scope: every save attempt captures fresh bytes, including a retry after a failure and "Save Another". A failed capture is a handled, visible error — never a silent upload of old bytes.</constraint>
+    <constraint source="NFR-10">No `hostType ===` branch; Outlook sends no document bytes and must be unaffected.</constraint>
+    <constraint source="ADR-012">Thin views under `shared/taskpane/`; no `@spaarke/ui-components` import.</constraint>
+    <constraint source="project">Gates: production typecheck 0 and no new test-file errors in touched files (baseline 111); `npm run build` (placeholder env vars); jest baseline 10 failing suites / 84 tests unchanged; all `ci-gated-suites.txt` suites green by path.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, the 025 analysis note (M12, O5, the ordering note), and the 024/038 notes (which reshaped the same files). Declare FULL, sonnet @ high, DIRECTIONAL.</step>
+    <step order="1">Reproduce first: a test where the adapter returns bytes B1 at mount and B2 later; pressing Save must upload B2. It fails on the current code.</step>
+    <step order="2">Move the capture into the save action (and the retry / "Save Another" paths); keep a loading state while capturing.</step>
+    <step order="3">Run the gates; record deviations in `notes/045-capture-bytes-at-save.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If capturing at Save press would change `getDocumentContent()`'s extraction or the bytes produced for an unchanged document, STOP and escalate.</trigger>
+    <trigger>If task 025's collision handling is not yet merged when this task is ready, STOP — do not ship fresh-byte capture ahead of it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The capture exists (`SaveView.tsx` mount effect); only its timing is wrong. Modify-only.</existing>
+    <extension>Yes — move the existing call to the save action.</extension>
+    <cost-of-doing-nothing>A user who opens the Save tab, keeps editing, then presses Save uploads the document as it was when the tab opened; the pane says "saved" and the edits are silently lost.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the adapter returns B1 at mount and B2 later, when the user presses Save, then the request carries B2 — proven by a test that fails on the old code.</criterion>
+    <criterion testable="true">Given a failed save, when the user retries, then the retry captures fresh bytes.</criterion>
+    <criterion testable="true">Given "Save Another", when used, then fresh bytes are captured.</criterion>
+    <criterion testable="true">Negative: a capture failure shows a handled error and uploads nothing.</criterion>
+    <criterion testable="true">`WordAdapter.test.ts` (task 010's `.docx` guard) stays green; Outlook saves are unaffected.</criterion>
+    <criterion testable="true">Production typecheck 0; `npm run build` passes; no previously-passing jest test regressed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-09-14 by the main session from the 025 residual-collision analysis (standing policy: unowned work is owned by this project). Production-blocking. The "remember the just-created document so the next save is a version" idea (025 option O4) is part of the open owner discussion on document matching (014/FR-02 + 025) and is NOT in this task.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -19,12 +19,16 @@ describe('TaskPaneNavigation', () => {
     expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
   });
 
-  it('renders only the Save tab for Word', () => {
+  it('renders Save, Find and Create To Do tabs for Word', () => {
     renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} hostType="word" />);
 
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
-    // Create To Do is Outlook-only (a To Do is created from an email).
-    expect(screen.queryByRole('tab', { name: /create to do/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /find/i })).toBeInTheDocument();
+    // Create To Do is a shared capability (task 049 / FR-14 / FR-19) — no longer Outlook-only.
+    expect(screen.getByRole('tab', { name: /create to do/i })).toBeInTheDocument();
+    // Share/Recent are disabled ("V1") — not rendered on Word either.
+    expect(screen.queryByRole('tab', { name: /share/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
   });
 
   it('highlights selected tab', () => {

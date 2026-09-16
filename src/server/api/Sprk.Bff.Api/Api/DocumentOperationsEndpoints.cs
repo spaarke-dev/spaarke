@@ -339,7 +339,13 @@ public static class DocumentOperationsEndpoints
                 FileName = fileInfo.FileName,
                 DocumentId = fileInfo.DocumentId.ToString(),
                 Source = "CheckinTrigger",
-                EnqueuedAt = DateTimeOffset.UtcNow
+                EnqueuedAt = DateTimeOffset.UtcNow,
+                // Task 048 (spaarkeai-word-add-in-r1): check-in re-indexes an EXISTING, previously
+                // checked-out item — the same "new version of an existing item" shape task 029 fixed for
+                // Office version saves. This trigger's idempotency key already includes DateTimeOffset
+                // ticks (never skipped as a duplicate), so every check-in reaches this payload and must
+                // trim any leftover tail once the new chunks land.
+                ReplaceStaleChunks = true,
             }));
 
             // Create and submit job

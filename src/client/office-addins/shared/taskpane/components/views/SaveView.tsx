@@ -4,6 +4,7 @@ import { SaveFlow } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import type { EntityType, EntitySearchResult } from '../../hooks/useEntitySearch';
+import type { DocumentIdentityState } from '../../services/documentIdentityService';
 
 const useStyles = makeStyles({
   container: {
@@ -56,6 +57,20 @@ export interface SaveViewProps {
   onNavigate?: (view: 'save' | 'status') => void;
   /** Entity types allowed for association */
   allowedEntityTypes?: EntityType[];
+  /**
+   * `sprk_document` id resolved by task 013's FR-01 identity resolution (task 021 / FR-07), from
+   * `App.savedContext`. Threaded straight through to `SaveFlow`'s Profile section — this view does
+   * not re-resolve identity itself.
+   */
+  resolvedDocumentId?: string;
+  /**
+   * The open document's identity state (task 024 / FR-11), from `App`. Threaded straight through to
+   * `SaveFlow`, which decides from it whether Save defaults to a new version. `undefined` = identity does
+   * not apply (Outlook) → a plain create save, as before.
+   */
+  documentIdentity?: DocumentIdentityState;
+  /** Re-runs identity resolution for the "Check again" / "Try again" actions. */
+  onRetryDocumentIdentity?: () => void;
 }
 
 /**
@@ -90,6 +105,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
   onViewDocument,
   onNavigate,
   allowedEntityTypes,
+  resolvedDocumentId,
+  documentIdentity,
+  onRetryDocumentIdentity,
 }) => {
   const styles = useStyles();
 
@@ -135,7 +153,13 @@ export const SaveView: React.FC<SaveViewProps> = ({
         const subject = await hostAdapter.getSubject();
         setItemName(subject);
 
-        // Get host-specific data
+        // Get host-specific data.
+        // task 040 / FR-19 audit: this `type === 'outlook'` scaffold decides WHICH host-specific
+        // IHostAdapter methods to call at all (getAttachments/getSenderEmail/getRecipients on
+        // Outlook vs getDocumentContent on Word) — the actual value-producing calls inside each
+        // branch are ALREADY capability-gated (canGetAttachments/canGetSender/canGetRecipients/
+        // canGetDocumentContent). Left as-is (documented in notes/parity-checklist.md) rather than
+        // converting the outer scaffold itself, which would only relabel this same branch.
         if (type === 'outlook') {
           // Get attachments
           if (hostAdapter.getCapabilities().canGetAttachments) {
@@ -161,8 +185,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
             setRecipients(
               recipientList.map(r => ({
                 email: r.email,
-                displayName: r.displayName,
                 type: r.type,
+                ...(r.displayName !== undefined ? { displayName: r.displayName } : {}),
               }))
             );
           }
@@ -190,7 +214,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
               const uint8Array = new Uint8Array(content);
               let binary = '';
               for (let i = 0; i < uint8Array.length; i++) {
-                binary += String.fromCharCode(uint8Array[i]);
+                binary += String.fromCharCode(uint8Array[i] ?? 0);
               }
               const base64 = btoa(binary);
               setDocumentContentBase64(base64);
@@ -251,29 +275,44 @@ export const SaveView: React.FC<SaveViewProps> = ({
     );
   }
 
+  // task 027 / FR-10 (NFR-10): decided from the live adapter's capabilities, never a `hostType`
+  // check — `false` (including while `hostAdapter` is absent/loading) renders SaveFlow's
+  // related-record card and Document-record affordance without their open action.
+  const canOpenRecord = hostAdapter?.getCapabilities().canOpenBrowserWindow ?? false;
+
+  // task 040 / FR-19 (NFR-10): same pattern as canOpenRecord above — decided from the live
+  // adapter's capabilities, never a `hostType` check. `false` (including while `hostAdapter` is
+  // absent/loading) skips SaveFlow's "Related to" auto-match candidates fetch entirely.
+  const canSuggestRelatedRecords = hostAdapter?.getCapabilities().canSuggestRelatedRecords ?? false;
+
   // Render SaveFlow with context
   return (
     <div className={styles.container}>
       <SaveFlow
         hostType={hostType}
-        itemId={itemId}
-        itemName={itemName}
         attachments={attachments}
-        senderEmail={senderEmail}
-        senderDisplayName={senderDisplayName}
-        recipients={recipients}
-        sentDate={sentDate}
-        documentUrl={documentUrl}
-        documentContentBase64={documentContentBase64}
         getAccessToken={getAccessToken || defaultGetAccessToken}
-        apiBaseUrl={apiBaseUrl}
-        onComplete={onComplete}
-        {...(onSaved ? { onSaved } : {})}
-        onQuickCreate={onQuickCreate}
         onViewDocument={handleViewDocument}
-        onNavigate={onNavigate}
-        allowedEntityTypes={allowedEntityTypes}
         showDocumentInfo
+        canOpenRecord={canOpenRecord}
+        canSuggestRelatedRecords={canSuggestRelatedRecords}
+        {...(itemId !== undefined ? { itemId } : {})}
+        {...(itemName !== undefined ? { itemName } : {})}
+        {...(senderEmail !== undefined ? { senderEmail } : {})}
+        {...(senderDisplayName !== undefined ? { senderDisplayName } : {})}
+        {...(recipients !== undefined ? { recipients } : {})}
+        {...(sentDate !== undefined ? { sentDate } : {})}
+        {...(documentUrl !== undefined ? { documentUrl } : {})}
+        {...(documentContentBase64 !== undefined ? { documentContentBase64 } : {})}
+        {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
+        {...(onComplete ? { onComplete } : {})}
+        {...(onSaved ? { onSaved } : {})}
+        {...(onQuickCreate ? { onQuickCreate } : {})}
+        {...(onNavigate ? { onNavigate } : {})}
+        {...(allowedEntityTypes !== undefined ? { allowedEntityTypes } : {})}
+        {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
+        {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+        {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
       />
     </div>
   );

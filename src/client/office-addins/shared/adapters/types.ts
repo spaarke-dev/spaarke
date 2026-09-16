@@ -75,6 +75,8 @@ export interface HostCapabilities {
   canGetSender: boolean;
   /** Whether document content can be retrieved as ArrayBuffer (Word only) */
   canGetDocumentContent: boolean;
+  /** Whether the open document's URL can be retrieved (Word only) */
+  canGetDocumentUrl: boolean;
   /** Whether document can be saved as PDF */
   canSaveAsPdf: boolean;
   /** Whether item can be saved as EML (Outlook emails) */
@@ -83,10 +85,81 @@ export interface HostCapabilities {
   canInsertLink: boolean;
   /** Whether files can be attached (Outlook compose) */
   canAttachFile: boolean;
+  /**
+   * Whether the host can open a plain browser tab/window (`OpenBrowserWindowApi` 1.1).
+   * spaarkeai-word-add-in-r1 task 027 / FR-10 — Spike-2's chosen mechanism (Option 3: read-only
+   * detail in-pane + a browser-tab escape hatch) for opening a Dataverse record from the pane.
+   * Decided at runtime via `Office.context.requirements.isSetSupported('OpenBrowserWindowApi',
+   * '1.1')` — NOT declared as a manifest requirement (that would stop the add-in loading on hosts
+   * without it). Views MUST gate the open-record affordance on this flag, never on `hostType`
+   * (NFR-10) — when it is `false`, the related-record card and Document-record affordance render
+   * without their open action.
+   */
+  canOpenBrowserWindow: boolean;
+  /**
+   * Whether the host can open a native new-message compose window pre-populated with a subject and
+   * HTML body (`Office.context.mailbox.displayNewMessageForm`, `Mailbox` requirement set 1.6).
+   * spaarkeai-word-add-in-r1 task 036 / FR-15 — Send Email via Outlook.
+   *
+   * `Office.context.mailbox` does not exist in Word, so this is Outlook-only. Within Outlook it is
+   * further gated on the pane running in **read** mode — `displayNewMessageForm`'s documented
+   * applicable mode is Message Read; calling it from a compose surface is unsupported by the host
+   * API itself, not a Spaarke-side restriction. Views MUST gate the Send Email affordance on this
+   * flag, never on `hostType` (NFR-10) — when it is `false`, the affordance is hidden entirely.
+   */
+  canComposeEmail: boolean;
+  /**
+   * Whether the host can show the linked-to-dos indicator banner (`LinkedTodosBanner`, count of
+   * `sprk_todo` rows carrying `sprk_regardingcommunication` for the current item) —
+   * spaarkeai-word-add-in-r1 task 040 / FR-19, formalizing smart-todo-decoupling-r3 FR-28 / A-1.
+   *
+   * Spec's parity boundary (spec.md Assumptions) lists "linked-todos" under Outlook-only, alongside
+   * email/attachment save and triage. A Word document has no `sprk_communication` counterpart, so
+   * there is nothing for the banner's query to key off. Views MUST gate the banner on this flag,
+   * never on `hostType` (NFR-10) — when it is `false`, the banner never renders, however
+   * `communicationId` was sourced.
+   */
+  canShowLinkedTodos: boolean;
+  /**
+   * Whether the host can fetch the Association Engine's ranked "Related to" auto-match candidates
+   * for the Save tab's reconciliation-style cards (`communicationSuggestionsService.fetchRelatedCandidates`,
+   * `GET /api/office/communications/by-message-id/{id}/suggestions`) — spaarkeai-word-add-in-r1 task
+   * 040 / FR-19, formalizing the pre-existing "Outlook only" gate `SaveFlow.tsx` already carried.
+   *
+   * Spec's parity boundary (spec.md Assumptions) lists "triage" under Outlook-only. The engine keys
+   * off the captured email's sender/recipients/thread signals (`internetMessageId`) — a Word document
+   * has no equivalent captured-communication record to look up. Views MUST gate the auto-match fetch
+   * on this flag, never on `hostType` (NFR-10).
+   */
+  canSuggestRelatedRecords: boolean;
   /** Minimum required Office.js API version */
   minApiVersion: string;
   /** Currently supported requirement set */
   supportedRequirementSet: string;
+}
+
+/**
+ * Content for a new-message compose window (spaarkeai-word-add-in-r1 task 036 / FR-15).
+ * Mirrors the subset of `Office.context.mailbox.displayNewMessageForm`'s parameters this add-in
+ * uses — recipients are deliberately NOT included; the user addresses the message themselves.
+ */
+export interface EmailComposeContent {
+  /** The message subject. */
+  subject: string;
+  /** The message body as HTML. */
+  htmlBody: string;
+}
+
+/**
+ * Result of a {@link IHostAdapter.composeNewEmail} call — always a defined result, mirroring the
+ * `InsertLinkResult` / `AttachFileResult` convention (never throws for an expected "not supported"
+ * outcome; callers still SHOULD gate on {@link HostCapabilities.canComposeEmail} first).
+ */
+export interface ComposeEmailResult {
+  /** Whether the compose window was actually opened. */
+  success: boolean;
+  /** Error message if opening the compose window failed or is not supported. */
+  errorMessage?: string;
 }
 
 /**
@@ -98,7 +171,7 @@ export interface HostAdapterError {
   /** Human-readable error message */
   message: string;
   /** Original error if wrapping another error */
-  innerError?: Error;
+  innerError?: Error | undefined;
 }
 
 /**
