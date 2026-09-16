@@ -166,8 +166,17 @@ public sealed record FileIndexRequest
     /// the file's chunks beyond the new chunk count are deleted from the same index
     /// (<see cref="IRagService.DeleteChunksBeyondCountAsync"/>) — the leftovers of a previous, longer version, which
     /// the id-keyed overwrite cannot reach. Upload first, then trim, so the file is never without chunks. A trim
-    /// failure fails the indexing result (retryable) with the new chunks already in place. Default false: every
-    /// existing caller (Compose save-back, manual Run Index, email / attachment) is unchanged.
+    /// failure fails the indexing result (retryable) with the new chunks already in place.
+    /// <b>Task 048</b>: every re-index path that can touch an EXISTING item now sets this true — the
+    /// <see cref="Services.Ai.PostUploadIndexingEnqueuer"/> seam (Compose save-back, the Create* wizards,
+    /// Office create + version save, Email-to-Document, outbound-email enrichment, post-AI-analysis
+    /// re-index), manual Run Index (<c>POST /api/ai/rag/send-to-index</c>), the Knowledge Base admin
+    /// reindex route, the playbook Index node, the document check-in re-index trigger, and bulk
+    /// re-indexing when <c>ForceReindex</c> is requested. A first index of a brand-new item has no tail
+    /// to remove — the trim is a harmless no-op search call in that case (proven by test). Default
+    /// remains false on the record itself; only the scheduled "unindexed only" bulk sweep and
+    /// pre-extracted content indexing (<see cref="IFileIndexingService.IndexContentAsync"/>, which never
+    /// reads this property) still never set it.
     /// </summary>
     public bool ReplaceStaleChunks { get; init; }
 }

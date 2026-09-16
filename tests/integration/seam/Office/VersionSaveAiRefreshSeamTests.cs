@@ -44,8 +44,18 @@ namespace Sprk.Bff.Api.Tests.Seam.Office;
 /// <para><b>What is proven here</b> (owner decisions 2026-09-15): a new version is re-profiled once and re-indexed once;
 /// the index then holds exactly the new version's chunks, in the index the document routes to; a redelivery or retry
 /// of the SAME save runs nothing; every genuinely new save refreshes even when its bytes repeat an earlier version
-/// (B, A, B); a first save and an Email save keep today's keys and payloads and never trim; a failed trim leaves the
-/// new chunks in place and the retry finishes the replace.</para>
+/// (B, A, B); a first save and an Email save keep today's keys and payloads; a failed trim leaves the new chunks in
+/// place and the retry finishes the replace.</para>
+/// <para><b>Task 048 (spaarkeai-word-add-in-r1) update:</b> this file's own scope statement above used to say a
+/// first save and an Email save "never trim". That was 029's deliberate, narrower scope — the trim (§F below,
+/// <see cref="PostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/>) was opt-in per caller via
+/// <c>VersionDiscriminator</c>, and only the Office version-save job set it. Task 048 turned the SAME trim on
+/// UNCONDITIONALLY for every producer through that seam — first save and Email save included — per its own
+/// acceptance criterion that a first index may either skip the trim call entirely OR run one that deletes
+/// nothing; this task chose the latter (see the code comment at the enqueuer). <see cref="FirstSave_AndEmailSave_KeepTodaysKeysAndPayloads_AndTheNowUnconditionalTrimDeletesNothing"/>
+/// (renamed from "...AndNeverTrim") is updated accordingly — the key/payload assertions this slice's title
+/// promises are otherwise untouched by task 048, which changed no key and no skip/retry behaviour anywhere in
+/// this file's scope.</para>
 /// <para><b>Production types end to end:</b> <see cref="OfficeJobQueue"/> → <see cref="UploadFinalizationWorker"/> →
 /// <see cref="PostUploadIndexingEnqueuer"/> → <see cref="RagIndexingJobHandler"/> → <see cref="FileIndexingService"/>,
 /// and <see cref="AppOnlyDocumentAnalysisJobHandler"/>. Doubled only at the boundaries: Service Bus (a sender that
@@ -157,8 +167,20 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
         keys.Should().OnlyHaveUniqueItems("each save is its own refresh, so no content hash can collapse two of them");
     }
 
+    /// <summary>
+    /// Task 048 (spaarkeai-word-add-in-r1) renamed this test from
+    /// "...AndNeverTrim" and updated its two stale assertions (the <c>ReplaceStaleChunks</c> payload
+    /// property and the trim-call count). Task 029 made the trim opt-in per caller via
+    /// <c>VersionDiscriminator</c>, so a first save / Email save — neither of which ever sets it — kept
+    /// <c>ReplaceStaleChunks</c> off the wire entirely and never called the trim. Task 048's own
+    /// acceptance criterion for a first index explicitly allows either "no trim call, or a trim that
+    /// deletes nothing"; this task's design chose the latter, applied UNCONDITIONALLY at the shared
+    /// <see cref="PostUploadIndexingEnqueuer"/> seam this test exercises. Everything else this slice's
+    /// name promises — today's keys, today's job shape, no <c>VersionSaveJobId</c> — is untouched: task
+    /// 048 changed no key and no skip/retry behaviour anywhere in this file's scope.
+    /// </summary>
     [Fact]
-    public async Task FirstSave_AndEmailSave_KeepTodaysKeysAndPayloads_AndNeverTrim()
+    public async Task FirstSave_AndEmailSave_KeepTodaysKeysAndPayloads_AndTheNowUnconditionalTrimDeletesNothing()
     {
         _pipeline.SpeText[Item] = FirstVersion;
         var firstJobs = await _pipeline.FinalizeAsync(DocumentSave(), Guid.NewGuid(), Item, _documentId, isVersionSave: false);
@@ -182,12 +204,20 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
 
         firstJobs.Concat(emailJobs)
             .Where(j => j.JobType == RagIndexingJobHandler.JobTypeName)
-            .Should().OnlyContain(j => !HasProperty(j.Payload!.RootElement, "ReplaceStaleChunks"),
-                "an index job that is not a version keeps today's payload byte-for-byte");
+            .Should().OnlyContain(j => HasProperty(j.Payload!.RootElement, "ReplaceStaleChunks")
+                                        && j.Payload!.RootElement.GetProperty("ReplaceStaleChunks").GetBoolean(),
+                "task 048: every non-version index job now asks for the trim too — only the version-key " +
+                "suffix stays exclusive to a version save, not the trim flag");
 
         await _pipeline.RunAllAsync(firstJobs.Concat(emailJobs));
 
-        _pipeline.Index.TrimCalls.Should().Be(0, "only a version re-index removes chunks");
+        _pipeline.Index.TrimCalls.Should().Be(2,
+            "task 048: the trim now runs once per non-version index job (first save + Email save) " +
+            "instead of never running — but each call has nothing to remove");
+        _pipeline.Index.ChunksFor(RoutedIndex, Item).Should().HaveCount(5,
+            "the first save's own 5 chunks must all survive its own no-op trim");
+        _pipeline.Index.ChunksFor(RoutedIndex, emailItem).Should().HaveCount(2,
+            "the Email save's own 2 chunks must all survive its own no-op trim");
     }
 
     [Fact]

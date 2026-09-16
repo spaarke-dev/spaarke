@@ -405,10 +405,17 @@ public class RagIndexingJobPayload
     public string? SearchIndexName { get; set; }
 
     /// <summary>
-    /// Task 029 (spaarkeai-word-add-in-r1): true only for the index job of an Office VERSION save. After the new
-    /// chunks are written, the file's leftover chunks from the previous (longer) version are deleted from the same
-    /// index (<see cref="FileIndexRequest.ReplaceStaleChunks"/>). False — every other producer — is omitted from
-    /// the JSON, so their payloads are byte-for-byte unchanged.
+    /// Task 029 (spaarkeai-word-add-in-r1): when true, after the new chunks are written the file's leftover
+    /// chunks from a previous, longer index are deleted from the same index
+    /// (<see cref="FileIndexRequest.ReplaceStaleChunks"/>). Originally set only for the index job of an
+    /// Office VERSION save; <b>task 048</b> made every producer that builds this payload through
+    /// <see cref="Services.Ai.PostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/> set it
+    /// unconditionally (Office create + version save, Email-to-Document, outbound-email enrichment,
+    /// post-AI-analysis re-index), plus the Knowledge Base admin reindex route, the playbook Index node,
+    /// and the document check-in re-index trigger. The scheduled "unindexed only" bulk sweep is the one
+    /// producer that still omits it (nothing to trim by construction — the query excludes already-indexed
+    /// documents). False is still omitted from the JSON (<c>WhenWritingDefault</c>), so a producer that
+    /// never sets the property keeps a byte-for-byte-unchanged payload.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool ReplaceStaleChunks { get; set; }

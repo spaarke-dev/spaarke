@@ -711,7 +711,12 @@ public static class RagEndpoints
                     // Null/whitespace here falls through to IRagService's own tenant-default chain
                     // (byte-for-byte backward compatible), so the ACTUAL write — not just the
                     // Dataverse stamp below — honors the per-record index.
-                    SearchIndexName = resolvedIndexName
+                    SearchIndexName = resolvedIndexName,
+                    // Task 048 (spaarkeai-word-add-in-r1): this route re-indexes an EXISTING Dataverse
+                    // document by id ("Send to Index" / the Dataverse ribbon button) — the item may
+                    // already carry chunks from an earlier index. Trim any leftover tail after the new
+                    // chunks land; a first index (never-indexed document) finds nothing to trim.
+                    ReplaceStaleChunks = true,
                 };
 
                 // Step 5: Index via OBO authentication
@@ -878,7 +883,14 @@ public static class RagEndpoints
                 Metadata = request.Metadata,
                 ParentEntity = request.ParentEntity,
                 Source = "EnqueueEndpoint",
-                EnqueuedAt = DateTimeOffset.UtcNow
+                EnqueuedAt = DateTimeOffset.UtcNow,
+                // Task 048 (spaarkeai-word-add-in-r1): thread the caller's own value through instead of
+                // silently dropping it. FileIndexRequest.ReplaceStaleChunks has been a bindable field on
+                // this request body since task 029; before this fix a caller that set it true on the
+                // wire had that intent discarded here. This endpoint has no first-class "this is a
+                // re-index" signal of its own (unlike SendToIndex / the Knowledge Base reindex route), so
+                // the caller decides, same as the sibling IndexFile endpoint.
+                ReplaceStaleChunks = request.ReplaceStaleChunks,
             }));
 
             // Step 4: Create and submit job
