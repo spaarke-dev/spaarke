@@ -282,6 +282,37 @@ _The code, test and doc fixes above are applied in a follow-up commit; §7.4 rec
   compiler enforces that, and a text-scan rule asserting signatures the same commit added can never fail
   — the shape `tests/CLAUDE.md` warns about. Its reasoning is left in the file where a reader will look.
 
+### 7.5 Amendment — the owner's answers (2026-09-16)
+
+Commit `c28c1d0ac`. §9 items 1 and 2 are now closed decisions, and item 4 carries the owner's affirmation
+on removal semantics.
+
+**What changed.** A share carries the requested level **∩ the caller's own rights on the record**.
+`RecordShareLevels.Intersect` is the one place the two rights vocabularies meet — each level right paired
+with its Dataverse name and bit AND the `AccessRights` flag the evaluator reports. The handler re-probes
+the caller's rights rather than reusing the delegation filter's computation, on the same reasoning the
+filter gives for re-reading the grant row. An empty or Read-less intersection is
+`403 sdap.access.user_share.caller_cannot_grant`, which also covers the probe being unable to answer — it
+reports `None` for "no rights" and "could not answer" alike, so both fail closed. A narrowed grant is
+WRITTEN and reported (`narrowed: true`, and `accessLevel` null when the intersection matches no level)
+rather than refused: refusing would stop an administrator from giving a colleague exactly the access they
+themselves have. The self-share escalation closes as a consequence, with no self-share rule — the check is
+keyed on the RIGHTS, not on who the target is.
+
+**Verification.** Affected suites **164 / 164** (155 + 9: Full Access narrowed for a Collaborate-only
+caller, the level-less intersection, the unestablishable-rights refusal, a five-case theory pinning the
+vocabulary pairing right by right, and the level as a ceiling). ArchTests **323 / 323**.
+
+**Perturbations: 12 / 12 caught.** The ten earlier ones re-anchored against the rewritten handler — five
+of their anchors had moved, which would have reported INVALID rather than a false pass — plus **P11**
+(write the requested level instead of the intersection) and **P12** (mis-pair one row of the two
+vocabularies: Dataverse Delete ← Spaarke Append).
+
+⚠️ **P12's first verdict was INVALID — a build error, which is not a result.** Re-run alone it CAUGHT the
+defect, failing 2 of the theory's 5 cases. That is this project's recorded failure mode appearing a third
+time: an eleventh consecutive `dotnet test` in one batch leaves a lock behind, and a broken perturbation
+must never be counted as either a pass or a fail.
+
 ## 8. Premises the task file got wrong (16 and 17 for this project, found at Step 0)
 
 16. It located the POA seam at `Services/Communication/Access/`. Task 060 moved it to
