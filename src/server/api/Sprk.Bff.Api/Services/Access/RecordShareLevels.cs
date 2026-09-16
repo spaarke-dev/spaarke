@@ -1,3 +1,4 @@
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Access;
@@ -95,4 +96,59 @@ internal static class RecordShareLevels
         FullAccessMask => ExternalAccessLevel.FullAccess,
         _ => null
     };
+
+    /// <summary>
+    /// The rights a level can carry, paired across the TWO vocabularies: the Dataverse <c>AccessMask</c> name and bit
+    /// a POA row stores, and the <see cref="AccessRights"/> flag the evaluator reports for the same right.
+    /// </summary>
+    /// <remarks>
+    /// This is the only place in the codebase where the two vocabularies meet. Everything else stays inside one of
+    /// them, which is what keeps Dataverse's Delete (65536) from ever being read as Spaarke's Delete (4). The order is
+    /// the canonical order the CSV is emitted in, so the same set of rights always produces the same literal.
+    /// </remarks>
+    private static readonly (string Name, int DataverseBit, AccessRights Flag)[] LevelRights =
+    {
+        ("ReadAccess", Read, AccessRights.Read),
+        ("WriteAccess", Write, AccessRights.Write),
+        ("AppendAccess", Append, AccessRights.Append),
+        ("AppendToAccess", AppendTo, AccessRights.AppendTo),
+        ("DeleteAccess", Delete, AccessRights.Delete),
+    };
+
+    /// <summary>
+    /// The rights of <paramref name="requested"/> that <paramref name="callerRights"/> also holds — <b>you may grant
+    /// only what you hold</b> (owner decision 2026-09-16).
+    /// </summary>
+    /// <remarks>
+    /// <para>Dataverse applies this rule natively when a USER shares a record, and cannot apply it here: the POA write
+    /// is app-only, so the platform sees the application's rights rather than the caller's. Intersecting restores the
+    /// rule the platform would have enforced — a caller who cannot delete a record cannot hand Delete to anyone else,
+    /// themselves included, which is the escalation path this closes.</para>
+    /// <para>A result with no Read grants nothing readable; <see cref="IsGrantable"/> is that check, and the share
+    /// endpoint refuses on it. <c>CallerRecordAccessProbe</c> answers <see cref="AccessRights.None"/> both for "no
+    /// rights" and for "could not answer" — deliberately indistinguishable — so an unanswerable probe lands in the
+    /// same refusal, which is the fail-closed direction.</para>
+    /// </remarks>
+    internal static RecordShareRights Intersect(RecordShareRights requested, AccessRights callerRights)
+    {
+        var names = new List<string>(LevelRights.Length);
+        var mask = 0;
+
+        foreach (var (name, dataverseBit, flag) in LevelRights)
+        {
+            if ((requested.AccessRightsMask & dataverseBit) == 0)
+                continue;
+
+            if ((callerRights & flag) != flag)
+                continue;
+
+            names.Add(name);
+            mask |= dataverseBit;
+        }
+
+        return new RecordShareRights(string.Join(",", names), mask);
+    }
+
+    /// <summary>Whether these rights are worth writing as a share at all: without Read, a share grants nothing readable.</summary>
+    internal static bool IsGrantable(RecordShareRights rights) => (rights.AccessRightsMask & Read) == Read;
 }

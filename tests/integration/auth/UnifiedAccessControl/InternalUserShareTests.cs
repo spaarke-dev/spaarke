@@ -93,7 +93,8 @@ public class InternalUserShareTests
         var result = await Share(UserId, ExternalAccessLevel.Collaborate);
 
         OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
-            UserId, ExternalAccessLevel.Collaborate, CollaborateMask, InternalShareEndpoints.OutcomeCreated));
+            UserId, ExternalAccessLevel.Collaborate, CollaborateMask, InternalShareEndpoints.OutcomeCreated,
+            Narrowed: false));
         _shares.Writes.Should().Equal($"GrantAccess {CollaborateCsv}");
         _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(CollaborateMask);
     }
@@ -135,10 +136,99 @@ public class InternalUserShareTests
         var result = await Share(UserId, ExternalAccessLevel.ViewOnly);
 
         OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
-            UserId, ExternalAccessLevel.ViewOnly, ViewOnlyMask, InternalShareEndpoints.OutcomeUpdated));
+            UserId, ExternalAccessLevel.ViewOnly, ViewOnlyMask, InternalShareEndpoints.OutcomeUpdated,
+            Narrowed: false));
         _shares.Writes.Should().Equal("ModifyAccess ReadAccess");
         _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(ViewOnlyMask,
             "the user now holds Read only — not Read plus the Write and Delete a GrantAccess would have kept");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // You may grant only what you hold (owner decision 2026-09-16)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The escalation this closes. The POA write is app-only, so Dataverse cannot apply its own "a sharer may only
+    /// pass on rights they hold" rule; the endpoint applies it. A caller holding Collaborate who asks for Full Access
+    /// grants Collaborate — and because the rule is keyed on the RIGHTS, not on who the target is, it closes the
+    /// self-share path too: the same caller naming themselves also gets no Delete.
+    /// </summary>
+    [Fact]
+    public async Task Share_WhenTheCallerLacksDelete_NarrowsFullAccessToWhatTheyHold()
+    {
+        var callerHoldsCollaborate =
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+
+        var result = await Share(UserId, ExternalAccessLevel.FullAccess, callerRights: callerHoldsCollaborate);
+
+        OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
+            UserId, ExternalAccessLevel.Collaborate, CollaborateMask, InternalShareEndpoints.OutcomeCreated,
+            Narrowed: true));
+        _shares.Writes.Should().Equal($"GrantAccess {CollaborateCsv}");
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(CollaborateMask,
+            "Delete was never the caller's to give");
+    }
+
+    /// <summary>
+    /// The caller's rights need not be one of the three levels — a role can grant Read and Write without Append. The
+    /// share is still written, at the intersection, and reports <c>accessLevel: null</c> because those rights match no
+    /// level. Refusing instead would block an administrator from giving a colleague exactly the access they have.
+    /// </summary>
+    [Fact]
+    public async Task Share_WhenTheCallersRightsMatchNoLevel_GrantsTheIntersectionAndReportsNoLevel()
+    {
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate,
+            callerRights: AccessRights.Read | AccessRights.Write);
+
+        OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
+            UserId, AccessLevel: null, AccessRightsMask: 3, InternalShareEndpoints.OutcomeCreated, Narrowed: true));
+        _shares.Writes.Should().Equal("GrantAccess ReadAccess,WriteAccess");
+    }
+
+    /// <summary>
+    /// The probe answers <see cref="AccessRights.None"/> both for "no rights" and for "could not answer", so this one
+    /// case covers both — and both must refuse rather than write something.
+    /// </summary>
+    [Fact]
+    public async Task Share_WhenTheCallersRightsCannotBeEstablished_Is403AndWritesNothing()
+    {
+        var result = await Share(UserId, ExternalAccessLevel.ViewOnly, callerRights: AccessRights.None);
+
+        ProblemOf(result).Should().Be((403, InternalShareEndpoints.CallerCannotGrantReasonCode));
+        _shares.Writes.Should().BeEmpty();
+        _shares.StrictReads.Should().Be(0, "the refusal comes before the share read — nothing to read for");
+    }
+
+    /// <summary>
+    /// The intersection is where the two rights vocabularies meet, so it is pinned right by right. Spaarke's Append is
+    /// 16 and Dataverse's is 4; Spaarke's Delete is 4 and Dataverse's is 65536. A mis-paired row would grant a right
+    /// nobody asked for — silently, and in the dangerous direction.
+    /// </summary>
+    [Theory]
+    [InlineData(AccessRights.Read, "ReadAccess", 1)]
+    [InlineData(AccessRights.Read | AccessRights.Write, "ReadAccess,WriteAccess", 3)]
+    [InlineData(AccessRights.Read | AccessRights.Append, "ReadAccess,AppendAccess", 5)]
+    [InlineData(AccessRights.Read | AccessRights.AppendTo, "ReadAccess,AppendToAccess", 17)]
+    [InlineData(AccessRights.Read | AccessRights.Delete, "ReadAccess,DeleteAccess", 65537)]
+    public void Intersect_PairsTheTwoVocabulariesRightByRight(
+        AccessRights callerRights, string expectedCsv, int expectedMask)
+    {
+        RecordShareLevels.TryGetRights(ExternalAccessLevel.FullAccess, out var fullAccess).Should().BeTrue();
+
+        var granted = RecordShareLevels.Intersect(fullAccess, callerRights);
+
+        granted.Should().Be(new RecordShareRights(expectedCsv, expectedMask));
+    }
+
+    /// <summary>A caller's rights the level does not ask for add nothing: the level is the ceiling, their rights the floor.</summary>
+    [Fact]
+    public void Intersect_NeverAddsARightTheLevelDoesNotCarry()
+    {
+        RecordShareLevels.TryGetRights(ExternalAccessLevel.ViewOnly, out var viewOnly).Should().BeTrue();
+
+        var granted = RecordShareLevels.Intersect(viewOnly, FullWorkingRights | AccessRights.Share);
+
+        granted.Should().Be(new RecordShareRights("ReadAccess", ViewOnlyMask));
     }
 
     [Fact]
@@ -662,11 +752,37 @@ public class InternalUserShareTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private Task<IResult> Share(Guid? systemUserId, ExternalAccessLevel? level, string? recordType = "matter") =>
+    /// <summary>
+    /// What a caller holds unless a test says otherwise: a full working set, so the level asked for is the level
+    /// granted and the narrowing path stays visible only in the tests that ask for it.
+    /// </summary>
+    private const AccessRights FullWorkingRights =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete;
+
+    private Task<IResult> Share(
+        Guid? systemUserId, ExternalAccessLevel? level, string? recordType = "matter", AccessRights? callerRights = null) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
-            _shares, _users.Client, _cache.Object, AuthenticatedContext(), NullLogger<Program>.Instance,
-            CancellationToken.None);
+            _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>
+    /// Reports fixed rights for the caller, which is what the intersection rule reads. A probe that answered
+    /// <see cref="AccessRights.None"/> would make every share refuse, so the default has to be a caller who can
+    /// actually grant — and a test that wants the narrowing path states the narrower rights explicitly.
+    /// </summary>
+    private sealed class StubCallerRightsProbe : CallerRecordAccessProbe
+    {
+        private readonly AccessRights _rights;
+
+        public StubCallerRightsProbe(AccessRights rights)
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+            => _rights = rights;
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+            => Task.FromResult(_rights);
+    }
 
     private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
         InternalShareEndpoints.UnshareAsync(

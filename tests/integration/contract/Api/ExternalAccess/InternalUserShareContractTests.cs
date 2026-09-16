@@ -55,6 +55,8 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
         body.GetProperty("accessLevel").GetInt32().Should().Be(100000001, "the level is the same number a contact grant carries");
         body.GetProperty("accessRightsMask").GetInt32().Should().Be(23, "Read 1 + Write 2 + Append 4 + AppendTo 16");
         body.GetProperty("outcome").GetString().Should().Be("created");
+        body.GetProperty("narrowed").GetBoolean().Should().BeFalse(
+            "the fixture's caller holds a full working set, so their own rights did not narrow the grant");
     }
 
     [Fact]

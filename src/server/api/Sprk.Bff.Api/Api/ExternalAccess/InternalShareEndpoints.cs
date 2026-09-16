@@ -82,6 +82,12 @@ public static class InternalShareEndpoints
     /// <summary>The user or the record's shares could not be read, so nothing was written.</summary>
     internal const string ReadFailedReasonCode = "sdap.access.user_share.read_failed";
 
+    /// <summary>
+    /// The caller's own rights on the record include nothing grantable from the requested level — or could not be
+    /// established at all. You may grant only what you hold (owner decision 2026-09-16).
+    /// </summary>
+    internal const string CallerCannotGrantReasonCode = "sdap.access.user_share.caller_cannot_grant";
+
     /// <summary>A write was sent and its result could not be confirmed.</summary>
     internal const string WriteNotConfirmedReasonCode = "sdap.access.user_share.write_not_confirmed";
 
@@ -197,6 +203,7 @@ public static class InternalShareEndpoints
         IDataverseRecordShareService recordShare,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
+        CallerRecordAccessProbe callerAccessProbe,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -220,6 +227,7 @@ public static class InternalShareEndpoints
 
         var level = request.AccessLevel!.Value;
         var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        var rootEntitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
 
         // ── Who: an existing, enabled, internal person ────────────────────────
         SystemUserRow? user;
@@ -250,6 +258,58 @@ public static class InternalShareEndpoints
             return ineligible;
         }
 
+        // ── You may grant only what you hold (owner decision 2026-09-16) ──────
+        //
+        // The POA write is app-only, so Dataverse sees the APPLICATION's rights and cannot apply its own rule that a
+        // sharer may only pass on rights they hold. Intersecting the requested level with the caller's own rights
+        // restores it: a caller who cannot delete this record cannot hand Delete to anyone — themselves included,
+        // which is the escalation path this closes.
+        //
+        // The rights are re-probed rather than carried over from the delegation filter, which computed them a moment
+        // ago. That mirrors the filter's own reasoning for re-reading the grant row (DelegationRuleFilter's remarks on
+        // FromAccessRecordAsync): one more caller-scoped read on a low-volume admin mutation does not materially
+        // change request cost, and a handler that trusted authorization state cached by a filter would be trusting
+        // something it cannot verify.
+        AccessRights callerRights;
+        try
+        {
+            callerRights = await callerAccessProbe.GetCallerRightsAsync(
+                Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                rootEntitySet, root.Id, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[USER-SHARE] Could not establish the caller's own rights on {RootType} {RootId} (caller {CallerOid}). " +
+                "Nothing was shared.", root.Type, root.Id, callerOid);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
+                ReadFailedReasonCode,
+                "Your own access to this record could not be established, so nothing was shared. Try again.");
+        }
+
+        var granted = RecordShareLevels.Intersect(rights, callerRights);
+        var narrowed = granted.AccessRightsMask != rights.AccessRightsMask;
+
+        // The probe answers None both for "no rights" and for "could not answer" — deliberately indistinguishable —
+        // so an unanswerable probe refuses here too, which is the fail-closed direction.
+        if (!RecordShareLevels.IsGrantable(granted))
+        {
+            logger.LogWarning(
+                "[USER-SHARE] Caller {CallerOid} holds {CallerRights} on {RootType} {RootId}, which grants nothing of " +
+                "{Level}; nothing was shared.", callerOid, callerRights, root.Type, root.Id, level);
+            return Refused(httpContext, StatusCodes.Status403Forbidden, NotSharedTitle, CallerCannotGrantReasonCode,
+                "You can only give someone the access you have on this record, and yours does not cover the level you " +
+                "asked for. Nothing was shared.");
+        }
+
+        if (narrowed)
+        {
+            logger.LogInformation(
+                "[USER-SHARE] Caller {CallerOid} asked for {Level} on {RootType} {RootId} but holds {CallerRights}, so " +
+                "the share is narrowed to mask {Granted}.",
+                callerOid, level, root.Type, root.Id, callerRights, granted.AccessRightsMask);
+        }
+
         // ── The user's current share, from the STRICT read ─────────────────────
         int current;
         try
@@ -265,25 +325,25 @@ public static class InternalShareEndpoints
                 ReadFailedReasonCode, "The shares on this record could not be read, so nothing was changed. Try again.");
         }
 
-        if (current == rights.AccessRightsMask)
+        if (current == granted.AccessRightsMask)
         {
             logger.LogInformation(
-                "[USER-SHARE] {SystemUserId} already holds {Level} on {RootType} {RootId}; nothing was written (caller {CallerOid}).",
-                systemUserId, level, root.Type, root.Id, callerOid);
-            return TypedResults.Ok(new ShareRecordWithUserResponse(systemUserId, level, current, OutcomeUnchanged));
+                "[USER-SHARE] {SystemUserId} already holds mask {Mask} on {RootType} {RootId}; nothing was written " +
+                "(caller {CallerOid}).", systemUserId, current, root.Type, root.Id, callerOid);
+            return TypedResults.Ok(new ShareRecordWithUserResponse(
+                systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
         }
 
         // ── Write, then confirm what Dataverse stored ─────────────────────────
-        var entitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
         var principal = DataversePrincipalRef.User(systemUserId);
         int? stored = null;
         Exception? failure = null;
         try
         {
             if (current == 0)
-                await recordShare.GrantAccessAsync(entitySet, root.Id, principal, rights.AccessRightsCsv, ct);
+                await recordShare.GrantAccessAsync(rootEntitySet, root.Id, principal, granted.AccessRightsCsv, ct);
             else
-                await recordShare.ModifyAccessAsync(entitySet, root.Id, principal, rights.AccessRightsCsv, ct);
+                await recordShare.ModifyAccessAsync(rootEntitySet, root.Id, principal, granted.AccessRightsCsv, ct);
 
             stored = await ReadDirectShareMaskAsync(recordShare, root, systemUserId, ct);
         }
@@ -299,24 +359,27 @@ public static class InternalShareEndpoints
                 cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type), logger);
         }
 
-        if (failure is not null || stored != rights.AccessRightsMask)
+        if (failure is not null || stored != granted.AccessRightsMask)
         {
             logger.LogError(failure,
                 "[USER-SHARE] Sharing {RootType} {RootId} with {SystemUserId} at {Level} was not confirmed: the user held " +
                 "mask {Previous}, the write asked for {Requested}, and the read-back found {Stored} (caller {CallerOid}).",
-                root.Type, root.Id, systemUserId, level, current, rights.AccessRightsMask,
+                root.Type, root.Id, systemUserId, level, current, granted.AccessRightsMask,
                 stored?.ToString() ?? "nothing readable", callerOid);
             return NotConfirmed(httpContext,
-                "The share could not be confirmed at the requested level. Reload the list to see what this user holds, then try again.",
+                "The share could not be confirmed. Reload the list to see what this user holds, then try again.",
                 stored);
         }
 
         var outcome = current == 0 ? OutcomeCreated : OutcomeUpdated;
         logger.LogInformation(
-            "[USER-SHARE] Caller {CallerOid} shared {RootType} {RootId} with {SystemUserId} at {Level} ({Outcome}; mask {Previous} -> {Stored}).",
-            callerOid, root.Type, root.Id, systemUserId, level, outcome, current, stored);
+            "[USER-SHARE] Caller {CallerOid} shared {RootType} {RootId} with {SystemUserId}: asked {Level}, granted mask " +
+            "{Granted} ({Outcome}; was {Previous}; narrowed={Narrowed}).",
+            callerOid, root.Type, root.Id, systemUserId, level, granted.AccessRightsMask, outcome, current, narrowed);
 
-        return TypedResults.Ok(new ShareRecordWithUserResponse(systemUserId, level, rights.AccessRightsMask, outcome));
+        return TypedResults.Ok(new ShareRecordWithUserResponse(
+            systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
+            outcome, narrowed));
     }
 
     // =========================================================================

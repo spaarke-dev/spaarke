@@ -851,7 +851,12 @@ public sealed class EntitledCallerRecordAccessProbe : CallerRecordAccessProbe
 
     public override Task<AccessRights> GetCallerRightsAsync(
         string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
-        => Task.FromResult(AccessRights.Read | AccessRights.Write);
+        // Write is all the delegation gate needs. The rest matter since task 063 made a share the INTERSECTION of the
+        // requested level with the caller's OWN rights (owner 2026-09-16): an entitled caller must hold a full working
+        // set, or these contract tests would silently be exercising the narrowing path instead of the contract. The
+        // narrowing itself is owned by InternalUserShareTests.
+        => Task.FromResult(
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete);
 }
 
 /// <summary>

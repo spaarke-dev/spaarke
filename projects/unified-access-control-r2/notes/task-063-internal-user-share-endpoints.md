@@ -140,6 +140,14 @@ assert them as literals rather than deriving them from the table under test.
   mask Dataverse actually holds — so the client can tell "nothing happened" from "something else is
   stored" without a second round trip (Step 9.5 review finding 18). The extension is **absent** when the
   read-back itself failed, which is its own answer and not one to fake a number for.
+- **A share carries the requested level ∩ the caller's own rights on the record** (owner 2026-09-16 — §9
+  item 1). A caller holding Collaborate who asks for Full Access grants Collaborate, and the response
+  says so with **`narrowed: true`**. `accessLevel` is then the level whose rights match the stored mask
+  exactly, or **`null`** when the intersection matches no level — a caller holding Read and Write but not
+  Append grants mask 3, which is no level. A caller whose own rights cover nothing of the requested level,
+  **or whose rights cannot be established at all**, gets `403 sdap.access.user_share.caller_cannot_grant`
+  and nothing is written. Task 065 should show what was actually granted rather than what was asked for;
+  the requested level is the client's own input and is deliberately not echoed back.
 - **Who can receive a share**: an existing, enabled person (access mode Read-Write, Administrative or
   Read; no application id) whose `sprk_isexternal` flag confirms them internal. **Unsharing checks only
   that the user exists** — a share must stay removable after its holder is disabled or reclassified.
@@ -291,39 +299,41 @@ resolve through the same helper `/set-record-share-expiry` uses.
 
 ## 9. Open items for the owner
 
-1. **A caller with Write can confer Delete — including on themselves.** B-14 makes Write the delegation
-   right, and Full Access includes Delete, so a user who can write a record can grant Full Access to a
-   colleague, or to themselves, and thereby gain a right they did not have. Dataverse's own sharing model
-   would not allow that (a sharer can only pass on rights they hold), but the write here is app-only, so
-   Dataverse does not enforce it. This is a direct consequence of two decisions already made, so it is
-   surfaced rather than changed unilaterally. Two ways to close it, both small: intersect the requested
-   level with the caller's own rights — the delegation filter already computes them and then discards
-   them — or refuse a self-share, the narrow half (`CallerRecordAccessProbe.GetCallerSystemUserIdAsync`
-   already resolves the caller's systemuserid). **Not implemented; awaiting a decision.** The Step 9.5
-   review rates this a merge blocker.
-2. **Any Write-holder can remove the creating attorney's share — and on a share-only secure project that
-   locks them out with no recovery path.** Found by the Step 9.5 review; not previously recorded. On a
-   secure project every human's access IS an explicit share and no security role reaches the secure
-   business unit (design §5.1 / NFR-05). A colleague shared at Collaborate holds Write, so they pass the
-   gate and may `unshare-user` the creator — who then has no role, no business-unit path, and no way back,
-   because they can no longer pass the gate either. Three candidate floors, each an owner decision:
-   refuse to revoke the last share carrying `ShareAccess`; refuse to revoke the record owner's or
-   creator's share; or require the caller to hold `ShareAccess` before removing someone else's.
-   **Not implemented; awaiting a decision.**
+1. ✅ **CLOSED — owner 2026-09-16: "intersect the requested level with the caller's own rights."**
+   A share now carries the requested level ∩ the caller's own rights on that record, so a caller who
+   cannot delete a record cannot hand Delete to anyone — themselves included, which closes the
+   self-share path without needing a self-share rule (the check is keyed on the RIGHTS, not on who the
+   target is). Implementation: `RecordShareLevels.Intersect`, the one place the two rights vocabularies
+   meet; the handler re-probes the caller's rights rather than trusting the filter's computation, on the
+   same reasoning the filter gives for re-reading the grant row. An empty or Read-less intersection is a
+   403 `…caller_cannot_grant`, which also catches the probe answering "could not establish" — it reports
+   `None` for that and for "no rights" alike, so both fail closed. A narrowed grant is written, not
+   refused (refusing would block an administrator from giving a colleague exactly the access they
+   themselves have), and the response says so with `narrowed: true`.
+2. ✅ **CLOSED — owner 2026-09-16: not a use case; do not police it.** A Write-holder may remove any
+   share on a record, the creating attorney's included. No floor was added and none of the three
+   candidates was implemented. The behaviour stands as built: an unshare needs Write on the record and
+   nothing more.
 3. **Sharing with an external licensed system user is refused** (`user_not_internal`). An external person
    is expected to arrive through a contact grant, which carries an expiry and reminders. If the product
    intends to allow a licensed external system user to be shared with directly, this rule needs to change.
-4. **Before merge: confirm against real Dataverse with a DOWNGRADE, not a create.** Rewritten after the
-   Step 9.5 review, which caught that the check as first scoped could not detect the failure the design
-   hinges on. A create-and-read exercises `GrantAccess` on a principal with no share — the one case
-   Microsoft Learn effectively covers. The load-bearing assumption is that **`ModifyAccess` REPLACES**.
-   If it is additive instead, a downgrade stores the union: the read-back refuses with
-   `write_not_confirmed` — loud on the wire — while the user silently KEEPS Write and Delete, and nothing
-   rolls back. The operator is told "could not be confirmed", not "this user still has Full Access".
+   **Still open — not yet ruled on.**
+4. **Before merge: confirm against real Dataverse with a DOWNGRADE, not a create.** This is a
+   verification step this task owns, not a decision for the owner. Rewritten after the Step 9.5 review,
+   which caught that the check as first scoped could not detect the failure the design hinges on. A
+   create-and-read exercises `GrantAccess` on a principal with no share — the one case Microsoft Learn
+   effectively covers. The load-bearing assumption is that **`ModifyAccess` REPLACES**. If it is additive
+   instead, a downgrade stores the union: the read-back refuses with `write_not_confirmed` — loud on the
+   wire — while the user silently KEEPS Write and Delete, and nothing rolls back. The operator is told
+   "could not be confirmed", not "this user still has Full Access".
    So the check is: seed Full Access on a scratch record, call `share-user` at View Only, then read
    `accessrightsmask` directly and assert **1**. Worth adding in the same pass: `RevokeAccess` for a
    principal holding no share, and `ModifyAccess` for a principal holding no share — both are modelled
    as throwing, and the endpoints are built on that reading.
+   **Owner 2026-09-16, on the semantics:** *"if permissions are removed then they should be removed"* —
+   which is exactly what the code enforces. A level change REPLACES the mask rather than adding to it,
+   and the read-back refuses to report success unless Dataverse stored precisely that. The live check
+   exists to prove Dataverse agrees; nothing about the intended behaviour is in question.
 5. **No rate-limiting policy on this admin surface** (§7.2 W2). The review priced the amplification: a
    DENIED request still costs an OBO exchange, a `WhoAmI`, and up to three `RetrievePrincipalAccess`
    calls with 400 ms + 1200 ms of built-in retry — roughly five Dataverse calls and 1.6 s of held request

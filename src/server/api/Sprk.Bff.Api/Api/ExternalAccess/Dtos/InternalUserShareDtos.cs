@@ -23,19 +23,30 @@ public record ShareRecordWithUserRequest(
     Guid? SystemUserId,
     ExternalAccessLevel? AccessLevel);
 
-/// <summary>Response for a share confirmed at the requested level.</summary>
+/// <summary>Response for a share whose stored rights were confirmed.</summary>
 /// <param name="SystemUserId">The person the record is shared with.</param>
-/// <param name="AccessLevel">The level the share is now at.</param>
+/// <param name="AccessLevel">
+/// The level whose rights are EXACTLY <paramref name="AccessRightsMask"/>, or <c>null</c> when the stored rights match
+/// no level — which is possible when the caller's own rights narrowed the grant (see <paramref name="Narrowed"/>).
+/// Same rule, and same meaning, as in the share list.
+/// </param>
 /// <param name="AccessRightsMask">The rights mask Dataverse stored, read back after the write.</param>
 /// <param name="Outcome">
-/// <c>created</c> (the user held no share), <c>updated</c> (the level changed) or <c>unchanged</c> (the user already
-/// held exactly this level; nothing was written).
+/// <c>created</c> (the user held no share), <c>updated</c> (the rights changed) or <c>unchanged</c> (the user already
+/// held exactly these rights; nothing was written).
+/// </param>
+/// <param name="Narrowed">
+/// <c>true</c> when the caller's own rights on the record were narrower than the level they asked for, so the share
+/// carries the INTERSECTION — you may grant only what you hold (owner decision 2026-09-16). The requested level is
+/// the client's own input, so it is not echoed back; compare it with <paramref name="AccessLevel"/> to show the user
+/// what they actually granted.
 /// </param>
 public record ShareRecordWithUserResponse(
     Guid SystemUserId,
-    ExternalAccessLevel AccessLevel,
+    ExternalAccessLevel? AccessLevel,
     int AccessRightsMask,
-    string Outcome);
+    string Outcome,
+    bool Narrowed);
 
 /// <summary>Request body for <c>POST /api/v1/external-access/unshare-user</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
