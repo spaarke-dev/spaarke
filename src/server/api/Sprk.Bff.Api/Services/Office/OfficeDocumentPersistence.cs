@@ -29,6 +29,16 @@ public class OfficeDocumentPersistence
     internal const string CanonicalHashAttribute = "sprk_canonicalhash";
     internal const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
+    /// <summary>
+    /// Task 020 (FR-06): <c>sprk_documentname</c> is NVARCHAR(850). Bounded HERE — at the boundary where the
+    /// user-facing name is about to become <see cref="CreateDocumentRequest.Name"/> — rather than an ad-hoc
+    /// per-caller cap elsewhere. Contrast <c>CommunicationService.TruncateTo(name, 200)</c>, which truncates
+    /// this SAME column to a narrower, wrong limit purely for its own (Email) callers; that pattern is
+    /// deliberately NOT reused here. A name over 850 characters is bounded, never thrown as an unhandled
+    /// Dataverse length error (the save still succeeds).
+    /// </summary>
+    internal const int DocumentNameMaxLength = 850;
+
     private readonly IDocumentDataverseService _documentService;
     private readonly IProcessingJobService _jobService;
     private readonly ContentDedupDetector _dedupDetector;
@@ -190,16 +200,27 @@ public class OfficeDocumentPersistence
             canonicalHash = dedup.CanonicalHash;
         }
 
+        // Task 020 (FR-06): bound to the sprk_documentname column width. `documentName` here is always
+        // non-empty by the time it reaches this method (Email/Document set it explicitly; Attachment falls
+        // back to `fileName` in OfficeService) — this only ever shortens an over-length value.
+        var boundedDocumentName = documentName.Length <= DocumentNameMaxLength
+            ? documentName
+            : documentName[..DocumentNameMaxLength];
+
         // Create base document record
         var createRequest = new CreateDocumentRequest
         {
-            Name = documentName, // task 046 (b): the readable name; only the stored file (sprk_filename) carries a suffix
+            Name = boundedDocumentName, // task 046 (b) / 020: the readable name; only the stored file (sprk_filename) carries a suffix
             ContainerId = driveId,
             Description = request.ContentType switch
             {
                 SaveContentType.Email => request.Email?.Subject,
                 SaveContentType.Attachment => $"Attachment: {request.Attachment?.FileName}",
-                SaveContentType.Document => request.Document?.Title ?? request.Document?.FileName,
+                // Task 020 (FR-06): Document no longer duplicates the name into Description — that was the
+                // other half of the inverted mapping this task closes (sprk_documentname now correctly holds
+                // it, per Name above). Matches the 2026-09-12 owner decision that Office saves send no
+                // free-text description for documents (FR-07 "Description" -> "Profile").
+                SaveContentType.Document => null,
                 _ => null
             }
         };
