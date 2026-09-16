@@ -104,7 +104,21 @@ public static class InternalShareEndpoints
     /// The columns the eligibility check reads. All are standard <c>systemuser</c> columns except
     /// <c>sprk_isexternal</c>, which <c>SystemUserIdentityResolver</c> already reads on the same table.
     /// </summary>
-    internal const string SystemUserSelect = "systemuserid,fullname,isdisabled,accessmode,applicationid,sprk_isexternal";
+    /// <remarks>
+    /// <c>fullname</c> is deliberately absent (Step 9.5 review): the share path never displays a name, and every
+    /// column named here is one more whose absence — or column-level security — would 400 the whole read.
+    /// </remarks>
+    internal const string SystemUserSelect = "systemuserid,isdisabled,accessmode,applicationid,sprk_isexternal";
+
+    /// <summary>
+    /// What the UNSHARE path reads: existence, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// Removing a share must not depend on a value it does not consult — least of all <c>sprk_isexternal</c>, a
+    /// custom column whose absence, or column-level security, would 400 the read and block the one operation that
+    /// has to keep working (Step 9.5 review finding 4).
+    /// </remarks>
+    internal const string SystemUserExistsSelect = "systemuserid";
 
     /// <summary>The columns the share list reads for names.</summary>
     internal const string SystemUserNameSelect = "systemuserid,fullname";
@@ -292,9 +306,9 @@ public static class InternalShareEndpoints
                 "mask {Previous}, the write asked for {Requested}, and the read-back found {Stored} (caller {CallerOid}).",
                 root.Type, root.Id, systemUserId, level, current, rights.AccessRightsMask,
                 stored?.ToString() ?? "nothing readable", callerOid);
-            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotConfirmedTitle,
-                WriteNotConfirmedReasonCode,
-                "The share could not be confirmed at the requested level. Reload the list to see what this user holds, then try again.");
+            return NotConfirmed(httpContext,
+                "The share could not be confirmed at the requested level. Reload the list to see what this user holds, then try again.",
+                stored);
         }
 
         var outcome = current == 0 ? OutcomeCreated : OutcomeUpdated;
@@ -335,12 +349,14 @@ public static class InternalShareEndpoints
 
         var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
 
-        // The user must exist — and nothing more. A share held by a user who has since been disabled, or reclassified
-        // as external, is exactly the kind that must stay removable.
-        SystemUserRow? user;
+        // The user must exist — and nothing more. A share held by a user who has since been disabled, or
+        // reclassified as external, is exactly the kind that must stay removable, so the eligibility rules are
+        // deliberately NOT applied here. The read selects ONE column for the same reason: removal must not be
+        // blocked by a value it does not consult (Step 9.5 review finding 4).
+        bool userExists;
         try
         {
-            user = await ReadSystemUserAsync(dataverseClient, systemUserId, ct);
+            userExists = await SystemUserExistsAsync(dataverseClient, systemUserId, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -351,7 +367,7 @@ public static class InternalShareEndpoints
                 ReadFailedReasonCode, "The user could not be looked up, so no share was removed. Try again.");
         }
 
-        if (user is null)
+        if (!userExists)
             return Refused(httpContext, StatusCodes.Status404NotFound, NotUnsharedTitle,
                 UserNotFoundReasonCode, "No user with this id exists.");
 
@@ -401,9 +417,9 @@ public static class InternalShareEndpoints
                 "[USER-SHARE] Removing {SystemUserId}'s share on {RootType} {RootId} was not confirmed: it held mask " +
                 "{Previous} and the read-back found {Remaining} (caller {CallerOid}).",
                 systemUserId, root.Type, root.Id, current, remaining?.ToString() ?? "nothing readable", callerOid);
-            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotConfirmedTitle,
-                WriteNotConfirmedReasonCode,
-                "Removing this user's share could not be confirmed. Reload the list to see whether they still have access, then try again.");
+            return NotConfirmed(httpContext,
+                "Removing this user's share could not be confirmed. Reload the list to see whether they still have access, then try again.",
+                remaining);
         }
 
         logger.LogInformation(
@@ -467,7 +483,10 @@ public static class InternalShareEndpoints
                 RecordShareLevels.LevelForMask(s.Mask),
                 s.ModifiedOn))
             .OrderBy(s => s.FullName is null)
-            .ThenBy(s => s.FullName, StringComparer.CurrentCultureIgnoreCase)
+            // Ordinal, not CurrentCulture (Step 9.5 review finding 11): a server-side order must not depend on the
+            // host's culture configuration, or one record lists its users in different orders across hosts — or
+            // after a config change — with no test able to see it.
+            .ThenBy(s => s.FullName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(s => s.SystemUserId)
             .ToList();
 
@@ -515,6 +534,29 @@ public static class InternalShareEndpoints
 
         // Compared as well as filtered on: a row for any other user is not an answer about this one.
         return rows.FirstOrDefault(r => r.Id == systemUserId);
+    }
+
+    /// <summary>
+    /// Whether a system user with this id exists — the ONLY thing the unshare path needs to know about them.
+    /// Exceptions propagate.
+    /// </summary>
+    /// <remarks>
+    /// A separate read from <see cref="ReadSystemUserAsync"/>, selecting one column, so that removing a share cannot
+    /// be blocked by a value it does not consult (Step 9.5 review finding 4). <c>sprk_isexternal</c> is a CUSTOM
+    /// column: its absence in an environment, or column-level security on it, would 400 the eligibility read and turn
+    /// "remove this person's access" into a 500 for a share that plainly exists.
+    /// </remarks>
+    private static async Task<bool> SystemUserExistsAsync(
+        DataverseWebApiClient dataverseClient, Guid systemUserId, CancellationToken ct)
+    {
+        var rows = await dataverseClient.QueryAsync<SystemUserRow>(
+            SystemUserEntitySet,
+            filter: $"systemuserid eq {systemUserId}",
+            select: SystemUserExistsSelect,
+            top: 1,
+            cancellationToken: ct);
+
+        return rows.Any(r => r.Id == systemUserId);
     }
 
     /// <summary>
@@ -588,6 +630,33 @@ public static class InternalShareEndpoints
                 ["traceId"] = httpContext.TraceIdentifier,
                 ["reasonCode"] = reasonCode,
             });
+
+    /// <summary>
+    /// The refusal for a write whose result could not be confirmed.
+    /// </summary>
+    /// <remarks>
+    /// Carries the mask the read-back actually OBSERVED, when it was readable, so a client can tell "nothing
+    /// happened" from "something else is stored" without a second round trip (Step 9.5 review finding 18). The
+    /// extension is absent when the read-back itself failed — which is its own answer, and not one to fake a number
+    /// for.
+    /// </remarks>
+    private static IResult NotConfirmed(HttpContext httpContext, string detail, int? observedAccessRightsMask)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["traceId"] = httpContext.TraceIdentifier,
+            ["reasonCode"] = WriteNotConfirmedReasonCode,
+        };
+
+        if (observedAccessRightsMask is { } observed)
+            extensions["observedAccessRightsMask"] = observed;
+
+        return Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: NotConfirmedTitle,
+            detail: detail,
+            extensions: extensions);
+    }
 
     /// <summary>The <c>systemuser</c> columns these routes read.</summary>
     internal sealed class SystemUserRow

@@ -4,7 +4,7 @@
     <title>BFF endpoints: internal system-user share grant / revoke / list (FR-29 server half)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 060 (POA seam) + 008 (FR-07 delegation) merged. Delegation is a HARD prerequisite: these endpoints must not exist without it.</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New authorization-granting endpoints (.cs, auth): the write path by which internal users gain record access.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,7 +95,19 @@
     <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported; route decision documented.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-29; design.md §6. Consumed by task 065. FR-30's read/provenance surface is task 064 — do not build a partial provenance read here.</notes>
+  <notes>spec.md FR-29; design.md §6. Consumed by task 065. FR-30's read/provenance surface is task 064 — do not build a partial provenance read here.
+
+COMPLETED 2026-09-15 (session 13). Commits: `d47b586eb` (implementation + tests), `5e84c6b9f` (record, register, task 108), `1d016f1ed` (publish + Step 9.5 records), plus the Step 9.5 fix commit. Full record: notes/task-063-internal-user-share-endpoints.md.
+- Routes: POST /share-user, POST /unshare-user, GET /user-shares on the EXISTING /api/v1/external-access group — the route-placement decision this task asked for — so all three inherit the FR-07 Write-on-the-record gate. DelegationRuleFilter gained one target-resolution case per request type, including the [AsParameters]-bound GET.
+- Levels (owner 2026-09-15, "No re-share at any level"): View Only = Read; Collaborate = Read/Write/Append/AppendTo; Full Access = Collaborate + Delete. No level carries Share or Assign. `Services/Access/RecordShareLevels.cs` is the ONE table, and ProvisionProjectEndpoint's creator and colleague constants now derive from it.
+- Write path: `ModifyAccessAsync` (new) for an existing share — Microsoft Learn documents it as REPLACING the mask — and GrantAccess only when there is no direct share, because GrantAccess on an existing share is undocumented and reported additive (a downgrade through it could silently keep Write and Delete). Every write is confirmed by reading the stored mask back. An unshare with no share answers removed=false without calling RevokeAccess, whose no-share behaviour is also undocumented.
+- `GetPrincipalAccessOrThrowAsync` (new) answers completely or throws. The soft read's empty list cannot distinguish "no share" from "the read failed"; deciding a write from it would grant over an existing share and report "nothing to remove" for one that exists.
+- Premise corrections (16 and 17 for this project): the POA seam had moved to Services/Access, not Services/Communication/Access; and the "060 seam mapping" from level to AccessMask did not exist — the evaluator's ExternalAccessLevels.ToAccessRights uses Spaarke's own bit layout and includes Create, so reusing it would have granted the wrong rights.
+- The escalation trigger did not fire: DelegationTarget(EntitySet, RecordId) is generic, and the three root types resolve through the same explicit-root helper /set-record-share-expiry uses.
+- Acceptance criteria all met. Verification: perturbations 10/10; affected suites 155/155; ArchTests 323/323; full suite green (BFF assembly 12,463 / 0 / 58); publish 45.45 MB vs a freshly measured master 45.35 MB with 214 files on each side (≈ +0.02 MB for this task); no vulnerable packages.
+- Step 9.5: adr-check 0 violations / 8 warnings (dispositions in notes §7.2); code-review approve-with-changes, 22 findings — 11 fixed in the follow-up commit, 3 escalated, the rest accepted with stated reasons (notes §7.3).
+- 🔔 OPEN FOR THE OWNER (notes §9): (1) a caller with Write can confer Delete, including on themselves — the POA write is app-only, so Dataverse's "a sharer may only pass on rights they hold" rule is not enforced; (2) any Write-holder can revoke the CREATING attorney's share, which on a share-only secure project locks them out with no recovery path (found by the review); (3) before merge, the live Dataverse check must exercise a DOWNGRADE rather than a create — a create confirms nothing about ModifyAccess, the assumption the design rests on.
+- Side findings registered: ISS-017 / #994 (PlaybookSharingService reads Assign as Share — handed off, AI-owned) and ISS-018 / #995 (unsecure-project reports a failed share read as "0 revoked" — stays in the project as task 108).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

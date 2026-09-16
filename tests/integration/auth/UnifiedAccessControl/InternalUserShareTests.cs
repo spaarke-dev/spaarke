@@ -244,7 +244,9 @@ public class InternalUserShareTests
     [Fact]
     public void ProvisioningShares_AreBuiltFromTheCollaborateLevel()
     {
-        ProvisionProjectEndpoint.CollaboratorAccessRights.Should().Be(RecordShareLevels.CollaborateRights);
+        ProvisionProjectEndpoint.CollaboratorAccessRights.Should().Be(CollaborateCsv,
+            "asserted against the LITERAL, not against RecordShareLevels.CollaborateRights: comparing a constant " +
+            "with the constant it is now DEFINED as can only catch re-literalization, and would move with any drift");
         ProvisionProjectEndpoint.CreatorAccessRights.Should().Be(CollaborateCsv + ",ShareAccess",
             "the creator's share is unchanged by task 063: Collaborate plus the right to re-share");
     }
@@ -402,6 +404,9 @@ public class InternalUserShareTests
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.WriteNotConfirmedReasonCode));
         _invalidated.Should().ContainSingle();
+        result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Extensions
+            .Should().Contain(new KeyValuePair<string, object?>("observedAccessRightsMask", 0),
+                "the refusal reports the mask actually stored, so the client need not round-trip to find out");
     }
 
     [Fact]
@@ -416,7 +421,7 @@ public class InternalUserShareTests
     }
 
     [Fact]
-    public async Task Share_WhenTheReadBackFails_IsNotConfirmed()
+    public async Task Share_WhenTheReadBackFails_IsNotConfirmedAndReportsNoObservedMask()
     {
         _shares.FailReadBackAfterWrite = true;
 
@@ -424,6 +429,9 @@ public class InternalUserShareTests
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.WriteNotConfirmedReasonCode));
         _shares.Writes.Should().Equal($"GrantAccess {CollaborateCsv}");
+        result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Extensions
+            .Should().NotContainKey("observedAccessRightsMask",
+                "the read-back itself failed, so there is no observed mask — and none is invented");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -584,6 +592,70 @@ public class InternalUserShareTests
             i.Tenant == TenantId
             && i.Resource == ImpersonatedRootSetSource.CacheResource
             && i.Id == $"{UserId:D}:{table}");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The two level tables share three names — and must keep disagreeing deliberately
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="RecordShareLevels"/> (a POA share) and <see cref="ExternalAccessLevels.ToAccessRights"/> (an
+    /// external contact's grant) use the SAME three level names for DIFFERENT rights: internal Collaborate carries
+    /// Append and AppendTo and no Create; external Collaborate carries Create and no Append. That divergence is
+    /// deliberate, but one picker renders one label for both planes, so this pins what is meant to hold instead of
+    /// leaving it to drift — a POA level never carries Create, and both tables nest.
+    /// </summary>
+    [Fact]
+    public void TheTwoLevelTables_DisagreeDeliberately_AndBothNest()
+    {
+        const int createBit = 32;
+        var levels = new[] { ExternalAccessLevel.ViewOnly, ExternalAccessLevel.Collaborate, ExternalAccessLevel.FullAccess };
+
+        var poa = levels.Select(level =>
+        {
+            RecordShareLevels.TryGetRights(level, out var rights).Should().BeTrue();
+            return rights.AccessRightsMask;
+        }).ToList();
+
+        poa.Should().OnlyContain(mask => (mask & createBit) == 0,
+            "Create means nothing on a share of an existing record — the reason the evaluator's table cannot be reused here");
+        (poa[0] & poa[1]).Should().Be(poa[0], "View Only ⊂ Collaborate");
+        (poa[1] & poa[2]).Should().Be(poa[1],
+            "Collaborate ⊂ Full Access — the nesting the concurrent-create path depends on");
+
+        var evaluator = levels.Select(level => ExternalAccessLevels.ToAccessRights(level)).ToList();
+
+        (evaluator[0] & evaluator[1]).Should().Be(evaluator[0], "the evaluator's table nests too");
+        (evaluator[1] & evaluator[2]).Should().Be(evaluator[1]);
+        evaluator[1].Should().HaveFlag(AccessRights.Create,
+            "the evaluator's Collaborate DOES carry Create; if that ever changes the two tables have converged and " +
+            "this test — and the reason RecordShareLevels exists — should be revisited");
+    }
+
+    /// <summary>
+    /// The list reads names in batches of <see cref="InternalShareEndpoints.NameBatchSize"/>. With one more share
+    /// than a batch, the chunking, the per-batch filter and the per-batch <c>$top</c> all have to line up — and if
+    /// they do not, a share silently loses its name, which the list is designed to tolerate, so nothing else here
+    /// would notice.
+    /// </summary>
+    [Fact]
+    public async Task List_WithMoreSharesThanOneNameBatch_NamesEveryShare()
+    {
+        var ids = Enumerable.Range(1, InternalShareEndpoints.NameBatchSize + 1)
+            .Select(i => Guid.Parse($"{i:D8}-0000-0000-0000-000000000000"))
+            .ToList();
+
+        foreach (var (id, index) in ids.Select((id, index) => (id, index)))
+        {
+            _users.SeedPerson(id, $"User {index:D3}");
+            _shares.Seed(MatterTable, MatterId, User(id), CollaborateMask);
+        }
+
+        var shares = OkBody<RecordUserSharesResponse>(await List()).Shares;
+
+        shares.Should().HaveCount(ids.Count);
+        shares.Should().OnlyContain(s => s.FullName != null, "every share's name must survive the batching");
+        _users.Queries.Should().Be(2, "{0} users read in batches of {1}", ids.Count, InternalShareEndpoints.NameBatchSize);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

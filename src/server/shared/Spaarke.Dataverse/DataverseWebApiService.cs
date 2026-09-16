@@ -1318,11 +1318,25 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             if (!TryReadInt(row, "accessrightsmask", out var mask) && strict)
                 throw ShareReadFailed(entityLogicalName, recordId, $"the share of {principalId} has no readable rights mask");
 
-            var modifiedOn = row.TryGetValue("modifiedon", out var modifiedElement)
+            // modifiedon is in the $select, so a value that cannot be read means an anomalous response. The soft
+            // read keeps its long-standing fallback — its callers only display the value. The strict read refuses:
+            // "incomplete counts as failed" must not carry an exception that reports a share as changed just now.
+            DateTimeOffset modifiedOn;
+            if (row.TryGetValue("modifiedon", out var modifiedElement)
                 && modifiedElement.ValueKind == JsonValueKind.String
-                && DateTimeOffset.TryParse(modifiedElement.GetString(), out var parsedModified)
-                    ? parsedModified
-                    : DateTimeOffset.UtcNow;
+                && DateTimeOffset.TryParse(modifiedElement.GetString(), out var parsedModified))
+            {
+                modifiedOn = parsedModified;
+            }
+            else if (strict)
+            {
+                throw ShareReadFailed(
+                    entityLogicalName, recordId, $"the share of {principalId} has no readable modifiedon");
+            }
+            else
+            {
+                modifiedOn = DateTimeOffset.UtcNow;
+            }
 
             results.Add(new DataversePrincipalAccess(
                 new DataversePrincipalRef(kind.Value, principalId), mask, modifiedOn));

@@ -19,9 +19,16 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// against an in-memory share table (<see cref="FakeRecordShareTable"/>) that throws when told to. These tests pin that
 /// the REAL read throws in each case the table stands in for — a refused read, an unreadable table code, a second page,
 /// an unreadable row — while the soft read keeps its long-standing empty answer.</para>
-/// <para>A scripted handler answers each request and records it, body included. It is a hand-written test double, not
-/// <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 ban B1); a static credential stands in for the token through the
-/// service's protected test constructor.</para>
+/// <para><b>ADR-038 ban B1 — a path-A exception (root CLAUDE.md §6.5), stated rather than argued around.</b> B1 bans
+/// <c>Mock&lt;HttpMessageHandler&gt;</c> because a transport-level double encodes the wire format and breaks on
+/// refactors. <see cref="ScriptedHandler"/> is hand-written rather than a mock, but it has the banned PROPERTY: it
+/// asserts the exact JSON body. The exception is narrow and deliberate on both halves. The POA payload shape IS the
+/// contract this task has to get right — a wrong <c>@odata.id</c> or a renamed <c>AccessMask</c> fails at runtime and
+/// nothing offline would notice. And the strict read's refusal branches (a non-success status, <c>@odata.nextLink</c>,
+/// an unreadable row) are unreachable through <c>WebApplicationFactory</c>, because nothing offline can make
+/// Dataverse answer those shapes. Task 104 set the same precedent in this folder
+/// (<c>DataverseWebApiServiceImpersonationTests</c>) for the same reason. A static credential stands in for the token
+/// through the service's protected test constructor.</para>
 /// </remarks>
 public class DataverseRecordShareWireTests
 {
@@ -148,6 +155,25 @@ public class DataverseRecordShareWireTests
         var strict = () => new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
 
         await strict.Should().ThrowAsync<InvalidOperationException>().WithMessage("*no readable principal*");
+    }
+
+    /// <summary>
+    /// <c>modifiedon</c> is in the <c>$select</c>, so a value that cannot be read means an anomalous response. The
+    /// strict read refuses it for the same reason it refuses an unreadable mask: "incomplete counts as failed" must
+    /// not carry an exception that quietly reports a share as changed just now. The soft read keeps its fallback,
+    /// because its callers only display the value (Step 9.5 review finding 12).
+    /// </summary>
+    [Fact]
+    public async Task GetPrincipalAccessOrThrowAsync_WhenARowHasNoReadableModifiedOn_Throws_WhileTheSoftReadFallsBack()
+    {
+        var body = $$"""{"value":[{"principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":23}]}""";
+
+        var strict = () => new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
+
+        await strict.Should().ThrowAsync<InvalidOperationException>().WithMessage("*modifiedon*");
+        (await new OfflineService(SharesHandler(body)).GetPrincipalAccessAsync("sprk_matter", MatterId))
+            .Should().ContainSingle().Which.AccessRightsMask.Should().Be(23,
+                "the soft read still answers, with its fallback timestamp");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

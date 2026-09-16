@@ -30,6 +30,13 @@ internal readonly record struct RecordShareRights(string AccessRightsCsv, int Ac
 /// <para><b>Not <see cref="ExternalAccessLevels.ToAccessRights"/>.</b> That table decides what an EXTERNAL contact's
 /// grant lets the evaluator admit, and it includes Create, which means nothing on a share of an existing record.
 /// The two tables use the same three level names to answer different questions.</para>
+///
+/// <para><b>The levels NEST, and that is load-bearing</b> (Step 9.5 review, task 063): View Only ⊂ Collaborate ⊂
+/// Full Access. The share endpoint's "no direct share → GrantAccess" branch is race-safe only because of it — two
+/// concurrent creates union to the wider REQUESTED level, so neither caller is answered success over rights wider
+/// than it asked for. A future NON-nested level (say a "Delete only") breaks that: two racing creates would union
+/// to a mask wider than either request, both callers would get 500 "not confirmed", and the record would be left
+/// elevated with no response claiming it. Add such a level only with the concurrency path revisited.</para>
 /// </remarks>
 internal static class RecordShareLevels
 {

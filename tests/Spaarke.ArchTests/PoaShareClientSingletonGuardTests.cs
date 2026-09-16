@@ -92,22 +92,14 @@ public class PoaShareClientSingletonGuardTests
             StringComparison.Ordinal);
     }
 
-    [Fact(DisplayName = "Task 063: the POA seam exposes ModifyAccess and the strict read the share endpoints decide from")]
-    public void TheSeamExposesModifyAndTheStrictRead()
-    {
-        var text = File.ReadAllText(Path.Combine(
-            SourceScan.RepoRoot,
-            "src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs"));
-
-        Assert.True(
-            text.Contains("Task ModifyAccessAsync(", StringComparison.Ordinal),
-            "without ModifyAccess a level change goes through GrantAccess, which is not documented to replace "
-            + "an existing share's rights — a downgrade could silently keep Write and Delete");
-        Assert.True(
-            text.Contains("Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(", StringComparison.Ordinal),
-            "the soft read answers an empty list when it fails; a write decided from it cannot tell 'no share' "
-            + "from 'the read failed'");
-    }
+    // Task 063 deliberately adds NO rule asserting that the seam DECLARES ModifyAccessAsync or
+    // GetPrincipalAccessOrThrowAsync. The compiler already enforces both — every implementation and every call site
+    // fails to build without them — and a text-scan rule asserting signatures the same commit added can never fail,
+    // which is the shape tests/CLAUDE.md warns about ("a detector nobody has seen fail is a detector nobody knows
+    // works"); it would also false-red the moment someone legally wraps a signature across lines. The invariant
+    // worth guarding is the one above: exactly ONE file builds POA payloads, ModifyAccess included — and that rule
+    // has a verified negative control (task 063 perturbation P10 seeded a second "ModifyAccess" POST and watched it
+    // go red).
 
     [Fact(DisplayName = "Task 060: PlaybookSharingService holds no private POA client")]
     public void PlaybookSharingServiceDelegatesRatherThanDuplicating()

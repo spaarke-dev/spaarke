@@ -133,6 +133,13 @@ assert them as literals rather than deriving them from the table under test.
   `.user_not_found` (404), `.user_disabled` (422), `.user_not_a_person` (422), `.user_not_internal` (422),
   `.read_failed` (500 — nothing was written), `.write_not_confirmed` (500 — a write was sent and its
   result could not be confirmed; reload before retrying).
+  ⚠️ `record_unresolved` is **defence-in-depth and unreachable through the route** (Step 9.5 review
+  finding 13): the group filter resolves the same root through the same helper and denies first with
+  403 `…delegation_target_unresolved`. Task 065 should build no branch for the 400.
+- **`write_not_confirmed` also carries `observedAccessRightsMask`** when the read-back was readable — the
+  mask Dataverse actually holds — so the client can tell "nothing happened" from "something else is
+  stored" without a second round trip (Step 9.5 review finding 18). The extension is **absent** when the
+  read-back itself failed, which is its own answer and not one to fake a number for.
 - **Who can receive a share**: an existing, enabled person (access mode Read-Write, Administrative or
   Read; no application id) whose `sprk_isexternal` flag confirms them internal. **Unsharing checks only
   that the user exists** — a share must stay removable after its holder is disabled or reclassified.
@@ -247,6 +254,25 @@ Triage, blockers first:
 | 22 | The contract fixture's Dataverse stub ignores entity set and filter | **Accept** — that discrimination is owned by the auth suite's strict double |
 
 _The code, test and doc fixes above are applied in a follow-up commit; §7.4 records the result._
+
+### 7.4 Verification after the Step 9.5 fixes
+
+- **Full suite** at `d47b586eb`, before the fixes: **green, exit 0**. The BFF assembly — the large one —
+  reported **12,463 passed / 0 failed / 58 skipped** in 19 m 23 s. The other assemblies' summaries
+  scrolled past the captured tail; `dotnet test` exits non-zero if any assembly fails, so exit 0 is the
+  solution-wide verdict.
+- **After the fixes**: the new and affected suites **155 / 155** — 152 before, plus the three tests the
+  fixes added (the cross-table level guard, the 51-share name batching, and the unreadable-`modifiedon`
+  wire case) — and **ArchTests 323 / 323**, run in FULL rather than filtered, so the route census (119),
+  the POA-client guard with its deleted rule, and the drift guard's scan of the new task-108 POML are all
+  covered.
+- Two of the fixes changed behaviour, so each got a test rather than a note: the strict read now refuses
+  an unreadable `modifiedon` (the soft read keeps its fallback, pinned in the same test), and
+  `write_not_confirmed` now carries `observedAccessRightsMask` when the read-back was readable and omits
+  it when it was not.
+- The 11th fix is a deletion: the ArchTest rule asserting that the seam declares the two new members. The
+  compiler enforces that, and a text-scan rule asserting signatures the same commit added can never fail
+  — the shape `tests/CLAUDE.md` warns about. Its reasoning is left in the file where a reader will look.
 
 ## 8. Premises the task file got wrong (16 and 17 for this project, found at Step 0)
 
