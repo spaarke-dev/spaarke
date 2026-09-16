@@ -1,7 +1,7 @@
 # Task 063 — internal system-user share endpoints (FR-29 server half)
 
-> **Status**: implementation committed `d47b586eb` (2026-09-15, session 13). Step 9.5 and the final
-> verification numbers are recorded in §7 below.
+> **Status**: implemented `d47b586eb`, Step 9.5 fixes `852e96eb9`, **amended `c28c1d0ac`** on the owner's
+> answers of 2026-09-16 (the intersection rule — §7.5 and §9.1). Verification figures in §7.
 > **Consumed by**: task 065 (the Manage Access "+ User" picker). §5 is the contract it codes against.
 > **Sibling**: task 064 owns the FR-30 read/provenance surface. This task deliberately builds no part of it.
 
@@ -13,7 +13,7 @@ Three routes on the existing `/api/v1/external-access` management group:
 
 | Route | Body / query | Answer |
 |---|---|---|
-| `POST /share-user` | `{recordType, recordId, systemUserId, accessLevel}` | `{systemUserId, accessLevel, accessRightsMask, outcome}` |
+| `POST /share-user` | `{recordType, recordId, systemUserId, accessLevel}` | `{systemUserId, accessLevel, accessRightsMask, outcome, narrowed}` |
 | `POST /unshare-user` | `{recordType, recordId, systemUserId}` | `{systemUserId, removed}` |
 | `GET /user-shares` | `?recordType=&recordId=` | `{shares: [{systemUserId, fullName, accessRightsMask, accessLevel, modifiedOn}]}` |
 
@@ -302,6 +302,13 @@ keyed on the RIGHTS, not on who the target is.
 **Verification.** Affected suites **164 / 164** (155 + 9: Full Access narrowed for a Collaborate-only
 caller, the level-less intersection, the unestablishable-rights refusal, a five-case theory pinning the
 vocabulary pairing right by right, and the level as a ceiling). ArchTests **323 / 323**.
+
+**Full suite on the FINAL tree**: green, exit 0 — the BFF assembly **12,475 passed / 0 failed / 58
+skipped** (12,533 total, 14 m 6 s) and the SPE integration assembly **403 / 0 / 25**. Other assemblies'
+summaries scrolled past the captured tail; `dotnet test` exits non-zero if any assembly fails, so exit 0
+is the solution-wide verdict. The BFF count is **12 higher** than the 12,463 measured at `d47b586eb`,
+which is exactly the twelve tests added since — three with the Step 9.5 fixes and nine with this
+amendment. That arithmetic is the check that the run covered the tree it was supposed to.
 
 **Perturbations: 12 / 12 caught.** The ten earlier ones re-anchored against the rewritten handler — five
 of their anchors had moved, which would have reported INVALID rather than a false pass — plus **P11**
