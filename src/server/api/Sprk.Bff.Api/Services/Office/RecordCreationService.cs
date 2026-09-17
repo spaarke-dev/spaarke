@@ -272,7 +272,7 @@ public sealed class RecordCreationService
             }
         }
 
-        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, warnings, ct).ConfigureAwait(false);
+        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "matter", warnings, ct).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(request.SourceEntityLogicalName)
             && request.SourceRecordId is { } sourceRecordId
@@ -359,7 +359,7 @@ public sealed class RecordCreationService
             entity[ProjectDescriptionAttribute] = request.Description.Trim();
         }
 
-        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, warnings, ct).ConfigureAwait(false);
+        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "project", warnings, ct).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(request.SourceEntityLogicalName)
             && request.SourceRecordId is { } sourceRecordId
@@ -502,9 +502,11 @@ public sealed class RecordCreationService
     /// with <c>ownerid</c> = the caller, is this same business unit. A failed read therefore degrades to that
     /// fallback rather than blocking the create.
     /// </remarks>
+    /// <param name="entityLabel">Lower-case noun for the user-facing warning ("matter" / "project").</param>
     private async Task ApplyBusinessUnitDefaultsAsync(
         Entity entity,
         Guid ownerId,
+        string entityLabel,
         List<string> warnings,
         CancellationToken ct)
     {
@@ -546,12 +548,12 @@ public sealed class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[RECORD-CREATE] Business-unit defaults for owner {OwnerId} could not be read; the matter is created "
-                + "without them and index routing falls back to its owning business unit.",
-                ownerId);
+                "[RECORD-CREATE] Business-unit defaults for owner {OwnerId} could not be read; the {EntityLabel} is "
+                + "created without them and index routing falls back to its owning business unit.",
+                ownerId, entityLabel);
             warnings.Add(
                 "Business-unit search defaults could not be read, so they were not applied. Document indexing for "
-                + "this matter falls back to its business unit's settings.");
+                + $"this {entityLabel} falls back to its business unit's settings.");
         }
     }
 

@@ -118,9 +118,12 @@ internal static class CreateTimeFieldMapping
 
         if (protectedAttributes.Contains(targetField))
         {
+            // Deliberately does NOT claim the server sets the field: it does not set either number (both are left to
+            // the planned on-create numbering component), so "is set by the server when a record is created" was
+            // false for precisely the load-bearing attribute. "Managed by" is true of all three protected targets.
             warnings.Add(
-                $"Field-mapping rule targeting \"{targetField}\" was skipped: that field is set by the server when a "
-                + "record is created and cannot be changed by a field-mapping rule.");
+                $"Field-mapping rule targeting \"{targetField}\" was skipped: that field is managed by the server and "
+                + "cannot be set by a field-mapping rule.");
             return;
         }
 

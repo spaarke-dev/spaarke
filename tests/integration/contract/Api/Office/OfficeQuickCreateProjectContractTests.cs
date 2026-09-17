@@ -119,6 +119,10 @@ public class OfficeQuickCreateProjectContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created, "index-routing hints are never worth failing a create");
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().ContainSingle(w => w.Contains("Business-unit search defaults could not be read"));
+        // Pins the SECOND sentence too: ApplyBusinessUnitDefaultsAsync is shared with the Matter path, and its noun
+        // was hardcoded to "matter" until task 031's Step 9.5 review caught it leaking onto Project creates.
+        body.Warnings!.Single().Should().Contain("this project falls back")
+            .And.NotContain("matter", "the shared BU helper must not leak the Matter noun onto the Project path");
         created.Entity!.Contains("sprk_searchindexname").Should().BeFalse();
         created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
     }

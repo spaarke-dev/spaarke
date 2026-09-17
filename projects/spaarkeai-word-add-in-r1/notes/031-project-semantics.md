@@ -152,3 +152,30 @@ warns and still creates.
 `030-creation-service-decisions.md` §9 lists them; the ones that now also apply to Project: field-level security on
 the mapping source (app-only read after a record-level Read check), the caller's Create privilege not being probed,
 and Default-rule CLR typing. None is newly introduced by this task.
+
+## 8. Deliberate deviations from the POML's letter
+
+| POML says | Implemented | Why |
+|---|---|---|
+| Step 2 + AC1: write the note stating the *chosen numbering semantics*, and fire the escalation trigger if the evidence does not support one | Note written, but it RECORDS the owner's 2026-09-17 decision instead of choosing; trigger NOT fired | The `<owner-decisions>` block answers the question the trigger exists to ask. Firing it would re-ask a decided question. §2. |
+| Step 1 + `<tool name="dataverse-mcp">`: confirm the primary-name attribute against live metadata | Cited task 030's live verification of 2026-09-11 instead | The Dataverse MCP server was **down** in this session (connection timeout). Task 030 verified both entities in one call and recorded it. Stated as cited-not-re-measured rather than stalling. §1(a). |
+| `<relevant-files>` lists `IRecordCreationService.cs` as a file to modify | No interface exists or was created | Pre-existing ADR-010 path-C decision from task 030 (`030-creation-service-decisions.md` §8) — one implementation, no seam. Not re-litigated here. |
+| Step 5 + `<outputs>`: extend `OfficeQuickCreateContractTests.cs` with the Project cases | Created a NEW file, `OfficeQuickCreateProjectContractTests.cs`, reusing that file's `OfficeQuickCreateTestWebAppFactory` | AC7 requires task 030's Matter contract tests to pass **without modification**. Editing that file to add cases — or to extract shared helpers — would modify it. The new file keeps it byte-identical, at the cost of duplicating ~60 lines of arrangement helpers. |
+| Step 8: set this task's status to ✅ in `TASK-INDEX.md` | Not done | `TASK-INDEX.md`, `current-task.md`, the project `CLAUDE.md` and `ci-gated-suites.txt` are owned by the main session (dispatch boundary). Reported for the main session to apply. |
+
+## 9. Step 9.5 review dispositions
+
+Two independent reviewers (code-review + adr-check). **No Critical findings; adr-check returned ADR-clean.**
+
+| Finding | Disposition |
+|---|---|
+| 🔴 **`ApplyBusinessUnitDefaultsAsync` hardcoded the noun "matter"** in its warning and log strings, so a Project whose BU read failed told the user *"Document indexing for this **matter**…"* | **Fixed.** Added an `entityLabel` parameter, mirroring `KeepRequestedNameIfMappingBlankedIt`. The asymmetry — parameterising one shared helper and not the other — was the tell. The test only asserted the first sentence, so it missed it; the assertion now pins `"this project falls back"` and forbids `"matter"`. |
+| Stale OpenAPI `.WithDescription` on the route — still described Matter only and "does not assign a **matter** number" | **Fixed.** Now covers both entities, the load-bearing owner, and that NEITHER number is assigned (with the blank-primary-name consequence). Task 030's round-2 review fixed the same class of finding (W2). |
+| The protected-skip warning claimed the field "is set by the server when a record is created" | **Fixed** in `CreateTimeFieldMapping`. That was false for precisely the load-bearing attribute — nothing sets either number. Now "is managed by the server and cannot be set by a field-mapping rule", which is true of all three protected targets. |
+| `QuickCreateRequest.MatterTypeId` doc claimed an unknown id is "a 400" | **Fixed.** Contradicted shipped behaviour since task 030 round 2 (201 + warning). Also now states it is ignored for Project. |
+| Publish size not evidenced | **Fixed.** It had been measured but not written up; recorded in [`031-publish-size.md`](031-publish-size.md). |
+| POML deviation (new test file) not recorded | **Fixed** — §8 above. |
+| `CollectSourceColumns` reads source columns for rules whose protected target is then skipped; suggestion to filter them | **Accepted, not changed.** Task 030's Matter contract test asserts the exact column set *including* the number column, so changing it would modify a test AC7 requires to pass unmodified. Harmless (the caller holds Read on the source). |
+| `CreateMatterAsync` / `CreateProjectAsync` duplication (~40 lines) | **Accepted, not changed.** The two reviewers split on this; adr-check's reasoning wins: the duplication plus the per-entity protected sets is *what guarantees* Matter is behaviourally untouched. Collapsing them would put AC7 at risk for a cosmetic gain. Worth revisiting when a third entity arrives. |
+| `SaveFlow.tsx` swallows the 403 (`if (!res.ok) return null`), so the Project owner-unresolved message never reaches the user | **Out of scope; flagged.** Pre-existing shape from task 030, newly reachable for Project. Needs a client follow-up task, and is entangled with task 050 (`application/problem+json` header defect). Named here so it is not discovered in UAT. |
+| No direct test that the *displayed* name is what the semantics intend (AC3) | **Accepted.** Primary-name rendering is a Dataverse property that cannot be asserted at a mocked `IGenericEntityService` seam; `AssertNoProjectNumberSent` is the honest proxy. Stated rather than left looking covered. |
