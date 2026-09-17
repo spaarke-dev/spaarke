@@ -558,6 +558,20 @@ export class OutlookAdapter implements IHostAdapter {
 
   /**
    * @inheritdoc
+   *
+   * Outlook has no open document — this capability is Word-only (spaarkeai-word-add-in-r1 FR-02 /
+   * task 051), same reasoning as {@link getDocumentUrl}. Rejects with a typed
+   * `CAPABILITY_NOT_SUPPORTED` `HostAdapterError`, matching that method's convention.
+   */
+  async readDocumentStamp(): Promise<string | null> {
+    throw createHostAdapterError(
+      'CAPABILITY_NOT_SUPPORTED',
+      'Outlook has no open document. readDocumentStamp() is only supported in Word.'
+    );
+  }
+
+  /**
+   * @inheritdoc
    */
   getCapabilities(): HostCapabilities {
     const hasMailbox18 = this.isMailboxSupported('1.8');
@@ -575,6 +589,8 @@ export class OutlookAdapter implements IHostAdapter {
       canGetDocumentContent: false,
       // No open document in Outlook — FR-01 / task 013 is Word-only
       canGetDocumentUrl: false,
+      // No open document in Outlook — FR-02 client half / task 051 is Word-only
+      canReadDocumentStamp: false,
       // PDF conversion is server-side, so we can indicate support
       canSaveAsPdf: true,
       // EML saving requires Mailbox 1.8 for full attachment support

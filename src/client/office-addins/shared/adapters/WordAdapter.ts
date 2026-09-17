@@ -43,6 +43,75 @@ import type {
 const MIN_WORD_API_VERSION = '1.3';
 
 /**
+ * The FR-02 stamp contract (spaarkeai-word-add-in-r1 task 051, reading what task 014 writes).
+ * Mirrors `OfficeDocumentStamp.StampNamespace` / `.StampRootElement` / `.StampIdElement`
+ * (`src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentStamp.cs`). TypeScript cannot
+ * reference a C# constant, so this is a byte-for-byte VALUE mirror, not a shared reference — a
+ * silent mismatch here means `getByNamespaceAsync` simply never finds the part the server wrote,
+ * with no compiler or runtime signal. Re-verify against that file (or
+ * `projects/spaarkeai-word-add-in-r1/notes/014-xml-part-stamp-decisions.md` §13.3) before changing
+ * any of the three strings below.
+ */
+const STAMP_NAMESPACE = 'urn:spaarke:office:document-identity:1';
+const STAMP_ROOT_ELEMENT = 'documentIdentity';
+const STAMP_ID_ELEMENT = 'documentId';
+
+/**
+ * A bare, optionally-braced GUID's shape — what `Guid.ToString("D")` writes server-side, plus the
+ * braced form defensively (`cleanGuid`, applied by this method's caller per ADR-044, strips braces).
+ */
+const STAMP_GUID_SHAPE = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
+const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * Parse one custom XML part's raw XML text and return its stamp id, or `null` for anything that
+ * isn't exactly task 014's shape: a namespace/root mismatch (any other custom XML part — a
+ * bibliography, Google Docs metadata, SharePoint columns — 019 condition 2/3), malformed XML, a
+ * missing `documentId` child, or text that isn't GUID-shaped. Mirrors the server's
+ * `TryReadStampId` (`OfficeDocumentStamp.cs`) — same rejection list.
+ *
+ * Returns a lowercase, brace-stripped candidate purely so THIS function can correctly decide "is
+ * this GUID-shaped" — `shared/adapters` sits below `shared/taskpane` in this package's layering, so
+ * it cannot import `shared/taskpane/utils/cleanGuid` without inverting that boundary (no
+ * `shared/adapters/**` file imports from `shared/taskpane/**` today). `readDocumentStamp()`'s
+ * caller (`documentIdentityService.ts`, which already imports the canonical `cleanGuid`) still runs
+ * the result through it before the id crosses into saved state — that is the ADR-044 boundary; the
+ * normalization here is an implementation detail of shape validation, not a second one.
+ */
+function extractStampId(xml: string): string | null {
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(xml, 'application/xml');
+  } catch {
+    return null;
+  }
+
+  // A well-formedness failure surfaces as a <parsererror> document, not a thrown exception (both
+  // jsdom and real browsers do this) — must check explicitly rather than trust the try/catch above.
+  if (doc.getElementsByTagName('parsererror').length > 0) {
+    return null;
+  }
+
+  // lib.dom.d.ts declares `documentElement: HTMLElement` (non-nullable), but the WHATWG spec itself
+  // types it `Element?` — a degenerate parse (e.g. an empty string, which a hostile or buggy
+  // getXmlAsync result could produce) can genuinely yield no root element. This guards real
+  // untrusted-input behavior the lib's type declaration under-states, not a redundant check.
+  const root = doc.documentElement;
+  if (!root || root.localName !== STAMP_ROOT_ELEMENT || root.namespaceURI !== STAMP_NAMESPACE) {
+    return null;
+  }
+
+  const idNode = root.getElementsByTagNameNS(STAMP_NAMESPACE, STAMP_ID_ELEMENT)[0];
+  const raw = idNode?.textContent?.trim();
+  if (!raw || !STAMP_GUID_SHAPE.test(raw)) {
+    return null;
+  }
+
+  const bare = raw.replace(/[{}]/g, '').toLowerCase();
+  return bare === EMPTY_GUID ? null : bare;
+}
+
+/**
  * Word-specific host adapter implementation.
  *
  * Handles document content extraction, metadata retrieval, and link insertion
@@ -233,6 +302,57 @@ export class WordAdapter implements IHostAdapter {
   }
 
   /**
+   * Read the client-side custom XML identity stamp task 014 (FR-02) writes into every saved
+   * document (spaarkeai-word-add-in-r1 task 051 — the client half that completes FR-02).
+   *
+   * Common API only (`Office.context.document.customXmlParts.getByNamespaceAsync` → `getXmlAsync`)
+   * — 019 condition 1 forbids `Word.Document.customXmlParts` (WordApi 1.4; the manifest deliberately
+   * stays at 1.3 to keep Office 2019/2021 LTSC installable). Promisified the same way
+   * {@link getCompressedFile} wraps `getFileAsync`. Guarded by `isSetSupported('CustomXmlParts')`
+   * (019 condition 4) BEFORE any Common API call is made, extending {@link checkRequirementSet}
+   * rather than adding a second helper (root CLAUDE.md §11).
+   *
+   * A missing, unreadable, or internally-disagreeing stamp is a NORMAL state (019 condition 3) —
+   * every failure mode resolves to `null`, never a throw, so this can never block the save flow.
+   * **A stamp is a hint, never an authorization** (014 §3): this method makes no network call and
+   * asserts nothing beyond "the bytes carry this GUID" — resolving the id through an authorized
+   * server path is the caller's job (`documentIdentityService.applyStampPrecedence`).
+   *
+   * @returns The single distinct Spaarke id found, or `null` for every failure mode (unsupported
+   * requirement set, no matching part, malformed XML, or two disagreeing ids).
+   */
+  async readDocumentStamp(): Promise<string | null> {
+    this.ensureInitialized();
+
+    if (!this.checkRequirementSet('CustomXmlParts')) {
+      return null;
+    }
+
+    try {
+      const parts = await this.getCustomXmlPartsByNamespace(STAMP_NAMESPACE);
+
+      // Mirrors the server's TryReadStamp loop (OfficeDocumentStamp.cs): collect the one id every
+      // matching part agrees on; two DISTINCT ids is "no answer is better than the wrong one".
+      let found: string | null = null;
+      for (const part of parts) {
+        const xml = await this.getPartXml(part);
+        const id = extractStampId(xml);
+        if (!id) {
+          continue;
+        }
+        if (found !== null && found !== id) {
+          return null;
+        }
+        found = id;
+      }
+
+      return found;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Get the document content as an ArrayBuffer.
    *
    * The default (and `ooxml`) path returns the **real .docx binary** (the compressed OOXML package)
@@ -372,6 +492,36 @@ export class WordAdapter implements IHostAdapter {
   }
 
   /**
+   * Promisify `CustomXmlParts.getByNamespaceAsync` (Common API — see {@link readDocumentStamp}).
+   * A synchronous throw inside the executor (e.g. `Office.context.document` itself being absent on a
+   * misbehaving host) becomes a promise rejection, so callers only need one `try`/`catch`.
+   */
+  private getCustomXmlPartsByNamespace(namespace: string): Promise<Office.CustomXmlPart[]> {
+    return new Promise((resolve, reject) => {
+      Office.context.document.customXmlParts.getByNamespaceAsync(namespace, result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(result.error);
+          return;
+        }
+        resolve(result.value);
+      });
+    });
+  }
+
+  /** Promisify `CustomXmlPart.getXmlAsync` (Common API — see {@link readDocumentStamp}). */
+  private getPartXml(part: Office.CustomXmlPart): Promise<string> {
+    return new Promise((resolve, reject) => {
+      part.getXmlAsync(result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(result.error);
+          return;
+        }
+        resolve(result.value);
+      });
+    });
+  }
+
+  /**
    * Get the capabilities of this adapter.
    *
    * Word adapter supports document content retrieval and link insertion,
@@ -391,6 +541,10 @@ export class WordAdapter implements IHostAdapter {
       canGetSender: false,
       canGetDocumentContent: isApiSupported,
       canGetDocumentUrl: true,
+      // task 051 / FR-02 (client half): unlike canGetDocumentUrl, genuinely conditional — a host can
+      // satisfy this adapter's WordApi 1.3 floor and still lack the separate Common `CustomXmlParts`
+      // requirement set (019 condition 4). Bare one-arg call: the set is unversioned (019 §6 cond. 4).
+      canReadDocumentStamp: this.checkRequirementSet('CustomXmlParts'),
       canSaveAsPdf: true, // Server-side conversion
       canSaveAsEml: false,
       canInsertLink: isApiSupported,
@@ -543,13 +697,20 @@ export class WordAdapter implements IHostAdapter {
 
   /**
    * Check if a requirement set is supported.
+   *
+   * `version` is optional (task 051 / FR-02 client half): an UNVERSIONED Common set — e.g.
+   * `CustomXmlParts` (019 §6 condition 4) — is correctly checked with the bare one-argument call;
+   * omitting `version` here, rather than adding a second helper, follows root CLAUDE.md §11.
+   *
    * @param set - The requirement set name (e.g., 'WordApi')
-   * @param version - The minimum version required
+   * @param version - The minimum version required. Omit for an unversioned Common requirement set.
    * @returns True if the requirement set is supported
    */
-  private checkRequirementSet(set: string, version: string): boolean {
+  private checkRequirementSet(set: string, version?: string): boolean {
     try {
-      return Office.context.requirements.isSetSupported(set, version);
+      return version === undefined
+        ? Office.context.requirements.isSetSupported(set)
+        : Office.context.requirements.isSetSupported(set, version);
     } catch {
       return false;
     }

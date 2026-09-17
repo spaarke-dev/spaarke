@@ -214,6 +214,18 @@ export class OutlookHostAdapter implements IHostAdapter {
   }
 
   /**
+   * Read the client-side custom XML identity stamp — not applicable for Outlook emails (Word-only
+   * capability, spaarkeai-word-add-in-r1 FR-02 / task 051).
+   *
+   * @remarks Same dead-code situation as {@link getDocumentUrl} — see that method's remarks. This
+   * exists only to keep the class satisfying `IHostAdapter` after task 051 added
+   * `readDocumentStamp()` to the interface; it is not exercised by any live code path.
+   */
+  async readDocumentStamp(): Promise<string | null> {
+    throw new Error('readDocumentStamp() is only supported in Word.');
+  }
+
+  /**
    * Get the capabilities of this host adapter.
    */
   getCapabilities(): HostCapabilities {
@@ -225,6 +237,9 @@ export class OutlookHostAdapter implements IHostAdapter {
       canGetSender: true,
       canGetDocumentContent: false,
       canGetDocumentUrl: false,
+      // task 051 / FR-02 client half: same "keep this dead file conforming to IHostAdapter" reason
+      // as canGetDocumentUrl above — mirrors the canonical shared/adapters/OutlookAdapter.ts's value.
+      canReadDocumentStamp: false,
       canSaveAsPdf: true,
       canSaveAsEml: hasMailbox18,
       canInsertLink: this.isComposeMode(),

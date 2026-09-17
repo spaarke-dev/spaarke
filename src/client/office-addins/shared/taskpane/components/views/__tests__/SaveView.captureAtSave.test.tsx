@@ -42,6 +42,7 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canGetSender: false,
   canGetDocumentContent: true,
   canGetDocumentUrl: true,
+  canReadDocumentStamp: true,
   canSaveAsPdf: true,
   canSaveAsEml: false,
   canInsertLink: true,
@@ -62,6 +63,7 @@ const OUTLOOK_CAPABILITIES: HostCapabilities = {
   canGetSender: true,
   canGetDocumentContent: false,
   canGetDocumentUrl: false,
+  canReadDocumentStamp: false,
   canProvideDocumentName: false,
 };
 
@@ -78,6 +80,7 @@ function makeWordAdapter(overrides: Partial<IHostAdapter> = {}): IHostAdapter {
     getRecipients: jest.fn().mockResolvedValue([]),
     getDocumentContent: jest.fn().mockResolvedValue(new ArrayBuffer(0)),
     getDocumentUrl: jest.fn().mockResolvedValue('https://contoso.sharepoint.com/Brief.docx'),
+    readDocumentStamp: jest.fn().mockResolvedValue(null),
     getCapabilities: () => WORD_CAPABILITIES,
     initialize: jest.fn().mockResolvedValue(undefined),
     isInitialized: () => true,

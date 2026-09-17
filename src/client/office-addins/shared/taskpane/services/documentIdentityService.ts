@@ -231,6 +231,74 @@ export async function resolveDocumentIdentity(
 }
 
 /**
+ * Apply the owner's binding identity precedence (spaarkeai-word-add-in-r1 task 051, 2026-09-17
+ * owner-decisions block — supersedes task 014's POML step 5, "prefer the stamp"):
+ *
+ * 1. A cloud URL that RESOLVES (this `urlOutcome.kind === 'resolved'`) WINS.
+ * 2. The stamp is used only when 012 could not attach the document to a URL at all —
+ *    `urlOutcome.kind === 'new'`, whose only three reasons are `not_cloud_document` /
+ *    `not_resolvable` / `not_spaarke_document`.
+ * 3. A resolved URL whose id DISAGREES with the stamp is `identity_conflict`.
+ *
+ * Stamp-first has a documented data-loss case (014 §9): a Spaarke document copied into SPE through
+ * a non-stamping path carries its SOURCE's stamp X while its URL resolves to row W, so a
+ * stamp-preferred default version save would write W's content into X's file.
+ *
+ * `identity_conflict` reuses the EXISTING `'conflict'` outcome kind rather than adding a new one
+ * (root CLAUDE.md §11: extend, don't duplicate) — this is not a stretch: the server's OWN
+ * `resolve-identity` response already uses the literal reason string `'identity_conflict'` for the
+ * different-drive-same-item case this file maps to `kind: 'conflict'` above, and `SaveModeSection`
+ * already renders `'conflict'` as "Save disabled, no save-as-new offered, ask an admin" — exactly
+ * the owner's required treatment here too ("no default save target ... never a silent choice
+ * between them"). The two conflict CAUSES differ, but the correct user-facing behavior — stop,
+ * don't guess — is identical, so one kind correctly serves both.
+ *
+ * NEVER calls the network. **A stamp is a hint, never an authorization** (014 §3): a stamp-only
+ * match below resolves to `'resolved'` with an EMPTY `documentName`/`fileName` and no
+ * `relatedRecord` — nothing here can honestly know them without either a Graph round-trip
+ * (forbidden: AC1 requires none) or a new BFF endpoint (out of this task's scope; the server half is
+ * task 014's, already shipped). The actual authorization is enforced exactly where the URL-resolved
+ * path already relies on it — the version-save endpoint's `OfficeVersionSaveAuthorizationFilter`, at
+ * the moment of the save itself. `SaveModeSection.resolveSaveMode` already degrades a null
+ * `documentLabel` to "the existing document", and `useRelatedRecord` already treats a `null`
+ * `relatedRecord` as `'unassociated'` — both pre-existing, unmodified by this function.
+ *
+ * A pure function (no Office.js, no network, no React) — independently unit-testable, mirroring
+ * {@link applyDocumentIdentityOutcome}'s shape.
+ *
+ * @param urlOutcome The outcome of {@link resolveDocumentIdentity} (or the local `not_cloud_document`
+ * short-circuit for a document with no URL at all).
+ * @param stampDocumentId The raw id `IHostAdapter.readDocumentStamp()` returned, or `null` for every
+ * one of its own failure modes (absent, unsupported, unparseable, disagreeing parts).
+ */
+export function applyStampPrecedence(
+  urlOutcome: DocumentIdentityOutcome,
+  stampDocumentId: string | null
+): DocumentIdentityOutcome {
+  if (urlOutcome.kind === 'resolved') {
+    if (stampDocumentId && cleanGuid(stampDocumentId) !== urlOutcome.documentId) {
+      return { kind: 'conflict' };
+    }
+    return urlOutcome;
+  }
+
+  if (urlOutcome.kind === 'new' && stampDocumentId) {
+    return {
+      kind: 'resolved',
+      documentId: cleanGuid(stampDocumentId),
+      documentName: '',
+      fileName: '',
+      relatedRecord: null,
+    };
+  }
+
+  // 'conflict' (012's own different-drive collision) | 'indeterminate' | 'denied' | 'error': the
+  // owner's precedence names exactly three 'new' reasons as the stamp's ONLY fallback trigger — none
+  // of these outcomes is in that list, so the stamp is not consulted and the outcome is unchanged.
+  return urlOutcome;
+}
+
+/**
  * The identity-related subset of `App.savedContext` this service knows how to populate (task 013
  * step 6). `App`'s actual saved-context type is a wider superset (it also carries the Create-To-Do
  * "filed to" fields from `SaveView.onSaved`) — this is the slice `applyDocumentIdentityOutcome`

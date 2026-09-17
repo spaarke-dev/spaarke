@@ -163,6 +163,37 @@ export interface IHostAdapter {
   getDocumentUrl(): Promise<string | null>;
 
   /**
+   * Read the client-side custom XML identity stamp task 014 (FR-02) writes into every saved document
+   * (spaarkeai-word-add-in-r1 task 051 — the client half that completes FR-02).
+   *
+   * Only supported when {@link HostCapabilities.canReadDocumentStamp} is `true` (Word, and only when
+   * the host supports the `CustomXmlParts` requirement set). Callers MUST check the capability flag
+   * before calling — matching the {@link getDocumentUrl} convention.
+   *
+   * A missing, unreadable, or internally-disagreeing stamp is a NORMAL, recoverable state (019
+   * condition 3 — the Document Inspector's "Custom XML Data → Remove All" is a real, user-reachable
+   * un-stamping path) — every such case resolves to `null`, never a throw, so this can never block
+   * the save flow.
+   *
+   * **A stamp is a hint, never an authorization** (014 §3): anyone can author a custom XML part
+   * carrying any GUID. This method asserts nothing beyond "the bytes carry this GUID" — it makes no
+   * network call of any kind. Callers MUST still resolve/authorize the id through an existing
+   * server-authorized path (the URL-based resolver, or the version-save endpoint's own authorization
+   * filter) before relying on it for anything beyond a display/pre-selection default.
+   *
+   * Two distinct outcomes, matching the {@link getDocumentUrl} shape:
+   * - **Supported, but no usable stamp**: resolves to `null` — a defined, expected result, not a throw.
+   * - **Not supported at all** (e.g. called on an adapter whose `canReadDocumentStamp` is `false`):
+   *   rejects with a typed {@link HostAdapterError} (`CAPABILITY_NOT_SUPPORTED`).
+   *
+   * @returns The single distinct Spaarke document id found in the document's custom XML data store
+   * (Word's raw text — the caller canonicalizes via `cleanGuid` per ADR-044 before it crosses into
+   * saved state), or `null` when absent, unreadable, disagreeing, or the requirement set is unsupported.
+   * @throws {HostAdapterError} with code `CAPABILITY_NOT_SUPPORTED` when the host does not support this capability at all.
+   */
+  readDocumentStamp(): Promise<string | null>;
+
+  /**
    * Get the capabilities of this host adapter.
    *
    * Use this to determine what features are available before calling
