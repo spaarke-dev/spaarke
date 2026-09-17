@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>The same problem+json content-type defect at three hand-rolled sites outside the global handler</title>
+    <phase>2 Save flow</phase>
+    <gate>050 merged (the fix pattern and its regression-test shape are established) AND 031 merged (it owns `OfficeEndpoints.cs` concurrently)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` in `Sprk.Bff.Api` on error paths, including an SSE stream; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The defect, the fix and the verification shape are all fully established by task 050 — this is applying a proven one-line change at three located sites, plus the coverage that never existed. The only judgment is the SSE path, which the constraints below pin down.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`OfficeEndpoints.cs` is a save-spine file that tasks 031, 025 and 014 also modify. Do not co-schedule with any of them.</parallel-reason>
+    <deps>050</deps>
+    <tags>bff-api, error-handling, integration-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Task 050 fixed the global exception handler, where `WriteAsJsonAsync` silently overwrote the `application/problem+json` content type it had just set. The identical anti-pattern survives at three more hand-rolled sites. Fix them the same way, with the same kind of failing-first coverage.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core minimal APIs, RFC 7807 ProblemDetails, and Server-Sent Events response semantics. Follow ADRs strictly.</role>
+
+  <goal>Each of the three sites serves its error response as `application/problem+json`, its body is byte-for-byte unchanged, and a test fails if any of them regresses. No successful response, and no SSE data frame, changes.</goal>
+
+  <context>
+    <background>
+      Found by task 050 while surveying the blast radius of the global-handler fix, and recorded in `projects/spaarkeai-word-add-in-r1/notes/050-problem-json-content-type.md` §5. It was **not** fixed there because 050's POML scoped it to the global handler, and because `OfficeEndpoints.cs` was being edited concurrently by task 031 in another worktree.
+
+      It is filed here rather than deferred: unowned work belongs to this project (deferral policy, 2026-09-09 — a GitHub issue alone is NOT a hand-off), and this is the same defect class the owner assigned to this project as #975.
+
+      **The three sites** (re-locate by symbol; line numbers drift):
+      - `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` ~:536-537 — the attachment-validation 4xx path.
+      - `src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs` ~:739-748 — the SSE-stream 401 path.
+      - `src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs` ~:764-772 — the SSE-stream 404 path.
+
+      Each sets `Response.ContentType = "application/problem+json"` and then calls `WriteAsJsonAsync(...)` with no explicit content type, which unconditionally overwrites the header with `application/json; charset=utf-8`.
+
+      **The established fix** (task 050, commit on the branch): pass the content type explicitly to the framework's own 4-arg overload — `WriteAsJsonAsync(obj, options: (JsonSerializerOptions?)null, contentType: "application/problem+json")`. `options: null` reproduces exactly what the parameterless overload resolved to internally, so serialization is untouched.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs</file>
+      <file role="canonical-reference">tests/integration/regression/Issue975_ProblemJsonContentTypeTests.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/050-problem-json-content-type.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">The response BODY must not change at any of the three sites — only the media type. Any client parsing the current body keeps working byte-for-byte.</constraint>
+    <constraint source="project">⚠️ **The two SSE sites need explicit thought, not a blind copy.** These are error responses emitted on a route that otherwise streams `text/event-stream`. Confirm for each that the error is written BEFORE any SSE framing begins (i.e. the response is a plain error, not a frame inside a stream). If an error is emitted mid-stream, changing the response content type is either meaningless or wrong — in that case leave it, and say so in the note with the evidence. Do NOT change the content type of the stream itself, and do NOT alter any `data:` frame.</constraint>
+    <constraint source="project">Reproduce first: a test that fails on today's code for each site you change, then passes. Task 050's `tests/integration/regression/Issue975_ProblemJsonContentTypeTests.cs` is the shape to follow (ADR-038 §1 KEEP path, `Issue{N}_*Tests.cs` naming).</constraint>
+    <constraint source="project">Task 050 already surveyed every repo consumer that branches on error content type and found none that would break — the shared `authenticatedFetch` accepts both media types via an OR check. Re-verify only if you touch a NEW response surface beyond these three; otherwise cite §4 of the 050 note rather than repeating the survey.</constraint>
+    <constraint source="ADR-038">No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests, no `Stopwatch` + `Task.Delay`. Keep a negative test: a successful (2xx) response's content type is unchanged.</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size against a FRESH master build (PowerShell `Compress-Archive -CompressionLevel Optimal`, short path), CVE check, and a placement statement — the answer is "modifies existing endpoints only; no new endpoint, service, DI registration or package".</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md, ADR-019, and `notes/050-problem-json-content-type.md` (especially §3 the fix and §5 these sites). Declare FULL / sonnet / high / DIRECTIONAL. Run `/conflict-check` — `OfficeEndpoints.cs` is a save-spine hot path.</step>
+    <step order="1">Re-locate the three sites by symbol. Confirm each still exhibits the defect before changing anything — if one was already fixed by another project, say so and skip it.</step>
+    <step order="2">For the two SSE sites, determine and record whether the error precedes any stream framing. This decides whether they are in scope at all.</step>
+    <step order="3">Write the failing tests first; show them failing.</step>
+    <step order="4">Apply the fix at each in-scope site; keep every body identical.</step>
+    <step order="5">BFF build, the Chat and Office test groups, ArchTests (baseline 191/191), and the full `Sprk.Bff.Api.Tests` once. Report exact numbers.</step>
+    <step order="6">Publish size + CVE; record both in the note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an SSE error turns out to be emitted mid-stream, do NOT change it — record the finding and reduce this task's scope to the sites that are genuinely plain error responses.</trigger>
+    <trigger>If fixing any site would change its body shape, STOP — the body is shipped contract and a body change needs its own decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 050 fixed exactly this defect in the global handler; this applies the same proven change at the three sites its survey found. No new surface.</existing>
+    <extension>Yes — argument changes at three existing call sites, plus tests.</extension>
+    <cost-of-doing-nothing>Three error paths keep claiming to be plain JSON while ADR-019 says the API serves RFC-7807 problems, so the contract stays untrue exactly where #975 proved it matters — and the defect has already demonstrated it can survive unnoticed because nothing tested the media type.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/052-problem-json-remaining-sites.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each site changed, a test fails on the code before this task proving the response is served as `application/json`.</criterion>
+    <criterion testable="true">After the fix, each of those responses carries `Content-Type: application/problem+json` and its body is byte-for-byte what it was.</criterion>
+    <criterion testable="true">Each SSE site is explicitly classified in the note as in scope (a plain error response) or out of scope (emitted mid-stream), with the evidence that decided it.</criterion>
+    <criterion testable="true">Negative: no `text/event-stream` response's content type changes, and no `data:` frame is altered.</criterion>
+    <criterion testable="true">Negative: a successful (2xx) response's content type is unchanged.</criterion>
+    <criterion testable="true">`dotnet build` green; ArchTests 191/191; the full `Sprk.Bff.Api.Tests` suite passes with no new failure; publish size vs a fresh master build and the CVE result are recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-17 by the main session from task 050's §5 finding. Owned here rather than deferred, per the 2026-09-09 deferral policy. Close any GitHub issue filed for these sites when this merges.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
