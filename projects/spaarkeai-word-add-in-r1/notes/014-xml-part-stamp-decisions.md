@@ -575,3 +575,19 @@ Defences, in order of reliability:
 3. **Stop the background task first** (`TaskStop`) to release the lock; `tasklist | grep testhost` confirms.
 4. Note that concurrent `dotnet test` runs on the same assembly are safe for the LOCK (shared read) but split
    the CPU, which can push a borderline chunk over the cap — so run chunks serially.
+
+**Evidence for rule 4 — a contention-induced failure, and how it was cleared.** One near-full-suite run
+reported `Failed: 1, Passed: 11593, Skipped: 33` while **two other `dotnet test` processes were running
+concurrently** against the same assembly. The failing test's NAME was lost: the capture used
+`grep -E 'Failed!|Passed!|Failed:'`, and xUnit's per-test line reads `  Failed <name>` — "Failed" followed by a
+SPACE, matching none of those patterns. (Capture `"^  Failed "` as well, or the one thing you most need is the
+one thing you throw away.)
+
+It was then cleared two independent ways, both on the final binaries:
+- the **7-chunk partition** above: 12,366 / 0 / 56, i.e. every test in the assembly passing;
+- a **clean monolithic run with no concurrent load**: `Failed: 0, Passed: 12366, Skipped: 56, Total: 12422`
+  (26 m 46 s) — identical numbers from a separate measurement.
+
+So the failure did not reproduce, and the cause was CPU contention, not a regression. Two lessons: run chunks
+serially (rule 4 is not merely about the timeout), and treat an un-named failure as unresolved until it is
+either reproduced or cleared by a clean run — never inferred away.
