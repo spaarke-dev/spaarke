@@ -1383,31 +1383,361 @@ public class AccessibleRecordSetServiceTests
         membership.VerifyNoOtherCalls();
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Design §4.5 term 4 — ORG EXPANSION (unified-access-control-r2 task 043 / FR-24 + FR-25 + FR-22).
+    //
+    // A contact derives membership of records that reference — via a REGISTRY-LISTED org-typed lookup —
+    // an organization the contact actively belongs to, at THAT ORGANIZATION's standing-grant baseline.
+    //
+    // ⚠️ This region REPLACES task 042's deliberate scope-boundary test
+    // (ComposeAsync_NeverReadsTheOrganizationStandingGrant_OrgTermIsTask043), which asserted
+    // Times.Never on ReadForOrganizationAsync with the reason "task 043 owns it". Task 043 is this
+    // task; the boundary it marked is the thing now being built, so the assertion is inverted rather
+    // than deleted — every test below reads the org baseline that test forbade.
+    //
+    // The registry filter itself (which org columns may confer) is the RESOLVER's, pinned at the
+    // FetchXml-shape level in MembershipResolverServiceTests. These tests pin what the EVALUATOR does
+    // with the answer: the level, the suppression, the provenance, and the read accounting.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>A walk that binds NO organizations — the contact's own standing-grant membership.</summary>
+    private static MembershipResolveOptions? ContactWalk =>
+        It.Is<MembershipResolveOptions?>(o => o != null && o.OrganizationIds == null);
+
     /// <summary>
-    /// Task 042's scope boundary, asserted rather than assumed: the ORG baseline reader exists and is
-    /// unit-tested, but the evaluator must NOT consume it yet — the org expansion term is task 043's.
+    /// A walk bound to <paramref name="orgId"/> — the org-expansion term. Mutually exclusive with
+    /// <see cref="ContactWalk"/>, so setup order does not matter.
     /// </summary>
+    private static MembershipResolveOptions? OrgWalkFor(Guid orgId) =>
+        It.Is<MembershipResolveOptions?>(o =>
+            o != null && o.OrganizationIds != null && o.OrganizationIds.Contains(orgId));
+
+    private static readonly Guid OrgA = Guid.Parse("e0000000-0000-0000-0000-00000000000a");
+    private static readonly Guid OrgB = Guid.Parse("e0000000-0000-0000-0000-00000000000b");
+    private static readonly Guid OrgDerivedRecord = Guid.Parse("d0000000-0000-0000-0000-000000000001");
+    private static readonly Guid OrgDerivedRecordB = Guid.Parse("d0000000-0000-0000-0000-000000000002");
+
     [Fact]
-    public async Task ComposeAsync_NeverReadsTheOrganizationStandingGrant_OrgTermIsTask043()
+    public async Task ComposeAsync_ContactInOrgWithViewOnlyStanding_OrgDerivedRecordCarriesExactlyRead()
     {
+        // FR-25 acceptance 1: the org-derived contribution enters at the ORGANIZATION's baseline —
+        // never the contact's own, never a hardcoded level. Asserted by EQUALITY so a stray bit fails.
+        //
+        // The contact here holds NO standing grant of their own, which is load-bearing: the org term is
+        // the ORGANIZATION's standing arrangement, so it must apply independently. Before task 043 this
+        // contact composed to nothing at all.
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Response(ProjectEntity, StandingProject));
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, OrgDerivedRecord));
 
         var standing = new Mock<ISubjectStandingGrantReader>();
-        standing
-            .Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new StandingGrantState(true, ExternalAccessLevel.Collaborate));
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.ViewOnly));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.ActiveOrgIds.Add(OrgA);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(OrgDerivedRecord).Should().Be(AccessRights.Read,
+            "View Only on the ORGANIZATION means exactly Read on every record derived through it");
+        set.Sources.OrgExpansionMembership.Should().BeTrue();
+        set.Sources.StandingGrantMembership.Should().BeFalse(
+            "the contact holds no standing grant — the org term must not borrow that provenance");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ContactInNoOrganizations_NeverReadsAnOrgBaselineAndDerivesNothing()
+    {
+        // FR-24 negative half: no active organization ⇒ no org-derived entry, and the baseline read is
+        // not even attempted (NFR-02 — a term that cannot contribute costs nothing).
+        //
+        // NOTE on the OTHER half of the acceptance criterion — "an INACTIVE junction row confers
+        // nothing". That is enforced by the `statecode eq 0` predicate inside
+        // ExternalParticipationService.QueryActiveOrgIdsAsync, which THIS DOUBLE REPLACES. Asserting it
+        // here would assert the fake, not the product, so it is pinned where it lives (the junction
+        // query) and deliberately not restated here.
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
 
         var sut = CreateSut(membership.Object, NoParticipations(), standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
-        await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
-
+        set.RecordIds.Should().BeEmpty();
+        set.Sources.OrgExpansionMembership.Should().BeFalse();
         standing.Verify(
             s => s.ReadForOrganizationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SecureRecord_SuppressesTheOrgDerivedContributionForAContactPrincipal()
+    {
+        // FR-22: org expansion is a DERIVED-MEMBER term, so a secure record never receives the
+        // contribution at all. Structural suppression, not post-hoc subtraction — the record is ABSENT,
+        // not present at zero rights.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, OrgDerivedRecord, OrgDerivedRecordB));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.FullAccess));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.ActiveOrgIds.Add(OrgA);
+        participations.Flags[OrgDerivedRecord] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(OrgDerivedRecord).Should().BeFalse(
+            "a Full Access ORG standing grant confers nothing on a secure record");
+        set.RightsFor(OrgDerivedRecord).Should().Be(AccessRights.None);
+        set.Contains(OrgDerivedRecordB).Should().BeTrue(
+            "the non-secure record still comes through the very same term");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SecureRecord_Type1SystemUserGetsNoOrgInheritedAccessAndNoOrgExpansionWalk()
+    {
+        // FR-22, the systemuser half of the criterion: a Type 1 user whose LINKED CONTACT belongs to an
+        // organization must not reach a secure record through that organization either.
+        //
+        // On this plane the org-derived route is the org-INHERITED GRANT (DirectAccessLevel == null is
+        // the provenance marker task 037 introduced), and term 2 already suppresses it. Org EXPANSION
+        // is NOT applied here — design §5 composes a systemuser as ADR-034 membership ∪ the caller's own
+        // contact grants — so the two Times.Never assertions below are the design decision itself,
+        // recorded as a test rather than as a comment: no org walk, no org baseline read.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = null,   // reached ONLY through the linked contact's organization
+            },
+        });
+        participations.ActiveOrgIds.Add(OrgA);
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
+            "org-inherited access is suppressed on a secure record for a systemuser principal too");
+        set.Contains(MemberRecordA).Should().BeTrue("the user's own ADR-034 membership is untouched");
+        set.Sources.OrgExpansionMembership.Should().BeFalse();
+        membership.Verify(
+            m => m.ResolveByContactAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "wiring the org term here would ship an untested access path; task 043 owns it");
+            "org expansion is a contact-plane term; running it here would invent access design §5 does not grant");
+        standing.Verify(
+            s => s.ReadForOrganizationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ComposeAsync_OrgViewOnlyPlusDirectCollaborateGrant_ComposesToTheMax()
+    {
+        // The additive max across terms: the same record reached by a View Only ORG standing grant and
+        // a Collaborate DIRECT grant ends at the union, not at either one alone.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.ViewOnly));
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.Collaborate,
+                DirectAccessLevel = ExternalAccessLevel.Collaborate,
+            },
+        });
+        participations.ActiveOrgIds.Add(OrgA);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create,
+            "highest-wins is a bitwise union of the org-derived and direct terms");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_TwoOrgsAtDifferentBaselines_CreditsEachRecordAtItsOwnOrgsLevel()
+    {
+        // 🔴 THE test for task 043's central design decision. The contact belongs to two organizations
+        // with DIFFERENT baselines, so the term is resolved as one walk per DISTINCT baseline.
+        //
+        // The rejected alternative — ONE walk binding every organization — could credit only a single
+        // level, so the record reachable only through the View Only firm would silently inherit the
+        // Full Access firm's rights. Nothing downstream could detect that: the record ids are identical
+        // either way and only the level differs, which is precisely the class of defect FR-19 exists to
+        // remove.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, OrgDerivedRecord));
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgB), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, OrgDerivedRecordB));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.ViewOnly));
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgB, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.FullAccess));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.ActiveOrgIds.Add(OrgA);
+        participations.ActiveOrgIds.Add(OrgB);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(OrgDerivedRecord).Should().Be(AccessRights.Read,
+            "reachable only through the View Only firm — it must NOT inherit the other firm's level");
+        set.RightsFor(OrgDerivedRecordB).Should().Be(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete,
+            "reachable through the Full Access firm");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserPlane_RequestsAccessConferringColumnsOnly()
+    {
+        // FR-24 / register A-8 closure. The setup matcher REQUIRES AccessConferringOnly == true, so a
+        // regression to the unfiltered call fails to match, the mock returns no response, and the
+        // assertion below dies — the test pins the flag rather than merely observing it.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(
+                SystemUserId,
+                MatterEntity,
+                It.Is<MembershipResolveOptions?>(o => o != null && o.AccessConferringOnly),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, MemberRecordA));
+
+        var sut = CreateSut(membership.Object, NoParticipations(), new Mock<ISubjectStandingGrantReader>().Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { MemberRecordA },
+            "the composer must ask for registry-listed conferring columns only when deciding access");
+        membership.Verify(
+            m => m.ResolveAsync(
+                SystemUserId,
+                MatterEntity,
+                It.Is<MembershipResolveOptions?>(o => o != null && o.AccessConferringOnly),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ComposeAsync_WhenTheJunctionReadFaults_DeniesEveryCandidateAndDoesNotThrow()
+    {
+        // NFR-01 / NFR-02. The junction read feeds TWO consumers whose safe failure directions are
+        // opposite, so one fault has two consequences and the test states both:
+        //   • the additive org-expansion term contributes NOTHING (over-inclusion there is an
+        //     over-grant), and
+        //   • the FR-23 deny veto denies EVERY queried candidate (over-inclusion there is merely a
+        //     stricter wall) — which is why the surviving grant disappears too.
+        //
+        // That second half is STRICTER than the acceptance criterion's "no org-derived contribution",
+        // and deliberately so: collapsing both onto an empty org list would have turned the veto's
+        // long-standing fail-CLOSED into a fail-OPEN, because an empty subject-org list is
+        // indistinguishable from "belongs to no organization". The gate must not 500 either way.
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.Collaborate,
+                DirectAccessLevel = ExternalAccessLevel.Collaborate,
+            },
+        })
+        {
+            ThrowOnActiveOrgIds = true,
+        };
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Sources.OrgExpansionMembership.Should().BeFalse("a failed junction read contributes nothing");
+        set.Contains(GrantedProject).Should().BeFalse(
+            "the deny veto cannot evaluate this subject's organizations, so it denies every candidate");
+        set.RecordIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_OrgHoldsStandingGrantWithNoBaseline_ContributesNothingAndGrantsSurvive()
+    {
+        // The org-side mirror of task 042's owner decision (option B): a standing grant with NO baseline
+        // is a MISCONFIGURATION and confers nothing — a level nobody chose must not confer access. The
+        // reader already fails closed to this same value on an unreadable or FLS-stripped row, so this
+        // one case covers the whole "org-baseline read yields nothing" family.
+        //
+        // Unlike the junction-fault test above, the deny veto is unaffected here: the subject's
+        // organizations were read successfully, so the explicit grant survives.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, OrgDerivedRecord));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StandingGrantState.NotHeld);
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: null));
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.ViewOnly,
+                DirectAccessLevel = ExternalAccessLevel.ViewOnly,
+            },
+        });
+        participations.ActiveOrgIds.Add(OrgA);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(OrgDerivedRecord).Should().BeFalse(
+            "ABSENT, not present-with-zero-rights — the distinction task 042 §6.2 established");
+        set.Sources.OrgExpansionMembership.Should().BeFalse("provenance must not claim a term that gave nothing");
+        set.RightsFor(GrantedProject).Should().Be(AccessRights.Read,
+            "the explicit grant is untouched — a missing org baseline is not a composition failure");
     }
 
     private static ISubjectStandingGrantReader StandingAt(ExternalAccessLevel baseline)
@@ -1521,8 +1851,21 @@ public class AccessibleRecordSetServiceTests
         public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
         public HashSet<Guid> UnreadableOrgReferences { get; } = new();
 
+        /// <summary>
+        /// Makes the junction read FAULT (task 043). The real query is wrapped in a try/catch that
+        /// returns an empty list, so a fault surfaces to the composer as
+        /// <c>ActiveOrgMemberships.Failed</c> rather than as an exception — and that outcome drives TWO
+        /// decisions in opposite directions: the additive org-expansion term contributes nothing, while
+        /// the FR-23 deny veto denies every queried candidate. A double that could only return an empty
+        /// list could not tell those apart, which is the whole point of the distinction.
+        /// </summary>
+        public bool ThrowOnActiveOrgIds { get; set; }
+
         public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
+            => ThrowOnActiveOrgIds
+                ? Task.FromException<IReadOnlyList<Guid>>(
+                    new InvalidOperationException("sprk_contactorganization query failed"))
+                : Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

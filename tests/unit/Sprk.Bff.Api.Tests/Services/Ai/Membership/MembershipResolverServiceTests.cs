@@ -1296,6 +1296,259 @@ public class MembershipResolverServiceTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Design §4.5 term 4 — ORG EXPANSION on the contact plane
+    // (unified-access-control-r2 task 043 / spec FR-24 + FR-25).
+    //
+    // In scope here: that supplied organization ids reach the emitted FetchXml through the REGISTRY
+    // filter and nothing else; that the default (no ids) leaves the contact plane byte-identical to
+    // its pre-043 behaviour; that IdentityTypes narrowing keeps the always-bound ContactId from
+    // widening an org-only walk; and that the resolver's cache key separates option values that
+    // change the answer. Level assignment and Secure suppression are the EVALUATOR's, tested in
+    // AccessibleRecordSetServiceTests.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveByContactAsync_WithBoundOrganizationIds_ResolvesViaRegistryListedOrgColumn()
+    {
+        // FR-24/FR-25 positive: sprk_assignedlawfirm1 is org-typed and IS in the migration-seeded
+        // registry (ADR-034 M4). Before task 043 the contact-plane identity carried no org ids, so this
+        // descriptor survived the registry filter and then matched nothing — investigation 02 §3's
+        // "org-typed descriptors emit zero conditions today".
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"));
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("sprk_assignedlawfirm1", new EntityReference("sprk_organization", TestOrgA))),
+            }));
+
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object);
+
+        var result = await sut.ResolveByContactAsync(
+            TestContactId,
+            EntityType,
+            new MembershipResolveOptions(OrganizationIds: new[] { TestOrgA }),
+            CancellationToken.None);
+
+        result.Ids.Should().BeEquivalentTo(new[] { MatterIdA });
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedLawFirm" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1");
+        captured.Query.Should().Contain(TestOrgA.ToString("D"),
+            "the bound organization id must appear as a condition value, not merely be accepted");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_WithNoOrganizationIds_EmitsNoOrgConditionAndQueriesNothing()
+    {
+        // The other half of the option: omitting OrganizationIds leaves the contact plane exactly as it
+        // was before task 043. With ONLY an org-typed descriptor discovered and no org ids bound, zero
+        // conditions are built, so the resolver short-circuits to an empty response and never queries.
+        // This is the pin that the new option is genuinely opt-in.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"));
+
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object);
+
+        var result = await sut.ResolveByContactAsync(
+            TestContactId, EntityType, options: null, CancellationToken.None);
+
+        result.Ids.Should().BeEmpty();
+        dataverse.Verify(
+            x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_WithBoundOrganizationIds_NonRegistryOrgColumnNeverReachesTheQuery()
+    {
+        // FR-24 negative, stated at the FetchXml-shape level as the task requires: an organization the
+        // record references through a NON-registry org lookup (opposing counsel's firm) confers nothing.
+        // Binding org ids must not turn every org-typed lookup on the entity into an access path — which
+        // is precisely the disclosure ADR-034 Amendment A1 / register B-12 exist to prevent.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"),
+            Descriptor("sprk_opposingfirm", "opposingFirm", "Organization"));
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("sprk_assignedlawfirm1", new EntityReference("sprk_organization", TestOrgA))),
+            }));
+
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object);
+
+        var result = await sut.ResolveByContactAsync(
+            TestContactId,
+            EntityType,
+            new MembershipResolveOptions(OrganizationIds: new[] { TestOrgA }),
+            CancellationToken.None);
+
+        result.ByRole.Should().NotContainKey("opposingFirm");
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1");
+        captured.Query.Should().NotContain("sprk_opposingfirm",
+            "an org-typed lookup absent from the registry must never confer access, even to a member of that org");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_OrganizationIdentityTypeOnly_ExcludesTheAlwaysBoundContactCondition()
+    {
+        // The guard behind the evaluator's org term. ContactId is bound unconditionally on this path, so
+        // an org-ids walk that did NOT narrow identity types would return contact-derived records too —
+        // and the evaluator credits everything an org walk returns at the ORGANIZATION's baseline. The
+        // contact's own assignment would then silently inherit its firm's level, undetectably, because
+        // the returned ids look the same either way.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"));
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("sprk_assignedlawfirm1", new EntityReference("sprk_organization", TestOrgA))),
+            }));
+
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object);
+
+        await sut.ResolveByContactAsync(
+            TestContactId,
+            EntityType,
+            new MembershipResolveOptions(
+                IdentityTypes: new[] { "Organization" },
+                OrganizationIds: new[] { TestOrgA }),
+            CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1");
+        captured.Query.Should().NotContain("sprk_assignedattorney1",
+            "an org-only walk must not also bind the contact, or org rights would be applied to contact-derived records");
+        captured.Query.Should().NotContain(TestContactId.ToString("D"),
+            "the contact id must not appear as a condition value in an org-only walk");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_DoesNotShareACacheEntryWithTheUnfilteredCall()
+    {
+        // 🚨 REGRESSION PIN for the defect task 043 found by reading: HashOptions did not include
+        // AccessConferringOnly. Task 041 added the flag and left it unset everywhere, so the omission was
+        // latent; task 043 sets it true in AccessibleRecordSetService.ComposeForSystemUserAsync.
+        //
+        // From that moment the SCOPING caller (MembershipEndpoints, unfiltered) and the AUTHORIZATION
+        // caller (filtered) shared one cache id — same user, same entity, same Limit — for the 5-minute
+        // TTL. This test runs them in the dangerous order: scoping FIRST, authorization second. Before
+        // the fix the second call is a cache HIT and the gate is handed the UNFILTERED descriptor set,
+        // which is register A-8's over-inclusion reintroduced through Redis rather than through code.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_opposingcounsel", "opposingCounsel", "Contact"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA,
+                ("ownerid", new EntityReference("systemuser", TestSystemUserId)),
+                ("sprk_assignedattorney1", new EntityReference("contact", TestContactId)),
+                ("sprk_opposingcounsel", new EntityReference("contact", TestContactId))));
+
+        var sharedCache = new FakeDistributedCache();
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object, cache: sharedCache);
+
+        // 1. The scoping call — unfiltered, and it populates the cache.
+        var scoping = await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+        scoping.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "assignedAttorney", "opposingCounsel" });
+
+        // 2. The authorization call — same user, same entity, same limit; only the flag differs.
+        var authorization = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        authorization.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" },
+            "the authorization call must resolve its OWN filtered answer, never inherit the scoping call's cached one");
+        authorization.ByRole.Should().NotContainKey("opposingCounsel",
+            "an adverse lookup reaching an access decision through a shared cache entry is a disclosure");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_DifferentOrganizationIds_DoNotShareACacheEntry()
+    {
+        // The same cache hazard in the option task 043 adds. The evaluator resolves ONE walk per
+        // distinct standing-grant baseline, so a single contact legitimately issues several
+        // contact-plane calls that differ ONLY by which organizations are bound. If OrganizationIds
+        // were absent from the options hash, the first baseline's row set would be served as every
+        // other baseline's — silently granting one firm's records at another firm's level.
+        var otherOrg = Guid.Parse("88888888-8888-8888-8888-888888888888");
+
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"));
+
+        // Rows are returned only when the emitted query actually asks for TestOrgA, so a stale cache
+        // entry is distinguishable from a real resolution.
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FetchExpression fe, CancellationToken _) =>
+                fe.Query.Contains(TestOrgA.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                    ? new EntityCollection(new List<Entity>
+                    {
+                        MatterRow(MatterIdA, ("sprk_assignedlawfirm1", new EntityReference("sprk_organization", TestOrgA))),
+                    })
+                    : new EntityCollection(new List<Entity>()));
+
+        var sharedCache = new FakeDistributedCache();
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object,
+            cache: sharedCache);
+
+        var viaOrgA = await sut.ResolveByContactAsync(
+            TestContactId, EntityType,
+            new MembershipResolveOptions(
+                IdentityTypes: new[] { "Organization" }, OrganizationIds: new[] { TestOrgA }),
+            CancellationToken.None);
+        viaOrgA.Ids.Should().BeEquivalentTo(new[] { MatterIdA });
+
+        var viaOtherOrg = await sut.ResolveByContactAsync(
+            TestContactId, EntityType,
+            new MembershipResolveOptions(
+                IdentityTypes: new[] { "Organization" }, OrganizationIds: new[] { otherOrg }),
+            CancellationToken.None);
+
+        viaOtherOrg.Ids.Should().BeEmpty(
+            "a walk bound to a different organization must resolve its own answer, not the first walk's cached rows");
+    }
+
     private static MembershipResolverService CreateSut(
         IMembershipFieldDiscoveryService discovery,
         IIdentityNormalizationService identity,

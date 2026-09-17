@@ -156,10 +156,23 @@ public sealed class AccessibleRecordSet
 /// <param name="ContactGrants">contact → sprk_externalrecordaccess grants term applied.</param>
 /// <param name="StandingGrantMembership">contact → standing-grant runtime membership term applied
 /// (only when the contact held a standing grant).</param>
+/// <param name="OrgExpansionMembership">
+/// contact → ORG-EXPANSION membership term applied (design §4.5 term 4 / FR-24 + FR-25, task 043):
+/// records referencing — via a registry-listed org-typed lookup — an organization the contact actively
+/// belongs to, at that organization's standing-grant baseline.
+/// <para>
+/// ⚠️ <c>true</c> only when an organization actually held a standing grant WITH a recognised baseline,
+/// i.e. when the term could contribute something. An organization with the flag unset, no baseline, or
+/// an unreadable row leaves this <c>false</c> — provenance must not claim a term that contributed
+/// nothing (the rule task 042 established for <paramref name="StandingGrantMembership"/>; see
+/// notes/task-042-standing-grant-levels.md §6.2).
+/// </para>
+/// </param>
 public readonly record struct AccessibleRecordSetSources(
     bool SystemUserMembership,
     bool ContactGrants,
-    bool StandingGrantMembership);
+    bool StandingGrantMembership,
+    bool OrgExpansionMembership = false);
 
 /// <inheritdoc />
 public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
@@ -444,10 +457,103 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// proceed as though nothing needed checking (spec NFR-01).
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Narrows an org-expansion walk to org-typed descriptors ONLY (task 043).
+    /// </summary>
+    /// <remarks>
+    /// Load-bearing, not tidiness. <c>ResolveByContactAsync</c> binds the <c>ContactId</c>
+    /// unconditionally, so a walk that bound organization ids WITHOUT this narrowing would return the
+    /// union of contact-derived and org-derived records — and the org term credits every id it
+    /// receives at the ORGANIZATION's baseline. A contact's own assignment would then silently inherit
+    /// its firm's level. The returned ids are identical either way, so nothing downstream could
+    /// detect it.
+    /// </remarks>
+    private static readonly string[] OrganizationIdentityTypeOnly = { "Organization" };
+
+    /// <summary>
+    /// The outcome of reading a subject's ACTIVE organization memberships
+    /// (<c>sprk_contactorganization</c>) — the ids, plus whether the read could be completed at all.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>Why this is an outcome and not just a list.</b> One junction read feeds two consumers whose
+    /// safe failure directions are OPPOSITE:
+    /// <list type="bullet">
+    /// <item>the ADDITIVE org-expansion term, where over-inclusion is an over-GRANT — so a failed read
+    /// must contribute NOTHING;</item>
+    /// <item>the FR-23 deny-veto SUBJECT, where over-inclusion is merely a stricter wall — so a failed
+    /// read must deny EVERY candidate (the behaviour <c>ResolveDenyVetoAsync</c> has always had).</item>
+    /// </list>
+    /// Collapsing both onto a bare empty list would have silently converted the veto's fail-CLOSED into
+    /// a fail-OPEN: an empty subject-org list looks exactly like "belongs to no organization", so the
+    /// wall would simply stop matching. Carrying <see cref="Unreadable"/> keeps the two decisions
+    /// distinct while still costing one read (NFR-02).
+    /// </remarks>
+    private readonly record struct ActiveOrgMemberships(IReadOnlyList<Guid> OrganizationIds, bool Unreadable)
+    {
+        /// <summary>No contact subject, or a subject that genuinely belongs to no organization.</summary>
+        internal static ActiveOrgMemberships None { get; } = new(Array.Empty<Guid>(), false);
+
+        /// <summary>The read faulted — contribute nothing, and deny every queried candidate.</summary>
+        internal static ActiveOrgMemberships Failed { get; } = new(Array.Empty<Guid>(), true);
+    }
+
+    /// <summary>
+    /// Reads the subject's ACTIVE organization memberships ONCE per composition, for both the
+    /// org-expansion term and the deny-veto subject (task 043).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Hoisted out of <see cref="ResolveDenyVetoAsync"/>, which used to perform this read itself. Two
+    /// reads in one composition could disagree — the additive term and the wall would then be computed
+    /// from different memberships — and the org-expansion term needs the ids BEFORE the membership walk
+    /// anyway, since they are an input to it.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>The query bounds on <c>statecode</c> only; it does NOT bound on <c>sprk_enddate</c></b>, and
+    /// task 043 decided that deliberately rather than inheriting it. See
+    /// <c>notes/task-043-org-expansion-term.md</c> — the short version is that
+    /// <c>QueryActiveOrgIdsAsync</c> is shared by this ADDITIVE caller and the VETO subject, whose fail
+    /// directions are inverted, so a blanket date bound would tighten the grant path and simultaneously
+    /// make the ethical wall match FEWER subjects. One query shape cannot be correct for both.
+    /// </para>
+    /// </remarks>
+    private async Task<ActiveOrgMemberships> ReadActiveOrgMembershipsAsync(
+        Guid? subjectContactId, CancellationToken ct)
+    {
+        if (subjectContactId is not { } contactId || contactId == Guid.Empty)
+        {
+            // The deny list is keyed on contact/organization identities only (FR-23), and organization
+            // membership is itself read FROM the contact — so a principal with no contact identity has
+            // no relevant subject on EITHER axis. Not a failure.
+            return ActiveOrgMemberships.None;
+        }
+
+        try
+        {
+            var orgIds = await _participations
+                .QueryActiveOrgIdsAsync(contactId, ct).ConfigureAwait(false);
+            return new ActiveOrgMemberships(orgIds, Unreadable: false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[WF-AUTHZ] Active-organization read FAILED for contact {ContactId}. The org-expansion " +
+                "term will contribute NOTHING, and the deny veto will deny every queried candidate — " +
+                "the two consumers fail in opposite, deliberate directions (NFR-01).",
+                contactId);
+            return ActiveOrgMemberships.Failed;
+        }
+    }
+
     private async Task<IReadOnlySet<Guid>> ResolveDenyVetoAsync(
         string entityType,
         IReadOnlyCollection<Guid> candidateIds,
         Guid? subjectContactId,
+        ActiveOrgMemberships subjectOrgs,
         CancellationToken ct)
     {
         if (candidateIds.Count == 0)
@@ -461,10 +567,22 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             return EmptyDeniedSet;
         }
 
+        // The subject's own organization memberships could not be read. Deny every queried candidate —
+        // the same outcome this method's catch-all has always produced for this fault, now decided from
+        // the hoisted read's outcome rather than by catching the read here (task 043).
+        if (subjectOrgs.Unreadable)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] Deny-veto resolution for {EntityType} ({Count} candidates) cannot proceed: " +
+                "the subject's active organizations were unreadable. Failing CLOSED — denying every " +
+                "queried candidate; the veto is never skipped (NFR-01).",
+                entityType, candidateIds.Count);
+            return candidateIds.ToHashSet();
+        }
+
         try
         {
-            var subjectOrgIds = await _participations
-                .QueryActiveOrgIdsAsync(subjectContactId!.Value, ct).ConfigureAwait(false);
+            var subjectOrgIds = subjectOrgs.OrganizationIds;
 
             var referencedOrgs = await _participations
                 .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
@@ -679,24 +797,49 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// worse than a loud failure.
     /// </para>
     /// </summary>
+    /// <param name="accessConferringOnly">
+    /// FR-24 (task 043) — narrow discovered descriptors to the access-conferring column registry.
+    /// Passed <c>true</c> by the systemuser plane, which is making an ACCESS decision; ignored by
+    /// <c>ResolveByContactAsync</c>, which applies the registry filter unconditionally.
+    /// </param>
+    /// <param name="identityTypes">
+    /// Narrows which identity types may bind. Used by the org-expansion term to request org-typed
+    /// descriptors ONLY (see <see cref="OrganizationIdentityTypeOnly"/>).
+    /// </param>
+    /// <param name="organizationIds">
+    /// FR-24 + FR-25 (task 043) — the organizations to bind into the resolved identity, so org-typed
+    /// descriptors emit conditions. Already resolved by the caller; see
+    /// <see cref="ReadActiveOrgMembershipsAsync"/>.
+    /// </param>
     private async Task<MembershipPageWalk> WalkMembershipPagesAsync(
         Func<MembershipResolveOptions, CancellationToken, Task<MembershipResponse>> readPage,
         string entityType,
         string principalDescription,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool accessConferringOnly = false,
+        IReadOnlyList<string>? identityTypes = null,
+        IReadOnlyList<Guid>? organizationIds = null)
     {
         var ids = new HashSet<Guid>();
         string? token = null;
         var pages = 0;
         var capped = false;
 
+        // ⚠️ Every page of a walk MUST carry identical options apart from the continuation token —
+        // including these three. The resolver's cache id is keyed on the options hash, so a page that
+        // dropped one of them would be looked up, and stored, under a DIFFERENT key than its siblings.
+        MembershipResolveOptions PageOptions(string? continuation) => new(
+            IdentityTypes: identityTypes,
+            Limit: MembershipPageSize,
+            ContinuationToken: continuation,
+            AccessConferringOnly: accessConferringOnly,
+            OrganizationIds: organizationIds);
+
         while (true)
         {
             ct.ThrowIfCancellationRequested();
 
-            var response = await readPage(
-                new MembershipResolveOptions(Limit: MembershipPageSize, ContinuationToken: token),
-                ct).ConfigureAwait(false);
+            var response = await readPage(PageOptions(token), ct).ConfigureAwait(false);
             pages++;
 
             var before = ids.Count;
@@ -729,9 +872,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 // straight back. So spend ONE bounded confirmation round trip and know.
                 // Its rows are deliberately NOT merged — if more exists we are capped, and the
                 // count must stay at the ceiling the NFR-03 message quotes.
-                var confirmation = await readPage(
-                    new MembershipResolveOptions(Limit: MembershipPageSize, ContinuationToken: token),
-                    ct).ConfigureAwait(false);
+                var confirmation = await readPage(PageOptions(token), ct).ConfigureAwait(false);
                 pages++;
 
                 capped = confirmation.ContinuationToken is not null
@@ -793,11 +934,28 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         // FR-14: follow continuation tokens to the end of the stream. Passing `options: null`
         // here (the pre-fix shape) took only the first 500 rows and dropped the rest.
+        //
+        // ── accessConferringOnly: true — FR-24, task 043 ───────────────────────────────────────────
+        // This is an ACCESS decision, so the membership term is narrowed to the registry-listed
+        // conferring columns. Until now the systemuser plane consumed EVERY discovered descriptor as
+        // an access answer, and the contact plane did not: an internal user whose linked contact
+        // appears in an ADVERSE lookup (opposing counsel), or whose employer account / business unit
+        // is referenced by an account- or BU-typed lookup, counted as "a member" of that record for
+        // gate purposes (register A-8; investigation 02 §4.2, which names closing this asymmetry as
+        // UAC-r2's job). The contact plane has had this guard since it existed.
+        //
+        // ⚠️ This SHRINKS the composed set. That is the intended direction, but it is a BEHAVIOUR
+        // change for internal callers, not a refactor.
+        //
+        // NOTE on the task brief: the POML describes this as "the flag-off branch of 036". There is no
+        // such branch — 036 is still open (and gated behind 034), so this single call IS the membership
+        // path today. 036 will add the impersonated Dataverse answer alongside it.
         var walk = await WalkMembershipPagesAsync(
             (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
             entityType,
             $"systemuser {systemUserId}",
-            ct).ConfigureAwait(false);
+            ct,
+            accessConferringOnly: true).ConfigureAwait(false);
 
         // ── ADDITIVE TERMS (design §4.5) ───────────────────────────────────────────────────────────
         // Each term contributes (recordId -> rights); AccumulateTerm merges them highest-wins.
@@ -863,7 +1021,16 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Deny-veto subject = this principal's OWN resolved contact identity (the SAME one the grant
         // term used above) + that contact's active organizations (task 039 / FR-23). The membership
         // term is what survives Restricted on this plane.
-        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, grantContactId, ct)
+        //
+        // The organization read is hoisted here (task 043) so both planes resolve it identically and
+        // exactly once. Org EXPANSION itself is NOT applied on this plane: design §5 composes a
+        // systemuser as ADR-034 membership ∪ the caller's own contact grants, and the org-derived
+        // access a Type 1 user can reach through their linked contact is the org-INHERITED GRANT —
+        // which term 2 above already suppresses on a secure record via DirectAccessLevel (FR-22).
+        // Adding a second org path here would invent access design §5 does not give.
+        var activeOrgs = await ReadActiveOrgMembershipsAsync(grantContactId, ct).ConfigureAwait(false);
+
+        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, grantContactId, activeOrgs, ct)
             .ConfigureAwait(false);
 
         ApplyVetoPipeline(
@@ -889,7 +1056,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         };
     }
 
-    // ── contact plane: grants ∪ (standing-grant membership IFF flag set) ─────────────────────────
+    // ── contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ───────────────
     private async Task<AccessibleRecordSet> ComposeForContactAsync(
         WorkforcePrincipal principal, string entityType, CancellationToken ct)
     {
@@ -900,8 +1067,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         var composed = new Dictionary<Guid, AccessRights>();
 
-        // Read grants + standing membership FIRST so the candidate id set is complete before the single
-        // batched flag read (NFR-02).
+        // Read grants + standing membership + org expansion FIRST so the candidate id set is complete
+        // before the single batched flag read (NFR-02).
         var grantsApplied = false;
         ExternalGrantSet? grants = null;
         if (IsGrantSupported(entityType))
@@ -909,6 +1076,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             grants = await _participations.GetGrantSetAsync(contactId, ct).ConfigureAwait(false);
             grantsApplied = true;
         }
+
+        // ── ONE junction read, shared by the additive org term AND the deny-veto subject (NFR-02) ──
+        // Hoisted above the membership walk because the contact's active organizations are an INPUT to
+        // it: an org-typed descriptor can only emit a condition if the identity carries org ids.
+        var activeOrgs = await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false);
 
         // Standing-grant runtime membership, GATED on the subject-level policy flag. The negative case is
         // load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit grants — NEVER automatic
@@ -948,8 +1120,83 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             standingApplied = true;
         }
 
+        // ── ORG EXPANSION (design §4.5 term 4 / FR-24 + FR-25, task 043) ───────────────────────────
+        //
+        // A contact derives membership of records that reference — via a REGISTRY-LISTED org-typed
+        // lookup — an organization the contact actively belongs to, at THAT ORGANIZATION's
+        // standing-grant baseline.
+        //
+        // Resolved as one walk per DISTINCT baseline. Neither obvious alternative is right:
+        //   • one walk per organization costs N queries for information that varies only by baseline,
+        //     and FR-25 defines exactly three baselines, so N collapses to at most 3;
+        //   • ONE walk for all organizations could credit only a single level, so a record reachable
+        //     ONLY through a View Only firm would silently inherit an unrelated Full Access firm's
+        //     rights. That over-grant is undetectable downstream — the record ids are identical
+        //     either way, and only the level differs.
+        // Each walk narrows to org-typed descriptors (OrganizationIdentityTypeOnly) so the
+        // always-bound ContactId cannot drag contact-derived records in at an organization's level.
+        //
+        // Independent of the contact's OWN standing grant: this term is the ORGANIZATION's standing
+        // arrangement, so it applies whether or not the contact personally holds one.
+        var orgTerms = new List<(AccessRights Rights, HashSet<Guid> RecordIds)>();
+        var orgExpansionApplied = false;
+        if (activeOrgs.OrganizationIds.Count > 0)
+        {
+            var orgsByRights = new Dictionary<AccessRights, List<Guid>>();
+            foreach (var orgId in activeOrgs.OrganizationIds.Distinct())
+            {
+                // The reader refuses Guid.Empty (it is a caller bug there, not a subject). Skipping it
+                // here keeps a malformed junction row from turning the whole term into an exception.
+                if (orgId == Guid.Empty)
+                {
+                    continue;
+                }
+
+                // STANDING-GATED, deliberately and provisionally. Register B-1 says derived access is
+                // "default-on" with Secure as the veto, but no FR assigns a level to a NON-standing
+                // derived contribution, and this task is instructed to encode rather than invent one
+                // (POML escalation trigger 1). An organization with the flag unset, no baseline, or an
+                // unreadable row yields Rights == None and contributes NOTHING — the same fail-closed
+                // value task 042 established for the contact plane.
+                var orgStanding = await _standingGrant
+                    .ReadForOrganizationAsync(orgId, ct).ConfigureAwait(false);
+                var orgRights = orgStanding.Rights;
+                if (orgRights == AccessRights.None)
+                {
+                    continue;
+                }
+
+                if (!orgsByRights.TryGetValue(orgRights, out var bucket))
+                {
+                    orgsByRights[orgRights] = bucket = new List<Guid>();
+                }
+                bucket.Add(orgId);
+            }
+
+            foreach (var (orgRights, orgIds) in orgsByRights)
+            {
+                // Provenance is set because a term that CAN contribute ran — matching standingApplied
+                // above. It stays false when every organization resolved to None, so Sources never
+                // claims a term that contributed nothing (task 042 §6.2).
+                orgExpansionApplied = true;
+
+                var orgWalk = await WalkMembershipPagesAsync(
+                    (options, token) => _membership.ResolveByContactAsync(contactId, entityType, options, token),
+                    entityType,
+                    $"contact {contactId} via {orgIds.Count} organization(s) at {orgRights}",
+                    ct,
+                    identityTypes: OrganizationIdentityTypeOnly,
+                    organizationIds: orgIds).ConfigureAwait(false);
+
+                orgTerms.Add((orgRights, orgWalk.Ids));
+                capped |= orgWalk.Capped;
+                membershipPages += orgWalk.Pages;
+            }
+        }
+
         // ── FLAGS: ONE batched read over every candidate id (NFR-02) ───────────────────────────────
         var candidates = standingIds
+            .Concat(orgTerms.SelectMany(t => t.RecordIds))
             .Concat(grants is null ? Enumerable.Empty<Guid>() : GrantedIdsFor(grants, entityType))
             .ToList();
         var flags = await _participations
@@ -975,19 +1222,36 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                     .Select(id => KeyValuePair.Create(id, standingRights)));
         }
 
+        // Term 3 — ORG EXPANSION. A DERIVED-MEMBER term, so Secure suppresses it ENTIRELY and
+        // STRUCTURALLY: a secure record never receives the contribution at all (FR-22), exactly as the
+        // standing term above — not a post-hoc subtraction, which the max would already have absorbed.
+        // This covers every principal kind that can reach the term, which on this plane is the contact.
+        foreach (var (orgRights, recordIds) in orgTerms)
+        {
+            AccumulateTerm(
+                composed,
+                recordIds
+                    .Where(id => !IsSecure(id))
+                    .Select(id => KeyValuePair.Create(id, orgRights)));
+        }
+
         // ── VETOES, after the max, in order: deny-list (task 039) → Restricted (task 037) ──────────
-        // Deny-veto subject = this contact's OWN id + its active organizations (task 039 / FR-23).
+        // Deny-veto subject = this contact's OWN id + its active organizations (task 039 / FR-23) —
+        // the SAME single read the org-expansion term above consumed, so the additive term and the
+        // ethical wall can never be computed from two different membership snapshots.
         // NOTHING survives Restricted on this plane: a contact principal's every term is contact-sourced,
         // which is precisely FR-21's "denies ALL contact principals regardless of grant source".
-        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, ct)
+        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, activeOrgs, ct)
             .ConfigureAwait(false);
 
         ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +
-            "(grants: {Grants}, standing-grant membership: {Standing} over {Pages} page(s), capped: {Capped}).",
-            contactId, entityType, composed.Count, grantsApplied, standingApplied, membershipPages, capped);
+            "(grants: {Grants}, standing-grant membership: {Standing}, org expansion: {OrgExpansion} over " +
+            "{OrgTerms} baseline(s), {Pages} membership page(s) total, capped: {Capped}).",
+            contactId, entityType, composed.Count, grantsApplied, standingApplied, orgExpansionApplied,
+            orgTerms.Count, membershipPages, capped);
 
         return new AccessibleRecordSet
         {
@@ -998,7 +1262,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: false,
                 ContactGrants: grantsApplied,
-                StandingGrantMembership: standingApplied),
+                StandingGrantMembership: standingApplied,
+                OrgExpansionMembership: orgExpansionApplied),
         };
     }
 }

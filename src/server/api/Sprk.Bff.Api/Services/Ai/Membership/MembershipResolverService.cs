@@ -382,17 +382,32 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var effectiveOptions = options ?? new MembershipResolveOptions();
 
         // ── Contact-only principal (ADR-034 Path C — no systemuser) ─────────
-        // A PersonIdentity carrying ONLY the contactId. SystemUserId is
-        // Guid.Empty so BuildFetchXml's SystemUser branch (and every other
-        // non-Contact branch — Team/BusinessUnit/Account/Organization) emits
-        // zero conditions (AppendCondition guards Guid.Empty; the identity's
-        // team/org collections are empty). Only the Contact branch can bind —
-        // and we further constrain the descriptors to the access-conferring
-        // allowlist below, so this path can NEVER resolve via a non-contact or
-        // adverse lookup. We deliberately bypass IIdentityNormalizationService
-        // (which is hard-keyed to a systemuserid) — that is exactly the gap
-        // this entry point closes.
-        var identity = new PersonIdentity(SystemUserId: Guid.Empty, ContactId: contactId);
+        // A PersonIdentity carrying the contactId and, when the caller supplies them, the
+        // organizations that contact actively belongs to. SystemUserId is Guid.Empty so
+        // BuildFetchXml's SystemUser branch (and the Team/BusinessUnit/Account branches) emit
+        // zero conditions (AppendCondition guards Guid.Empty; those identity collections are
+        // empty). So exactly two branches can bind — Contact, and Organization when org ids were
+        // supplied — and we further constrain the descriptors to the access-conferring registry
+        // below, so this path can NEVER resolve via a non-registry or adverse lookup. We
+        // deliberately bypass IIdentityNormalizationService (which is hard-keyed to a
+        // systemuserid) — that is exactly the gap this entry point closes.
+        //
+        // ORG EXPANSION (design §4.5 term 4 / FR-24 + FR-25, task 043): binding org ids is what
+        // makes registry-listed org-typed descriptors emit conditions at all. Before this, the
+        // identity's OrganizationIds was always empty here, so those descriptors survived the
+        // registry filter and then matched nothing — investigation 02 §3's "org-typed descriptors
+        // emit zero conditions today".
+        //
+        // ⚠️ The ids are the CALLER's to resolve, and the caller is expected to pair them with
+        // IdentityTypes: ["Organization"] when it wants the org-derived records ALONE. ContactId is
+        // bound unconditionally on this path, so an unnarrowed call with org ids returns the UNION
+        // of contact- and org-derived records with no way to tell them apart — and the evaluator
+        // credits org-derived records at the ORGANIZATION's baseline, which would then be applied
+        // to the contact's own assignments too. See MembershipResolveOptions.OrganizationIds.
+        var identity = new PersonIdentity(
+            SystemUserId: Guid.Empty,
+            ContactId: contactId,
+            OrganizationIds: effectiveOptions.OrganizationIds);
 
         // ── Cache lookup (contact-namespaced id, disjoint from systemuser path) ─
         var tenantId = GetTenantId();
@@ -1446,10 +1461,40 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
     /// <summary>
     /// Options hash — deterministic across equivalent option values regardless of
-    /// ordering. Includes Roles, IdentityTypes, IncludeRelated, Limit, and the
-    /// ContinuationToken (so paging requests cache per-page). First 8 bytes →
-    /// 16 hex chars; collision risk negligible at this scope.
+    /// ordering. Covers EVERY option that changes the resolved row set: Roles,
+    /// IdentityTypes, IncludeRelated, Limit, ContinuationToken (so paging requests cache
+    /// per-page), <see cref="MembershipResolveOptions.AccessConferringOnly"/> and
+    /// <see cref="MembershipResolveOptions.OrganizationIds"/>. First 8 bytes → 16 hex chars;
+    /// collision risk negligible at this scope.
     /// </summary>
+    /// <remarks>
+    /// 🚨 <b><c>AccessConferringOnly</c> and <c>OrganizationIds</c> were ADDED to this hash by task
+    /// 043, and the omission was a latent disclosure — not a tidiness fix.</b>
+    /// <para>
+    /// Task 041 introduced <c>AccessConferringOnly</c> as the systemuser plane's registry-filter
+    /// opt-in but did not add it here, which was harmless only because 041 deliberately left the
+    /// flag unset at every call site. Task 043 sets it <c>true</c> in
+    /// <c>AccessibleRecordSetService.ComposeForSystemUserAsync</c>. From that moment the
+    /// AUTHORIZATION caller (filtered, <c>true</c>) and the SCOPING caller
+    /// (<c>Api/Membership/MembershipEndpoints</c>, unfiltered, <c>false</c>) would have shared one
+    /// cache entry — same user, same entity, same Limit, therefore the same
+    /// <c>{systemUserId}:{entityType}:{optionsHash}</c> — for the 5-minute TTL. Whichever call
+    /// arrived first would decide what the other saw, and in the direction that matters: a scoping
+    /// call landing first hands the authorization gate the UNFILTERED descriptor set, which is
+    /// exactly the register A-8 over-inclusion FR-24 exists to close, reintroduced through Redis
+    /// rather than through code.
+    /// </para>
+    /// <para>
+    /// <c>OrganizationIds</c> is the same hazard in a new option: two compositions for one contact
+    /// differ ONLY by which organizations were bound (task 043 resolves one walk per distinct
+    /// standing-grant baseline), so omitting it would serve one baseline's row set as another's.
+    /// </para>
+    /// <para>
+    /// The general rule for this method: an option that can change the returned rows MUST appear
+    /// here. A cache key narrower than the query it stores is not a performance detail — on an
+    /// authorization path it is a way to answer the wrong question quietly.
+    /// </para>
+    /// </remarks>
     private static string HashOptions(MembershipResolveOptions options)
     {
         var sb = new StringBuilder(64);
@@ -1457,7 +1502,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
         sb.Append("i:").Append(HashSorted(options.IdentityTypes)).Append('|');
         sb.Append("x:").Append(HashSorted(options.IncludeRelated)).Append('|');
         sb.Append("l:").Append(options.Limit).Append('|');
-        sb.Append("c:").Append(options.ContinuationToken ?? string.Empty);
+        sb.Append("c:").Append(options.ContinuationToken ?? string.Empty).Append('|');
+        sb.Append("a:").Append(options.AccessConferringOnly ? '1' : '0').Append('|');
+        sb.Append("o:").Append(HashSortedGuids(options.OrganizationIds));
 
         var hashInput = sb.ToString();
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
@@ -1474,6 +1521,25 @@ public sealed class MembershipResolverService : IMembershipResolverService
             .Where(v => !string.IsNullOrWhiteSpace(v))
             .Select(v => v.Trim().ToLowerInvariant())
             .Distinct()
+            .OrderBy(v => v, StringComparer.Ordinal);
+        return string.Join(",", sorted);
+    }
+
+    /// <summary>
+    /// The Guid counterpart of <see cref="HashSorted(IReadOnlyList{string}?)"/> — order-independent
+    /// and duplicate-independent, so two callers that bind the same organizations in a different
+    /// order share a cache entry, and two that bind different ones never do.
+    /// </summary>
+    private static string HashSortedGuids(IReadOnlyList<Guid>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return "*";
+        }
+        var sorted = values
+            .Where(v => v != Guid.Empty)
+            .Select(v => v.ToString("D", CultureInfo.InvariantCulture))
+            .Distinct(StringComparer.Ordinal)
             .OrderBy(v => v, StringComparer.Ordinal);
         return string.Join(",", sorted);
     }
