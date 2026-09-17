@@ -133,6 +133,11 @@ shared/taskpane/services/__tests__/sendEmailService.test.ts
 # Pins: each adapter reports its capability set honestly per host, so a view that
 # gates on a capability cannot silently enable a feature the host lacks.
 shared/adapters/__tests__/capabilities.test.ts
+# --- Document Name field (task 020, FR-06) - green from creation --------------
+# Pins: the field defaults to the open document's name minus its extension, the
+# pencil edit commits/reverts, the edited value is what reaches the wire as
+# document.title, and Outlook is untouched (no default, no pencil).
+shared/taskpane/components/__tests__/SaveFlow.documentName.test.tsx
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
