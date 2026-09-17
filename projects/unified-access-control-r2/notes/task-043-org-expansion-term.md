@@ -223,3 +223,55 @@ Net new reads when no organization holds a standing grant: **zero** beyond one b
   connect this session (`CONNECTION_CLOSED`). Relevant only if §4.1 is ever actioned.
 - **No live check of the org-typed lookup metadata** for the same reason; the registry seed's org columns
   come from task 041's live pass (2026-09-04).
+
+---
+
+## 8. 🔴 A verification error I made, and how it was caught
+
+I ran `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/` with a filter naming
+`StandingGrant`, `AccessibleRecordSet`, `Membership`, `ExternalScope`, `Delegation` and
+`UnifiedAccessControl`, and got **"Passed! Failed: 0, Passed: 16"**. I nearly recorded that as the
+affected-integration-suite figure.
+
+It was the wrong 16. `tests/integration/auth/**` and `tests/integration/seam/**` are **not** compiled
+into `Sprk.Bff.Api.IntegrationTests` at all — they are globbed into
+`tests/unit/Sprk.Bff.Api.Tests.csproj` (lines 111 and 149, `LinkBase="AuthTests"` / `"SeamTests"`). The
+16 that passed were `Sprk.Bff.Api.IntegrationTests.Membership.Phase2*`, an unrelated Phase-2 suite that
+happened to match the word "Membership". `StandingGrantRuntimeUnionSeamTests` — the seam test task 042
+recorded as breaking on *their* change to the same method I restructured — was never in the run.
+
+**The mechanism: a filter that selects NOTHING reports identically to one that selects everything.**
+Both print `Failed: 0`. This is the same error class as trusting a zero-failure count while checks are
+still pending (`push-to-github` Step 8) and as session 13's orphaned `testhost` executing stale DLLs:
+the observation was taken outside the thing being observed.
+
+**Practice adopted for the rest of this task, and worth generalising:** before trusting a filtered test
+run, prove the filter is non-empty — `--list-tests` with the same filter, and assert the count is > 0.
+A test-count delta against `HEAD` serves the same purpose for added tests (used here: +14
+`[Fact]`/`[Theory]`, matching 6 resolver + 9 evaluator − 1 inverted).
+
+---
+
+## 9. Verification
+
+Commit `28f833a0e` (local; **not pushed**).
+
+| Gate | Result | How it was made trustworthy |
+|---|---|---|
+| BFF build | **0 warnings / 0 errors** | — |
+| The two edited classes | **108 / 108** | `[Fact]`/`[Theory]` delta vs `HEAD` = **+14** (evaluator 51→59, resolver 37→43), so the run provably covered the edited tree rather than stale DLLs |
+| Affected unit namespaces (`Infrastructure.ExternalAccess` + `Services.Ai.Membership`) | **328 / 328** | Re-run after a **forced rebuild**, because a lint-staged pre-commit hook ran `dotnet format` over the five C# files and the first run had reused pre-format binaries (1 s duration gave it away) |
+| Seam + auth surfaces (`Seam.ExternalAccess`, `Auth.UnifiedAccessControl`, …) | **197 / 197** | Filter proven non-empty first (**189** selected) after the §8 error; all three `StandingGrantRuntimeUnionSeamTests` methods confirmed present **by name** |
+| ArchTests | **323 / 323** | Census unchanged from task 063's 323 — expected, since no route or DI registration was added |
+| Perturbations | in flight | 11 cases, one per load-bearing behaviour; harness reports CAUGHT / MISSED / **INVALID** separately |
+| CVEs · publish size · Step 9.5 | pending | — |
+
+**Specifically re-verified because task 042 warned about it**: `StandingGrantRuntimeUnionSeamTests`
+broke on 042's change to `ComposeForContactAsync`, and this task restructured the same method. All three
+of its tests pass unchanged, including
+`StandingGrant_WithNoBaseline_ConfersNoAccessEvenWhenTheFlagIsSet` — the assertion 042 added after
+discovering its fixture mirrored the live state of both real standing-grant contacts.
+
+**Housekeeping:** the pre-commit hook created and then removed its own stash (`72cf68afa`). The two
+entries remaining on the shared stack (`stash@{0}` master pre-deploy, `stash@{1}` WIP on
+`spaarke-ai-platform-unification-r2`) belong to other worktrees and were left untouched.
