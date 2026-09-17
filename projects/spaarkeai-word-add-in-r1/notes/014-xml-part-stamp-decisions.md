@@ -529,9 +529,33 @@ Recorded because it will bite the next task that has to produce full-suite numbe
 suites build a fresh host per test. Sizing chunks by class count is therefore misleading; size them by whether
 the classes are factory-based.
 
-The partition used here is complete and disjoint, built from `~` / `!~` / `&` filters (no parentheses — VSTest
-does not handle them reliably): `.Services.Ai.` · `.Services.` minus that · `.Seam.` · `.Api.Ai.` · the rest of
-`.Api.` · and the negative complement `!~.Services. & !~.Seam. & !~.Api.`. Every test falls in exactly one.
+**🔴 Second trap — `FullyQualifiedName~.Api.` matches the ENTIRE assembly.** Every test's fully-qualified name
+begins `Sprk.Bff.Api.Tests.`, which itself contains the substring `.Api.`. So a `~.Api.` chunk is not a chunk at
+all — it is the whole suite — and its complement `!~.Api.` selects **nothing** (VSTest reports "No test matches
+the given testcase filter", which is easy to misread as "this area is empty" rather than "your filter is
+wrong"). The symptom that exposed it: a supposed "rest of `.Api.`" chunk ran 11,627 tests and its skip list
+contained `…Tests.Services.Office.…`, a namespace that filter should never have reached.
+
+**Use the fully-qualified prefix `Sprk.Bff.Api.Tests.Api.`** when selecting the `Api` area. `.Api.Ai.` and
+`.Api.Office.` are safe as-is because those substrings are unambiguous.
+
+The corrected partition is complete and disjoint (`~` / `!~` / `&`; no parentheses — VSTest does not handle them
+reliably). Measured on the final binaries for this task:
+
+| Chunk (filter) | Passed | Failed | Skipped |
+|---|---|---|---|
+| `~.Services.Ai.` | 4660 | 0 | 17 |
+| `~.Services.` & `!~.Services.Ai.` | 2239 | 0 | 7 |
+| `~.Seam.` | 1749 | 0 | 0 |
+| `~.Api.Ai.` | 601 | 0 | 14 |
+| `~.Api.Office.` | 171 | 0 | 9 |
+| `~Sprk.Bff.Api.Tests.Api.` & `!~.Api.Ai.` & `!~.Api.Office.` | 721 | 0 | 0 |
+| `!~.Services.` & `!~.Seam.` & `!~Sprk.Bff.Api.Tests.Api.` | 2225 | 0 | 9 |
+| **Total** | **12,366** | **0** | **56** |
+
+Reconciliation: 12,422 tests total; skipped **56** matches the pre-task baseline exactly, and passed
+**12,366 = 12,333 (baseline) + 33 new tests** (24 `OfficeDocumentStampTests` + 9
+`OfficeSaveDocumentStampContractTests`). Every test in the assembly is in exactly one row.
 
 **🔴 The trap: a failed build + `--no-build` silently yields numbers for code that was never tested.**
 A chunk that overruns the cap is moved to the BACKGROUND, and its `testhost` keeps a **write lock** on
