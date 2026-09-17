@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>The pane silently swallows quick-create failures — including task 031's new actionable 403</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>031 merged (it introduced the load-bearing 403) AND 050 merged (errors now carry application/problem+json)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.tsx` in the add-in's save flow, on the path a user hits when record creation fails. Tags include office-addins and save-flow.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The defect sites are located exactly and the server contract they must surface is already shipped and typed. The work is careful error surfacing against a known response shape, not a design decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`SaveFlow.tsx` is also modified by tasks 025 and 045. Do not co-schedule with either.</parallel-reason>
+    <deps>031, 050</deps>
+    <tags>office-addins, frontend, save-flow, error-handling</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`SaveFlow.tsx` discards every non-OK quick-create and entity-search response with a bare `if (!res.ok) return null` / `return []`. Task 031 just made owner resolution load-bearing — an unresolvable caller now gets a 403 with an actionable message and no row created — and the pane throws that message away, so the user clicks Create and sees nothing happen. Surface these failures.</prompt>
+
+  <role>SPAARKE add-in developer. Expert in the pane's save flow, Fluent UI v9 in a narrow task pane, and the BFF's typed ProblemDetails error contract. Follow ADRs strictly.</role>
+
+  <goal>A failed quick-create tells the user what happened and what to do about it, using the server's own typed message. A failed entity search is distinguishable from "no results". No failure path silently returns as if nothing occurred.</goal>
+
+  <context>
+    <background>
+      Found by task 031 (2026-09-17) while making Project creation complete, and filed here rather than deferred — unowned work belongs to this project (deferral policy 2026-09-09).
+
+      **The two sites** (re-locate by symbol; line numbers drift):
+      - `src/client/office-addins/shared/taskpane/components/SaveFlow.tsx` ~:962 — `POST /api/office/quickcreate/{type}` → `if (!res.ok) return null;`. This is the one task 031 made urgent.
+      - The same file ~:908 — `GET /api/office/search/entities` → `if (!res.ok) return [];`, which renders a failed search as an empty result set. Milder, same class: the user cannot tell "nothing matched" from "the search broke".
+
+      **What task 031 changed on the server** (`notes/031-project-semantics.md`): owner assignment for Project moved from best-effort to **load-bearing**. An unresolvable caller is refused with a 403 carrying `RecordCreationFailureKind.OwnerUnresolved` / `"owner_unresolved"` **before any write**, so no row is created. Task 030 had deliberately left this decision to 031. It is a contract-visible status-code change on a shipped route, and the pane is its only consumer that matters here.
+
+      **What task 050 changed** (merged 2026-09-17): the BFF's error responses now carry `Content-Type: application/problem+json` with the body unchanged — `type`, `title`, `detail`, `status`, `correlationId`, and `extensions.code`. So a typed, human-readable `detail` and a machine-readable `code` are both already available to branch on; this task does not need any new server surface.
+
+      Quick-create can also succeed **with warnings** (`warnings?: string[]` in the response) — e.g. business-unit defaults could not be read, or an unknown Matter Type was ignored. Check whether the pane surfaces those today; if it drops them, that is the same defect class and is in scope.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/utils/errorMessages.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/ApiClient.ts</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/050-problem-json-content-type.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Surface the SERVER's message. The BFF already returns an actionable `detail` and a typed `extensions.code`; do NOT invent a client-side replacement string for a failure the server explained. A generic "Something went wrong" for a 403 the server described precisely is the same defect in a nicer costume.</constraint>
+    <constraint source="project">Every failure must leave the user a way forward — retry, correct the input, or a clear statement that an administrator must act. Silent `return null` / `return []` is exactly what this task exists to remove; do not reintroduce it on a new branch of the code.</constraint>
+    <constraint source="project">Distinguish "no results" from "the search failed" at the entity-search site. They must not render identically.</constraint>
+    <constraint source="NFR-10">Gate any host-dependent behaviour on a declared capability, never on `hostType === 'word'`. This project has regressed here once already (task 020).</constraint>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens only, no hex literals; honours the Office light/dark theme via `useOfficeTheme`. Verify in BOTH themes.</constraint>
+    <constraint source="ADR-012">Per this project's path-A exception: thin views under `shared/taskpane/`; MUST NOT import `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-038">New tests in NEW files. Report the suite paths for the main session to add to `ci-gated-suites.txt` — do NOT edit that file yourself.</constraint>
+    <constraint source="project">Build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` — `npm run build` IS the production build. `npm run lint` is broken in this package (points at a non-existent `src` subfolder) — run `eslint` directly on the files you touch.</constraint>
+    <constraint source="project">Server-side changes are OUT OF SCOPE. The contract already carries everything needed. If you believe the server must change, STOP and report rather than widening into `Services/Office/**`, which tasks 025 and 014 are queued to modify.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md, `notes/031-project-semantics.md` and `notes/050-problem-json-content-type.md` §4. Declare FULL / sonnet / high / DIRECTIONAL.</step>
+    <step order="1">Re-locate both sites by symbol and confirm they still discard the response. Enumerate every failure the quick-create route can now return (403 `owner_unresolved` at minimum) and what the user should do about each.</step>
+    <step order="2">Write the failing tests first: a 403 with a `detail` reaches the user; a failed search is distinguishable from an empty one.</step>
+    <step order="3">Parse the ProblemDetails body and surface `detail` (falling back sensibly when a response is not ProblemDetails at all — an infrastructure 502 has no body to read).</step>
+    <step order="4">Check whether success-with-`warnings` is surfaced; if it is dropped, surface it too.</step>
+    <step order="5">Run `npx tsc --noEmit` (production must stay 0), `npm run build`, `npx jest --ci` (baseline: exactly ten known failing suites, 84 tests), and `eslint` on the touched files. Report the new suite paths for gating.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If surfacing the error would require a server-side change to the response shape, STOP and report — the contract is shipped, and `Services/Office/**` is queued for tasks 025 and 014.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`errorMessages.ts` already maps typed server errors to pane copy, and `ApiClient.ts` already handles responses. Both are extended, not duplicated.</existing>
+    <extension>Yes — two call sites stop discarding their response and route through the existing error-message path.</extension>
+    <cost-of-doing-nothing>A user whose account cannot be resolved clicks Create, and nothing happens — no record, no error, no explanation. The server did the right thing (refused before writing, with a message saying why) and the pane throws that message away, which converts a handled failure into an apparent bug in Spaarke.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/053-pane-error-surfacing.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given quick-create returns 403 `owner_unresolved`, when the user submits, then the pane shows the server's `detail` message and the user is not left looking at an unchanged form with no feedback.</criterion>
+    <criterion testable="true">Given entity search fails, when results render, then the failure is visibly distinct from "no matches" and offers a retry.</criterion>
+    <criterion testable="true">Given a quick-create that succeeds WITH warnings, when it completes, then the warnings reach the user (or the note records, with evidence, that they already did).</criterion>
+    <criterion testable="true">Negative: `grep` shows no remaining bare `if (!res.ok) return null` / `return []` in `SaveFlow.tsx`.</criterion>
+    <criterion testable="true">Negative: a non-ProblemDetails failure (e.g. a 502 with no body) still produces a sensible message and never throws into the save flow.</criterion>
+    <criterion testable="true">Negative: no `hostType === 'word'` added (NFR-10); no hex literals in added styles, verified in both Office themes (ADR-021).</criterion>
+    <criterion testable="true">`npx tsc --noEmit` production errors remain 0; `npm run build` exits 0; `npx jest --ci` shows no new failing suite beyond the ten known ones.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-17 by the main session from task 031's closing report. Owned here rather than deferred, per the 2026-09-09 deferral policy. Task 031's PR note stands: the Project owner 403 is a contract-visible status-code change on a shipped route, and this task is what makes it visible to the person it affects.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
