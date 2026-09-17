@@ -159,6 +159,16 @@ shared/taskpane/utils/__tests__/errorMessages.collision.test.ts
 shared/taskpane/utils/__tests__/errorMessages.fetchFailure.test.ts
 shared/taskpane/components/__tests__/RelatedToPicker.errorSurfacing.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.quickCreateErrorSurfacing.test.tsx
+# --- bytes are captured at Save press, not at mount (task 045) ---------------
+# Pins the silent-data-loss guard: the pane must NOT read the document once at
+# Save-tab mount and reuse it. All THREE submit paths re-read current bytes —
+# the initial Save, the hook's own retry(), and the next save after "Save
+# Another" — plus task 025's "Keep both" collision retry. A rejected capture
+# surfaces a handled error and sends ZERO requests to /api/office/save.
+# These fail if the live callback is ever replaced by a cached value again:
+# reverting that one line turned 5 of the 7 red.
+shared/taskpane/components/__tests__/SaveFlow.captureAtSave.test.tsx
+shared/taskpane/components/views/__tests__/SaveView.captureAtSave.test.tsx
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
