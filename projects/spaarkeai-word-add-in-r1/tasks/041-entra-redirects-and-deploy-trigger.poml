@@ -4,7 +4,7 @@
     <title>NFR-09: per-env Entra SPA redirects and deploy-workflow trigger</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>011 complete — the Word manifest determines the SWA host the redirects must match</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Configuration and workflow-trigger change; creates no application code. Modifies Entra app registrations and one CI workflow file. Quality gates are skipped per the STANDARD default, but the frozen-CI-file constraint and the confirmation-before-write ordering are hard rules.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -112,6 +112,12 @@
 
   <notes>
     spec.md NFR-09 and Dependencies ("Per-environment Entra SPA redirect registration — a provisioning step that must precede deployment to each environment"). plan.md §4 Phase 4 task 041. The frozen-CI-file rule comes from root CLAUDE.md and the project CLAUDE.md; the shadow-comparison window opened 2026-08-27.
+
+    **COMPLETED 2026-09-17 (main session, owner-authorized). Outcome: verification only — no write was necessary, and no file under `.github/` was touched.** Full record: `projects/spaarkeai-word-add-in-r1/notes/041-entra-redirects.md`.
+    (1) **Entra**: both NFR-09 URIs were already registered as SPA redirects on `Spaarke Office Add-in` (`c1258e2d-1688-49d2-ac99-a7485ebd9995`) for `icy-desert-0bfdbb61e.6.azurestaticapps.net`. `spaarke-office-addins` is the only add-in Static Web App in the subscription, so dev is the only environment in scope; §6 of the note carries the recipe for the next one. Read with the operator's own identity (`ralph.schroeder@spaarke.com`); no secret created, rotated or stored.
+    (2) **The dependency on 011 is satisfied in substance** even though 011 is still 🔄 for its sideload verification: the host was taken from the DEPLOYED `word/manifest.xml` (HTTP 200, Version 1.0.8.0, no origin other than the SWA host), which is the artifact the redirects must match.
+    (3) **Trigger decision: `workflow_dispatch`** — `deploy-office-addins.yml` is unchanged. Three successful dispatch runs on this branch (34546485352, 34532444044, 34414699298) prove the path; a push trigger would auto-deploy a feature branch to the shared dev SWA. Task 042 launches with `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`.
+    (4) **Observations left alone on purpose**: `/auth-dialog.html` and `/auth-end.html` are registered redirects whose targets return 404 (inert; the additive-only constraint forbids removing them), and the unused `Spaarke Word` / `Spaarke Outlook` registrations have zero SPA URIs — registering anything on them would have been wrong.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
