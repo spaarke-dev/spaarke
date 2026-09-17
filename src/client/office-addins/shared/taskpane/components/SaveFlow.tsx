@@ -52,6 +52,7 @@ import {
 } from '../services/matterTypeLookupService';
 import { openRecord } from '../services/openRecordLauncher';
 import { cleanGuid } from '../utils/cleanGuid';
+import { describeFetchFailure } from '../utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 
@@ -915,36 +916,53 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   }, [flowState, selectedEntity, submittedTarget, onSaved]);
 
   // "Look up another record" search — scoped to the selected chip type.
+  //
+  // Task 053: a failed search used to render identically to "nothing matched" (`return []` on both a
+  // non-OK response and a thrown exception) — the user could never tell the two apart. Now a failure
+  // THROWS a descriptive Error (server `detail` when the response is ProblemDetails-shaped, a sensible
+  // status-aware fallback otherwise, via `describeFetchFailure`); `RelatedToPicker`'s `runSearch` catches
+  // it and renders it distinctly from an empty result set, with a Retry. A genuinely empty search still
+  // resolves to `[]`, unchanged.
   const relatedSearch = useCallback(
     async (query: string, type: EntityType): Promise<EntitySearchResult[]> => {
-      if (!apiBaseUrl || !getAccessToken) return [];
+      if (!apiBaseUrl || !getAccessToken) {
+        throw new Error("Couldn't search: the pane isn't fully configured. Reload and try again.");
+      }
+
+      let res: Response;
       try {
         const token = await getAccessToken();
-        const res = await authenticatedJsonFetch(
+        res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10`,
           { headers: { 'Content-Type': 'application/json' } },
           token,
           { getRetryToken: getAccessToken }
         );
-        if (!res.ok) return [];
-        const data = await res.json();
-        const rows = (data.results ?? []) as Array<{
-          id: string;
-          entityType: string;
-          logicalName: string;
-          name: string;
-          displayInfo?: string;
-        }>;
-        return rows.map(item => ({
-          id: item.id,
-          entityType: item.entityType as EntityType,
-          logicalName: item.logicalName,
-          name: item.name,
-          ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
-        }));
       } catch {
-        return [];
+        // Network/token failure before any response existed — never silently "no matches".
+        throw new Error("Couldn't reach Spaarke to search. Check your connection and try again.");
       }
+
+      if (!res.ok) {
+        const errorMsg = await describeFetchFailure(res);
+        throw new Error(errorMsg.message);
+      }
+
+      const data = await res.json();
+      const rows = (data.results ?? []) as Array<{
+        id: string;
+        entityType: string;
+        logicalName: string;
+        name: string;
+        displayInfo?: string;
+      }>;
+      return rows.map(item => ({
+        id: item.id,
+        entityType: item.entityType as EntityType,
+        logicalName: item.logicalName,
+        name: item.name,
+        ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
+      }));
     },
     [apiBaseUrl, getAccessToken]
   );
@@ -955,8 +973,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // `matterTypeId` — a bare lowercase GUID (ADR-044) — and any server warning (e.g. an unresolvable
   // type, or numbering not existing yet) is surfaced, never swallowed. The pane never sends or
   // constructs a matter number; that is a separate server-side numbering project.
+  //
+  // Task 053: task 031 made Project owner resolution load-bearing — an unresolvable caller now gets a
+  // 403 `owner_unresolved` with an actionable `detail` and NO row created. This used to be discarded
+  // (`if (!res.ok) return null`), so the user clicked Create and saw nothing happen — the server did the
+  // right thing and the pane hid it. A failure now THROWS a descriptive Error carrying the server's own
+  // message (via `describeFetchFailure` — the same ProblemDetails-parsing path `errorMessages.ts` already
+  // uses for the top-level save/collision flows); `RelatedToPicker`'s `handleCreate` catches it and shows
+  // the real message instead of a generic "Couldn't create the {type}."
   const createRelatedRecord = useCallback(
-    async (type: EntityType, name: string, matterTypeId?: string): Promise<CreateRecordResult | null> => {
+    async (type: EntityType, name: string, matterTypeId?: string): Promise<CreateRecordResult> => {
       // Test harness: return a mock created record so the flow is iterable without the BFF.
       if (isBrowserTestMode()) {
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -970,36 +996,46 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           },
         };
       }
-      if (!apiBaseUrl || !getAccessToken) return null;
+      if (!apiBaseUrl || !getAccessToken) {
+        throw new Error(`Couldn't create the ${type}: the pane isn't fully configured. Reload and try again.`);
+      }
+
+      let res: Response;
       try {
         const token = await getAccessToken();
         const body = type === 'Matter' && matterTypeId ? { name, matterTypeId: cleanGuid(matterTypeId) } : { name };
-        const res = await authenticatedJsonFetch(
+        res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/quickcreate/${type.toLowerCase()}`,
           { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
           token,
           { getRetryToken: getAccessToken }
         );
-        if (!res.ok) return null;
-        const data = (await res.json()) as {
-          id: string;
-          logicalName: string;
-          name: string;
-          warnings?: string[];
-        };
-        // The chosen matterTypeId didn't resolve (renamed/removed on the server since this pane's
-        // cache was populated) — clear the cache so the NEXT fetch (a later create, or the pane's next
-        // open) picks up the current reference table rather than serving the same stale entry again.
-        if (type === 'Matter' && warningsIndicateMatterTypeNotFound(data.warnings)) {
-          clearMatterTypesCache();
-        }
-        return {
-          record: { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name },
-          ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
-        };
       } catch {
-        return null;
+        // Network/token failure before any response existed — never silently "nothing happened".
+        throw new Error(`Couldn't reach Spaarke to create the ${type}. Check your connection and try again.`);
       }
+
+      if (!res.ok) {
+        const errorMsg = await describeFetchFailure(res);
+        throw new Error(errorMsg.message);
+      }
+
+      const data = (await res.json()) as {
+        id: string;
+        logicalName: string;
+        name: string;
+        warnings?: string[];
+      };
+      // The chosen matterTypeId didn't resolve (renamed/removed on the server since this pane's
+      // cache was populated) — clear the cache so the NEXT fetch (a later create, or the pane's next
+      // open) picks up the current reference table rather than serving the same stale entry again.
+      if (type === 'Matter' && warningsIndicateMatterTypeNotFound(data.warnings)) {
+        clearMatterTypesCache();
+      }
+      return {
+        record: { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name },
+        ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+      };
     },
     [apiBaseUrl, getAccessToken]
   );

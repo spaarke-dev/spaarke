@@ -196,6 +196,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createWarning, setCreateWarning] = useState<string | null>(null);
+  // Task 053: a failed "Look up another record" search, distinct from a genuine zero-result search —
+  // set from the Error `onSearch` (SaveFlow's `relatedSearch`) now throws instead of silently resolving
+  // `[]`. Cleared at the start of every new search attempt and on a type-chip change.
+  const [searchError, setSearchError] = useState<string | null>(null);
   // Matter Type (task 038) — required only when creating a Matter; owner decision 2026-09-11.
   const [selectedMatterTypeId, setSelectedMatterTypeId] = useState('');
   const [matterTypeError, setMatterTypeError] = useState<string | null>(null);
@@ -210,6 +214,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     setSelectedType(type);
     setQuery('');
     setSearchResults([]);
+    setSearchError(null);
     setShowCreate(false);
     setNewName('');
     setCreateError(null);
@@ -252,10 +257,16 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
           setCreateWarning(result.warnings.join(' '));
         }
       } else {
+        // Defensive only: `onCreateRecord` implementations THROW on failure (task 053) rather than
+        // resolving null, so this branch is not reached by the shipped `SaveFlow.createRelatedRecord` —
+        // kept for any other caller of this prop that still follows the older null-on-failure contract.
         setCreateError(`Couldn't create the ${selectedType}.`);
       }
-    } catch {
-      setCreateError(`Couldn't create the ${selectedType}.`);
+    } catch (err) {
+      // Task 053: surface the SERVER's own message (thrown by `onCreateRecord`, e.g. task 031's
+      // `owner_unresolved` 403 `detail`) instead of this generic fallback — the fallback now applies
+      // only when something threw a non-Error value.
+      setCreateError(err instanceof Error ? err.message : `Couldn't create the ${selectedType}.`);
     } finally {
       setCreating(false);
     }
@@ -267,13 +278,20 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     const q = query.trim();
     if (q.length === 0) {
       setSearchResults([]);
+      setSearchError(null);
       return;
     }
     setSearching(true);
+    setSearchError(null);
     try {
       setSearchResults(await onSearch(q, selectedType));
-    } catch {
+    } catch (err) {
+      // Task 053: a failed search must not render identically to "nothing matched" — `onSearch`
+      // (SaveFlow's `relatedSearch`) throws a descriptive Error on failure. Clear any stale results
+      // from a prior, different query (so they don't linger under this query's error) and show the
+      // error + a Retry instead of a silent empty list.
       setSearchResults([]);
+      setSearchError(err instanceof Error ? err.message : `Couldn't search for ${selectedType} records.`);
     } finally {
       setSearching(false);
     }
@@ -491,6 +509,21 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         <Text size={200} className={styles.fieldWarning} role="status">
           {createWarning}
         </Text>
+      )}
+
+      {/* Task 053: a failed search rendered identically to "nothing matched" — now shown distinctly,
+          with a Retry that re-runs the same query. Reuses the Matter Type load-failure's own
+          message+Retry pattern (styles.matterTypeErrorRow / styles.fieldError) rather than inventing a
+          second one. */}
+      {searchError && (
+        <div className={styles.matterTypeErrorRow}>
+          <Text size={200} className={styles.fieldError} role="alert">
+            {searchError}
+          </Text>
+          <Button appearance="outline" size="small" onClick={() => void runSearch()} disabled={disabled}>
+            Retry
+          </Button>
+        </div>
       )}
 
       {searchResults.length > 0 && (

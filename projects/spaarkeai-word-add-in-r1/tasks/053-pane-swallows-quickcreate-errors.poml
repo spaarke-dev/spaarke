@@ -4,7 +4,7 @@
     <title>The pane silently swallows quick-create failures — including task 031's new actionable 403</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>031 merged (it introduced the load-bearing 403) AND 050 merged (errors now carry application/problem+json)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.tsx` in the add-in's save flow, on the path a user hits when record creation fails. Tags include office-addins and save-flow.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,7 +93,16 @@
     <criterion testable="true">`npx tsc --noEmit` production errors remain 0; `npm run build` exits 0; `npx jest --ci` shows no new failing suite beyond the ten known ones.</criterion>
   </acceptance-criteria>
 
-  <notes>Created 2026-09-17 by the main session from task 031's closing report. Owned here rather than deferred, per the 2026-09-09 deferral policy. Task 031's PR note stands: the Project owner 403 is a contract-visible status-code change on a shipped route, and this task is what makes it visible to the person it affects.</notes>
+  <notes>Created 2026-09-17 by the main session from task 031's closing report. Owned here rather than deferred, per the 2026-09-09 deferral policy. Task 031's PR note stands: the Project owner 403 is a contract-visible status-code change on a shipped route, and this task is what makes it visible to the person it affects.
+
+**Completed 2026-09-17** (task-execute sub-agent, sonnet/high/directional). Full write-up: `notes/053-pane-error-surfacing.md`. Summary:
+- Both sites re-located by symbol (line numbers had drifted, as warned): `createRelatedRecord` (quick-create) and `relatedSearch` (entity search) in `SaveFlow.tsx`. Both now throw a descriptive `Error` — built from the server's own `detail` via a new `describeFetchFailure()` helper in `errorMessages.ts` — instead of swallowing to `null`/`[]`.
+- Verified against C# (not assumed) that the QuickCreate endpoint's own `catch (SdapProblemException)` block sends `errorCode`/`detail`/`correlationId` as TOP-LEVEL JSON properties (`Results.Problem`'s extensions-flattening), matching `errorMessages.ts`'s EXISTING `ProblemDetails` parsing exactly — no server-side change was needed; the escalation trigger did not fire.
+- **Deviation**: `RelatedToPicker.tsx` (not in the POML's `<relevant-files>`) was also modified. Necessary, not optional — it is the component that actually renders `onCreateRecord`/`onSearch`'s result, and its `catch` blocks previously discarded whatever was thrown. Full rationale + the failing-test evidence proving this is `notes/053-pane-error-surfacing.md` §4/§6.
+- Success-with-`warnings` (Step 4): already surfaced end-to-end before this task; verified with evidence (existing code path + existing passing test), no code change needed there.
+- Gates: `tsc --noEmit` 111/0 (exact baseline match); `npm run build` exit 0; full jest 10 failed/39 passed suites (84/684 tests) — the 10 failures are exactly the known baseline by name; gated list (`ci-gated-suites.txt`, run via `--runTestsByPath`) unchanged and green at 34/34 suites, 432/432 tests; `eslint` 0 errors/6 pre-existing warnings (verified identical in the precedent files this task's tests mirror); `code-review` 0 Critical/0 Warning/1 Suggestion; `adr-check` 0 Violations/0 Warnings.
+- **`ci-gated-suites.txt` discrepancy flagged, not fixed** (forbidden-edit file): the task brief expected 36/443; the committed file at this branch's tip has 34/432 — task 025's own two suites (`SaveFlowCollision.test.tsx`, `errorMessages.collision.test.ts`) were never added to the gate despite merging and passing. Recommend the main session promote those two PLUS this task's three new suites in one ratchet update.
+- New test files (ADR-038): `utils/__tests__/errorMessages.fetchFailure.test.ts`, `components/__tests__/RelatedToPicker.errorSurfacing.test.tsx`, `components/__tests__/SaveFlow.quickCreateErrorSurfacing.test.tsx`.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
