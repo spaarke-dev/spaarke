@@ -285,6 +285,11 @@ export const SaveView: React.FC<SaveViewProps> = ({
   // absent/loading) skips SaveFlow's "Related to" auto-match candidates fetch entirely.
   const canSuggestRelatedRecords = hostAdapter?.getCapabilities().canSuggestRelatedRecords ?? false;
 
+  // task 020 / FR-06 (NFR-10): same pattern — decided from the live adapter's capabilities, never a
+  // `hostType` check. `false` (including while `hostAdapter` is absent/loading) leaves the Document
+  // Name field as the plain, empty Textarea it was before task 020 — no default, no pencil.
+  const canProvideDocumentName = hostAdapter?.getCapabilities().canProvideDocumentName ?? false;
+
   // Render SaveFlow with context
   return (
     <div className={styles.container}>
@@ -296,6 +301,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         showDocumentInfo
         canOpenRecord={canOpenRecord}
         canSuggestRelatedRecords={canSuggestRelatedRecords}
+        canProvideDocumentName={canProvideDocumentName}
         {...(itemId !== undefined ? { itemId } : {})}
         {...(itemName !== undefined ? { itemName } : {})}
         {...(senderEmail !== undefined ? { senderEmail } : {})}

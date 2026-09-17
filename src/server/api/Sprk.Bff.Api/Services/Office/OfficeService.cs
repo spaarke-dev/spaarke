@@ -410,8 +410,9 @@ public class OfficeService : IOfficeService
             // 1. Create Document → 2. Upload to SPE → 3. Associate Document to SPE → 4. Trigger AI
             Stream? contentStream = null;
             string fileName;
-            // Task 046 (b): the name the document is SHOWN under (sprk_documentname). Null means "the stored file
-            // name", which is the case for every branch except Email.
+            // Task 046 (b) / 020: the name the document is SHOWN under (sprk_documentname). Null means "the
+            // stored file name", which is the case only for Attachment — Email (task 046 (b)) and Document
+            // (task 020, FR-06) both set it explicitly below.
             string? documentName = null;
             long fileSize = 0;
 
@@ -482,6 +483,15 @@ public class OfficeService : IOfficeService
                         // same sanitizer. Removing the hardcoded folder prefixes elsewhere in this change
                         // does NOT subsume this — a filename is a path, so it needs its own guard.
                         fileName = SpeUploadPath.SanitizeFileName(request.Document.FileName);
+
+                        // Task 020 (FR-06): the readable name (sprk_documentname) is the user-facing
+                        // Document Name the pane sends as document.title — independent of the sanitized SPE
+                        // upload path above (the inverted-mapping UAT defect this task closes: the record list
+                        // showed .docx filenames instead of the names users typed). Falls back to the sanitized
+                        // file name only when Title is absent/blank, so sprk_documentname is never empty.
+                        documentName = !string.IsNullOrWhiteSpace(request.Document.Title)
+                            ? request.Document.Title
+                            : fileName;
                         break;
 
                     default:

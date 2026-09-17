@@ -920,6 +920,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
         // Build request in server-expected format
         // Server requires: contentType, targetEntity, and type-specific metadata
+        //
+        // Task 020 (FR-06): the top-level `documentMetadata: { name, description }` object this used to send
+        // is REMOVED — `SaveRequest` (server) has no such member, so System.Text.Json silently dropped it on
+        // every prior request (dead weight on the wire). The user-facing name already travels correctly per
+        // content type: `document.title` (Document, mapped server-side to sprk_documentname as of task 020)
+        // and `email.subject` (Email, unchanged — task 046 (b)). No replacement field is needed.
         const serverRequest: Record<string, unknown> = {
           contentType,
           triggerAiProcessing:
@@ -928,13 +934,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             profileSummary: processingOptions.profileSummary,
             ragIndex: processingOptions.ragIndex,
             deepAnalysis: processingOptions.deepAnalysis,
-          },
-          // Include custom document name for Dataverse fields. Description removed per owner
-          // decision (2026-09-12): FR-07 literal — "Description" becomes "Profile", no free-text
-          // description box in the pane, no sprk_documentdescription sent from here on save. The
-          // server's DocumentMetadata.Description stays accepted (other clients may still send it).
-          documentMetadata: {
-            name: effectiveDocumentName,
           },
         };
 

@@ -879,6 +879,60 @@ public class OfficeVersionSaveContractTests
         world.Jobs.Should().ContainSingle().Which.Name.Should().StartWith("Document Save - ");
     }
 
+    // ── Task 020 (FR-06): document.title -> sprk_documentname, independent of the SPE filename ─────
+
+    [Fact]
+    public async Task Post_OfficeSave_DocumentWithDifferentTitleAndFileName_WritesTitleToDocumentNameAndSanitizedFileNameToSpe()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save",
+            OfficeVersionSaveWorld.NewDocumentSave(
+                "Acme Merger Agreement.docx", InitialBytes, title: "Acme Merger Agreement - Execution Copy"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        // sprk_documentname is the user-facing title the pane sent...
+        world.CreatedDocumentNames.Should().ContainSingle()
+            .Which.Should().Be("Acme Merger Agreement - Execution Copy");
+        // ...never carried into sprk_documentdescription (the other half of the inverted-mapping defect)...
+        world.CreatedDocumentDescriptions.Should().ContainSingle().Which.Should().BeNull();
+        // ...and the SPE blob keeps the sanitized, unedited .docx filename, independently of the title above.
+        world.SpeItems.Values.Should().ContainSingle().Which.Name.Should().Be("Acme Merger Agreement.docx");
+    }
+
+    [Fact]
+    public async Task Post_OfficeSave_DocumentWithNoTitle_FallsBackToTheSanitizedFileNameForDocumentName()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        // NewDocumentSave leaves Title unset — the negative case: sprk_documentname must still never be empty.
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.NewDocumentSave("Brief.docx", InitialBytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.CreatedDocumentNames.Should().ContainSingle().Which.Should().Be("Brief.docx");
+    }
+
+    [Fact]
+    public async Task Post_OfficeSave_DocumentWithTitleOver850Characters_IsBoundedTo850AndSaveSucceeds()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var longTitle = new string('A', 900);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save",
+            OfficeVersionSaveWorld.NewDocumentSave("Brief.docx", InitialBytes, title: longTitle));
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Accepted, "sprk_documentname is bounded at the write boundary, never an unhandled Dataverse length error");
+        world.CreatedDocumentNames.Should().ContainSingle().Which.Should().HaveLength(850)
+            .And.Be(new string('A', 850));
+    }
+
     // ── The version path, HTTP shape ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -1147,11 +1201,11 @@ public sealed class OfficeVersionSaveWorld
         return (id, itemId);
     }
 
-    public static SaveRequest NewDocumentSave(string fileName, byte[] bytes) => new()
+    public static SaveRequest NewDocumentSave(string fileName, byte[] bytes, string? title = null) => new()
     {
         ContentType = SaveContentType.Document,
         TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
-        Document = new DocumentMetadata { FileName = fileName, ContentBase64 = Convert.ToBase64String(bytes) },
+        Document = new DocumentMetadata { FileName = fileName, Title = title, ContentBase64 = Convert.ToBase64String(bytes) },
     };
 
     public static SaveRequest VersionSave(
@@ -1190,6 +1244,12 @@ public sealed class OfficeVersionSaveWorld
     /// </summary>
     public List<string> CreatedDocumentNames { get; } = new();
 
+    /// <summary>
+    /// The <c>sprk_documentdescription</c> each <c>CreateDocumentAsync</c> wrote, in order (task 020). <c>null</c>
+    /// entries are real — a Document save sends no description as of task 020 (FR-06/FR-07).
+    /// </summary>
+    public List<string?> CreatedDocumentDescriptions { get; } = new();
+
     internal string CreateDocument(CreateDocumentRequest request)
     {
         lock (_gate)
@@ -1202,6 +1262,7 @@ public sealed class OfficeVersionSaveWorld
 
             DocumentCreates++;
             CreatedDocumentNames.Add(request.Name);
+            CreatedDocumentDescriptions.Add(request.Description);
             var id = Guid.NewGuid();
             Documents[id] = new DocumentRow { Id = id, FileName = request.Name };
             return id.ToString("D");

@@ -67,6 +67,10 @@ describe('WordAdapter.getCapabilities()', () => {
     // (spec.md Assumptions: "linked-todos", "triage").
     expect(capabilities.canShowLinkedTodos).toBe(false);
     expect(capabilities.canSuggestRelatedRecords).toBe(false);
+
+    // task 020 / FR-06 (converted from a hostType gate per this task's coordinator follow-up):
+    // Word can supply the open document's own name as the Document Name field's default.
+    expect(capabilities.canProvideDocumentName).toBe(true);
   });
 
   it('canOpenBrowserWindow follows the runtime requirement-set check (task 027), not a hardcoded value', () => {
@@ -164,5 +168,10 @@ describe('OutlookAdapter.getCapabilities()', () => {
 
     // Shared.
     expect(capabilities.canSaveAsPdf).toBe(true);
+
+    // task 020 / FR-06: Outlook is false — not because it cannot supply a name (it has a subject),
+    // but because the Document Name box already overrides that subject under a different contract
+    // (task 046 (b)'s isNameSystemDerived). See the capability's doc comment in types.ts.
+    expect(capabilities.canProvideDocumentName).toBe(false);
   });
 });

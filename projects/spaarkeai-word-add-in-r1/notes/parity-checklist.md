@@ -105,6 +105,7 @@ Legend: **S** = supported, **GA** = gated-absent (intentional, declared), **B** 
 | `canComposeEmail` (task 036) | GA (`false`, always — `Office.context.mailbox` doesn't exist in Word; **owner-confirmed Outlook-only for r1**) | S (read mode + Mailbox 1.6) | `WordAdapter.composeEmail.test.ts` + `OutlookAdapter.composeEmail.test.ts` (both gated, pre-existing) | pending — task 042 UAT |
 | **`canShowLinkedTodos`** (task 040, this task) | GA (`false`, always — no `sprk_communication` counterpart) | S (`true`, unconditional) | **NEW**: `capabilities.test.ts` — asserts both adapters directly. No component-level test exists (App.tsx has no test file); the feature is currently unwired at both entry points (`communicationId`/`onViewLinkedTodos` are not passed to `<App>` by `outlook/taskpane/index.tsx` or `word/taskpane/index.tsx` — confirmed by reading both files) | pending — task 042 UAT, and pending the future ribbon-wiring task that actually supplies `communicationId` |
 | **`canSuggestRelatedRecords`** (task 040, this task) | GA (`false`, always — engine keys off captured-email sender/recipients, which Word has none of) | S (`true`, unconditional) | **NEW**: `capabilities.test.ts`. `SaveFlow.test.tsx` (red/ungated baseline, unaffected — no existing test exercised this code path before or after) | pending — task 042 UAT |
+| **`canProvideDocumentName`** (task 020, converted from an initial `hostType === 'word'` gate — coordinator follow-up, 2026-09-16, applying this task's own pattern) | S (`true`, unconditional — `getSubject()` always returns a usable Title-or-fallback value) | GA (`false`, always — **not** because Outlook can't supply a name, but because its Document Name box already overrides the subject under task 046 (b)'s separate `isNameSystemDerived` contract; see the capability's doc comment in `types.ts` for the full reasoning) | **NEW**: `capabilities.test.ts` (both adapters, extended); `shared/taskpane/components/__tests__/SaveFlow.documentName.test.tsx` (new, task 020) exercises the gated default/pencil UI end-to-end for the true case, and its "Outlook path untouched" suite proves the false case renders the pre-existing plain Textarea with no behavior change | pending — task 042 UAT |
 
 ### Spec's Word-only / Outlook-only lists, marked explicitly gated-absent (not gaps)
 
@@ -203,3 +204,27 @@ as a deviation rather than a pass.
 `getCapabilities()` output exhaustively (not just the two new fields) so a future capability addition has
 an obvious place to extend coverage. **This suite is new and not yet in `ci-gated-suites.txt`** — the main
 session owns adding it (this task may not edit that file per its override).
+
+---
+
+## 9. Addendum (2026-09-16) — `canProvideDocumentName` added by task 020's coordinator follow-up
+
+Task 020 (FR-06, filename defaults to Document Name) initially shipped its pencil/default UI gated on
+`hostType === 'word'` inside `SaveFlow.tsx` — exactly the NFR-10 anti-pattern this task (040) exists to
+find and convert. A coordinator review caught it post-merge (this task's own audit sweep, §1/§6, predates
+task 020's existence and so could not have caught it) and asked for the same conversion this task already
+applied twice: a new `HostCapabilities.canProvideDocumentName` entry, threaded from `SaveView` into
+`SaveFlow` exactly like `canOpenRecord` / `canSuggestRelatedRecords`, replacing the `hostType` read at
+every site (lazy state initializer, the `defaultDocumentName` memo, the sync effect, and the JSX render
+branch — four sites, one conditional).
+
+Re-running this task's own §6 grep after that conversion confirms it left no new `hostType` residue: the
+only `SaveFlow.tsx` hits are the same four pre-existing, already-classified-as-data reads from §3/§6 above
+(item-type label, sender display, sent date, attachment selector) — nothing added by task 020 remains as a
+raw `hostType` comparison. §4's table above carries the new row; §3's reasoning table is unchanged (no new
+"legitimate data" case was created — the one conditional task 020 added was a genuine capability gate, not
+data, and has been fully converted, not merely reasoned about).
+
+Full detail, including why Outlook is `false` despite technically having a subject it could offer: the
+capability's own doc comment in `shared/adapters/types.ts`, and `projects/spaarkeai-word-add-in-r1/notes/
+020-filename-defaults-document-name.md`'s follow-up section.

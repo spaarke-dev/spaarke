@@ -15,6 +15,7 @@ import {
   ProgressBar,
   mergeClasses,
   Textarea,
+  Input,
   Label,
 } from '@fluentui/react-components';
 import {
@@ -61,6 +62,16 @@ function isBrowserTestMode(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Task 020 (FR-06): strips a trailing `.docx`/`.doc` extension (case-insensitive) from a display name,
+ * for deriving the default Document Name from the filename-shaped `itemName` prop. A value with no such
+ * extension (e.g. Word's "Untitled Document" fallback) is returned unchanged — this is normalization,
+ * not a requirement that an extension be present.
+ */
+function stripDocumentExtension(name: string): string {
+  return name.replace(/\.docx?$/i, '');
 }
 
 /**
@@ -177,6 +188,21 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
+  },
+  // Task 020 (FR-06): the read-only Document Name row (value + pencil). ADR-021 / fluent-v9-host-visual-fit —
+  // tokens only, sized for the narrow pane; the value truncates rather than wrapping/overflowing.
+  documentNameDisplay: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    minHeight: '32px',
+  },
+  documentNameText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
   },
   actions: {
     display: 'flex',
@@ -341,6 +367,15 @@ export interface SaveFlowProps {
    * pre-ranked suggestion cards.
    */
   canSuggestRelatedRecords?: boolean;
+  /**
+   * task 020 / FR-06 (NFR-10): whether this host can supply the open item's own name as the
+   * Document Name field's default (`hostAdapter.getCapabilities().canProvideDocumentName`, decided
+   * by `SaveView` from the live adapter — never a `hostType` check here). `false`/absent leaves the
+   * field as a plain, empty Textarea with no default and no pencil affordance — Outlook's existing,
+   * pre-task-020 behavior (see the capability's doc comment in `shared/adapters/types.ts` for why
+   * Outlook is false despite technically having a subject it could offer).
+   */
+  canProvideDocumentName?: boolean;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -414,6 +449,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     onRetryDocumentIdentity,
     canOpenRecord = false,
     canSuggestRelatedRecords = false,
+    canProvideDocumentName = false,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -463,8 +499,105 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
 
-  // Local state for document metadata fields
-  const [documentName, setDocumentName] = useState<string>('');
+  // Local state for document metadata fields.
+  //
+  // Task 020 (FR-06): gated on `canProvideDocumentName` (NFR-10 — converted from an initial
+  // `hostType === 'word'` gate per task 040's precedent; see that capability's doc comment in
+  // `shared/adapters/types.ts`). When true, the field defaults to the open item's own name minus its
+  // extension (derived from `itemName` — see `defaultDocumentName` below) and is editable in-pane
+  // behind a pencil affordance. When false (Outlook, always, today), `documentName` still starts
+  // empty with no default and no pencil, exactly as before task 020, so `effectiveDocumentName` /
+  // `email.isNameSystemDerived` (useSaveFlow.ts, task 046 (b)) keep their existing meaning.
+  // Lazy-initialized from the default so a capable pane's very first render already shows it
+  // (SaveView only mounts SaveFlow once its own itemName load completes) rather than flashing
+  // empty-then-populated.
+  const [documentName, setDocumentName] = useState<string>(() =>
+    canProvideDocumentName && itemName ? stripDocumentExtension(itemName) : ''
+  );
+  // Whether the user has ever edited the value (typed a character while the pencil was open). Once true, the
+  // default-sync effect below never overwrites it again — an identity/itemName refresh must not clobber an
+  // edit. Reset by Cancel (the wizard "Cancel" pattern) and by a fully-emptied commit (§ closeDocumentNameEditing).
+  const [documentNameTouched, setDocumentNameTouched] = useState(false);
+  // Read-only display (with a pencil affordance) vs. an editable Input. Word only — see above.
+  const [isEditingDocumentName, setIsEditingDocumentName] = useState(false);
+  // The value at the moment editing opened, so Escape can revert to it without depending on effect timing.
+  const documentNameBeforeEditRef = useRef('');
+  // Suppresses the onBlur "commit" handler for a blur the component itself triggers (Enter-commit or
+  // Escape-cancel unmount the <Input>, which can also fire a native blur) — see closeDocumentNameEditing.
+  const suppressNextDocumentNameBlurRef = useRef(false);
+
+  // Task 020 (FR-06): the FR-06 default — the open item's own name, minus its extension. `undefined`
+  // when the host has no `canProvideDocumentName` capability (Outlook, today) and while `itemName`
+  // hasn't loaded yet.
+  const defaultDocumentName = useMemo(
+    () => (canProvideDocumentName && itemName ? stripDocumentExtension(itemName) : undefined),
+    [canProvideDocumentName, itemName]
+  );
+
+  // Keeps the field in sync with the default until the user edits it or opens the editor — covers the
+  // ordinary case where SaveView mounts SaveFlow before its own `itemName` load resolves, and the
+  // identity-retry re-read (task 027 / FR-10) which can re-fire `itemName`/the capability.
+  useEffect(() => {
+    if (!canProvideDocumentName) return;
+    if (documentNameTouched || isEditingDocumentName) return;
+    if (defaultDocumentName !== undefined) setDocumentName(defaultDocumentName);
+  }, [defaultDocumentName, canProvideDocumentName, documentNameTouched, isEditingDocumentName]);
+
+  const handleStartEditDocumentName = useCallback(() => {
+    documentNameBeforeEditRef.current = documentName;
+    setIsEditingDocumentName(true);
+    announce('Editing document name', 'polite');
+  }, [documentName, announce]);
+
+  const handleDocumentNameChange = useCallback((_e: unknown, data: { value: string }) => {
+    setDocumentName(data.value);
+    setDocumentNameTouched(true);
+  }, []);
+
+  // commit=true (Enter, or blur-to-commit — the standard inline-edit convention): an emptied value falls
+  // back to the FR-06 default rather than left showing a blank name (the "never empty" acceptance criterion
+  // holds either way, via buildSaveContext's truthy check below, but this avoids the confusing blank label).
+  // commit=false (Escape): reverts to the pre-edit value.
+  const closeDocumentNameEditing = useCallback(
+    (commit: boolean) => {
+      suppressNextDocumentNameBlurRef.current = true;
+      if (commit) {
+        const trimmed = documentName.trim();
+        if (trimmed) {
+          setDocumentNameTouched(true);
+        } else {
+          setDocumentName(defaultDocumentName ?? '');
+          setDocumentNameTouched(false);
+        }
+      } else {
+        setDocumentName(documentNameBeforeEditRef.current);
+      }
+      setIsEditingDocumentName(false);
+      announce(commit ? 'Document name updated' : 'Document name edit canceled', 'polite');
+    },
+    [documentName, defaultDocumentName, announce]
+  );
+
+  const handleDocumentNameKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        closeDocumentNameEditing(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDocumentNameEditing(false);
+      }
+    },
+    [closeDocumentNameEditing]
+  );
+
+  const handleDocumentNameBlur = useCallback(() => {
+    if (suppressNextDocumentNameBlurRef.current) {
+      suppressNextDocumentNameBlurRef.current = false;
+      return;
+    }
+    closeDocumentNameEditing(true);
+  }, [closeDocumentNameEditing]);
 
   // Auto-match candidates for the "Related to" cards (engine suggestions, ranked
   // highest-first). Replaces the old single pre-selection with the reconciliation-
@@ -684,6 +817,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleCancel = useCallback(() => {
     setSelectedEntity(null);
     setDocumentName('');
+    // Task 020: un-touch so the sync effect re-applies the Word FR-06 default (Outlook has none, so this
+    // is a no-op there — the field simply stays empty, exactly as before task 020).
+    setDocumentNameTouched(false);
+    setIsEditingDocumentName(false);
     setSaveModeChoice(null);
     reset();
   }, [setSelectedEntity, reset]);
@@ -1101,15 +1238,44 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                 <Label htmlFor="document-name" className={styles.fieldLabel}>
                   Document Name
                 </Label>
-                <Textarea
-                  id="document-name"
-                  value={documentName}
-                  onChange={(_e, data) => setDocumentName(data.value)}
-                  placeholder="Enter document name"
-                  disabled={isSaving}
-                  aria-label="Document name"
-                  rows={2}
-                />
+                {canProvideDocumentName ? (
+                  isEditingDocumentName ? (
+                    <Input
+                      id="document-name"
+                      value={documentName}
+                      onChange={handleDocumentNameChange}
+                      onKeyDown={handleDocumentNameKeyDown}
+                      onBlur={handleDocumentNameBlur}
+                      placeholder="Enter document name"
+                      disabled={isSaving}
+                      aria-label="Document name"
+                      maxLength={850}
+                      autoFocus
+                    />
+                  ) : (
+                    <div className={styles.documentNameDisplay}>
+                      <Text className={styles.documentNameText}>{documentName || 'Untitled Document'}</Text>
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<EditRegular />}
+                        onClick={handleStartEditDocumentName}
+                        disabled={isSaving}
+                        aria-label="Edit document name"
+                      />
+                    </div>
+                  )
+                ) : (
+                  <Textarea
+                    id="document-name"
+                    value={documentName}
+                    onChange={(_e, data) => setDocumentName(data.value)}
+                    placeholder="Enter document name"
+                    disabled={isSaving}
+                    aria-label="Document name"
+                    rows={2}
+                  />
+                )}
               </div>
             </Card>
           </div>

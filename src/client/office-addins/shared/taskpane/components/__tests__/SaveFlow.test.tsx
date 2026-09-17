@@ -499,3 +499,49 @@ describe('AttachmentSelector', () => {
     expect(screen.getByText('0/3')).toBeInTheDocument();
   });
 });
+
+// Task 020 (FR-06): filename defaults to Document Name, editable in-pane via a pencil affordance.
+// Full coverage (pencil toggling, edit-survives-to-save-context, the 850-char bound, the Outlook
+// regression guard) lives in the dedicated SaveFlow.documentName.test.tsx — see that file's header
+// comment for why it is separate. This block is the light rendering smoke-check the task asks for here.
+//
+// Coordinator follow-up: the default/pencil UI is gated on the `canProvideDocumentName` capability
+// (NFR-10), never on `hostType` — see `shared/adapters/types.ts`'s `HostCapabilities` doc comment.
+// The Word case below passes it explicitly (what a real Word adapter reports via `SaveView`); the
+// Outlook case deliberately omits it, defaulting to `false` (what a real Outlook adapter reports).
+describe('Document Name (task 020 / FR-06)', () => {
+  it('defaults the Document Name to the filename minus its extension for Word, behind a pencil affordance', () => {
+    render(
+      <TestWrapper>
+        <SaveFlow
+          hostType="word"
+          itemId="doc-123"
+          itemName="Acme Merger Agreement.docx"
+          documentUrl="https://example.com/doc"
+          canProvideDocumentName
+          getAccessToken={mockGetAccessToken}
+        />
+      </TestWrapper>
+    );
+
+    expect(screen.getByText('Acme Merger Agreement')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /edit document name/i })).toBeInTheDocument();
+  });
+
+  it('does not default or show a pencil for Outlook — the Email path is untouched by this task', () => {
+    render(
+      <TestWrapper>
+        <SaveFlow
+          hostType="outlook"
+          itemId="email-123"
+          itemName="Test Email Subject"
+          getAccessToken={mockGetAccessToken}
+        />
+      </TestWrapper>
+    );
+
+    expect(screen.queryByRole('button', { name: /edit document name/i })).not.toBeInTheDocument();
+    const field = screen.getByRole('textbox', { name: /document name/i }) as HTMLTextAreaElement;
+    expect(field.value).toBe('');
+  });
+});
