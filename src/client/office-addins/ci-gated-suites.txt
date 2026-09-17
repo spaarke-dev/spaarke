@@ -169,6 +169,22 @@ shared/taskpane/components/__tests__/SaveFlow.quickCreateErrorSurfacing.test.tsx
 # reverting that one line turned 5 of the 7 red.
 shared/taskpane/components/__tests__/SaveFlow.captureAtSave.test.tsx
 shared/taskpane/components/views/__tests__/SaveView.captureAtSave.test.tsx
+# --- the client half of FR-02: read the stamp (task 051) --------------------
+# Completes FR-02 — task 014 writes the invisible marker, these pin that the
+# pane READS it, which is what stops a downloaded/edited/re-uploaded document
+# forking its record. They pin the owner's binding PRECEDENCE: a resolved cloud
+# URL wins (asserted by same-object-reference, not equality); the stamp is used
+# only on 012's not_cloud_document / not_resolvable / not_spaarke_document; and
+# a resolved URL whose id DISAGREES with the stamp is a conflict with no default
+# save target -- never a silent choice between them. Stamp-first is a data-loss
+# path (a copy carries its SOURCE's stamp X while its URL resolves to row W),
+# which is why task 014's own POML step 5 was overridden by owner decision.
+# Also pinned: every null path (absent, malformed, non-GUID, two disagreeing
+# ids, API failure) resolves null and never throws, and a false capability means
+# getByNamespaceAsync is never invoked at all -- 019 conditions 1 and 4.
+shared/adapters/__tests__/WordAdapter.readDocumentStamp.test.ts
+shared/adapters/__tests__/OutlookAdapter.readDocumentStamp.test.ts
+shared/taskpane/services/__tests__/documentIdentityService.stampPrecedence.test.ts
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
