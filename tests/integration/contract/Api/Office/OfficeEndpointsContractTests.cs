@@ -755,6 +755,25 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
                         ETag: null,
                         IsFolder: false,
                         WebUrl: "https://contoso.sharepoint.com/sites/test/Shared%20Documents/test.eml"));
+            // Task 025: OfficeStorageUploader now always calls the EXPLICIT-conflictBehavior overload
+            // (Fail by default). This fixture models no collisions at all — it exists to test the SAVE
+            // endpoint's HTTP contract, not filename-collision semantics (that is OfficeVersionSaveWorld's
+            // job, via OfficeVersionSaveTestWebAppFactory below) — so every conflictBehavior still succeeds.
+            speFileStoreMock
+                .Setup(s => s.UploadSmallAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(),
+                    It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string path, Stream _, ConflictBehavior _, CancellationToken _) =>
+                    (FileHandleDto?)new FileHandleDto(
+                        Id: $"item-{Guid.NewGuid():N}",
+                        Name: path,
+                        ParentId: null,
+                        Size: 3,
+                        CreatedDateTime: DateTimeOffset.UtcNow,
+                        LastModifiedDateTime: DateTimeOffset.UtcNow,
+                        ETag: null,
+                        IsFolder: false,
+                        WebUrl: "https://contoso.sharepoint.com/sites/test/Shared%20Documents/test.eml"));
             services.RemoveAll<SpeFileStore>();
             services.AddScoped(_ => speFileStoreMock.Object);
 
@@ -1405,14 +1424,16 @@ public sealed class OfficeVersionSaveWorld
     public bool FailDocumentReferenceLookup { get; set; }
 
     /// <summary>
-    /// The two query shapes the save path issues; every other query answers empty, exactly as this fixture always
-    /// did. Seeded rows are active.
+    /// The three query shapes the save path issues; every other query answers empty, exactly as this fixture
+    /// always did. Seeded rows are active.
     /// <list type="bullet">
     /// <item>Task 024 — <c>ContentDedupDetector</c>'s canonical lookup: an ACTIVE <c>sprk_document</c> whose
     /// <c>sprk_canonicalhash</c> equals the hash and whose <c>sprk_canonicaldocument</c> is null (a true canonical,
     /// never a hash-linked copy), top 1.</item>
     /// <item>Task 046 — the file-reference lookup: every <c>sprk_document</c> whose <c>sprk_graphitemid</c> equals the
     /// item id, matched case-insensitively as Dataverse string equality is.</item>
+    /// <item>Task 025 — the collision-target lookup (<c>FindDocumentIdByLocationAsync</c>): the <c>sprk_document</c>
+    /// whose <c>sprk_graphdriveid</c> AND <c>sprk_filename</c> both equal the collision's, top 1.</item>
     /// </list>
     /// </summary>
     internal Microsoft.Xrm.Sdk.EntityCollection RetrieveMultiple(Microsoft.Xrm.Sdk.Query.QueryExpression query)
@@ -1422,6 +1443,28 @@ public sealed class OfficeVersionSaveWorld
             return result;
 
         var conditions = query.Criteria.Conditions;
+
+        var driveCondition = conditions.FirstOrDefault(c =>
+            c.AttributeName == "sprk_graphdriveid" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal);
+        var fileNameCondition = conditions.FirstOrDefault(c =>
+            c.AttributeName == "sprk_filename" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal);
+        if (driveCondition is not null && fileNameCondition is not null)
+        {
+            if (driveCondition.Values.Count == 1 && driveCondition.Values[0] is string wantedDrive
+                && fileNameCondition.Values.Count == 1 && fileNameCondition.Values[0] is string wantedFileName)
+            {
+                lock (_gate)
+                {
+                    var match = Documents.Values.FirstOrDefault(r =>
+                        string.Equals(r.DriveId, wantedDrive, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(r.FileName, wantedFileName, StringComparison.OrdinalIgnoreCase));
+                    if (match is not null)
+                        result.Entities.Add(new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, match.Id));
+                }
+            }
+
+            return result;
+        }
 
         var itemCondition = conditions.FirstOrDefault(c =>
             c.AttributeName == "sprk_graphitemid" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal);
@@ -1484,6 +1527,70 @@ public sealed class OfficeVersionSaveWorld
             }
             item.Versions.Add(bytes);
             return Handle(item, bytes.Length);
+        }
+    }
+
+    /// <summary>Task 025: how many times an upload was refused with a name collision (ConflictBehavior.Fail
+    /// against an existing item) — the refusal writes nothing, so it is counted separately from
+    /// <see cref="UploadSmallCalls"/>.</summary>
+    public int CollisionRefusals { get; private set; }
+
+    /// <summary>
+    /// Task 025: path-keyed upload with an EXPLICIT conflict behaviour, mirroring the real Fail/Rename/Replace
+    /// semantics <c>UploadSessionManager.PutContentWithConflictBehaviorAsync</c> implements against Graph.
+    /// <c>Fail</c> on an existing name THROWS the same typed exception the facade does (no bytes written, no
+    /// version added, no new item created) — the collision this method exists to reproduce. <c>Rename</c> on an
+    /// existing name mints a NEW item under a non-colliding name (mirroring Graph's own auto-rename), leaving the
+    /// existing item completely untouched. Both behave exactly like <see cref="PutByPath"/> when there is no
+    /// collision, or under <c>Replace</c>.
+    /// </summary>
+    internal FileHandleDto PutByPathWithConflictBehavior(
+        string driveId, string path, byte[] bytes, ConflictBehavior conflictBehavior)
+    {
+        lock (_gate)
+        {
+            var existing = SpeItems.Values.FirstOrDefault(i =>
+                i.DriveId == driveId && string.Equals(i.Name, path, StringComparison.OrdinalIgnoreCase));
+
+            if (existing is not null && conflictBehavior == ConflictBehavior.Fail)
+            {
+                CollisionRefusals++;
+                throw new SpaarkeStorageException(
+                    $"A file named '{path}' already exists in this location.",
+                    statusCode: 409,
+                    errorCode: "nameAlreadyExists");
+            }
+
+            if (existing is not null && conflictBehavior == ConflictBehavior.Rename)
+            {
+                UploadSmallCalls++;
+                var renamed = NextAvailableName(driveId, path);
+                var newItem = new SpeItem { DriveId = driveId, Id = $"item-{Guid.NewGuid():N}", Name = renamed };
+                newItem.Versions.Add(bytes);
+                SpeItems[newItem.Id] = newItem;
+                return Handle(newItem, bytes.Length);
+            }
+
+            UploadSmallCalls++;
+            var item = existing ?? new SpeItem { DriveId = driveId, Id = $"item-{Guid.NewGuid():N}", Name = path };
+            if (existing is null)
+                SpeItems[item.Id] = item;
+            item.Versions.Add(bytes);
+            return Handle(item, bytes.Length);
+        }
+    }
+
+    /// <summary>Mirrors Graph's own conflictBehavior=rename: the first "name (n).ext" that does not collide.</summary>
+    private string NextAvailableName(string driveId, string path)
+    {
+        var dot = path.LastIndexOf('.');
+        var stem = dot >= 0 ? path[..dot] : path;
+        var ext = dot >= 0 ? path[dot..] : string.Empty;
+        for (var n = 1; ; n++)
+        {
+            var candidate = $"{stem} ({n}){ext}";
+            if (!SpeItems.Values.Any(i => i.DriveId == driveId && string.Equals(i.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+                return candidate;
         }
     }
 
@@ -1678,6 +1785,17 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverse.Object);
 
+            // Task 025: the collision-target lookup (OfficeDocumentPersistence.FindDocumentIdByLocationAsync)
+            // reads through IGenericEntityService, not IDataverseService — but per GraphModule.cs,
+            // IGenericEntityService (along with IDocumentDataverseService and IProcessingJobService) is
+            // registered as `sp.GetRequiredService<IDataverseService>()`, and IDataverseService itself
+            // INHERITS IGenericEntityService (the composite-interface pattern this factory's base class
+            // already documents above, "IDataverseService is the ONE composite implementation..."). The
+            // `dataverse` mock just above therefore ALREADY answers IGenericEntityService.RetrieveMultipleAsync
+            // via its RetrieveMultipleAsync setup — no separate registration needed (an explicit one was
+            // tried and found to be an unnecessary, behavior-preserving-in-theory-but-NOT-in-Moq-practice
+            // duplicate: it is NOT wired here, deliberately).
+
             var graphClientFactory = Mock.Of<IGraphClientFactory>();
             var spe = new Mock<SpeFileStore>(
                 MockBehavior.Loose,
@@ -1689,6 +1807,14 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string driveId, string path, Stream content, CancellationToken _) =>
                     (FileHandleDto?)world.PutByPath(driveId, path, OfficeVersionSaveWorld.ReadAll(content)));
+            // Task 025: OfficeStorageUploader now always calls THIS explicit-conflictBehavior overload (the
+            // create path passes Fail by default, Rename for "Keep both") — the 4-arg mock above is kept for
+            // any other caller, but is no longer reachable from the Office save path.
+            spe.Setup(s => s.UploadSmallAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(),
+                    It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string driveId, string path, Stream content, ConflictBehavior conflictBehavior, CancellationToken _) =>
+                    (FileHandleDto?)world.PutByPathWithConflictBehavior(driveId, path, OfficeVersionSaveWorld.ReadAll(content), conflictBehavior));
             spe.Setup(s => s.ReplaceFileContentAsUserAsync(
                     It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<Stream>(), It.IsAny<CancellationToken>()))

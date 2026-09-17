@@ -386,6 +386,15 @@ public record DocumentMetadata
     /// </summary>
     [MaxLength(1000)]
     public string? VersionComment { get; init; }
+
+    /// <summary>
+    /// Task 025 (spaarkeai-word-add-in-r1): the pane's explicit "Keep both" retry after an OFFICE_020
+    /// name-collision refusal — asks the server to upload under a Graph-generated non-colliding name
+    /// instead of refusing again. Ignored on a version save (<c>ExistingDocumentId</c> set): that path
+    /// never collides by name, it targets an existing item by id. Defaults to <c>false</c>, so an
+    /// ordinary create still refuses-before-writing on a collision, exactly as before this field existed.
+    /// </summary>
+    public bool AllowRename { get; init; }
 }
 
 /// <summary>

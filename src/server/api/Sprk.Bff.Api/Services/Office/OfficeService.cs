@@ -2,9 +2,11 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -513,17 +515,75 @@ public class OfficeService : IOfficeService
                         correlationId, contentStream, fileName, fileSize, cancellationToken);
                 }
 
-                // Upload to SPE
-                var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
+                // ══ TASK 025 (spaarkeai-word-add-in-r1) — REFUSE-BEFORE-UPLOAD, DOCUMENT CREATES ══════
+                // D1: a same-name Document create used to land on the SAME SPE item as an existing
+                // document (ConflictBehavior.Replace, path-keyed), overwriting its bytes, and then fail
+                // creating a SECOND row on sprk_graphitemid_uk — so the FIRST document's content was
+                // silently replaced by a save that itself errored. ConflictBehavior.Fail makes Graph
+                // refuse the PUT atomically on a collision: no bytes move, the existing item is provably
+                // untouched. This is a FIXED value chosen from exactly two states — Fail (the default:
+                // refuse and ask) or Rename (the pane's explicit "Keep both" retry, AllowRename) — never a
+                // resolver. Mirrors OBOEndpoints' own default-to-Fail posture and the shipped
+                // external-upload precedent (ExternalProjectDataEndpoints.UploadDocument) — no new
+                // collision-detection mechanism, the same Graph-native conflictBehavior two other callers
+                // already use.
+                //
+                // Scoped to SaveContentType.Document ONLY. Email and Attachment are IMMUTABLE captures
+                // whose OWN safety net is content-hash dedup (NFR-08 suppress mode) running AFTER the
+                // upload, not a name-collision refusal BEFORE it — OfficeImmutableSaveFileSafetyTests
+                // pins a same-name, byte-identical Attachment save as a SUCCESSFUL suppressed duplicate,
+                // which a blanket Fail would turn into a 409 refusal instead. Verified empirically (root
+                // CLAUDE.md §F.3): applying Fail uniformly regressed that suite; scoping to Document alone
+                // does not. A future task may extend this to Email's typed-name collision (2026-09-15
+                // owner decision, CLAUDE.md § "Decisions Made" — "a clash on a typed name goes to task
+                // 025's refuse-and-ask prompt"), but that needs its own reconciliation with the immutable
+                // dedup-suppress path and is out of this task's verified scope; not attempted here.
+                var conflictBehavior = request.ContentType != SaveContentType.Document
+                    ? ConflictBehavior.Replace
+                    : request.Document?.AllowRename == true
+                        ? ConflictBehavior.Rename
+                        : ConflictBehavior.Fail;
+
+                var upload = await _storageUploader.UploadToSpeAsync(
                     containerId,
                     fileName,
                     contentStream,
-                    cancellationToken);
+                    cancellationToken,
+                    conflictBehavior);
 
-                if (!uploadSuccess || string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
+                if (upload.IsNameCollision)
+                {
+                    // Reachable only for a Document create (conflictBehavior above is Replace for every
+                    // other content type, which never throws the collision exception). Nothing was
+                    // written: SPE refused the PUT before any bytes moved, so the existing item (and its
+                    // owning sprk_document row, if any) is provably untouched. Extracted to its own method
+                    // (task 025 code-review, root CLAUDE.md §11.5): the ENTIRE collision-resolution
+                    // contract — refuse-if-owned, reclaim-if-orphaned, no third path — is auditable in one
+                    // place, mirroring the existing ResolveVersionTargetAsync (Target, Refusal) shape.
+                    var collisionUploadError = upload.Error;
+                    SaveError? refusal;
+                    (refusal, upload) = await ResolveNameCollisionAsync(
+                        upload, containerId, fileName, contentStream, cancellationToken);
+
+                    if (refusal is not null)
+                    {
+                        await _documentPersistence.UpdateJobStatusInDataverseAsync(
+                            jobId, JobStatus.Failed, "NameCollision", 0, collisionUploadError, cancellationToken);
+                        _jobStore[jobId] = jobRecord with
+                        {
+                            Status = JobStatus.Failed,
+                            CurrentPhase = "NameCollision",
+                            CompletedAt = DateTimeOffset.UtcNow
+                        };
+
+                        return new SaveResponse { Success = false, Error = refusal };
+                    }
+                }
+
+                if (!upload.Success || string.IsNullOrEmpty(upload.DriveId) || string.IsNullOrEmpty(upload.ItemId))
                 {
                     // Update job status to failed
-                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, uploadError, cancellationToken);
+                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, upload.Error, cancellationToken);
                     _jobStore[jobId] = jobRecord with
                     {
                         Status = JobStatus.Failed,
@@ -538,11 +598,20 @@ public class OfficeService : IOfficeService
                         {
                             Code = "OFFICE_012",
                             Message = "Failed to upload file to storage",
-                            Details = uploadError,
+                            Details = upload.Error,
                             Retryable = true
                         }
                     };
                 }
+
+                var driveId = upload.DriveId;
+                var itemId = upload.ItemId;
+                var webUrl = upload.WebUrl;
+                // Task 025: the name the item ACTUALLY holds in SPE — equal to `fileName` under Fail/Replace
+                // (the only paths that ran before this task), but DIFFERENT under Rename, where Graph chose
+                // a non-colliding name. The Dataverse row's stored file name must track SPE, never the name
+                // that was merely requested.
+                var storedFileName = upload.FileName ?? fileName;
 
                 // Update job status to uploading complete
                 await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "FileUploaded", 30, null, cancellationToken);
@@ -559,7 +628,7 @@ public class OfficeService : IOfficeService
                     driveId,
                     itemId,
                     webUrl,
-                    fileName,
+                    storedFileName,
                     documentName ?? fileName,
                     fileSize,
                     userId,
@@ -895,6 +964,74 @@ public class OfficeService : IOfficeService
     private static string HashContent(string? contentBase64) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(contentBase64 ?? string.Empty)));
+
+    /// <summary>
+    /// Task 025 (spaarkeai-word-add-in-r1): decides what a Document create's name collision means and what
+    /// to do about it — the ENTIRE collision-resolution contract in one auditable place, mirroring the
+    /// shape of <see cref="ResolveVersionTargetAsync"/> (a decision-or-refusal tuple, no job/response
+    /// mechanics inside it). Returns EITHER a refusal (<see cref="SaveError"/> — the collision names an
+    /// OWNED document; <c>Upload</c> is the original, still-collided result and MUST NOT be used further)
+    /// OR the upload to continue processing with (<c>Refusal</c> is <c>null</c> — the collision resolved to
+    /// no owning document, and an orphaned item was safely reclaimed via <see cref="ConflictBehavior.Replace"/>).
+    /// Never both; never neither.
+    /// </summary>
+    private async Task<(SaveError? Refusal, OfficeStorageUploader.UploadResult Upload)> ResolveNameCollisionAsync(
+        OfficeStorageUploader.UploadResult collidedUpload,
+        string containerId,
+        string fileName,
+        Stream contentStream,
+        CancellationToken cancellationToken)
+    {
+        // Resolve which row already holds this name in this drive — read-only, best-effort — so the pane
+        // can offer "Save as new version" as a direct retry through the ALREADY-SHIPPED version-save path
+        // (Document.ExistingDocumentId + IsNewVersion), never a second write mechanism.
+        var collidingDocumentId = collidedUpload.DriveId is { } collisionDriveId
+            ? await _documentPersistence.FindDocumentIdByLocationAsync(collisionDriveId, fileName, cancellationToken)
+            : null;
+
+        if (collidingDocumentId is null)
+        {
+            // The colliding item is UNREFERENCED — no sprk_document points at it. Without this reclaim, a
+            // create that uploads successfully but then fails BEFORE the Dataverse row is written (a
+            // transient Dataverse error, task 039's FailNextDocumentCreate scenario) would leave an
+            // orphaned item that PERMANENTLY refuses every retry under the same name — turning a transient
+            // failure into a lockout, which is a worse outcome than the D1 defect this task removes.
+            // Reclaiming is safe here specifically because nothing owns the name: no existing document's
+            // bytes are at risk, so Replace is the ORIGINAL, still-correct semantics for "this name is mine
+            // to use." Never reached for an owned collision — that always returns the refusal below.
+            _logger.LogInformation(
+                "Name collision on '{FileName}' resolved to an unreferenced item (no owning document); " +
+                "reclaiming it rather than refusing.",
+                fileName);
+
+            // The stream was already read once by the collided attempt (Fail still sends the PUT body;
+            // Graph rejects only after receiving it) — rewind before reusing it, or the reclaim would
+            // upload zero/partial bytes. MemoryStream (every Document save's content stream) is always
+            // seekable; the CanSeek guard is defensive for any future non-seekable source, which would
+            // instead surface as an ordinary upload failure below rather than silently corrupting content.
+            if (contentStream.CanSeek)
+            {
+                contentStream.Position = 0;
+            }
+
+            var reclaimed = await _storageUploader.UploadToSpeAsync(
+                containerId, fileName, contentStream, cancellationToken, ConflictBehavior.Replace);
+            return (null, reclaimed);
+        }
+
+        _logger.LogInformation(
+            "Name collision refused: a file named '{FileName}' already exists (existing document {ExistingDocumentId}).",
+            fileName, collidingDocumentId);
+
+        return (new SaveError
+        {
+            Code = OfficeErrorCodes.NameCollision,
+            Message = $"A file named \"{fileName}\" already exists here. Nothing was uploaded or changed.",
+            Retryable = false,
+            FileName = fileName,
+            ExistingDocumentId = collidingDocumentId
+        }, collidedUpload);
+    }
 
     /// <summary>
     /// FR-11 (task 023): validates a version save's intent and resolves its target row. Returns the target, or

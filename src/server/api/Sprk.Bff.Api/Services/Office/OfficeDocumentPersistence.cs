@@ -28,6 +28,10 @@ public class OfficeDocumentPersistence
     internal const string GraphItemIdAttribute = "sprk_graphitemid";
     internal const string CanonicalHashAttribute = "sprk_canonicalhash";
     internal const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
+    // Task 025: the two columns FindDocumentIdByLocationAsync matches on — already-established Dataverse
+    // attribute names (CommunicationService.cs, CommunicationAttachmentTextService.cs), not new schema.
+    internal const string GraphDriveIdAttribute = "sprk_graphdriveid";
+    internal const string FileNameAttribute = "sprk_filename";
 
     /// <summary>
     /// Task 020 (FR-06): <c>sprk_documentname</c> is NVARCHAR(850). Bounded HERE — at the boundary where the
@@ -300,11 +304,16 @@ public class OfficeDocumentPersistence
     /// </summary>
     /// <remarks>
     /// <para><b>Why this exists.</b> On a byte-identical hit the suppress branch deletes the item this request
-    /// uploaded, on the premise that it is a transient blob and never a document's own file. The Office create upload
-    /// is PATH-keyed under <c>ConflictBehavior.Replace</c>, so an upload whose name already exists in the container
-    /// lands on THAT existing item, and the premise fails. The item is then the canonical's own file (the detector's
-    /// canonical lookup does not exclude the probed item's own row), a hash-linked copy's, or any other document's.
-    /// Deleting it destroyed that document's file while the save reported success (025 note, M9 / R3).</para>
+    /// uploaded, on the premise that it is a transient blob and never a document's own file. Before task 025 the
+    /// Office create upload was PATH-keyed under <c>ConflictBehavior.Replace</c>, so an upload whose name already
+    /// existed in the container landed on THAT existing item, and the premise failed. The item was then the
+    /// canonical's own file (the detector's canonical lookup does not exclude the probed item's own row), a
+    /// hash-linked copy's, or any other document's. Deleting it destroyed that document's file while the save
+    /// reported success (025 note, M9 / R3). Task 025 changed the create upload's default to
+    /// <c>ConflictBehavior.Fail</c> — a NAME collision now refuses before any item is written, so a successful
+    /// create's item can no longer be an existing document's own file BY that route. This check is kept as a
+    /// defense-in-depth guard (cheap, and other writers of this same detector may not share the same invariant)
+    /// rather than removed.</para>
     /// <para><b>The check.</b> Any <c>sprk_document</c>, in ANY state, whose <c>sprk_graphitemid</c> equals the
     /// uploaded item id. That includes the canonical row's own pointer, which is the comparison the defect needs, and
     /// is widened to every row because the detector excludes hash-linked copies: the item the upload landed on can
@@ -362,6 +371,60 @@ public class OfficeDocumentPersistence
             "A same-name upload under ConflictBehavior.Replace landed on an existing item, so it is not a transient blob.",
             itemId, referencingId, referencingId == canonicalDocumentId ? "the canonical" : "another document");
         return false;
+    }
+
+    /// <summary>
+    /// Task 025 (spaarkeai-word-add-in-r1): does an <c>sprk_document</c> already hold <paramref name="fileName"/>
+    /// in <paramref name="driveId"/>? Called ONLY after a name-collision refusal (<c>OfficeStorageUploader</c>'s
+    /// <c>ConflictBehavior.Fail</c> 409) to resolve WHICH existing row the collision belongs to, so the pane can
+    /// offer "Save as new version" as a direct retry through the ALREADY-SHIPPED FR-11 version-save path
+    /// (<c>Document.ExistingDocumentId</c> + <c>IsNewVersion</c>) — never a second write mechanism. This is a
+    /// resolution step for an ALREADY-detected collision (Graph's own 409), not a second collision detector: it
+    /// answers "whose name is this", never "does this name collide".
+    /// </summary>
+    /// <remarks>
+    /// <para>Read-only, best-effort — mirrors <see cref="IsUploadUnreferencedAsync"/>'s established
+    /// query-then-fail-safe pattern over the same generic entity seam. Matches on the SAME two columns
+    /// <c>CreateDocumentWithSpePointersAsync</c> writes (<c>sprk_graphdriveid</c>, <c>sprk_filename</c>), so a
+    /// hit names the row that create would otherwise have collided with.</para>
+    /// <para><b>Fail-open, deliberately.</b> A failed lookup, or an absent generic seam, answers <c>null</c> — the
+    /// pane still offers "Keep both" (which needs no document id); only "Save as new version" becomes
+    /// unavailable. A wrong guess would be worse than no guess: this method never fabricates an id.</para>
+    /// </remarks>
+    public async Task<Guid?> FindDocumentIdByLocationAsync(
+        string driveId,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        if (_genericEntityService is null || string.IsNullOrWhiteSpace(driveId) || string.IsNullOrWhiteSpace(fileName))
+        {
+            _logger.LogInformation(
+                "Collision-target lookup skipped for {FileName} in drive {DriveId}: no document-reference lookup " +
+                "is available. \"Save as new version\" will not be offered for this collision.",
+                fileName, driveId);
+            return null;
+        }
+
+        try
+        {
+            var query = new QueryExpression(DocumentLogicalName)
+            {
+                ColumnSet = new ColumnSet(DocumentIdAttribute),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition(GraphDriveIdAttribute, ConditionOperator.Equal, driveId);
+            query.Criteria.AddCondition(FileNameAttribute, ConditionOperator.Equal, fileName);
+            var matches = await _genericEntityService.RetrieveMultipleAsync(query, cancellationToken);
+            return matches.Entities.Count > 0 ? matches.Entities[0].Id : (Guid?)null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Collision-target lookup failed (non-fatal) for {FileName} in drive {DriveId}; \"Save as new " +
+                "version\" will not be offered for this collision.",
+                fileName, driveId);
+            return null;
+        }
     }
 
     /// <summary>

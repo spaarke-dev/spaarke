@@ -122,4 +122,20 @@ public record SaveError
     /// Whether the operation can be retried.
     /// </summary>
     public bool Retryable { get; init; }
+
+    /// <summary>
+    /// Task 025 (OFFICE_020 name-collision only): the file name that collided, so the pane can restate it
+    /// in the two-option choice without re-parsing <see cref="Message"/>.
+    /// </summary>
+    public string? FileName { get; init; }
+
+    /// <summary>
+    /// Task 025 (OFFICE_020 name-collision only): the <c>sprk_document</c> that already holds
+    /// <see cref="FileName"/> in the target drive, when it could be resolved (Document saves only — the
+    /// only content type FR-11's version-save can target). <c>null</c> when the lookup found no row (an
+    /// unowned SPE item) or was unavailable (fail-open, per <c>OfficeDocumentPersistence.FindDocumentIdByLocationAsync</c>).
+    /// When present, the pane may retry as a version save of this document (<c>ExistingDocumentId</c> +
+    /// <c>IsNewVersion: true</c>) instead of a second create.
+    /// </summary>
+    public Guid? ExistingDocumentId { get; init; }
 }

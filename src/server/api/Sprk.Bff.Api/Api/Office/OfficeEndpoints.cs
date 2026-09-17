@@ -546,6 +546,22 @@ public static class OfficeEndpoints
                     ["correlationId"] = correlationId,
                     ["retryable"] = error.Retryable
                 }),
+            // Task 025 (word-add-in-r1) — a same-name collision refused BEFORE any bytes moved. FileName +
+            // ExistingDocumentId (Document saves only, when resolvable) let the pane offer the two-option
+            // choice ("Keep both" / "Save as new version") without re-parsing the message text.
+            OfficeErrorCodes.NameCollision => Results.Problem(
+                type: OfficeErrorCodes.GetTypeUri(error.Code),
+                title: OfficeErrorCodes.GetTitle(error.Code),
+                detail: error.Message,
+                statusCode: OfficeErrorCodes.GetStatusCode(error.Code),
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = error.Code,
+                    ["correlationId"] = correlationId,
+                    ["retryable"] = error.Retryable,
+                    ["fileName"] = error.FileName,
+                    ["existingDocumentId"] = error.ExistingDocumentId
+                }),
             _ => Results.Problem(
                 title: "Save Failed",
                 detail: error.Message,

@@ -26,6 +26,16 @@ export interface ProblemDetails {
    */
   reasonCode?: string;
   errors?: Record<string, string[]>;
+  /**
+   * Task 025 (OFFICE_020 name-collision only): the file name that collided.
+   */
+  fileName?: string;
+  /**
+   * Task 025 (OFFICE_020 name-collision only): the `sprk_document` that already holds `fileName` in the
+   * target drive, when the server could resolve it (Document saves only). Absent when the collision has
+   * no owning document, or the lookup was unavailable — in which case only "Keep both" is offered.
+   */
+  existingDocumentId?: string;
 }
 
 /**
@@ -49,6 +59,19 @@ export interface ErrorMessage {
    * document it named — so "Save as new document" is a way forward, and the pane offers it (task 024).
    */
   offerSaveAsNew?: boolean;
+  /**
+   * Task 025: the failed save was a CREATE refused on a filename collision (OFFICE_020) — the pane offers
+   * the two-option choice ("Keep both" always; "Save as new version" only when `collisionExistingDocumentId`
+   * is present) instead of the generic error actions.
+   */
+  offerCollisionChoice?: boolean;
+  /** Task 025: the file name that collided — set only when `offerCollisionChoice` is true. */
+  collisionFileName?: string;
+  /**
+   * Task 025: the existing document to retry as a version save of, when the server could resolve one.
+   * Absent → only "Keep both" is offered.
+   */
+  collisionExistingDocumentId?: string;
 }
 
 /**
@@ -127,6 +150,16 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     type: 'info',
     recoverable: false,
     action: 'View the existing document or select a different entity.',
+  },
+  // Task 025 (spaarkeai-word-add-in-r1): a filename collision on CREATE, refused before any bytes moved.
+  // Stated as a neutral choice, not an alarm — mirrors the shipped OBO wizard's own collision copy
+  // ("Nothing has been uploaded or changed — choose how to continue"), never error-red.
+  OFFICE_020: {
+    title: 'Name Already Exists',
+    message: 'A document with this name already exists here. Nothing was saved.',
+    type: 'warning',
+    recoverable: false,
+    action: 'Choose how to continue.',
   },
 
   // Service errors (502)
@@ -299,6 +332,29 @@ export function describeVersionSaveFailure(problem: ProblemDetails): ErrorMessag
 }
 
 /**
+ * Maps a refused CREATE save's filename collision (task 025, OFFICE_020) to a message the pane can act on.
+ *
+ * Mirrors {@link describeVersionSaveFailure}'s shape, for the create-path's own refusal: the catalog message
+ * gains `offerCollisionChoice` plus the collision's `fileName`, and `collisionExistingDocumentId` when the
+ * server could resolve which document already holds that name (Document saves only — the only content type
+ * FR-11's version-save can target). Any OTHER error code on a create attempt falls through to the ordinary
+ * mapping unchanged, so this is safe to call unconditionally on every create-path failure.
+ */
+export function describeCollisionFailure(problem: ProblemDetails): ErrorMessage {
+  const mapped = mapProblemDetailsToMessage(problem);
+  if (problem.errorCode !== 'OFFICE_020') {
+    return mapped;
+  }
+
+  return {
+    ...mapped,
+    offerCollisionChoice: true,
+    ...(problem.fileName !== undefined ? { collisionFileName: problem.fileName } : {}),
+    ...(problem.existingDocumentId !== undefined ? { collisionExistingDocumentId: problem.existingDocumentId } : {}),
+  };
+}
+
+/**
  * Maps an error code to a user-friendly message.
  *
  * @param errorCode - OFFICE_* error code
@@ -447,4 +503,5 @@ export const ERROR_CODES = {
   VERSION_TARGET_HAS_NO_FILE: 'OFFICE_017',
   VERSION_INTENT_MISMATCH: 'OFFICE_018',
   VERSION_TARGET_LOCKED: 'OFFICE_019',
+  NAME_COLLISION: 'OFFICE_020',
 } as const;
