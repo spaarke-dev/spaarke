@@ -405,6 +405,11 @@ export class WordAdapter implements IHostAdapter {
       // task 040 / FR-19: triage/auto-match suggestions is spec'd Outlook-only — the engine keys off
       // a captured email's sender/recipients/thread signals, which a Word document has none of.
       canSuggestRelatedRecords: false,
+      // task 020 / FR-06: unconditionally true — `getSubject()` (WordApi 1.1, well below this
+      // adapter's own WordApi 1.3 init-time floor) always returns a usable value (the document's
+      // Title, or "Untitled Document"), so no separate requirement-set check is needed here, matching
+      // `canGetDocumentUrl`'s unconditional-true pattern above.
+      canProvideDocumentName: true,
       minApiVersion: MIN_WORD_API_VERSION,
       supportedRequirementSet: `WordApi ${MIN_WORD_API_VERSION}`,
     };

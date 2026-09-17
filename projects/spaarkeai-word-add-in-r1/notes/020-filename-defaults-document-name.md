@@ -83,6 +83,40 @@ fixed under task 020.
    than the (also-considered, and rejected) alternative of the shared `DataverseServiceClientImpl.
    CreateDocumentAsync` choke point, to keep the change scoped to the Office save path only.
 
+## Coordinator follow-up (2026-09-16) — `hostType === 'word'` converted to a capability
+
+The initial implementation gated the pencil/default UI on `hostType === 'word'` directly inside
+`SaveFlow.tsx` — the NFR-10 view-level host-branching anti-pattern task 040 exists to find and convert
+(`canShowLinkedTodos`, `canSuggestRelatedRecords`). A coordinator review caught it (task 040's own audit
+predates task 020 and so could not have) and asked for the same conversion.
+
+**Change**: added `HostCapabilities.canProvideDocumentName` (`shared/adapters/types.ts`), implemented
+honestly in `WordAdapter` (`true`, unconditional — `getSubject()` always returns a usable value) and
+`OutlookAdapter` (`false`, unconditional), mechanically mirrored into the dead `outlook/OutlookHostAdapter.ts`
+for `tsc` (same reason task 036/040 already had to). Threaded from `SaveView` into `SaveFlow` exactly like
+`canOpenRecord`/`canSuggestRelatedRecords`, replacing all four `hostType === 'word'` reads task 020 had
+added (lazy state initializer, `defaultDocumentName` memo, the sync effect, the JSX render branch).
+**Behavior is unchanged** for both hosts — this is a mechanism swap, not a feature change.
+
+**Why Outlook is `false` and not "it can't supply a name"**: Outlook's `getSubject()` returns the email
+subject, which is a perfectly good "name" in the abstract. The capability is `false` there because the
+Document Name box already has a DIFFERENT, pre-existing contract (task 046 (b)): typing into it overrides
+the subject and sets `email.isNameSystemDerived: false`, which gates the collision-avoiding unique suffix
+on the stored `.eml` file. Defaulting/pencil-editing that box would make an untouched field register as
+"user typed it," silently reintroducing the exact collision task 046 (b) closed. This reasoning lives in
+the capability's own doc comment (`types.ts`) so it isn't lost to a future reader who only sees `true`/`false`.
+
+**Tests updated**: `SaveFlow.documentName.test.tsx`'s `renderWord()` now passes `canProvideDocumentName`
+explicitly (mirroring what a real Word adapter reports); `renderOutlook()` deliberately omits it (defaults
+to `false`, mirroring a real Outlook adapter). `SaveFlow.test.tsx`'s two task-020 smoke tests updated the
+same way. `capabilities.test.ts` (task 040's suite, already in `ci-gated-suites.txt`) extended with
+assertions for the new field in both adapters' existing test cases — no new test file, per the coordinator's
+explicit choice of extending the established suite.
+
+**`notes/parity-checklist.md`** (task 040's artifact) updated: §4's capability table gained a row; a new §9
+addendum records this follow-up (§1/§3/§6 are task 040's own audit-run record and were left as historical
+fact, not rewritten).
+
 ## Environment gap found and fixed (not a code change)
 
 A fresh `npm install` in this isolated worktree left `@spaarke/auth` (a `file:../shared/Spaarke.Auth`

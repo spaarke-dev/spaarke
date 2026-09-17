@@ -367,6 +367,15 @@ export interface SaveFlowProps {
    * pre-ranked suggestion cards.
    */
   canSuggestRelatedRecords?: boolean;
+  /**
+   * task 020 / FR-06 (NFR-10): whether this host can supply the open item's own name as the
+   * Document Name field's default (`hostAdapter.getCapabilities().canProvideDocumentName`, decided
+   * by `SaveView` from the live adapter — never a `hostType` check here). `false`/absent leaves the
+   * field as a plain, empty Textarea with no default and no pencil affordance — Outlook's existing,
+   * pre-task-020 behavior (see the capability's doc comment in `shared/adapters/types.ts` for why
+   * Outlook is false despite technically having a subject it could offer).
+   */
+  canProvideDocumentName?: boolean;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -440,6 +449,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     onRetryDocumentIdentity,
     canOpenRecord = false,
     canSuggestRelatedRecords = false,
+    canProvideDocumentName = false,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -491,17 +501,18 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // Local state for document metadata fields.
   //
-  // Task 020 (FR-06): for Word (`hostType === 'word'`, i.e. ContentType=Document — the same host-shaped-data
-  // proxy the task 040 audit already sanctions elsewhere in this file), the field defaults to the open
-  // document's own file name minus its extension (derived from `itemName`, which for Word is what the whole
-  // save pipeline already treats as "the document's name" — see `defaultDocumentName` below) and is editable
-  // in-pane behind a pencil affordance. Outlook (Email) is DELIBERATELY untouched: `documentName` still starts
+  // Task 020 (FR-06): gated on `canProvideDocumentName` (NFR-10 — converted from an initial
+  // `hostType === 'word'` gate per task 040's precedent; see that capability's doc comment in
+  // `shared/adapters/types.ts`). When true, the field defaults to the open item's own name minus its
+  // extension (derived from `itemName` — see `defaultDocumentName` below) and is editable in-pane
+  // behind a pencil affordance. When false (Outlook, always, today), `documentName` still starts
   // empty with no default and no pencil, exactly as before task 020, so `effectiveDocumentName` /
-  // `email.isNameSystemDerived` (useSaveFlow.ts, task 046 (b)) keep their existing meaning. Lazy-initialized
-  // from the default so a Word pane's very first render already shows it (SaveView only mounts SaveFlow once
-  // its own itemName load completes) rather than flashing empty-then-populated.
+  // `email.isNameSystemDerived` (useSaveFlow.ts, task 046 (b)) keep their existing meaning.
+  // Lazy-initialized from the default so a capable pane's very first render already shows it
+  // (SaveView only mounts SaveFlow once its own itemName load completes) rather than flashing
+  // empty-then-populated.
   const [documentName, setDocumentName] = useState<string>(() =>
-    hostType === 'word' && itemName ? stripDocumentExtension(itemName) : ''
+    canProvideDocumentName && itemName ? stripDocumentExtension(itemName) : ''
   );
   // Whether the user has ever edited the value (typed a character while the pencil was open). Once true, the
   // default-sync effect below never overwrites it again — an identity/itemName refresh must not clobber an
@@ -515,21 +526,22 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Escape-cancel unmount the <Input>, which can also fire a native blur) — see closeDocumentNameEditing.
   const suppressNextDocumentNameBlurRef = useRef(false);
 
-  // Task 020 (FR-06): the FR-06 default — Word's open-document filename, minus its extension. `undefined`
-  // for Outlook (no default there) and while `itemName` hasn't loaded yet.
+  // Task 020 (FR-06): the FR-06 default — the open item's own name, minus its extension. `undefined`
+  // when the host has no `canProvideDocumentName` capability (Outlook, today) and while `itemName`
+  // hasn't loaded yet.
   const defaultDocumentName = useMemo(
-    () => (hostType === 'word' && itemName ? stripDocumentExtension(itemName) : undefined),
-    [hostType, itemName]
+    () => (canProvideDocumentName && itemName ? stripDocumentExtension(itemName) : undefined),
+    [canProvideDocumentName, itemName]
   );
 
   // Keeps the field in sync with the default until the user edits it or opens the editor — covers the
   // ordinary case where SaveView mounts SaveFlow before its own `itemName` load resolves, and the
-  // identity-retry re-read (task 027 / FR-10) which can re-fire `itemName`/`hostType`.
+  // identity-retry re-read (task 027 / FR-10) which can re-fire `itemName`/the capability.
   useEffect(() => {
-    if (hostType !== 'word') return;
+    if (!canProvideDocumentName) return;
     if (documentNameTouched || isEditingDocumentName) return;
     if (defaultDocumentName !== undefined) setDocumentName(defaultDocumentName);
-  }, [defaultDocumentName, hostType, documentNameTouched, isEditingDocumentName]);
+  }, [defaultDocumentName, canProvideDocumentName, documentNameTouched, isEditingDocumentName]);
 
   const handleStartEditDocumentName = useCallback(() => {
     documentNameBeforeEditRef.current = documentName;
@@ -1226,7 +1238,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                 <Label htmlFor="document-name" className={styles.fieldLabel}>
                   Document Name
                 </Label>
-                {hostType === 'word' ? (
+                {canProvideDocumentName ? (
                   isEditingDocumentName ? (
                     <Input
                       id="document-name"

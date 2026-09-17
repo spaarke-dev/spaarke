@@ -242,6 +242,10 @@ export class OutlookHostAdapter implements IHostAdapter {
       // unconditional-true values (not exercised by any live code path).
       canShowLinkedTodos: true,
       canSuggestRelatedRecords: true,
+      // task 020 / FR-06: same "keep this dead file conforming to IHostAdapter" reason as the
+      // capabilities above — mirrors the canonical `shared/adapters/OutlookAdapter.ts`'s
+      // unconditional-false value (not exercised by any live code path).
+      canProvideDocumentName: false,
       minApiVersion: '1.3',
       supportedRequirementSet: hasMailbox18 ? 'Mailbox 1.8' : 'Mailbox 1.3',
     };

@@ -598,6 +598,13 @@ export class OutlookAdapter implements IHostAdapter {
       // formalizes (`SaveFlow.tsx`'s related-candidates fetch). The fetch is itself best-effort and
       // already no-ops without an `itemId`, so this capability need not additionally restrict by mode.
       canSuggestRelatedRecords: true,
+      // task 020 / FR-06: unconditionally FALSE — not because Outlook cannot supply a name
+      // (`getSubject()` returns the email subject), but because the Save tab's Document Name box
+      // already overrides that subject with its own contract (task 046 (b)'s
+      // `email.isNameSystemDerived`). Pre-populating/pencil-editing it here would make an untouched
+      // field register as user-typed and silently drop the collision-avoiding suffix. See the
+      // `HostCapabilities.canProvideDocumentName` doc comment (types.ts) for the full reasoning.
+      canProvideDocumentName: false,
       // Minimum API version for basic functionality
       minApiVersion: '1.5',
       // Actual supported version

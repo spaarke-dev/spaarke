@@ -13,6 +13,13 @@
  * display name from the SPE filename must NOT change behavior for Email/Attachment. The "Outlook path
  * untouched" tests below are the regression guard for that trigger — Outlook gets no default, no pencil,
  * and its `email.subject` / `email.isNameSystemDerived` wiring (task 046 (b)) is unaffected.
+ *
+ * Coordinator follow-up (post-merge review of this task): the default/pencil UI is gated on the
+ * `canProvideDocumentName` capability (`HostCapabilities`, `shared/adapters/types.ts`) rather than on
+ * `hostType` directly, per NFR-10 and task 040's precedent (`canShowLinkedTodos` / `canSuggestRelatedRecords`).
+ * `renderWord()` below passes it explicitly (mirroring what `SaveView` derives from a real Word
+ * adapter); `renderOutlook()` deliberately does NOT pass it, so it defaults to `false` — mirroring
+ * what `SaveView` derives from a real Outlook adapter. Behavior is unchanged either way.
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -105,6 +112,10 @@ function renderWord(itemName = 'Acme Merger Agreement.docx') {
         itemId="https://contoso.sharepoint.com/Acme%20Merger%20Agreement.docx"
         itemName={itemName}
         documentContentBase64="UEsDBBQAAAAIAAAAIQA="
+        // Coordinator follow-up: the default/pencil UI is gated on this capability (NFR-10), never
+        // on hostType — SaveView derives it from hostAdapter.getCapabilities().canProvideDocumentName
+        // (true for Word); tests supply it directly since there is no live hostAdapter here.
+        canProvideDocumentName
         getAccessToken={jest.fn().mockResolvedValue('token')}
         apiBaseUrl="https://bff"
       />

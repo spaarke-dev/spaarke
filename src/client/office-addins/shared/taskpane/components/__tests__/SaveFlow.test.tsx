@@ -504,6 +504,11 @@ describe('AttachmentSelector', () => {
 // Full coverage (pencil toggling, edit-survives-to-save-context, the 850-char bound, the Outlook
 // regression guard) lives in the dedicated SaveFlow.documentName.test.tsx — see that file's header
 // comment for why it is separate. This block is the light rendering smoke-check the task asks for here.
+//
+// Coordinator follow-up: the default/pencil UI is gated on the `canProvideDocumentName` capability
+// (NFR-10), never on `hostType` — see `shared/adapters/types.ts`'s `HostCapabilities` doc comment.
+// The Word case below passes it explicitly (what a real Word adapter reports via `SaveView`); the
+// Outlook case deliberately omits it, defaulting to `false` (what a real Outlook adapter reports).
 describe('Document Name (task 020 / FR-06)', () => {
   it('defaults the Document Name to the filename minus its extension for Word, behind a pencil affordance', () => {
     render(
@@ -513,6 +518,7 @@ describe('Document Name (task 020 / FR-06)', () => {
           itemId="doc-123"
           itemName="Acme Merger Agreement.docx"
           documentUrl="https://example.com/doc"
+          canProvideDocumentName
           getAccessToken={mockGetAccessToken}
         />
       </TestWrapper>

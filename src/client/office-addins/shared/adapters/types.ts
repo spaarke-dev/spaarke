@@ -132,6 +132,28 @@ export interface HostCapabilities {
    * on this flag, never on `hostType` (NFR-10).
    */
   canSuggestRelatedRecords: boolean;
+  /**
+   * Whether the host can supply the currently open item's OWN name as the FR-06 default for the
+   * Save tab's "Document Name" field — i.e. whether that field should pre-populate from the item
+   * and offer the pencil-edit affordance, rather than start as a plain empty input —
+   * spaarkeai-word-add-in-r1 task 020 / FR-06 (converted to a capability per task 040's NFR-10
+   * pattern, coordinator follow-up after task 020's initial `hostType === 'word'` gate).
+   *
+   * True for Word: the open document has its own name (`WordAdapter.getSubject()`, the Title
+   * property Word falls back to "Untitled Document" for) independent of anything typed elsewhere.
+   *
+   * False for Outlook — **not** because Outlook cannot supply a name (`OutlookAdapter.getSubject()`
+   * returns the email subject, which certainly qualifies as "the item's own name" in the abstract).
+   * It is false because Outlook's Document Name box already has a DIFFERENT, pre-existing contract
+   * (task 046 (b)): typing into it overrides the email's subject and sets
+   * `email.isNameSystemDerived: false`, which decides whether the stored `.eml` file gets a
+   * collision-avoiding unique suffix. Pre-populating/pencil-editing that box here would make an
+   * untouched field register as "user typed it" and silently disable the suffix — the exact
+   * collision this capability must not reintroduce (task 020's binding escalation-trigger boundary:
+   * "do not adapt the Email or Attachment paths"). Views MUST gate the Document Name default/pencil
+   * UI on this flag, never on `hostType` (NFR-10).
+   */
+  canProvideDocumentName: boolean;
   /** Minimum required Office.js API version */
   minApiVersion: string;
   /** Currently supported requirement set */
