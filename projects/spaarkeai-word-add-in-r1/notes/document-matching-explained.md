@@ -6,6 +6,31 @@
 
 ---
 
+## ✅ DECIDED — owner, 2026-09-17
+
+**"Follow the recommended approach (A+C with B also playing supporting role)."**
+
+| Option | Verdict | Task |
+|---|---|---|
+| **A** — the invisible marker inside the `.docx` | ✅ **BUILD** | **014** (server-side stamp) + **051** (client-side reader, new) |
+| **C** — the collision prompt on save | ✅ **BUILD** | **025** |
+| **B** — the content hash | ✅ **KEEP as support** — already shipped (028); no new work | — |
+
+**Two sequencing constraints come with it, both from `notes/014-xml-part-stamp-decisions.md` — neither is optional:**
+
+1. **Version-path stamping first; create-path stamping only after 025 lands.** Create-path stamping makes the D1
+   collision strictly worse until 025's refuse-before-upload exists (§6e). This is data safety, not preference.
+2. **Precedence: a resolved cloud URL wins; the stamp is the fallback.** This *overrides* task 014's POML step 5
+   ("prefer the stamp"), because stamp-first has a documented data-loss case (§9): a copy carrying its source's
+   stamp X, whose URL resolves to row W, would have W's content written into X's file.
+
+**One accepted consequence**, recorded as a §6.5 path-A exception in `spec.md`'s ADR Tensions table: once stamping
+ships, the `sprk_canonicaldocument` **link** can no longer be produced for Word-pane saves, because each record's
+stamp makes its stored bytes unique by construction. NFR-08's data-safety half is untouched — a create still always
+creates, and suppress is still never used for editable documents. A lost link costs a notification, never a record.
+
+---
+
 ## 1. The thing we are trying to prevent
 
 A user opens a Word document and saves it to Spaarke. Later — same document — they save again.

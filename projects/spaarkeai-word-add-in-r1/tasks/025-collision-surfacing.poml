@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-12: surface collision handling per the Spike-4 outcome</title>
     <phase>2 Save flow</phase>
-    <gate>blocked</gate>
+    <gate>UNBLOCKED 2026-09-17 — Spike-4 (005) is closed, and the owner chose "A + C": this task builds the collision prompt</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Save-path change on the BFF upload spine with a data-loss failure mode (a silent REPLACE overwrites an existing file's bytes); tags include bff-api + save-flow.</rigor-reason>
@@ -53,6 +53,13 @@
       <dependency task="005" status="pending">Spike-4 — determines whether the add-in's save path shares the shipped collision semantics, what `conflictBehavior` (if any) `OfficeStorageUploader` uses, and the §6.5 path recommendation that fixes this task's scope. This task cannot start until that report exists.</dependency>
     </dependencies>
   </context>
+
+  <owner-decisions date="2026-09-17">
+    <decision name="go">**BUILD IT.** The owner chose the recommendation in `notes/document-matching-explained.md`: **A + C, with B supporting.** This task is **C** — the collision prompt. It is needed under either answer and is now explicitly authorized. Spike-4 (005) is CLOSED, so step 1's precondition is met and its report exists at `notes/spikes/spike-4-collision-path.md`.</decision>
+    <decision name="scope-is-now-build-not-surface">The POML title and FR-12's "consume, do not rebuild" framing rest on a premise Spike-4 **falsified**: the add-in does not use the shipped collision path at all (`OfficeStorageUploader` hard-codes `ConflictBehavior.Replace` and has no conflict handling). So the first escalation trigger's condition is already known to be true — **do NOT fire it to re-ask.** The owner has re-scoped this task: it may build the refuse-before-upload check and the pane's two-option choice for the Office save path. That is a §6.5 **path A** deviation from FR-12's wording; record it in the note and cite it in the PR.</decision>
+    <decision name="must-carry-these-cases">The design MUST remove D1 (the same-name re-create that replaces the FIRST row's SPE file and then fails on `sprk_graphitemid_uk`) by refusing **before** any bytes move. Required tests: (a) the existing file's bytes and version are provably unchanged; (b) the **create B → A → B** sequence from task 047's addendum; (c) dismissing the choice writes nothing and creates no row.</decision>
+    <decision name="unblocks-and-gates">Landing this task **unblocks task 045** (the stale-bytes fix, which needs fresh bytes and therefore makes the same-name collision reachable) and **gates the create-path half of task 014** — create-path stamping must not reach production before this lands (`notes/014-xml-part-stamp-decisions.md` §6e).</decision>
+  </owner-decisions>
 
   <constraints>
     <constraint source="project">SCOPE — spec FR-12 is explicit: introduce NO new collision logic. Within this task, do not write a second conflict detector, a second conflict-behavior resolver, or a second collision dialog. If Spike-4 concluded the add-in path needs server-side conflict behavior it does not have, that is a re-scoping decision, not something to implement inside this task.</constraint>
