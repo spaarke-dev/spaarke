@@ -1572,6 +1572,51 @@ public class AccessibleRecordSetServiceTests
     }
 
     [Fact]
+    public async Task ComposeAsync_OrgAndContactStandingBothActive_EachTermKeepsItsOwnBaseline()
+    {
+        // Filling a gap task 043's code-review gate identified, and one this task CREATED: the
+        // task-042 test it replaced was the only place the contact's own standing grant and an active
+        // organization were configured TOGETHER. Every other org test here sets the contact to NotHeld.
+        //
+        // This is where a level can be mis-credited: TWO derived terms, at TWO different baselines,
+        // both Secure-suppressed, both feeding one AccumulateTerm. The record below is reachable by
+        // both, so the union is asserted; the org-only record proves the org term did not simply
+        // inherit the contact's (higher) level.
+        //
+        // Also the only consumer of ContactWalk, whose existence OrgWalkFor's doc relies on to claim
+        // the two matchers are mutually exclusive.
+        var shared = StandingProject;
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership   // the contact's OWN standing walk — binds no organizations
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, ContactWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, shared));
+        membership   // the org-expansion walk — bound to OrgA, org-typed descriptors only
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, shared, OrgDerivedRecord));
+
+        var standing = new Mock<ISubjectStandingGrantReader>();
+        standing.Setup(s => s.ReadForContactAsync(ContactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.Collaborate));
+        standing.Setup(s => s.ReadForOrganizationAsync(OrgA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandingGrantState(Held: true, Baseline: ExternalAccessLevel.ViewOnly));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.ActiveOrgIds.Add(OrgA);
+
+        var sut = CreateSut(membership.Object, participations, standing.Object);
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(shared).Should().Be(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create,
+            "reached by BOTH terms, so the union of Collaborate (contact) and Read (org) — the max, not either alone");
+        set.RightsFor(OrgDerivedRecord).Should().Be(AccessRights.Read,
+            "reachable ONLY through the View Only organization: it must NOT inherit the contact's Collaborate level");
+        set.Sources.StandingGrantMembership.Should().BeTrue();
+        set.Sources.OrgExpansionMembership.Should().BeTrue("both derived terms ran, so both must be claimed");
+    }
+
+    [Fact]
     public async Task ComposeAsync_OrgViewOnlyPlusDirectCollaborateGrant_ComposesToTheMax()
     {
         // The additive max across terms: the same record reached by a View Only ORG standing grant and

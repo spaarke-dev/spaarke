@@ -84,7 +84,16 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 
 ### ADR-034 cross-reference (contact-anchored membership entry)
 
-The non-systemuser (contact) principal resolves to membership via an **additive contact-anchored entry** on the existing membership engine (ADR-034 resolution **Path C**): the resolver reuses `MembershipResolverService` / `BuildFetchXml` (which already binds a `ContactId` for Contact-typed descriptors), filtered to the access-conferring `sprk_assigned*` role allowlist. This is a new *entry* path, not a second membership model — ADR-034 is complied with, not amended.
+The non-systemuser (contact) principal resolves to membership via an **additive contact-anchored entry** on the existing membership engine (ADR-034 resolution **Path C**): the resolver reuses `MembershipResolverService` / `BuildFetchXml` (which already binds a `ContactId` for Contact-typed descriptors, and — since `unified-access-control-r2` task 043 — the contact's active organizations for org-typed ones), filtered to the **access-conferring column registry**.
+
+> ⚠️ **Corrected 2026-09-17 (`unified-access-control-r2` task 043).** This paragraph previously said
+> "filtered to the access-conferring **`sprk_assigned*` role allowlist**". That naming convention was
+> **DELETED** by task 041 under ADR-034 Amendment A1 — it is not layered beneath the registry, it is
+> gone — so a reader trusting this sentence would conclude that naming a new column `sprk_assigned*`
+> still confers access. It does not; only an explicit, reviewed entry in
+> `MembershipOptions.AccessConferringRoles` does, which is the entire point of FR-24. **No ADR-028 rule
+> changes here** — this is a factual correction to a cross-reference describing ADR-034's mechanism, and
+> the identical stale sentence was fixed in `IMembershipResolverService`'s own XML doc in the same task.
 
 ### Alternatives considered (and rejected)
 

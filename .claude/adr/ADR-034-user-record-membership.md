@@ -115,7 +115,16 @@ public sealed record MembershipResolveOptions(
     IReadOnlyList<string>? IdentityTypes = null,
     IReadOnlyList<string>? IncludeRelated = null,  // 1-hop max per Q3
     int Limit = 500,
-    string? ContinuationToken = null);
+    string? ContinuationToken = null,
+    // A1 opt-in: apply the access-conferring registry filter on the SYSTEMUSER plane
+    // (ResolveByContactAsync always applies it). Default false keeps AI scoping unfiltered.
+    // Added by unified-access-control-r2 task 041; omitted from this block until 2026-09-17.
+    bool AccessConferringOnly = false,
+    // Org-expansion (design §4.5 term 4): the organizations to bind into the resolved identity on the
+    // CONTACT plane, so registry-listed org-typed descriptors emit conditions instead of nothing.
+    // SUPPLIED BY THE CALLER — see the contract table's contact-plane row below for why the resolver
+    // does not read the junction itself. Added by task 043.
+    IReadOnlyList<Guid>? OrganizationIds = null);
 
 public sealed record MembershipResponse(
     [property: JsonPropertyName("entityType")] string EntityType,
@@ -150,7 +159,8 @@ public sealed record PersonIdentity(
 | `Lookup → team` | Expand `teammembership` to systemusers | `teamIds[]` (cached) |
 | `Lookup → businessunit` | User's BU + any descendant BUs (configurable per role) | `businessUnitId` |
 | `Lookup → account` | User's primary contact's `parentcustomerid` (if contact) | `accountId` (when applicable) |
-| `Lookup → sprk_organization` | Configured `Membership:OrganizationLookup:UserLookupField` (R3 chose Option (b) config-driven per task 032 decision; default empty = fail-soft empty result) | `organizationIds[]` |
+| `Lookup → sprk_organization` (systemuser plane) | Configured `Membership:OrganizationLookup:UserLookupField` (R3 chose Option (b) config-driven per task 032 decision; default empty = fail-soft empty result) | `organizationIds[]` |
+| `Lookup → sprk_organization` (**contact plane**) | The **`sprk_contactorganization` junction** (`statecode eq 0` = active), read by the CALLER and passed in via `MembershipResolveOptions.OrganizationIds` — **not** by this service. Added 2026-09-17 (`unified-access-control-r2` task 043) because A1's org-typed axis had no documented contact-plane source, and a reader consulting only this table would conclude the contact plane has no org path at all. Two reasons the resolver does not read it itself: the junction lives behind `Infrastructure/ExternalAccess/ExternalParticipationService`, so reading it here would invert the layering; and the accessible-record-set composer ALREADY performs that read for the FR-23 deny veto, so a second read would be a second cache that can disagree with the first mid-composition. ⚠️ The `UserLookupField` mechanism in the row above is **not** a substitute — it resolves `sprk_organization`→`systemuser` and returns nothing for a contact. | `organizationIds[]` |
 | Text (email) | Substring `like` | `primaryEmail` |
 | Text (display name) | NOT supported (too fuzzy) | — |
 

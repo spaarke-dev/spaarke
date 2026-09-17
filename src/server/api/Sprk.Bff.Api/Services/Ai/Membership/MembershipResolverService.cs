@@ -83,6 +83,28 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// <para>
     /// Prior bump: 3 (r5 2026-07-09) for the distinct='true' completeness fix.
     /// </para>
+    /// <para>
+    /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
+    /// question came up and the answer was non-obvious). This constant and
+    /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
+    /// a bump:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>Bump REQUIRED</b> when the cached VALUE's shape or the query's semantics change while
+    /// the options-hash composition stays the same — because old entries then remain ADDRESSABLE under
+    /// an unchanged key and will be served as valid answers. That is exactly the 3→4 case above: the
+    /// key was identical, so only the version could orphan the silently-truncated id sets.</item>
+    /// <item><b>Bump NOT required</b> when the change alters the options-hash composition itself, as
+    /// task 043 did by adding <c>AccessConferringOnly</c> and <c>OrganizationIds</c> to
+    /// <see cref="HashOptions"/>. Every post-change hash carries the new fields, so no running code can
+    /// compute the key of a pre-change entry: they are unreachable and expire on their own TTL. The
+    /// changed composition IS the orphaning mechanism, and a bump would be redundant.</item>
+    /// </list>
+    /// <para>
+    /// The distinction matters in the unsafe direction: getting it wrong the FIRST way serves a stale
+    /// answer to a new question, which on this path means serving an unfiltered descriptor set to an
+    /// authorization decision.
+    /// </para>
     /// </summary>
     private const int CacheVersion = 4;
 

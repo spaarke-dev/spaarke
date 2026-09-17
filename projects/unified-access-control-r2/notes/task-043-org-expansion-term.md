@@ -263,8 +263,27 @@ Commit `28f833a0e` (local; **not pushed**).
 | Affected unit namespaces (`Infrastructure.ExternalAccess` + `Services.Ai.Membership`) | **328 / 328** | Re-run after a **forced rebuild**, because a lint-staged pre-commit hook ran `dotnet format` over the five C# files and the first run had reused pre-format binaries (1 s duration gave it away) |
 | Seam + auth surfaces (`Seam.ExternalAccess`, `Auth.UnifiedAccessControl`, …) | **197 / 197** | Filter proven non-empty first (**189** selected) after the §8 error; all three `StandingGrantRuntimeUnionSeamTests` methods confirmed present **by name** |
 | ArchTests | **323 / 323** | Census unchanged from task 063's 323 — expected, since no route or DI registration was added |
-| Perturbations | in flight | 11 cases, one per load-bearing behaviour; harness reports CAUGHT / MISSED / **INVALID** separately |
-| CVEs · publish size · Step 9.5 | pending | — |
+| Perturbations | **11 / 11 CAUGHT** | 0 MISSED, 0 INVALID — but only after a matcher fix and four individual re-runs; see §10 |
+| CVEs | **none** | `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`; no package reference was added, so this is the expected result |
+| Publish size | **45.45 MB vs master 45.35 MB = +0.10 MB** | Both sides measured from **fresh short-path worktrees** (`C:\wt043m` / `C:\wt043b`), master **re-measured** rather than compared to the recorded number, same zip tool both sides (`Compress-Archive -CompressionLevel Optimal`, matching `scripts/Deploy-BffApi.ps1`), **file counts EQUAL at 214/214**. 14.55 MB of headroom under the 60 MB NFR-01 ceiling. **043's own contribution is ≈0.00** — task 063 measured the same 45.45, and no `.csproj`/`.props` changed; the +0.10 is project-cumulative. See §12 for the false-green this measurement produced on its first attempt |
+| Step 9.5 `adr-check` | **0 violations / 11 warnings** | Including an independent answer to the `CacheVersion` question — see §13 |
+| Step 9.5 `code-review` | pending | — |
+
+### 9.1 Doc drift repaired at the gate's prompting
+
+`adr-check` found four documentation defects in the artifacts governing this task. All four are now
+fixed (`.claude/**` is main-session-only per root CLAUDE.md §3, so a sub-agent could not have):
+
+| # | Artifact | Was | Now |
+|---|---|---|---|
+| W2 | `.claude/adr/ADR-034` `Key Types` | `MembershipResolveOptions` missing **both** `AccessConferringOnly` (dropped by task 041) and `OrganizationIds` | both present, each dated and attributed |
+| W3 | `.claude/adr/ADR-034` Identity Normalization Contract | one `Lookup → sprk_organization` row, describing only the `UserLookupField` mechanism — so a reader would conclude the **contact plane has no org path at all** | split into systemuser / **contact** rows; the contact row names the `sprk_contactorganization` junction, says the caller supplies it and why, and warns that `UserLookupField` is not a substitute |
+| W4 | `.claude/adr/ADR-028` A2 cross-reference | "filtered to the access-conferring **`sprk_assigned*` role allowlist**" — a convention task 041 **deleted** | "the access-conferring column **registry**", with a dated note. **No ADR-028 rule changed** — a factual correction to a cross-reference describing ADR-034's mechanism |
+| W7 | `design.md` §3 placement table | membership resolver = "**Reuse unchanged**" | "**Extend additively**", naming 041's gate and 043's binding + cache fix |
+
+W2 and W4 are the same defect as the one this task already fixed in code (§5.1): **three artifacts
+described the retired `sprk_assigned*` convention as live.** Docs-vs-reality instances now stand at
+**fifteen**.
 
 **Specifically re-verified because task 042 warned about it**: `StandingGrantRuntimeUnionSeamTests`
 broke on 042's change to `ComposeForContactAsync`, and this task restructured the same method. All three
@@ -278,7 +297,32 @@ entries remaining on the shared stack (`stash@{0}` master pre-deploy, `stash@{1}
 
 ---
 
-## 10. Perturbations — first pass: CAUGHT 6 · MISSED 1 · INVALID 4
+## 10. Perturbations — final: **11 / 11 CAUGHT** (first pass 6, re-run 5)
+
+Every behaviour this task claims is pinned by a test that fails when the behaviour is removed. The
+route there is the interesting part, and §10.1–§10.2 keep it rather than tidying it away: the first
+pass was **CAUGHT 6 · MISSED 1 · INVALID 4**, and both of the numbers that were not CAUGHT turned out
+to matter.
+
+| Re-run (individually, on a cold build server) | Verdict |
+|---|---|
+| **P5** org term drops the `IdentityTypes` narrowing — *after* the matcher fix | **CAUGHT (4 tests)** |
+| **P1** `HashOptions` drops `AccessConferringOnly` | **CAUGHT** |
+| **P2** `HashOptions` drops `OrganizationIds` | **CAUGHT** |
+| **P10** org expansion leaks onto the systemuser plane | **CAUGHT** |
+| **P11** one walk for ALL orgs at the MAX baseline (the rejected alternative) | **CAUGHT** |
+
+Two conclusions worth keeping:
+
+- **P5's MISSED was a real defect in the tests, and only a perturbation could have found it.** The suite
+  was green with the guard removed; it now fails 4 tests. Nothing about the passing suite before the fix
+  distinguished "defends this behaviour" from "happens to pass".
+- **All four INVALIDs became CAUGHT once re-run alone.** So they were lock/environment artifacts
+  throughout, exactly as the harness's three-verdict design assumed — and had they been counted as
+  either passes or failures, the conclusion would have been wrong in both directions. In particular P1
+  and P2 cover §2's cache-key defect, the most consequential thing this task changed.
+
+## 10.0 First pass, and why the two non-CAUGHT results were kept
 
 | # | Break | Verdict |
 |---|---|---|
@@ -317,12 +361,211 @@ on P11) — plus `CS2001` for a missing generated `Spaarke.Scheduling.GeneratedM
 This project has recorded this failure mode three times before (session 13 P12 after eleven consecutive
 runs; session 12 `CS0649`; session 11 `CS0006`) and attributed it to back-to-back builds. **This pass
 adds a cause worth knowing: another agent is building the same solution concurrently on this machine.**
-The orphaned 6.2 GB `testhost` was checked before being killed and turned out to belong to
-`C:\code_files\spaarke\.claude\worktrees\agent-af442ccb79065ad1a` — a different worktree — so it was left
-alone, and `dotnet build-server shutdown` only quiesces THIS session's servers.
+The orphaned 6.2 GB `testhost` was inspected via its command line **before** anything was done to it, and
+it turned out to belong to `C:\code_files\spaarke\.claude\worktrees\agent-af442ccb79065ad1a` — a
+different worktree — so it was **left running, not killed**. Checking first was the whole point: killing
+it would have destroyed another agent's in-flight test run to speed up mine. `dotnet build-server
+shutdown` therefore quiesces only THIS session's servers, and the contention is not fully removable.
 
 Consequence for the method: the build environment is not fully controllable here, so each INVALID is
 re-run **individually** on a cold build server, and a repeat INVALID is recorded as an environment limit
 rather than promoted to a result. A broken perturbation is not evidence in either direction — and two of
 these four (P1, P2) cover the cache-key defect of §2, which is the single most consequential thing this
 task changed, so they are the last ones that may be left unresolved.
+
+---
+
+## 11. CVE check and status-drift baseline
+
+- **CVEs (CLAUDE.md §10 rule 5)**: `dotnet list package --vulnerable --include-transitive` on
+  `Sprk.Bff.Api` reports **no vulnerable packages**. This task added no package reference, so that is the
+  expected result rather than a lucky one.
+- **Status-drift baseline**: `scripts/check-task-status-drift.ps1` is **green before** the bookkeeping
+  edit — 105 POMLs / 105 index rows, no drift. Taken deliberately in advance: if the check goes red after
+  `ct043b.js` writes the POML status and the TASK-INDEX row together, the cause is this task's edit and
+  not inherited drift.
+
+## 12. 🔴 A false green from my own tooling — §8's lesson, restated the hard way
+
+The first publish-size run reported **"completed (exit code 0)"** and measured **nothing**. The script
+died on a PowerShell *parse* error before executing a single statement, and the apparent success came
+from the shell pipeline: `powershell ... | tail -40` takes its exit status from `tail`, not from
+PowerShell.
+
+Two causes, both mine:
+
+1. The `.ps1` was authored with em-dashes and arrows in its comments and strings, then invoked with
+   **`powershell`** (Windows PowerShell 5.1, ANSI) instead of **`pwsh`** (PowerShell 7, UTF-8). The
+   multi-byte characters were mangled — visible in the error output as
+   `published ZERO files ?" measur...` — which broke a string literal and cascaded into brace and paren
+   mismatches. A `pwsh` invocation in the very same message worked fine, which is what isolated it.
+2. Piping to `tail` discarded the real exit code, so nothing downstream could distinguish "measured and
+   passed" from "never started".
+
+**Rules adopted**: scratchpad PowerShell stays **7-bit ASCII** and runs under `pwsh`; the interpreter's
+own status is captured immediately (`rc=$?`) *before* any pipe. The rewritten script also fails loudly —
+it checks `$LASTEXITCODE` after `dotnet publish`, refuses a zero-file publish, and `exit 1`s on any
+failure — so a broken measurement can no longer masquerade as a clean one.
+
+This is the **third distinct instance in this one task** of the same underlying error: **an observation
+taken outside the thing being observed.** §8 (a filter that selected the wrong 16), §10.2 (perturbations
+that never compiled), and this. They look unrelated and share a root. The defence is cheap and identical
+every time: establish that the instrument registered something before believing what it reports —
+`--list-tests` before trusting a filter, a build check before scoring a perturbation, the interpreter's
+own exit code before trusting a script.
+
+---
+
+## 13. Step 9.5 — `adr-check`: **0 violations / 11 warnings**
+
+Run read-only against `c3553730c..47a63314c` (no `dotnet`, so the ArchTests were named rather than
+re-executed; the orchestrator's own run had them at 323/323).
+
+### 13.1 The `CacheVersion` question — answered independently, and the answer is "no bump"
+
+This was the one thing worth an outside opinion, because §2's fix **changed the options-hash
+composition** and ADR-009 governs cache-key versioning. The reasoning that settles it:
+
+Every post-change hash carries the new `|a:…|o:…` suffix, so **no running code can compute the key of
+any pre-change entry** — old entries are unreachable and expire on their own 5-minute TTL. And the
+hazardous direction specifically cannot occur: the authorization caller hashes `a:1`, a value no
+pre-deploy instance ever produced, so a stale **unfiltered** entry can never be served to the gate —
+including during a mixed-fleet rolling deploy, where old and new instances write to disjoint key spaces.
+
+The contrast with the 3→4 bump is the useful part: there the key was **unchanged**, so old
+silently-truncated entries stayed addressable and would have been served as valid answers; only the
+version could orphan them. Here the changed composition *is* the orphaning mechanism. That distinction
+is now written onto the `CacheVersion` doc-comment itself, since the next author is the one who will
+hit it.
+
+Residual, benign: every membership entry goes cold for up to 5 minutes at deploy. Worth a line in the
+PR rather than a surprise in a latency chart.
+
+### 13.2 W1 — the `Infrastructure → Services/Ai` dependency is COMPLIANT, not an exception
+
+`bff-extensions` §A.4 bans CRUD code from injecting "AI-internal" types, and the evaluator consumes
+`IMembershipResolverService` from `Services/Ai/Membership/`. The gate flagged it as a warning and named
+the cheap deciding check: what does the ArchTest actually enforce?
+
+**Checked, and it decides the question.** `ADR013_AiBoundaryTests.ForbiddenAiInternalTypes` is exactly
+two entries — `Services.Ai.IOpenAiClient` and `Services.Ai.IPlaybookService`. `IMembershipResolverService`
+is not among them, and `Sprk.Bff.Api.Services.Ai.` appears in the test's **grandfathered/allowed** prefix
+list, not as a banned target. `LayerDependencyTests.cs` contains no `Services.Ai` reference at all.
+
+So there is no rule — ArchTest or ADR — banning this dependency, and **ADR-034's own MUST mandates it**
+("MUST use `MembershipResolverService` via `IMembershipResolverService` DI for any 'records this user is
+associated with' query"). §A.4's "AI-internal" is operationalised by that enumerated list; the canonical
+membership interface is merely *housed* under `Services/Ai/` for historical reasons.
+
+**No §6.5 path is needed.** Recorded here so the next reviewer does not re-litigate it. The gate was
+right to raise it — one file in the codebase (`Tier2ScopeFilterInjector.cs:32-35`) *does* decline this
+dependency on principle, which is exactly the kind of inconsistency that deserves an answer rather than
+a shrug.
+
+### 13.3 Disposition of all eleven warnings
+
+| # | Disposition |
+|---|---|
+| W1 | **Closed as compliant** — evidence in §13.2; no exception required |
+| W2 · W3 · W4 · W7 | **Fixed** — see §9.1 (two ADR-034 passages, one ADR-028 cross-reference, one design.md row) |
+| W5 publish size | **Discharged** — §9: 45.45 vs re-measured master 45.35 = +0.10 MB, 214 files each side |
+| W6 CVE scan | **Discharged** — §11: no vulnerable packages |
+| W8 hot-path element names | Pre-existing cosmetic drift in design.md's block; nothing is gated by it (`project-pipeline` hard-warns only on a *missing* block). Addressed while design.md was open |
+| W9 trait tagging | **Declined, with reason.** §F's taxonomy is `repaired` / `real-bug-pending-fix` / `flaky-quarantined` — all three describe repair states from the test-suite-repair project. None applies to a newly authored passing test, and the gate agreed it is likely not a real obligation |
+| W10 no kill-switch on the new term | **Declined, deliberately.** A config gate would introduce precisely the asymmetric-registration hazard §F.1 exists to prevent. The term is already data-gated on the organisation's standing-grant flag, and **zero organisations hold one today** (task 042 §3), so it is inert until an operator sets one. Register B-1's model is derived-access-default-on with Secure as the veto |
+| W11 ADR-028 A5 systemuser root set | **Not this task's** — task 036 owns swapping in Dataverse's impersonated answer, and is blocked behind 🟡 034. This task **narrows** the documented interim state rather than widening it, by registry-filtering the interim path for however long it lives |
+
+Noted for the record: the gate independently reached the same conclusion as §5 about the POML's step 3 —
+that "the flag-off branch of 036" does not exist, and encoding that correction at the call site rather
+than silently doing something else was the right handling of a stale brief.
+
+---
+
+## 14. Step 9.5 — `code-review`: 1 Critical · 2 High · 7 Medium · 6 Low
+
+### 14.1 🚨 C-1 — ESCALATED, NOT DECIDED. `accessConferringOnly: true` also deletes owner/team/BU membership
+
+**This is the finding of the task, and I missed it.** Verified from source before escalating:
+
+| Evidence | Where |
+|---|---|
+| `systemuser` / `team` / `businessunit` ARE discovered as descriptors | `MembershipOptions.cs:252,254,255` (`CanonicalIdentityTables`) |
+| The conferring registry contains **no** `ownerid` / `owningteam` / `owningbusinessunit`, and no `IdentityType = "SystemUser"/"Team"/"BusinessUnit"` entry | `MembershipOptions.cs` — grepped; zero matches outside the identity-tables list |
+| Such an entry is **inexpressible**: anything not `Contact`/`Organization` is logged as *malformed* and dropped, so an operator could not add it even deliberately | `MembershipResolverService.cs:592-596` |
+| The binding being lost | `MembershipResolverService.cs:782-784` — `case "SystemUser": AppendCondition(sb, d.Field, identity.SystemUserId)` |
+| No compensating term exists | task **036** `🔲 open`, deps include **034** `🟡 blocked`; `IImpersonatedRootSetSource` is **not injected** into the evaluator |
+
+An internal Type-1 user who owns 45 matters and is not named in any `sprk_assigned*` contact column
+previously got all 45 via `ownerid`. With the flag on, the membership term returns nothing for them, so
+their accessible set collapses to (contact-column matches ∪ their own contact grants) — **zero for an
+owner-only user, and zero for any Type-1 user with no linked contact**. Every BFF-mediated read path is
+affected.
+
+**The damning detail: this task's own test asserts the regression as correct.**
+`ResolveAsync_AccessConferringOnly_DoesNotShareACacheEntryWithTheUnfilteredCall` seeds `ownerid` and
+asserts the filtered roles are exactly `{"assignedAttorney"}` — `owner` disappearing was written into the
+expected value and read past.
+
+Direction is **fail-closed** (under-grant, not disclosure), so it is availability/correctness rather than
+exposure. That does not make it an implementer's call: design §4.5 puts a Type-1 user's owner/team access
+in **term 1, the Dataverse answer via §4.4** — i.e. task 036 — and the POML's criterion scoped the intent
+to *over-inclusion* closure (A-8), which is a categorically smaller effect. **Escalated per CLAUDE.md
+§6; 043 is NOT marked complete and `ct043b.js` is NOT run pending the answer.**
+
+### 14.2 H-2 — the fault test and its doc claimed more than the code delivers. Corrected
+
+`ActiveOrgMemberships.Unreadable` is set only for faults that reach the reader as an **exception** —
+in practice token/API-url acquisition. A junction **query** failure (500/403/timeout/any non-success) is
+swallowed inside `ExternalParticipationService`'s private query, which returns an **empty list** — so it
+arrives as `Unreadable: false` and the deny veto's **organization axis** silently stops matching for
+that subject. Contact-keyed deny rows still apply, so the wall narrows rather than vanishes.
+
+**The hole pre-dates task 043.** What task 043 did was document and test it as *closed* — with a double
+that throws, which the real path mostly does not — and that is worse than silence, because a confident
+comment plus a green test stops the next reader looking. Same error class as §8 and §12: the instrument
+was not measuring what it claimed. Both the type's remarks and `ResolveDenyVetoAsync`'s remarks now state
+the exact scope and name the residual. **Fixing it properly belongs one layer down**, in the junction
+query, which also serves the org-GRANT path whose additive caller deliberately wants empty-on-fault — the
+same inverted-fail-direction problem recursing. **Needs a register entry + issue.**
+
+### 14.3 H-3 — `sprk_enddate`: the hedge is a data state, not a control
+
+The §4.1 decision stands, but the gate sharpened why it cannot rest on "exposure is nil today":
+**one admin ticking `sprk_standinggrant` on one organization arms an over-grant to every stale member of
+that firm.** Belongs in the PR as an explicitly accepted risk with owner sign-off, plus a register entry
+— not only in these notes.
+
+### 14.4 Fixed and verified
+
+| # | Finding | Fix |
+|---|---|---|
+| **M-1** | My edit inserted `OrganizationIdentityTypeOnly`'s doc immediately after `ResolveDenyVetoAsync`'s `</remarks>`, so the entire fail-closed safety explanation documented a `string[]` and the veto method had **no doc at all** | veto block moved to the method (deleting the field alone would have re-attached it to the next member); `<param>` for the new `subjectOrgs` added |
+| **M-2** | Hoisting the junction read moved it **above** the veto's `candidateIds.Count == 0` early-return, so a composition with nothing to evaluate performed a read it previously skipped — multiplied per authorization decision | systemuser-plane read gated on candidates being non-empty. On the **contact** plane the read must precede the walk (it is an input), so that increase is the new term's honest cost, not a regression |
+| **M-4** | Provenance doc conflated "could contribute" with "did contribute"; the code does the former, mirroring 042's `standingApplied` | doc tightened — the two flags must mean the same thing, since FR-30 provenance reads (task 064) consume both |
+| **M-5** | **No test had the org term and the contact's own standing term active together** — a gap this task created, since the replaced 042 test was the only place they were co-configured. Two derived terms at two baselines feeding one `AccumulateTerm` is exactly where a level can be mis-credited | `ComposeAsync_OrgAndContactStandingBothActive_EachTermKeepsItsOwnBaseline`: shared record = Collaborate ∪ ViewOnly; org-only record stays Read |
+| **L-1** | `ContactWalk` was dead, while `OrgWalkFor`'s doc relied on it to claim mutual exclusivity | the M-5 test is its consumer — fixed without deleting a referenced symbol |
+
+**Verified**: build **0 / 0**; filter proven non-empty at **109** (was 108, +1 for the new test);
+**109 / 109 pass**.
+
+### 14.5 Accepted with reasons, not fixed
+
+- **M-3** (N+1 org-baseline reads, N unbounded — no `$top` on the junction). Real shape issue; **0
+  organizations hold a standing grant today**, so N is 0. Batching the baseline read is the right
+  eventual fix. Register entry.
+- **M-6** (§10 artifacts) — **discharged after the gate ran**: publish +0.10 MB with 214 files each side
+  (§9), CVEs clean (§11).
+- **M-7** (decompose `ComposeForContactAsync`, now ~11 concerns) — agreed in principle, and the gate is
+  right that extracting the org term would have made M-1 and L-1 unlikely. Declined **in this task**:
+  restructuring the evaluator's hottest security method while a Critical on the same method is
+  unresolved trades a real risk for a cosmetic gain. Candidate for its own task.
+- **L-2** redundant `Verify` · **L-3** KEEP-path tension (pre-existing, `bff-extensions` §F directs BFF
+  tests here — a standing directive conflict, not this task's) · **L-4** over-keyed cache (harmless) ·
+  **L-5** redundant `.Distinct()` · **L-6** non-deterministic bucket iteration order (log text only).
+
+### 14.6 What the two gates agreed on independently
+
+Both reached the same verdict on the cache-key finding — that it was a **latent disclosure armed by this
+task's own step 3**, correctly diagnosed and correctly pinned by two tests that run the calls in the
+dangerous order — and both flagged the POML's non-existent "flag-off branch of 036". `adr-check` and
+`code-review` disagreed on nothing.

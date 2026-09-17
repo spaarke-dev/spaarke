@@ -161,11 +161,19 @@ public sealed class AccessibleRecordSet
 /// records referencing — via a registry-listed org-typed lookup — an organization the contact actively
 /// belongs to, at that organization's standing-grant baseline.
 /// <para>
-/// ⚠️ <c>true</c> only when an organization actually held a standing grant WITH a recognised baseline,
-/// i.e. when the term could contribute something. An organization with the flag unset, no baseline, or
-/// an unreadable row leaves this <c>false</c> — provenance must not claim a term that contributed
-/// nothing (the rule task 042 established for <paramref name="StandingGrantMembership"/>; see
-/// notes/task-042-standing-grant-levels.md §6.2).
+/// ⚠️ <b>Reports that the term RAN, not that it yielded records</b> — <c>true</c> iff at least one
+/// organization held a standing grant WITH a recognised baseline, i.e. iff the term COULD contribute.
+/// A walk that then matched no records still leaves this <c>true</c>.
+/// <para>
+/// Wording tightened 2026-09-17 after task 043's code-review gate read the previous phrasing as
+/// promising the stronger "did contribute" and flagged the code as contradicting its own doc. The code
+/// is right and deliberately mirrors <paramref name="StandingGrantMembership"/>, which task 042 set
+/// the same way: an organization with the flag unset, no baseline, or an unreadable row yields
+/// <c>Rights == None</c>, never enters a bucket, and leaves this <c>false</c>. That is the rule task
+/// 042 actually established — provenance must not claim a term that could contribute nothing (see
+/// notes/task-042-standing-grant-levels.md §6.2) — and it is the distinction FR-30 provenance reads
+/// (task 064) will consume, so the two flags must mean the same thing.
+/// </para>
 /// </para>
 /// </param>
 public readonly record struct AccessibleRecordSetSources(
@@ -402,62 +410,6 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static readonly IReadOnlySet<Guid> EmptyDeniedSet = new HashSet<Guid>();
 
     /// <summary>
-    /// Resolves the FR-23 deny-list veto set for one composition (task 039). Builds each candidate's
-    /// referenced organizations (the org-typed lookups enumerated in
-    /// projects/unified-access-control-r2/notes/task-039-org-reference-inventory.md — today
-    /// <c>sprk_assignedlawfirm1</c>/<c>2</c> on all three roots), resolves the SUBJECT's own active
-    /// organization membership, and queries <see cref="INoAccessListReader"/>. Shared by both principal
-    /// planes so this resolution logic exists in exactly one place.
-    /// </summary>
-    /// <param name="entityType">The root entity type being composed.</param>
-    /// <param name="candidateIds">
-    /// The SAME candidate id list already built for the flag read (task 037) — never rebuilt here, per
-    /// the task's own notes.
-    /// </param>
-    /// <param name="subjectContactId">
-    /// The contact identity to check as a DIRECT subject (contact×org / contact×record deny rows) — the
-    /// SAME resolved contact used for the contact-grant term, so "who is checked against the wall"
-    /// never diverges from "whose grants applied". Null (or <see cref="Guid.Empty"/>) when no contact
-    /// identity is available for this principal on this entity type — the deny list is keyed on
-    /// contact/organization identities only (spec FR-23), and organization membership is itself read
-    /// FROM the contact, so a principal with no contact identity has no deny-list-relevant subject on
-    /// EITHER axis. The deny-list reader is never even queried in that case.
-    /// </param>
-    /// <remarks>
-    /// <para>
-    /// <b>Denial deliberately OVER-matches (spec FR-23 / register B-10).</b> The record-side
-    /// organization match uses EVERY organization the record references — it is NOT narrowed to task
-    /// 041's access-conferring registry. An organization referenced only via a non-conferring lookup
-    /// (e.g. opposing counsel) still denies if it is named as a deny object.
-    /// </para>
-    /// <para>
-    /// <b>Fails closed toward DENIAL, at every step, by wrapping the whole resolution in one
-    /// try/catch.</b> Three independent fault surfaces all resolve to the SAME outcome — every id in
-    /// <paramref name="candidateIds"/> denied:
-    /// </para>
-    /// <list type="bullet">
-    /// <item>The deny-list reader itself already fails closed (task 038), returning a deny-all-queried
-    /// result with <see cref="NoAccessListResult.FailedClosed"/> set rather than throwing. That result
-    /// flows straight through — its denied ids are unioned into the return value.</item>
-    /// <item>A record whose OWN referenced-organizations could not be resolved
-    /// (<see cref="ReferencedOrganizations.Unreadable"/>) is denied DIRECTLY, independent of whatever
-    /// the reader would say — it is never even added to the candidate batch sent to the reader.
-    /// Silently treating an unreadable record as "references nothing" would let it slip past a real
-    /// deny entry keyed on an organization it actually references but which the read could not
-    /// confirm — exactly the "skipped record is an unevaluated wall" case this task's escalation
-    /// trigger names.</item>
-    /// <item>Any OTHER unexpected fault (including a fault resolving the SUBJECT's own active
-    /// organization membership — <see cref="ExternalParticipationService.QueryActiveOrgIdsAsync(Guid, CancellationToken)"/>)
-    /// is caught here and denies every queried candidate, mirroring <see cref="NoAccessListReader"/>'s
-    /// own over-large-subject-set fail-closed precedent: a subject that cannot be safely evaluated is
-    /// treated the same as a subject the reader could not evaluate.</item>
-    /// </list>
-    /// <para>
-    /// In every case the veto is never SKIPPED — a fault denies, it never causes the pipeline to
-    /// proceed as though nothing needed checking (spec NFR-01).
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// Narrows an org-expansion walk to org-typed descriptors ONLY (task 043).
     /// </summary>
     /// <remarks>
@@ -483,10 +435,24 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <item>the FR-23 deny-veto SUBJECT, where over-inclusion is merely a stricter wall — so a failed
     /// read must deny EVERY candidate (the behaviour <c>ResolveDenyVetoAsync</c> has always had).</item>
     /// </list>
-    /// Collapsing both onto a bare empty list would have silently converted the veto's fail-CLOSED into
-    /// a fail-OPEN: an empty subject-org list looks exactly like "belongs to no organization", so the
-    /// wall would simply stop matching. Carrying <see cref="Unreadable"/> keeps the two decisions
-    /// distinct while still costing one read (NFR-02).
+    /// Collapsing both onto a bare empty list would have converted the veto's fail-CLOSED into a
+    /// fail-OPEN for the faults this type CAN see: an empty subject-org list looks exactly like
+    /// "belongs to no organization", so the wall would simply stop matching. Carrying
+    /// <see cref="Unreadable"/> keeps the two decisions distinct while still costing one read (NFR-02).
+    /// <para>
+    /// ⚠️ <b>Scope of the guarantee — corrected by task 043's code-review gate, which found the original
+    /// wording here claimed more than the code delivers.</b> <see cref="Unreadable"/> is set only for
+    /// faults that reach
+    /// <see cref="ReadActiveOrgMembershipsAsync"/> as an <b>exception</b>, which in practice means
+    /// token/API-url acquisition. A junction <i>query</i> failure (HTTP 500/403, timeout, any
+    /// non-success status) is swallowed inside <c>ExternalParticipationService</c>'s private query,
+    /// which returns an empty list — so it arrives here as <c>Unreadable: false</c> and the deny veto's
+    /// ORGANIZATION axis silently stops matching for that subject. Contact-keyed deny rows still apply,
+    /// so the wall narrows rather than vanishes. That hole PRE-DATES task 043; what task 043 briefly did
+    /// was document and test it as closed, which is worse than silence because it stops the next reader
+    /// looking. See <see cref="ResolveDenyVetoAsync"/>'s remarks for why fixing it properly has to
+    /// happen one layer down, in the junction query itself.
+    /// </para>
     /// </remarks>
     private readonly record struct ActiveOrgMemberships(IReadOnlyList<Guid> OrganizationIds, bool Unreadable)
     {
@@ -549,6 +515,84 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
     }
 
+    /// <summary>
+    /// Resolves the FR-23 deny-list veto set for one composition (task 039). Builds each candidate's
+    /// referenced organizations (the org-typed lookups enumerated in
+    /// projects/unified-access-control-r2/notes/task-039-org-reference-inventory.md — today
+    /// <c>sprk_assignedlawfirm1</c>/<c>2</c> on all three roots), takes the SUBJECT's own active
+    /// organization membership as a resolved input, and queries <see cref="INoAccessListReader"/>.
+    /// Shared by both principal planes so this resolution logic exists in exactly one place.
+    /// </summary>
+    /// <param name="entityType">The root entity type being composed.</param>
+    /// <param name="candidateIds">
+    /// The SAME candidate id list already built for the flag read (task 037) — never rebuilt here, per
+    /// the task's own notes.
+    /// </param>
+    /// <param name="subjectContactId">
+    /// The contact identity to check as a DIRECT subject (contact×org / contact×record deny rows) — the
+    /// SAME resolved contact used for the contact-grant term, so "who is checked against the wall"
+    /// never diverges from "whose grants applied". Null (or <see cref="Guid.Empty"/>) when no contact
+    /// identity is available for this principal on this entity type — the deny list is keyed on
+    /// contact/organization identities only (spec FR-23), and organization membership is itself read
+    /// FROM the contact, so a principal with no contact identity has no deny-list-relevant subject on
+    /// EITHER axis. The deny-list reader is never even queried in that case.
+    /// </param>
+    /// <param name="subjectOrgs">
+    /// The subject's active organization memberships, already resolved by
+    /// <see cref="ReadActiveOrgMembershipsAsync"/> (task 043 hoisted the read out of this method so the
+    /// additive org-expansion term and this veto cannot be computed from two different snapshots).
+    /// <see cref="ActiveOrgMemberships.Unreadable"/> denies every queried candidate — but read that
+    /// type's remarks for exactly which fault modes set it, because the junction query's own error
+    /// handling does NOT surface every failure as one.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Denial deliberately OVER-matches (spec FR-23 / register B-10).</b> The record-side
+    /// organization match uses EVERY organization the record references — it is NOT narrowed to task
+    /// 041's access-conferring registry. An organization referenced only via a non-conferring lookup
+    /// (e.g. opposing counsel) still denies if it is named as a deny object.
+    /// </para>
+    /// <para>
+    /// <b>Fails closed toward DENIAL for every fault it can observe.</b> These surfaces all resolve to
+    /// the SAME outcome — every id in <paramref name="candidateIds"/> denied:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>The deny-list reader itself already fails closed (task 038), returning a deny-all-queried
+    /// result with <see cref="NoAccessListResult.FailedClosed"/> set rather than throwing. That result
+    /// flows straight through — its denied ids are unioned into the return value.</item>
+    /// <item>A record whose OWN referenced-organizations could not be resolved
+    /// (<see cref="ReferencedOrganizations.Unreadable"/>) is denied DIRECTLY, independent of whatever
+    /// the reader would say — it is never even added to the candidate batch sent to the reader.
+    /// Silently treating an unreadable record as "references nothing" would let it slip past a real
+    /// deny entry keyed on an organization it actually references but which the read could not
+    /// confirm — exactly the "skipped record is an unevaluated wall" case task 039's escalation
+    /// trigger names.</item>
+    /// <item>A subject whose active organizations could not be read
+    /// (<see cref="ActiveOrgMemberships.Unreadable"/>) denies every queried candidate, mirroring
+    /// <see cref="NoAccessListReader"/>'s own over-large-subject-set precedent: a subject that cannot be
+    /// safely evaluated is treated the same as a subject the reader could not evaluate.</item>
+    /// <item>Any other unexpected fault in this method is caught below and denies every queried
+    /// candidate.</item>
+    /// </list>
+    /// <para>
+    /// 🔴 <b>The one fault this veto does NOT catch</b> (recorded by task 043's code-review gate; the
+    /// hole PRE-DATES that task and is not introduced by it). A junction <i>query</i> failure — HTTP
+    /// 500/403, a timeout, any non-success status — is swallowed inside
+    /// <c>ExternalParticipationService</c>'s private query, which returns an EMPTY list rather than
+    /// throwing. The public overload only propagates a token/API-url acquisition fault. So a failed
+    /// junction query reaches this method as <c>Unreadable: false</c> with no organizations, which is
+    /// indistinguishable from "this subject belongs to no organization" — and the subject's
+    /// ORGANIZATION axis of the wall stops matching. Contact-keyed deny rows (contact×record,
+    /// contact×org) are unaffected, so the wall is narrowed rather than removed. Closing it properly
+    /// means surfacing an outcome from the junction query itself, which also governs the org-GRANT
+    /// path, whose additive caller deliberately wants empty-on-fault — i.e. the same inverted-fail-
+    /// direction problem one layer down. Filed, not fixed here.
+    /// </para>
+    /// <para>
+    /// In every case the veto is never SKIPPED — an observable fault denies; it never causes the
+    /// pipeline to proceed as though nothing needed checking (spec NFR-01).
+    /// </para>
+    /// </remarks>
     private async Task<IReadOnlySet<Guid>> ResolveDenyVetoAsync(
         string entityType,
         IReadOnlyCollection<Guid> candidateIds,
@@ -1028,7 +1072,17 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // access a Type 1 user can reach through their linked contact is the org-INHERITED GRANT —
         // which term 2 above already suppresses on a secure record via DirectAccessLevel (FR-22).
         // Adding a second org path here would invent access design §5 does not give.
-        var activeOrgs = await ReadActiveOrgMembershipsAsync(grantContactId, ct).ConfigureAwait(false);
+        // ⚠️ Gated on there being candidates at all (NFR-02, corrected by task 043's code-review gate).
+        // Hoisting this read moved it ABOVE ResolveDenyVetoAsync's `candidateIds.Count == 0`
+        // early-return, so without this condition a composition with nothing to evaluate would perform
+        // a junction read it previously skipped — and IsRecordAccessibleAsync / IsOperationPermittedAsync
+        // call ComposeAsync once per authorization check, so that cost multiplies per decision.
+        //
+        // Skipping to `None` rather than `Failed` is correct here and is not a fail-open: the veto
+        // itself returns EmptyDeniedSet for an empty candidate list, so the value is never consulted.
+        var activeOrgs = candidates.Count == 0
+            ? ActiveOrgMemberships.None
+            : await ReadActiveOrgMembershipsAsync(grantContactId, ct).ConfigureAwait(false);
 
         var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, grantContactId, activeOrgs, ct)
             .ConfigureAwait(false);
