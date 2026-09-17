@@ -33,6 +33,7 @@ import type { EntitySearchResult } from './hooks/useEntitySearch';
 import {
   resolveDocumentIdentity,
   applyDocumentIdentityOutcome,
+  applyStampPrecedence,
   type DocumentIdentityContext,
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
@@ -284,8 +285,12 @@ export const App: React.FC<AppProps> = ({
   const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net';
 
   // FR-01 document-identity resolution (task 013), now also the input to the Save tab's FR-11 save mode
-  // (task 024). Capability-gated (NFR-10) — no `hostType` conditional: Outlook's `canGetDocumentUrl` is
-  // always false, so this is a no-op there without needing to know which host it's running in.
+  // (task 024). Capability-gated (NFR-10) — no `hostType` conditional: Outlook's `canGetDocumentUrl` /
+  // `canReadDocumentStamp` are always false, so this is a no-op there without needing to know which
+  // host it's running in. FR-02 client half (task 051): the URL outcome and the custom XML stamp
+  // (014) are combined via `applyStampPrecedence` at the owner's binding precedence — resolved URL
+  // wins, stamp is the fallback, a disagreement is `identity_conflict` — see that function's doc
+  // comment for the full rule.
   //
   // Every attempt ends in a DEFINED outcome in `documentIdentity`, which the Save tab acts on:
   // 'resolved' defaults Save to a new version; 'new' is a plain create; 'conflict' / 'indeterminate' /
@@ -311,17 +316,28 @@ export const App: React.FC<AppProps> = ({
     setDocumentIdentity('checking');
     try {
       const url = await hostAdapter.getDocumentUrl();
-      if (!url) {
-        // Unsaved document (no URL yet) — a defined, expected "new document" case. No network call,
-        // per task 012's notes §2 rule 3.
-        settle({ kind: 'new', reason: 'not_cloud_document' });
-        return;
-      }
-      settle(await resolveDocumentIdentity(url));
+      // Unsaved document (no URL yet) — a defined, expected "new document" case. No network call,
+      // per task 012's notes §2 rule 3. The ternary's RHS (the network call) never runs when `url`
+      // is falsy, so this branch alone stays a zero-Graph-round-trip path (task 051 AC1).
+      const urlOutcome: DocumentIdentityOutcome = url
+        ? await resolveDocumentIdentity(url)
+        : { kind: 'new', reason: 'not_cloud_document' };
+
+      // FR-02 client half (task 051): the custom XML stamp task 014 writes, consulted at the
+      // owner's binding precedence (documentIdentityService.applyStampPrecedence) — a resolved URL
+      // still wins; the stamp is the fallback that lets a downloaded/edited/re-uploaded document
+      // self-identify. Capability-gated (NFR-10): on a host without CustomXmlParts, the reader is
+      // never even called, mirroring the canGetDocumentUrl gate this effect already runs under.
+      const stampDocumentId = hostAdapter.getCapabilities().canReadDocumentStamp
+        ? await hostAdapter.readDocumentStamp()
+        : null;
+
+      settle(applyStampPrecedence(urlOutcome, stampDocumentId));
     } catch (err) {
-      // getDocumentUrl()/resolveDocumentIdentity() are designed not to throw for expected outcomes. An
-      // unexpected throw is an 'error' outcome — NOT "new": it says nothing about whether Spaarke already
-      // tracks this file. The pane stays usable (retry, or an explicit save-as-new).
+      // getDocumentUrl()/resolveDocumentIdentity()/readDocumentStamp() are designed not to throw for
+      // expected outcomes. An unexpected throw is an 'error' outcome — NOT "new": it says nothing
+      // about whether Spaarke already tracks this file. The pane stays usable (retry, or an
+      // explicit save-as-new).
       console.warn('[Spaarke] Document identity resolution failed', err);
       settle({ kind: 'error', message: err instanceof Error ? err.message : 'Document identity resolution failed.' });
     }

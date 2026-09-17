@@ -77,6 +77,21 @@ export interface HostCapabilities {
   canGetDocumentContent: boolean;
   /** Whether the open document's URL can be retrieved (Word only) */
   canGetDocumentUrl: boolean;
+  /**
+   * Whether the host can read the client-side custom XML identity stamp task 014 (FR-02) writes into
+   * every saved `.docx` — `Office.context.document.customXmlParts`, the Common API `CustomXmlParts`
+   * requirement set (019 condition 1: NOT `Word.Document.customXmlParts`, which is WordApi 1.4 and
+   * would drop Office 2019/2021 LTSC). spaarkeai-word-add-in-r1 task 051 (FR-02 client half).
+   *
+   * Word-only — no open document in Outlook, same reasoning as {@link canGetDocumentUrl}. UNLIKE
+   * `canGetDocumentUrl`, this is NOT unconditionally true for Word: it is further gated at runtime on
+   * `Office.context.requirements.isSetSupported('CustomXmlParts')` (019 condition 4) — a host can
+   * satisfy this add-in's `WordApi` 1.3 floor and still lack the separate `CustomXmlParts` Common
+   * requirement set. Views/services MUST gate the stamp read on this flag, never on `hostType`
+   * (NFR-10) — when it is `false`, `readDocumentStamp()` is never called, and identity resolution
+   * falls back to the URL-only path task 013 already shipped.
+   */
+  canReadDocumentStamp: boolean;
   /** Whether document can be saved as PDF */
   canSaveAsPdf: boolean;
   /** Whether item can be saved as EML (Outlook emails) */
