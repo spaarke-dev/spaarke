@@ -143,6 +143,25 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     recoverable: false,
   },
 
+  // Task 053: the structured creation-refusal code family from RecordCreationService (tasks 030/031) —
+  // snake_case, NOT part of the OFFICE_* catalog, but a real `errorCode` value the QuickCreate endpoint's
+  // own ProblemDetails sends as a top-level JSON property (`OfficeEndpoints.QuickCreateAsync`'s
+  // `catch (SdapProblemException)` → `Results.Problem(..., extensions: { ["errorCode"] = problem.Code })`
+  // — ASP.NET flattens `extensions` to top-level properties via `[JsonExtensionData]`; confirmed against
+  // `OfficeQuickCreateContractTests`/`OfficeQuickCreateProjectContractTests`, which assert exactly this
+  // shape). Load-bearing since task 031 made Project owner resolution refuse-before-write (403, no row)
+  // the same way task 030 already did for Matter. No retry button: the cause is the caller's own AAD
+  // identity not being provisioned as a Dataverse user, which a same-click retry cannot fix — the
+  // message's own "ask an administrator" IS the way forward (root CLAUDE.md §6 framing: retry / correct
+  // input / admin must act).
+  owner_unresolved: {
+    title: 'Account Not Provisioned',
+    message: 'Your account could not be matched to a Dataverse user, so the record could not be created.',
+    type: 'error',
+    recoverable: false,
+    action: 'Ask an administrator to check that your user is provisioned in this environment.',
+  },
+
   // Conflict errors (409)
   OFFICE_011: {
     title: 'Document Exists',
@@ -352,6 +371,47 @@ export function describeCollisionFailure(problem: ProblemDetails): ErrorMessage 
     ...(problem.fileName !== undefined ? { collisionFileName: problem.fileName } : {}),
     ...(problem.existingDocumentId !== undefined ? { collisionExistingDocumentId: problem.existingDocumentId } : {}),
   };
+}
+
+/**
+ * Task 053: turns a failed fetch `Response` into a user-facing {@link ErrorMessage}, preferring the
+ * server's own ProblemDetails `detail`/`errorCode` (via {@link mapProblemDetailsToMessage}) over any
+ * client-invented replacement — per the project rule that a failure the server explained precisely must
+ * never be flattened into a generic "Something went wrong". Falls back to a status-aware, still honest
+ * message only when the body isn't ProblemDetails-shaped at all (an infrastructure failure, e.g. a 502
+ * from a gateway, has no such body to read). Never throws — safe to call on any non-OK `Response`,
+ * including one whose body is empty or not JSON.
+ *
+ * @param response - A non-OK fetch `Response`. The body is consumed (`.json()`) by this call.
+ */
+export async function describeFetchFailure(response: Response): Promise<ErrorMessage> {
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    // No body, or not JSON — an infrastructure failure (502/504 from a gateway) rather than a
+    // ProblemDetails the BFF wrote itself. Fall through to the status-aware default below.
+    body = null;
+  }
+
+  if (isProblemDetails(body)) {
+    return mapProblemDetailsToMessage(body);
+  }
+
+  return response.status >= 500
+    ? {
+        title: 'Service Error',
+        message: 'The server had a problem completing this request. Please try again.',
+        type: 'error',
+        recoverable: true,
+        action: 'Wait a moment and try again.',
+      }
+    : {
+        title: 'Error',
+        message: `The request could not be completed (status ${response.status}).`,
+        type: 'error',
+        recoverable: false,
+      };
 }
 
 /**
