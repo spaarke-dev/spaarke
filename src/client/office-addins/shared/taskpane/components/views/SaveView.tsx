@@ -125,8 +125,13 @@ export const SaveView: React.FC<SaveViewProps> = ({
   >([]);
   const [sentDate, setSentDate] = useState<Date | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
-  const [documentContentBase64, setDocumentContentBase64] = useState<string | undefined>();
   // Note: emailBody removed - now retrieved server-side via Graph API
+  // Task 045: document BYTES are deliberately NOT captured into state here. The old mount-time
+  // capture (`getDocumentContent` called once in this effect, cached in a `documentContentBase64`
+  // state variable) was the defect: every save after the first — an edit made after the tab
+  // mounted, a retry, "Save Another" — silently re-uploaded that first snapshot while the pane
+  // reported success. `captureDocumentContent` below is a live function instead, invoked by
+  // `useSaveFlow.startSave` at the moment each save actually submits (see its doc comment).
 
   // Load item context from host adapter
   useEffect(() => {
@@ -204,25 +209,9 @@ export const SaveView: React.FC<SaveViewProps> = ({
           // Document URL is typically the current file path
           setDocumentUrl(id);
 
-          // Capture document content as base64 for upload
-          if (hostAdapter.getCapabilities().canGetDocumentContent) {
-            try {
-              const content = await hostAdapter.getDocumentContent({
-                format: 'ooxml',
-              });
-              // Convert ArrayBuffer to base64
-              const uint8Array = new Uint8Array(content);
-              let binary = '';
-              for (let i = 0; i < uint8Array.length; i++) {
-                binary += String.fromCharCode(uint8Array[i] ?? 0);
-              }
-              const base64 = btoa(binary);
-              setDocumentContentBase64(base64);
-            } catch (err) {
-              console.error('Failed to get document content:', err);
-              // Don't fail completely - user can still attempt save
-            }
-          }
+          // Task 045: document content is NO LONGER captured here. It used to be read once, on
+          // mount, and cached — see the state-removal comment above for why that was the defect.
+          // `captureDocumentContent` (below, outside this effect) reads it fresh at save time instead.
         }
 
         setIsLoading(false);
@@ -254,6 +243,36 @@ export const SaveView: React.FC<SaveViewProps> = ({
     },
     [onViewDocument]
   );
+
+  // Task 045: reads the CURRENT document bytes, live — never cached. `useSaveFlow.startSave` calls
+  // this at the moment a save attempt actually submits (first Save, "Keep both", "Save as new
+  // version", a `retry()`, or the next Save after "Save Another"), so every attempt uploads the
+  // document as it is right then rather than a snapshot taken when the Save tab mounted. A stable
+  // callback (deps: [hostAdapter]) so `SaveFlow`'s `buildSaveContext` always forwards the SAME live
+  // function rather than a new one each render.
+  const captureDocumentContent = useCallback(async (): Promise<string> => {
+    if (!hostAdapter) {
+      throw new Error('Document content is required. Please ensure the document is captured before saving.');
+    }
+    try {
+      const content = await hostAdapter.getDocumentContent({ format: 'ooxml' });
+      // Convert ArrayBuffer to base64 — the same conversion this package has always done; only WHEN
+      // it runs has changed (it used to run once, in the mount effect below — task 025 note M12).
+      const uint8Array = new Uint8Array(content);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i] ?? 0);
+      }
+      return btoa(binary);
+    } catch (err) {
+      // Normalize to a real Error so useSaveFlow's existing catch (createErrorFromException) surfaces
+      // the actual cause (e.g. WordAdapter's typed HostAdapterError message) — a plain
+      // `{ code, message }` HostAdapterError is not `instanceof Error` and would otherwise fall
+      // through to a generic fallback string.
+      const message = err instanceof Error ? err.message : (err as { message?: string } | undefined)?.message;
+      throw new Error(message || "Couldn't read the document's current content. Please try again.");
+    }
+  }, [hostAdapter]);
 
   // Loading state
   if (isLoading) {
@@ -290,6 +309,13 @@ export const SaveView: React.FC<SaveViewProps> = ({
   // Name field as the plain, empty Textarea it was before task 020 — no default, no pencil.
   const canProvideDocumentName = hostAdapter?.getCapabilities().canProvideDocumentName ?? false;
 
+  // task 045 (NFR-10): same pattern as canOpenRecord/canSuggestRelatedRecords/canProvideDocumentName
+  // above — decided from the live adapter's capabilities, never a `hostType` check. `false` means
+  // SaveFlow gets no capture function at all (Outlook, which never has document bytes; or an adapter
+  // that doesn't support it) — it then falls back to whatever plain `documentContentBase64` value a
+  // caller supplies, which is none in production.
+  const canGetDocumentContent = hostAdapter?.getCapabilities().canGetDocumentContent ?? false;
+
   // Render SaveFlow with context
   return (
     <div className={styles.container}>
@@ -309,7 +335,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(recipients !== undefined ? { recipients } : {})}
         {...(sentDate !== undefined ? { sentDate } : {})}
         {...(documentUrl !== undefined ? { documentUrl } : {})}
-        {...(documentContentBase64 !== undefined ? { documentContentBase64 } : {})}
+        {...(canGetDocumentContent ? { captureDocumentContent } : {})}
         {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
         {...(onComplete ? { onComplete } : {})}
         {...(onSaved ? { onSaved } : {})}

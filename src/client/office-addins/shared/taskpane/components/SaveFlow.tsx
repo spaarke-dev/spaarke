@@ -334,8 +334,22 @@ export interface SaveFlowProps {
   emailBody?: string;
   /** Document URL (Word only) */
   documentUrl?: string;
-  /** Document content as base64 (Word only) */
+  /**
+   * Document content as a base64 VALUE (Word only) — already in hand. Used only when
+   * {@link captureDocumentContent} is absent (tests, or any future non-live caller); production
+   * `SaveView` supplies the live capture function instead (task 045).
+   */
   documentContentBase64?: string;
+  /**
+   * Task 045: reads the open document's CURRENT bytes, live, at the moment a save is submitted —
+   * threaded from `SaveView` (`hostAdapter.getDocumentContent()`), gated on the adapter's
+   * `canGetDocumentContent` capability (NFR-10, never a `hostType` check). Forwarded into every save
+   * attempt's context by `buildSaveContext` below, so the first Save, "Keep both", "Save as new
+   * version", the hook's `retry()` (which resends the same context/callback), and "Save Another"'s
+   * next Save press all re-invoke it and upload the document as it is at THAT moment — never a
+   * mount-time snapshot. `undefined` on Outlook (no document bytes) or while the capability is absent.
+   */
+  captureDocumentContent?: () => Promise<string>;
   /**
    * `sprk_document` id resolved by task 013's FR-01 identity resolution (task 021 / FR-07), threaded
    * down from `App.savedContext` via `SaveView`. `undefined` when unresolved (a new document, or
@@ -445,6 +459,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     emailBody,
     documentUrl,
     documentContentBase64,
+    captureDocumentContent,
     resolvedDocumentId,
     documentIdentity,
     onRetryDocumentIdentity,
@@ -786,6 +801,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       ...(emailBody !== undefined ? { emailBody } : {}),
       ...(documentUrl !== undefined ? { documentUrl } : {}),
       ...(documentContentBase64 !== undefined ? { documentContentBase64 } : {}),
+      // Task 045: the LIVE capture function, forwarded as-is (never invoked here) — `startSave` calls
+      // it at submission time, fresh, for every attempt that reaches it (first Save, "Keep both",
+      // "Save as new version", a hook `retry()` that resends this same context, and the next Save
+      // press after "Save Another").
+      ...(captureDocumentContent ? { captureDocumentContent } : {}),
     }),
     [
       hostType,
@@ -800,6 +820,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       emailBody,
       documentUrl,
       documentContentBase64,
+      captureDocumentContent,
       saveMode.target,
     ]
   );
