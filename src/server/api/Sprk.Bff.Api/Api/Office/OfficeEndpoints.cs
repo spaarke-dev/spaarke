@@ -1319,7 +1319,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. A Matter is created server-side (spaarkeai-word-add-in-r1 FR-13) with the caller as owner, business-unit defaults, the matter-type lookup when supplied, and the Field Mapping Framework applied from the optional record context. This endpoint does not assign a matter number: that will be done by a planned separate server-side numbering component, and until it exists, matters created here have no number.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with the caller as a load-bearing owner (an unresolved caller is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. This endpoint assigns NEITHER a matter number nor a project number: both will be set by a planned separate server-side numbering component that triggers on create. Because sprk_matternumber and sprk_projectnumber are their entities' primary name attributes, records created here show a blank name in lookups and grids until that component exists. Invoice keeps the minimal name-only path with best-effort ownership.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1676,9 +1676,9 @@ public static class OfficeEndpoints
 
         try
         {
-            // Resolve the caller's systemuserid for ownerid. For MATTER it is load-bearing: the creation service
-            // refuses an unresolved caller (403 owner_unresolved, no row written — word-add-in-r1 task 030). For
-            // Project / Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
+            // Resolve the caller's systemuserid for ownerid. For MATTER (task 030) and PROJECT (task 031) it is
+            // load-bearing: the creation service refuses an unresolved caller (403 owner_unresolved, no row written).
+            // For Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 

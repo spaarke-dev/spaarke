@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Office;
 /// </summary>
 public sealed record RecordCreationRequest
 {
-    /// <summary>The entity to create. <b>Matter only</b> in r1 — Project is task 031, Invoice stays on the minimal path.</summary>
+    /// <summary>The entity to create. <b>Matter</b> (task 030) or <b>Project</b> (task 031); Invoice stays on the minimal path.</summary>
     public required QuickCreateEntityType EntityType { get; init; }
 
     /// <summary>Record name (required; trimmed).</summary>
@@ -107,7 +107,7 @@ public sealed record RecordCreationResult
 /// <summary>
 /// Creates Dataverse records server-side with the completeness the client <c>Create*Wizard</c> components give
 /// them in the browser — a load-bearing owner, business-unit defaults, and the Field Mapping Framework. r1 scope is
-/// <b>Matter only</b> (FR-13; task 031 owns Project, whose semantics differ).
+/// <b>Matter</b> (task 030) and <b>Project</b> (task 031); Invoice stays on the minimal generic path.
 /// </summary>
 /// <remarks>
 /// <para><b>Matter pipeline</b> (mirrors <c>matterService.createMatter</c>, minus numbering):</para>
@@ -145,6 +145,16 @@ public sealed class RecordCreationService
     internal const string MatterTypeAttribute = "sprk_mattertype";
     internal const string MatterTypeEntity = "sprk_mattertype_ref";
     internal const string MatterTypeIdAttribute = "sprk_mattertype_refid";
+
+    // Project (task 031). sprk_projectnumber is the sprk_project PRIMARY NAME attribute and is NEVER written on this
+    // path — it belongs to the separate server-side numbering project (owner decision 2026-09-17). It is named here
+    // only so it can be PROTECTED from field-mapping rules; see ProjectProtectedAttributes and
+    // projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md §2.
+    internal const string ProjectEntity = "sprk_project";
+    internal const string ProjectNameAttribute = "sprk_projectname";
+    internal const string ProjectDescriptionAttribute = "sprk_projectdescription";
+    internal const string ProjectNumberAttribute = "sprk_projectnumber";
+
     internal const string OwnerAttribute = "ownerid";
     internal const string ContainerAttribute = "sprk_containerid";
     internal const string SystemUserEntity = "systemuser";
@@ -155,12 +165,25 @@ public sealed class RecordCreationService
     internal const string SearchIndexEntity = "sprk_aisearchindex";
 
     /// <summary>
-    /// Attributes a field-mapping rule may not write on this path: the number (left to the planned numbering
-    /// component — notes/030-numbering-handoff.md), the load-bearing owner, and the storage container
+    /// Attributes a field-mapping rule may not write when creating a MATTER: the number (left to the planned
+    /// numbering component — notes/030-numbering-handoff.md), the load-bearing owner, and the storage container
     /// (server-derived only — task 076 W1). Case-insensitive, so a mis-cased or padded target is caught too.
     /// </summary>
-    private static readonly IReadOnlySet<string> ProtectedAttributes =
+    private static readonly IReadOnlySet<string> MatterProtectedAttributes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MatterNumberAttribute, OwnerAttribute, ContainerAttribute };
+
+    /// <summary>
+    /// The same three protections for a PROJECT, with <see cref="ProjectNumberAttribute"/> in place of the matter
+    /// number. This is what makes "task 031 never writes <c>sprk_projectnumber</c>" actually hold: without it, an
+    /// admin-authored profile rule targeting it would be a back door straight through the owner's decision.
+    /// </summary>
+    /// <remarks>
+    /// The sets are deliberately PER ENTITY rather than one merged set. A merged set would newly skip-and-warn a rule
+    /// targeting <c>sprk_projectnumber</c> on a MATTER create — a behaviour change to the path task 030 shipped,
+    /// which task 031's acceptance criteria forbid.
+    /// </remarks>
+    private static readonly IReadOnlySet<string> ProjectProtectedAttributes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ProjectNumberAttribute, OwnerAttribute, ContainerAttribute };
 
     private readonly IGenericEntityService _entities;
     private readonly IFieldMappingDataverseService _fieldMappings;
@@ -185,15 +208,15 @@ public sealed class RecordCreationService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.EntityType != QuickCreateEntityType.Matter)
+        return request.EntityType switch
         {
-            return RecordCreationResult.Failed(new RecordCreationFailure(
+            QuickCreateEntityType.Matter => await CreateMatterAsync(request, ct).ConfigureAwait(false),
+            QuickCreateEntityType.Project => await CreateProjectAsync(request, ct).ConfigureAwait(false),
+            _ => RecordCreationResult.Failed(new RecordCreationFailure(
                 RecordCreationFailureKind.InvalidInput,
                 "entity_type_not_supported",
-                $"Server-side creation supports Matter only; '{request.EntityType}' is created by another path."));
-        }
-
-        return await CreateMatterAsync(request, ct).ConfigureAwait(false);
+                $"Server-side creation supports Matter and Project only; '{request.EntityType}' is created by another path."))
+        };
     }
 
     private async Task<RecordCreationResult> CreateMatterAsync(RecordCreationRequest request, CancellationToken ct)
@@ -249,16 +272,17 @@ public sealed class RecordCreationService
             }
         }
 
-        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, warnings, ct).ConfigureAwait(false);
+        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "matter", warnings, ct).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(request.SourceEntityLogicalName)
             && request.SourceRecordId is { } sourceRecordId
             && sourceRecordId != Guid.Empty)
         {
             await ApplyFieldMappingsAsync(
-                entity, request.SourceEntityLogicalName.Trim(), sourceRecordId, warnings, ct).ConfigureAwait(false);
+                    entity, request.SourceEntityLogicalName.Trim(), sourceRecordId, MatterProtectedAttributes, warnings, ct)
+                .ConfigureAwait(false);
 
-            KeepRequestedNameIfMappingBlankedIt(entity, name, warnings);
+            KeepRequestedNameIfMappingBlankedIt(entity, MatterNameAttribute, name, "matter", warnings);
         }
 
         if (ResolveFinalMatterType(entity, requestedType, warnings) is null && !typeWarningAdded)
@@ -281,6 +305,87 @@ public sealed class RecordCreationService
             RecordId = createdId,
             LogicalName = MatterEntity,
             Name = (string)entity[MatterNameAttribute],
+            Warnings = warnings
+        };
+    }
+
+    /// <summary>
+    /// The Project path (task 031, FR-13). Deliberately NOT a copy of Matter: there is no type lookup, and
+    /// <c>sprk_projectnumber</c> is never written.
+    /// </summary>
+    /// <remarks>
+    /// <para><b><c>sprk_projectnumber</c> is the <c>sprk_project</c> PRIMARY NAME attribute</b>, and this path writes
+    /// NOTHING to it — not a generated token, not a name-derived value (owner decision 2026-09-17: Project numbering
+    /// belongs to the separate server-side numbering project). A pane-created Project therefore shows a BLANK name in
+    /// lookups and grids until that component ships. <b>That is expected, not a defect.</b> Generating a token here
+    /// would write machine text into the Project's display name — a user-visible regression, not a fix. Full
+    /// reasoning: <c>projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md</c>.</para>
+    /// <para>Everything else is symmetric with Matter and reuses its implementation unchanged: a <b>load-bearing</b>
+    /// owner (an unresolved caller is refused; task 030 left Project best-effort and named task 031 as the decider —
+    /// notes/031 §4), business-unit defaults, and the Field Mapping Framework. <c>sprk_containerid</c> is never
+    /// written (task 076 W1).</para>
+    /// </remarks>
+    private async Task<RecordCreationResult> CreateProjectAsync(RecordCreationRequest request, CancellationToken ct)
+    {
+        var name = request.Name.Trim();
+        if (name.Length == 0)
+        {
+            return RecordCreationResult.Failed(new RecordCreationFailure(
+                RecordCreationFailureKind.InvalidInput, "name_required", "A project requires a name."));
+        }
+
+        // Load-bearing, as for Matter: "unresolved → app-owned, silently" is the defect FR-13 exists to fix, and
+        // AC2 requires a non-null ownerid. The refusal happens before any write, so nothing is created.
+        if (!TryParseGuid(request.OwnerSystemUserId, out var ownerId))
+        {
+            _logger.LogWarning(
+                "[RECORD-CREATE] Refusing Project create for caller {CallerUserId}: no resolved Dataverse systemuser, "
+                + "so the record cannot be owned by the caller.",
+                request.CallerUserId);
+
+            return RecordCreationResult.Failed(new RecordCreationFailure(
+                RecordCreationFailureKind.OwnerUnresolved,
+                "owner_unresolved",
+                "Your account could not be matched to a Dataverse user, so the new project could not be assigned to "
+                + "you and was not created. Ask an administrator to check that your user is provisioned in this "
+                + "environment."));
+        }
+
+        var warnings = new List<string>();
+        var entity = new Entity(ProjectEntity);
+        entity[ProjectNameAttribute] = name;
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity[ProjectDescriptionAttribute] = request.Description.Trim();
+        }
+
+        await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "project", warnings, ct).ConfigureAwait(false);
+
+        if (!string.IsNullOrWhiteSpace(request.SourceEntityLogicalName)
+            && request.SourceRecordId is { } sourceRecordId
+            && sourceRecordId != Guid.Empty)
+        {
+            await ApplyFieldMappingsAsync(
+                    entity, request.SourceEntityLogicalName.Trim(), sourceRecordId, ProjectProtectedAttributes, warnings, ct)
+                .ConfigureAwait(false);
+
+            KeepRequestedNameIfMappingBlankedIt(entity, ProjectNameAttribute, name, "project", warnings);
+        }
+
+        // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing.
+        entity[OwnerAttribute] = new EntityReference(SystemUserEntity, ownerId);
+
+        var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner={OwnerId}, warnings={WarningCount}",
+            createdId, request.CallerUserId, ownerId, warnings.Count);
+
+        return new RecordCreationResult
+        {
+            RecordId = createdId,
+            LogicalName = ProjectEntity,
+            Name = (string)entity[ProjectNameAttribute],
             Warnings = warnings
         };
     }
@@ -332,17 +437,21 @@ public sealed class RecordCreationService
     /// A mapping rule may replace the name (client semantics), but may not leave the record without one — a
     /// Template whose placeholders all resolve empty, or a non-text value, reverts to the name the user entered.
     /// </summary>
-    private static void KeepRequestedNameIfMappingBlankedIt(Entity entity, string requestedName, List<string> warnings)
+    /// <param name="nameAttribute">The record's name attribute (<c>sprk_mattername</c> / <c>sprk_projectname</c>).</param>
+    /// <param name="entityLabel">Lower-case noun for the user-facing warning ("matter" / "project").</param>
+    private static void KeepRequestedNameIfMappingBlankedIt(
+        Entity entity, string nameAttribute, string requestedName, string entityLabel, List<string> warnings)
     {
-        if (entity.Attributes.TryGetValue(MatterNameAttribute, out var value)
+        if (entity.Attributes.TryGetValue(nameAttribute, out var value)
             && value is string mappedName
             && !string.IsNullOrWhiteSpace(mappedName))
         {
             return;
         }
 
-        entity[MatterNameAttribute] = requestedName;
-        warnings.Add("A field-mapping rule produced an empty or non-text matter name, so the name you entered was kept.");
+        entity[nameAttribute] = requestedName;
+        warnings.Add(
+            $"A field-mapping rule produced an empty or non-text {entityLabel} name, so the name you entered was kept.");
     }
 
     /// <summary>
@@ -393,9 +502,11 @@ public sealed class RecordCreationService
     /// with <c>ownerid</c> = the caller, is this same business unit. A failed read therefore degrades to that
     /// fallback rather than blocking the create.
     /// </remarks>
+    /// <param name="entityLabel">Lower-case noun for the user-facing warning ("matter" / "project").</param>
     private async Task ApplyBusinessUnitDefaultsAsync(
         Entity entity,
         Guid ownerId,
+        string entityLabel,
         List<string> warnings,
         CancellationToken ct)
     {
@@ -437,12 +548,12 @@ public sealed class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[RECORD-CREATE] Business-unit defaults for owner {OwnerId} could not be read; the matter is created "
-                + "without them and index routing falls back to its owning business unit.",
-                ownerId);
+                "[RECORD-CREATE] Business-unit defaults for owner {OwnerId} could not be read; the {EntityLabel} is "
+                + "created without them and index routing falls back to its owning business unit.",
+                ownerId, entityLabel);
             warnings.Add(
                 "Business-unit search defaults could not be read, so they were not applied. Document indexing for "
-                + "this matter falls back to its business unit's settings.");
+                + $"this {entityLabel} falls back to its business unit's settings.");
         }
     }
 
@@ -465,6 +576,7 @@ public sealed class RecordCreationService
         Entity target,
         string sourceEntity,
         Guid sourceRecordId,
+        IReadOnlySet<string> protectedAttributes,
         List<string> warnings,
         CancellationToken ct)
     {
@@ -526,7 +638,7 @@ public sealed class RecordCreationService
             }
         }
 
-        CreateTimeFieldMapping.Apply(rules, target, source, ProtectedAttributes, warnings, _logger);
+        CreateTimeFieldMapping.Apply(rules, target, source, protectedAttributes, warnings, _logger);
     }
 
     private static bool TryParseGuid(string? value, out Guid id)
