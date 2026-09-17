@@ -146,6 +146,19 @@ shared/taskpane/components/__tests__/SaveFlow.documentName.test.tsx
 # message must name the file and never render a raw server string.
 shared/taskpane/components/__tests__/SaveFlowCollision.test.tsx
 shared/taskpane/utils/__tests__/errorMessages.collision.test.ts
+# --- pane surfaces server failures (task 053) - green from creation ----------
+# Pins that a failed quick-create or entity search is never swallowed: the
+# server's own `detail` reaches the user (not a generic client string), a failed
+# search is visibly distinct from "no matches", and a non-ProblemDetails failure
+# still yields a sensible message instead of throwing into the save flow.
+# NOTE the shape these pin: the QuickCreate endpoint's own catch(SdapProblemException)
+# returns errorCode/detail/correlationId as TOP-LEVEL properties via Results.Problem
+# extensions-flattening — NOT nested under `extensions.code`, which is the separate
+# global-handler shape task 050 fixed. Verified against the C# and the existing
+# OfficeQuickCreate*ContractTests before these tests were written.
+shared/taskpane/utils/__tests__/errorMessages.fetchFailure.test.ts
+shared/taskpane/components/__tests__/RelatedToPicker.errorSurfacing.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.quickCreateErrorSurfacing.test.tsx
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
