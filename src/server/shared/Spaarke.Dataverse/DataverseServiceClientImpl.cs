@@ -276,6 +276,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var document = new Entity("sprk_document");
         document["sprk_documentname"] = request.Name;
 
+        // FR-02 (spaarkeai-word-add-in-r1 task 014): honour a caller-supplied primary key. The Office document
+        // CREATE path pre-assigns the id so it can be stamped into the bytes it uploads before this row exists;
+        // see CreateDocumentRequest.Id. Every other caller leaves Id null and Dataverse mints the key as before.
+        if (request.Id is { } suppliedId && suppliedId != Guid.Empty)
+        {
+            document.Id = suppliedId;
+        }
+
         if (!string.IsNullOrEmpty(request.Description))
             document["sprk_documentdescription"] = request.Description;
 

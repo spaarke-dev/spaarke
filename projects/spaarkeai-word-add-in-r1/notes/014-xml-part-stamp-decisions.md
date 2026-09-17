@@ -3,10 +3,16 @@
 > Written BEFORE any production code, as the brief requires. Base: `9373c5abb` (project branch head, includes 039 at
 > `bdb98c230`). Rigor FULL · opus @ high · directional. Symbols are named, not line numbers.
 >
-> **Status: STOPPED at the design crux.** The brief's hash/dedup rule fires (§6): stamping the stored bytes changes
-> content-dedup behaviour in ways no owner decision covers. **No production code was written.** The byte-fidelity
-> question (POML escalation trigger 1) was settled with a throwaway probe, which was not committed (§4). Everything
-> needed to wire the stamp once a path is chosen is specified in §3, §5 and §10.
+> **Status (original, 2026-09-13): STOPPED at the design crux.** The brief's hash/dedup rule fired (§6): stamping
+> the stored bytes changes content-dedup behaviour in ways no owner decision covered. **No production code was
+> written.** The byte-fidelity question (POML escalation trigger 1) was settled with a throwaway probe, which was
+> not committed (§4). Everything needed to wire the stamp once a path was chosen is specified in §3, §5 and §10.
+>
+> ⚠️ **Status (2026-09-17): SHIPPED.** The owner resolved the escalation on 2026-09-17 (A + C with B supporting;
+> §7 option A sequenced as C first) and the wiring is implemented. **§13 below is the implementation record** and
+> supersedes this note's forward-looking language wherever they differ — in particular the error code (§5's
+> `OFFICE_020` was taken by task 025 in the interim) and §6a's "idempotency is clean" verdict, which turned out to
+> be true only of the *key* and NOT of the task-047 content check (§13.4).
 
 ---
 
@@ -324,3 +330,248 @@ cloud URL.
 - Whether Word's `getFileAsync` returns byte-identical bytes for an unchanged document. If it doesn't, the
   production reach of the 028 link half is already smaller than the tests suggest, which would shrink the cost of
   option A. It is worth one operator probe before the owner decides.
+
+---
+
+# 13. Implementation record (2026-09-17)
+
+Shipped per the owner's 2026-09-17 decisions: **§7 option A, sequenced as C first** — version-path stamping
+proven first, then create-path (unblocked because task **025 landed** and is in this branch's base `d21e54e98`).
+
+## 13.1 What shipped
+
+| File | Change |
+|---|---|
+| `src/.../Services/Office/OfficeDocumentStamp.cs` | **NEW.** Static, stateless; `Classify` / `Stamp` / `TryReadStamp`. No DI (ADR-010), no Graph type (ADR-007), no reference to `Services/Compose/**` or `Spaarke.Compose.Components` (ADR-049 independence). |
+| `src/.../Api/Office/Errors/OfficeErrorCodes.cs` | `CorruptDocumentPackage = "OFFICE_021"` → 400 / `validation-error` / "Document File Unreadable". |
+| `src/.../Api/Office/OfficeEndpoints.cs` | One new `MapSaveErrorToProblem` arm for `OFFICE_021`. The three `problem+json` content-type sites belong to **task 052** and were left alone. |
+| `src/.../Services/Office/OfficeService.cs` | Document arm: classify → refuse `OFFICE_021` → stamp → stream, with `fileSize` = the **stamped** length. Version stamps `versionTarget.DocumentId`; create mints and stamps a pre-assigned id. Plus the §13.4 fix. |
+| `src/.../Services/Office/OfficeDocumentPersistence.cs` | Optional trailing `Guid? preAssignedDocumentId = null`, passed to `CreateDocumentRequest.Id`. Trailing + optional **on purpose**: ~14 existing test call sites compile unchanged. |
+| `src/server/shared/Spaarke.Dataverse/Models.cs` | `CreateDocumentRequest.Id` (`Guid?`) — the **shared-contract** addition §2 called for; additive, opt-in. |
+| `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` | Honours `request.Id` by setting `document.Id`. The only live implementation (`_archive` copy is dead). |
+
+## 13.2 The error code: `OFFICE_021`, not `OFFICE_020`
+
+§5 assigned `OFFICE_020` to the corrupt-`.docx` refusal. **That code was taken in the interim** by task 025's
+name-collision refusal (`OfficeErrorCodes.NameCollision`). Verified by grep before choosing: `OFFICE_001`
+through `OFFICE_020` are all in use across `src/` **and** `tests/`, and `OFFICE_021` / `OFFICE_022` return zero
+hits repo-wide. `OFFICE_021` is therefore the next free code.
+
+Keeping them distinct is load-bearing, not cosmetic: both refusals are reachable from the same create request,
+and the pane offers a two-option retry for a collision (`OFFICE_020`) but must NOT offer one for unreadable
+bytes (`OFFICE_021`) — there is nothing to keep-both or version.
+
+## 13.3 The contract task 051 must read (client-side stamp reader)
+
+```
+part        /customXml/item{N}.xml      (N = lowest free; skips pre-existing custom XML such as a bibliography)
+props       /customXml/itemProps{N}.xml (ds:datastoreItem, ds:schemaRef ds:uri = the namespace below)
+wired from  word/_rels/document.xml.rels  ->  .../relationships/customXml  ->  target "../customXml/item{N}.xml"
+            customXml/_rels/item{N}.xml.rels -> .../relationships/customXmlProps -> "itemProps{N}.xml"
+namespace   urn:spaarke:office:document-identity:1     (explicit DEFAULT xmlns on the root — 019 condition 2)
+root        <documentIdentity xmlns="urn:spaarke:office:document-identity:1">
+payload     <documentId>{guid:D}</documentId>          (bare lowercase, ADR-044 — no normalisation needed)
+```
+
+Read it with the **Common API** (019 condition 1), guarded by `isSetSupported('CustomXmlParts')` (condition 4):
+`Office.context.document.customXmlParts.getByNamespaceAsync("urn:spaarke:office:document-identity:1")` →
+`getXmlAsync` → text of the single `documentId` child. The constants are exported as
+`OfficeDocumentStamp.StampNamespace` / `.StampRootElement` / `.StampIdElement` so the two sides cannot drift.
+
+**Absence is normal, never corruption** (condition 3). The server likewise returns `null` when two stamps
+disagree: a wrong identity on a save path is worse than no identity, and the caller then falls back to task 012.
+
+## 13.4 🔴 NEW FINDING — the note's §6a verdict was incomplete, and stamping regressed task 047
+
+§6a concluded "039 idempotency: **unaffected**", because both keys hash the REQUEST `ContentBase64` before any
+stamping. That is true **of the keys** and remains true. But task **047** added a second, non-key check —
+`OfficeService.IsStillTheSameOperationAsync` → `OfficeStorageUploader.ItemHoldsContentAsync` — which compares the
+request's bytes against the document's **stored** bytes to decide whether a Completed job may still answer a
+version save as a duplicate. §6a did not consider it.
+
+Once version saves are stamped, the stored bytes are stamped and the request's are not, so that comparison can
+**never** match. Every identical version-save retry would then be treated as a new operation and would write a
+redundant SPE version — silently undoing the guarantee task 047 exists to provide. Not hypothetical: it is
+exactly what `OfficeVersionSaveRevertTests` pins.
+
+**Fix**: compare like with like — stamp the request with the target document id before comparing. This is sound
+only because two properties hold, and both are now pinned by tests:
+
+1. **`Stamp` is byte-deterministic** — `Stamp_CalledTwiceOnTheSameInput_ProducesByteIdenticalOutput`. Achieved by
+   *deriving* the `ds:itemID` from the document id instead of generating a fresh GUID, and by giving every new
+   zip entry a fixed timestamp. This is why those two choices are not incidental.
+2. **A re-stamp with the same id is a true no-op** (returns the input array) — so a round-tripped document that
+   already carries the id compares correctly too.
+
+## 13.5 Fixture migration — wider than the brief stated
+
+The brief named three suites plus the contract file. The actual blast radius, found by grepping for Office
+Document-content-type saves, was **seven files and three separate classes inside the contract file**:
+
+`OfficeVersionSaveOneRowTests` · `OfficeSaveSpineIdempotencyTests` · `OfficeSaveAsNewDocumentLinkGraduateTests` ·
+`OfficeVersionSaveRevertTests` · `OfficeVersionSaveAiRefreshPayloadTests` · **`OfficeCreateCollisionTests`** ·
+and `OfficeEndpointsContractTests`'s `OfficeVersionSaveContractTests`, `OfficeSaveAddInWireContractTests` and
+`OfficeSaveSpineIdempotencyContractTests`.
+
+All now build real packages via the new **`tests/integration/Shared/Office/MinimalDocx.cs`** helper (deterministic
+bytes; also reads body text back). The §6d false-green trap was **not** taken — the `PK` prefix was kept and the
+fixtures made real, never "fixed" by dropping the prefix.
+
+Two suites NOT migrated, deliberately: `VersionSaveAiRefreshSeamTests` sends plain UTF-8 text (classifies
+not-a-zip → passes through untouched, which is correct), and `DuplicateDetectionTests` only computes keys with a
+test-local helper and never enters the save path.
+
+Assertions over stored bytes moved from raw `Should().Equal(fixture)` to **body text + stamp id**, because the
+stored bytes now legitimately differ from the posted bytes. That is a stronger claim than byte equality, not a
+weaker one: it says "this is the draft the user saved, and it names this record".
+
+## 13.6 The §6b / §6c consequences, as they now appear in the suite
+
+- **§6b (graduation)** — `OfficeVersionSaveOneRowTests`'s fourth test formerly asserted "byte-identical re-save
+  → the link stands". That is no longer true and cannot be: a pre-release linked copy's stored bytes gain a
+  stamp, so its live hash always diverges. Rewritten as
+  `VersionSave_OfAPreReleaseLinkedCopy_WithUnchangedContent_GraduatesIt_BecauseTheStoredBytesGainTheStamp`,
+  which pins the accepted behaviour *and* everything that must not change with it (the version is still written,
+  nothing deleted, no row created, no redirect to a canonical).
+- **§6c (link half inert)** — `OfficeSaveAsNewDocumentLinkGraduateTests` rewritten against the **amended SC-5**.
+  The binding half of NFR-08 is what it still defends: a create always creates and is never suppressed. The test
+  now also asserts *why* no link exists — the copy's stored bytes carry the copy's **own** id — so the reason is
+  visible at the failure site rather than inferred from a spec row.
+  Its second test's premise (graduating a link *made by the override*) became unreachable, so it was re-scoped to
+  the part that survives: the override's output is an independently versionable document. No scenario was lost —
+  graduation is covered twice in the same data-mutation KEEP path by the two `OneRowTests` cases above.
+
+## 13.7 Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | **0 warnings / 0 errors** |
+| Test project build | **0 warnings / 0 errors** |
+| `OfficeDocumentStampTests` (new, `tests/unit/domain/Office/`) | **23 / 23** |
+| `OfficeSaveDocumentStampContractTests` (new, contract KEEP path) | **9 / 9** |
+| ArchTests | **191 / 191** (baseline held) |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages |
+| Publish size | **+0.0111 MB** (45.41 → 45.43 MB). See `014-publish-size.md` |
+
+**Byte fidelity (POML escalation trigger 1 — does not fire).** Asserted structurally, not by "it still opens":
+every pre-existing part's decompressed content is byte-identical except `[Content_Types].xml` and
+`word/_rels/document.xml.rels`, and each of those is proven to be *the original plus one inserted element* by
+reconstructing the whole original from the common prefix + common suffix of before/after. Entry order is
+preserved and exactly three entries are added. A truncated package and a bare `PK` stub classify Corrupt; a PDF,
+an EML, an arbitrary binary and a readable non-Word zip are returned **reference-identical**.
+
+## 13.8 Scope boundaries and deviations
+
+- **POML step 5 is overridden by the owner's precedence decision.** The server exposes `TryReadStamp` as the
+  primitive, and forward-only holds. Wiring the precedence ladder (resolved cloud URL wins → stamp → otherwise
+  `identity_conflict`) is **client-side and belongs to task 051** (plus 013's resolver hook). AC2
+  ("a re-uploaded stamped document self-identifies without a Graph round-trip") is therefore **only fully
+  realised once 051 lands** — the server half is in place and tested; nothing consumes it yet. Recorded as a
+  limitation rather than claimed as done.
+- **POML step 10 not performed**: `tasks/TASK-INDEX.md`, `current-task.md`, the project `CLAUDE.md` and
+  `src/client/office-addins/ci-gated-suites.txt` are main-session-owned for this dispatch.
+- **`/conflict-check` could not be executed**: the worktree-isolation guard refuses git commands aimed at other
+  worktrees, so `unified-access-control-r2`'s unpushed edits to `OfficeService.cs` / `OfficeEndpoints.cs` could
+  not be inspected from here. The overlap surface is handed to the main session.
+- **Forward-only verified by construction**: the only write is to bytes the client just sent. No backfill, no
+  migration, no stamp-on-read exists — and `Post_OfficeSave_VersionSaveOfAnUnstampedPreReleaseDocument_…` pins
+  that a pre-release stored version stays byte-for-byte untouched.
+- **Still unverified** (unchanged from §12, needs a live host): a stamped file opened and re-saved in real Word,
+  and Office.js `getByNamespaceAsync` actually finding the part. Both are task 051 / 042 territory.
+
+## 13.9 Step 9.5 review — findings and dispositions
+
+`code-review` + `adr-check` were run in-session (not as background agents). **`adr-check`: clean**, and verified
+by grep rather than asserted — zero `Services/Compose` references in the new file or in `OfficeService`'s added
+lines (ADR-049 independence), zero `Microsoft.Graph`/`DriveItem` types (ADR-007), zero new DI registrations and
+zero new interfaces (ADR-010), zero new endpoints (ADR-001/008), `Guid.ToString("D")` for the stamped value
+(ADR-044). Publish +0.0111 MB (ADR-029 / §10).
+
+`code-review` found **two real defects in this task's own new code**. Both were fixed before commit, and both
+exist because FR-02 introduces a decompression surface that did not previously exist: before this task the
+uploaded bytes were streamed to storage **without ever being expanded**.
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| 1 | **Zip-bomb exposure.** Package parts were read with an unbounded `CopyTo`. A zip expands at roughly 1000:1, so an upload well inside the request limit can declare a part of many gigabytes, on a save path, from an untrusted file. | **Critical (security)** | **Fixed.** `MaxPartBytes` (8 MB) enforced in a single `TryReadPart` used by all three read sites, checking the central-directory length first *and* the running total while reading — a zip header can lie about the uncompressed size, so the declared value alone is not a guard. Over-size ⇒ pass through **unstamped**, never a failed save. Pinned by `Stamp_WhenAPackagePartExceedsTheSizeBound_…`. |
+| 2 | **O(n²) item-number probe.** `LowestFreeItemNumber` called `FindEntry` per candidate, and a miss falls through to a linear scan — quadratic in entry count, and unbounded, on a hostile package with a long run of `customXml/item*` parts. | **Warning (DoS)** | **Fixed.** Entry names hashed once; probe bounded by `MaxCustomXmlProbe` (5000); exhaustion ⇒ `Unsupported` (pass through unstamped). |
+
+Reported and **consciously accepted** (no change made):
+
+- **`ArgumentNullException.ThrowIfNull(bytes)` on a non-nullable `byte[]`** — flagged by the AI-smell checklist
+  (smell 3) because NRT already forbids null. **Kept**: NRT is compile-time only and unenforced across assembly
+  boundaries; this is a public static entry point on a save path, where the alternative is a
+  `NullReferenceException` surfacing deep inside zip handling rather than at the boundary.
+- **`OfficeService.SaveAsync` grew ~60 lines** (file 3207 → 3292, +2.6%) and was already a very large method.
+  Per `COMPONENT-COMPLEXITY.md` the judgement is cohesion, not line count, and the added block is one linear
+  concern (decode → classify → refuse → stamp) in the branch that already owns decoding. **Not decomposed
+  here** because `unified-access-control-r2` has unpushed edits to this same file and a structural extraction
+  would raise merge risk for no behavioural gain. Flagged for the main session as a deliberate deferral, not an
+  oversight. Verified there is no latent bug in the early `return` from inside the `switch`: `contentStream` is
+  still null at that point (so the `finally`'s `?.Dispose()` is a no-op), the job is marked Failed first, and no
+  SPE write has occurred.
+- **`OfficeDocumentStamp.cs` is 811 lines** — roughly 45% XML doc comment. Single responsibility (produce
+  stamped bytes); every private member serves the one public operation. Legitimate under the standard's
+  "a large *cohesive* file is not a defect" rule.
+
+**Security check that passed and is worth recording**: the obvious attack on a caller-supplied primary key is a
+client choosing the id. It cannot: `preAssignedDocumentId` is minted server-side with `Guid.NewGuid()` inside
+`OfficeService` and is never read from the request body; `DataverseServiceClientImpl` additionally ignores
+`Guid.Empty`. `CreateDocumentRequest.Id` is not bound from any HTTP surface.
+
+## 13.10 How the full suite was run — and a trap worth naming
+
+Recorded because it will bite the next task that has to produce full-suite numbers for this assembly.
+
+**The suite cannot be run in one command under the agent harness.** A single tool call is capped at 600 s, and
+`Sprk.Bff.Api.Tests` takes far longer — the cost is not test COUNT but `WebApplicationFactory` construction:
+`.Services.Ai.` runs 4,677 tests in ~35 s, while `.Api.` (≈3,500) exceeds 13 minutes because its contract
+suites build a fresh host per test. Sizing chunks by class count is therefore misleading; size them by whether
+the classes are factory-based.
+
+**🔴 Second trap — `FullyQualifiedName~.Api.` matches the ENTIRE assembly.** Every test's fully-qualified name
+begins `Sprk.Bff.Api.Tests.`, which itself contains the substring `.Api.`. So a `~.Api.` chunk is not a chunk at
+all — it is the whole suite — and its complement `!~.Api.` selects **nothing** (VSTest reports "No test matches
+the given testcase filter", which is easy to misread as "this area is empty" rather than "your filter is
+wrong"). The symptom that exposed it: a supposed "rest of `.Api.`" chunk ran 11,627 tests and its skip list
+contained `…Tests.Services.Office.…`, a namespace that filter should never have reached.
+
+**Use the fully-qualified prefix `Sprk.Bff.Api.Tests.Api.`** when selecting the `Api` area. `.Api.Ai.` and
+`.Api.Office.` are safe as-is because those substrings are unambiguous.
+
+The corrected partition is complete and disjoint (`~` / `!~` / `&`; no parentheses — VSTest does not handle them
+reliably). Measured on the final binaries for this task:
+
+| Chunk (filter) | Passed | Failed | Skipped |
+|---|---|---|---|
+| `~.Services.Ai.` | 4660 | 0 | 17 |
+| `~.Services.` & `!~.Services.Ai.` | 2239 | 0 | 7 |
+| `~.Seam.` | 1749 | 0 | 0 |
+| `~.Api.Ai.` | 601 | 0 | 14 |
+| `~.Api.Office.` | 171 | 0 | 9 |
+| `~Sprk.Bff.Api.Tests.Api.` & `!~.Api.Ai.` & `!~.Api.Office.` | 721 | 0 | 0 |
+| `!~.Services.` & `!~.Seam.` & `!~Sprk.Bff.Api.Tests.Api.` | 2225 | 0 | 9 |
+| **Total** | **12,366** | **0** | **56** |
+
+Reconciliation: 12,422 tests total; skipped **56** matches the pre-task baseline exactly, and passed
+**12,366 = 12,333 (baseline) + 33 new tests** (24 `OfficeDocumentStampTests` + 9
+`OfficeSaveDocumentStampContractTests`). Every test in the assembly is in exactly one row.
+
+**🔴 The trap: a failed build + `--no-build` silently yields numbers for code that was never tested.**
+A chunk that overruns the cap is moved to the BACKGROUND, and its `testhost` keeps a **write lock** on
+`Sprk.Bff.Api.dll`. The next `dotnet build` of the test project then fails with `MSB3027 / MSB3021` ("the file
+is locked by: testhost") — but if the following `dotnet test --no-build` is chained with `;` or run separately,
+it happily executes the **stale** assembly and reports a confident green.
+
+That happened here: three chunk results came back green against pre-fix binaries. The tell was a COUNT, not an
+error — the stamper suite reported 32 where 33 was expected, because the test added minutes earlier did not
+exist in the assembly under test. All three results were discarded and re-run.
+
+Defences, in order of reliability:
+1. **Gate the tests on the build's exit code** — `dotnet build … && dotnet test …`, with no pipe on the build
+   (a pipe replaces its exit status with the pipe's).
+2. **Assert an expected count** for a suite you just changed. A number that did not move is the cheapest
+   possible detector of "my change is not in the binary".
+3. **Stop the background task first** (`TaskStop`) to release the lock; `tasklist | grep testhost` confirms.
+4. Note that concurrent `dotnet test` runs on the same assembly are safe for the LOCK (shared read) but split
+   the CPU, which can push a borderline chunk over the cap — so run chunks serially.

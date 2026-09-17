@@ -417,6 +417,11 @@ public class OfficeService : IOfficeService
             // (task 020, FR-06) both set it explicitly below.
             string? documentName = null;
             long fileSize = 0;
+            // FR-02 (task 014): on a Document CREATE the sprk_document id must be known BEFORE the bytes are
+            // uploaded, because the stamp goes INTO those bytes. Minted in the Document arm below and handed to
+            // the row create, so the stored file and its record cannot disagree about which document this is.
+            // Null for Email/Attachment and for a version save (which already knows its target row).
+            Guid? preAssignedDocumentId = null;
 
             try
             {
@@ -457,7 +462,74 @@ public class OfficeService : IOfficeService
                         if (!string.IsNullOrEmpty(request.Document.ContentBase64))
                         {
                             var bytes = Convert.FromBase64String(request.Document.ContentBase64);
+
+                            // ══ FR-02 (task 014) — STAMP THE IDENTITY INTO THE UPLOADED BYTES ════════════════
+                            // The user's OPEN document in Word is never touched: the stamp goes into the copy
+                            // already in flight to the server, so Word never reports unsaved changes and never
+                            // prompts. Forward-only BY CONSTRUCTION (owner decision 2026-09-04) — this is the
+                            // only write, and it acts on bytes the client just sent; nothing already stored is
+                            // ever rewritten, so there is no backfill, migration or stamp-on-read to find.
+                            Guid stampTarget;
+                            if (versionTarget is not null)
+                            {
+                                stampTarget = versionTarget.DocumentId;
+                            }
+                            else
+                            {
+                                preAssignedDocumentId = Guid.NewGuid();
+                                stampTarget = preAssignedDocumentId.Value;
+                            }
+
+                            var stamp = OfficeDocumentStamp.Stamp(bytes, stampTarget);
+
+                            if (stamp.Outcome == OfficeDocumentStamp.StampOutcome.Corrupt)
+                            {
+                                // Refused BEFORE any SPE write, so nothing partial is stored. Note what does NOT
+                                // land here: a PDF, an EML, an arbitrary binary and a readable non-Word zip are
+                                // all pass-throughs, not errors. Only "carries a zip signature but is not a
+                                // readable package" is refused — bytes no reader could open.
+                                _logger.LogWarning(
+                                    "Document save refused: the uploaded bytes carry a zip signature but could not be "
+                                    + "read as an Office package (job {JobId}). Nothing was written to storage.",
+                                    jobId);
+
+                                await _documentPersistence.UpdateJobStatusInDataverseAsync(
+                                    jobId, JobStatus.Failed, "CorruptDocument", 0, stamp.Reason, cancellationToken);
+                                _jobStore[jobId] = jobRecord with
+                                {
+                                    Status = JobStatus.Failed,
+                                    CurrentPhase = "CorruptDocument",
+                                    CompletedAt = DateTimeOffset.UtcNow
+                                };
+
+                                return new SaveResponse
+                                {
+                                    Success = false,
+                                    Error = new SaveError
+                                    {
+                                        Code = OfficeErrorCodes.CorruptDocumentPackage,
+                                        Message = "This file could not be read as a Word document, so nothing was saved.",
+                                        Details = stamp.Reason,
+                                        Retryable = false
+                                    }
+                                };
+                            }
+
+                            if (stamp.Outcome == OfficeDocumentStamp.StampOutcome.Unsupported)
+                            {
+                                // A MISSING stamp is a normal, recoverable state (task 019 condition 3), never
+                                // corruption: the save proceeds unstamped and identity falls back to task 012's
+                                // Graph path. Logged so an unhandled package shape is discoverable rather than silent.
+                                _logger.LogWarning(
+                                    "Document stored WITHOUT an identity stamp: {Reason} (job {JobId}). Identity for "
+                                    + "this document falls back to the URL/Graph path.",
+                                    stamp.Reason, jobId);
+                            }
+
+                            bytes = stamp.Bytes;
                             contentStream = new MemoryStream(bytes);
+                            // The STAMPED length: sprk_filesize must describe the bytes actually stored, and the
+                            // finalization payload carries this same value downstream.
                             fileSize = bytes.Length;
                         }
                         else
@@ -632,7 +704,10 @@ public class OfficeService : IOfficeService
                     documentName ?? fileName,
                     fileSize,
                     userId,
-                    cancellationToken);
+                    cancellationToken,
+                    // FR-02 (task 014): the id already stamped into the uploaded bytes becomes this row's
+                    // primary key, so the stored file self-identifies as the record that owns it.
+                    preAssignedDocumentId);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
@@ -928,9 +1003,19 @@ public class OfficeService : IOfficeService
 
         try
         {
-            var content = Convert.FromBase64String(request.Document!.ContentBase64 ?? string.Empty);
+            var requested = Convert.FromBase64String(request.Document!.ContentBase64 ?? string.Empty);
+            var existingDocumentId = request.Document.ExistingDocumentId!.Value;
+
+            // FR-02 (task 014): the document's STORED bytes are stamped; the request's are not. Comparing them
+            // raw would therefore never match, and this check would answer "not the same operation" for every
+            // retry — writing a redundant SPE version each time and silently undoing task 047's guarantee. So
+            // compare like with like: stamp the request exactly as the save would. This is sound because
+            // stamping is byte-DETERMINISTIC and a re-stamp with the same id is a true no-op, which also makes
+            // it correct for a round-tripped document whose bytes already carry this id.
+            var content = OfficeDocumentStamp.Stamp(requested, existingDocumentId).Bytes;
+
             var target = await _documentPersistence.ResolveVersionTargetAsync(
-                request.Document.ExistingDocumentId!.Value, cancellationToken);
+                existingDocumentId, cancellationToken);
             var holdsContent = content.Length > 0 && target is { HasSpePointers: true }
                 ? await _storageUploader.ItemHoldsContentAsync(target.DriveId!, target.ItemId!, content, cancellationToken)
                 : null;

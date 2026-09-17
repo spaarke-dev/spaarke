@@ -8,6 +8,26 @@ public class CreateDocumentRequest
     public required string Name { get; set; }
     public required string ContainerId { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
+    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
+    /// save stamps the <c>sprk_document</c> GUID INTO the bytes it uploads, and on a CREATE the upload
+    /// necessarily precedes the row — so the id has to be known before Dataverse would otherwise mint it. The
+    /// BFF pre-assigns it, stamps it, uploads, and then creates the row WITH that key. The alternatives were
+    /// worse: reordering the save to create-row-before-upload changes when content dedup runs (an explicit
+    /// escalation trigger on that task), and uploading unstamped then writing a second stamped version doubles
+    /// the SPE writes and leaves a window where the stored bytes carry no stamp.</para>
+    /// <para><b>Additive and opt-in.</b> Existing callers are unchanged; this is stated explicitly in the PR
+    /// per root CLAUDE.md §10 because <c>Spaarke.Dataverse</c> is consumed beyond the BFF.</para>
+    /// <para><b>Honest cost.</b> Microsoft's guidance prefers platform-generated sequential GUIDs for
+    /// clustered-index locality. A caller-supplied random GUID is supported but gives that up for these rows —
+    /// a performance note, not a correctness one.</para>
+    /// </remarks>
+    public Guid? Id { get; set; }
 }
 
 /// <summary>
