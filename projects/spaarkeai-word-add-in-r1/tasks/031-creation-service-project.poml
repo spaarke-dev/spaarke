@@ -77,6 +77,11 @@
     </patterns>
   </knowledge>
 
+  <owner-decisions date="2026-09-17">
+    <decision name="no-numbering-here">Project numbering belongs to the SEPARATE server-side numbering project and is NOT a dependency of this project: a Project may be created with NO number. This task MUST NOT generate or write `sprk_projectnumber` — not a token, not a name-derived value, nothing. Leave it to whatever the user supplied (which may be empty) and let the numbering project fill it later.</decision>
+    <decision name="escalation-answered">The escalation trigger about `sprk_projectnumber` semantics is ANSWERED by the decision above — do not fire it, and do not write `notes/031-project-semantics.md` as a precondition. Record the two as-built facts (it is the primary name attribute; `projectService.ts` generates nothing) in your own note and move on.</decision>
+    <decision name="what-remains">Scope is now the half that was never in doubt: owner, business-unit defaults, Field-Mapping-Framework-mapped fields, and routing `QuickCreateAsync`'s Project branch through the creation service from task 030 — plus the contract test for `POST /api/office/quickcreate/project` including the unauthorized negative case. A pane-created Project showing a blank name until the numbering project ships is EXPECTED, not a defect.</decision>
+  </owner-decisions>
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-13, `plan.md` §3 (the FR-13 asymmetry finding), and task 030's completed POML + notes. Emit the mandatory rigor declaration (FULL / opus / high). Run `/conflict-check`.</step>
     <step order="1">Confirm against live Dataverse metadata that `sprk_projectnumber` is the `sprk_project` primary name attribute. Read `projectService.ts` end to end and confirm it generates no number. Record both findings with evidence.</step>
