@@ -1895,18 +1895,20 @@ public class OfficeService : IOfficeService
     /// <para>Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
     /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
     /// return null (endpoint 403s) until built out.</para>
-    /// <para><b>Matter</b> (spaarkeai-word-add-in-r1 task 030, FR-13) is created complete by
+    /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created complete by
     /// <see cref="RecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
-    /// matter-type lookup when supplied, and the Field Mapping Framework. It never writes <c>sprk_matternumber</c>:
-    /// numbering is left to a planned separate server-side component (owner decision 2026-09-11); until it exists,
-    /// matters created here have no number.
-    /// A refusal there surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
-    /// written); see <see cref="QuickCreateMatterAsync"/>.</para>
-    /// <para><b>Project / Invoice</b> keep the minimal path: the generic Dataverse create
-    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name (plus description for Project). Ownership is
-    /// attributed to the caller when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>,
-    /// ADR-024 — best-effort; unresolved → app-owned, still created). There is no impersonated-create helper in the
-    /// BFF, so ownership is set via the <c>ownerid</c> lookup rather than MSCRMCallerID.</para>
+    /// Field Mapping Framework, and for Matter the matter-type lookup when supplied. Neither writes its entity's
+    /// number — <c>sprk_matternumber</c> and <c>sprk_projectnumber</c> are both left to a planned separate
+    /// server-side numbering component (owner decisions 2026-09-11 and 2026-09-17). Both are their entity's PRIMARY
+    /// NAME attribute, so until that component exists a record created here shows a blank name in lookups and grids;
+    /// that is expected, not a defect (<c>notes/031-project-semantics.md</c>).
+    /// A refusal surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
+    /// written); see <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
+    /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
+    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name only. Ownership is attributed to the caller
+    /// when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-024 — best-effort;
+    /// unresolved → app-owned, still created). There is no impersonated-create helper in the BFF, so ownership is
+    /// set via the <c>ownerid</c> lookup rather than MSCRMCallerID.</para>
     /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
@@ -1943,28 +1945,22 @@ public class OfficeService : IOfficeService
             return null; // endpoint validates Name; guard defensively
         }
 
-        // FR-13 (spaarkeai-word-add-in-r1 task 030): Matter goes through the shared server-side creation service —
-        // load-bearing owner, BU defaults, matter-type lookup, Field Mapping Framework (no number: a separate
-        // numbering component owns sprk_matternumber). Project (task 031) and Invoice stay on the minimal path below.
-        if (entityType == QuickCreateEntityType.Matter)
+        // FR-13: Matter (task 030) and Project (task 031) both go through the shared server-side creation service —
+        // load-bearing owner, BU defaults, Field Mapping Framework, plus the matter-type lookup for Matter. Neither
+        // writes its entity's number; a separate on-create numbering component owns both. Invoice stays on the
+        // minimal path below.
+        if (entityType is QuickCreateEntityType.Matter or QuickCreateEntityType.Project)
         {
-            return await QuickCreateMatterAsync(name, request, userId, ownerSystemUserId, cancellationToken)
+            return await QuickCreateViaCreationServiceAsync(
+                    entityType, name, request, userId, ownerSystemUserId, cancellationToken)
                 .ConfigureAwait(false);
         }
 
+        // Invoice only. Name-only: no description field is verified to exist on sprk_invoice.
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
-        var (nameField, descriptionField) = entityType switch
-        {
-            QuickCreateEntityType.Project => ("sprk_projectname", (string?)"sprk_projectdescription"),
-            _ => ("sprk_invoicename", (string?)null), // Invoice: name-only (no verified description field)
-        };
 
         var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
-        entity[nameField] = name;
-        if (descriptionField is not null && !string.IsNullOrWhiteSpace(request.Description))
-        {
-            entity[descriptionField] = request.Description!.Trim();
-        }
+        entity["sprk_invoicename"] = name;
 
         // Attribute ownership to the caller when resolved (ADR-024). Best-effort: an unresolved
         // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
@@ -1994,7 +1990,7 @@ public class OfficeService : IOfficeService
     }
 
     /// <summary>
-    /// The Matter leg of <see cref="QuickCreateAsync"/> (spaarkeai-word-add-in-r1 task 030, FR-13): delegates to
+    /// The Matter (task 030) and Project (task 031) leg of <see cref="QuickCreateAsync"/>, FR-13: delegates to
     /// <see cref="RecordCreationService"/> and adapts its outcome to this method's contract.
     /// </summary>
     /// <remarks>
@@ -2003,11 +1999,13 @@ public class OfficeService : IOfficeService
     /// <see cref="IOfficeService.QuickCreateAsync"/> returns <c>QuickCreateResponse?</c> and its signature cannot
     /// change here: the shared <c>Phase2EndToEndFixture</c> mocks it. The endpoint renders that exception in the
     /// Office ProblemDetails shape. <see cref="RecordCreationService"/> itself returns the failure as data — that is
-    /// the contract task 031 and the wizard-migration evaluation consume.</para>
-    /// <para>Owner attribution is LOAD-BEARING for Matter (an unresolved caller is refused, 403), unlike the
-    /// best-effort posture the Project / Invoice leg keeps.</para>
+    /// the contract the wizard-migration evaluation consumes.</para>
+    /// <para>Owner attribution is LOAD-BEARING for both (an unresolved caller is refused, 403), unlike the
+    /// best-effort posture the Invoice leg keeps. <c>MatterTypeId</c> is passed through for both and ignored by the
+    /// Project path, which has no type lookup in r1.</para>
     /// </remarks>
-    private async Task<QuickCreateResponse?> QuickCreateMatterAsync(
+    private async Task<QuickCreateResponse?> QuickCreateViaCreationServiceAsync(
+        QuickCreateEntityType entityType,
         string name,
         QuickCreateRequest request,
         string userId,
@@ -2017,7 +2015,7 @@ public class OfficeService : IOfficeService
         var result = await _recordCreation.CreateAsync(
             new RecordCreationRequest
             {
-                EntityType = QuickCreateEntityType.Matter,
+                EntityType = entityType,
                 Name = name,
                 Description = request.Description,
                 CallerUserId = userId,
@@ -2032,7 +2030,7 @@ public class OfficeService : IOfficeService
         {
             throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
                 failure.Code,
-                "Matter Not Created",
+                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
                 failure.Detail,
                 MapCreationFailureStatus(failure.Kind));
         }
@@ -2040,7 +2038,7 @@ public class OfficeService : IOfficeService
         return new QuickCreateResponse
         {
             Id = result.RecordId,
-            EntityType = QuickCreateEntityType.Matter,
+            EntityType = entityType,
             LogicalName = result.LogicalName,
             Name = result.Name,
             Warnings = result.Warnings.Count > 0 ? result.Warnings : null,

@@ -1676,9 +1676,9 @@ public static class OfficeEndpoints
 
         try
         {
-            // Resolve the caller's systemuserid for ownerid. For MATTER it is load-bearing: the creation service
-            // refuses an unresolved caller (403 owner_unresolved, no row written — word-add-in-r1 task 030). For
-            // Project / Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
+            // Resolve the caller's systemuserid for ownerid. For MATTER (task 030) and PROJECT (task 031) it is
+            // load-bearing: the creation service refuses an unresolved caller (403 owner_unresolved, no row written).
+            // For Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 
