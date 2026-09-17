@@ -14,19 +14,22 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
 /// <item><b>Finding 4 (silent lost edits).</b> A second CREATE save of EDITED content to the same record under the
 /// same file name, within the 24-hour window, was answered from cache and never written — by the response cache
 /// when the pane reused its content-free <c>X-Idempotency-Key</c>, and by the persistent job lookup when the
-/// server's own create key (content-free) matched. Both now let the edited save through, while a byte-identical
-/// retry still writes nothing.</item>
+/// server's own create key (content-free) matched. Both now let the edited save reach the upload attempt (it is
+/// not a cached/duplicate replay), while a byte-identical retry still writes nothing.</item>
 /// <item><b>Finding 2 (failed jobs replay as duplicates).</b> A retry with the same key after a FAILED save was
 /// answered <c>Duplicate</c> with the failed job and wrote nothing. A failed (or cancelled) job no longer counts,
 /// and a save that throws after its job exists now marks that job Failed.</item>
+/// <item><b>Task 025 (D1).</b> Reaching the upload attempt is no longer the same as reaching SPE unopposed: a
+/// second create under the SAME name as the first now REFUSES with OFFICE_020 (name collision) rather than
+/// silently overwriting the first document's file — see
+/// <see cref="SecondCreateSave_OfEditedContent_UnderThePanesReusedHeaderKey_IsRefusedAsACollision"/> and its
+/// no-client-key sibling, updated by task 025 from their pre-025 "is written" assertions per this class's own
+/// former remarks ("the row-level outcome (the D1 collision) belongs to task 025").</item>
 /// </list>
 /// </summary>
 /// <remarks>
 /// <para><b>What "written" means here.</b> The SPE upload reached the drive (<see cref="OfficeVersionSaveWorld.UploadSmallCalls"/>,
-/// the item's version history) and a new ProcessingJob ran. The world does NOT model <c>sprk_graphitemid_uk</c>:
-/// a same-name create into the same container is a PATH-keyed replace onto the first save's drive item, whose
-/// row-level outcome (the D1 collision) belongs to task 025. These tests therefore make no claim about the row
-/// the second create produces.</para>
+/// the item's version history) and a new ProcessingJob ran.</para>
 /// <para>Module-boundary doubles only (ADR-038 §4); the real route, filters and <c>IdempotencyFilter</c> over the
 /// in-memory distributed cache.</para>
 /// </remarks>
@@ -46,6 +49,18 @@ public class OfficeSaveSpineIdempotencyTests
         return message;
     }
 
+    /// <summary>Task 025: the string-valued top-level properties of a ProblemDetails error body — mirrors the
+    /// established <c>ReadProblemAsync</c> idiom in <c>OfficeQuickCreateContractTests</c> (a local copy rather
+    /// than a shared extraction, per that file's own precedent of one per test class).</summary>
+    private static async Task<Dictionary<string, string?>> ReadProblemAsync(HttpResponseMessage response)
+    {
+        using var stream = await response.Content.ReadAsStreamAsync();
+        using var document = await System.Text.Json.JsonDocument.ParseAsync(stream);
+        return document.RootElement.EnumerateObject()
+            .Where(property => property.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+            .ToDictionary(property => property.Name, property => property.Value.GetString());
+    }
+
     /// <summary>Two create saves of the SAME record and file name — as the pane sends them — differing only in content.</summary>
     private static (SaveRequest First, SaveRequest Second) CreateSavesOf(byte[] first, byte[] second)
     {
@@ -61,9 +76,13 @@ public class OfficeSaveSpineIdempotencyTests
     // ── Finding 4 ────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SecondCreateSave_OfEditedContent_UnderThePanesReusedHeaderKey_IsWritten()
+    public async Task SecondCreateSave_OfEditedContent_UnderThePanesReusedHeaderKey_IsRefusedAsACollision()
     {
-        // The pane's create key is content-free (sourceType, record, document URL), so the SAME header rides both.
+        // The pane's create key is content-free (sourceType, record, document URL), so the SAME header rides
+        // both — but the server's own PERSISTENT key is content-aware (task 039 finding 4), so the second
+        // (edited) save is not a cached/duplicate replay: it reaches the upload attempt. Task 025: what happens
+        // there is now a refusal (OFFICE_020), not the pre-025 silent overwrite of the first document's file
+        // (D1) — this test's own name and assertions were "...IsWritten" before task 025 fixed exactly this.
         var world = new OfficeVersionSaveWorld();
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
         var client = factory.CreateClient();
@@ -72,18 +91,23 @@ public class OfficeSaveSpineIdempotencyTests
         (await client.SendAsync(Post(first, "pane-create-key"))).StatusCode.Should().Be(HttpStatusCode.Accepted);
         var response = await client.SendAsync(Post(second, "pane-create-key"));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        (await response.Content.ReadFromJsonAsync<SaveResponse>())!.Duplicate.Should().BeFalse();
-        world.UploadSmallCalls.Should().Be(2, "the edited save reaches SPE — it is not answered from the response cache");
-        SavedItem(world).Versions[^1].Should().Equal(Edited, "the user's edits are what SPE now holds");
-        world.Jobs.Should().HaveCount(2);
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "a same-name second create is refused before any bytes move, not silently written over the first");
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
+        world.UploadSmallCalls.Should().Be(1, "the collision is refused before a second upload — the edited bytes never reach SPE");
+        SavedItem(world).Versions.Should().ContainSingle()
+            .Which.Should().Equal(Original, "the first document's bytes are provably unchanged by the refused second save");
+        world.Jobs.Should().HaveCount(2, "the refused attempt still gets its own ProcessingJob row, marked Failed");
         world.Jobs.Select(j => j.IdempotencyKey).Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
-    public async Task SecondCreateSave_OfEditedContent_WithNoClientKey_IsWritten()
+    public async Task SecondCreateSave_OfEditedContent_WithNoClientKey_IsRefusedAsACollision()
     {
-        // No header and no body key: the server's own create key decides. It used to be content-free.
+        // No header and no body key: the server's own create key decides whether the second save reaches the
+        // upload attempt at all — it does, because that key is content-aware (a different document IS a
+        // different operation). Task 025: the upload itself now refuses the name collision (OFFICE_020) rather
+        // than silently overwriting the first document's file (D1).
         var world = new OfficeVersionSaveWorld();
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
         var client = factory.CreateClient();
@@ -92,10 +116,11 @@ public class OfficeSaveSpineIdempotencyTests
         (await client.SendAsync(Post(first, headerKey: null))).StatusCode.Should().Be(HttpStatusCode.Accepted);
         var response = await client.SendAsync(Post(second, headerKey: null));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "a different document is a different operation");
-        (await response.Content.ReadFromJsonAsync<SaveResponse>())!.Duplicate.Should().BeFalse();
-        world.UploadSmallCalls.Should().Be(2);
-        SavedItem(world).Versions[^1].Should().Equal(Edited);
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "a different document is a different operation, so it reaches the upload — which refuses the name collision");
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
+        world.UploadSmallCalls.Should().Be(1);
+        SavedItem(world).Versions.Should().ContainSingle().Which.Should().Equal(Original);
         world.Jobs.Should().HaveCount(2);
     }
 

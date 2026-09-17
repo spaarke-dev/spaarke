@@ -833,6 +833,27 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     announce('Save mode: a new document. Choose where to file it, then select Save.', 'polite');
   }, [clearError, announce]);
 
+  // Task 025: the pane's "Keep both" choice after a refused CREATE collision (OFFICE_020) — an immediate
+  // retry (unlike handleSaveAsNewInstead, no new required input is unlocked: the entity, content and name
+  // are already fully specified) asking the server to upload under a Graph-chosen non-colliding name
+  // instead of refusing again.
+  const handleKeepBoth = useCallback(() => {
+    clearError();
+    startSave({ ...buildSaveContext(), allowRename: true });
+    announce('Saving under a new name.', 'polite');
+  }, [buildSaveContext, clearError, startSave, announce]);
+
+  // Task 025: the pane's "Save as new version" choice after a refused CREATE collision — resubmits
+  // through the ALREADY-SHIPPED FR-11 version-save path, targeting the document the server's refusal
+  // resolved. No-op if the server could not resolve one (the button is hidden in that case).
+  const handleSaveAsVersionInstead = useCallback(() => {
+    const existingDocumentId = error?.collisionExistingDocumentId;
+    if (!existingDocumentId) return;
+    clearError();
+    startSave({ ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } });
+    announce('Saving as a new version of the existing document.', 'polite');
+  }, [buildSaveContext, clearError, startSave, announce, error]);
+
   // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
     (entity: EntitySearchResult | null) => {
@@ -1151,6 +1172,39 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     </MessageBar>
   );
 
+  // Task 025: a refused CREATE save's filename collision (OFFICE_020) — the shipped two-option choice,
+  // mirroring the OBO upload wizard's own dialog (Keep both / Save as new version) without importing it
+  // (ADR-012 exception). Kept as ITS OWN MessageBar, separate from renderErrorState, so a collision never
+  // reads as a failure: `intent="warning"` (never "error"), stated in neutral text — "Nothing was saved"
+  // — per the shipped wizard's own copy convention. Dismissing (the Dismiss button, same clearError as
+  // every other error state) writes nothing further: the refusal itself already left no bytes and no
+  // sprk_document row (server-side; task 025's non-destructive invariant).
+  const renderCollisionState = () => (
+    <MessageBar intent="warning">
+      <MessageBarBody>
+        <MessageBarTitle>{error?.title || 'Name Already Exists'}</MessageBarTitle>
+        {error?.message}
+        <Text size={200} style={{ display: 'block', marginTop: tokens.spacingVerticalXS }}>
+          Keep both uploads this file under a new name. Save as new version keeps the existing document and adds this
+          file as its latest version.
+        </Text>
+      </MessageBarBody>
+      <MessageBarActions>
+        <Button appearance="primary" size="small" onClick={handleKeepBoth}>
+          Keep both
+        </Button>
+        {error?.collisionExistingDocumentId && (
+          <Button appearance="secondary" size="small" onClick={handleSaveAsVersionInstead}>
+            Save as new version
+          </Button>
+        )}
+        <Button appearance="subtle" size="small" onClick={clearError}>
+          Dismiss
+        </Button>
+      </MessageBarActions>
+    </MessageBar>
+  );
+
   // Render main form
   //
   // task 040 / FR-19 audit: the `hostType === 'outlook'` reads below (label, sender, sent date,
@@ -1369,7 +1423,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       case 'error':
         return (
           <>
-            {renderErrorState()}
+            {error?.offerCollisionChoice ? renderCollisionState() : renderErrorState()}
             {renderForm()}
           </>
         );

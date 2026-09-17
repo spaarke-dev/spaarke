@@ -1,7 +1,7 @@
 namespace Sprk.Bff.Api.Api.Office.Errors;
 
 /// <summary>
-/// Error codes for Office integration endpoints (OFFICE_001-019).
+/// Error codes for Office integration endpoints (OFFICE_001-020).
 /// Per spec.md Error Code Catalog.
 /// </summary>
 /// <remarks>
@@ -84,6 +84,15 @@ public static class OfficeErrorCodes
     public const string VersionTargetLocked = "OFFICE_019";
 
     /// <summary>
+    /// OFFICE_020 (409): Name collision on create - a same-named file already exists in this location.
+    /// Refused BEFORE any bytes moved (task 025, spaarkeai-word-add-in-r1): the upload call passed
+    /// ConflictBehavior.Fail, so Graph refused the PUT atomically and the existing item is untouched.
+    /// Distinct from OFFICE_011 (DocumentAlreadyExists), which is content-hash dedup, not a filename
+    /// collision — the two layers stay separate per DEDUP-AND-SAVE-BACK-IDENTITY.md §2.
+    /// </summary>
+    public const string NameCollision = "OFFICE_020";
+
+    /// <summary>
     /// Base URI for Office error types.
     /// </summary>
     public const string TypeBaseUri = "https://spaarke.com/errors/office/";
@@ -111,6 +120,7 @@ public static class OfficeErrorCodes
             CannotCreateEntity => "forbidden",
             DocumentAlreadyExists => "conflict",
             VersionTargetHasNoFile => "conflict",
+            NameCollision => "conflict",
             VersionTargetLocked => "locked",
             SpeUploadFailed => "service-error",
             GraphApiError => "service-error",
@@ -150,6 +160,7 @@ public static class OfficeErrorCodes
             VersionTargetHasNoFile => "Version Target Has No File",
             VersionIntentMismatch => "Version Intent Mismatch",
             VersionTargetLocked => "Version Target Locked",
+            NameCollision => "File Already Exists",
             _ => "Error"
         };
     }
@@ -177,6 +188,7 @@ public static class OfficeErrorCodes
             CannotCreateEntity => 403,
             DocumentAlreadyExists => 409,
             VersionTargetHasNoFile => 409,
+            NameCollision => 409,
             VersionTargetLocked => 423,
             SpeUploadFailed => 502,
             GraphApiError => 502,

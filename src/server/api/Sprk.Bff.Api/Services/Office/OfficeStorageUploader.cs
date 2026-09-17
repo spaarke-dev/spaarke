@@ -25,30 +25,68 @@ public class OfficeStorageUploader
     }
 
     /// <summary>
+    /// Outcome of <see cref="UploadToSpeAsync"/>. Task 025 (spaarkeai-word-add-in-r1):
+    /// <see cref="IsNameCollision"/> distinguishes a refused-before-any-bytes-moved name collision
+    /// (the caller passed <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Fail"/> and Graph refused the
+    /// PUT atomically, leaving the existing item untouched) from every other upload failure —
+    /// <see cref="Success"/> is <c>false</c> for both, but only a collision is safe to re-offer to the
+    /// user as a choice rather than a bare retry. <see cref="FileName"/> is the name the item ACTUALLY
+    /// holds in SPE on success: identical to the requested name under Replace/Fail, but DIFFERENT under
+    /// Rename (Graph auto-generates a non-colliding name) — the caller must persist THAT name, not the
+    /// one it asked for. <see cref="DriveId"/> is populated even on failure (it is resolved before the
+    /// upload is attempted), so a collision caller can still look up what already owns the name.
+    /// </summary>
+    public sealed record UploadResult(
+        bool Success,
+        string? DriveId,
+        string? ItemId,
+        string? FileName,
+        string? WebUrl,
+        string? Error,
+        bool IsNameCollision);
+
+    /// <summary>
     /// Uploads content to SPE and returns the DriveId, ItemId, WebUrl, and any error.
     /// </summary>
     /// <remarks>
-    /// Uploads FLAT into the container root. The dormant <c>folderPath</c> parameter was deleted along
+    /// <para>Uploads FLAT into the container root. The dormant <c>folderPath</c> parameter was deleted along
     /// with <c>SaveRequest.FolderPath</c>: it was client-supplied, no client ever sent it (zero hits for
     /// <c>folderPath</c> under <c>src/client/**</c>), and in SPE any folder segment in an upload path is
     /// created implicitly by Graph — so the only thing the plumbing could do was mint folders nobody
-    /// asked for. Reinstating a caller-chosen folder would also reinstate that side effect.
+    /// asked for. Reinstating a caller-chosen folder would also reinstate that side effect.</para>
+    /// <para><b>Task 025 — <paramref name="conflictBehavior"/>.</b> Defaults to
+    /// <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Fail"/> so a same-named collision REFUSES before
+    /// any bytes move, mirroring the OBO path's own default-to-Fail posture
+    /// (<c>OBOEndpoints.ResolveConflictBehavior</c>) and the already-shipped external-upload precedent
+    /// (<c>ExternalProjectDataEndpoints.UploadDocument</c>). This is the FIXED value <see cref="OfficeService"/>
+    /// passes for an ordinary create; it also passes
+    /// <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Rename"/> for the pane's explicit "Keep both" retry —
+    /// two states, never a resolver. The historical caller-visible default of this method — silently
+    /// replacing a same-named file — is <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Replace"/> and is
+    /// no longer the default; the one caller (<c>OfficeService.SaveAsync</c>) now always states its choice
+    /// explicitly, per the same "MUST always be stated explicitly" rule <c>UploadSessionManager</c> already
+    /// documents for the facade.</para>
     /// </remarks>
-    public async Task<(bool Success, string? DriveId, string? ItemId, string? WebUrl, string? Error)> UploadToSpeAsync(
+    public async Task<UploadResult> UploadToSpeAsync(
         string containerId,
         string fileName,
         Stream content,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior = Sprk.Bff.Api.Models.ConflictBehavior.Fail)
     {
         _logger.LogDebug(
-            "Uploading to SPE container {ContainerId}, file {FileName} (flat container root)",
+            "Uploading to SPE container {ContainerId}, file {FileName} (flat container root, conflictBehavior={ConflictBehavior})",
             containerId,
-            fileName);
+            fileName,
+            conflictBehavior);
 
+        // Resolved before the try's remaining work so a collision (caught below) can still report WHERE
+        // the collision happened — the resolve itself failing is an "every other upload failure" case.
+        string? driveId = null;
         try
         {
             // Resolve container to drive ID
-            var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
+            driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
 
             // Upload using SpeFileStore (ADR-007) — the file name IS the path; no folder segments.
             //
@@ -59,24 +97,44 @@ public class OfficeStorageUploader
             // becomes "a path", so it is the last place that can still be honest about it. The double call
             // is idempotent (sanitizing a sanitized name is a no-op).
             var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
-            var result = await _speFileStore.UploadSmallAsync(driveId, uploadPath, content, cancellationToken);
+            var result = await _speFileStore.UploadSmallAsync(driveId, uploadPath, content, conflictBehavior, cancellationToken);
 
             if (result != null)
             {
                 _logger.LogInformation(
-                    "File uploaded to SPE: DriveId={DriveId}, ItemId={ItemId}",
+                    "File uploaded to SPE: DriveId={DriveId}, ItemId={ItemId}, Name={Name}",
                     driveId,
-                    result.Id);
+                    result.Id,
+                    result.Name);
 
-                return (true, driveId, result.Id, result.WebUrl, null);
+                return new UploadResult(
+                    Success: true, DriveId: driveId, ItemId: result.Id, FileName: result.Name,
+                    WebUrl: result.WebUrl, Error: null, IsNameCollision: false);
             }
 
-            return (false, null, null, null, "Upload returned null result");
+            return new UploadResult(
+                Success: false, DriveId: driveId, ItemId: null, FileName: null,
+                WebUrl: null, Error: "Upload returned null result", IsNameCollision: false);
+        }
+        // Task 025: reached only when conflictBehavior is Fail (or, in principle, Rename racing another
+        // writer) — the caller explicitly asked to be told about a name collision rather than silently
+        // overwriting. Graph refuses the PUT atomically: the existing item is UNTOUCHED, no bytes moved.
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == 409)
+        {
+            _logger.LogInformation(
+                "SPE upload collision for {FileName} (conflictBehavior={ConflictBehavior}); existing item left intact.",
+                fileName,
+                conflictBehavior);
+            return new UploadResult(
+                Success: false, DriveId: driveId, ItemId: null, FileName: null,
+                WebUrl: null, Error: ex.Message, IsNameCollision: true);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "SPE upload failed for {FileName}", fileName);
-            return (false, null, null, null, ex.Message);
+            return new UploadResult(
+                Success: false, DriveId: driveId, ItemId: null, FileName: null,
+                WebUrl: null, Error: ex.Message, IsNameCollision: false);
         }
     }
 

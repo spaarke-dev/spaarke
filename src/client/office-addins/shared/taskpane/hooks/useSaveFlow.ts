@@ -3,8 +3,8 @@ import type { EntitySearchResult } from './useEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import {
-  mapProblemDetailsToMessage,
   describeVersionSaveFailure,
+  describeCollisionFailure,
   isProblemDetails,
   createErrorFromException,
   type ErrorMessage,
@@ -206,6 +206,13 @@ export interface SaveFlowContext {
   documentUrl?: string;
   /** Document content as base64 string (Word only) */
   documentContentBase64?: string;
+  /**
+   * Task 025: "Keep both" — retries a CREATE save that was just refused with a filename collision
+   * (OFFICE_020), asking the server to upload under a Graph-chosen non-colliding name instead of
+   * refusing again. Ignored on a version save (`saveTarget.mode === 'version'`): that path never
+   * collides by name. Absent/false means "refuse and ask" (this save's normal, non-retry behavior).
+   */
+  allowRename?: boolean;
 }
 
 /**
@@ -1006,6 +1013,10 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             // without isNewVersion:true (OFFICE_018). "Save as new document" sends neither. No versionComment:
             // the pane collects none (SharePoint Embedded keeps no readable version comment).
             ...(existingDocumentId ? { existingDocumentId, isNewVersion: true } : {}),
+            // Task 025: "Keep both" only applies to a CREATE (never a version save, which cannot collide by
+            // name) — the guard mirrors the existingDocumentId branch above rather than trusting the caller
+            // not to set both.
+            ...(!existingDocumentId && context.allowRename ? { allowRename: true } : {}),
           };
         }
 
@@ -1114,10 +1125,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
               versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
             }
             // A refused VERSION save is described in terms of the existing document and — when the refusal is
-            // about that document — offers "Save as new document" as the way forward (task 024).
+            // about that document — offers "Save as new document" as the way forward (task 024). A refused
+            // CREATE save (task 025) is described in terms of the collision and offers the two-option choice
+            // ("Keep both" always; "Save as new version" when the server resolved an existing document) — the
+            // two describers are mutually exclusive by construction (isVersionAttempt), so there is no
+            // ambiguity about which applies.
             const errorMsg = isVersionAttempt
               ? describeVersionSaveFailure(responseData)
-              : mapProblemDetailsToMessage(responseData);
+              : describeCollisionFailure(responseData);
             setError(errorMsg);
             setFlowState('error');
             onError?.(errorMsg);
