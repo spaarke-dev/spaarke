@@ -4,7 +4,7 @@
     <title>Capture the Word document's bytes when Save is pressed, not when the Save tab mounts</title>
     <phase>2 Save flow</phase>
     <gate>025 (collision fix) merged — fresh bytes make the same-name collision reachable, so this lands WITH or AFTER it</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx on the pane's save path; the failure mode is silent lost edits.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -78,6 +78,8 @@
 
   <notes>
     Created 2026-09-14 by the main session from the 025 residual-collision analysis (standing policy: unowned work is owned by this project). Production-blocking. The "remember the just-created document so the next save is a version" idea (025 option O4) is part of the open owner discussion on document matching (014/FR-02 + 025) and is NOT in this task.
+
+    Completed 2026-09-17. Capture site re-located by symbol (the POML's cited SaveView.tsx:202-219 had drifted per the POML's own warning) — the mount effect's `if (type === 'word') { if (hostAdapter.getCapabilities().canGetDocumentContent) { ... } }` block. Fix: removed the eager mount-time capture and `documentContentBase64` state from SaveView.tsx entirely; added a live `captureDocumentContent` callback (useCallback, deps [hostAdapter]), gated on a new `canGetDocumentContent` capability flag matching the file's existing canOpenRecord/canSuggestRelatedRecords/canProvideDocumentName pattern (NFR-10). Threaded through SaveFlow.tsx's buildSaveContext unchanged. useSaveFlow.ts's startSave now resolves `documentContentForRequest` from `context.captureDocumentContent()` when present (else falls back to the plain `context.documentContentBase64` value for backward compat with every existing gated test), used for both the wire body and the version-save idempotency hash. All three submit paths — initial Save, the hook's own retry() (which replays the same context/live-callback object), and Save Another's next Save press — automatically re-invoke the live callback with zero path-specific code, because the fix is in WHERE the byte value comes from, not in any submission call site. Reproduce-first confirmed by temporarily reverting the one-line resolution and re-running the new tests (5 of 7 failed pre-fix, restored to 7/7). Gates: tsc 111 total / 0 production (identical per-file baseline breakdown); npm run build exit 0; full jest 10 failed suites / 84 failed tests (identical suite names + identical per-suite counts in SaveView.test.tsx/useSaveFlow.test.ts — zero pre-existing tests changed behavior); gated 39/39 suites, 461/461 tests unchanged; eslint clean on all 5 touched files; code-review and adr-check both 0 Critical/Warning/Violation. Two new gate-eligible suites added (not registered in ci-gated-suites.txt per this task's worktree boundary — reported to main session): shared/taskpane/components/__tests__/SaveFlow.captureAtSave.test.tsx (7/7) and shared/taskpane/components/views/__tests__/SaveView.captureAtSave.test.tsx (5/5). Full detail: notes/045-capture-bytes-at-save.md. No .cs touched — no BFF publish-size measurement needed. WordAdapter.getDocumentContent()/getCompressedFile() extraction has zero diff.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

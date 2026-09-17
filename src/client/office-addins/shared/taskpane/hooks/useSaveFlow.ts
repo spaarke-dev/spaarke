@@ -204,8 +204,24 @@ export interface SaveFlowContext {
   sentDate?: Date;
   /** Document content URL (Word only) */
   documentUrl?: string;
-  /** Document content as base64 string (Word only) */
+  /**
+   * Document content as a base64 string (Word only) — a plain VALUE, already in hand. Kept for
+   * callers (tests, or any future non-live caller) that already have bytes; production `SaveFlow`
+   * supplies {@link captureDocumentContent} instead, which `startSave` prefers when present (task 045).
+   */
   documentContentBase64?: string;
+  /**
+   * Task 045: reads the document's CURRENT bytes at the moment `startSave` actually submits — never
+   * captured earlier and cached. A LIVE function (bound to the open document by the caller, e.g.
+   * `SaveView`'s `hostAdapter.getDocumentContent()`), not a snapshot — so every attempt that reaches
+   * `startSave` re-invokes it and reads whatever is on screen right now. That covers the first Save,
+   * `retry()` (which resends this SAME context object, so the same live function runs again), and
+   * "Save Another" (which rebuilds a fresh context on the next Save press). When present, `startSave`
+   * calls this INSTEAD OF reading the plain {@link documentContentBase64} value. A rejection here
+   * surfaces as an ordinary handled save error (the existing `catch` in `startSave`,
+   * `createErrorFromException`) — nothing is uploaded.
+   */
+  captureDocumentContent?: () => Promise<string>;
   /**
    * Task 025: "Keep both" — retries a CREATE save that was just refused with a filename collision
    * (OFFICE_020), asking the server to upload under a Graph-chosen non-colliding name instead of
@@ -924,6 +940,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // legitimate version save.
         const sentEntity = versionTarget ? null : selectedEntity;
         let documentFileName: string | undefined;
+        // Task 045: the bytes actually sent for a Document save — resolved below, at submission time,
+        // from `context.captureDocumentContent()` when supplied (the live path) or the plain
+        // `context.documentContentBase64` value otherwise. Declared here so the idempotency-key section
+        // further down (which hashes this same content) can read it without re-invoking the capture.
+        let documentContentForRequest: string | undefined;
 
         // Build request in server-expected format
         // Server requires: contentType, targetEntity, and type-specific metadata
@@ -994,8 +1015,20 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
           };
         } else if (contentType === 'Document') {
-          // Document content is required for Word documents
-          if (!context.documentContentBase64) {
+          // Task 045: capture the document's bytes HERE — at the moment this save is actually
+          // submitted — never earlier. `captureDocumentContent` (when supplied) is a LIVE function
+          // bound to the open document (SaveView → hostAdapter.getDocumentContent()); calling it fresh
+          // on every `startSave` is what makes the first Save, a `retry()` (which resends this same
+          // context/callback), and "Save Another" (whose next Save press rebuilds the context) each
+          // upload the document as it is right now, instead of a snapshot taken when the Save tab
+          // mounted. Falls back to the plain `documentContentBase64` value for callers that already
+          // have bytes in hand (tests). A capture failure THROWS here, inside the existing try/catch,
+          // so it surfaces as an ordinary handled save error (`createErrorFromException` below) and
+          // uploads nothing — never a silent old-bytes upload.
+          documentContentForRequest = context.captureDocumentContent
+            ? await context.captureDocumentContent()
+            : context.documentContentBase64;
+          if (!documentContentForRequest) {
             throw new Error('Document content is required. Please ensure the document is captured before saving.');
           }
           // Ensure a real .docx extension — SPE preview, Word open, Compose mount, and AI text
@@ -1008,7 +1041,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             fileName: docFileName,
             title: effectiveDocumentName,
             contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            contentBase64: context.documentContentBase64,
+            contentBase64: documentContentForRequest,
             // FR-11 (task 024): the two version fields travel TOGETHER — the server refuses existingDocumentId
             // without isNewVersion:true (OFFICE_018). "Save as new document" sends neither. No versionComment:
             // the pane collects none (SharePoint Embedded keeps no readable version comment).
@@ -1050,11 +1083,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // response cache (IdempotencyFilter) — so the body key is what stops a retry after a failure from being
         // answered with the failed job, and what makes two revisions of one document two operations.
         let idempotencyKey: string;
-        if (existingDocumentId && documentFileName && context.documentContentBase64) {
+        if (existingDocumentId && documentFileName && documentContentForRequest) {
           idempotencyKey = await computeIdempotencyKey(request, {
             existingDocumentId,
             fileName: documentFileName,
-            contentSha256: await sha256Hex(context.documentContentBase64),
+            contentSha256: await sha256Hex(documentContentForRequest),
             failedAttempts: versionFailuresRef.current,
           });
           serverRequest.idempotencyKey = idempotencyKey;
