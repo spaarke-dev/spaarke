@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.Shared.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
@@ -30,9 +31,15 @@ public class OfficeVersionSaveAiRefreshPayloadTests
 {
     private const string DocumentDrive = "b!doc-drive";
 
-    private static readonly byte[] Original = { 0x50, 0x4B, 0x03, 0x04, 0x10 };
-    private static readonly byte[] DraftB = { 0x50, 0x4B, 0x03, 0x04, 0x42, 0x42 };
-    private static readonly byte[] DraftA = { 0x50, 0x4B, 0x03, 0x04, 0x41 };
+    // FR-02 (task 014): REAL minimal .docx bytes, not a bare PK signature. Once the save path stamps the
+    // document identity into the uploaded bytes, a zip signature with nothing behind it classifies CORRUPT and
+    // the save is refused with OFFICE_021 — so a stub fixture would silently test a refusal instead of this
+    // class's actual subject. Note the trap NOT taken: dropping the PK prefix also makes these tests pass,
+    // because the stamper then treats the bytes as a non-OOXML payload and passes them through — green tests
+    // over a production path that never stamps anything.
+    private static readonly byte[] Original = MinimalDocx.Create("original");
+    private static readonly byte[] DraftB = MinimalDocx.Create("draft B");
+    private static readonly byte[] DraftA = MinimalDocx.Create("draft A");
 
     private static async Task<Guid> ReadJobIdAsync(HttpResponseMessage response)
     {

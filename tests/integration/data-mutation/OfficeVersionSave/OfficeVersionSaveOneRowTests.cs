@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.Shared.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
@@ -30,9 +32,13 @@ public class OfficeVersionSaveOneRowTests
 {
     private const string DocumentDrive = "b!doc-drive";
 
-    private static readonly byte[] Original = { 0x50, 0x4B, 0x03, 0x04, 0x10 };
-    private static readonly byte[] SecondDraft = { 0x50, 0x4B, 0x03, 0x04, 0x20, 0x20 };
-    private static readonly byte[] ThirdDraft = { 0x50, 0x4B, 0x03, 0x04, 0x30, 0x30, 0x30 };
+    // FR-02 (task 014): REAL minimal .docx bytes. A bare PK signature classifies CORRUPT once the save path
+    // stamps document identity into the uploaded bytes, so every save here would be refused with OFFICE_021.
+    // Dropping the PK prefix would also turn these green — by making the stamper pass the bytes through
+    // untouched — which is the false green this migration exists to avoid.
+    private static readonly byte[] Original = MinimalDocx.Create("original");
+    private static readonly byte[] SecondDraft = MinimalDocx.Create("second draft");
+    private static readonly byte[] ThirdDraft = MinimalDocx.Create("third draft");
 
     [Fact]
     public async Task VersionSave_LeavesExactlyOneRow_AndAddsOneVersionToTheSameDriveItem()
@@ -59,13 +65,18 @@ public class OfficeVersionSaveOneRowTests
         world.SpeItems.Should().HaveCount(itemsBefore, "no second SPE item is minted");
         var item = world.SpeItems[itemId];
         item.Versions.Should().HaveCount(2, "the SPE version count is incremented");
-        item.Versions[^1].Should().Equal(SecondDraft);
+        // FR-02 (task 014): what is STORED is the posted draft plus this document's identity stamp, so content
+        // is compared by body text rather than by raw bytes — and the stamp must name THIS row.
+        MinimalDocx.ReadBodyText(item.Versions[^1]).Should().Be("second draft");
+        OfficeDocumentStamp.TryReadStamp(item.Versions[^1]).Should().Be(documentId,
+            "a version save stamps the identity of the row it is writing to");
         world.Documents[documentId].ItemId.Should().Be(itemId, "the row keeps the sprk_graphitemid it already carried");
 
         // Only the file metadata the version changed — never an identity column.
         var update = world.DocumentUpdates.Should().ContainSingle().Subject;
         update.DocumentId.Should().Be(documentId.ToString("D"));
-        update.Update.FileSize.Should().Be(SecondDraft.Length);
+        update.Update.FileSize.Should().Be(item.Versions[^1].Length,
+            "sprk_filesize describes the bytes actually stored, which carry the identity stamp");
         update.Update.FilePath.Should().Be(item.WebUrl);
         update.Update.FileName.Should().BeNull("SPE's item name did not change, so the row's name is not rewritten");
         update.Update.GraphItemId.Should().BeNull();
@@ -105,7 +116,7 @@ public class OfficeVersionSaveOneRowTests
             .StatusCode.Should().Be(HttpStatusCode.Accepted, "a different revision is a different operation");
 
         world.SpeItems[itemId].Versions.Should().HaveCount(3);
-        world.SpeItems[itemId].Versions[^1].Should().Equal(ThirdDraft);
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("third draft");
         world.Jobs.Select(j => j.IdempotencyKey).Should().OnlyHaveUniqueItems();
 
         // A retry of the SAME request is de-duplicated — no fourth version.
@@ -138,7 +149,9 @@ public class OfficeVersionSaveOneRowTests
         var graduation = world.GenericUpdates.Should().ContainSingle().Subject;
         graduation.Id.Should().Be(documentId);
         graduation.Fields["sprk_canonicaldocument"].Should().Be(DBNull.Value, "the link is severed");
-        graduation.Fields["sprk_canonicalhash"].Should().Be(OfficeVersionSaveWorld.Hash(SecondDraft));
+        graduation.Fields["sprk_canonicalhash"].Should().Be(
+            OfficeVersionSaveWorld.Hash(world.SpeItems[itemId].Versions[^1]),
+            "content identity is the hash of the bytes as STORED, which include the identity stamp (FR-02)");
         world.Documents[documentId].CanonicalDocumentId.Should().BeNull();
 
         world.SpeItems[itemId].Versions.Should().HaveCount(2);
@@ -147,10 +160,19 @@ public class OfficeVersionSaveOneRowTests
     }
 
     [Fact]
-    public async Task VersionSave_ByteIdenticalToWhatTheLinkedCopyAlreadyHolds_KeepsTheLink_AndStillWritesTheVersion()
+    public async Task VersionSave_OfAPreReleaseLinkedCopy_WithUnchangedContent_GraduatesIt_BecauseTheStoredBytesGainTheStamp()
     {
-        // A byte-identical re-save must not be treated as a duplicate that deletes the version just written,
-        // or that redirects the user to another canonical.
+        // FR-02 (task 014) §6b — an ACCEPTED, recorded semantic change, pinned here so it cannot drift back.
+        //
+        // This row's hash link was recorded over UNSTAMPED stored bytes: every link made before FR-02 shipped,
+        // and every link made by a non-Word path. The moment a Word-pane version save writes, the stored bytes
+        // gain an identity stamp, so their live hash necessarily differs from the recorded one — and
+        // graduate-on-divergence severs the link even though the USER changed nothing.
+        //
+        // The direction is conservative: a lost link costs a notification, never a record or a byte, which is
+        // why the owner accepted it on 2026-09-17 (spec NFR-08 as amended). What must NOT change is everything
+        // else this test guards: the version is still written, nothing is deleted, no row is created, and the
+        // user stays on THEIR document rather than being redirected to a canonical.
         var world = new OfficeVersionSaveWorld();
         var canonical = Guid.NewGuid();
         var (documentId, itemId) = world.SeedDocument(
@@ -162,11 +184,18 @@ public class OfficeVersionSaveOneRowTests
             "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, SecondDraft));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        world.SpeItems[itemId].Versions.Should().HaveCount(2, "the version is written even though the bytes match");
+        world.SpeItems[itemId].Versions.Should().HaveCount(2, "the version is written even though the content is unchanged");
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("second draft");
         world.DeletedItemIds.Should().BeEmpty("the byte-identical short-circuit never runs on the version path");
-        world.GenericUpdates.Should().BeEmpty("not diverged → the link stands");
-        world.Documents[documentId].CanonicalDocumentId.Should().Be(canonical);
 
+        var graduation = world.GenericUpdates.Should().ContainSingle().Subject;
+        graduation.Id.Should().Be(documentId);
+        graduation.Fields["sprk_canonicaldocument"].Should().Be(DBNull.Value,
+            "the stamp makes the stored bytes diverge from the pre-release link's recorded hash");
+        world.Documents[documentId].CanonicalDocumentId.Should().BeNull();
+
+        world.Documents.Should().HaveCount(1, "graduation never creates a row");
+        world.DocumentCreates.Should().Be(0);
         var payload = world.FinalizationPayloads.Should().ContainSingle().Subject;
         OfficeVersionSaveWorld.PayloadValue(payload, "DocumentId")
             .Should().Be(documentId.ToString("D"), "the user stays on THEIR document, not a canonical");

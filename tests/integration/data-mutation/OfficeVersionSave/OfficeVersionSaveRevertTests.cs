@@ -5,6 +5,7 @@ using System.Text;
 using FluentAssertions;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.Shared.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
@@ -33,9 +34,15 @@ public class OfficeVersionSaveRevertTests
 {
     private const string DocumentDrive = "b!doc-drive";
 
-    private static readonly byte[] Initial = { 0x50, 0x4B, 0x03, 0x04, 0x30 };
-    private static readonly byte[] B = { 0x50, 0x4B, 0x03, 0x04, 0x42, 0x42 };
-    private static readonly byte[] A = { 0x50, 0x4B, 0x03, 0x04, 0x41, 0x41, 0x41 };
+    // FR-02 (task 014): REAL minimal .docx bytes — a bare PK signature now classifies CORRUPT (OFFICE_021).
+    //
+    // This class is also where FR-02's interaction with task 047 is load-bearing. The duplicate check reads the
+    // document's CURRENT stored content, which is now stamped, while the request's bytes are not. OfficeService
+    // therefore stamps the request before comparing, which is only sound because stamping is byte-
+    // DETERMINISTIC. If that ever regressed, "the same save sent twice" below would write two versions.
+    private static readonly byte[] Initial = MinimalDocx.Create("initial");
+    private static readonly byte[] B = MinimalDocx.Create("draft B");
+    private static readonly byte[] A = MinimalDocx.Create("draft A");
 
     private static readonly SaveEntityReference Target = new() { EntityType = "matter", EntityId = Guid.NewGuid() };
 
@@ -86,7 +93,8 @@ public class OfficeVersionSaveRevertTests
 
         world.SpeItems[itemId].Versions.Should().HaveCount(4,
             "the seed plus three saves: the third save of B follows a different written version, so it is written");
-        world.SpeItems[itemId].Versions[^1].Should().Equal(B, "SPE holds what the user saved last");
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1])
+            .Should().Be("draft B", "SPE holds what the user saved last");
         third.StatusCode.Should().Be(HttpStatusCode.Accepted);
         third.Headers.GetValues("X-Idempotency-Status").Should().Equal(new[] { "new" },
             "the response cache must not replay the first B save's 202");
@@ -114,7 +122,7 @@ public class OfficeVersionSaveRevertTests
             "the first B save's Completed job no longer describes the document, which now holds A");
         (await BodyOf(third)).Duplicate.Should().BeFalse();
         world.SpeItems[itemId].Versions.Should().HaveCount(4);
-        world.SpeItems[itemId].Versions[^1].Should().Equal(B);
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("draft B");
         world.Jobs.Should().HaveCount(3);
     }
 
@@ -134,7 +142,7 @@ public class OfficeVersionSaveRevertTests
         third.StatusCode.Should().Be(HttpStatusCode.Accepted);
         (await BodyOf(third)).Duplicate.Should().BeFalse();
         world.SpeItems[itemId].Versions.Should().HaveCount(4);
-        world.SpeItems[itemId].Versions[^1].Should().Equal(B);
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("draft B");
         world.Jobs.Should().HaveCount(3);
     }
 
@@ -219,7 +227,7 @@ public class OfficeVersionSaveRevertTests
 
         retry.StatusCode.Should().Be(HttpStatusCode.Accepted, "a cancelled attempt is not a performed operation");
         world.SpeItems[itemId].Versions.Should().HaveCount(2);
-        world.SpeItems[itemId].Versions[^1].Should().Equal(B);
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("draft B");
         world.Jobs.Should().HaveCount(2);
     }
 

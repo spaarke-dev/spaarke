@@ -85,9 +85,11 @@ public class OfficeDocumentPersistence
         string fileName,
         long fileSize,
         string userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? preAssignedDocumentId = null)
         => CreateDocumentWithSpePointersAsync(
-            request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken);
+            request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken,
+            preAssignedDocumentId);
 
     /// <summary>
     /// Task 046 (b): the same create, with the name the document is SHOWN under (<paramref name="documentName"/>,
@@ -105,7 +107,8 @@ public class OfficeDocumentPersistence
         string documentName,
         long fileSize,
         string userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? preAssignedDocumentId = null)
     {
         _logger.LogDebug(
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
@@ -216,6 +219,10 @@ public class OfficeDocumentPersistence
         {
             Name = boundedDocumentName, // task 046 (b) / 020: the readable name; only the stored file (sprk_filename) carries a suffix
             ContainerId = driveId,
+            // FR-02 (spaarkeai-word-add-in-r1 task 014): when the caller stamped an id into the bytes it
+            // uploaded, the row MUST take that id as its key — otherwise the stored file names a record that
+            // does not exist. Null for every other caller, and Dataverse mints the key exactly as before.
+            Id = preAssignedDocumentId,
             Description = request.ContentType switch
             {
                 SaveContentType.Email => request.Email?.Subject,

@@ -93,6 +93,23 @@ public static class OfficeErrorCodes
     public const string NameCollision = "OFFICE_020";
 
     /// <summary>
+    /// OFFICE_021 (400): the uploaded document carries a zip signature but cannot be read as an Office
+    /// package — truncated or damaged bytes. Refused BEFORE any SPE write (FR-02, task 014,
+    /// spaarkeai-word-add-in-r1), so nothing partial is stored and the save's job is marked Failed.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is a deliberate BEHAVIOUR CHANGE: before FR-02 stamping, a corrupt <c>.docx</c> was stored
+    /// as-is. Refusing is the acceptance criterion ("corrupt → handled ProblemDetails, no partial bytes"), and
+    /// it is strictly better than accepting bytes no reader can open.</para>
+    /// <para>Distinct from every pass-through case: a PDF, an EML, an arbitrary binary or a readable non-Word
+    /// zip is NOT an error — those bytes are stored untouched. Only "claims to be a package, is not one" lands
+    /// here.</para>
+    /// <para>⚠️ <b>Not 020.</b> <c>OFFICE_020</c> is task 025's name-collision refusal. The task-014 design
+    /// note predates 025 landing and assigned 020 to this refusal; 021 is the next free code.</para>
+    /// </remarks>
+    public const string CorruptDocumentPackage = "OFFICE_021";
+
+    /// <summary>
     /// Base URI for Office error types.
     /// </summary>
     public const string TypeBaseUri = "https://spaarke.com/errors/office/";
@@ -113,6 +130,7 @@ public static class OfficeErrorCodes
             TotalSizeExceeded => "validation-error",
             BlockedFileType => "validation-error",
             VersionIntentMismatch => "validation-error",
+            CorruptDocumentPackage => "validation-error",
             AssociationNotFound => "not-found",
             JobNotFound => "not-found",
             VersionTargetNotFound => "not-found",
@@ -161,6 +179,7 @@ public static class OfficeErrorCodes
             VersionIntentMismatch => "Version Intent Mismatch",
             VersionTargetLocked => "Version Target Locked",
             NameCollision => "File Already Exists",
+            CorruptDocumentPackage => "Document File Unreadable",
             _ => "Error"
         };
     }
@@ -181,6 +200,7 @@ public static class OfficeErrorCodes
             TotalSizeExceeded => 400,
             BlockedFileType => 400,
             VersionIntentMismatch => 400,
+            CorruptDocumentPackage => 400,
             AssociationNotFound => 404,
             JobNotFound => 404,
             VersionTargetNotFound => 404,

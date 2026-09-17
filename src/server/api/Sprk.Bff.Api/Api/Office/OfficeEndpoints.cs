@@ -535,6 +535,11 @@ public static class OfficeEndpoints
                 error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
             OfficeErrorCodes.VersionIntentMismatch => ProblemDetailsHelper.OfficeValidationError(
                 error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
+            // FR-02 (word-add-in-r1 task 014) — the uploaded bytes claim to be an Office package but cannot be
+            // opened as one. Refused before any SPE write, so nothing partial was stored. Same validation-error
+            // shape as OFFICE_018 above; it is the request's content that is wrong, not the server's state.
+            OfficeErrorCodes.CorruptDocumentPackage => ProblemDetailsHelper.OfficeValidationError(
+                error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
             OfficeErrorCodes.VersionTargetHasNoFile or OfficeErrorCodes.VersionTargetLocked => Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(error.Code),
                 title: OfficeErrorCodes.GetTitle(error.Code),

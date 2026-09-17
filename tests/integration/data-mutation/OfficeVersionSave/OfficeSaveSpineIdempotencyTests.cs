@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.Shared.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
@@ -38,8 +39,11 @@ public class OfficeSaveSpineIdempotencyTests
 {
     private const string DefaultContainer = "b!test-office-save-drive";
 
-    private static readonly byte[] Original = { 0x50, 0x4B, 0x03, 0x04, 0x61 };
-    private static readonly byte[] Edited = { 0x50, 0x4B, 0x03, 0x04, 0x62, 0x62 };
+    // FR-02 (task 014): REAL minimal .docx bytes — a bare PK signature now classifies CORRUPT (OFFICE_021),
+    // and dropping the PK prefix would make the stamper pass the bytes through, which is the false green this
+    // migration exists to avoid.
+    private static readonly byte[] Original = MinimalDocx.Create("original");
+    private static readonly byte[] Edited = MinimalDocx.Create("edited");
 
     private static HttpRequestMessage Post(SaveRequest body, string? headerKey)
     {
@@ -95,8 +99,10 @@ public class OfficeSaveSpineIdempotencyTests
             "a same-name second create is refused before any bytes move, not silently written over the first");
         (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
         world.UploadSmallCalls.Should().Be(1, "the collision is refused before a second upload — the edited bytes never reach SPE");
-        SavedItem(world).Versions.Should().ContainSingle()
-            .Which.Should().Equal(Original, "the first document's bytes are provably unchanged by the refused second save");
+        // Compared by body text, not raw bytes: what is stored is the first save's content plus its identity
+        // stamp (FR-02, task 014). The claim being made is "the first document's CONTENT is untouched".
+        MinimalDocx.ReadBodyText(SavedItem(world).Versions.Should().ContainSingle().Subject)
+            .Should().Be("original", "the first document is provably unchanged by the refused second save");
         world.Jobs.Should().HaveCount(2, "the refused attempt still gets its own ProcessingJob row, marked Failed");
         world.Jobs.Select(j => j.IdempotencyKey).Should().OnlyHaveUniqueItems();
     }
@@ -120,7 +126,8 @@ public class OfficeSaveSpineIdempotencyTests
             "a different document is a different operation, so it reaches the upload — which refuses the name collision");
         (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
         world.UploadSmallCalls.Should().Be(1);
-        SavedItem(world).Versions.Should().ContainSingle().Which.Should().Equal(Original);
+        MinimalDocx.ReadBodyText(SavedItem(world).Versions.Should().ContainSingle().Subject)
+            .Should().Be("original");
         world.Jobs.Should().HaveCount(2);
     }
 
@@ -185,7 +192,7 @@ public class OfficeSaveSpineIdempotencyTests
         retry.StatusCode.Should().Be(HttpStatusCode.Accepted, "a failed attempt is not a duplicate of the retry");
         (await retry.Content.ReadFromJsonAsync<SaveResponse>())!.Duplicate.Should().BeFalse();
         world.SpeItems[itemId].Versions.Should().HaveCount(2);
-        world.SpeItems[itemId].Versions[^1].Should().Equal(Edited);
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("edited");
         world.Jobs.Should().HaveCount(2);
         world.Documents.Should().HaveCount(1);
     }

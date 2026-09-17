@@ -28,6 +28,7 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.Services.Compose;
+using Sprk.Bff.Api.Tests.Shared.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
@@ -875,8 +876,12 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
 [Trait("status", "repaired")]
 public class OfficeVersionSaveContractTests
 {
-    private static readonly byte[] InitialBytes = { 0x50, 0x4B, 0x03, 0x04, 0x01 };
-    private static readonly byte[] RevisedBytes = { 0x50, 0x4B, 0x03, 0x04, 0x02, 0x02 };
+    // FR-02 (task 014): REAL minimal .docx bytes. A bare PK signature classifies CORRUPT once the save path
+    // stamps document identity into the uploaded bytes, so every Document save here would be refused with
+    // OFFICE_021. Dropping the PK prefix would also turn these green — by making the stamper pass the bytes
+    // through as a non-OOXML payload — and that is the false green the migration exists to avoid.
+    private static readonly byte[] InitialBytes = MinimalDocx.Create("initial");
+    private static readonly byte[] RevisedBytes = MinimalDocx.Create("revised");
 
     // ── AC3: no existingDocumentId → a new document, exactly as today ─────────────────────────────
 
@@ -1282,7 +1287,11 @@ public sealed class OfficeVersionSaveWorld
             DocumentCreates++;
             CreatedDocumentNames.Add(request.Name);
             CreatedDocumentDescriptions.Add(request.Description);
-            var id = Guid.NewGuid();
+            // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
+            // document-create path now supplies one so the row's id matches the id stamped into the bytes it
+            // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare
+            // it against the created row — a world that always minted its own id could not observe the link.
+            var id = request.Id ?? Guid.NewGuid();
             Documents[id] = new DocumentRow { Id = id, FileName = request.Name };
             return id.ToString("D");
         }
@@ -1875,9 +1884,10 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
 [Trait("status", "repaired")]
 public class OfficeSaveAddInWireContractTests
 {
-    private static readonly byte[] InitialBytes = { 0x50, 0x4B, 0x03, 0x04, 0x31 };
-    private static readonly byte[] Revision2 = { 0x50, 0x4B, 0x03, 0x04, 0x32, 0x32 };
-    private static readonly byte[] Revision3 = { 0x50, 0x4B, 0x03, 0x04, 0x33, 0x33, 0x33 };
+    // FR-02 (task 014): REAL minimal .docx bytes — see the note on OfficeVersionSaveContractTests' fixtures.
+    private static readonly byte[] InitialBytes = MinimalDocx.Create("wire initial");
+    private static readonly byte[] Revision2 = MinimalDocx.Create("wire revision 2");
+    private static readonly byte[] Revision3 = MinimalDocx.Create("wire revision 3");
 
     /// <summary>The body useSaveFlow builds for a Word Document save.</summary>
     private static string PaneBody(byte[] bytes, string? existingDocumentId, string? bodyKey, bool withTarget = false)
@@ -2058,9 +2068,12 @@ public class OfficeSaveAddInWireContractTests
 [Trait("status", "repaired")]
 public class OfficeSaveSpineIdempotencyContractTests
 {
-    private static readonly byte[] InitialBytes = { 0x50, 0x4B, 0x03, 0x04, 0x41 };
-    private static readonly byte[] Revision2 = { 0x50, 0x4B, 0x03, 0x04, 0x42, 0x42 };
-    private static readonly byte[] Revision3 = { 0x50, 0x4B, 0x03, 0x04, 0x43, 0x43, 0x43 };
+    // FR-02 (task 014): REAL minimal .docx bytes — see the note on OfficeVersionSaveContractTests' fixtures.
+    // The ContentHash assertions below are unaffected: they hash the REQUEST's base64, which the stamper
+    // never touches (it works on a decoded copy and never writes back to the request).
+    private static readonly byte[] InitialBytes = MinimalDocx.Create("spine initial");
+    private static readonly byte[] Revision2 = MinimalDocx.Create("spine revision 2");
+    private static readonly byte[] Revision3 = MinimalDocx.Create("spine revision 3");
 
     private static HttpRequestMessage Post(SaveRequest body, string? headerKey)
     {
@@ -2109,7 +2122,9 @@ public class OfficeSaveSpineIdempotencyContractTests
         response.Headers.GetValues("X-Idempotency-Status").Should().Equal(new[] { "new" },
             "a reused header never replays a response for a different Document body");
         world.SpeItems[itemId].Versions.Should().HaveCount(3, "the third revision is written");
-        world.SpeItems[itemId].Versions[^1].Should().Equal(Revision3);
+        // FR-02 (task 014): the stored version carries this document's identity stamp, so the content claim is
+        // made against body text rather than raw bytes.
+        MinimalDocx.ReadBodyText(world.SpeItems[itemId].Versions[^1]).Should().Be("spine revision 3");
         world.Jobs.Select(j => j.IdempotencyKey).Should().Equal(new[] { "body-r2", "body-r3" },
             "the BODY key is the persistent key; the header never becomes it");
     }

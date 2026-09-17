@@ -5,6 +5,7 @@ using FluentAssertions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.Shared.Office;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
@@ -40,8 +41,11 @@ public class OfficeCreateCollisionTests
 {
     private const string SaveContainer = "b!test-office-save-drive";
 
-    private static readonly byte[] B = { 0x50, 0x4B, 0x03, 0x04, 0x42, 0x42 };
-    private static readonly byte[] A = { 0x50, 0x4B, 0x03, 0x04, 0x41, 0x41, 0x41 };
+    // FR-02 (task 014): REAL minimal .docx bytes — a bare PK signature now classifies CORRUPT, so every save
+    // here would be refused with OFFICE_021 instead of reaching the OFFICE_020 collision this class is about.
+    // The two refusals must stay distinguishable, which is why 014 took the next free code rather than 020.
+    private static readonly byte[] B = MinimalDocx.Create("draft B");
+    private static readonly byte[] A = MinimalDocx.Create("draft A");
 
     private static readonly SaveEntityReference Target = new() { EntityType = "matter", EntityId = Guid.NewGuid() };
 
@@ -123,7 +127,8 @@ public class OfficeCreateCollisionTests
         // The existing file's bytes AND version are provably unchanged.
         var item = TheItemNamed(world, "Brief.docx");
         item.Versions.Should().ContainSingle("the collision never added a version, let alone replaced the content");
-        item.Versions[0].Should().Equal(B, "the existing item's bytes are exactly what the first save wrote");
+        MinimalDocx.ReadBodyText(item.Versions[0])
+            .Should().Be("draft B", "the existing item still holds exactly what the first save wrote");
         world.UploadSmallCalls.Should().Be(1, "the colliding attempt never reached a second successful upload");
         world.CollisionRefusals.Should().Be(1);
     }
@@ -164,7 +169,8 @@ public class OfficeCreateCollisionTests
         world.Documents.Should().HaveCount(1, "A's create never inserted a second row (the sprk_graphitemid_uk defect is moot: it never got that far)");
         var item = TheItemNamed(world, "Brief.docx");
         item.Versions.Should().ContainSingle("neither the refused A nor the truthful duplicate B wrote anything new");
-        item.Versions[0].Should().Equal(B, "SPE ends exactly where the user left it — holding B, never silently corrupted to A");
+        MinimalDocx.ReadBodyText(item.Versions[0])
+            .Should().Be("draft B", "SPE ends exactly where the user left it — holding B, never silently corrupted to A");
         world.Jobs.Should().HaveCount(2, "B's job (Completed) and A's job (Failed) — the third save's Duplicate answer creates no new job");
     }
 
@@ -221,7 +227,7 @@ public class OfficeCreateCollisionTests
         world.Documents.Should().HaveCount(2, "a genuinely new row for the renamed upload");
         var renamedItem = world.SpeItems.Values.Should().ContainSingle(i => i.DriveId == SaveContainer && i.Name != "Brief.docx").Subject;
         renamedItem.Name.Should().StartWith("Brief (", "Graph's own auto-rename shape, mirrored by the fixture");
-        renamedItem.Versions.Should().ContainSingle().Which.Should().Equal(A);
+        MinimalDocx.ReadBodyText(renamedItem.Versions.Should().ContainSingle().Subject).Should().Be("draft A");
 
         // The Dataverse row stores the file's ACTUAL (renamed) name, not the one that was merely requested.
         var renamedDocument = world.Documents.Values.Single(d => d.ItemId == renamedItem.Id);
@@ -229,7 +235,7 @@ public class OfficeCreateCollisionTests
 
         // The original is provably untouched throughout.
         var original = TheItemNamed(world, "Brief.docx");
-        original.Versions.Should().ContainSingle().Which.Should().Equal(B);
+        MinimalDocx.ReadBodyText(original.Versions.Should().ContainSingle().Subject).Should().Be("draft B");
     }
 
     [Fact]
@@ -262,7 +268,8 @@ public class OfficeCreateCollisionTests
         world.Documents.Should().HaveCount(1, "a version save never creates a second row — the invariant this retry depends on");
         var item = TheItemNamed(world, "Brief.docx");
         item.Versions.Should().HaveCount(2, "the version write is item-keyed (ReplaceFileContentAsUserAsync), not a second path-keyed upload");
-        item.Versions[^1].Should().Equal(A, "the version save's content is what the user actually chose to keep");
+        MinimalDocx.ReadBodyText(item.Versions[^1])
+            .Should().Be("draft A", "the version save's content is what the user actually chose to keep");
         world.ReplaceCalls.Should().Be(1, "the version write went through the item-keyed path, never a second create upload");
     }
 }
