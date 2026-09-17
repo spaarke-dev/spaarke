@@ -138,6 +138,14 @@ shared/adapters/__tests__/capabilities.test.ts
 # pencil edit commits/reverts, the edited value is what reaches the wire as
 # document.title, and Outlook is untouched (no default, no pencil).
 shared/taskpane/components/__tests__/SaveFlow.documentName.test.tsx
+# --- create-path name collision (task 025, FR-12) - green from creation -------
+# Pins the refuse-before-upload contract at the pane: an OFFICE_020 (409) shows
+# the inline two-option choice rather than a dead error; "Keep both" sends
+# AllowRename; "Save as new version" routes through the SHIPPED FR-11 version
+# path (never a second create); dismissing writes nothing. The typed collision
+# message must name the file and never render a raw server string.
+shared/taskpane/components/__tests__/SaveFlowCollision.test.tsx
+shared/taskpane/utils/__tests__/errorMessages.collision.test.ts
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
