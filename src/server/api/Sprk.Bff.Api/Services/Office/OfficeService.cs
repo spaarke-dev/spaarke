@@ -600,19 +600,22 @@ public class OfficeService : IOfficeService
                 // collision-detection mechanism, the same Graph-native conflictBehavior two other callers
                 // already use.
                 //
-                // Scoped to SaveContentType.Document ONLY. Email and Attachment are IMMUTABLE captures
-                // whose OWN safety net is content-hash dedup (NFR-08 suppress mode) running AFTER the
-                // upload, not a name-collision refusal BEFORE it — OfficeImmutableSaveFileSafetyTests
-                // pins a same-name, byte-identical Attachment save as a SUCCESSFUL suppressed duplicate,
-                // which a blanket Fail would turn into a 409 refusal instead. Verified empirically (root
-                // CLAUDE.md §F.3): applying Fail uniformly regressed that suite; scoping to Document alone
-                // does not. A future task may extend this to Email's typed-name collision (2026-09-15
-                // owner decision, CLAUDE.md § "Decisions Made" — "a clash on a typed name goes to task
-                // 025's refuse-and-ask prompt"), but that needs its own reconciliation with the immutable
-                // dedup-suppress path and is out of this task's verified scope; not attempted here.
-                var conflictBehavior = request.ContentType != SaveContentType.Document
-                    ? ConflictBehavior.Replace
-                    : request.Document?.AllowRename == true
+                // ══ TASK 054 — THE SAME REFUSAL NOW COVERS EMAIL AND ATTACHMENT ══════════════════
+                // Task 025 scoped Fail to Document because a BLANKET Fail regressed
+                // OfficeImmutableSaveFileSafetyTests: an immutable capture's safety net is content-hash
+                // dedup running AFTER the upload, and that suite pins a same-name, byte-identical
+                // Attachment save as a SUCCESSFUL suppressed duplicate, which a bare refusal turns into a
+                // 409. So a typed-name Email/Attachment collision kept overwriting the first document's
+                // file (the 2026-09-15 owner decision's unimplemented half).
+                //
+                // The conflict is one of ORDERING, and it is resolved in ResolveNameCollisionAsync, not
+                // here: a name alone cannot separate "the same capture saved twice" (a duplicate suppress
+                // is right to collapse) from "two different emails that share a typed name" (two documents
+                // that must become two files) — only the CONTENT can, and it is compared there against the
+                // already-stored file BEFORE anything is written. Every content type therefore asks SPE to
+                // refuse first; what a refusal MEANS is decided below.
+                var conflictBehavior = request.ContentType == SaveContentType.Document
+                    && request.Document?.AllowRename == true
                         ? ConflictBehavior.Rename
                         : ConflictBehavior.Fail;
 
@@ -625,17 +628,17 @@ public class OfficeService : IOfficeService
 
                 if (upload.IsNameCollision)
                 {
-                    // Reachable only for a Document create (conflictBehavior above is Replace for every
-                    // other content type, which never throws the collision exception). Nothing was
-                    // written: SPE refused the PUT before any bytes moved, so the existing item (and its
-                    // owning sprk_document row, if any) is provably untouched. Extracted to its own method
-                    // (task 025 code-review, root CLAUDE.md §11.5): the ENTIRE collision-resolution
-                    // contract — refuse-if-owned, reclaim-if-orphaned, no third path — is auditable in one
-                    // place, mirroring the existing ResolveVersionTargetAsync (Target, Refusal) shape.
+                    // Reachable for EVERY content type since task 054 (Document, Email and Attachment all
+                    // ask for Fail above). Nothing was written: SPE refused the PUT before any bytes
+                    // moved, so the existing item (and its owning sprk_document row, if any) is provably
+                    // untouched. Extracted to its own method (task 025 code-review, root CLAUDE.md §11.5):
+                    // the ENTIRE collision-resolution contract — reclaim-if-orphaned, continue-if-the-same
+                    // -immutable-content, refuse-otherwise — is auditable in one place, mirroring the
+                    // existing ResolveVersionTargetAsync (Target, Refusal) shape.
                     var collisionUploadError = upload.Error;
                     SaveError? refusal;
                     (refusal, upload) = await ResolveNameCollisionAsync(
-                        upload, containerId, fileName, contentStream, cancellationToken);
+                        upload, containerId, fileName, contentStream, request.ContentType, cancellationToken);
 
                     if (refusal is not null)
                     {
@@ -1051,20 +1054,55 @@ public class OfficeService : IOfficeService
             System.Text.Encoding.UTF8.GetBytes(contentBase64 ?? string.Empty)));
 
     /// <summary>
-    /// Task 025 (spaarkeai-word-add-in-r1): decides what a Document create's name collision means and what
-    /// to do about it — the ENTIRE collision-resolution contract in one auditable place, mirroring the
-    /// shape of <see cref="ResolveVersionTargetAsync"/> (a decision-or-refusal tuple, no job/response
-    /// mechanics inside it). Returns EITHER a refusal (<see cref="SaveError"/> — the collision names an
-    /// OWNED document; <c>Upload</c> is the original, still-collided result and MUST NOT be used further)
-    /// OR the upload to continue processing with (<c>Refusal</c> is <c>null</c> — the collision resolved to
-    /// no owning document, and an orphaned item was safely reclaimed via <see cref="ConflictBehavior.Replace"/>).
-    /// Never both; never neither.
+    /// Task 025 (spaarkeai-word-add-in-r1), extended to immutable captures by task 054: decides what a
+    /// create's name collision means and what to do about it — the ENTIRE collision-resolution contract in
+    /// one auditable place, mirroring the shape of <see cref="ResolveVersionTargetAsync"/> (a
+    /// decision-or-refusal tuple, no job/response mechanics inside it). Returns EITHER a refusal
+    /// (<see cref="SaveError"/>; <c>Upload</c> is the original, still-collided result and MUST NOT be used
+    /// further) OR the upload to continue processing with (<c>Refusal</c> is <c>null</c>). Never both;
+    /// never neither.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Three outcomes, in the order they are decided.</b></para>
+    /// <list type="number">
+    /// <item><b>Nothing owns the name</b> — an orphan left by an earlier attempt that uploaded but failed
+    /// before its Dataverse row was written. Reclaimed via <see cref="ConflictBehavior.Replace"/> rather
+    /// than refused, or a transient failure would become a permanent lockout (task 025).</item>
+    /// <item><b>The name is owned, the content is IMMUTABLE, and the stored file already holds exactly
+    /// these bytes</b> (task 054) — that is the content duplicate the suppress path exists for, so the
+    /// upload proceeds under <see cref="ConflictBehavior.Replace"/> exactly as it did before this task and
+    /// the caller's dedup branch answers it. Unreachable for Document.</item>
+    /// <item><b>Otherwise the name is owned</b> — refused with <see cref="OfficeErrorCodes.NameCollision"/>,
+    /// having written nothing.</item>
+    /// </list>
+    /// <para><b>Task 054 — why the CONTENT is compared, and why before the upload.</b> An immutable
+    /// capture's safety net is content-hash dedup, which runs AFTER the upload because the hash is SPE's; a
+    /// name refusal must decide BEFORE it. A name alone cannot separate the two cases that share it: two
+    /// saves of the SAME capture are a duplicate suppress is right to collapse, while two DIFFERENT emails
+    /// that happen to share a user-typed name are two documents that must become two files. What separates
+    /// them is the content, and <see cref="OfficeStorageUploader.ItemHoldsContentAsync"/> (task 047) answers
+    /// exactly that against the already-stored item before anything is written — a byte comparison, never a
+    /// re-implemented hash, so it cannot disagree with what SPE holds.
+    /// <c>ContentDedupDetector</c> is deliberately NOT touched: its answer is correct for its other callers
+    /// (email-r2, Compose), and the ordering problem belongs to this caller.</para>
+    /// <para><b>Fail-safe.</b> A collision target that cannot be resolved or read answers "not provably
+    /// identical" and is REFUSED. A refusal is recoverable — the user renames and retries; overwriting
+    /// another document's file is not. Same direction as task 046's cleanup guard.</para>
+    /// <para><b>Document saves are unchanged by task 054.</b> Two Word drafts that are byte-identical right
+    /// now are still two distinct drafts (NFR-08), so an editable collision is refused on the NAME alone,
+    /// exactly as task 025 left it. Only an editable refusal carries <c>ExistingDocumentId</c>: FR-11's
+    /// version-save retry is Document-only — an Email/Attachment save carrying <c>ExistingDocumentId</c>
+    /// ignores it and creates its own document (pinned by
+    /// <c>OfficeVersionSaveContractTests.Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_IgnoresIt_AndBehavesAsBefore</c>),
+    /// so advertising that retry for an immutable capture would offer the pane a choice the server does not
+    /// honour.</para>
+    /// </remarks>
     private async Task<(SaveError? Refusal, OfficeStorageUploader.UploadResult Upload)> ResolveNameCollisionAsync(
         OfficeStorageUploader.UploadResult collidedUpload,
         string containerId,
         string fileName,
         Stream contentStream,
+        SaveContentType contentType,
         CancellationToken cancellationToken)
     {
         // Resolve which row already holds this name in this drive — read-only, best-effort — so the pane
@@ -1104,9 +1142,51 @@ public class OfficeService : IOfficeService
             return (null, reclaimed);
         }
 
-        _logger.LogInformation(
-            "Name collision refused: a file named '{FileName}' already exists (existing document {ExistingDocumentId}).",
-            fileName, collidingDocumentId);
+        var isEditable = OfficeDocumentPersistence.IsEditableContent(contentType);
+
+        if (!isEditable)
+        {
+            // Task 054: the name is owned AND this is an immutable capture, so the question the suppress
+            // path would have answered after the upload has to be answered now, from the content.
+            var holdsSameContent = await CollisionTargetHoldsRequestContentAsync(
+                collidingDocumentId.Value, contentStream, cancellationToken);
+
+            if (holdsSameContent == true)
+            {
+                // The stored file already holds exactly these bytes, so this save IS the duplicate the
+                // immutable suppress path is for. Continue under Replace — byte-for-byte the behaviour
+                // before task 054 — and let ContentDedupDetector reconcile it as it always has. The
+                // rewind matters: Fail still sends the PUT body, so the stream was consumed, and reading
+                // it for the comparison above consumed it again.
+                _logger.LogInformation(
+                    "Name collision on '{FileName}' resolved to document {ExistingDocumentId}, whose file already "
+                    + "holds exactly these bytes; continuing as a content duplicate rather than refusing.",
+                    fileName, collidingDocumentId);
+
+                if (contentStream.CanSeek)
+                {
+                    contentStream.Position = 0;
+                }
+
+                var deduplicated = await _storageUploader.UploadToSpeAsync(
+                    containerId, fileName, contentStream, cancellationToken, ConflictBehavior.Replace);
+                return (null, deduplicated);
+            }
+
+            _logger.LogWarning(
+                "Name collision refused: '{FileName}' is already held by document {ExistingDocumentId}, whose file "
+                + "{State}. Nothing was uploaded, so that document's file is untouched.",
+                fileName, collidingDocumentId,
+                holdsSameContent == false
+                    ? "holds different content — this is a different capture that happens to share the name"
+                    : "could not be read to confirm its content (fail-safe: an unknown is never 'identical')");
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Name collision refused: a file named '{FileName}' already exists (existing document {ExistingDocumentId}).",
+                fileName, collidingDocumentId);
+        }
 
         return (new SaveError
         {
@@ -1114,8 +1194,71 @@ public class OfficeService : IOfficeService
             Message = $"A file named \"{fileName}\" already exists here. Nothing was uploaded or changed.",
             Retryable = false,
             FileName = fileName,
-            ExistingDocumentId = collidingDocumentId
+            // Immutable captures get no version-save retry to offer — see the remarks above.
+            ExistingDocumentId = isEditable ? collidingDocumentId : null
         }, collidedUpload);
+    }
+
+    /// <summary>
+    /// Task 054 (spaarkeai-word-add-in-r1): does the document that already owns a collided name hold EXACTLY
+    /// the bytes this save is trying to upload? <c>true</c> / <c>false</c> when the comparison was actually
+    /// made; <c>null</c> when it could not be (the row carries no SPE pointers, its file could not be read,
+    /// or the row itself could not be resolved). An unknown is never "identical" — the caller refuses.
+    /// </summary>
+    /// <remarks>
+    /// Reuses the two seams that already exist for this exact question rather than adding a third:
+    /// <see cref="OfficeDocumentPersistence.ResolveVersionTargetAsync"/> for the row's SPE pointers, and
+    /// <see cref="OfficeStorageUploader.ItemHoldsContentAsync"/> (task 047) for the byte comparison — which
+    /// stops at the first differing byte and never reads more than the request's own length.
+    /// </remarks>
+    private async Task<bool?> CollisionTargetHoldsRequestContentAsync(
+        Guid collidingDocumentId,
+        Stream contentStream,
+        CancellationToken cancellationToken)
+    {
+        OfficeDocumentPersistence.VersionTarget? target;
+        try
+        {
+            target = await _documentPersistence.ResolveVersionTargetAsync(collidingDocumentId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Could not resolve sprk_document {DocumentId}, which owns a collided name; its content is unknown.",
+                collidingDocumentId);
+            return null;
+        }
+
+        // No pointers means there is no stored file to compare against — not "the same", just unknown.
+        if (target is not { HasSpePointers: true })
+        {
+            return null;
+        }
+
+        var content = ReadAllBytes(contentStream);
+        if (content.Length == 0)
+        {
+            return null;
+        }
+
+        return await _storageUploader.ItemHoldsContentAsync(
+            target.DriveId!, target.ItemId!, content, cancellationToken);
+    }
+
+    /// <summary>
+    /// Task 054: the full content of a save's content stream, rewound first so the stream can still be
+    /// uploaded afterwards. Every save's stream is an in-memory, seekable one built in <c>SaveAsync</c>.
+    /// </summary>
+    private static byte[] ReadAllBytes(Stream content)
+    {
+        if (content.CanSeek)
+        {
+            content.Position = 0;
+        }
+
+        using var buffer = new MemoryStream();
+        content.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     /// <summary>
