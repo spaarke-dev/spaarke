@@ -182,22 +182,14 @@ public class DocumentIdentityContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
-        // NOT response.Content.Headers.ContentType — a REAL, REPO-WIDE defect (task 016; filed as ISS-003,
-        // https://github.com/spaarke-dev/spaarke/issues/975 — NOT fixed here, production code is out of
-        // this task's scope):
-        // MiddlewarePipelineExtensions.cs's global exception handler sets
-        // ctx.Response.ContentType = "application/problem+json" and then calls
-        // ctx.Response.WriteAsJsonAsync(...) with NO explicit content-type argument, which unconditionally
-        // resets ContentType to "application/json; charset=utf-8" (HttpResponseJsonExtensions never
-        // consults the response's existing header). EVERY SdapProblemException-driven response across the
-        // WHOLE BFF is served as "application/json", never "application/problem+json" — contrary to
-        // ADR-019 ("MUST return ProblemDetails for all HTTP failures", which RFC 7807 defines as this
-        // media type). Confirmed against the SAME response's JSON BODY below, which IS still the correct
-        // ProblemDetails shape — only the header is wrong. Confirmed NOT a fixture artifact: the 403 in
-        // ResolveIdentity_WhenCallerLacksReadOnTheResolvedDocument_Returns403AndLeaksNoDocumentMetadata (a
-        // DIFFERENT code path — DocumentAuthorizationFilter's Results.Problem(...), which sets the header
-        // through ASP.NET Core's own ProblemHttpResult rather than a raw WriteAsJsonAsync) gets the header
-        // right in THIS SAME fixture.
+        // FIXED 2026-09-17 (spaarkeai-word-add-in-r1 task 050, GitHub #975 / ISS-003): this assertion
+        // was deliberately absent here (task 016) because MiddlewarePipelineExtensions.cs's global
+        // exception handler served every SdapProblemException-driven response as "application/json"
+        // instead of "application/problem+json" — contrary to ADR-019 (RFC 7807). Root cause + the
+        // dedicated regression coverage: tests/integration/regression/Issue975_ProblemJsonContentTypeTests.cs.
+        // Restored now that the header is fixed; the JSON body shape below is unchanged by that fix.
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("status").GetInt32().Should().Be(400);
         body.GetProperty("title").GetString().Should().NotBeNullOrEmpty();
