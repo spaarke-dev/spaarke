@@ -275,3 +275,54 @@ discovering its fixture mirrored the live state of both real standing-grant cont
 **Housekeeping:** the pre-commit hook created and then removed its own stash (`72cf68afa`). The two
 entries remaining on the shared stack (`stash@{0}` master pre-deploy, `stash@{1}` WIP on
 `spaarke-ai-platform-unification-r2`) belong to other worktrees and were left untouched.
+
+---
+
+## 10. Perturbations — first pass: CAUGHT 6 · MISSED 1 · INVALID 4
+
+| # | Break | Verdict |
+|---|---|---|
+| P3 | `ResolveByContactAsync` ignores the supplied org ids (pre-043 behaviour) | **CAUGHT** (4) |
+| P4 | systemuser plane reverts to the UNFILTERED membership term (A-8 reopened) | **CAUGHT** (1) |
+| P6 | org term drops Secure suppression (FR-22) | **CAUGHT** (1) |
+| P7 | the two opposite fail directions collapse — a junction fault stops denying | **CAUGHT** (1) |
+| P8 | org term gates on `Held` instead of `Rights != None` | **CAUGHT** (1) |
+| P9 | provenance lies — `OrgExpansionMembership` set when no org contributed | **CAUGHT** (3) |
+| **P5** | **org term drops the `IdentityTypes` narrowing** | 🔴 **MISSED** |
+| P1 · P2 · P10 · P11 | (cache key ×2, systemuser leak, single-walk-at-max) | **INVALID** — did not build |
+
+### 10.1 🔴 P5 MISSED — the test was decoration, and the fix is the matcher
+
+Removing `identityTypes: OrganizationIdentityTypeOnly` from the evaluator's org walk left the suite
+**green**. The behaviour is load-bearing (§3.4): without it the always-bound `ContactId` drags
+contact-derived records into a walk whose results are credited at the ORGANISATION's baseline, so a
+contact's own assignment silently inherits its firm's level — undetectable downstream, since the ids are
+identical and only the level differs.
+
+**Why nothing caught it**: `OrgWalkFor(orgId)` matched only on `OrganizationIds`, and a Moq setup is
+indifferent to option fields it does not mention — so the stripped call still matched and still received
+the canned response. The resolver-level test cannot cover it either: it passes `IdentityTypes` *itself*,
+proving the resolver HONOURS the narrowing, never that the evaluator SENDS it.
+
+**Fix**: tighten `OrgWalkFor` to require `IdentityTypes` contains `"Organization"`, rather than add a
+test. One line, and it pins the narrowing across every org test at once — drop it in the evaluator and no
+setup matches, so the org term contributes nothing and the tests fail. A perturbation that comes back
+MISSED is the only thing that distinguishes a test which defends behaviour from one which merely passes.
+
+### 10.2 The four INVALIDs are measurement failures, and not solely self-inflicted
+
+`CS2012` — `Sprk.Bff.Api.dll` locked by **`VBCSCompiler`, under two different PIDs** (37460 on P2, 15416
+on P11) — plus `CS2001` for a missing generated `Spaarke.Scheduling.GeneratedMSBuildEditorConfig`.
+
+This project has recorded this failure mode three times before (session 13 P12 after eleven consecutive
+runs; session 12 `CS0649`; session 11 `CS0006`) and attributed it to back-to-back builds. **This pass
+adds a cause worth knowing: another agent is building the same solution concurrently on this machine.**
+The orphaned 6.2 GB `testhost` was checked before being killed and turned out to belong to
+`C:\code_files\spaarke\.claude\worktrees\agent-af442ccb79065ad1a` — a different worktree — so it was left
+alone, and `dotnet build-server shutdown` only quiesces THIS session's servers.
+
+Consequence for the method: the build environment is not fully controllable here, so each INVALID is
+re-run **individually** on a cold build server, and a repeat INVALID is recorded as an environment limit
+rather than promoted to a result. A broken perturbation is not evidence in either direction — and two of
+these four (P1, P2) cover the cache-key defect of §2, which is the single most consequential thing this
+task changed, so they are the last ones that may be left unresolved.

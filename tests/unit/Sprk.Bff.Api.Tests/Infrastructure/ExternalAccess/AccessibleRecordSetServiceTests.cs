@@ -1408,9 +1408,27 @@ public class AccessibleRecordSetServiceTests
     /// A walk bound to <paramref name="orgId"/> — the org-expansion term. Mutually exclusive with
     /// <see cref="ContactWalk"/>, so setup order does not matter.
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>The IdentityTypes clause is load-bearing, and it is here because perturbation P5 came back
+    /// MISSED without it.</b> Removing <c>identityTypes: OrganizationIdentityTypeOnly</c> from the
+    /// evaluator's org walk left the whole suite green: a Moq setup is indifferent to option fields it
+    /// does not mention, so the stripped call still matched on OrganizationIds alone and still received
+    /// the canned response. Requiring the narrowing HERE pins it for every org test at once — drop it in
+    /// the evaluator and no setup matches, so the org term contributes nothing and the tests fail.
+    /// <para>
+    /// The resolver-level test cannot cover this: it passes IdentityTypes itself, so it proves the
+    /// resolver HONOURS the narrowing, never that the evaluator SENDS it. What the narrowing prevents is
+    /// the always-bound ContactId dragging contact-derived records into a walk whose results are credited
+    /// at the ORGANISATION's baseline — undetectable downstream, since the ids are identical and only the
+    /// level differs.
+    /// </para>
+    /// </remarks>
     private static MembershipResolveOptions? OrgWalkFor(Guid orgId) =>
         It.Is<MembershipResolveOptions?>(o =>
-            o != null && o.OrganizationIds != null && o.OrganizationIds.Contains(orgId));
+            o != null
+            && o.OrganizationIds != null && o.OrganizationIds.Contains(orgId)
+            && o.IdentityTypes != null
+            && o.IdentityTypes.Contains("Organization", StringComparer.OrdinalIgnoreCase));
 
     private static readonly Guid OrgA = Guid.Parse("e0000000-0000-0000-0000-00000000000a");
     private static readonly Guid OrgB = Guid.Parse("e0000000-0000-0000-0000-00000000000b");
