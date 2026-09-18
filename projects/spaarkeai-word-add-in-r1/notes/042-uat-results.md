@@ -125,7 +125,7 @@ Legend — **PASS**: verified, evidence cited · **PARTIAL**: the automated half
 | # | Criterion | Status | Evidence / why |
 |---|---|---|---|
 | 1 | Spaarke-sourced doc in Word desktop resolves to the right `sprk_document` + matter | **PARTIAL** | Integration/contract tests green (tasks 012/013/026; `resolve-identity` 401-verified live on the deployed BFF). The criterion's **manual** half needs live Word desktop. |
-| 2 | Desktop-sourced doc claims no identity, saves cleanly as new | **PARTIAL** | Went PASS → **FAIL** (live UAT found every NEW document answering 503) → **fix verified + deployed 2026-09-18**. The regression test using the REAL fault code now passes (26/26, adjacency guards intact) and the fix is live on `spaarke-bff-dev`, hash-verified. **Still PARTIAL, not PASS: the live half is unconfirmed** — a new document in Word must show no banner. [#997](https://github.com/spaarke-dev/spaarke/issues/997) / ISS-005 stays OPEN until then. See §6.3. |
+| 2 | Desktop-sourced doc claims no identity, saves cleanly as new | **PASS** | Full arc: PASS (green-but-wrong test) → **FAIL** (live UAT: every NEW document answered 503) → fix verified 26/26 + deployed → **LIVE-CONFIRMED 2026-09-18**: a brand-new document shows the Save tab with **no "Couldn't check this document" banner**, reading "This document is not yet in Spaarke" — the correct 200 `{resolved:false}` path. [#997](https://github.com/spaarke-dev/spaarke/issues/997) closed. See §6.3. |
 | 3 | Stamped doc, downloaded + re-opened from disk, self-identifies | **BLOCKED** | FR-02 is end-to-end in code (014 server stamp + 051 client reader, both shipped with unit coverage), but the criterion's verification method is an **end-to-end test** through a real Word host. Not executable here. |
 | 4 | Saving an identified doc defaults to a **version**, not a duplicate row | **PASS** | Integration test asserting one `sprk_document` row + incremented SPE version (FR-11). |
 | 5 | "Save as new document" override always creates its own record, never suppressed | **PASS** | Integration test. Note the **2026-09-17 amendment**: the `sprk_canonicaldocument` link assertion applies only to unstamped paths — a Word-pane save's stamp makes bytes differ by construction, so no link is produced. Accepted consequence of FR-02, recorded in the spec's NFR-08 ADR Tensions row. |
@@ -138,11 +138,14 @@ Legend — **PASS**: verified, evidence cited · **PARTIAL**: the automated half
 | 12 | `npm run typecheck` is clean — *Verify*: CI | **FAIL** | Measured: **exit 2, 111 `error TS` lines, 0 production**. And its stated verification method does not exist — **no CI job typechecks `office-addins`**. Filed: **[#996](https://github.com/spaarke-dev/spaarke/issues/996)** + `defer-issues.md` ISS-004. See §6.1. |
 | 13 | Publish-size delta measured and within ceiling | **PASS** | Fresh `origin/master` build 45.35 MB → branch 45.43 MB = **+0.08 MB**, same zip tool both sides. Absolute 45.43 MB « 60 MB ceiling; delta 62× under the +5 MB escalation threshold. See §3. |
 
-**Tally**: 5 PASS · **5 PARTIAL** · 2 BLOCKED · **1 FAIL**. **None omitted.**
+**Tally**: **6 PASS** · **4 PARTIAL** · 2 BLOCKED · **1 FAIL**. **None omitted.**
 
-Criterion 2's history is the honest record of this task: **PASS** (green test) → **FAIL** (live UAT found the
-503) → **PARTIAL** (fix verified by a corrected test and deployed; live re-test outstanding). The one remaining
-FAIL is criterion 12 (#996).
+Criterion 2's history is the honest record of this task: **PASS** (a green test that encoded the wrong premise)
+→ **FAIL** (live UAT found the 503 the test could not) → **PASS** (corrected test, fix deployed, then confirmed
+in a live pane). The one remaining FAIL is criterion 12 (#996).
+
+⚠️ **A NEW finding arrived from the same UAT session and is NOT reflected in this tally** — a save produced an
+SPE file with no matter association. It is under triage, not yet classified: see **§6.4**.
 
 ---
 
@@ -249,6 +252,36 @@ six consecutive Debug builds failed, each naming a *different* just-generated fi
 Same signature as this task's master-publish failures (§3's measurement note), which vanished on relocating the
 build. It then **cleared on its own** with no code or flag change — consistent with antivirus scanning fresh
 build intermediates. Never reproduced in CI. **If it recurs: wait and retry before changing anything.**
+
+---
+
+### 6.4 OPEN — save produced an SPE file with no matter association (2026-09-18 UAT)
+
+**Full triage, with the diagnostics that settle it: `notes/042-uat-findings-2026-09-18.md`.** Summary only here.
+
+Three symptoms were reported from one session; they are not three bugs:
+
+| # | Symptom | Triage |
+|---|---|---|
+| A | Collision named `Untitled Document.docx`, not the existing `Examiner report draft.docx` | **Probably correct, not a defect.** `OfficeService.cs:640` passes the **requested** filename into `ResolveNameCollisionAsync`, so the message names the file being uploaded — i.e. an item of that name already exists in the container. Evidence of symptom C, not a separate fault. **Confirm via §4.1 before touching the message.** |
+| B | Did not save as a **version** of the existing document | **Expected under the owner's A+C decision.** The file is a copy of a **pre-stamp** document (modified 2026-09-04, before task 014 shipped), so it carries no custom-XML stamp and has no SPE URL — neither identity signal exists. Content-based auto-matching is exactly what the decision declined; **"Save as new version" in the banner is the sanctioned remedy.** Open question: was it clicked, and what happened? |
+| C | File in SPE, `_sprk_matter_value` NULL, matter still shows only its original document | **The primary defect candidate.** |
+
+**CONFIRMED in code** (`OfficeDocumentPersistence.cs:256-267`): association runs **only**
+`if (request.TargetEntity != null)`, and the null-target branch creates an unassociated row **silently** — it
+logs nothing. `sprk_matter` is **not** among the known gaps (account, contact, sprk_todo), so a genuine matter
+target would either associate or log a warning naming the type.
+
+**Leading hypothesis**: the pane sent no `TargetEntity` — possibly the collision-retry path ("Keep both" /
+"Save as new version") drops it. **Competing hypothesis**: it was sent and `DocumentAssociationMap.TryApply`
+returned false. §4.2's single log query separates them — the warning fires only in the second case.
+
+**Why it compounds**: a targetless save orphans bytes in SPE *and* its filename then blocks the next
+legitimate save of that file — which is how symptom A arises from symptom C.
+
+⚠️ **Do not read NULL `_sprk_matter_value` as "unassociated" on its own.** Task 026 records **16
+association-shaped lookups** on `sprk_document` (4 direct + 12 `sprk_related*`); check all four direct slots
+first (§4.3).
 
 ---
 

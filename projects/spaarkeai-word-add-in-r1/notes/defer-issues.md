@@ -294,7 +294,7 @@ The `CLAUDE.md` decisions are later and explicit; `spec.md` is the stale documen
 |---|---|
 | **Type** | Issue (live defect on the deployed dev build; FR-01 primary path) |
 | **Found** | 2026-09-18, task 042 UAT — the first defect this project's 12,375 green tests could not have caught |
-| **Owner** | **This project** — ✅ fix **VERIFIED (26/26 tests) and DEPLOYED** to `spaarke-bff-dev` 2026-09-18, hash-verified. **Issue stays OPEN**: the live half (a new Word document showing no banner) is unconfirmed |
+| **Owner** | **This project — ✅ CLOSED 2026-09-18.** Fix verified (26/26 tests), deployed to `spaarke-bff-dev` hash-verified, all 8 Tier 1 CI checks pass on `62f52d2d3`, and **live-confirmed by the operator**: a new Word document shows the Save tab with no banner. Spec criterion 2 → PASS. ⚠️ A SEPARATE finding from the same session (save produces an SPE file with `_sprk_matter_value` NULL) is under triage in `notes/042-uat-findings-2026-09-18.md` — deliberately NOT folded into this entry |
 | **Severity** | Fails SAFE (no duplicate rows) but breaks FR-01's primary path: spec Success Criterion 2 does not hold against the deployed build |
 | **GitHub Issue** | [spaarke-dev/spaarke#997](https://github.com/spaarke-dev/spaarke/issues/997) |
 
