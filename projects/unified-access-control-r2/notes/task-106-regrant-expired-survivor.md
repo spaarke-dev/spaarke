@@ -260,8 +260,72 @@ outside the thing being observed.*
 | Perturbations (final, against the V1-fixed code) | **5 / 5 CAUGHT**, 0 MISSED, 0 INVALID |
 | `dotnet list package --vulnerable --include-transitive` | no vulnerable packages; **no package added** |
 | `Spaarke.ArchTests` | **323 / 323** — count unchanged, so no endpoint-census shift |
-| Full `Sprk.Bff.Api.Tests` | _pending — see §15_ |
-| Publish size vs a FRESH master | _pending — see §15_ |
+| Full `Sprk.Bff.Api.Tests` | **12,501 passed / 0 failed / 58 skipped** (12,559 total), 15 m 36 s |
+| `Spaarke.Core.Tests` | **64 / 64** |
+| `Spaarke.Scheduling.Tests` | **75 / 75** (matches session 11's recorded 75/75 exactly) |
+| `Sprk.Bff.Api.IntegrationTests` | **compiles** — `rc=0`, 0 warnings / 0 errors (session 7's precedent) |
+| Publish size vs a FRESH master | **45.46 MB** vs re-measured master **45.35 MB** = **+0.11 MB**, 214 files each side; 14.54 MB under the 60 MB ceiling |
+
+### Publish measurement — all four §10 hazards honoured
+
+| Field | Value |
+|---|---|
+| master, **RE-MEASURED** (not the recorded number) @ `e0a6f87c4` | **45.35 MB**, 214 files |
+| branch @ `3750bf269` | **45.46 MB**, 214 files |
+| delta | **+0.11 MB** (project-cumulative) |
+| zip tool | PowerShell `Compress-Archive -CompressionLevel Optimal` — matches `scripts/Deploy-BffApi.ps1` |
+| publish | `dotnet publish -c Release`, framework-dependent, **PDBs INCLUDED** |
+| ceiling | 60 MB (NFR-01) — **14.54 MB headroom** |
+
+**Task 106's own increment is ≈ +0.01 MB.** Task 043 measured master 45.35 / branch 45.45; master is
+*identical* now (consistent with `HEAD..origin/master` = 0 commits), so the +0.11 is the project's
+cumulative delta and this task contributes about a hundredth of a megabyte — the expected shape for ~18
+lines of code and no new package.
+
+The four hazards, each addressed rather than assumed:
+1. **The baseline ages** — master was re-measured from a fresh worktree, never taken from the recorded
+   figure. (The recorded number agreeing exactly is a sanity check, not the measurement.)
+2. **The zip tool moves the number ~1.3 MB** on byte-identical content — `Compress-Archive -Optimal`,
+   pinned to what the deploy script uses.
+3. **The build environment** — fresh worktrees on **both** sides, not just master. Stale build state once
+   invented a +4.95 MB delta that did not exist.
+4. **Deep paths break the tooling itself** — `C:\wt106m` / `C:\wt106b`, and **file counts asserted equal
+   (214 = 214)**. Past `MAX_PATH`, MSBuild reports `MSB3030` for a file that exists and the partial
+   publish zips *smaller*, so a broken measurement reads as an improvement. 214 vs 214 is the shape of a
+   trustworthy delta; 214 vs 190 would have voided it.
+
+Two process notes. The script captured `$LASTEXITCODE` from each `dotnet publish` **before** any pipe and
+printed `publish rc=0` per side — because the invocation pipes through `grep`/`tail`, the shell's own exit
+code is `tail`'s and says nothing (the same mechanism that made a full-suite "exit code 0" meaningless
+earlier this session). And the repo-wide `git worktree prune` was **deliberately removed** from the
+script: about a dozen other agent worktrees share this `.git`, several locked, so cleanup removes only the
+two paths this script created.
+
+### ⚠️ Reading the suite count — 12,559 is NOT a 2,000-test regression
+
+This project's history records **two different** "full suite" figures, and quoting mine next to the wrong
+one would look alarming:
+
+| Lineage | Figure | Skipped |
+|---|---|---|
+| Sessions 7–9, target `Sprk.Bff.Api.Tests` | 12,280 → 12,300 → 12,327 passed | **58** |
+| Sessions 11–12, a BROADER target | 14,540 → 14,578 passed | **86** |
+| **This run**, target `Sprk.Bff.Api.Tests` | **12,501 passed** | **58** |
+
+Mine matches the sessions 7–9 lineage exactly in shape and skip count, and the passed count has grown
+monotonically with added tests (+221 since session 7). The 14.5k/86 figures are a **different, larger
+instrument** — almost certainly this assembly combined with `Spaarke.Core.Tests` and/or
+`Spaarke.Scheduling.Tests`, both of which the scheduling work (tasks 102/103) exercised. Same class of
+mistake as comparing a publish size against an aged baseline: *the number moved because the instrument
+changed, not because the thing being measured did.*
+
+**Scope actually verified, and why.** Eight test projects exist. `Spaarke.ArchTests` and
+`Sprk.Bff.Api.Tests` are the two that carry this change — the auth KEEP-path tests, including
+`RecordShareExpiryTests` for the `SetRecordShareExpiryEndpoint` edit, are globbed into the unit assembly
+(`<Compile Include="..\..\integration\auth\**\*.cs">`), so they ran. Still owed: `Spaarke.Core.Tests`,
+`Spaarke.Scheduling.Tests`, and the `Sprk.Bff.Api.IntegrationTests` compile check (session 7's
+precedent). Legitimately excluded: `Spe.Integration.Tests` (needs live SPE) and the two
+`Sprk.Provisioning.ControlPlane` Load/Nightly projects (excluded from Tier 2 by design, PR #894).
 
 **The expected test count was computed from the source attributes (39 + 12 = 51) independently of the
 run, which then reported Total: 51.** This is not ceremony: session 14 lost real time to a filter that
@@ -275,14 +339,28 @@ against *pre-format* source with *pre-format* binaries. Re-verified on the commi
 anchors confirmed still present exactly once before the harness ran. Session 14 hit the same hook and
 did not notice until a 1-second test duration gave it away.
 
-## 15. Still pending at the time of writing
+## 15. Nothing pending — every row in §14 is measured
 
-ArchTests, the full unit suite, and the publish-size measurement against a fresh `origin/master`
-(CLAUDE.md §10 hazards 1–4: re-measure master, `Compress-Archive`, short paths on **both** sides,
-file-count parity). Step 9.5 gates (`code-review` + `adr-check`) are unconditional here — FULL rigor
-**and** a test-modifying task. Rows above are marked _pending_ rather than pre-filled, because an
-unfilled number that reads as a result is exactly how session 14 nearly recorded task 043 complete with
-superseded figures.
+All seven acceptance criteria are met, each against a named artifact rather than an assertion:
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | expired survivor + LATER-dated duplicate, no new expiry → no 409 | `…WithALaterDuplicateOnTheSameKey_DoesNotReportNoAccess` |
+| 2 | same with a NULL-expiry duplicate → no 409 | `…WithAnUnboundedDuplicateOnTheSameKey_DoesNotReportNoAccess` |
+| 3 | no conferring duplicate → 409 unchanged | `…WhoseDuplicatesAreAlsoExpired_StillReportsNoAccess` + the pre-existing single-row test |
+| 4 | the row that conferred access is still active | `Upsert_WhenCollapsingDuplicates_LeavesTheRowThatConfersAccessActive` |
+| 5 | a request carrying a new expiry behaves as before | `…TakesTheTask023PathAndRestoresAccess` — **rewritten**, because the original encoded the defect |
+| 6 | perturbations: survivor-only check, and lowest-id collapse | **P1** 7 failed · **P2** 5 failed (plus P3/P4/P5) |
+| 7 | build + full suite green; publish ≤ 60 MB vs a FRESH master | 0/0 · 12,501 + 64 + 75, IntegrationTests compiles · **+0.11 MB**, 214/214, 14.54 MB headroom |
+
+Step 9.5 ran **unconditionally** — FULL rigor *and* a test-modifying task — and it is the reason this task
+took a second pass: both gates independently found V1 (§16), a privilege-loss regression the task itself
+had introduced and that I had asserted was safe in three separate comments.
+
+**Every row in §14 was filled only after its run, never before.** The rows sat marked _pending_ through
+five separate edits of this file. That discipline is not ceremony: session 14 came close to recording task
+043 complete with superseded figures, and an unfilled number that reads as a result is indistinguishable
+from a measured one once it is written down.
 
 ---
 

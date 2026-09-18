@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-008 (#973) — a re-grant over an EXPIRED survivor judges "confers access" across every active row on the key before answering 409</title>
     <phase>Register-driven (owner rule 2026-09-15)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -67,6 +67,44 @@
   </acceptance-criteria>
 
   <notes>Register ISS-008; GitHub #973 (label unified-access-control-r2). Related: tasks 010, 023, 097.</notes>
+
+  <completion date="2026-09-18" session="15">
+    <summary>
+      The match path now judges "confers access" across every active row on the key. The fix is the
+      ELECTION, not the check: the survivor is the row conferring access longest (ConferralRank), ties
+      broken by ascending id. Three properties become structural rather than checked — an expired survivor
+      proves every row is expired; the collapse cannot deactivate the conferring row, because that row IS
+      the survivor; and a request carrying an explicit expiry behaves as it always did. The naive fix
+      (suppress the 409 and fall through) would have REVOKED the live access it had just detected, turning
+      an inert bug destructive; that is why the register said "NOT collapse first".
+    </summary>
+    <commits>3d1ce86e6, b849cf6e7, e17a4c1c9, 97481c917, 3750bf269</commits>
+    <escalation-trigger fired="false">
+      The honest response when a live duplicate exists is 200 plus the surviving row id — both already in
+      the contract. No status code or reasonCode was added, changed, or removed. Checked, not assumed.
+    </escalation-trigger>
+    <step-9-5 outcome="found-a-regression-this-task-introduced">
+      adr-check 1 violation / 9 warnings; code-review 1 Critical / 6 Warning / 8 Suggestion. BOTH gates
+      independently found the same Critical defect (V1 / F1): the first version ranked rows by a
+      PER-REQUEST value, so the election was not a total order two callers share. Two concurrent grants
+      could elect different survivors and deactivate each other, leaving ZERO active rows while both
+      received HTTP 200. Pre-106 that interleaving was impossible, so it was strictly worse than the false
+      409 it replaced. Fixed in e17a4c1c9 by ranking on ConferralRank and REMOVING the request parameter,
+      making request-independence structural. Also fixed: F6 (a stale comment five lines from my own
+      edit), F2 (my own false "must not merge" claim), F4 (one name for two values), F9 (two tests missing
+      a precondition the notes claimed all had), F3 (a second in-memory expiry copy, folded in), F11 (an
+      unenforced precondition). Filed rather than fixed: ISS-022 (F5) and ISS-023 (F10).
+    </step-9-5>
+    <verification>
+      build 0/0 (--no-incremental); affected classes 52/52 with the expected count derived from source
+      attributes independently of the run; perturbations 5/5 CAUGHT, 0 MISSED, 0 INVALID (spread
+      7/5/1/1/2); ArchTests 323/323 (count unchanged); Sprk.Bff.Api.Tests 12,501/0/58; Spaarke.Core.Tests
+      64/64; Spaarke.Scheduling.Tests 75/75; Sprk.Bff.Api.IntegrationTests compiles; publish 45.46 MB vs
+      RE-MEASURED master 45.35 = +0.11 MB with 214 files each side (task 106's own increment about
+      +0.01 MB); no vulnerable packages, no package added.
+    </verification>
+    <record>projects/unified-access-control-r2/notes/task-106-regrant-expired-survivor.md</record>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
