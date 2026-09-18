@@ -185,6 +185,20 @@ shared/taskpane/components/views/__tests__/SaveView.captureAtSave.test.tsx
 shared/adapters/__tests__/WordAdapter.readDocumentStamp.test.ts
 shared/adapters/__tests__/OutlookAdapter.readDocumentStamp.test.ts
 shared/taskpane/services/__tests__/documentIdentityService.stampPrecedence.test.ts
+# --- Word ribbon commands (task 037, FR-17) - green from creation -----------
+# NOTE: `word/...` paths only resolve because task 037 widened jest.config.js
+# `roots` to ['shared','word','outlook'] — commands.test.ts was the first test
+# file in this package outside shared/. Do not narrow `roots` back.
+# These pin the ribbon contract that cannot be checked by inspection: every
+# branch of BOTH commands calls event.completed() exactly once — success,
+# doc-extraction failure, auth failure, network failure, mint failure, identity
+# throw, clipboard failure — because omitting it on any error path leaves the
+# Word ribbon spinner stuck forever. Two tests further pin that a BROKEN
+# notification surface still cannot block completion. Also pinned: quickSave's
+# idempotency key hashes document content, so a double click collapses to one
+# key while a real edit does not.
+word/commands/__tests__/commands.test.ts
+shared/taskpane/services/__tests__/shareLinkService.test.ts
 # --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
 # shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
 # shared/services/__tests__/ApiClient.test.ts                    19/20
