@@ -41,8 +41,8 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
 | ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
 | ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
-| ISS-022 — a stale snapshot can shorten access | {URL} | **In project** | Task **106** Step 9.5 (code-review F5). The election key moved from an immutable `id` to a MUTABLE column read at T₀, so the shortening shape is **new**; the revoke-race variant is pre-existing and symmetric. V1's fix does not address it — V1 was request-dependence, this is mutability |
-| ISS-023 — a duplicate collapse can lower the effective LEVEL | {URL} | **In project** — 🔔 needs an owner product decision | Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
+| ISS-022 — a stale snapshot can shorten access | #1001 | **In project** | Task **106** Step 9.5 (code-review F5). The election key moved from an immutable `id` to a MUTABLE column read at T₀, so the shortening shape is **new**; the revoke-race variant is pre-existing and symmetric. V1's fix does not address it — V1 was request-dependence, this is mutability |
+| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — 🔔 needs an owner product decision | Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -607,7 +607,7 @@ Wrong in both directions: a playbook shared with Assign is displayed as re-share
 | **Urgency** | next-round |
 | **Filed** | 2026-09-17 |
 | **Source** | Task 043 Step 9.5 code-review finding H-2, while hoisting the junction read for the org-expansion term |
-| **GitHub Issue** | {URL} |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/998 |
 
 `ExternalParticipationService.QueryActiveOrgIdsAsync`'s **private** overload catches query faults and
 non-success statuses and returns an **empty list** (`:1078-1084`, `:1093-1097`). Only the public
@@ -640,11 +640,11 @@ leaving the additive callers on the existing empty-on-fault overload.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project**; needs an OWNER DECISION |
+| **Status** | Open — **in project**; 🔔 **question formally put to the owner 2026-09-18, still UNDECIDED** |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-17 |
 | **Source** | Filed onto task 043 by task 020; decided-and-recorded in 043 (notes §4.1), sharpened by 043's code-review finding H-3 |
-| **GitHub Issue** | {URL} |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/999 |
 
 The `sprk_contactorganization` junction carries `sprk_enddate`, but `QueryActiveOrgIdsAsync` filters
 `statecode eq 0` alone (`:1067-1069`). **A membership ended by date but never deactivated still confers
@@ -676,7 +676,7 @@ over-grant to every stale member of that firm. And fixing it properly *changes w
 | **Urgency** | someday |
 | **Filed** | 2026-09-17 |
 | **Source** | Task 043 Step 9.5 code-review finding M-3 |
-| **GitHub Issue** | {URL} |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1000 |
 
 `AccessibleRecordSetService.ComposeForContactAsync` awaits one
 `ISubjectStandingGrantReader.ReadForOrganizationAsync` per distinct active organisation, serially, and
@@ -700,7 +700,7 @@ with `Capped` surfaced per NFR-03 — the same treatment the membership walk alr
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 |
 | **Source** | Task 106 Step 9.5 code-review finding F5 |
-| **GitHub Issue** | {URL} |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1001 |
 
 `GrantExternalAccessEndpoint.CreateGrantAsync` reads the key's active rows, elects a survivor, then
 deactivates the rest — with **no ETag or conditional update** between the read and the write. Task 106
@@ -730,11 +730,11 @@ optimistic concurrency at all. A re-read immediately before the collapse narrows
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project**; needs an owner **product** decision |
+| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** (below) |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 |
 | **Source** | Task 106 Step 9.5 — code-review finding F10, adr-check W3 |
-| **GitHub Issue** | {URL} |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1002 |
 
 The read path composes effective access as `GroupBy(root).Max(level)` over active, unexpired rows
 (`ExternalParticipationService`, `DedupeByHighestLevel`). The write path's `CollapseDuplicatesAsync`
@@ -750,10 +750,21 @@ either direction. It is filed now because task 106's own argument, that a dedupl
 duration, ignore level" an explicit ranking choice for the first time, so the asymmetry deserves a
 register entry rather than a paragraph in a task note.
 
-**The decision needed** is a contract question, not an implementation one: does `POST /grant` at level X
-mean *set the grant to X* (today's behaviour, and a defensible reading of "grant X"), or *raise it to at
-least X*? If set — no code change, document it and close. If raise — the survivor must take
-`max(requested, existing)`, or the collapse must preserve the maximum level on the key.
+### ✅ Owner decision (2026-09-18)
+
+**"When access is renewed the user should have the same level as previous access period."**
+
+So a **renewal must not lower the effective level**. The prior period's level carries forward, rather
+than the requested level overwriting it.
+
+**The open design question this leaves** — to be surfaced at implementation, not guessed: the request
+**always** carries an `AccessLevel`, so a *renewal* has to be distinguished from an *explicit level
+change*. An explicit downgrade MUST remain possible: task 063's `share-user` path exists to set a
+system user to View Only, and the real-Dataverse DOWNGRADE check before merge of PR #950 is specifically
+about that working. So the rule cannot be "always take `max(requested, existing)`" — that would make
+downgrades impossible. Candidate discriminators (an explicit intent flag, a dedicated renew route, or
+treating "same level as one of the existing rows" as a renewal) are the task's first decision, and it
+carries an escalation trigger for it.
 
 **Estimated effort**: small once decided. **Blockers**: the owner's product answer. **Related**: tasks
 010, 106.
