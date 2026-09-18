@@ -37,6 +37,15 @@ public class DocumentUrlIdentityResolutionTests
     private const string DriveId = "b!yLMdWD2AdkaWXsktRe9yIW7Hn0uXvZVBnuXhwwvLvZWY-YU6-G3sQ7t6c1tKzXJM";
     private const int ObjectDoesNotExist = -2147220969;
 
+    /// <summary>
+    /// <c>0x80060891</c> — what Dataverse ACTUALLY sends when an <b>alternate-key</b> retrieve finds no row.
+    /// Distinct from <see cref="ObjectDoesNotExist"/> (<c>0x80040217</c>), which is the <b>by-id</b> code, and
+    /// ADJACENT to <c>0x80060892</c> (duplicate / not-Active key) which must stay indeterminate — see
+    /// <see cref="UnhealthyAlternateKey_Is503_WithNoDuplicateTolerantFallback"/>. One digit apart, opposite
+    /// required outcomes, so classification matches this code EXACTLY and never a range.
+    /// </summary>
+    private const int AlternateKeyRecordDoesNotExist = -2147088239;
+
     private static readonly Guid DocumentId = Guid.Parse("3d3e6cbf-1111-4222-8333-944455556666");
 
     private readonly Mock<IGenericEntityService> _dataverse = new(MockBehavior.Strict);
@@ -162,6 +171,34 @@ public class DocumentUrlIdentityResolutionTests
     public async Task AbsentRow_SignalledByTheObjectDoesNotExistFaultCode_IsNotASpaarkeDocument()
     {
         AltKeyThrows(Wrapped(Fault(ObjectDoesNotExist,
+            "A record with the specified key values does not exist in sprk_document entity")));
+
+        var result = await Resolve(Spe(ResolvedFor(DriveId, ItemId)));
+
+        result.NoIdentityReason.Should().Be(DocumentUrlIdentityResolution.ReasonNotSpaarkeDocument);
+    }
+
+    /// <summary>
+    /// REGRESSION — task 042 UAT, 2026-09-18. The sibling test above pairs the REAL production message with
+    /// the WRONG fault code, a combination Dataverse cannot produce, so it proved the predicate only for a
+    /// fault that never occurs. This test uses what the platform actually sends.
+    ///
+    /// <para><b>Measured, not assumed.</b> Read-only against dev:
+    /// <c>GET sprk_documents(sprk_graphitemid='&lt;absent&gt;')</c> → <c>404
+    /// {"code":"0x80060891","message":"A record with the specified key values does not exist in sprk_document
+    /// entity"}</c>, byte-identical to the App Insights fault captured from the failing save. By-id, for
+    /// contrast, returns <c>0x80040217</c>.</para>
+    ///
+    /// <para><b>What the defect did.</b> Every genuinely-new Word document resolved as INDETERMINATE (503)
+    /// instead of "not a Spaarke document" (200), so the pane showed "Couldn't check this document — the
+    /// service is unavailable" and offered only the save-as-new-anyway fallback. It failed SAFE (no duplicate
+    /// rows), but it is FR-01's primary path and spec Success Criterion 2 inverted: the three-answers contract
+    /// exists to stop indeterminate being read as new, and this read new as indeterminate.</para>
+    /// </summary>
+    [Fact]
+    public async Task AbsentRow_SignalledByTheAlternateKeyFaultCodeDataverseActuallySends_IsNotASpaarkeDocument()
+    {
+        AltKeyThrows(Wrapped(Fault(AlternateKeyRecordDoesNotExist,
             "A record with the specified key values does not exist in sprk_document entity")));
 
         var result = await Resolve(Spe(ResolvedFor(DriveId, ItemId)));

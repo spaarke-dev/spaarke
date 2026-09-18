@@ -288,6 +288,56 @@ The `CLAUDE.md` decisions are later and explicit; `spec.md` is the stale documen
 
 ---
 
+## ISS-005 — Every NEW Word document 503s on the identity check: alternate-key absent-row fault `0x80060891` misclassified as indeterminate
+
+| Field | Value |
+|---|---|
+| **Type** | Issue (live defect on the deployed dev build; FR-01 primary path) |
+| **Found** | 2026-09-18, task 042 UAT — the first defect this project's 12,375 green tests could not have caught |
+| **Owner** | **This project** — fix written + committed but **UNVERIFIED** (local build blocked); needs a build + test run, then a redeploy |
+| **Severity** | Fails SAFE (no duplicate rows) but breaks FR-01's primary path: spec Success Criterion 2 does not hold against the deployed build |
+| **GitHub Issue** | [spaarke-dev/spaarke#997](https://github.com/spaarke-dev/spaarke/issues/997) |
+
+**Description**
+
+`POST /api/documents/resolve-identity` returns **503** for the ordinary "not a Spaarke document" case, which the
+contract requires to be **200 `{resolved:false}`**. `IsAlternateKeyNotFound` matches only `0x80040217`
+(`ObjectDoesNotExist` — the **by-id** code) and `DataverseServiceClientImpl`'s own literal *"not found with
+provided alternate key values"*. Dataverse sends **`0x80060891`** for an **alternate-key** miss, with the
+message *"A record with the specified key values does not exist in sprk_document entity"* — measured read-only
+against dev and byte-identical to the App Insights fault from the failing save.
+
+It is the three-answers contract inverted: it exists so INDETERMINATE is never read as NEW; this reads NEW as
+INDETERMINATE.
+
+**Why the suite was green**: `DocumentUrlIdentityResolutionTests.cs:38` sets `ObjectDoesNotExist = -2147220969`
+(by-id) and the absent-row test pairs it with the REAL alternate-key message — a pairing Dataverse cannot emit.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs:308` (the 503 throw),
+  `:324-331` (`IsAlternateKeyNotFound`), `:334-367` (the committed fix)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Documents/DocumentUrlIdentityResolutionTests.cs:38` (the wrong
+  constant), `~:181-210` (the new regression test)
+- Full record: `notes/042-uat-results.md` §6.3
+
+**Suggested fix** (committed, unverified)
+
+Exact-match typed predicate on `unchecked((int)0x80060891)`, mirroring
+`DataverseServiceClientImpl.IsAlternateKeyDuplicate`. **Never a range** — `0x80060892` is one integer away,
+means duplicate / not-Active key, and must keep answering 503 (NFR-07). Deliberately NOT applied to the shared
+`RecordContainerResolver.IsRecordNotFound`, which guards a security decision.
+
+**Blockers**: local build — six attempts, each naming a different just-generated file under the API's
+`obj/Debug/net10.0/linux-x64/` as missing; consistent with AV scanning build intermediates; not reproducible in CI.
+
+**Estimated effort**: <1 hour once a build works (fix + test already written)
+**Related**: FR-01, spec Success Criterion 2, NFR-07; ISS-003 (#975) for the sibling "one call site, one
+classification bug" pattern. Latent risk recorded in #997: five call sites classify not-found by English
+message text; only `RecordContainerResolver` does it typed on `ErrorCode`.
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.

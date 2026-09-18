@@ -125,7 +125,7 @@ Legend — **PASS**: verified, evidence cited · **PARTIAL**: the automated half
 | # | Criterion | Status | Evidence / why |
 |---|---|---|---|
 | 1 | Spaarke-sourced doc in Word desktop resolves to the right `sprk_document` + matter | **PARTIAL** | Integration/contract tests green (tasks 012/013/026; `resolve-identity` 401-verified live on the deployed BFF). The criterion's **manual** half needs live Word desktop. |
-| 2 | Desktop-sourced doc claims no identity, saves cleanly as new | **PASS** | Integration test — `resolved:false` path (200, never 404), task 012. |
+| 2 | Desktop-sourced doc claims no identity, saves cleanly as new | **FAIL** | ⚠️ **Corrected 2026-09-18 from PASS.** Live UAT on the deployed build: every NEW document answers **503**, not 200 `{resolved:false}`, and the pane shows "Couldn't check this document". Root cause measured, fix written but **UNVERIFIED** (local build blocked). Filed **[#997](https://github.com/spaarke-dev/spaarke/issues/997)** / ISS-005. See §6.3. The integration test that reported PASS pairs the real fault MESSAGE with the wrong fault CODE — a combination Dataverse cannot emit. |
 | 3 | Stamped doc, downloaded + re-opened from disk, self-identifies | **BLOCKED** | FR-02 is end-to-end in code (014 server stamp + 051 client reader, both shipped with unit coverage), but the criterion's verification method is an **end-to-end test** through a real Word host. Not executable here. |
 | 4 | Saving an identified doc defaults to a **version**, not a duplicate row | **PASS** | Integration test asserting one `sprk_document` row + incremented SPE version (FR-11). |
 | 5 | "Save as new document" override always creates its own record, never suppressed | **PASS** | Integration test. Note the **2026-09-17 amendment**: the `sprk_canonicaldocument` link assertion applies only to unstamped paths — a Word-pane save's stamp makes bytes differ by construction, so no link is produced. Accepted consequence of FR-02, recorded in the spec's NFR-08 ADR Tensions row. |
@@ -138,7 +138,8 @@ Legend — **PASS**: verified, evidence cited · **PARTIAL**: the automated half
 | 12 | `npm run typecheck` is clean — *Verify*: CI | **FAIL** | Measured: **exit 2, 111 `error TS` lines, 0 production**. And its stated verification method does not exist — **no CI job typechecks `office-addins`**. Filed: **[#996](https://github.com/spaarke-dev/spaarke/issues/996)** + `defer-issues.md` ISS-004. See §6.1. |
 | 13 | Publish-size delta measured and within ceiling | **PASS** | Fresh `origin/master` build 45.35 MB → branch 45.43 MB = **+0.08 MB**, same zip tool both sides. Absolute 45.43 MB « 60 MB ceiling; delta 62× under the +5 MB escalation threshold. See §3. |
 
-**Tally**: 6 PASS · 4 PARTIAL · 2 BLOCKED · 1 FAIL. **None omitted.**
+**Tally**: 5 PASS · 4 PARTIAL · 2 BLOCKED · **2 FAIL**. **None omitted.** (Was 6/4/2/1 before live UAT
+demoted criterion 2 — see §6.3.)
 
 ---
 
@@ -188,6 +189,58 @@ history comment at :95 recording that it was `['outlook']` from task 015 through
 **The parity checklist is therefore stale on this point** — it was written 2026-09-15 alongside the fix and
 still carries the pre-fix recommendation. Nothing is owed here; noted so a later reader does not re-open it.
 **No open owner decision remains from this section.**
+
+---
+
+### 6.3 FAIL — criterion 2: every NEW document 503s on the identity check (#997 / ISS-005)
+
+**Found by live UAT 2026-09-18** — the first criterion this project's 12,375 green tests could not have caught.
+
+`POST /api/documents/resolve-identity` answers **503** for the ordinary "not in Spaarke" case, which the FR-01
+contract requires to be **200 `{resolved:false}`**. The pane therefore shows *"Couldn't check this document —
+the service is unavailable"* and offers only **"Save it as a new document anyway"**.
+
+**Root cause — measured, not inferred.** `IsAlternateKeyNotFound` recognises only `0x80040217`
+(`ObjectDoesNotExist`, the **by-id** code, via `RecordContainerResolver.IsRecordNotFound`) plus
+`DataverseServiceClientImpl`'s own literal `"not found with provided alternate key values"`. Dataverse sends a
+different code for an **alternate-key** miss. Read-only probe against dev:
+
+| Lookup | Code | Message |
+|---|---|---|
+| **alternate key, absent** | **`0x80060891`** | *"A record with the specified key values does not exist in sprk_document entity"* |
+| by id, absent | `0x80040217` | *"Entity 'sprk_document' With Id = … Does Not Exist"* |
+
+That first message is **byte-identical** to the production fault in App Insights (`spe-insights-dev-67e2xz`,
+2026-09-18T04:33:38Z). So the absent row falls into the indeterminate branch and throws at
+`DocumentUrlIdentityResolution.cs:308`.
+
+**Fails safe, but inverts the contract.** No duplicate rows — the refusal is the conservative direction. But
+the three-answers contract exists so INDETERMINATE is never read as NEW; this reads NEW as INDETERMINATE.
+
+**Why the suite was green.** `DocumentUrlIdentityResolutionTests.cs:38` defines
+`ObjectDoesNotExist = -2147220969` (the by-id code) and the absent-row test pairs it with the **real**
+alternate-key message — a pairing Dataverse cannot produce. One line of test data.
+
+**Ruled out along the way** (recorded so nobody re-walks them): `sprk_graphitemid_uk` is **Active**
+(`Verify-ComposeIdentityKey.ps1` exit 0); auth/OBO is healthy (`appid=c1258e2d-…`, `scp=SDAP.Access
+user_impersonation`); not a network/CORS failure (those render different pane copy); and `testhost` PID 6612
+belonged to **another worktree** (`unified-access-control-r2`) and was correctly left alone.
+
+**🔴 FIX STATUS: WRITTEN, COMMITTED, NEVER COMPILED — UNVERIFIED.** A regression test using the real fault code
+**was confirmed to fail before the fix** (`identity_resolution_unavailable` at line 308) with all 25
+pre-existing tests passing. The fix itself has never built: six consecutive attempts each named a *different*
+just-generated file under `src/server/api/Sprk.Bff.Api/obj/Debug/net10.0/linux-x64/` as missing (`ref/…dll`,
+`refint/…dll`, `…GeneratedMSBuildEditorConfig.editorconfig`) plus `MSB3030` copy failures on the 14 MB
+`Sprk.Bff.Api.dll`. Identical signature to this task's own master-publish failures (§3's measurement note),
+which vanished on relocating the build — consistent with AV scanning fresh build intermediates. **Not
+reproducible in CI.**
+
+**The deployed dev BFF still carries this defect.** No redeploy was performed.
+
+**To finish it**: build, then `dotnet test --filter FullyQualifiedName~DocumentUrlIdentityResolutionTests`
+(26 tests). The new test must pass **and** the three `UnhealthyAlternateKey_Is503…` cases must still pass —
+`0x80060892` is one integer away, means duplicate/not-Active key, and must stay 503 (NFR-07). Then redeploy and
+re-run a new-document save in Word.
 
 ---
 
