@@ -46,8 +46,8 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-021 — org-baseline N+1 on the hot path | #1000 | **In project** | Task **111** (queued 2026-09-18). N is currently 0 (no org holds a standing grant), so the shape is wrong but the cost is not yet paid |
 | ISS-022 — a stale snapshot can shorten access | #1001 | **In project** | Task **112** (queued 2026-09-18). Task **106** Step 9.5 (code-review F5). The election key is now a MUTABLE column; V1's fix does not cover it, and the revoke-race half is pre-existing |
 | ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — ✅ **owner decided 2026-09-18** | Task **113** (queued 2026-09-18). Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
-| ISS-024 — external licensed user refused as "not internal" | — | **In project** — ✅ **owner decided 2026-09-18** | Task **114** (queued 2026-09-18). Found by task 063; the owner has ruled an external **licensed** user is treated the same as an internal one. ⚠️ The stale surface is SHIPPED CODE plus an **asserting** contract test, not a POML |
-| ISS-025 — the drift check cannot see an index row with no POML | — | **In project** | No task yet. Found 2026-09-18 by creating the condition: six index rows with no POML, and `scripts/check-task-status-drift.ps1` printed both counts and still said "No drift". The mirror of a guard it already has |
+| ISS-024 — external licensed user refused as "not internal" | #1003 | **In project** — ✅ **owner decided 2026-09-18** | Task **114** (queued 2026-09-18). Found by task 063; the owner has ruled an external **licensed** user is treated the same as an internal one. ⚠️ The stale surface is SHIPPED CODE plus an **asserting** contract test, not a POML |
+| ISS-025 — the drift check cannot see an index row with no POML | #1004 | **In project** | No task yet. Found 2026-09-18 by creating the condition: six index rows with no POML, and `scripts/check-task-status-drift.ps1` printed both counts and still said "No drift". The mirror of a guard it already has |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -784,7 +784,7 @@ carries an escalation trigger for it.
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 (the finding itself dates from task 063, session 13) |
 | **Source** | Task 063; raised as an open owner question in every handoff since |
-| **GitHub Issue** | — (to be filed with task 114) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1003 |
 
 `POST /api/v1/external-access/share-user` refuses a system user flagged as external with HTTP 422
 `sdap.access.user_share.user_not_internal` (`InternalShareEndpoints.cs:80`), and
@@ -825,7 +825,7 @@ it — the guard may be load-bearing for some *other* distinction.
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 |
 | **Source** | Found by accident while queuing tasks 109–114: I created the condition and the check passed |
-| **GitHub Issue** | — (to be filed) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1004 |
 
 `scripts/check-task-status-drift.ps1` reconciles by iterating the **POMLs**
 (`foreach ($id in ($poml.Keys | Sort-Object))`) and looking up each one's index marker. An index row with
