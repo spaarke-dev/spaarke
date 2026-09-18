@@ -125,7 +125,7 @@ Legend — **PASS**: verified, evidence cited · **PARTIAL**: the automated half
 | # | Criterion | Status | Evidence / why |
 |---|---|---|---|
 | 1 | Spaarke-sourced doc in Word desktop resolves to the right `sprk_document` + matter | **PARTIAL** | Integration/contract tests green (tasks 012/013/026; `resolve-identity` 401-verified live on the deployed BFF). The criterion's **manual** half needs live Word desktop. |
-| 2 | Desktop-sourced doc claims no identity, saves cleanly as new | **FAIL** | ⚠️ **Corrected 2026-09-18 from PASS.** Live UAT on the deployed build: every NEW document answers **503**, not 200 `{resolved:false}`, and the pane shows "Couldn't check this document". Root cause measured, fix written but **UNVERIFIED** (local build blocked). Filed **[#997](https://github.com/spaarke-dev/spaarke/issues/997)** / ISS-005. See §6.3. The integration test that reported PASS pairs the real fault MESSAGE with the wrong fault CODE — a combination Dataverse cannot emit. |
+| 2 | Desktop-sourced doc claims no identity, saves cleanly as new | **PARTIAL** | Went PASS → **FAIL** (live UAT found every NEW document answering 503) → **fix verified + deployed 2026-09-18**. The regression test using the REAL fault code now passes (26/26, adjacency guards intact) and the fix is live on `spaarke-bff-dev`, hash-verified. **Still PARTIAL, not PASS: the live half is unconfirmed** — a new document in Word must show no banner. [#997](https://github.com/spaarke-dev/spaarke/issues/997) / ISS-005 stays OPEN until then. See §6.3. |
 | 3 | Stamped doc, downloaded + re-opened from disk, self-identifies | **BLOCKED** | FR-02 is end-to-end in code (014 server stamp + 051 client reader, both shipped with unit coverage), but the criterion's verification method is an **end-to-end test** through a real Word host. Not executable here. |
 | 4 | Saving an identified doc defaults to a **version**, not a duplicate row | **PASS** | Integration test asserting one `sprk_document` row + incremented SPE version (FR-11). |
 | 5 | "Save as new document" override always creates its own record, never suppressed | **PASS** | Integration test. Note the **2026-09-17 amendment**: the `sprk_canonicaldocument` link assertion applies only to unstamped paths — a Word-pane save's stamp makes bytes differ by construction, so no link is produced. Accepted consequence of FR-02, recorded in the spec's NFR-08 ADR Tensions row. |
@@ -138,8 +138,11 @@ Legend — **PASS**: verified, evidence cited · **PARTIAL**: the automated half
 | 12 | `npm run typecheck` is clean — *Verify*: CI | **FAIL** | Measured: **exit 2, 111 `error TS` lines, 0 production**. And its stated verification method does not exist — **no CI job typechecks `office-addins`**. Filed: **[#996](https://github.com/spaarke-dev/spaarke/issues/996)** + `defer-issues.md` ISS-004. See §6.1. |
 | 13 | Publish-size delta measured and within ceiling | **PASS** | Fresh `origin/master` build 45.35 MB → branch 45.43 MB = **+0.08 MB**, same zip tool both sides. Absolute 45.43 MB « 60 MB ceiling; delta 62× under the +5 MB escalation threshold. See §3. |
 
-**Tally**: 5 PASS · 4 PARTIAL · 2 BLOCKED · **2 FAIL**. **None omitted.** (Was 6/4/2/1 before live UAT
-demoted criterion 2 — see §6.3.)
+**Tally**: 5 PASS · **5 PARTIAL** · 2 BLOCKED · **1 FAIL**. **None omitted.**
+
+Criterion 2's history is the honest record of this task: **PASS** (green test) → **FAIL** (live UAT found the
+503) → **PARTIAL** (fix verified by a corrected test and deployed; live re-test outstanding). The one remaining
+FAIL is criterion 12 (#996).
 
 ---
 
@@ -226,21 +229,26 @@ alternate-key message — a pairing Dataverse cannot produce. One line of test d
 user_impersonation`); not a network/CORS failure (those render different pane copy); and `testhost` PID 6612
 belonged to **another worktree** (`unified-access-control-r2`) and was correctly left alone.
 
-**🔴 FIX STATUS: WRITTEN, COMMITTED, NEVER COMPILED — UNVERIFIED.** A regression test using the real fault code
-**was confirmed to fail before the fix** (`identity_resolution_unavailable` at line 308) with all 25
-pre-existing tests passing. The fix itself has never built: six consecutive attempts each named a *different*
-just-generated file under `src/server/api/Sprk.Bff.Api/obj/Debug/net10.0/linux-x64/` as missing (`ref/…dll`,
-`refint/…dll`, `…GeneratedMSBuildEditorConfig.editorconfig`) plus `MSB3030` copy failures on the 14 MB
-`Sprk.Bff.Api.dll`. Identical signature to this task's own master-publish failures (§3's measurement note),
-which vanished on relocating the build — consistent with AV scanning fresh build intermediates. **Not
-reproducible in CI.**
+**✅ FIX STATUS: VERIFIED BY TEST AND DEPLOYED (2026-09-18).**
 
-**The deployed dev BFF still carries this defect.** No redeploy was performed.
+| Step | Evidence |
+|---|---|
+| Reproduce-first | The regression test using the REAL fault code **failed before the fix**, for the right reason — `SdapProblemException: identity_resolution_unavailable` at `DocumentUrlIdentityResolution.cs:308` — with all 25 pre-existing tests passing (26 discovered) |
+| After the fix | **26 / 26 pass**, exit 0 — including `AbsentRow_SignalledByTheAlternateKeyFaultCodeDataverseActuallySends_IsNotASpaarkeDocument` |
+| Adjacency guards | All three `UnhealthyAlternateKey_Is503_WithNoDuplicateTolerantFallback` cases **still pass** — `0x80060892` (duplicate / not-Active key) correctly stays 503 per NFR-07 |
+| Deploy | `Deploy-BffApi.ps1` → 45.43 MB, **4/4 critical files SHA-256 verified**, `/healthz` passed, both CORS origins present |
+| Post-deploy probes | `/healthz` 200 · `/api/office/health` 200 · `resolve-identity` **401** · `/api/office/save` **401** — zero 404s |
 
-**To finish it**: build, then `dotnet test --filter FullyQualifiedName~DocumentUrlIdentityResolutionTests`
-(26 tests). The new test must pass **and** the three `UnhealthyAlternateKey_Is503…` cases must still pass —
-`0x80060892` is one integer away, means duplicate/not-Active key, and must stay 503 (NFR-07). Then redeploy and
-re-run a new-document save in Word.
+**⚠️ The live half is still unconfirmed, so this is not closed.** A new document in Word must show no
+"Couldn't check this document" banner. **#997 stays OPEN until that is observed.**
+
+**Build-environment note (cost six attempts, recorded so nobody repeats it).** Before the successful run above,
+six consecutive Debug builds failed, each naming a *different* just-generated file under
+`src/server/api/Sprk.Bff.Api/obj/Debug/net10.0/linux-x64/` as missing (`ref/…dll`, `refint/…dll`,
+`…GeneratedMSBuildEditorConfig.editorconfig`), plus `MSB3030` copy failures on the 14 MB `Sprk.Bff.Api.dll`.
+Same signature as this task's master-publish failures (§3's measurement note), which vanished on relocating the
+build. It then **cleared on its own** with no code or flag change — consistent with antivirus scanning fresh
+build intermediates. Never reproduced in CI. **If it recurs: wait and retry before changing anything.**
 
 ---
 

@@ -294,7 +294,7 @@ The `CLAUDE.md` decisions are later and explicit; `spec.md` is the stale documen
 |---|---|
 | **Type** | Issue (live defect on the deployed dev build; FR-01 primary path) |
 | **Found** | 2026-09-18, task 042 UAT — the first defect this project's 12,375 green tests could not have caught |
-| **Owner** | **This project** — fix written + committed but **UNVERIFIED** (local build blocked); needs a build + test run, then a redeploy |
+| **Owner** | **This project** — ✅ fix **VERIFIED (26/26 tests) and DEPLOYED** to `spaarke-bff-dev` 2026-09-18, hash-verified. **Issue stays OPEN**: the live half (a new Word document showing no banner) is unconfirmed |
 | **Severity** | Fails SAFE (no duplicate rows) but breaks FR-01's primary path: spec Success Criterion 2 does not hold against the deployed build |
 | **GitHub Issue** | [spaarke-dev/spaarke#997](https://github.com/spaarke-dev/spaarke/issues/997) |
 
