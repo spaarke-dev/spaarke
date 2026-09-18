@@ -41,6 +41,8 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
 | ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
 | ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
+| ISS-022 — a stale snapshot can shorten access | {URL} | **In project** | Task **106** Step 9.5 (code-review F5). The election key moved from an immutable `id` to a MUTABLE column read at T₀, so the shortening shape is **new**; the revoke-race variant is pre-existing and symmetric. V1's fix does not address it — V1 was request-dependence, this is mutability |
+| ISS-023 — a duplicate collapse can lower the effective LEVEL | {URL} | **In project** — 🔔 needs an owner product decision | Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -687,6 +689,74 @@ composition-level cache, so the cost multiplies per decision.
 
 **Suggested fix**: a batched org-baseline read (one query for N organisation ids), or an explicit bound
 with `Capped` surfaced per NFR-03 — the same treatment the membership walk already gets.
+
+---
+
+### ISS-022 — a stale snapshot of the grant rows can SHORTEN access on the collapse
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 |
+| **Source** | Task 106 Step 9.5 code-review finding F5 |
+| **GitHub Issue** | {URL} |
+
+`GrantExternalAccessEndpoint.CreateGrantAsync` reads the key's active rows, elects a survivor, then
+deactivates the rest — with **no ETag or conditional update** between the read and the write. Task 106
+changed the election key from an **immutable** `sprk_externalrecordaccessid` to a **mutable**
+`sprk_expiresdate` read at T₀, which makes one new outcome reachable.
+
+Rows r₁ (expires today+10, lower id) and r₂ (today+200). A date-less grant reads both and elects r₂.
+Concurrently `/set-record-share-expiry` moves r₂ to today+1. A then collapses onto r₂ — now the shorter
+row — and deactivates r₁. The union conferred access until +10 before the call and until +1 after:
+**shortened by a stale read**. Pre-106 the same interleaving elected r₁ and kept +10.
+
+**Honest scope split** (the reviewer's, and it is the reason this is `next-round` rather than urgent):
+only the *shortening* shape is new. The **revoke-race** variant — a racer deactivates the elected row,
+then this collapse removes the others, leaving zero active rows — is **pre-existing and symmetric**, and
+pre-106 it fired whenever the revoked row happened to be the lowest id. **V1's fix does not address
+either**: V1 removed request-dependence from the ranking; this is about the ranked column being mutable.
+
+**Suggested fix**: a conditional update on the deactivation (`If-Match` on the row's ETag) so a collapse
+cannot apply to a row whose state changed since the read — the read-then-write pair currently has no
+optimistic concurrency at all. A re-read immediately before the collapse narrows but does not close it.
+
+**Estimated effort**: medium. **Blockers**: none. **Related**: tasks 010, 023, 098, 106.
+
+---
+
+### ISS-023 — 🔔 a duplicate collapse can lower the effective access LEVEL
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; needs an owner **product** decision |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 |
+| **Source** | Task 106 Step 9.5 — code-review finding F10, adr-check W3 |
+| **GitHub Issue** | {URL} |
+
+The read path composes effective access as `GroupBy(root).Max(level)` over active, unexpired rows
+(`ExternalParticipationService`, `DedupeByHighestLevel`). The write path's `CollapseDuplicatesAsync`
+writes the **requested** level to the survivor and deactivates every other row. So a re-grant at
+ViewOnly over a key that holds a FullAccess duplicate reduces effective access from FullAccess to
+ViewOnly — on a request whose caller may have meant only to renew.
+
+**This is PRE-EXISTING (task 010's convergence semantics), and task 106 does not make it worse.** The
+review verified the stronger statement: the final level is **invariant** under the election change,
+because `requestedLevel` is written to whichever row is elected — so 106 cannot alter level outcomes in
+either direction. It is filed now because task 106's own argument, that a deduplication must not decide
+**how long** access lasts, applies verbatim to **how much** access it confers; 106 made "rank on
+duration, ignore level" an explicit ranking choice for the first time, so the asymmetry deserves a
+register entry rather than a paragraph in a task note.
+
+**The decision needed** is a contract question, not an implementation one: does `POST /grant` at level X
+mean *set the grant to X* (today's behaviour, and a defensible reading of "grant X"), or *raise it to at
+least X*? If set — no code change, document it and close. If raise — the survivor must take
+`max(requested, existing)`, or the collapse must preserve the maximum level on the key.
+
+**Estimated effort**: small once decided. **Blockers**: the owner's product answer. **Related**: tasks
+010, 106.
 
 ---
 

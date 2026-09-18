@@ -185,16 +185,45 @@ defect as an invariant, asserting the request-dependent tie that *was* the bug.
 
 ## 11. Perturbations (mandatory — harness `p106.js`, run against the COMMITTED tree)
 
-| # | Perturbation | Result |
-|---|---|---|
-| P1 | revert the match-path election to lowest id (the bug, restored) | **CAUGHT** — 6 failed / 45 passed |
-| P2 | keep the election, collapse onto `existing[0].Id` (isolates the collapse) | **CAUGHT** — 4 failed / 47 passed |
-| P3 | mirror uses `> today` instead of `>= today` | **CAUGHT** — 1 failed / 50 passed |
-| P4 | rank by raw `ExpiresDate`, null as max | **CAUGHT** — 2 failed / 49 passed |
+Final set, run against the V1-fixed code (the pre-V1 run's numbers are superseded; P5 did not exist then):
 
-**4 CAUGHT / 0 MISSED / 0 INVALID.** The *spread* is the signal: four different blast radii mean the
-suite distinguishes four different guarantees. Had all four failed the same six tests, it would only be
-detecting "something changed".
+| # | Property removed | Result |
+|---|---|---|
+| P1 | revert the election to lowest id (the ORIGINAL ISS-008 bug, restored) | **CAUGHT** — 7 failed / 45 passed |
+| P2 | keep the election, collapse onto `existing[0].Id` (isolates the COLLAPSE) | **CAUGHT** — 5 failed / 47 passed |
+| P3 | mirror uses `> today` instead of `>= today` | **CAUGHT** — 1 failed / 51 passed |
+| P4 | rank by the RAW column, `null` as `MaxValue` (the reviewer's own suggested fix) | **CAUGHT** — 1 failed / 51 passed |
+| P5 | restore REQUEST-DEPENDENCE in the ranking (**V1**, in full) | **CAUGHT** — 2 failed / 50 passed |
+
+**5 CAUGHT / 0 MISSED / 0 INVALID.** The *spread* — 7 / 5 / 1 / 1 / 2 — is the signal: five different
+blast radii mean the suite separates five different guarantees. Had they all failed the same seven tests,
+it would only be detecting "something changed".
+
+**P5 is the one that had to pass.** It restores V1 across the signature and both call sites, because
+request-independence is *structural* — `ElectSurvivor` has no parameter to pass a request through, so no
+single-line edit can reintroduce the defect. That the test fails when V1 returns is the only evidence the
+regression guard is real rather than decorative.
+
+### ⚠️ Three of the five were INVALID first, and the harness is why that cost a re-run and not a wrong conclusion
+
+The first batch returned **2 CAUGHT / 3 INVALID**: P1 on `CS2001`, P2 on `CS2012`, P5 with no test
+summary at all. Two separate causes, and conflating them would have wasted another cycle:
+
+- **`CS2012` — "output file in use."** Five back-to-back `dotnet test` cycles, each leaving a `testhost`
+  that had not exited before the next build tried to overwrite the same DLL. **The harness was racing
+  itself.** Fixed by *waiting* for `testhost` to exit before each build — never killing it, because a
+  dozen other agent worktrees share this machine and one foreign `dotnet` has been alive three days;
+  killing by process name would take their runs down too. It logged "waited 16s" before P5 and turned a
+  non-result into a verdict.
+- **`CS2001` — "source file could not be found."** A complaint about the FILE, not the code, and *not*
+  the same fault. P1 hit it twice, both times as the first perturbation of its batch — the one whose
+  build starts soonest after `fs.writeFileSync` truncates and rewrites the file. The wait ran *before*
+  the write, so there was no settle window at all. A 2.5 s settle *after* the write fixed it; P1 then
+  came back CAUGHT with 7 failures.
+
+Had the harness scored those three as MISSED rather than INVALID, the recorded conclusion would have been
+"the tests do not defend these properties" — including that my own V1 regression test is decorative. This
+project has now hit the broken-perturbation class **four times**; labelling it is what keeps it cheap.
 
 Harness properties, each earned from a prior failure in this project: it refuses to run on a dirty tree;
 it asserts each anchor matches **exactly once** before perturbing; it reports **INVALID** — never CAUGHT
@@ -226,11 +255,11 @@ outside the thing being observed.*
 
 | Run | Result |
 |---|---|
-| `dotnet build src/server/api/Sprk.Bff.Api/` | **0 errors / 0 warnings** |
-| `GrantLifecycle` + `GrantExpiry`, post-format forced rebuild | **51 / 51** |
-| Perturbations | **4 / 4 CAUGHT**, 0 MISSED, 0 INVALID |
+| `dotnet build` (`--no-incremental`, committed post-format state) | **0 errors / 0 warnings** |
+| `GrantLifecycle` + `GrantExpiry`, fresh binaries | **52 / 52** |
+| Perturbations (final, against the V1-fixed code) | **5 / 5 CAUGHT**, 0 MISSED, 0 INVALID |
 | `dotnet list package --vulnerable --include-transitive` | no vulnerable packages; **no package added** |
-| `Spaarke.ArchTests` | _pending — see §15_ |
+| `Spaarke.ArchTests` | **323 / 323** — count unchanged, so no endpoint-census shift |
 | Full `Sprk.Bff.Api.Tests` | _pending — see §15_ |
 | Publish size vs a FRESH master | _pending — see §15_ |
 
@@ -346,12 +375,22 @@ the call **shorter than it arrived**. That is exactly the trap §5 documents and
 
 ### Status
 
-**Task 106 is NOT complete.** The V1 fix is designed and its consequences traced, but **not applied** —
-the `code-review` gate was still reading these files, and editing underneath it would make its findings
-describe a state that no longer exists, the same class of non-result as a perturbation that fails to
-compile. Order from here: apply V1 + W7 + W8 → rewrite the one bad test, add the determinism test →
-re-run the affected classes, ArchTests and the full suite → **P1–P5** → publish size vs a fresh master →
-fill §14 → POML + TASK-INDEX + drift check.
+**V1 is FIXED and verified** — commit `e17a4c1c9`, plus `97481c917` for the record. Applied only once both
+gates had finished reading these files: editing underneath a review makes its findings describe a state
+that no longer exists, the same class of non-result as a perturbation that fails to compile.
+
+Landed with it: **F6** (the stale comment five lines from my own edit), **F2** (my own false "must not
+merge" claim, corrected in code *and* in §4 rather than quietly deleted), **F4** (one name for two
+different values — the durable guard F2's comment was reaching for), **F9** (the two tests missing the
+precondition §10 claimed they all had), **F3/W8** (the second in-memory expiry copy folded through
+`ConfersAccessOn`, so the exclusivity claim is true by construction rather than narrowed), and **F11/W7**
+(an unenforced precondition made mechanical).
+
+**Task 106 is still not complete.** Remaining: the full `Sprk.Bff.Api.Tests` suite, publish size against a
+fresh `origin/master`, register entries for **F5** and **F10**, then the POML + TASK-INDEX transaction and
+the drift re-check. Acceptance criterion 7 is unmet until the last two of those land, so the status
+artifacts stay untouched — marking a task complete on a criterion I have not measured is the specific
+failure this project's drift guard exists to catch.
 
 **The gate earned its keep.** Build, 51/51 tests, and 4/4 perturbations all passed over a real
 privilege-loss defect, because every one of those instruments was single-request and the defect lives in
