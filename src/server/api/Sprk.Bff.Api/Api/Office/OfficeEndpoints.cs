@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Office.Errors;
@@ -758,15 +759,27 @@ public static class OfficeEndpoints
 
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.ContentType = "application/problem+json";
-            await context.Response.WriteAsJsonAsync(new
-            {
-                type = "https://tools.ietf.org/html/rfc7235#section-3.1",
-                title = "Unauthorized",
-                status = 401,
-                detail = "User identity could not be determined",
-                errorCode = "OFFICE_009",
-                correlationId = traceId
-            }, cancellationToken);
+            // GitHub #975 (ADR-019 / RFC 7807), task 052: WriteAsJsonAsync's convenience overload
+            // always sets Content-Type to "application/json; charset=utf-8", unconditionally
+            // overwriting the "application/problem+json" set immediately above — it never consults
+            // the response's existing header. This return happens before ANY SSE framing begins
+            // (context.Response.ContentType is not set to "text/event-stream" until further below),
+            // so it is a plain error response, not a frame inside a started stream. Passing
+            // contentType explicitly (the framework's own 4-arg overload, same fix task 050 applied
+            // to the global exception handler) fixes the header without changing the serialized body.
+            await context.Response.WriteAsJsonAsync(
+                new
+                {
+                    type = "https://tools.ietf.org/html/rfc7235#section-3.1",
+                    title = "Unauthorized",
+                    status = 401,
+                    detail = "User identity could not be determined",
+                    errorCode = "OFFICE_009",
+                    correlationId = traceId
+                },
+                options: (JsonSerializerOptions?)null,
+                contentType: "application/problem+json",
+                cancellationToken);
             return;
         }
 
@@ -783,16 +796,28 @@ public static class OfficeEndpoints
 
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.Response.ContentType = "application/problem+json";
-            await context.Response.WriteAsJsonAsync(new
-            {
-                type = "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-                title = "Not Found",
-                status = 404,
-                detail = $"No processing job found with ID '{jobId}'",
-                errorCode = "OFFICE_008",
-                jobId = jobId,
-                correlationId = traceId
-            }, cancellationToken);
+            // GitHub #975 (ADR-019 / RFC 7807), task 052: WriteAsJsonAsync's convenience overload
+            // always sets Content-Type to "application/json; charset=utf-8", unconditionally
+            // overwriting the "application/problem+json" set immediately above — it never consults
+            // the response's existing header. This return happens before ANY SSE framing begins
+            // (context.Response.ContentType is not set to "text/event-stream" until further below),
+            // so it is a plain error response, not a frame inside a started stream. Passing
+            // contentType explicitly (the framework's own 4-arg overload, same fix task 050 applied
+            // to the global exception handler) fixes the header without changing the serialized body.
+            await context.Response.WriteAsJsonAsync(
+                new
+                {
+                    type = "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+                    title = "Not Found",
+                    status = 404,
+                    detail = $"No processing job found with ID '{jobId}'",
+                    errorCode = "OFFICE_008",
+                    jobId = jobId,
+                    correlationId = traceId
+                },
+                options: (JsonSerializerOptions?)null,
+                contentType: "application/problem+json",
+                cancellationToken);
             return;
         }
 
