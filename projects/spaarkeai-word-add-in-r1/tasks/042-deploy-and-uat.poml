@@ -4,7 +4,8 @@
     <title>Deploy the add-in and BFF, run UAT against the acceptance set</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>040 complete (parity checklist), 041 complete (Entra redirects + deploy trigger)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
+    <status-note>2026-09-17: BOTH DEPLOYS COMPLETE AND VERIFIED (BFF hash-verified to spaarke-bff-dev, 45.43 MB; add-in via CI run 35302983608, hosted manifest 1.0.8.0 -> 1.0.9.0). Steps 5-7 (M365 Integrated-apps re-upload, the 13 live criteria, deployed-build parity) are handed to the operator per step 5's own allowance — they need a live Office host. Criterion 12 recorded FAIL (issue #996 / ISS-004). Full record: notes/042-uat-results.md. Stays in-progress, NOT completed, until UAT runs.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and verification task; creates no application code beyond a manifest version bump. Quality gates skipped per the STANDARD default, but the CI-only deploy rule and the prescriptive step order are hard requirements.</rigor-reason>
     <model-tier>sonnet</model-tier>

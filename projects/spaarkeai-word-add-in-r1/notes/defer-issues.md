@@ -229,6 +229,65 @@ Either is a small, contained change to one file; add a regression test asserting
 
 ---
 
+## ISS-004 — `office-addins` is typechecked by NO CI job; FR-18's "CI gates it going forward" was never implemented
+
+| Field | Value |
+|---|---|
+| **Type** | Issue (missing gate — the safety property an accepted decision depends on is absent) |
+| **Found** | 2026-09-17, task 042, while recording spec Success Criterion 12 against the deployed build |
+| **Owner** | Whoever next owns office-addins CI — one workflow step, plus a spec.md amendment |
+| **Severity** | A NEW **production** typecheck error in `src/client/office-addins` would be caught by no gate at all |
+| **GitHub Issue** | [spaarke-dev/spaarke#996](https://github.com/spaarke-dev/spaarke/issues/996) |
+
+**Description**
+
+Spec Success Criterion 12 reads *"`npm run typecheck` is clean — Verify: CI"*. Measured on the deployed
+build's commit: `npm run typecheck` (= `tsc --noEmit --skipLibCheck`) **exits 2 with 111 `error TS` lines**,
+**0 of them production** (all under `__tests__/`, `*.test.*`, or `shared/__mocks__/office-js.ts`). So the
+criterion **FAILS as literally worded**.
+
+The 111 are not an unowned regression — project `CLAUDE.md` records a deliberate accept (2026-09-09,
+narrowed 290 → 111 on 2026-09-12, owner-approved). The real defect is the OTHER half of FR-18's acceptance:
+
+> FR-18 (`spec.md:92`): *"Acceptance: `npm run typecheck` is clean; **CI gates it going forward**."*
+
+**No CI job typechecks this package.** `grep -n typecheck .github/workflows/*.yml` matches only
+`sdap-ci.yml:432-485`, every hit belonging to a different package (`Spaarke.UI.Components`,
+`Spaarke.AI.Widgets`, `Spaarke.Auth`, …).
+
+**Why it matters**: the 2026-09-09 accept's stated safety property is *"production is at 0 so new production
+errors stand out"*. That holds only if something runs typecheck. Nothing does — `npm run build` is webpack
+and test files are not in its graph; `ts-jest isolatedModules` is transpile-only. The property is currently
+unenforced, which the accept itself flagged as the thing to watch.
+
+**Document conflict to resolve (owner decision)**
+
+- `spec.md:92` (FR-18) + `spec.md:264` ("Typecheck debt | Clean in this project? | **Yes**") assert clean + CI-gated.
+- Project `CLAUDE.md:158` + `:167` accept 111 test-file errors and state no CI job typechecks the package.
+
+The `CLAUDE.md` decisions are later and explicit; `spec.md` is the stale document and has never been amended.
+
+**Entry-points**
+
+- `src/client/office-addins/package.json` — `"typecheck": "tsc --noEmit --skipLibCheck"`
+- `.github/workflows/sdap-ci.yml:432-485` — the typecheck steps that exist, none for this package
+- `projects/spaarkeai-word-add-in-r1/CLAUDE.md:158,167` — the two accept decisions
+- `projects/spaarkeai-word-add-in-r1/spec.md:92,214,264` — the stale assertions
+
+**Suggested fix**
+
+1. Add a CI typecheck step for office-addins gating on **production errors only** (fail on any error outside
+   `__tests__`/`*.test.*`/`__mocks__`). This preserves the accepted debt while restoring the missing property.
+2. Amend `spec.md` FR-18 + the Assumptions table to state the accepted baseline (0 production / ~111
+   test-file) instead of "clean".
+
+**Estimated effort**: ~1 hour (one workflow step + spec edit)
+**Blockers**: none
+**Related**: `spec.md` FR-18 / criterion 12; project `CLAUDE.md` 2026-09-09 + 2026-09-12 rows;
+`notes/009-jest-harness-repair.md`, `notes/017-testing-library-alignment.md`
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.

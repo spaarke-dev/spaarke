@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-17 (context-handoff before /compact — ALL implementation tasks complete; only 042 deploy+UAT and 090 wrap-up remain)
+> **Last Updated**: 2026-09-17 (task 042 — **BOTH DEPLOYS DONE AND VERIFIED**; UAT + M365 re-upload are the operator's, then 090)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
@@ -13,13 +13,21 @@
 
 | Field | Value |
 |---|---|
-| **Where** | Branch `work/spaarkeai-word-add-in-r1` · head **`6f29ef236`** · working tree **clean** · **0 commits unpushed** · PR **#960** (description current, 198 lines) |
-| **Progress** | **52 of 55 tasks ✅.** Open: **011 🔄** (not blocking — see below), **042 🔲** (deploy + UAT), **090 🔲** (wrap-up). **Every implementation task is done.** |
+| **Where** | Branch `work/spaarkeai-word-add-in-r1` · PR **#960** · **0 behind / 198+ ahead of `origin/master`**. Deployed state is the stable anchor: BFF live on `spaarke-bff-dev`, add-in live on `icy-desert-0bfdbb61e.6.azurestaticapps.net` at manifest **1.0.9.0**. (No head SHA pinned here — task 042's own docs commit supersedes it; use `git log -1`.) |
+| **Progress** | **52 of 55 tasks ✅.** Open: **011 🔄** (closes on the M365 re-upload), **042 🔄** (**deploys DONE**; UAT outstanding), **090 🔲** (wrap-up). **Every implementation task is done, and both deploys are live.** |
 | **Baselines — use these, do not re-derive** | BFF `Sprk.Bff.Api.Tests` **12,375 passed / 0 failed / 56 skipped** (12,431 total) · ArchTests **191/191** · client `tsc --noEmit` **111 total / 0 production** · gated jest **46 suites / 537 tests** |
 | **CI on `6f29ef236`** | **Terminal, 0 pending.** All **8 Tier 1 (Blocking) checks PASS**; 32 pass overall; Trivy skipped. One cancel: `Tier 2 (Advisory) / Full Unit Tests`, killed at its 30-minute job cap — **advisory by design, lives in the frozen `ci-tier2-advisory.yml` this project does not own, and the required `Router` context excludes Tier 2 from its adjudication.** Not a failure and not a merge blocker. |
-| **Next Action** | Run **task 042** using the runbook immediately below, then **090**. |
+| **Next Action** | **Operator**: (1) re-upload the 1.0.9 manifest in M365 Admin Center → Integrated apps — this also closes **011**; (2) run UAT per `notes/042-uat-results.md` §7 and record results back into its §4 table. **Then** 090. Agent-side work on 042 is complete. |
+| **042 result** | Deploys ✅ verified. Criteria **6 PASS / 4 PARTIAL / 2 BLOCKED / 1 FAIL**, none omitted. The 4 PARTIAL + 2 BLOCKED all need a live Office host. The 1 FAIL is criterion 12 → [#996](https://github.com/spaarke-dev/spaarke/issues/996) / ISS-004 (**no CI job typechecks `office-addins`** — FR-18's "CI gates it going forward" was never built; the 111 test-file tsc errors are the accepted 2026-09-09 baseline, 0 production). Publish **+0.08 MB** vs fresh master. Full record: **`notes/042-uat-results.md`**. |
 
 ### 🚀 TASK 042 — DEPLOYMENT RUNBOOK (everything verified present 2026-09-17)
+
+> ✅ **STEPS 1–2 EXECUTED 2026-09-17 — DO NOT RE-RUN.** BFF deployed to `spaarke-bff-dev` (45.43 MB, 4/4
+> critical files SHA-256 verified, `/healthz` 200, 11 routes probed → 9×401 + 2×200, **zero 404s**). Add-in
+> deployed via CI run **`35302983608`**; hosted `word/manifest.xml` went **1.0.8.0 → 1.0.9.0** with task 037's
+> `FunctionFile` + 3×`ExecuteFunction` present in the deployed artifact and all 8 resource URLs resolving.
+> **Step 2 of the POML (4-part version bump) needed no action — task 037 had already done it.**
+> **Steps 3–4 below are the operator's and remain outstanding.** Full evidence: `notes/042-uat-results.md`.
 
 **Both deploy mechanisms are already owner-authorised.** The UAT half needs a live Office host and is the owner's.
 
