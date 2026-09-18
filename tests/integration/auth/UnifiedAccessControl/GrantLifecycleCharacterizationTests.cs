@@ -903,4 +903,215 @@ public class GrantLifecycleCharacterizationTests
             "a re-grant from a surface with no date field must not move a date someone chose");
         table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(longer);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ISS-008 / #973 — TASK 106. "Confers access" is a question about the WHOLE KEY.
+    //
+    // The task-023 check above judged the ELECTED survivor, and the election was "lowest id". On a key
+    // carrying duplicates that produced two separate wrong answers:
+    //
+    //   1. An expired lowest-id row returned 409 sdap.grant.expired_not_restored — "still confers no
+    //      access" — while a live duplicate meant the grantee DID have access. The 409 was false.
+    //   2. CollapseDuplicatesAsync deactivates every row but the survivor, so the naive fix (suppress the
+    //      409 and fall through) would have REVOKED the live access it had just detected. The bug's
+    //      current form is inert; that fix would not have been. Hence the register's "NOT collapse first".
+    //
+    // The fix is the ELECTION, not the check: the survivor is the row that will confer access longest
+    // after this request. An expired survivor then PROVES every row is expired, and the collapse cannot
+    // drop a conferring row because that row is the survivor.
+    //
+    // Duplicates are real, not hypothetical: task 097's backfill found one contact holding FIVE active
+    // rows on one matter (notes/task-097-mandatory-expiry.md).
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// An expired lowest-id row plus a live duplicate with a LATER expiry: the grantee has access, so the
+    /// endpoint must not claim otherwise.
+    /// </summary>
+    [Fact]
+    public async Task Upsert_OverAnExpiredRowWithALaterDuplicateOnTheSameKey_DoesNotReportNoAccess()
+    {
+        var table = new FakeGrantTable();
+        var expired = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(-1));
+        var live = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(30));
+        var client = table.BuildMock();
+
+        // Seed order IS the setup: the pre-106 election took the lowest id, so the expired row must BE the
+        // lowest id or this test would pass without ever exercising the defect.
+        expired.Id.CompareTo(live.Id).Should().BeNegative("the expired row must be the lowest id");
+
+        var outcome = await Grant(client, Request(expiryDate: null));
+
+        outcome.Warning.Should().BeNull(
+            "a live duplicate on the same key confers access, so '409 still confers no access' is false");
+        outcome.AccessRecordId.Should().Be(live.Id,
+            "the caller is handed the row access actually rests on, not an expired sibling");
+    }
+
+    /// <summary>
+    /// The same case with a NULL-expiry duplicate — null is never-expiring on the read path
+    /// (<c>ExpiryPredicate</c>'s <c>eq null</c> branch), so that row confers access too.
+    /// </summary>
+    [Fact]
+    public async Task Upsert_OverAnExpiredRowWithAnUnboundedDuplicateOnTheSameKey_DoesNotReportNoAccess()
+    {
+        var table = new FakeGrantTable();
+        var expired = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(-1));
+        var unbounded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: null);
+        var client = table.BuildMock();
+
+        expired.Id.CompareTo(unbounded.Id).Should().BeNegative("the expired row must be the lowest id");
+
+        var outcome = await Grant(client, Request(expiryDate: null));
+
+        outcome.Warning.Should().BeNull("an unbounded active row confers access — null never expires");
+        outcome.AccessRecordId.Should().Be(unbounded.Id);
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(
+            Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays),
+            "FR-33 still bounds the surviving unbounded row rather than leaving it open");
+    }
+
+    /// <summary>
+    /// The discriminating negative: when EVERY active row on the key is expired, the 409 is true and must
+    /// still fire. Without this, a fix that simply stopped returning the warning would also pass.
+    /// </summary>
+    [Fact]
+    public async Task Upsert_OverAnExpiredRowWhoseDuplicatesAreAlsoExpired_StillReportsNoAccess()
+    {
+        var table = new FakeGrantTable();
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(-30));
+        var latest = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(-1));
+        var client = table.BuildMock();
+
+        var outcome = await Grant(client, Request(expiryDate: null));
+
+        outcome.Warning.Should().NotBeNull(
+            "no active row on the key confers access, so the 409 is a true statement about the whole key");
+        outcome.AccessRecordId.Should().Be(latest.Id,
+            "even when all rows are expired the latest-expiring one is elected — it is what the caller retries against");
+        table.DeactivateCount.Should().Be(0,
+            "the warning returns BEFORE the collapse, exactly as it did pre-106");
+        table.ActiveRows.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// NEGATIVE — the failure the fix must not introduce. Collapsing onto an expired survivor would
+    /// deactivate the live duplicate and REVOKE access, which is why the register says "NOT collapse first".
+    /// </summary>
+    [Fact]
+    public async Task Upsert_WhenCollapsingDuplicates_LeavesTheRowThatConfersAccessActive()
+    {
+        var table = new FakeGrantTable();
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(-1));
+        var live = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(30));
+        var client = table.BuildMock();
+
+        await Grant(client, Request(expiryDate: null));
+
+        table.ActiveRows.Should().ContainSingle().Which.Id.Should().Be(live.Id,
+            "the expired row is the duplicate to collapse; deactivating the LIVE one would revoke real access");
+        table.ActiveRows[0].ExpiresDate.Should().Be(Today.AddDays(30),
+            "and its date is untouched — a re-grant carrying no date must not move one someone set");
+    }
+
+    /// <summary>
+    /// NEGATIVE — a request that CARRIES a new expiry behaves exactly as before (the task 023 path). An
+    /// explicit date applies to every row equally, so the effective expiries tie and the ascending-id
+    /// tie-break alone decides: the pre-106 election, unchanged.
+    /// </summary>
+    [Fact]
+    public async Task Upsert_WithANewExpiryOverDuplicates_ElectsTheLowestIdExactlyAsBefore()
+    {
+        var table = new FakeGrantTable();
+        var lowest = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(-1));
+        var other = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(30));
+        var client = table.BuildMock();
+        var renewed = Today.AddDays(60);
+
+        lowest.Id.CompareTo(other.Id).Should().BeNegative();
+
+        var outcome = await Grant(client, Request(expiryDate: renewed));
+
+        outcome.Warning.Should().BeNull("the request supplied a future expiry, so access IS restored");
+        outcome.AccessRecordId.Should().Be(lowest.Id,
+            "with an explicit expiry every row ties, so the id tie-break decides — task 023's behaviour, intact");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(renewed);
+    }
+
+    /// <summary>
+    /// The election is unrestricted, not "only when the lowest-id row is expired" — a deliberate choice.
+    /// </summary>
+    /// <remarks>
+    /// Two LIVE duplicates at +20 and +200 days: collapsing onto the lowest id would silently shorten the
+    /// grantee's access from 200 days to 20. That is the same family of defect as the false 409 — a collapse
+    /// deciding how long access lasts — so the row that confers longest wins here too. This is the one
+    /// behaviour change task 106 makes on a key where nothing is expired, so it is pinned deliberately
+    /// rather than left to fall out of the ordering.
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_WithTwoLiveDuplicates_KeepsTheLongerLivedRow()
+    {
+        var table = new FakeGrantTable();
+        var shorter = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(20));
+        var longer = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(200));
+        var client = table.BuildMock();
+
+        shorter.Id.CompareTo(longer.Id).Should().BeNegative("the shorter-lived row must be the lowest id");
+
+        var outcome = await Grant(client, Request(expiryDate: null));
+
+        outcome.AccessRecordId.Should().Be(longer.Id);
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(Today.AddDays(200),
+            "collapsing onto the lowest id would have cut access from +200 days to +20");
+        table.ExpiryUpdateCount.Should().Be(0, "no date moved; only the duplicate was collapsed");
+    }
+
+    /// <summary>
+    /// The election ranks rows by the expiry they will CARRY after this request, never by the raw column.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the case that proves the difference, and it discriminates against BOTH wrong designs.
+    /// Read <c>sprk_expiresdate</c> literally and an unbounded row sorts as "never expires", so it wins the
+    /// election — and FR-33 then bounds that winner at today + 90, collapsing away a sibling dated +200.
+    /// Access comes out of the call SHORTER than it went in, from a change whose entire purpose was to stop
+    /// access being mis-stated. The pre-106 lowest-id election lands in exactly the same hole here, because
+    /// the unbounded row is seeded first.</para>
+    /// <para>Judging the post-request value elects the +200 row instead: no unbounded row survives, so
+    /// FR-33 is still satisfied, and nothing is shortened.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_WithAnUnboundedRowAndALaterDatedDuplicate_KeepsTheDatedRowAndDoesNotShortenAccess()
+    {
+        var table = new FakeGrantTable();
+        var unbounded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: null);
+        var dated = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            expiresDate: Today.AddDays(200));
+        var client = table.BuildMock();
+
+        unbounded.Id.CompareTo(dated.Id).Should().BeNegative(
+            "the unbounded row must be the lowest id, so this also discriminates against lowest-id election");
+
+        var outcome = await Grant(client, Request(expiryDate: null));
+
+        outcome.AccessRecordId.Should().Be(dated.Id,
+            "electing the unbounded row would bound it to today + 90 and collapse the +200 row — cutting "
+            + "access by 110 days");
+        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(Today.AddDays(200));
+        table.ActiveRows.Should().NotContain(r => r.Id == unbounded.Id,
+            "and FR-33 still holds — no unbounded row survives the collapse");
+        table.ExpiryUpdateCount.Should().Be(0, "the surviving row already carried its date");
+    }
 }

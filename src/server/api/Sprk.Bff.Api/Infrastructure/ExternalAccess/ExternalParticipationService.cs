@@ -99,6 +99,23 @@ public class ExternalParticipationService
     internal static string ExpiryPredicate(DateOnly today)
         => $"(sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})";
 
+    /// <summary>
+    /// The IN-MEMORY mirror of <see cref="ExpiryPredicate"/>: does a grant carrying
+    /// <paramref name="expiresDate"/> still confer access on <paramref name="today"/>?
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Deliberately adjacent to the OData form, and the only in-memory copy</b> (task 106). The
+    /// write path must answer the same question the read filter answers — "does this row confer access" —
+    /// but it holds materialized rows rather than a <c>$filter</c>, so it cannot reuse the string. Two
+    /// independent definitions of "expired" is precisely the drift that would let <c>/grant</c> report an
+    /// outcome the reader contradicts, which is finding A-5's shape. So this sits next to the predicate it
+    /// mirrors, and <c>GrantExpiryCharacterizationTests</c> pins it to the same two semantics: <c>null</c>
+    /// never expires, and the expiry date ITSELF still confers (<c>ge</c>, not <c>gt</c> — task 007's Date
+    /// Only rule).</para>
+    /// </remarks>
+    internal static bool ConfersAccessOn(DateOnly? expiresDate, DateOnly today)
+        => expiresDate is null || expiresDate.Value >= today;
+
     /// <summary>Today in UTC — the reference date every expiry comparison uses.</summary>
     private static DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
 

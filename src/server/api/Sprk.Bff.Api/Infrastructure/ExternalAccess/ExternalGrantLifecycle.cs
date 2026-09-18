@@ -170,6 +170,55 @@ internal static class ExternalGrantLifecycle
     /// <summary>The expiry an absent request value becomes: <paramref name="today"/> + <see cref="DefaultExpiryDays"/>.</summary>
     internal static DateOnly DefaultExpiry(DateOnly today) => today.AddDays(DefaultExpiryDays);
 
+    /// <summary>
+    /// The expiry one row would carry after a request naming <paramref name="requestedExpiry"/> — the
+    /// value BOTH the survivor election and the "confers no access" decision judge.
+    /// </summary>
+    /// <remarks>
+    /// <para>ONE definition, two uses (task 106). The precedence mirrors the upsert's write rule exactly:
+    /// an explicitly requested date wins; otherwise a date someone already set is KEPT (a re-grant from a
+    /// surface with no date field must never move it — task 097); otherwise an unbounded row is bounded at
+    /// the FR-33 default.</para>
+    ///
+    /// <para><b>Why the election judges this and not the raw column.</b> Ranking rows by
+    /// <see cref="ExternalGrantRow.ExpiresDate"/> alone makes <c>null</c> sort as "never expires" and win —
+    /// and FR-33 then bounds that winner to today + 90, collapsing away a sibling dated LATER. Access would
+    /// come out of the call SHORTER than it went in. Ranking the post-request value keeps the row that will
+    /// actually confer longest.</para>
+    /// </remarks>
+    internal static DateOnly EffectiveExpiry(DateOnly? requestedExpiry, DateOnly? rowExpiry, DateOnly today)
+        => requestedExpiry ?? rowExpiry ?? DefaultExpiry(today);
+
+    /// <summary>
+    /// Elects the row a grant upsert applies to: the one that will confer access LONGEST after this
+    /// request, ties broken by ascending id. <paramref name="rows"/> must be non-empty.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Task 106 (ISS-008 / #973).</b> The election was previously "lowest id", which produced two
+    /// distinct wrong answers on a key carrying duplicates. (1) An expired lowest-id row returned 409
+    /// <c>sdap.grant.expired_not_restored</c> — "still confers no access" — while a live duplicate meant the
+    /// grantee DID have access. (2) <c>CollapseDuplicatesAsync</c> then deactivates every row but the
+    /// survivor, so the naive fix — suppress the 409 and fall through — would have REVOKED the live access
+    /// it had just correctly detected. The bug's current form is at least inert; that fix would not be.</para>
+    ///
+    /// <para>Electing by effective expiry makes both properties structural rather than checked: the elected
+    /// row is a conferring row whenever ANY row confers, so an expired survivor PROVES every row on the key
+    /// is expired — judging the survivor becomes judging the whole key — and the collapse cannot deactivate
+    /// the row that confers access, because that row IS the survivor.</para>
+    ///
+    /// <para><b>Determinism is preserved</b> — the property <see cref="QueryActiveRowsAsync"/>'s ordering
+    /// exists for. Two concurrent grants read the same rows and apply the same total order, so they elect
+    /// the same survivor and cannot deactivate each other. And when the request CARRIES an expiry, every
+    /// row's effective expiry is identical, so the tie-break alone decides and the election is exactly the
+    /// pre-106 "lowest id" — which is why a request with an explicit date behaves as it always did.</para>
+    /// </remarks>
+    internal static ExternalGrantRow ElectSurvivor(
+        IReadOnlyList<ExternalGrantRow> rows, DateOnly? requestedExpiry, DateOnly today)
+        => rows
+            .OrderByDescending(r => EffectiveExpiry(requestedExpiry, r.ExpiresDate, today))
+            .ThenBy(r => r.Id)
+            .First();
+
     // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
     // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
     // that had already expired. Verified DATE ONLY in live metadata (task 007).
@@ -186,6 +235,11 @@ internal static class ExternalGrantLifecycle
     /// same duplicate set must elect the SAME survivor, or they would deactivate each other's row and
     /// leave zero grants. Ascending id is stable and clock-independent, unlike <c>createdon</c> which can
     /// tie.</para>
+    ///
+    /// <para><b>Since task 106 this ordering is the TIE-BREAK, not the election itself</b> —
+    /// <see cref="ElectSurvivor"/> ranks by effective expiry first and falls back to ascending id. It is
+    /// still exactly what makes the outcome deterministic, because two racers applying the same total order
+    /// reach the same row; it is no longer, on its own, what decides which row survives.</para>
     ///
     /// <para><b>Rows without a usable id are discarded.</b> A row whose
     /// <c>sprk_externalrecordaccessid</c> did not materialise is not addressable — it cannot be updated

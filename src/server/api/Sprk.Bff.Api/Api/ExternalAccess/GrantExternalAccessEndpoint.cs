@@ -174,6 +174,14 @@ public static class GrantExternalAccessEndpoint
     /// <para>Now: query the logical key first — no match creates; an exact match is a no-op returning the
     /// existing id; a match at a different level updates that row IN PLACE. Any surplus active rows on
     /// the same key (pre-existing duplicates, or a lost create race) are collapsed onto the survivor.</para>
+    ///
+    /// <para><b>Which row survives (task 106, ISS-008).</b> The survivor is elected by
+    /// <see cref="ExternalGrantLifecycle.ElectSurvivor"/> — the row that will confer access longest after
+    /// this request, ties broken by ascending id — not the lowest id outright. That single change makes two
+    /// properties structural instead of checked: the expired-row branch below speaks for the WHOLE key
+    /// (an expired survivor proves every row is expired), and the collapse can never deactivate the row
+    /// access rests on (that row is the survivor). A request carrying an explicit expiry ties every row,
+    /// so it elects exactly what it always did.</para>
     /// </remarks>
     internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
@@ -197,9 +205,12 @@ public static class GrantExternalAccessEndpoint
 
         if (existing.Count > 0)
         {
-            // Deterministic survivor (lowest id) so concurrent grants elect the same row — see
-            // QueryActiveRowsAsync's remarks.
-            var survivor = existing[0];
+            // Task 106 (ISS-008 / #973): the survivor is the row that will confer access LONGEST after
+            // this request, ties broken by ascending id — NOT simply the lowest id. Electing a CONFERRING
+            // row is what makes the ADR-003 check below a statement about the whole key, and what keeps
+            // CollapseDuplicatesAsync from deactivating the row access actually rests on. Concurrent
+            // grants still converge: both apply the same total order. See ElectSurvivor's remarks.
+            var survivor = ExternalGrantLifecycle.ElectSurvivor(existing, request.ExpiryDate, today);
 
             // ── Task 023 (finding H1): the match path must write the EXPIRY too ──────────────
             //
@@ -261,17 +272,33 @@ public static class GrantExternalAccessEndpoint
             // record id while task 007's read filter kept excluding the row — the caller is told access
             // was restored, and the grantee still has none. If the request DID carry a new expiry, the
             // write above has already resolved it and this does not fire.
-            var effectiveExpiry = requestedExpiry ?? survivor.ExpiresDate;
-            if (effectiveExpiry is { } expiry && expiry < today)
+            //
+            // ── Task 106 (ISS-008 / #973): this judges the WHOLE KEY, not one row ───────────
+            //
+            // The survivor is elected by effective expiry, so if IT does not confer access then NO active
+            // row on the key does — which is the question the caller is really asking, because the read
+            // path unions every active unexpired row on the key. Before task 106 the elected row was
+            // simply the lowest id, so an expired lowest-id row produced this 409 — "still confers no
+            // access" — while a live duplicate meant the grantee did have access. The 409 was false.
+            //
+            // NOTE the two variables are NOT redundant and must not be merged: `requestedExpiry` is
+            // nullable because null means "write nothing" (task 097 — a re-grant from a surface with no
+            // date field must not move a date someone set), while `effectiveExpiry` is the value the row
+            // will actually carry. Collapsing them would start rewriting dates that already match.
+            // Conferral itself is ExternalParticipationService.ConfersAccessOn — the in-memory mirror of
+            // the read filter's own predicate, deliberately the only copy.
+            var effectiveExpiry = ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today);
+            if (!ExternalParticipationService.ConfersAccessOn(effectiveExpiry, today))
             {
                 logger.LogWarning(
-                    "[EXT-GRANT] Grant {Key} matched record {AccessRecordId} whose expiry {Expiry} has " +
-                    "PASSED, and the request supplied no new expiry. Refusing to report success over a " +
-                    "grant that confers no access.", key, survivor.Id, expiry);
+                    "[EXT-GRANT] Grant {Key} elected record {AccessRecordId} whose expiry {Expiry} has " +
+                    "PASSED — no active row on the key confers access — and the request supplied no new " +
+                    "expiry. Refusing to report success over a grant that confers no access.",
+                    key, survivor.Id, effectiveExpiry);
 
                 return new GrantUpsertOutcome(
                     survivor.Id,
-                    $"The existing grant expired on {expiry:yyyy-MM-dd} and this request supplied no new "
+                    $"The existing grant expired on {effectiveExpiry:yyyy-MM-dd} and this request supplied no new "
                     + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.");
             }
 
@@ -306,7 +333,12 @@ public static class GrantExternalAccessEndpoint
             var afterCreate = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct);
             if (afterCreate.Count > 1)
             {
-                var survivor = afterCreate[0];
+                // Same election rule as the match path (task 106). Here every row is a fresh create
+                // carrying the same requested-or-default expiry, so the effective expiries TIE and the
+                // ascending-id tie-break decides — provably identical to the pre-106 `afterCreate[0]`.
+                // Using the shared rule anyway keeps one definition of "which row survives", and covers
+                // the case where a racer's row carries a different date.
+                var survivor = ExternalGrantLifecycle.ElectSurvivor(afterCreate, request.ExpiryDate, today);
                 await CollapseDuplicatesAsync(dataverseClient, afterCreate, survivor.Id, key, logger, ct);
                 accessRecordId = survivor.Id;
             }
