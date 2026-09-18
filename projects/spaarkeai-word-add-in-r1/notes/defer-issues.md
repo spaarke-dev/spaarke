@@ -338,6 +338,46 @@ message text; only `RecordContainerResolver` does it typed on `ErrorCode`.
 
 ---
 
+## ISS-006 — Word pane: "Save as new version" on a filename collision versions an UNRELATED document and silently drops the selected record
+
+| Field | Value |
+|---|---|
+| **Type** | Issue (live defect on the deployed dev build; cross-record content exposure) |
+| **Found** | 2026-09-18, task 042 UAT — observed live, then reproduced from logs + rows |
+| **Owner** | **Unassigned — needs an owner decision.** The fix spans the pane (`SaveFlow.tsx`, `useSaveFlow.ts`) and arguably the 409 contract; it is NOT a one-liner and it interacts with task 023's deliberate no-re-associate rule |
+| **Severity** | 🔴 A user's document is written as a new version of an **unrelated** `sprk_document`, then profiled and RAG-indexed under that row, while the record the user selected receives nothing |
+| **GitHub Issue** | [spaarke-dev/spaarke#1005](https://github.com/spaarke-dev/spaarke/issues/1005) |
+
+**What fails**
+
+A create save whose file name collides is refused with `OFFICE_020` (correct — nothing is uploaded). The pane
+then offers **"Save as new version"**, which versions the open document onto whichever `sprk_document` owns the
+colliding **file name** in the container. Because `WordAdapter.getSubject()` falls back to
+`'Untitled Document'` (Word's Title metadata, normally blank) and containers are **business-unit scoped**, that
+is routinely an unrelated document belonging to someone else. The pane never names it, and
+`useSaveFlow.ts:937-941` (`sentEntity = versionTarget ? null : selectedEntity`) discards the user's selected
+Related-to record before the request is sent.
+
+**The bug is not the dropped association** — task 023 D-4/D-5 deliberately omits `targetEntity` on a version
+save, and that is correct for its intended case. **The bug is that a filename match is treated as document
+identity** (`errorMessages.ts:34-36`: the id is *"the `sprk_document` that already holds `fileName` in the
+target drive"*), and the pane offers to write into it unnamed.
+
+**Evidence** — five independent lines agree; full chain in
+[`notes/042-uat-findings-2026-09-18.md`](042-uat-findings-2026-09-18.md) §2–§3.
+
+**Suggested fix** — two changes that must land together: (1) name the document in the prompt
+("Save as a new version of **{name}** — filed to **{record}**"); (2) do not offer the retry when the colliding
+document's association contradicts the user's selection, or carry `targetEntity` and refuse server-side rather
+than dropping it silently. ⚠️ **Do NOT fix it by making the version save re-associate** — that silently re-files
+another user's document onto the current user's record, which is worse and crosses task 023's authorization
+boundary.
+
+**Live data remediation is outstanding** and is the operator's (this project is read-only on Dataverse): one
+row in dev currently holds another document's content, profile and index chunks. See §8 of the findings note.
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.

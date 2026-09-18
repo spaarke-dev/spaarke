@@ -144,8 +144,10 @@ Criterion 2's history is the honest record of this task: **PASS** (a green test 
 → **FAIL** (live UAT found the 503 the test could not) → **PASS** (corrected test, fix deployed, then confirmed
 in a live pane). The one remaining FAIL is criterion 12 (#996).
 
-⚠️ **A NEW finding arrived from the same UAT session and is NOT reflected in this tally** — a save produced an
-SPE file with no matter association. It is under triage, not yet classified: see **§6.4**.
+⚠️ **A NEW defect arrived from the same UAT session and is NOT reflected in this tally** — the collision
+prompt's "Save as new version" writes into an unrelated document. **Diagnosed and filed as
+[#1005](https://github.com/spaarke-dev/spaarke/issues/1005) / ISS-006**: see **§6.4**. It is a defect on the
+deployed build, not a criterion in this tally.
 
 ---
 
@@ -255,33 +257,39 @@ build intermediates. Never reproduced in CI. **If it recurs: wait and retry befo
 
 ---
 
-### 6.4 OPEN — save produced an SPE file with no matter association (2026-09-18 UAT)
+### 6.4 DIAGNOSED → [#1005](https://github.com/spaarke-dev/spaarke/issues/1005) / ISS-006 — the collision prompt writes into an unrelated document (2026-09-18 UAT)
 
-**Full triage, with the diagnostics that settle it: `notes/042-uat-findings-2026-09-18.md`.** Summary only here.
+**Full chain: `notes/042-uat-findings-2026-09-18.md`.** Summary only here.
 
-Three symptoms were reported from one session; they are not three bugs:
+Three symptoms were reported; they are **one** defect plus one pre-existing condition:
 
-| # | Symptom | Triage |
+| # | Symptom | Verdict |
 |---|---|---|
-| A | Collision named `Untitled Document.docx`, not the existing `Examiner report draft.docx` | **Probably correct, not a defect.** `OfficeService.cs:640` passes the **requested** filename into `ResolveNameCollisionAsync`, so the message names the file being uploaded — i.e. an item of that name already exists in the container. Evidence of symptom C, not a separate fault. **Confirm via §4.1 before touching the message.** |
-| B | Did not save as a **version** of the existing document | **Expected under the owner's A+C decision.** The file is a copy of a **pre-stamp** document (modified 2026-09-04, before task 014 shipped), so it carries no custom-XML stamp and has no SPE URL — neither identity signal exists. Content-based auto-matching is exactly what the decision declined; **"Save as new version" in the banner is the sanctioned remedy.** Open question: was it clicked, and what happened? |
-| C | File in SPE, `_sprk_matter_value` NULL, matter still shows only its original document | **The primary defect candidate.** |
+| A | Collision named `Untitled Document.docx`, not `Examiner report draft.docx` | ✅ **The message was correct.** A row of that name really did own the slot. `OfficeService.cs:640` passes the **requested** filename, and `getSubject()` falls back to `'Untitled Document'` (Word's Title metadata, normally blank) — so that is genuinely what was being uploaded. |
+| B | Did not save as a **version** of the existing document | 🔴 **This is the defect — and the earlier triage of it was wrong.** "Save as new version" *was* clicked, and it versioned the document onto the **colliding orphan**, not onto `Examiner report draft.docx`. The button targets whoever owns the **file name** (`errorMessages.ts:34-36`), never names it in the UI, and `useSaveFlow.ts:937-941` drops the selected record on the version path. |
+| C | File in SPE, `_sprk_matter_value` NULL, matter shows only its original document | ⚠️ **Two separate things.** Today's save created **no row at all** (it was a version write onto the orphan — only 2 rows exist for 2026-09-18, neither from that save). The NULL row the operator inspected is a **pre-existing orphan** from `04:32:44`. Record-less saves are allowed by design (`notes/025-…` M4). |
 
-**CONFIRMED in code** (`OfficeDocumentPersistence.cs:256-267`): association runs **only**
-`if (request.TargetEntity != null)`, and the null-target branch creates an unassociated row **silently** — it
-logs nothing. `sprk_matter` is **not** among the known gaps (account, contact, sprk_todo), so a genuine matter
-target would either associate or log a warning naming the type.
+**The chain**, every step code-verified: Word's default name → BU-scoped flat container → one shared filename
+slot per business unit → `OFFICE_020` refusal (correct, nothing uploaded) → the 409 resolves an
+`existingDocumentId` **by file name** → the pane offers to version it, unnamed → the version path sends no
+`targetEntity`.
 
-**Leading hypothesis**: the pane sent no `TargetEntity` — possibly the collision-retry path ("Keep both" /
-"Save as new version") drops it. **Competing hypothesis**: it was sent and `DocumentAssociationMap.TryApply`
-returned false. §4.2's single log query separates them — the warning fires only in the second case.
+**The dropped association is NOT the bug.** Task 023 D-4/D-5 omits `targetEntity` on a version save
+deliberately, and correctly, for its intended case. **The bug is a filename match treated as document
+identity.** ⚠️ Fixing it by re-associating on version save would silently re-file another user's document onto
+the current user's record — worse, and it crosses task 023's authorization boundary.
 
-**Why it compounds**: a targetless save orphans bytes in SPE *and* its filename then blocks the next
-legitimate save of that file — which is how symptom A arises from symptom C.
+**Measured, and worth keeping**: **256** true orphans in dev (all four direct slots null, `sprk_hasfile` true)
+— not 267; filtering on `_sprk_matter_value` alone over-counts by 11 rows associated via another direct slot,
+exactly the trap task 026's 16-lookup inventory warns about. They are **long-standing, not introduced by this
+project**: earliest `2026-01-13`, with 167 of them in January.
 
-⚠️ **Do not read NULL `_sprk_matter_value` as "unassociated" on its own.** Task 026 records **16
-association-shaped lookups** on `sprk_document` (4 direct + 12 `sprk_related*`); check all four direct slots
-first (§4.3).
+**Association is not broken**: `Invoice PAT-942665.docx`, created 11 minutes earlier the same morning, has its
+matter lookup correctly set — which disproves the "`DocumentAssociationMap.TryApply` fails for `sprk_matter`"
+hypothesis.
+
+⚠️ **Do not re-run the old §4 diagnostics.** App Insights retention in `spe-insights-dev-67e2xz` is ~2 hours;
+the `04:32` telemetry no longer exists. The question was settled from Dataverse row-creation times instead.
 
 ---
 
