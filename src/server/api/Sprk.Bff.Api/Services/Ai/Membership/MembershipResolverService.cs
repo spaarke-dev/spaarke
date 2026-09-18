@@ -250,8 +250,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // Default false (the untouched path) makes this line a no-op — candidateFields IS
         // discovery.DiscoveredFields, the same reference — so scoping output stays byte-identical to
         // pre-task-041 behavior (AC pinned by ResolveAsync_AccessConferringOnlyDefaultsFalse_* tests).
+        // includePlatformOwnership: true — the SYSTEMUSER plane, the only plane where owning a record is
+        // possible (task 043 C-1, owner decision 2026-09-17). See PlatformOwnershipColumns.
         var candidateFields = effectiveOptions.AccessConferringOnly
-            ? FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields)
+            ? FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: true)
             : discovery.DiscoveredFields;
         var descriptors = FilterDescriptors(candidateFields, effectiveOptions);
 
@@ -454,7 +456,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // contact roles before any options narrowing. Reuses the SAME metadata
         // discovery mechanism as the systemuser path — no second discovery engine.
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var allowlisted = FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields);
+        // includePlatformOwnership: FALSE — a contact can never own a Dataverse record, so ownership
+        // descriptors would bind nothing here and merely widen the query (task 043 C-1; NFR-05, pinned
+        // by ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords).
+        var allowlisted = FilterToAccessConferringRoles(
+            normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: false);
         var descriptors = FilterDescriptors(allowlisted, effectiveOptions);
 
         // No access-conferring contact roles → empty response (NOT an error).
@@ -556,9 +562,59 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// column — or a maker naming a brand-new column to merely LOOK like an assignment field — has zero
     /// effect on access, because only an explicit registry entry does.
     /// </summary>
+    /// <summary>
+    /// The Dataverse PLATFORM ownership columns, which confer access structurally rather than by
+    /// registry entry (owner decision 2026-09-17 — task 043 finding C-1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>Restoring these is not a convenience; omitting them caused a production outage once
+    /// already.</b> <c>MembershipFieldDiscoveryService</c>'s own rationale block records R7 W12 task 130
+    /// (2026-06-30): <i>"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid …
+    /// verified via raw SQL. Only ownerid matches those 44 rows for that user; the assigned* fields do
+    /// not."</i> Task 043's registry filter would have reproduced that exact symptom on the systemuser
+    /// plane, because the registry can only declare Contact/Organization types.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b><c>owningteam</c> is the load-bearing one, not <c>ownerid</c></b> — records in this
+    /// deployment are owned primarily at team / business-unit level (owner, 2026-09-17). Discovery binds
+    /// the FIRST target matching <c>IncludedIdentityTables</c>, whose order starts at
+    /// <c>systemuser</c>, so a polymorphic Owner column always resolves to <b>SystemUser</b> and is bound
+    /// against the caller's own <c>SystemUserId</c>. On a team-owned record <c>ownerid</c> holds the
+    /// TEAM's id, so that condition never matches; the access arrives via <c>owningteam</c> →
+    /// <c>Team</c> → <c>identity.TeamIds</c>. Keying on <c>ownerid</c> alone would look like a fix and
+    /// confer nothing.
+    /// </para>
+    /// <para>
+    /// Residual worth knowing: <c>TeamIds</c> comes from the <c>teammembership</c> query in
+    /// <c>IdentityNormalizationService</c>, which fails <b>soft</b> to an empty list ("TeamIds will be
+    /// empty"). So on team-owned records a transient failure of that read is indistinguishable from "no
+    /// access" — the same read-fault-looks-like-absence shape recorded as ISS-019.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> PlatformOwnershipColumns =
+        new(StringComparer.OrdinalIgnoreCase) { "ownerid", "owningteam", "owningbusinessunit" };
+
+    /// <param name="includePlatformOwnership">
+    /// Whether <see cref="PlatformOwnershipColumns"/> may confer. <c>true</c> on the SYSTEMUSER plane
+    /// only; <c>false</c> on the contact plane.
+    /// <para>
+    /// ⚠️ <b>Not a toggle — a plane invariant, and a pre-existing test caught it being violated.</b> A
+    /// contact can never own a Dataverse record, so on the contact plane these descriptors bind nothing
+    /// (<c>SystemUserId</c> is <see cref="Guid.Empty"/>, <c>TeamIds</c> empty, <c>BusinessUnitId</c>
+    /// null) and admitting them only widens the descriptor set and the emitted FetchXml. When task 043
+    /// first added the ownership allowance unconditionally,
+    /// <c>ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords</c> failed with
+    /// <c>ByRole</c> = <c>{["owner"] = {empty}, ["assignedAttorney"] = {…}}</c> — the role present and
+    /// contributing zero records — against its own reason, "SystemUser lookups are not access-conferring
+    /// on the contact path" (NFR-05). Keeping this <c>false</c> there preserves the contact plane's
+    /// byte-identical output, which several tests deliberately pin.
+    /// </para>
+    /// </param>
     private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringRoles(
         string entityType,
-        IReadOnlyList<MembershipDescriptor> discovered)
+        IReadOnlyList<MembershipDescriptor> discovered,
+        bool includePlatformOwnership)
     {
         if (discovered.Count == 0)
         {
@@ -566,18 +622,17 @@ public sealed class MembershipResolverService : IMembershipResolverService
         }
 
         var registry = _options.AccessConferringRoles ?? new AccessConferringRegistry();
-        if (!registry.Entities.TryGetValue(entityType, out var columns) ||
-            columns is null || columns.Count == 0)
-        {
-            // Fail-closed default (NFR-01): an entity absent from the registry confers nothing via the
-            // derived-member term — silence, not a wildcard grant, for any entity nobody has reviewed a
-            // conferring column onto yet.
-            return Array.Empty<MembershipDescriptor>();
-        }
+        registry.Entities.TryGetValue(entityType, out var columns);
+
+        // An entity absent from the registry confers nothing via the maker-authored axis (fail-closed,
+        // NFR-01) — but it still confers through PLATFORM OWNERSHIP below, so this is no longer an
+        // early return. Ownership is not a registry concern; see PlatformOwnershipColumns.
+        columns ??= new List<AccessConferringColumn>();
 
         // Validate + index the registry's declared columns for this entity. A malformed entry (blank
         // Field, or an IdentityType outside {Contact, Organization}) is logged and dropped here — never
-        // widened, per NFR-01.
+        // widened, per NFR-01. NOTE: the Contact/Organization restriction applies to the REGISTRY only.
+        // The ownership axis is admitted structurally, not by declaring a type here.
         var byField = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in columns)
         {
@@ -610,11 +665,38 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 continue;
             }
 
+            // ── PLATFORM OWNERSHIP — admitted structurally, ahead of the registry ──────────────────
+            // Owner/team/business-unit ownership confers access without a registry entry, and MUST:
+            // being the owner IS Dataverse access, which is the very thing this filter is approximating
+            // until the FR-20 impersonated read (task 036) replaces it with Dataverse's own answer.
+            //
+            // Why these three are NOT a registry concern (owner decision 2026-09-17, task 043 C-1):
+            // FR-24's entire rationale is that a MAKER-AUTHORED lookup must not confer by naming
+            // accident — a rename could silently grant access, so conferral needs a reviewed entry.
+            // `ownerid` / `owningteam` / `owningbusinessunit` are platform-maintained system columns,
+            // fixed by the Dataverse data model (see MembershipFieldDiscoveryService's
+            // OwnerAttributeTargets, "fixed ... regardless of solution / entity"). Nobody can rename
+            // their way into them, so there is nothing for a review to protect against — and requiring
+            // an entry made them INEXPRESSIBLE, because the loop above rejects any declared type
+            // outside {Contact, Organization} as malformed.
+            //
+            // 🔴 What this deliberately does NOT do: admit every SystemUser/Team/BusinessUnit-typed
+            // lookup. A maker-authored `sprk_reviewer → systemuser` still confers nothing without a
+            // reviewed entry — otherwise register A-8's over-inclusion returns through a different
+            // door. The allowance is keyed on the three platform NAMES, not on the identity type.
+            // Pinned by ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing.
+            if (includePlatformOwnership && PlatformOwnershipColumns.Contains(d.Field.Trim()))
+            {
+                result.Add(d);
+                continue;
+            }
+
             if (!byField.TryGetValue(d.Field.Trim(), out var registeredType))
             {
                 // Not in the registry — the FR-24 default. Adverse fields (opposing-counsel lookups),
-                // account/BU/systemuser/team-typed lookups, and any column nobody has reviewed onto the
-                // registry all end here, regardless of how their name reads.
+                // account-typed lookups, maker-authored systemuser/team-typed lookups, and any column
+                // nobody has reviewed onto the registry all end here, regardless of how their name
+                // reads. (Platform ownership is the one exception, handled immediately above.)
                 continue;
             }
 

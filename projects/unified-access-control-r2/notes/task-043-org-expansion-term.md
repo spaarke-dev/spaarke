@@ -569,3 +569,99 @@ Both reached the same verdict on the cache-key finding — that it was a **laten
 task's own step 3**, correctly diagnosed and correctly pinned by two tests that run the calls in the
 dangerous order — and both flagged the POML's non-existent "flag-off branch of 036". `adr-check` and
 `code-review` disagreed on nothing.
+
+---
+
+## 15. C-1 RESOLVED — the owner chose the correct option, not the expedient one
+
+> **Owner, 2026-09-17**: *"for C-1 we need to implement the correct technical and user access control
+> option; note that records will be primarily owned at the team/business unit and not individual users
+> if that impacts the approach."*
+
+It impacts it decisively. Option **A** (revert the flag) was my recommendation and would have restored the
+pre-043 wildcard — every discovered descriptor conferring, adverse contact lookups included (A-8). The
+owner declined that, correctly.
+
+### 15.1 What shipped: platform ownership confers **structurally**, not by registry entry
+
+`ownerid`, `owningteam`, `owningbusinessunit` are admitted by `FilterToAccessConferringRoles` ahead of
+the registry lookup, and **without** needing an entry.
+
+**Why they are not a registry concern.** FR-24's entire rationale is that a **maker-authored** lookup
+must not confer by naming accident — a rename could silently grant access, so conferral needs review.
+These three are platform-maintained, fixed by the Dataverse data model (see
+`MembershipFieldDiscoveryService.OwnerAttributeTargets`: *"fixed … regardless of solution / entity"*).
+Nobody can rename their way into them, so there is nothing for a review to protect against — and
+requiring an entry made them **inexpressible**, since the registry validator rejects any declared type
+outside `{Contact, Organization}` as malformed. **Being the owner IS Dataverse access**, which is the
+very thing this filter approximates until task 036 replaces it with Dataverse's own answer.
+
+### 15.2 🔴 This regression already happened once, in production
+
+`MembershipFieldDiscoveryService`'s own rationale block records R7 W12 task 130 (2026-06-30):
+
+> *"root cause of production symptom `sprk_matter resolved rows=0` for a user who owns 44 matters via
+> `ownerid` … verified via raw SQL. Only `ownerid` matches those 44 rows for that user; the assigned\*
+> fields do not."*
+
+So C-1 was not a hypothetical with an unknown blast radius — it was a documented outage with a measured
+one, and severe enough then to warrant an empirical SDK investigation plus a synthesis fallback.
+
+### 15.3 ⚠️ `owningteam` is the load-bearing column — `ownerid` alone would have been a false fix
+
+The owner's team/BU fact turns out to be decisive, and provable from the code. Discovery binds the
+**first** target matching `IncludedIdentityTables` (`MembershipFieldDiscoveryService.cs:282-300`), and
+that list is ordered `systemuser, contact, team, businessunit, account, sprk_organization`. Since an
+Owner column is polymorphic over `{systemuser, team}`, **`ownerid` always resolves to `SystemUser`** and
+is bound against the caller's own `SystemUserId`.
+
+On a **team-owned** record `ownerid` holds the *team's* id — so that condition never matches. The access
+arrives through `owningteam` → `Team` → `identity.TeamIds`, or `owningbusinessunit` → the caller's
+`BusinessUnitId`. Had I keyed the allowance on `ownerid` alone it would have compiled, passed, read as a
+fix, and conferred nothing in the deployment that matters.
+
+Pinned by `ResolveAsync_AccessConferringOnly_TeamAndBusinessUnitOwnership_Confer`, which asserts the
+caller's team id appears **as a condition value**, not merely that the column survived the filter.
+
+### 15.4 The narrow rule, and the test that makes it provable
+
+The allowance is keyed on the three platform **names**, never on the identity type. A maker-authored
+`sprk_reviewer → systemuser` still requires a reviewed registry entry — otherwise A-8's over-inclusion
+returns through a different door, and "ownership confers" would be indistinguishable from "any
+systemuser-typed lookup confers". Pinned by
+`ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing`, which seeds two
+SystemUser-typed descriptors and admits exactly one.
+
+### 15.5 I over-widened it, and a pre-existing test caught me
+
+My first cut applied the allowance unconditionally, so it reached the **contact** plane too.
+`ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords` — a pre-existing NFR-05
+assertion, not one of mine — failed with:
+
+```
+Expected result.ByRole {["owner"] = {empty}, ["assignedAttorney"] = {…}} not to contain key "owner"
+because SystemUser lookups are not access-conferring on the contact path, but found it anyhow.
+```
+
+`owner` present **with an empty id list**: it bound nothing (a contact has `SystemUserId == Guid.Empty`,
+no teams, no BU) and merely widened the descriptor set and the emitted FetchXml. The fix was mine, not
+the test's — `includePlatformOwnership` is now threaded per call site, `true` on the systemuser plane and
+`false` on the contact plane, which also keeps the contact plane byte-identical (a property several tests
+deliberately pin). **The test's expectations were not touched.** A contact can never own a Dataverse
+record; the invariant was already written down, and I had briefly broken it.
+
+### 15.6 ADR-034 **A1.1** — amendment applied (CLAUDE.md §6.5 path B)
+
+A1 as written covered only the maker-authored contact/org axis. A1.1 adds the platform-ownership axis as
+structurally conferring, with the explicit **MUST NOT** against widening to every SystemUser/Team/BU-typed
+lookup, the R7 W12 T130 evidence, and the `owningteam`-not-`ownerid` warning. Owner-approved by the
+direction above; applied to `.claude/adr/ADR-034-user-record-membership.md` (main-session only, per root
+CLAUDE.md §3).
+
+### 15.7 Residual
+
+`TeamIds` comes from the `teammembership` query in `IdentityNormalizationService`, which **fails soft**
+to an empty list ("TeamIds will be empty"). On team-owned records a transient failure of that read is
+therefore indistinguishable from "no access" — the same read-fault-looks-like-absence shape as
+**ISS-019**, one layer over. Recorded on `PlatformOwnershipColumns` itself so the next reader meets it
+where it bites.

@@ -1073,8 +1073,16 @@ public class MembershipResolverServiceTests
         // AC (systemuser opt-in gate): AccessConferringOnly=true applies the SAME registry filter
         // ResolveByContactAsync always applies, on the systemuser (ResolveAsync) path. A registry-listed
         // Contact column resolves; a non-registry Contact column (sprk_opposingcounsel — discovery still
-        // finds it) never reaches the emitted FetchXml; a non-Contact/Organization descriptor
-        // (SystemUser-typed "owner") is excluded regardless, same as the contact path always was.
+        // finds it) never reaches the emitted FetchXml.
+        //
+        // ⚠️ CORRECTED 2026-09-17 (owner decision, task 043 finding C-1). This test previously asserted
+        // that the SystemUser-typed `ownerid` was "excluded regardless" — and that assertion was the
+        // regression, written into the expected value. PLATFORM OWNERSHIP (ownerid / owningteam /
+        // owningbusinessunit) now confers structurally, because being the owner IS Dataverse access and
+        // the registry can only declare Contact/Organization types, which made ownership inexpressible.
+        // Excluding it reproduced R7 W12 task 130's production outage ("rows=0 for a user who owns 44
+        // matters via ownerid"). What stays excluded is the MAKER-AUTHORED axis — see
+        // ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing.
         var discovery = BuildDiscoveryMock(
             Descriptor("ownerid", "owner", "SystemUser"),
             Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
@@ -1101,16 +1109,107 @@ public class MembershipResolverServiceTests
             new MembershipResolveOptions(AccessConferringOnly: true),
             CancellationToken.None);
 
-        // Assert — only the registry-listed Contact column resolves.
-        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" });
-        result.ByRole.Should().NotContainKey("owner");
+        // Assert — the registry-listed Contact column AND platform ownership resolve; the adverse
+        // contact lookup does not.
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "assignedAttorney" });
         result.ByRole.Should().NotContainKey("opposingCounsel");
         captured.Should().NotBeNull();
         captured!.Query.Should().Contain("sprk_assignedattorney1");
-        captured.Query.Should().NotContain("ownerid",
-            "AccessConferringOnly excludes non-Contact/Organization descriptors even on the systemuser plane");
+        captured.Query.Should().Contain("ownerid",
+            "platform ownership confers structurally — excluding it is what caused R7 W12 task 130's rows=0 outage");
         captured.Query.Should().NotContain("sprk_opposingcounsel",
             "AccessConferringOnly excludes a Contact-typed field that is not in the registry");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing()
+    {
+        // 🔴 THE test that makes the platform-ownership allowance a NARROW rule rather than a hole.
+        //
+        // Ownership confers structurally because `ownerid` / `owningteam` / `owningbusinessunit` are
+        // platform-maintained and nobody can rename their way into them. A MAKER-AUTHORED lookup that
+        // happens to target systemuser has none of that protection: if the allowance were keyed on the
+        // identity TYPE instead of the three platform names, `sprk_reviewer` would start conferring the
+        // moment someone added it — which is register A-8's over-inclusion returning through a
+        // different door, and exactly what FR-24 exists to stop.
+        //
+        // Both descriptors below are SystemUser-typed. Only the platform one may confer.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),
+            Descriptor("sprk_reviewer", "reviewer", "SystemUser"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId))),
+            }));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner" });
+        result.ByRole.Should().NotContainKey("reviewer");
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("ownerid");
+        captured.Query.Should().NotContain("sprk_reviewer",
+            "a maker-authored systemuser-typed lookup must still require a reviewed registry entry — the "
+            + "allowance is keyed on the three platform column NAMES, never on the identity type");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_TeamAndBusinessUnitOwnership_Confer()
+    {
+        // The paths that actually carry access in this deployment: records are owned primarily at
+        // TEAM / BUSINESS-UNIT level, not by individual users (owner, 2026-09-17).
+        //
+        // Why `ownerid` alone would have been a false fix: discovery binds the FIRST target matching
+        // IncludedIdentityTables, whose order starts at `systemuser`, so a polymorphic Owner column
+        // always resolves to SystemUser and is bound against the caller's OWN SystemUserId. On a
+        // team-owned record `ownerid` holds the TEAM's id, so that condition never matches. The access
+        // arrives through `owningteam` → Team → identity.TeamIds (and `owningbusinessunit` → the
+        // caller's BusinessUnitId). BuildFullIdentity() supplies TestTeamA/TestTeamB + TestBusinessUnit.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("owningteam", "owningTeam", "Team"),
+            Descriptor("owningbusinessunit", "owningBusinessUnit", "BusinessUnit"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("owningteam", new EntityReference("team", TestTeamA))),
+                MatterRow(MatterIdB, ("owningbusinessunit", new EntityReference("businessunit", TestBusinessUnit))),
+            }));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        result.Ids.Should().BeEquivalentTo(new[] { MatterIdA, MatterIdB });
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owningTeam", "owningBusinessUnit" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain(TestTeamA.ToString("D"),
+            "the caller's team membership must appear as a condition value, not merely be accepted");
+        captured.Query.Should().Contain(TestBusinessUnit.ToString("D"));
     }
 
     [Fact]
@@ -1493,7 +1592,7 @@ public class MembershipResolverServiceTests
             new MembershipResolveOptions(AccessConferringOnly: true),
             CancellationToken.None);
 
-        authorization.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" },
+        authorization.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "assignedAttorney" },
             "the authorization call must resolve its OWN filtered answer, never inherit the scoping call's cached one");
         authorization.ByRole.Should().NotContainKey("opposingCounsel",
             "an adverse lookup reaching an access decision through a shared cache entry is a disclosure");
