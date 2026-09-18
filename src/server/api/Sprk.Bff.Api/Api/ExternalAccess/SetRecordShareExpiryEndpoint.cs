@@ -237,7 +237,11 @@ public static class SetRecordShareExpiryEndpoint
             "[SHARE-EXPIRY] Caller {CallerOid} set {Count} active shares of {RootType} {RootId} to expire {Expiry} " +
             "({Renewed} of them had already lapsed and are renewed).",
             callerOid, shares.Count, root.Type, root.Id, expiry,
-            shares.Count(s => s.ExpiresDate is { } d && d < today));
+            // Task 106 review finding F3: this was a second in-memory definition of "expired" sitting in
+            // the same folder as the read filter's. Log-only, and the exact negation of the predicate, so
+            // there was no divergence yet -- which is precisely when to consolidate rather than after one
+            // appears. Routed through the shared mirror.
+            shares.Count(s => !ExternalParticipationService.ConfersAccessOn(s.ExpiresDate, today)));
 
         await InvalidateAffectedCachesAsync(shares, dataverseClient, cache, httpContext.User, logger);
 

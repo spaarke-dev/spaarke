@@ -70,13 +70,26 @@ is algebraically equal to task 023's `requestedExpiry ?? survivor.ExpiresDate` i
 (requested date / kept date / unbounded→default), so one extracted helper serves both the election and
 the conferral decision.
 
-### What I did NOT merge, deliberately
+### What I did NOT merge — and ⚠️ the reason I first gave for it was FALSE
 
-`requestedExpiry` stays nullable and separate. Its null means **"write nothing"** (task 097 — a re-grant
-from a surface with no date field must not move a date someone set), whereas `effectiveExpiry` is the
-value the row will carry. Collapsing them would start rewriting dates that already match and break
-`Upsert_NoExpiryOnAGrantWithALongerExpiry_LeavesItUnchanged`'s `ExpiryUpdateCount == 0`. A comment in
-the code says so, because the two look redundant and the "simplification" is inviting.
+`expiryToWrite` (renamed from `requestedExpiry`, see §16/F4) stays nullable and separate from
+`effectiveExpiry`. Its null means **"write nothing"** (task 097 — a re-grant from a surface with no date
+field must not move a date someone set), whereas `effectiveExpiry` is the value the row will carry.
+
+🔴 **Correction (review finding F2).** I originally wrote here, and in a code comment, that merging them
+"would start rewriting dates that already match and break
+`Upsert_NoExpiryOnAGrantWithALongerExpiry_LeavesItUnchanged`'s `ExpiryUpdateCount == 0`". **Both claims
+are false**, and the review traced all three branches to show it: the write guard is
+`expiryChanged = expiryToWrite.HasValue && expiryToWrite != survivor.ExpiresDate`, and in the one branch
+where `expiryToWrite` is null (`request.ExpiryDate is null && survivor.ExpiresDate is not null`) the
+merged form evaluates `effectiveExpiry != survivor.ExpiresDate` — which is `E != E`, i.e. false, so no
+write. The merge is behaviour-preserving, and that test would still pass.
+
+The honest reason to keep them apart is that **the nullable type expresses the write/don't-write intent**,
+not that merging is unsafe. This matters beyond pedantry: a comment that guards a non-hazard teaches the
+next reader to discount its neighbours, and the neighbouring comments (the ADR-003 ordering, the task-097
+keep-the-date rule) are load-bearing and true. The durable guard is F4's rename, which removes the
+name collision that made the merge tempting in the first place.
 
 ## 5. The alternative I rejected — and why it is a trap
 
@@ -152,10 +165,23 @@ a target (`.claude/constraints/testing.md` §2b).
 | `Upsert_WithAnUnboundedRowAndALaterDatedDuplicate_…` | §5 — the rejected design |
 | `ConfersAccessOn_MirrorsTheReadFiltersExpirySemantics` | §8 — mirror drift |
 
-**Test-design note.** Each duplicate test **asserts its own precondition** (`expired.Id.CompareTo(live.Id)`
+**Test-design note.** Each duplicate test asserts its own precondition (`expired.Id.CompareTo(live.Id)`
 is negative). The tests depend on `FakeGrantTable`'s sequential GUIDs sorting as expected; a test seeded
 the other way round would pass *without ever exercising the defect*. Asserting the setup is the same
 "prove the instrument registered something" discipline that this session's earlier steps needed.
+
+🔴 **Correction (review finding F9).** That sentence was **not true when I wrote it**: two of the seven
+duplicate tests — `…WhoseDuplicatesAreAlsoExpired…` and `Upsert_WhenCollapsingDuplicates…` — had no such
+assertion, while the other five did. So the claim was accurate about the design and false about the code,
+which is the worse of the two failure modes: a reader checking the invariant finds it held in the places
+they happened to look. Both now assert it. The review also verified the underlying instrument is sound —
+`aaaaaaaa-0000-0000-0000-{seq:D12}` does sort sequentially under `Guid.CompareTo`, the same comparator
+`OrderBy(r => r.Id)` / `ThenBy` uses — so the assertions pin a real property rather than papering over a
+shaky one.
+
+**A ninth test was added after review**: `Upsert_ElectsTheSameSurvivor_WhetherOrNotTheRequestCarriesAnExpiry`,
+the V1/F1 regression (§16). And `…_ElectsTheLowestIdExactlyAsBefore` was **rewritten**: it had encoded the
+defect as an invariant, asserting the request-dependent tie that *was* the bug.
 
 ## 11. Perturbations (mandatory — harness `p106.js`, run against the COMMITTED tree)
 
@@ -228,3 +254,105 @@ file-count parity). Step 9.5 gates (`code-review` + `adr-check`) are uncondition
 **and** a test-modifying task. Rows above are marked _pending_ rather than pre-filled, because an
 unfilled number that reads as a result is exactly how session 14 nearly recorded task 043 complete with
 superseded figures.
+
+---
+
+## 16. 🔴 Step 9.5 found a defect I INTRODUCED — V1, determinism (fix designed, NOT yet applied)
+
+`adr-check` returned **1 violation / 9 warnings**. The violation is real, I verified its algebra
+independently before accepting it, and **it is a regression this task created**. Recorded here in full
+because it is the most valuable thing this task produced.
+
+### The defect
+
+`ElectSurvivor` ranked rows by `EffectiveExpiry(requestedExpiry, row.ExpiresDate, today)` — and
+`requestedExpiry` is a **per-request value**. So the total order is *parameterised by the request*, and
+two concurrent callers do not share it. Rows A (lower id, `today+10`) and B (higher id, `today+200`):
+
+| Request | A's rank | B's rank | Elects | Collapse deactivates |
+|---|---|---|---|---|
+| no expiry | +10 | **+200** | **B** | A |
+| `expiryDate: today+30` | +30 | +30 → tie → lower id | **A** | B |
+
+Both read `{A,B}` before either writes → request 1 deactivates A, request 2 deactivates B →
+**ZERO active rows, and both callers receive HTTP 200** naming a row that is now inactive. The grantee
+silently loses all access on the key. There is no ETag or conditional update on the deactivation, and it
+does not self-heal.
+
+**This is worse than the bug task 106 set out to fix.** Pre-106 the election was `existing[0]` — ascending
+id, request-INDEPENDENT — so any two racers necessarily agreed and the interleaving was *impossible*. The
+false 409 was inert; this is destructive. It is also precisely the failure
+`QueryActiveRowsAsync`'s own remarks exist to prevent.
+
+**And I asserted the opposite in three places** (`GrantExternalAccessEndpoint.cs` ~:211,
+`ExternalGrantLifecycle.cs` ~:209 and ~:239): *"both apply the same total order"*. I reasoned about the
+**tie-break** being deterministic and never noticed the **ranking function itself** varies with the
+request. The task-106 POML asked the reviewer to check exactly this, and it found the answer I had
+assumed away. Path A is unavailable: I would be documenting my own regression.
+
+### The fix — drop the request from the RANKING (not from the conferral decision)
+
+```
+ConferralRank(rowExpiry, today) = rowExpiry ?? DefaultExpiry(today)     // request-INDEPENDENT
+ElectSurvivor(rows, today)      = max by ConferralRank, then ascending id
+```
+
+`requestedExpiry` is **removed from `ElectSurvivor`'s signature**, so request-independence becomes
+structural — a caller *cannot* reintroduce it. The conferral decision keeps
+`EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today)`: that is a per-request question, not
+an ordering, so it carries no determinism obligation.
+
+Properties re-checked under the new ranking (not assumed):
+- **Conferral implication holds.** A row confers ⟺ its rank ≥ today (an unbounded row ranks at
+  `today+90`, a dated row at its date). The survivor has the maximum rank, so if the survivor does not
+  confer, no row does — the 409 still speaks for the whole key.
+- **Collapse safety holds.** If any row confers, the maximum-rank row confers, and that row is the
+  survivor.
+- **Access is still never shortened.** `{unbounded, +200}` ranks +90 vs +200 → the dated row wins, so
+  §5's test still passes.
+
+### ⚠️ The reviewer's own suggested fix is itself flawed — do not apply it as written
+
+It proposed ranking `r.ExpiresDate ?? DateOnly.MaxValue`. That makes an unbounded row rank **highest**,
+FR-33 then bounds the elected row to `today+90`, and a sibling dated `+200` is collapsed — access leaves
+the call **shorter than it arrived**. That is exactly the trap §5 documents and
+`Upsert_WithAnUnboundedRowAndALaterDatedDuplicate_…` pins, so it would fail that test. Ranking at
+`DefaultExpiry(today)` instead of `MaxValue` is the difference, and it is the whole point.
+
+### Test consequences
+
+- `Upsert_WithANewExpiryOverDuplicates_ElectsTheLowestIdExactlyAsBefore` **encodes the buggy invariant**
+  — it asserts the request-dependent tie that IS the defect. It must be rewritten to assert
+  contract-level equivalence (no 409, one active row, the requested expiry written) rather than a
+  particular surviving id.
+- **New test needed**: the same row set must elect the same survivor whether or not the request carries
+  an expiry. This is the V1 regression, and **none of P1–P4 could have caught it** — every perturbation
+  was single-request, so the whole class was outside the harness's reach. A suite can be 4/4 CAUGHT and
+  still be blind to an entire dimension.
+- **P5 needed**: reintroduce `requestedExpiry` into the ranking; the new determinism test must fail.
+
+### Other findings verified rather than accepted on trust
+
+| # | Finding | Verified | Disposition |
+|---|---|---|---|
+| W7 | `ElectSurvivor`'s "must be non-empty" is documentation-only | Both call sites ARE guarded (`Count > 0`, `Count > 1`); if reached, `InvalidOperationException` → 500, fail-closed but opaque | **Take path C** — one-line guard turns a comment into an enforced precondition |
+| W8 | "the only in-memory copy" is over-broad | TRUE — `SetRecordShareExpiryEndpoint.cs:240` also compares in memory, but it sits **inside a `LogInformation` argument list** (counting lapsed-and-renewed shares), so it is telemetry, not a conferral decision | **Take path C** — narrow the claim to "the only in-memory copy used for a conferral decision" |
+| W5 | ADR-038 ban B8 covers `InternalsVisibleTo`, not just reflection | TRUE, verbatim in `docs/adr/ADR-038-testing-strategy.md`: *"B8 bans `InternalsVisibleTo` as well as reflection, so the only compliant fix is giving the logic a public surface — a production refactor across several subsystems"*, filed under **"Blocked on a production refactor"**. The documented census of 12 sites is *reflection* sites; these are `internal` + `InternalsVisibleTo`, in the ban's text but not that inventory | **Path A now** (cite the ADR's own acknowledgement); **path B flagged** to the ADR owner. Amending a testing ADR needs sign-off and is not task 106's to do — but §6.5 forbids silently ignoring it |
+| W1 | ADR-019 `reasonCode`/`traceId` vs `errorCode`/`correlationId` | Pre-existing (task 097 S6/S7); this change touched the 409's `detail` only, neither extension key | Pre-existing; repo-wide, so the ADR is what is out of date → path B candidate, not this task |
+| W3 | A collapse can still lower the effective LEVEL | Pre-existing task 010 convergence; §6 records it | Path A — promote §6's rationale into the PR so it is reviewer-visible |
+| W2 | `accessRecordId` now names a different row | The field's documented meaning ("the single surviving active row") is unchanged; only the value moved, and the old value pointed at a row about to be deactivated | Note in the PR: a client holding a previously-returned id may hold a deactivated row |
+| W6 | No `[Trait("status", …)]` on the touched test files | Systemic — only 6 of 53 files under `tests/integration/auth/**` carry any trait, and the taxonomy (`repaired`/`real-bug-pending-fix`/`flaky-quarantined`) has no value for new green tests | Path A/B to the constraint owner; applying it to 2 files while 47 siblings lack it buys nothing |
+| W9 | The 409 path returns before cache invalidation | Traced unreachable as a stale read: the cached set is built from a query carrying `ExpiryPredicate`, so an expired row is never in the cache to go stale | Comment only, so the invariant is not broken later |
+
+### Status
+
+**Task 106 is NOT complete.** The V1 fix is designed and its consequences traced, but **not applied** —
+the `code-review` gate was still reading these files, and editing underneath it would make its findings
+describe a state that no longer exists, the same class of non-result as a perturbation that fails to
+compile. Order from here: apply V1 + W7 + W8 → rewrite the one bad test, add the determinism test →
+re-run the affected classes, ArchTests and the full suite → **P1–P5** → publish size vs a fresh master →
+fill §14 → POML + TASK-INDEX + drift check.
+
+**The gate earned its keep.** Build, 51/51 tests, and 4/4 perturbations all passed over a real
+privilege-loss defect, because every one of those instruments was single-request and the defect lives in
+the interaction between two.

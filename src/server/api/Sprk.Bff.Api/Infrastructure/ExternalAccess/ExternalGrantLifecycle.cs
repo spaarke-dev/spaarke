@@ -180,14 +180,42 @@ internal static class ExternalGrantLifecycle
     /// surface with no date field must never move it — task 097); otherwise an unbounded row is bounded at
     /// the FR-33 default.</para>
     ///
-    /// <para><b>Why the election judges this and not the raw column.</b> Ranking rows by
-    /// <see cref="ExternalGrantRow.ExpiresDate"/> alone makes <c>null</c> sort as "never expires" and win —
-    /// and FR-33 then bounds that winner to today + 90, collapsing away a sibling dated LATER. Access would
-    /// come out of the call SHORTER than it went in. Ranking the post-request value keeps the row that will
-    /// actually confer longest.</para>
+    /// <para><b>This answers a per-request question and MUST NOT be used to rank rows</b> — see
+    /// <see cref="ConferralRank"/> for why. Use it for the one elected row, to decide what that row will
+    /// carry and whether it confers access.</para>
     /// </remarks>
-    internal static DateOnly EffectiveExpiry(DateOnly? requestedExpiry, DateOnly? rowExpiry, DateOnly today)
-        => requestedExpiry ?? rowExpiry ?? DefaultExpiry(today);
+    internal static DateOnly EffectiveExpiry(DateOnly? explicitExpiry, DateOnly? rowExpiry, DateOnly today)
+        => explicitExpiry ?? rowExpiry ?? DefaultExpiry(today);
+
+    /// <summary>
+    /// A row's rank in the survivor election: the date it would confer access until if this request named
+    /// none. <b>Deliberately independent of the request.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the request is excluded, and this is load-bearing</b> (task 106 review finding V1/F1,
+    /// caught by BOTH Step 9.5 gates). An election parameterised by a per-request value is not a total
+    /// order two callers share, and a shared order is the entire point — see
+    /// <see cref="QueryActiveRowsAsync"/>. With rows A (lower id, expiring in 10 days) and B (200 days):
+    /// a request naming NO date ranks B first, while a request naming 30 days makes both ranks equal so
+    /// the id tie-break elects A. Two such requests reading the same rows then collapse onto DIFFERENT
+    /// survivors and deactivate each other, leaving <b>ZERO active rows while both callers receive
+    /// 200</b>. The grantee loses all access on the key, there is no conditional update to stop it, and it
+    /// does not self-heal. That is strictly worse than the false 409 task 106 set out to fix: the original
+    /// defect was inert, this one destroys access.</para>
+    ///
+    /// <para><b>Why the default and not <see cref="DateOnly.MaxValue"/>.</b> An unbounded row ranks at
+    /// today + <see cref="DefaultExpiryDays"/>, NOT at infinity. Ranking <c>null</c> highest would elect
+    /// the unbounded row, FR-33 would then bound it to that same default, and a sibling dated LATER would
+    /// be collapsed away — access leaving the call SHORTER than it arrived.</para>
+    ///
+    /// <para><b>What it preserves.</b> A row confers access exactly when its rank is on or after
+    /// <paramref name="today"/>, so a conferring row always outranks a non-conferring one. The elected row
+    /// therefore confers whenever any row does — which is what lets the caller judge the whole key from
+    /// the survivor alone, and what keeps the duplicate collapse from deactivating the row access rests
+    /// on.</para>
+    /// </remarks>
+    internal static DateOnly ConferralRank(DateOnly? rowExpiry, DateOnly today)
+        => rowExpiry ?? DefaultExpiry(today);
 
     /// <summary>
     /// Elects the row a grant upsert applies to: the one that will confer access LONGEST after this
@@ -206,18 +234,26 @@ internal static class ExternalGrantLifecycle
     /// is expired — judging the survivor becomes judging the whole key — and the collapse cannot deactivate
     /// the row that confers access, because that row IS the survivor.</para>
     ///
-    /// <para><b>Determinism is preserved</b> — the property <see cref="QueryActiveRowsAsync"/>'s ordering
-    /// exists for. Two concurrent grants read the same rows and apply the same total order, so they elect
-    /// the same survivor and cannot deactivate each other. And when the request CARRIES an expiry, every
-    /// row's effective expiry is identical, so the tie-break alone decides and the election is exactly the
-    /// pre-106 "lowest id" — which is why a request with an explicit date behaves as it always did.</para>
+    /// <para><b>Determinism</b> — the property <see cref="QueryActiveRowsAsync"/>'s ordering exists for.
+    /// The rank comes from <see cref="ConferralRank"/>, which depends only on the ROW and
+    /// <paramref name="today"/>, so every caller computes the same total order over the same rows and two
+    /// racers cannot elect different survivors. ⚠️ It deliberately takes NO request value: an earlier
+    /// version ranked by <see cref="EffectiveExpiry"/> and was therefore request-dependent, which let two
+    /// concurrent grants deactivate each other and leave zero active rows (V1/F1). Request-independence is
+    /// structural here — there is no parameter through which to reintroduce it. Do not add one.</para>
     /// </remarks>
-    internal static ExternalGrantRow ElectSurvivor(
-        IReadOnlyList<ExternalGrantRow> rows, DateOnly? requestedExpiry, DateOnly today)
-        => rows
-            .OrderByDescending(r => EffectiveExpiry(requestedExpiry, r.ExpiresDate, today))
+    internal static ExternalGrantRow ElectSurvivor(IReadOnlyList<ExternalGrantRow> rows, DateOnly today)
+    {
+        // The precondition was prose-only until the review (F11/W7). Both call sites guard, so this is
+        // unreachable today; a third would inherit an opaque InvalidOperationException instead of a clear
+        // contract violation.
+        ArgumentOutOfRangeException.ThrowIfZero(rows.Count);
+
+        return rows
+            .OrderByDescending(r => ConferralRank(r.ExpiresDate, today))
             .ThenBy(r => r.Id)
             .First();
+    }
 
     // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
     // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row

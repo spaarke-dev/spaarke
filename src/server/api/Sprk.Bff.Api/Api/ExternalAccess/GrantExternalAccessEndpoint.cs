@@ -205,12 +205,14 @@ public static class GrantExternalAccessEndpoint
 
         if (existing.Count > 0)
         {
-            // Task 106 (ISS-008 / #973): the survivor is the row that will confer access LONGEST after
-            // this request, ties broken by ascending id — NOT simply the lowest id. Electing a CONFERRING
-            // row is what makes the ADR-003 check below a statement about the whole key, and what keeps
-            // CollapseDuplicatesAsync from deactivating the row access actually rests on. Concurrent
-            // grants still converge: both apply the same total order. See ElectSurvivor's remarks.
-            var survivor = ExternalGrantLifecycle.ElectSurvivor(existing, request.ExpiryDate, today);
+            // Task 106 (ISS-008 / #973): the survivor is the row that confers access LONGEST — by
+            // ConferralRank, which depends only on the row and today — ties broken by ascending id, NOT
+            // simply the lowest id. Electing a CONFERRING row is what makes the ADR-003 check below a
+            // statement about the whole key, and what keeps CollapseDuplicatesAsync from deactivating the
+            // row access actually rests on. The rank takes NO request value, deliberately: a
+            // request-dependent order is not shared between callers, and two racers applying different
+            // orders deactivate each other's row (V1/F1). See ElectSurvivor and ConferralRank.
+            var survivor = ExternalGrantLifecycle.ElectSurvivor(existing, today);
 
             // ── Task 023 (finding H1): the match path must write the EXPIRY too ──────────────
             //
@@ -234,9 +236,15 @@ public static class GrantExternalAccessEndpoint
             // never move a date someone set, in either direction. Only an UNBOUNDED survivor gets
             // today + DefaultExpiryDays. (An EXPIRED survivor keeps its date too, and is reported by the
             // ADR-003 check below rather than silently renewed.)
-            var requestedExpiry = request.ExpiryDate
+            // `expiryToWrite` (null = write NOTHING) is a different value from the `effectiveExpiry`
+            // computed below (what the row will CARRY). Renamed from `requestedExpiry` after review
+            // finding F4: the election helpers take a parameter of that name holding the caller's RAW
+            // date, so two different values wore one name twenty lines apart — and substituting this one
+            // into the election would have been circular (it is derived FROM the survivor) and would have
+            // compiled.
+            var expiryToWrite = request.ExpiryDate
                 ?? (survivor.ExpiresDate is null ? ExternalGrantLifecycle.DefaultExpiry(today) : null);
-            var expiryChanged = requestedExpiry.HasValue && requestedExpiry != survivor.ExpiresDate;
+            var expiryChanged = expiryToWrite.HasValue && expiryToWrite != survivor.ExpiresDate;
             var levelChanged = survivor.AccessLevel != requestedLevel;
 
             if (levelChanged || expiryChanged)
@@ -247,7 +255,7 @@ public static class GrantExternalAccessEndpoint
                     update["sprk_accesslevel"] = requestedLevel;
 
                 if (expiryChanged)
-                    update["sprk_expiresdate"] = FormatDateOnly(requestedExpiry!.Value);
+                    update["sprk_expiresdate"] = FormatDateOnly(expiryToWrite!.Value);
 
                 await dataverseClient.UpdateAsync(EntitySet, survivor.Id, update, ct);
 
@@ -256,7 +264,7 @@ public static class GrantExternalAccessEndpoint
                     "level {OldLevel} → {NewLevel}, expiry {OldExpiry} → {NewExpiry}.",
                     key, survivor.Id,
                     survivor.AccessLevel, levelChanged ? requestedLevel : survivor.AccessLevel,
-                    survivor.ExpiresDate, expiryChanged ? requestedExpiry : survivor.ExpiresDate);
+                    survivor.ExpiresDate, expiryChanged ? expiryToWrite : survivor.ExpiresDate);
             }
             else
             {
@@ -281,12 +289,20 @@ public static class GrantExternalAccessEndpoint
             // simply the lowest id, so an expired lowest-id row produced this 409 — "still confers no
             // access" — while a live duplicate meant the grantee did have access. The 409 was false.
             //
-            // NOTE the two variables are NOT redundant and must not be merged: `requestedExpiry` is
-            // nullable because null means "write nothing" (task 097 — a re-grant from a surface with no
-            // date field must not move a date someone set), while `effectiveExpiry` is the value the row
-            // will actually carry. Collapsing them would start rewriting dates that already match.
+            // NOTE `expiryToWrite` and `effectiveExpiry` are distinct on purpose: the former is nullable
+            // because null means "write NOTHING" (task 097 — a re-grant from a surface with no date field
+            // must not move a date someone set), the latter is what the row will CARRY.
+            //
+            // ⚠️ An earlier version of this comment claimed merging them "would start rewriting dates that
+            // already match". Review finding F2: that is FALSE, and traced in all three branches — the
+            // `!=` guard on `expiryChanged` already makes a merged form behaviour-preserving. The reason
+            // to keep them apart is that the nullable type EXPRESSES the write/don't-write intent, not
+            // that merging is unsafe. Left corrected rather than deleted: a comment asserting a
+            // non-hazard teaches the next reader to discount its neighbours, several of which (the
+            // ADR-003 ordering below, the task-097 intent above) are load-bearing and true.
+            //
             // Conferral itself is ExternalParticipationService.ConfersAccessOn — the in-memory mirror of
-            // the read filter's own predicate, deliberately the only copy.
+            // the read filter's own predicate.
             var effectiveExpiry = ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today);
             if (!ExternalParticipationService.ConfersAccessOn(effectiveExpiry, today))
             {
@@ -326,19 +342,28 @@ public static class GrantExternalAccessEndpoint
             accessRecordId, request.ContactId, rootType, rootId);
 
         // Race window: two concurrent grants on the same key both see zero rows and both create. Re-query
-        // and collapse so the pair converges on one row. Both racers elect the same survivor (lowest id),
-        // so this is safe to run from either — they cannot deactivate each other.
+        // and collapse so the pair converges on one row. Both racers compute the SAME total order over the
+        // rows they see (ConferralRank depends only on the row and today), so they elect the same survivor
+        // and cannot deactivate each other.
+        //
+        // ⚠️ This comment previously said "the same survivor (lowest id)", which the task-106 election
+        // superseded, and it was left five lines from its own replacement — review finding F6, the exact
+        // docs-vs-reality drift this task's notes were congratulating themselves on repairing elsewhere.
         try
         {
             var afterCreate = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct);
             if (afterCreate.Count > 1)
             {
-                // Same election rule as the match path (task 106). Here every row is a fresh create
-                // carrying the same requested-or-default expiry, so the effective expiries TIE and the
-                // ascending-id tie-break decides — provably identical to the pre-106 `afterCreate[0]`.
-                // Using the shared rule anyway keeps one definition of "which row survives", and covers
-                // the case where a racer's row carries a different date.
-                var survivor = ExternalGrantLifecycle.ElectSurvivor(afterCreate, request.ExpiryDate, today);
+                // Same election rule as the match path (task 106), and for the same reason: the rank is
+                // request-independent, so both racers agree on the survivor.
+                //
+                // ⚠️ An earlier comment here claimed this path was "provably identical to the pre-106
+                // `afterCreate[0]`" because "every row is a fresh create carrying the same
+                // requested-or-default expiry". Review finding F1: that premise is FALSE on two counts —
+                // racers differing in whether they send a date create rows with different expiries, and
+                // even two date-less racers straddling a UTC midnight get DefaultExpiry values a day
+                // apart. This path needed no pre-existing duplicates to hit the mutual-deactivation bug.
+                var survivor = ExternalGrantLifecycle.ElectSurvivor(afterCreate, today);
                 await CollapseDuplicatesAsync(dataverseClient, afterCreate, survivor.Id, key, logger, ct);
                 accessRecordId = survivor.Id;
             }

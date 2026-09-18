@@ -983,11 +983,16 @@ public class GrantLifecycleCharacterizationTests
     public async Task Upsert_OverAnExpiredRowWhoseDuplicatesAreAlsoExpired_StillReportsNoAccess()
     {
         var table = new FakeGrantTable();
-        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+        var oldest = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
             expiresDate: Today.AddDays(-30));
         var latest = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
             expiresDate: Today.AddDays(-1));
         var client = table.BuildMock();
+
+        // Added after review finding F9: this test and the collapse test below were the two of seven that
+        // lacked the precondition the notes claimed all of them had. Both need the lower-id row to be the
+        // one a naive election would pick, or they pass without exercising anything.
+        oldest.Id.CompareTo(latest.Id).Should().BeNegative("the oldest expiry must be the lowest id");
 
         var outcome = await Grant(client, Request(expiryDate: null));
 
@@ -1008,11 +1013,14 @@ public class GrantLifecycleCharacterizationTests
     public async Task Upsert_WhenCollapsingDuplicates_LeavesTheRowThatConfersAccessActive()
     {
         var table = new FakeGrantTable();
-        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+        var expired = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
             expiresDate: Today.AddDays(-1));
         var live = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
             expiresDate: Today.AddDays(30));
         var client = table.BuildMock();
+
+        // Added after review finding F9 (see the sibling test above).
+        expired.Id.CompareTo(live.Id).Should().BeNegative("the expired row must be the lowest id");
 
         await Grant(client, Request(expiryDate: null));
 
@@ -1023,29 +1031,79 @@ public class GrantLifecycleCharacterizationTests
     }
 
     /// <summary>
-    /// NEGATIVE — a request that CARRIES a new expiry behaves exactly as before (the task 023 path). An
-    /// explicit date applies to every row equally, so the effective expiries tie and the ascending-id
-    /// tie-break alone decides: the pre-106 election, unchanged.
+    /// NEGATIVE — a request that CARRIES a new expiry still takes the task 023 path: no 409, one active
+    /// row, the requested date written.
     /// </summary>
+    /// <remarks>
+    /// <para>⚠️ <b>REWRITTEN after review finding V1/F1 — the earlier version encoded the DEFECT as an
+    /// invariant.</b> It asserted that an explicit expiry elects the LOWEST ID, which was true only
+    /// because an explicit date made every row's effective expiry equal so the tie-break decided. That tie
+    /// WAS the bug: it meant the election varied with what the request carried, so a date-less caller and
+    /// a dated caller elected different survivors and each collapse deactivated the other's row. A test
+    /// asserting it could only ever go green on the broken behaviour — which is how the defect survived
+    /// 51 passing tests and four caught perturbations.</para>
+    /// <para>What is actually owed here is CONTRACT equivalence, not a particular surviving id: no
+    /// warning, the requested date applied, exactly one row left active. Which row carries it is not a
+    /// security property. Two racers destroying each other's rows is.</para>
+    /// </remarks>
     [Fact]
-    public async Task Upsert_WithANewExpiryOverDuplicates_ElectsTheLowestIdExactlyAsBefore()
+    public async Task Upsert_WithANewExpiryOverDuplicates_TakesTheTask023PathAndRestoresAccess()
     {
         var table = new FakeGrantTable();
-        var lowest = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+        var expired = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
             expiresDate: Today.AddDays(-1));
-        var other = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+        var live = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly,
             expiresDate: Today.AddDays(30));
         var client = table.BuildMock();
         var renewed = Today.AddDays(60);
 
-        lowest.Id.CompareTo(other.Id).Should().BeNegative();
+        expired.Id.CompareTo(live.Id).Should().BeNegative("the expired row must be the lowest id");
 
         var outcome = await Grant(client, Request(expiryDate: renewed));
 
         outcome.Warning.Should().BeNull("the request supplied a future expiry, so access IS restored");
-        outcome.AccessRecordId.Should().Be(lowest.Id,
-            "with an explicit expiry every row ties, so the id tie-break decides — task 023's behaviour, intact");
-        table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(renewed);
+        table.ActiveRows.Should().ContainSingle("duplicates converge on one row")
+            .Which.ExpiresDate.Should().Be(renewed);
+        outcome.AccessRecordId.Should().Be(live.Id,
+            "the election is request-INDEPENDENT, so the conferral-ranked row (+30) wins whether or not "
+            + "this request carried a date — see the determinism test below");
+    }
+
+    /// <summary>
+    /// 🔴 <b>The V1/F1 regression test.</b> The election must not depend on what the request carries.
+    /// </summary>
+    /// <remarks>
+    /// <para>Task 106's first version ranked rows by <c>EffectiveExpiry(request.ExpiryDate, …)</c>, so the
+    /// total order was parameterised by a PER-REQUEST value. Rows A (+10, lower id) and B (+200): a
+    /// request with no date ranks B first and elects B; a request naming +30 makes both ranks equal, so
+    /// the id tie-break elects A. Two such callers reading the same rows collapse onto DIFFERENT
+    /// survivors and deactivate each other — <b>zero active rows remain and BOTH receive HTTP 200</b>,
+    /// each naming a row the other just deactivated. Strictly worse than the false 409 the task set out to
+    /// fix, because that one was inert and this destroys access.</para>
+    /// <para><b>Why nothing else could catch it.</b> All eight tests above and all four perturbations
+    /// exercise a SINGLE request. This defect lives in the relationship between two, so the entire class
+    /// was outside the harness's reach: the suite was 51/51 with 4/4 perturbations caught and still blind
+    /// to a whole dimension. Both gates found it by reading, not by running.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Upsert_ElectsTheSameSurvivor_WhetherOrNotTheRequestCarriesAnExpiry()
+    {
+        // Two runs over IDENTICAL row sets. The ONLY difference is what the request carries.
+        static FakeGrantTable Seeded()
+        {
+            var t = new FakeGrantTable();
+            t.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: Today.AddDays(10));
+            t.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, expiresDate: Today.AddDays(200));
+            return t;
+        }
+
+        var withoutDate = await Grant(Seeded().BuildMock(), Request(expiryDate: null));
+        var withDate = await Grant(Seeded().BuildMock(), Request(expiryDate: Today.AddDays(30)));
+
+        withDate.AccessRecordId.Should().Be(withoutDate.AccessRecordId,
+            "the election must be a total order EVERY caller shares. If it varies with the request, two "
+            + "concurrent grants elect different survivors, each collapse deactivates the other's row, and "
+            + "the key is left with ZERO active rows while both callers are told 200");
     }
 
     /// <summary>

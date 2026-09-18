@@ -104,14 +104,22 @@ public class ExternalParticipationService
     /// <paramref name="expiresDate"/> still confer access on <paramref name="today"/>?
     /// </summary>
     /// <remarks>
-    /// <para><b>Deliberately adjacent to the OData form, and the only in-memory copy</b> (task 106). The
-    /// write path must answer the same question the read filter answers — "does this row confer access" —
-    /// but it holds materialized rows rather than a <c>$filter</c>, so it cannot reuse the string. Two
-    /// independent definitions of "expired" is precisely the drift that would let <c>/grant</c> report an
-    /// outcome the reader contradicts, which is finding A-5's shape. So this sits next to the predicate it
-    /// mirrors, and <c>GrantExpiryCharacterizationTests</c> pins it to the same two semantics: <c>null</c>
-    /// never expires, and the expiry date ITSELF still confers (<c>ge</c>, not <c>gt</c> — task 007's Date
-    /// Only rule).</para>
+    /// <para><b>Deliberately adjacent to the OData form, and the only in-memory expiry test in the
+    /// external-access write path</b> (task 106). The write path must answer the same question the read
+    /// filter answers — "does this row confer access" — but it holds materialized rows rather than a
+    /// <c>$filter</c>, so it cannot reuse the string. Two independent definitions of "expired" is
+    /// precisely the drift that would let <c>/grant</c> report an outcome the reader contradicts, which is
+    /// finding A-5's shape. So this sits next to the predicate it mirrors, and
+    /// <c>GrantExpiryCharacterizationTests</c> pins it to the same two semantics: <c>null</c> never
+    /// expires, and the expiry date ITSELF still confers (<c>ge</c>, not <c>gt</c> — task 007's Date Only
+    /// rule).</para>
+    ///
+    /// <para>Review finding F3/W8 found the original "the only in-memory copy" claim was false:
+    /// <c>SetRecordShareExpiryEndpoint</c> already compared expiry in memory for a log count. Rather than
+    /// narrow the claim, that call site was routed through here, so the claim is true by construction.
+    /// (<c>GrantExpiryReminderJob</c>'s days-until-expiry arithmetic is NOT a mirror — it answers a
+    /// different question.) The nullable parameter mirrors the nullable column so a caller holding a raw
+    /// row can use it; the grant path itself always passes a resolved value.</para>
     /// </remarks>
     internal static bool ConfersAccessOn(DateOnly? expiresDate, DateOnly today)
         => expiresDate is null || expiresDate.Value >= today;
