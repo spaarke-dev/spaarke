@@ -157,7 +157,14 @@ public async Task PostOrder_WithValidPayment_PersistsConfirmedOrder()
 }
 ```
 
-#### B8. Internal/private method tests (via `InternalsVisibleTo` or reflection)
+#### B8. Reflection into non-public members
+
+> **Amended 2026-09-18 — see Amendment A2.** This ban targets **reflection**
+> (`BindingFlags.NonPublic`, `GetMethod(…).Invoke`, `PrivateObject`-style access). `internal` +
+> `[assembly: InternalsVisibleTo]` is **permitted** for a deliberately extracted, pure member carrying a
+> contract the public surface cannot express observably. The heading previously read *"via
+> `InternalsVisibleTo` or reflection"*, which contradicted both this ADR's own summary table and the
+> repo's documented practice.
 
 ```csharp
 // BAD
@@ -171,7 +178,9 @@ public void NormalizeFilename_HandlesUnicode()
 }
 ```
 
-**Why scaffolding**: Locks the implementation; "private" no longer means "free to refactor." Behavior should be tested via the public surface.
+**Why scaffolding**: Reflection binds by string, reaches past a boundary the author never opened, and breaks silently on rename — "private" no longer means "free to refactor." Behavior should be tested via the public surface.
+
+**Why `InternalsVisibleTo` is different** (Amendment A2): it is the author *deliberately widening* a boundary — compiler-checked, visible in the signature, and moved correctly by refactoring tools. One is a lock-pick; the other is a key cut on purpose. It stays permitted for a pure, deliberately extracted member whose contract the public surface cannot express observably.
 
 ```csharp
 // GOOD — test through the public endpoint
@@ -487,7 +496,7 @@ appearing as "not enforced" — it moves the enforcement point to `/test-diet` a
 |---|---|---|
 | **No lexical signature exists** | B5, B6, B9 | B6 (mirror tests) asks whether a test asserts that an implementation does what it does — a claim about the relationship between two bodies of code. It needs a call graph, not a regex. Permanently `/test-diet` judgment. |
 | **Detector output is mostly noise** | B7, B10, B11, B14 | B10 measured **247 hits, 1 true positive**. Arming a rule whose failures are mostly wrong gets it suppressed, and real violations then ride in behind it. |
-| **Blocked on a production refactor** | B8 | **12 call sites in 10 files** invoke private production methods by reflection (corrected 2026-08-30 from an earlier under-count of 7/5). NOT a quick win: B8 bans `InternalsVisibleTo` as well as reflection, so the only compliant fix is giving the logic a public surface — a production refactor across several subsystems. Per-call-site inventory is in the census note. |
+| **Blocked on a production refactor** | B8 | **12 call sites in 10 files** invoke private production methods by reflection (corrected 2026-08-30 from an earlier under-count of 7/5). **Scoped by Amendment A2 (2026-09-18)** to those reflection sites only — B8 no longer bans `InternalsVisibleTo`, so the compliant fix is per-site (extract the logic as a pure `internal` member, or reach it through the public surface) rather than a repo-wide production refactor. Per-call-site inventory is in the census note. |
 | **Threshold undefined, or type absent** | B13, B15, B2, B17 | B13's live count spans **15 to 1,466** depending only on how strictly `{Method}_{Scenario}_{ExpectedResult}` is read; a guard would enforce the threshold rather than the ban. B2 (`IServiceClient`) and B17 (AutoMapper) name types this repo does not contain. |
 
 Full census with every count and its row-by-row adjudication:
@@ -601,3 +610,70 @@ succeeds; the ArchTests fail** — so the gate is CI (`sdap-ci.yml` `code-qualit
   wrong, redundant, or assert a rule nobody agreed to.
 - **Does** mean a `/test-diet` run that recommends deleting a file there is reporting a **classifier
   defect**, not a finding.
+
+---
+
+## Amendment A2 — ban B8 targets reflection into privates, not `InternalsVisibleTo` (2026-09-18)
+
+**Raised by**: `unified-access-control-r2` task 106 Step 9.5 (adr-check W5 / code-review F13) ·
+**Ratified**: owner, 2026-09-18 · **Path**: CLAUDE.md §6.5 **B** (amend the ADR)
+
+### The contradiction this closes
+
+This ADR says three incompatible things about B8:
+
+| Where | What it says |
+|---|---|
+| §7 heading (B8) | bans internal/private method tests *"via `InternalsVisibleTo` **or** reflection"* |
+| §7 summary table | bans *"Internal/private method tests via **reflection**"* — reflection only |
+| Enforcement table | *"B8 bans `InternalsVisibleTo` as well as reflection, so the only compliant fix is giving the logic a public surface — a production refactor across several subsystems"*, and files B8 under **"Blocked on a production refactor"** |
+
+So the ADR bans a pattern, summarises the same ban as *not* covering that pattern, and then concedes the
+ban cannot be complied with. A rule in that state does not guide anyone: it is cited when convenient and
+waived when not, which is the failure mode ADR-003 Amendment A1 named — *"a rule nobody follows is a trap
+for the next reader, not a guardrail."*
+
+### Why the narrow reading is the correct one
+
+**B1 forces it.** B8's stated remedy is "test through the public surface" — but the defect class that
+produced most of these members is an **OData `$filter` string**, and the only ways to observe one are to
+intercept the transport (**B1-banned**: `Mock<HttpMessageHandler>`) or to read the member that builds it.
+Finding A-5 is the worked example: task 001 *could not pin it at all* because the queries were inline
+interpolations immediately before `_httpClient.SendAsync`. Task 007 extracted them as **pure `internal`
+members**, and that extraction is what made the assertion possible. Banning both observation routes leaves
+a real security predicate untestable.
+
+**The repo already does this deliberately, and says so.** `internal` + `[assembly: InternalsVisibleTo]`
+is used *instead of* reflection across tasks 005/007/010/021/022/023/024/025/028/029/096/106, each time
+with an inline note explaining the choice. The reflection inventory the enforcement table counts — **12
+call sites in 10 files** — is a genuinely different population, and it is the one worth banning.
+
+**The two are not the same act.** Reflection reaches past a boundary the author did not open, binds by
+string, and breaks silently on rename. `internal` + `InternalsVisibleTo` is the author *deliberately
+widening* a boundary, checked by the compiler, visible in the signature, and renameable by refactoring
+tools. One is a lock-pick; the other is a key the author cut on purpose.
+
+### The rule
+
+**B8 bans reflection into non-public members** — `BindingFlags.NonPublic`, `GetMethod(…).Invoke`,
+`PrivateObject`-style accessors, and equivalents.
+
+**`internal` + `[assembly: InternalsVisibleTo]` is PERMITTED** for a member that satisfies all three:
+
+1. it was **extracted deliberately to be assertable** (it is not incidental internal plumbing);
+2. it is **pure, or near-pure** — no transport, no clock, no ambient state; and
+3. it **carries a contract the public surface cannot express observably** — a predicate, a filter string,
+   a mapping, an election rule.
+
+### Scope and non-scope
+
+- **Does not** license testing arbitrary internals. A member made `internal` *only* so a test can reach it,
+  carrying no contract of its own, is still scaffolding — and B6 (mirror tests) and B9 (pass-through
+  wrappers) still apply to it on their own terms.
+- **Does not** relax B1. If a test can reach the behaviour through the public surface *without* mocking
+  transport, that remains the better test and this amendment is not a licence to skip it.
+- **Does** mean the enforcement table's "blocked on a production refactor" entry is now scoped to the 12
+  reflection sites, which are a tractable list rather than a repo-wide refactor.
+- **Does** mean `/test-diet` and `code-review` stop reporting the sanctioned pattern as a ban violation —
+  a report that flags the repo's documented, better-than-reflection convention is a **classifier defect**,
+  not a finding.
