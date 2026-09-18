@@ -7,6 +7,34 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-18 — ADR-038 A2: ban B8 targets reflection, not `InternalsVisibleTo` (owner-ratified)
+
+- **`.claude/constraints/testing.md` ban 8** rewritten. Was: *"MUST NOT test internal/private methods via
+  `[InternalsVisibleTo]` or reflection."* Now: **reflection into non-public members is banned**
+  (`BindingFlags.NonPublic`, `GetMethod(…).Invoke`, `PrivateObject`-style); **`internal` +
+  `[assembly: InternalsVisibleTo]` is permitted** for a member that is (1) deliberately extracted to be
+  assertable, (2) pure or near-pure, and (3) carries a contract the public surface cannot express
+  observably. A member made `internal` *only* to be reachable, carrying no contract, is still scaffolding —
+  B6 and B9 still apply to it.
+- **ADR-038 Amendment A2** added (`docs/adr/ADR-038-testing-strategy.md`); the §7 B8 heading, its
+  "why scaffolding" rationale and the enforcement-table entry were retargeted to match. `tests/CLAUDE.md`'s
+  B8 heading likewise. ADR-038's §7 summary table needed no change — it already said "via reflection", and
+  is now the correct statement rather than the odd one out.
+- **Why**: the ADR said three incompatible things. The §7 heading and the enforcement note banned
+  `InternalsVisibleTo`; the §7 summary table banned only reflection; and the enforcement table filed B8
+  under *"Blocked on a production refactor"*, conceding the ban could not be complied with. A rule in that
+  state is cited when convenient and waived when not — the trap ADR-003 A1 named.
+- **And B1 forces the narrow reading.** B8's remedy is "test through the public surface", but the defect
+  class here is an OData `$filter` string, observable only by intercepting transport (**B1-banned**) or by
+  reading the member that builds it. Finding A-5 is the worked example: task 001 could not pin it at all
+  until task 007 extracted the predicates as pure `internal` members. Banning both routes leaves a live
+  security predicate untestable. The reflection inventory the enforcement table counts — 12 call sites in
+  10 files — is a different, tractable population, and it is the one worth banning.
+- **Raised by** `unified-access-control-r2` task 106 Step 9.5 (adr-check W5 / code-review F13); **ratified**
+  by the owner 2026-09-18; CLAUDE.md §6.5 path **B**. Touches no open task POML — every B8 citation in this
+  project is in a completed one.
+
+---
 ###### 2026-09-15 — ADR-028 A5: the impersonation helper fails closed (task 104, #990)
 
 - **ADR-028 A5** (concise): a factual correction; no rule changes. The warning that "the enforcement is in
