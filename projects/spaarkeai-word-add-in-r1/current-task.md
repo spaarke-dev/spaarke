@@ -1,11 +1,97 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-17 (context-handoff before /compact — owner answers recorded; 031, 050 and 041 are dispatchable; matching still open)
+> **Last Updated**: 2026-09-17 (context-handoff before /compact — ALL implementation tasks complete; only 042 deploy+UAT and 090 wrap-up remain)
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
+
+> ⚠️ **This block (2026-09-17 handoff) is authoritative and supersedes the table further down**, whose
+> "Next Action" row accreted across the session and contains stale, duplicate-numbered entries. Read this;
+> treat the table below as historical detail only.
+
+| Field | Value |
+|---|---|
+| **Where** | Branch `work/spaarkeai-word-add-in-r1` · head **`6f29ef236`** · working tree **clean** · **0 commits unpushed** · PR **#960** (description current, 198 lines) |
+| **Progress** | **52 of 55 tasks ✅.** Open: **011 🔄** (not blocking — see below), **042 🔲** (deploy + UAT), **090 🔲** (wrap-up). **Every implementation task is done.** |
+| **Baselines — use these, do not re-derive** | BFF `Sprk.Bff.Api.Tests` **12,375 passed / 0 failed / 56 skipped** (12,431 total) · ArchTests **191/191** · client `tsc --noEmit` **111 total / 0 production** · gated jest **46 suites / 537 tests** |
+| **CI on `6f29ef236`** | **Terminal, 0 pending.** All **8 Tier 1 (Blocking) checks PASS**; 32 pass overall; Trivy skipped. One cancel: `Tier 2 (Advisory) / Full Unit Tests`, killed at its 30-minute job cap — **advisory by design, lives in the frozen `ci-tier2-advisory.yml` this project does not own, and the required `Router` context excludes Tier 2 from its adjudication.** Not a failure and not a merge blocker. |
+| **Next Action** | Run **task 042** using the runbook immediately below, then **090**. |
+
+### 🚀 TASK 042 — DEPLOYMENT RUNBOOK (everything verified present 2026-09-17)
+
+**Both deploy mechanisms are already owner-authorised.** The UAT half needs a live Office host and is the owner's.
+
+**Step 0 — pre-flight (always).** `Set-Location 'C:\code_files\spaarke-wt-spaarkeai-word-add-in-r1'` and confirm the
+environment says *"is a git worktree"* — it repeatedly flips to a lowercase `c:` path that reports otherwise.
+Confirm CI is terminal and Tier 1 green before deploying anything. Confirm **no `testhost.exe` is running**
+(`Get-Process testhost`) before any build — a killed agent shell leaves its `testhost` child alive holding a DLL
+lock, which fails the rebuild with `MSB3027` and lets a later `--no-build` run report green for the *previous*
+binary.
+
+**Step 1 — BFF → `spaarke-bff-dev`.** Use the `/bff-deploy` skill (owner-specified). It wraps
+`scripts/Deploy-BffApi.ps1` (verified present). Invoke with **`pwsh`**, not `powershell`:
+`pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`. Expect a **~45 MB** package; anything under
+30 MB means an incomplete zip. The script hash-verifies 6 critical DLLs via Kudu and auto-recovers — **never
+trust "deployment successful" alone.** Linux cold start takes 90–120 s, so hash-verify passing plus a `/healthz`
+timeout means the deploy is *correct and still booting* — do not redeploy. Verify:
+`curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/documents/test/preview-url`
+→ **401 expected** (route found, auth required). A **404 means an incomplete package.**
+
+**Step 2 — add-in → Azure Static Web App.** The workflow does **not** trigger on this branch by design (a push
+trigger would auto-deploy a feature branch onto the shared dev SWA). It declares `workflow_dispatch`, and three
+dispatch runs on this branch have already succeeded. Run:
+`gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`
+The build injects `ADDIN_CLIENT_ID`, `TENANT_ID`, `BFF_API_CLIENT_ID`, `BFF_API_BASE_URL` **and `ORG_URL`** —
+without `ORG_URL` task 027's Open buttons hide themselves rather than doing nothing.
+
+**Step 3 — M365 manifest re-upload (⚠️ NOW MANDATORY, not optional).** Task 037 bumped both Word manifests to
+**1.0.9** (XML `<Version>1.0.9.0</Version>`, JSON `"version": "1.0.9"`, `APP_VERSION` synced) to add the
+`<FunctionFile>` + two `ExecuteFunction` ribbon controls. **Task 041's "a re-upload may not be needed" is
+superseded.** Upload the **build output** `src/client/office-addins/dist/word/manifest.xml` (after a production
+`npm run build`) or the hosted copy `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.xml` —
+**never** the repo source `word/word-manifest.xml`, which carries `https://localhost:3000` placeholders.
+Path: M365 Admin Center → Settings → Integrated apps. Then confirm the pane footer reads **1.0.9**, which also
+finally closes **011**. Outlook needs no re-upload; note its hosted XML is `/outlook/outlook-manifest.xml`
+(**not** `/outlook/manifest.xml` — that 404s).
+
+**Step 4 — UAT.** Three things no agent could settle, all requiring a live Office host:
+1. **037's four ribbon `<ui-tests>`** — quickSave and shareDocument firing from the ribbon without opening the
+   pane; double-click creates exactly one `sprk_document`; the failure path returns the button to idle rather
+   than spinning. Implemented and unit-proven (14 tests assert `event.completed()` on every branch); only live
+   confirmation remains.
+2. **`SaveModeSection`'s `'conflict'` copy** (task 051 finding) — wording was written for task 012's
+   different-drive case and reads imprecisely when the cause is a stamp/URL disagreement. **Behaviour is correct**
+   (Save disabled, no default target); this is a copy judgment against a live pane.
+3. **`notes/parity-checklist.md`** — 16 entries still marked "pending live check"; 042 converts each into real
+   verification.
+
+### Owner decisions that must survive compaction
+
+- **Document matching = A + C, with B supporting** (2026-09-17). A = the invisible custom-XML marker *inside* the
+  `.docx` (tasks 014 + 051, both shipped — FR-02 is end-to-end). C = the save-time collision prompt (025, shipped).
+  B = the content hash (028), already shipped, stays the supporting signal. Explainer:
+  `notes/document-matching-explained.md`.
+- **Identity precedence**: a resolved cloud URL **wins**; the stamp is the fallback; disagreement is
+  `identity_conflict`. This *overrides* task 014's POML step 5 — stamp-first has a documented data-loss path.
+- **Project numbering is a separate project and NOT a dependency** — a Project may be created with no number;
+  `sprk_projectnumber` is in the protected-attribute set so field mapping cannot write it.
+- **Document Name defaults to the file name**; **#975 was assigned here** (task 050, closed); **Send Email is
+  Outlook-only** (hidden in Word).
+- **A typed name is never changed automatically** — which is why an immutable collision (054) has no in-pane
+  retry; the user renames and re-saves.
+
+### Still genuinely unowned (not this project's, but nobody's)
+
+- The idempotency filter's no-header path is a no-op on all 4 routes that use it.
+- CI capacity: Tier 2 "Full Unit Tests" keeps hitting its 30-minute cap against a ~12,400-test suite. The limit
+  lives in `ci-tier2-advisory.yml`, which this project does not own.
+- `unified-access-control-r2` has **unpushed local** edits to `OfficeService.cs` and `OfficeEndpoints.cs`. Line
+  ranges do not overlap this branch's changes, so a clean merge is expected — but neither side is in master yet,
+  so whoever merges second should check.
+
+### Historical detail (superseded — kept for provenance)
 
 | Field | Value |
 |---|---|
