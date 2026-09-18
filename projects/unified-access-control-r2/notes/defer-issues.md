@@ -597,6 +597,99 @@ Wrong in both directions: a playbook shared with Assign is displayed as re-share
 
 ---
 
+### ISS-019 — a junction *query* failure silently removes the deny veto's ORGANISATION axis
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-17 |
+| **Source** | Task 043 Step 9.5 code-review finding H-2, while hoisting the junction read for the org-expansion term |
+| **GitHub Issue** | {URL} |
+
+`ExternalParticipationService.QueryActiveOrgIdsAsync`'s **private** overload catches query faults and
+non-success statuses and returns an **empty list** (`:1078-1084`, `:1093-1097`). Only the public
+overload's token/API-url acquisition can throw. So an HTTP 500/403 or a timeout on the
+`sprk_contactorganization` query reaches `AccessibleRecordSetService.ReadActiveOrgMembershipsAsync` as a
+*successful* read of zero organisations — `Unreadable: false` — which the FR-23 deny veto cannot
+distinguish from "this subject belongs to no organisation". Every deny row keyed on an organisation the
+subject belongs to stops matching. Contact-keyed rows (contact×record, contact×org) still apply, so the
+ethical wall **narrows rather than vanishes** — but the narrowing is silent and is exactly the case the
+veto's own documentation claims to cover.
+
+**The hole pre-dates task 043.** What 043 briefly did was worse than leaving it alone: it documented and
+unit-tested the property as *held*, using a test double that throws where the real path does not. A
+confident comment plus a green test is how a gap stops being looked for. Both `ActiveOrgMemberships`'
+and `ResolveDenyVetoAsync`'s remarks were corrected in `62e5d5d0c` to state the exact scope and name
+this residual.
+
+**Why it was not fixed in 043**: the correct fix is one layer down — surface an outcome from the junction
+query itself — and that same query also serves the **additive** org-grant term, whose caller
+*deliberately* wants empty-on-fault so a read failure cannot GRANT access. That is the same
+inverted-fail-direction problem 043 solved at the evaluator, recursing into
+`ExternalParticipationService`. It needs its own change with its own tests, not a drive-by.
+
+**Suggested fix**: a `QueryActiveOrgIdsOutcomeAsync` (ids + `Unreadable`) consumed by the veto path,
+leaving the additive callers on the existing empty-on-fault overload.
+
+---
+
+### ISS-020 — 🔔 the org-membership read bounds on `statecode` only, so a date-ended membership still confers
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; needs an OWNER DECISION |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-17 |
+| **Source** | Filed onto task 043 by task 020; decided-and-recorded in 043 (notes §4.1), sharpened by 043's code-review finding H-3 |
+| **GitHub Issue** | {URL} |
+
+The `sprk_contactorganization` junction carries `sprk_enddate`, but `QueryActiveOrgIdsAsync` filters
+`statecode eq 0` alone (`:1067-1069`). **A membership ended by date but never deactivated still confers
+inherited access** — via the org-grant term today, and via task 043's org-expansion term from now on.
+
+Task 020 deliberately declined to change it and filed the decision here with the instruction *"do not
+inherit the revoke's shape by default, because its fail direction is inverted relative to yours"*.
+Task 043's decision: **leave the query shape unchanged**, because one shape cannot be right for both
+callers — `QueryActiveOrgIdsAsync` serves an **additive** term (over-inclusion = over-GRANT, so a date
+bound is a tightening) *and* the **deny-veto subject** (over-inclusion = a stricter wall, so the same
+date bound makes the wall match FEWER subjects — a fail-OPEN change to a veto).
+
+**Why this needs the owner and not another implementer decision**: the hedge that made 043 safe is a
+**data state, not a control** — exposure is nil only because **zero organisations hold a standing grant
+today** (task 042 §3). One administrator ticking `sprk_standinggrant` on one organisation arms an
+over-grant to every stale member of that firm. And fixing it properly *changes who has access today*
+(it narrows live org-grant inheritance), which is beyond any single task's remit.
+
+**Suggested fix**: a date-bounded variant for the additive callers only, leaving the veto subject on
+`statecode`-only; plus a decision on whether to backfill/deactivate date-ended junction rows.
+
+---
+
+### ISS-021 — the org-baseline read is an unbounded N+1 on the authorization hot path
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project** |
+| **Urgency** | someday |
+| **Filed** | 2026-09-17 |
+| **Source** | Task 043 Step 9.5 code-review finding M-3 |
+| **GitHub Issue** | {URL} |
+
+`AccessibleRecordSetService.ComposeForContactAsync` awaits one
+`ISubjectStandingGrantReader.ReadForOrganizationAsync` per distinct active organisation, serially, and
+`QueryActiveOrgIdsAsync` applies no `$top` — so N is unbounded by construction. `IsRecordAccessibleAsync`
+and `IsOperationPermittedAsync` call `ComposeAsync` once per authorization check with no
+composition-level cache, so the cost multiplies per decision.
+
+**Not urgent, and the reason is measurable**: zero organisations hold a standing grant, so N is currently
+0 and the loop never executes. The shape is still wrong for a hot path.
+
+**Suggested fix**: a batched org-baseline read (one query for N organisation ids), or an explicit bound
+with `Capped` surfaced per NFR-03 — the same treatment the membership walk already gets.
+
+---
+
 ## Closed
 
 *(none yet)*
