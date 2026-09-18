@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/teams-manifest/MicrosoftTeams.schema.json",
   "manifestVersion": "devPreview",
   "id": "b3965ea0-6942-4f17-81b3-2c645bd05ebf",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "name": {
     "short": "Spaarke Word",
     "full": "Spaarke Document Management for Word"
@@ -42,6 +42,10 @@
           {
             "name": "CustomXmlParts",
             "minVersion": "1.1"
+          },
+          {
+            "name": "DialogApi",
+            "minVersion": "1.1"
           }
         ]
       },
@@ -57,6 +61,25 @@
             {
               "id": "openTaskPane",
               "type": "openPage"
+            }
+          ]
+        },
+        {
+          "id": "CommandRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/word/commands.html",
+            "script": "https://localhost:3000/word/commands.js"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "quickSave",
+              "type": "executeFunction"
+            },
+            {
+              "id": "shareDocument",
+              "type": "executeFunction"
             }
           ]
         }
@@ -109,6 +132,54 @@
                         "description": "Save this document to Spaarke Document Management System"
                       },
                       "actionId": "openTaskPane"
+                    },
+                    {
+                      "id": "QuickSaveButton",
+                      "type": "button",
+                      "label": "Quick Save",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Quick Save to Spaarke",
+                        "description": "Save this document to Spaarke DMS in one click, without opening the pane"
+                      },
+                      "actionId": "quickSave"
+                    },
+                    {
+                      "id": "ShareButton",
+                      "type": "button",
+                      "label": "Share",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Share via Spaarke",
+                        "description": "Create a Spaarke share link for this document and copy it to the clipboard"
+                      },
+                      "actionId": "shareDocument"
                     }
                   ]
                 }

@@ -12,7 +12,7 @@ import { authService, apiClient } from '@shared/services';
 // word-manifest.xml's 4-part <Version> is kept in step but is not this
 // constant's source — XML requires 4-part, the unified manifest requires
 // SemVer-style 1-3 part).
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.0.9';
 const BUILD_DATE = process.env.BUILD_DATE || 'unknown';
 
 // Configuration from environment or build-time injection
@@ -164,9 +164,7 @@ async function init() {
     // `readyHost` is undefined only if Office.onReady itself reported no host, in which case
     // detectHostType() still runs and a genuine detection failure still surfaces as a typed
     // INVALID_HOST / API_NOT_AVAILABLE rendered by the catch below.
-    hostAdapter = await HostAdapterFactory.createAndInitialize(
-      readyHost === Office.HostType.Word ? 'word' : undefined
-    );
+    hostAdapter = await HostAdapterFactory.createAndInitialize(readyHost === Office.HostType.Word ? 'word' : undefined);
     console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
