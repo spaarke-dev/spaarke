@@ -665,3 +665,36 @@ to an empty list ("TeamIds will be empty"). On team-owned records a transient fa
 therefore indistinguishable from "no access" — the same read-fault-looks-like-absence shape as
 **ISS-019**, one layer over. Recorded on `PlatformOwnershipColumns` itself so the next reader meets it
 where it bites.
+
+### 15.8 C-1 perturbations — 2 / 2 CAUGHT (task total **13 / 13**)
+
+| # | Break | Verdict |
+|---|---|---|
+| **C1-a** | strip `PlatformOwnershipColumns` entirely — ownership confers nothing again, i.e. the C-1 regression restored | **CAUGHT** (4 failed) |
+| **C1-b** | strip ONLY the plane gate (`includePlatformOwnership` forced true) — ownership leaks onto the contact plane | **CAUGHT** (1 failed) |
+
+**C1-b is the one worth having.** It recreates the exact over-widening I committed in the first cut, and
+the test that fails is the *pre-existing* NFR-05 assertion
+`ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords` — not one I wrote. So that
+invariant is genuinely guarded, rather than having caught me once by luck. Without this perturbation I
+would have known the test *had* failed, but not that it *reliably would*.
+
+C1-a's 4 failures are the two ownership tests plus the two assertions that previously encoded the
+regression as correct — which is the shape you want: the fix and its documentation fail together.
+
+### 15.9 Publish re-measured at the final commit
+
+The +0.10 MB figure in §9 was taken at `47a63314c`, before C-1 and five commits back. Re-measured at
+`d51370559`:
+
+| | |
+|---|---|
+| master (**re-measured**, not the recorded number) | **45.35 MB**, 214 files |
+| branch `d51370559` | **45.45 MB**, 214 files |
+| delta | **+0.10 MB** — unchanged by C-1, as expected: no package reference, and the change is one static `HashSet` plus a parameter |
+| ceiling (NFR-01 60 MB) | 14.55 MB headroom |
+| file counts | **EQUAL at 214/214** — hazard 4's trustworthiness check |
+
+Method per CLAUDE.md §10: fresh short-path worktrees on **both** sides, master re-measured rather than
+compared to a recorded number, same zip tool both sides (`Compress-Archive -CompressionLevel Optimal`),
+and `pwsh` with the interpreter's exit code captured before any pipe — the discipline §12 exists for.
