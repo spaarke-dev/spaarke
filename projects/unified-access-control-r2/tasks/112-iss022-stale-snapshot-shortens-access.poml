@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="112" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-022 (#1001) — a stale snapshot of the grant rows must not let the duplicate collapse SHORTEN access</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A localized concurrency fix on one endpoint, with the failure mode already characterised.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>106</deps>
+    <tags>bff-api, auth, testing</tags>
+    <origin>Register ISS-022 / GitHub #1001. Filed by task 106 Step 9.5 code-review finding F5. Queued by the owner's 2026-09-18 directive.</origin>
+  </metadata>
+
+  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create. Note task 106 moved these lines,
+       so any line number quoted below is already suspect. See notes/task-accuracy-audit-2026-09-18.md. -->
+
+  <prompt>`GrantExternalAccessEndpoint.CreateGrantAsync` reads the key's active rows, elects a survivor, then deactivates the rest — with NO ETag or conditional update between the read and the write. Task 106 changed the election key from an IMMUTABLE row id to a MUTABLE `sprk_expiresdate` read at T₀, which makes one new outcome reachable: rows r₁ (expires today+10, lower id) and r₂ (today+200); a date-less grant elects r₂; concurrently `/set-record-share-expiry` moves r₂ to today+1; the grant then collapses onto r₂ — now the shorter row — and deactivates r₁. Access was conferred until +10 before the call and until +1 after.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external grant lifecycle.</role>
+  <goal>A duplicate collapse cannot apply to a row whose state changed since the read, so a concurrent expiry change cannot shorten conferred access and a concurrent revoke cannot leave the key with zero active rows.</goal>
+
+  <constraints>
+    <constraint source="register ISS-022">Task 106's V1 fix does NOT address this. V1 removed request-DEPENDENCE from the ranking; this is about the ranked column being MUTABLE. Do not assume the election is the problem.</constraint>
+    <constraint source="register ISS-022">Honest scope: only the SHORTENING shape is new. The revoke-race variant (a racer deactivates the elected row, then the collapse removes the others, leaving zero rows) is PRE-EXISTING and symmetric — pre-106 it fired whenever the revoked row was the lowest id. Fix both or state which is out of scope.</constraint>
+    <constraint source="task 106">Do NOT reintroduce request-dependence into the election. `ElectSurvivor` deliberately takes no request value so request-independence is structural; a concurrency fix must not undo that (perturbation P5 pins it).</constraint>
+    <constraint source="ADR-003">Fail closed: an outcome the endpoint cannot verify is never reported as success.</constraint>
+  </constraints>
+
+  <notes>Suggested fix on file: `If-Match` on the row's ETag for the deactivation — the read-then-write pair has no optimistic concurrency at all. A re-read immediately before the collapse narrows but does not close the window. Register: `notes/defer-issues.md` § ISS-022. Related: tasks 010, 023, 098, 106.</notes>
+</task>

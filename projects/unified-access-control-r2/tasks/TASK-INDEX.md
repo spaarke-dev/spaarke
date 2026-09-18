@@ -715,6 +715,23 @@ fourth-root premise contradicted task 028's ruling.
 | 🔲 [open] 107 | Grants written outside the BFF get the default expiry — Dataverse-side, every write path (ISS-009 / #974) | FR-33 | 097 | — | ✅ | sonnet | high |
 | 🔲 [open] 108 | Unsecure-project must not report a failed share read as "0 shares revoked" (ISS-018 / #995) | NFR-01 | **063** | — | ❌ | sonnet | high |
 
+### Queued 2026-09-18 (owner directive: *"we need the issues tracked AND queued to be fixed in this project not deferred"*)
+
+All five open register entries were filed as GitHub issues and queued here. ⚠️ **POMLs are not yet
+authored** — deliberately. Author them with `/task-create` so each gets its own premise verification: the
+2026-09-18 accuracy audit ([`notes/task-accuracy-audit-2026-09-18.md`](../notes/task-accuracy-audit-2026-09-18.md))
+found **eight** existing task files carrying a wrong load-bearing sentence, and writing six more from
+unverified premises would repeat exactly that.
+
+| # | Task | FR | Deps | Group | Safe | Tier | Effort |
+|---|---|---|---|---|---|---|---|
+| 🔲 [open] 109 | A junction *query* failure must not silently remove the deny veto's ORGANISATION axis (ISS-019 / **#998**). `QueryActiveOrgIdsAsync`'s private overload returns an **empty list** on fault, which the FR-23 veto cannot distinguish from "belongs to no organisation" — so every org-keyed deny row stops matching. Contact-keyed rows still apply, so the wall **narrows rather than vanishes**. ⚠️ Fix is one layer down and the same query also serves the **additive** term, which *deliberately* wants empty-on-fault so a read failure cannot GRANT. Suggested: a `QueryActiveOrgIdsOutcomeAsync` (ids + `Unreadable`) for the veto path only | FR-23 | 043 | — | ❌ | **opus** | high |
+| 🔲 [open] 110 | 🔴 **BLOCKED — owner question undecided.** Should a date-ended but still state-active org membership stop conferring access (ISS-020 / **#999**)? `QueryActiveOrgIdsAsync` filters `statecode eq 0` alone while the junction carries `sprk_enddate`. ⚠️ The same query feeds an additive term (over-inclusion = over-GRANT, so a date bound tightens) **and** the deny-veto subject (over-inclusion = a stricter wall, so the same bound is fail-**OPEN**). One shape cannot be right for both. Today's safety is a **data state, not a control** — zero orgs hold a standing grant. Recommendation on file: bound the additive callers only | FR-24 | 043 | — | ❌ | **opus** | high |
+| 🔲 [open] 111 | Org-baseline read is an unbounded N+1 on the authorization hot path (ISS-021 / **#1000**). One `ReadForOrganizationAsync` per active org, serially, with no `$top` and no composition-level cache, once per authorization decision. Not urgent for a measurable reason: N is currently **0**. Suggested: a batched read, or an explicit bound with `Capped` per NFR-03 | NFR-03 | 043 | — | ❌ | sonnet | medium |
+| 🔲 [open] 112 | A stale snapshot must not let the duplicate collapse SHORTEN access (ISS-022 / **#1001**). Task 106 moved the election key from an immutable id to a **mutable** `sprk_expiresdate` read at T₀, so a concurrent `/set-record-share-expiry` can leave the collapse landing on a now-shorter row. ⚠️ **106's V1 fix does not cover this** — that removed request-*dependence*; this is about *mutability*. The revoke-race half is pre-existing and symmetric. Suggested: `If-Match` on the deactivation; the read-then-write pair has no optimistic concurrency at all | FR-09 | 106 | — | ❌ | sonnet | high |
+| 🔲 [open] 113 | ✅ **Owner decided**: on renewal a grantee keeps the previous period's level (ISS-023 / **#1002**). Today `GrantExternalAccessEndpoint.cs:248-255` writes the **requested** level, so a re-grant *sets* it and a collapse can lower effective access below the read path's `Max(level)`. 🔴 **The rule cannot be "always `max(requested, existing)`"** — that makes downgrades impossible, and task 063's `share-user` path exists to downgrade (the pre-merge real-Dataverse DOWNGRADE check is about exactly that). Distinguishing a **renewal** from an **explicit level change** is the task's first decision; carry an escalation trigger for it. ⚠️ Also constrain **099** (the renewal UI): its criteria never mention level, so as specified it would show a date picker while the server changed the level | FR-09 | 106 | — | ❌ | **opus** | high |
+| 🔲 [open] 114 | ✅ **Owner decided**: an external **licensed** system user is treated the same as an internal one (ISS-024). Remove the 422 `sdap.access.user_share.user_not_internal` refusal (`InternalShareEndpoints.cs:80`) — licence, not the external flag, is the discriminator. 🔴 **Ship the test with the code**: `InternalUserShareContractTests.cs:94` **asserts** the 422, so it encodes the retired rule; a green suite after changing only one side proves nothing. ⚠️ A *contact* is still not a security principal and still cannot be a POA share target — this is licensed **system users** only. Confirm what `isExternal` denotes in live metadata before deleting the branch that reads it | FR-28 | **063** | — | ❌ | sonnet | high |
+
 ## Execution sequence — dependency-ordered (owner, 2026-09-15)
 
 Owner, 2026-09-15: *"we don't need to worry about shipping a feature — sequence the tasks so that they have
@@ -725,8 +742,8 @@ first. Run them one at a time: most of them edit the evaluator core.
 
 | Wave | Order | Notes |
 |---|---|---|
-| 1 | **104** → 063 → 043 → 106 → 107 → 093 → 082 → 094 → 095 | 104 heads the longest chain (104 → 036 → 105 → 064 → 087 → 088 → 089 → 090). 082's external dep PR #832 is merged. |
-| 2 | 036 → 044 → 065 → 101 → 047 | 047 is live-dev validation — BLOCKED (not substituted) if no deployment is available |
+| 1 | **104** ✅ → 063 ✅ → 043 ✅ → 106 ✅ → ⚠️ 107 → ⚠️ 093 → 082 → 094 → 095 | 104 heads the longest chain (104 → 036 → 105 → 064 → 087 → 088 → 089 → 090). 082's external dep PR #832 is merged. 🔴 **107 and 093 must NOT be run as written — see the 2026-09-18 audit below.** |
+| 2 | 036 → 044 → 065 → 101 → 047 | 047 is live-dev validation — BLOCKED (not substituted) if no deployment is available. ⚠️ **044 and 065 do not belong behind 036** — see below |
 | 3 | 105 · 054 · **108** | 🔴 **054 is blocked** on the owner's ISS-003 product question (amended 2026-09-15); 055 / 056 / 057 / 058 wait with it. **108** (ISS-018 / #995) needs only 063's strict share read, so it can run any time after 063. |
 | 4 | 064 · 055 | |
 | 5 | 087 → 066 → 069 → 056 | |
@@ -746,6 +763,32 @@ first. Run them one at a time: most of them edit the evaluator core.
 | 088 | 036, 043, 055, 064 | versions every evaluator term and makes their inputs injectable — it must see all of them |
 | 047 | 093 | validates provisioning through the Create Project wizard, which 093 reorders |
 | 090 | 036, 043, 044, 047, 087, 088, 089, 093, 094, 095 | wrap-up follows everything (these were only implied) |
+
+### 🔴 Accuracy audit, 2026-09-18 — read before starting anything in wave 1
+
+Owner-requested audit of whether the open tasks are accurate and match current status. Full record:
+[`notes/task-accuracy-audit-2026-09-18.md`](../notes/task-accuracy-audit-2026-09-18.md). Status drift is
+**clean** (26/26 agree), but **eight** task files carry a wrong load-bearing sentence.
+
+| Task | Why it must not run as written |
+|---|---|
+| **107** | 🔔 **Needs an owner ADR-002 exception first.** A pre-operation plugin is now the *only* viable in-transaction mechanism — a business rule **provably cannot work** (client-form-only; no date arithmetic) — but ADR-002 requires explicit exception approval and **no such exception has ever been granted in this repo**. Also: ISS-009's own suggested fix (`ApplicationRequired`) is **insufficient alone**; its reference implementation `BaseProxyPlugin.cs` is `[Obsolete]` *for violating ADR-002*; and its test plan cannot build (net462 — and adding a net4x project to `Spaarke.sln` is a deliberate Tier-1 CI failure on ubuntu) |
+| **093** | 🔴 **Four false premises.** Its background says `EntityCreationService.ts` orders "upload → create → link" — task **076 inverted that**, and the file's own header now says *"Create the record FIRST."* Acceptance criterion 1 is **already met** in all five uploading wizards, and the isolation gap it exists to close is **already closed for projects** (`CreateProjectWizard.tsx:690` provisions before `:736` uploads). It claims `SecureProjectSection.tsx` exists in **two** implementations — task **068 disproved that by building the bundle and grepping `dist`** — and cites a knowledge file whose real name differs. An implementer obeying it literally would **redo shipped work** |
+| **082** | Its own header says the second ratchet was retired, but `<step order="0">` still makes "confirm PR #832 merged" a **hard gate** (#832/#840 *have* merged), criteria 1/2/7 still demand it, `<outputs>` still lists `CallerIdentityCensusTests.cs`, and `<deps>` still lists `PR-832`. Census stale: "71 files / ~40 unaudited" re-measures to **59 / 6 filters / zero outside a 5-entry allowlist** |
+| **087, 088** | Systematic **pre-renumbering** references — `<gate>`/`<goal>`/`<dependency>` cite **080/081** for what is now 086/087 |
+| **036** | Cites `src/server/api/Sprk.Bff.Api/appsettings.json` as `role="modify"`; **that file does not exist** (only `appsettings.Testing.json` + three `.template`s) |
+| **095** | ❌ "`sprk_document` has **NO** lookup for `sprk_todo`" — `sprk_relatedtodo` exists. This claim is the stated **argument for** the intersection entity's shape |
+| **094** | Accurate, but add before executing: `DriveItemOperations.ListChildrenAsync` is **drive-keyed**, while under 076/083 the container is server-resolved from `(entity, recordId)`. The probe must be **record-keyed**, or it reintroduces the client-supplied-container shape 083 deleted |
+
+**Sequencing corrections the audit found** (not yet applied to the waves above — a resequencing call is the
+owner's):
+
+- **044 does not belong behind 036.** Its deps (039/041/042/043) are **all ✅**, and the index itself notes
+  it "excludes FR-20 by design". It is runnable now.
+- **065 does not belong behind 036 either.** Its only dep (063) is ✅, and pulling it forward unblocks the
+  **066 → 067 → 099** chain *plus* **069**. 099's escalation has already fired *waiting on 065's M8*.
+- **Genuinely clean and runnable right now**: **108, 065, 044, 094, 095** (082 after its rewrite; 093 and
+  107 after the items above).
 
 Checked and deliberately NOT a dependency: 036 ↔ 043 both edit `AccessibleRecordSetService.cs`, but neither
 consumes the other's term — 043 goes first so 044's Phase 1–2 seam suite closes on it, and 044 excludes FR-20

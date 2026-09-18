@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-021 (#1000) — the org-baseline read is an unbounded N+1 on the authorization hot path</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Evaluator hot path (.cs); tags bff-api/auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A bounded, well-specified performance change with an existing precedent to copy (the membership walk's `Capped` surfacing).</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>043</deps>
+    <tags>bff-api, auth, testing</tags>
+    <origin>Register ISS-021 / GitHub #1000. Filed by task 043 Step 9.5 code-review finding M-3. Queued by the owner's 2026-09-18 directive.</origin>
+  </metadata>
+
+  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create, which must verify every path and
+       line number below against the code. See notes/task-accuracy-audit-2026-09-18.md. -->
+
+  <prompt>`AccessibleRecordSetService.ComposeForContactAsync` awaits one `ISubjectStandingGrantReader.ReadForOrganizationAsync` per distinct active organisation, SERIALLY, and `QueryActiveOrgIdsAsync` applies no `$top` — so N is unbounded by construction. `IsRecordAccessibleAsync` and `IsOperationPermittedAsync` call `ComposeAsync` once per authorization check with no composition-level cache, so the cost multiplies per decision.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external access evaluator.</role>
+  <goal>The org-baseline read is bounded and does not scale with the number of organisations on the authorization hot path — either one batched query for N organisation ids, or an explicit bound whose truncation is VISIBLE per NFR-03 rather than silent.</goal>
+
+  <constraints>
+    <constraint source="NFR-03">A truncated read must be visibly truncated, never silently. Reuse the `Capped` surfacing the membership walk already has rather than inventing a second shape.</constraint>
+    <constraint source="ADR-003">Fail closed: a batched read that partially fails must not resolve to "fewer organisations confer".</constraint>
+    <constraint source="register ISS-021">Not urgent, and the reason is measurable: N is currently 0 because no organisation holds a standing grant. Do not let that make the change untested — the tests must exercise N &gt; 1.</constraint>
+  </constraints>
+
+  <notes>Register: `notes/defer-issues.md` § ISS-021. Related: tasks 042, 043, 105 (the collection-read rewrite — check for overlap before starting).</notes>
+</task>

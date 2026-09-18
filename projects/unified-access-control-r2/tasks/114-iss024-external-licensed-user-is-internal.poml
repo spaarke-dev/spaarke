@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-024 — an external *licensed* system user is treated the same as an internal one (owner-decided)</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Share write path (.cs, Api/ExternalAccess); tags bff-api/auth. Removes a refusal, i.e. widens who can be granted access.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A localized removal with a clear owner ruling; the judgment point (what `isExternal` actually denotes) is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>063</deps>
+    <tags>bff-api, auth, testing</tags>
+    <origin>Register ISS-024. Found by task 063 (session 13) and raised as an open owner question in every handoff since. Owner decision received 2026-09-18; queued by the same directive.</origin>
+  </metadata>
+
+  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create, which must verify the cited paths
+       and confirm what `isExternal` denotes in LIVE metadata. See notes/task-accuracy-audit-2026-09-18.md. -->
+
+  <owner-decision date="2026-09-18">"For task 063 an 'external' licensed user is treated the same as an internal licensed user." LICENCE, not the external flag, is the discriminator: a licensed system user is a Dataverse security principal and can hold a POA share, whether or not the directory marks them external.</owner-decision>
+
+  <prompt>`POST /api/v1/external-access/share-user` refuses a system user flagged as external with HTTP 422 `sdap.access.user_share.user_not_internal` (`InternalShareEndpoints.cs:80`), and `SystemUserIdentityResolver.cs:57` carries a doc comment justifying the refusal. Per the owner's ruling the refusal should go.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external access share path.</role>
+  <goal>A licensed system user can be granted a POA share regardless of the external flag, and the test suite asserts the new rule rather than the retired one.</goal>
+
+  <escalation>
+    <trigger>Confirm what `isExternal` on a systemuser actually denotes in LIVE metadata BEFORE deleting the branch that reads it. If it turns out to carry a different, load-bearing distinction (an unlicensed guest, an app user, a stub row), STOP and escalate — the ruling is about LICENSED users and does not authorise removing a guard that separates something else.</trigger>
+  </escalation>
+
+  <constraints>
+    <constraint source="audit 2026-09-18">🔴 SHIP THE TEST WITH THE CODE. `tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs:94` ASSERTS the 422 and its reason code, so it encodes the retired rule. A green suite after changing only the endpoint would mean the test never exercised the path; a green suite after changing only the test would mean nothing at all.</constraint>
+    <constraint source="project CLAUDE.md fact 4">⚠️ A *contact* is still NOT a security principal: it cannot be a POA share target and cannot be impersonated. This decision covers licensed SYSTEM USERS only, and the contact plane must keep COMPUTING access rather than storing it.</constraint>
+    <constraint source="task 063">The share write path's rights vocabulary is Dataverse's, not Spaarke's — the two have same-named values with different bit layouts (Spaarke Delete = 4; Dataverse 4 = Append). Assert Dataverse's numbers as literals rather than deriving them from the table under test.</constraint>
+    <constraint source="project">Response contract: removing a reasonCode is a contract change — state it explicitly and check for client consumers of `user_not_internal` before deleting it.</constraint>
+  </constraints>
+
+  <notes>Register: `notes/defer-issues.md` § ISS-024. Related: tasks 060, 061, 063, 065 (the "+ User" picker), 069 (Phase-4 seam tests).</notes>
+</task>

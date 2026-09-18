@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-023 (#1002) — on renewal, a grantee keeps the previous period's access LEVEL (owner-decided)</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth. Changes what level a re-grant writes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A contract decision inside the implementation: the renewal-vs-explicit-change discriminator, with an explicit-downgrade path that must keep working.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>106</deps>
+    <tags>bff-api, auth, testing</tags>
+    <origin>Register ISS-023 / GitHub #1002. Filed by task 106 Step 9.5 (code-review F10 / adr-check W3). Owner decision received 2026-09-18. Queued by the owner's 2026-09-18 directive.</origin>
+  </metadata>
+
+  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create. Task 106 rewrote this region, so
+       any line number below is already suspect. See notes/task-accuracy-audit-2026-09-18.md. -->
+
+  <owner-decision date="2026-09-18">"When access is renewed the user should have the same level as previous access period." A renewal must NOT lower the effective level; the prior period's level carries forward rather than the requested level overwriting it.</owner-decision>
+
+  <prompt>The read path composes effective access as `GroupBy(root).Max(level)` over active, unexpired rows. The write path's `CollapseDuplicatesAsync` writes the REQUESTED level to the survivor and deactivates every other row. So a re-grant at ViewOnly over a key holding a FullAccess duplicate reduces effective access from FullAccess to ViewOnly — on a request whose caller may have meant only to renew. This is pre-existing (task 010 convergence semantics); task 106 provably does not change level outcomes, because the requested level is written to whichever row is elected.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external grant lifecycle.</role>
+  <goal>A renewal preserves the previous period's effective level, while an explicit level change — including a DOWNGRADE — still applies exactly as requested.</goal>
+
+  <escalation>
+    <trigger>The renewal-vs-explicit-change discriminator is a CONTRACT decision. If it cannot be made without a request-shape change (a new field, a new route, or a changed meaning for an existing one), STOP and escalate with options rather than inferring intent from the payload.</trigger>
+  </escalation>
+
+  <constraints>
+    <constraint source="owner 2026-09-18">🔴 The rule CANNOT be implemented as "always take `max(requested, existing)`" — that makes downgrades impossible. Task 063's `share-user` path exists to set a system user to View Only, and the pre-merge real-Dataverse DOWNGRADE check (task 063 notes §9.4) is about exactly that working. An explicit downgrade MUST remain possible.</constraint>
+    <constraint source="audit 2026-09-18">⚠️ Constrain task **099** as part of this: 099 is the renewal UI and its acceptance criteria say nothing about level, so as specified it would present a date picker while the server silently changed the level. Check task **101**'s views too.</constraint>
+    <constraint source="project">Response contract: status codes and reasonCodes unchanged; needing a new one is an escalation.</constraint>
+  </constraints>
+
+  <notes>Register: `notes/defer-issues.md` § ISS-023. Related: tasks 010, 023, 063, 097, 098, 099, 101, 106.</notes>
+</task>

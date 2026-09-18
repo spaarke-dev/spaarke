@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-020 (#999) — should a date-ended but still state-active org membership stop conferring access?</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Evaluator membership path (.cs); tags bff-api/auth. Changes who has access today.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A fail-direction decision on a query serving both an additive term and a veto subject, plus a live-data narrowing.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>043</deps>
+    <tags>bff-api, auth, testing</tags>
+    <origin>Register ISS-020 / GitHub #999. Filed onto task 043 by task 020; decided-and-recorded in 043 notes §4.1; sharpened by 043's code-review finding H-3. Queued by the owner's 2026-09-18 directive.</origin>
+  </metadata>
+
+  <!-- 🔴 BLOCKED — DO NOT START. The owner's question was formally put on 2026-09-18 and is UNDECIDED.
+       ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create AFTER the decision, and have it
+       verify every claim below against the code. See notes/task-accuracy-audit-2026-09-18.md for why. -->
+
+  <escalation>
+    <trigger>This task is blocked on an owner decision and MUST NOT be started until it is answered. Starting it means choosing the answer.</trigger>
+  </escalation>
+
+  <prompt>The `sprk_contactorganization` junction carries `sprk_enddate`, but `QueryActiveOrgIdsAsync` filters `statecode eq 0` ALONE. A membership ended by date but never deactivated still confers inherited access — via the org-grant term today, and via task 043's org-expansion term from now on.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external access evaluator.</role>
+  <goal>Whatever the owner decides, implemented so that BOTH fail directions stay closed — the additive terms cannot over-grant, and the ethical-wall veto cannot stop matching a subject it should wall.</goal>
+
+  <owner-question status="UNDECIDED" put="2026-09-18">
+    <part n="1">Should a date-ended but still state-active membership stop conferring access — i.e. should the additive terms bound on `sprk_enddate`?</part>
+    <part n="2">If yes: should the ethical-wall veto keep matching that person anyway? The SAME query feeds an additive term (over-inclusion = over-GRANT, so a date bound is a tightening) AND the deny-veto subject (over-inclusion = a stricter wall, so the same date bound makes the wall match FEWER people — a fail-OPEN change to a veto). One query shape cannot be correct for both.</part>
+    <part n="3">Should date-ended junction rows be backfilled or deactivated in data?</part>
+    <recommendation>Yes to (1), no to (2) — a date-bounded variant for additive callers only, leaving the veto subject on statecode-only, which keeps both fail directions closed. (3) as a separate, audited data action.</recommendation>
+  </owner-question>
+
+  <constraints>
+    <constraint source="task 020">"Do not inherit the revoke's shape by default, because its fail direction is inverted relative to yours."</constraint>
+    <constraint source="task 043">Today's safety is a DATA STATE, not a control: exposure is nil only because zero organisations hold a standing grant. One administrator ticking `sprk_standinggrant` arms an over-grant to every stale member.</constraint>
+    <constraint source="owner">Fixing this NARROWS live org-grant inheritance — it changes who has access today. Treat the data change as its own audited action with a recorded before-state.</constraint>
+  </constraints>
+
+  <notes>Register: `notes/defer-issues.md` § ISS-020. Related: tasks 020, 042, 043.</notes>
+</task>

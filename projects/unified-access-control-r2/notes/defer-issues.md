@@ -41,8 +41,13 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
 | ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
 | ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
-| ISS-022 — a stale snapshot can shorten access | #1001 | **In project** | Task **106** Step 9.5 (code-review F5). The election key moved from an immutable `id` to a MUTABLE column read at T₀, so the shortening shape is **new**; the revoke-race variant is pre-existing and symmetric. V1's fix does not address it — V1 was request-dependence, this is mutability |
-| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — 🔔 needs an owner product decision | Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
+| ISS-019 — junction query failure removes the deny veto's org axis | #998 | **In project** | Task **109** (queued 2026-09-18). Pre-dates task 043; 043 briefly documented the property as HELD using a double that throws where the real path does not |
+| ISS-020 — date-ended membership still confers | #999 | **In project** — 🔔 **question put to the owner 2026-09-18, UNDECIDED** | Task **110** (queued, BLOCKED on the answer). Fixing it narrows live org-grant inheritance, i.e. changes who has access today |
+| ISS-021 — org-baseline N+1 on the hot path | #1000 | **In project** | Task **111** (queued 2026-09-18). N is currently 0 (no org holds a standing grant), so the shape is wrong but the cost is not yet paid |
+| ISS-022 — a stale snapshot can shorten access | #1001 | **In project** | Task **112** (queued 2026-09-18). Task **106** Step 9.5 (code-review F5). The election key is now a MUTABLE column; V1's fix does not cover it, and the revoke-race half is pre-existing |
+| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — ✅ **owner decided 2026-09-18** | Task **113** (queued 2026-09-18). Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
+| ISS-024 — external licensed user refused as "not internal" | — | **In project** — ✅ **owner decided 2026-09-18** | Task **114** (queued 2026-09-18). Found by task 063; the owner has ruled an external **licensed** user is treated the same as an internal one. ⚠️ The stale surface is SHIPPED CODE plus an **asserting** contract test, not a POML |
+| ISS-025 — the drift check cannot see an index row with no POML | — | **In project** | No task yet. Found 2026-09-18 by creating the condition: six index rows with no POML, and `scripts/check-task-status-drift.ps1` printed both counts and still said "No drift". The mirror of a guard it already has |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -768,6 +773,85 @@ carries an escalation trigger for it.
 
 **Estimated effort**: small once decided. **Blockers**: the owner's product answer. **Related**: tasks
 010, 106.
+
+---
+
+### ISS-024 — ✅ an external *licensed* system user is refused as "not internal"
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 (the finding itself dates from task 063, session 13) |
+| **Source** | Task 063; raised as an open owner question in every handoff since |
+| **GitHub Issue** | — (to be filed with task 114) |
+
+`POST /api/v1/external-access/share-user` refuses a system user flagged as external with HTTP 422
+`sdap.access.user_share.user_not_internal` (`InternalShareEndpoints.cs:80`), and
+`SystemUserIdentityResolver.cs:57` carries a doc comment justifying the refusal.
+
+### ✅ Owner decision (2026-09-18)
+
+**"For task 063 an 'external' licensed user is treated the same as an internal licensed user."**
+
+So **licence, not the external flag, is the discriminator.** A licensed system user is a Dataverse
+security principal and can hold a POA share; whether the directory marks them external is irrelevant to
+that. The refusal should go.
+
+### ⚠️ Why this is riskier than it looks
+
+The old rule is **asserted by a contract test**:
+`tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs:94` asserts the 422 and
+its reason code. So the test encodes the retired rule and **must change in the same commit as the code** —
+a green suite after changing only the endpoint would mean the test was never exercising the path, and a
+green suite after changing only the test would mean nothing at all.
+
+**What must NOT change**: a *contact* is still not a security principal (project CLAUDE.md fact 4) and
+still cannot be a POA share target. This decision is about **licensed system users** only, and the
+contact plane must keep computing access rather than storing it. Whoever implements this should confirm
+what `isExternal` on a systemuser actually denotes in live metadata before deleting the branch that reads
+it — the guard may be load-bearing for some *other* distinction.
+
+**Estimated effort**: small. **Blockers**: none. **Related**: tasks 063, 065 (the "+ User" picker),
+069 (Phase-4 seam tests).
+
+---
+
+### ISS-025 — the status-drift check cannot see an index row that has no POML
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 |
+| **Source** | Found by accident while queuing tasks 109–114: I created the condition and the check passed |
+| **GitHub Issue** | — (to be filed) |
+
+`scripts/check-task-status-drift.ps1` reconciles by iterating the **POMLs**
+(`foreach ($id in ($poml.Keys | Sort-Object))`) and looking up each one's index marker. An index row with
+**no corresponding POML is therefore never examined.**
+
+Demonstrated, not theorised: after adding six `🔲 [open]` rows (109–114) with no task files, the script
+printed **`task POMLs parsed : 105`, `index rows parsed : 111`** and then **"No drift: every task POML
+status agrees with its index marker."** `rc=0`. Both numbers were on screen and the verdict ignored the
+difference.
+
+**Why it matters.** This script exists because completion is recorded in two places and nothing enforced
+agreement — a 2026-09-03 audit found 17 disagreements across 92 tasks. It closes the *POML-stale* and
+*index-stale* directions for paired tasks, but **an orphan index row is a third direction it does not
+cover**: the index can advertise work that no task file backs, `task-execute <id>` then fails to find a
+file, and `push-to-github` Step 1.65 passes on the way there. It already guards the inverse case (POMLs
+present but zero index rows parsed, i.e. a format change) — this is the mirror of that guard.
+
+**Suggested fix**: after the POML loop, assert the row set and the POML set are equal, and report
+unpaired **index** rows as drift with their ids. Two or three lines. Keep the existing message shape so
+the failure is legible.
+
+⚠️ **Note the verdict was not wrong, it was narrow** — true about what it measured and silent about what
+had changed. Same class as this project's recurring root error: *an observation taken outside the thing
+being observed.* The 105/111 mismatch was printed and I nearly accepted the green over it.
+
+**Estimated effort**: small. **Blockers**: none. **Related**: task 106 Step 10; the 2026-09-03 drift audit.
 
 ---
 

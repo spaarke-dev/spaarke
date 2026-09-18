@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="109" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-019 (#998) — a junction query failure must not silently remove the deny veto's ORGANISATION axis</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Evaluator/veto path (.cs, Infrastructure/ExternalAccess); tags bff-api/auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A fail-direction decision on a veto path: the same query serves an additive term that deliberately wants the opposite behaviour.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>043</deps>
+    <tags>bff-api, auth, testing</tags>
+    <origin>Register ISS-019 / GitHub #998. Filed by task 043 Step 9.5 code-review finding H-2. Kept in-project under the owner's 2026-09-15 disposition rule and queued by the owner's 2026-09-18 directive.</origin>
+  </metadata>
+
+  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author the full task with /task-create, which must run its
+       own premise check against the code. This project's task files have been wrong 19 times, and the
+       2026-09-18 accuracy audit found EIGHT open task files carrying a wrong load-bearing sentence
+       (notes/task-accuracy-audit-2026-09-18.md). The statements below are copied from the register
+       entry and the finding that produced it; treat every file path, line number and behavioural claim
+       as UNCHECKED until /task-create has verified it. -->
+
+  <prompt>`ExternalParticipationService.QueryActiveOrgIdsAsync`'s private overload catches query faults and non-success statuses and returns an EMPTY LIST; only the public overload's token/API-url acquisition can throw. So an HTTP 500/403 or a timeout on the `sprk_contactorganization` query reaches `AccessibleRecordSetService.ReadActiveOrgMembershipsAsync` as a successful read of zero organisations (`Unreadable: false`), which the FR-23 deny veto cannot distinguish from "this subject belongs to no organisation". Every deny row keyed on an organisation the subject belongs to stops matching. Contact-keyed rows still apply, so the ethical wall narrows rather than vanishes — but silently, and this is exactly the case the veto's own documentation claims to cover.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external access evaluator.</role>
+  <goal>A junction-query fault is distinguishable from "no organisations" on the veto path, and the deny veto fails CLOSED when the organisation axis cannot be evaluated — without changing the additive org-grant term, which deliberately wants empty-on-fault so a read failure cannot GRANT access.</goal>
+
+  <constraints>
+    <constraint source="register ISS-019">The additive callers MUST keep empty-on-fault. Two consumers, inverted fail directions; one shape cannot serve both.</constraint>
+    <constraint source="ADR-003">Fail closed on every term that cannot be evaluated.</constraint>
+    <constraint source="task 043">The hole PRE-DATES 043. What 043 briefly did was worse than leaving it alone: it documented and unit-tested the property as HELD, using a double that throws where the real path does not. Do not repeat that — the test double must model the real empty-on-fault behaviour.</constraint>
+  </constraints>
+
+  <notes>Suggested fix on file: a `QueryActiveOrgIdsOutcomeAsync` (ids + `Unreadable`) consumed by the veto path only. Register: `notes/defer-issues.md` § ISS-019. Related: tasks 042, 043.</notes>
+</task>
