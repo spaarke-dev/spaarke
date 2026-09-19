@@ -5,31 +5,142 @@
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
     <status>pending</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth.</rigor-reason>
-    <model-tier>sonnet</model-tier>
-    <model-tier-reason>A localized concurrency fix on one endpoint, with the failure mode already characterised.</model-tier-reason>
+    <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth; modifies tests; the primary fix reaches into the shared Dataverse client.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>RE-TIERED from `sonnet` on verification. The stub's reason — "a localized concurrency fix on one endpoint" — is FALSE: the register's own suggested fix (`If-Match`) is not implementable without adding precondition support to `DataverseWebApiClient` (`:204-214` has no header hook) and an etag field to `ExternalGrantRow` (`:78-120` has none), i.e. a change to a SHARED library whose `DeactivateAsync` is also called by the revoke path (`RevokeExternalAccessEndpoint.cs:152`). Cross-request concurrency with correctness consequences on two write paths — the same profile as task 103, which was opus.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project; this also touches src/server/shared/Spaarke.Dataverse, which every BFF write path uses.</parallel-reason>
     <deps>106</deps>
     <tags>bff-api, auth, testing</tags>
-    <origin>Register ISS-022 / GitHub #1001. Filed by task 106 Step 9.5 code-review finding F5. Queued by the owner's 2026-09-18 directive.</origin>
+    <estimated-effort>5–7 hours</estimated-effort>
+    <origin>Register ISS-022 / GitHub #1001. Filed by task 106 Step 9.5 code-review finding F5. Queued by the owner's 2026-09-18 directive. Authored 2026-09-19 with premises re-verified against HEAD — the defect is real; the suggested FIX was under-scoped, see `&lt;notes&gt;`.</origin>
   </metadata>
 
-  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create. Note task 106 moved these lines,
-       so any line number quoted below is already suspect. See notes/task-accuracy-audit-2026-09-18.md. -->
+  <prompt>`GrantExternalAccessEndpoint.CreateGrantAsync` reads the key's active rows (`:204`), elects a survivor (`:215`), writes it (`:260`), then deactivates the rest (`:321` → `:478` → `ExternalGrantLifecycle.DeactivateAsync` `:416`) — with NO ETag and no conditional update anywhere between the read and the writes. Task 106 moved the election key from the IMMUTABLE `sprk_externalrecordaccessid` to the MUTABLE `sprk_expiresdate`, read at T₀ (`ConferralRank`, `ExternalGrantLifecycle.cs:217-218`; ordered at `:252-255`), which makes one new outcome reachable.
 
-  <prompt>`GrantExternalAccessEndpoint.CreateGrantAsync` reads the key's active rows, elects a survivor, then deactivates the rest — with NO ETag or conditional update between the read and the write. Task 106 changed the election key from an IMMUTABLE row id to a MUTABLE `sprk_expiresdate` read at T₀, which makes one new outcome reachable: rows r₁ (expires today+10, lower id) and r₂ (today+200); a date-less grant elects r₂; concurrently `/set-record-share-expiry` moves r₂ to today+1; the grant then collapses onto r₂ — now the shorter row — and deactivates r₁. Access was conferred until +10 before the call and until +1 after.</prompt>
+Rows r₁ (expires today+10, lower id) and r₂ (today+200). A date-less grant reads both and elects r₂. Concurrently `POST …/set-record-share-expiry` moves r₂ to today+1 (it writes ONLY `sprk_expiresdate` — `SetRecordShareExpiryEndpoint.cs:213-216`). The grant then collapses onto r₂ — now the SHORTER row — and deactivates r₁. The union conferred access until +10 before the call and until +1 after. Pre-106 the same interleaving elected r₁ and kept +10.
+
+⚠️ The two writers use DIFFERENT Dataverse clients: the collapse PATCHes through `DataverseWebApiClient`, the expiry setter goes through `IDataverseService.BulkUpdateAsync` (`DataverseServiceClientImpl.cs:2327`). They share no transaction. A row-version precondition still DETECTS the other writer; nothing can make them coordinate, so do not try.</prompt>
   <role>SPAARKE platform developer, C#/.NET, the external grant lifecycle.</role>
-  <goal>A duplicate collapse cannot apply to a row whose state changed since the read, so a concurrent expiry change cannot shorten conferred access and a concurrent revoke cannot leave the key with zero active rows.</goal>
+  <goal>A duplicate collapse cannot apply to a row whose state changed since the read, so a concurrent expiry change cannot shorten conferred access and a concurrent revoke cannot leave the key with zero active rows. Every outcome the endpoint cannot verify is reported as such rather than as success.</goal>
+
+  <context>
+    <background>Task 106 fixed a false 409 by electing the row that confers access longest. That election is deliberately REQUEST-INDEPENDENT and structurally so: `ElectSurvivor(IReadOnlyList&lt;ExternalGrantRow&gt;, DateOnly)` (`ExternalGrantLifecycle.cs:245`) has no parameter through which a request value could be reintroduced, because a request-parameterised order let two racers elect different survivors and deactivate each other, leaving ZERO active rows (finding V1/F1; the reasoning is preserved at `:195-215` and `notes/task-106-regrant-expired-survivor.md:203`). This task must not undo that.
+
+**What the suggested fix actually costs — verified, because the register makes it sound like one line.** "`If-Match` on the row's ETag" needs three pieces that do not exist:
+  1. `ExternalGrantRow` (`ExternalGrantLifecycle.cs:78-120`) has no `@odata.etag` property, and `RowSelect` (`:261-264`) does not request one — the row version is never read today.
+  2. `DataverseWebApiClient.UpdateAsync` (`:204-214`) is `(entitySetName, id, entity, ct)` and builds its own request via `CreateAuthenticatedRequestAsync` (`:161-167`), which sets only `Authorization`. There is no If-Match support anywhere in that client (the repo's other If-Match uses are Compose/Graph and Cosmos, not this client).
+  3. Nothing handles a 412. `UpdateAsync` calls `EnsureSuccessStatusCode()`, so a precondition failure surfaces as a bare `HttpRequestException`.
+
+Ripple: `DeactivateAsync` has a SECOND caller, `RevokeExternalAccessEndpoint.cs:152`. A required-precondition signature changes the revoke path too; an optional one does not. Decide deliberately.
+
+Current error posture to preserve or change deliberately: `CollapseDuplicatesAsync` SWALLOWS failures (`:480-485`) because the caller's grant already succeeded, while `DeactivateAsync` PROPAGATES (`:403-404`) so a partial sweep surfaces. A 412 arriving in the swallowing branch would be silently discarded — which is precisely the shape this task exists to remove.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (CreateGrantAsync :186-383; CollapseDuplicatesAsync :459-486)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs (ExternalGrantRow :78-120; RowSelect :261-264; QueryActiveRowsAsync :286-299; DeactivateAsync :406-422)</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs (precondition support on the PATCH — only if the If-Match path is chosen)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs:190-234 (the concurrent writer, and the all-or-nothing honesty wording to mirror when an outcome is unknown)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:152 (the other DeactivateAsync caller — the ripple surface)</file>
+    </relevant-files>
+  </context>
 
   <constraints>
-    <constraint source="register ISS-022">Task 106's V1 fix does NOT address this. V1 removed request-DEPENDENCE from the ranking; this is about the ranked column being MUTABLE. Do not assume the election is the problem.</constraint>
-    <constraint source="register ISS-022">Honest scope: only the SHORTENING shape is new. The revoke-race variant (a racer deactivates the elected row, then the collapse removes the others, leaving zero rows) is PRE-EXISTING and symmetric — pre-106 it fired whenever the revoked row was the lowest id. Fix both or state which is out of scope.</constraint>
-    <constraint source="task 106">Do NOT reintroduce request-dependence into the election. `ElectSurvivor` deliberately takes no request value so request-independence is structural; a concurrency fix must not undo that (perturbation P5 pins it).</constraint>
-    <constraint source="ADR-003">Fail closed: an outcome the endpoint cannot verify is never reported as success.</constraint>
+    <constraint source="register ISS-022">Scope: the diagnosis. Task 106's V1 fix does NOT address this. V1 removed request-DEPENDENCE from the ranking; this is about the ranked column being MUTABLE. Do not "fix" the election.</constraint>
+    <constraint source="task 106">Scope: the election. Do NOT reintroduce request-dependence. `ElectSurvivor` takes no request value so the property is structural, not checked; perturbation P5 pins it. A concurrency fix must not add a parameter through which a request value could re-enter.</constraint>
+    <constraint source="register ISS-022">Scope: honest coverage. Only the SHORTENING shape is new. The revoke-race variant — a racer deactivates the elected row, then the collapse removes the others, leaving ZERO active rows — is PRE-EXISTING and symmetric (pre-106 it fired whenever the revoked row was the lowest id). Fix both, or state in the notes which is out of scope and why.</constraint>
+    <constraint source="ADR-003">Scope: fail direction. An outcome the endpoint cannot verify is never reported as success. A discarded 412 is exactly that — if the precondition path lands inside the currently-swallowing `CollapseDuplicatesAsync` catch (`:480-485`), the swallow must become deliberate and distinguishable, not inherited.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: the shared client. `src/server/shared/Spaarke.Dataverse` is consumed by every BFF write path. Any precondition support must be ADDITIVE and default to today's behaviour, so no existing caller changes semantics by being recompiled. State the placement decision explicitly in the PR.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: new surface. Extend the existing `UpdateAsync` with an optional precondition rather than adding a parallel client or a second write path. One way to PATCH a row, not two.</constraint>
+    <constraint source="ADR-019">Scope: refusal shape. Any new client-visible refusal is ProblemDetails with a stable reason code and the trace id, matching the file's existing codes.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+    <constraint source="risk-register (plan §7)">Scope: the instrument. A green single-request suite is NOT evidence here. Task 106 passed build, 51/51 tests and 4/4 perturbations over a real privilege-loss defect because every instrument was single-request and the defect lived BETWEEN two requests. The test for this must span two writers interleaved at the read/write boundary, or it does not test this at all.</constraint>
   </constraints>
 
-  <notes>Suggested fix on file: `If-Match` on the row's ETag for the deactivation — the read-then-write pair has no optimistic concurrency at all. A re-read immediately before the collapse narrows but does not close the window. Register: `notes/defer-issues.md` § ISS-022. Related: tasks 010, 023, 098, 106.</notes>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+      <file>projects/unified-access-control-r2/notes/task-106-regrant-expired-survivor.md</file>
+      <file>projects/unified-access-control-r2/notes/remediation-and-sequencing-plan-2026-09-18.md</file>
+    </files>
+    <patterns>
+      <pattern name="Request-independent survivor election" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs:190-256">
+        `ConferralRank` + `ElectSurvivor`: a total order over rows that depends only on the ROW and `today`, so two racers compute the same order. Read the remarks before changing anything nearby — they record why a request value must never enter.
+      </pattern>
+      <pattern name="Truthful unknown-outcome refusal" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs:218-234">
+        A write whose outcome cannot be confirmed refuses without claiming "nothing changed" — it states the all-or-nothing invariant and tells the caller to reload. Mirror this wording for an unverifiable collapse.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Hand-trace the interleaving against the code before writing anything, and confirm the SHORTENING outcome is reachable at HEAD (the register's scenario, against `:204` read → `:215` elect → `:260` write → `:321` collapse). Then choose the mechanism and answer the escalation: optional precondition on the shared client versus a narrower fix, and what the endpoint returns on a detected conflict.</step>
+    <step order="1">Implement the detection. If the precondition path is chosen: read the row version in `RowSelect`/`ExternalGrantRow`, thread it through `QueryActiveRowsAsync` and `DeactivateAsync`, add ADDITIVE precondition support to `DataverseWebApiClient.UpdateAsync` defaulting to current behaviour, and map a 412 to a distinguishable result rather than a bare transport exception.</step>
+    <step order="2">Decide and implement the endpoint's response on conflict — retry once on a fresh read, or refuse with a stable reason code. Whichever: the collapse must never deactivate a row whose state changed since the read, and the swallowing catch must not silently absorb the conflict.</step>
+    <step order="3">Cover the revoke-race half, or record it as out of scope with a reason. Check the ripple on `RevokeExternalAccessEndpoint.cs:152`.</step>
+    <step order="4">Tests per the closed set — each spanning TWO interleaved writers, not one request. Perturbations. Build, full suite, ArchTests, publish size versus a fresh master worktree; notes; report. Leave TASK-INDEX to the main session.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The MECHANISM is a judgment call with a shared-library consequence the register does not mention. `If-Match` closes the window but requires additive precondition support on `DataverseWebApiClient` (used by every BFF write path) plus a row-version field and 412 handling; a re-read immediately before the collapse narrows the window without closing it and touches nothing shared. Present both with the blast radius and a recommendation before implementing. Do not start editing the shared client on your own judgment.</trigger>
+    <trigger>If detection is achievable but the correct RESPONSE is unclear — retry-once versus refuse — stop and ask. A silent retry that lands on a different survivor is a new request-dependence in disguise, which constraint "task 106" forbids; a refusal changes the endpoint's contract for a case callers have never seen.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`DataverseWebApiClient.UpdateAsync` (`:204-214`) — a PATCH with no precondition support; `ExternalGrantRow` (`:78-120`) — no row-version field; `DeactivateAsync` (`:406-422`) — an unconditional statecode write.</existing>
+    <extension>Extends the EXISTING `UpdateAsync` with an optional precondition and the EXISTING row model with the version it already receives from Dataverse but discards. No new client, no second write path, no package.</extension>
+    <cost-of-doing-nothing>A concurrent `/set-record-share-expiry` during a date-less re-grant collapses the key onto a row that is now shorter and deactivates the longer one: conferred access silently drops from today+10 to today+1 while both callers receive 200. Symmetrically, a concurrent revoke of the elected row leaves the key with ZERO active rows and still returns 200. Neither is detectable after the fact — the rows simply read as correct — and no existing test can see either, because every instrument on this path is single-request.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs, src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs, and src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs if the precondition path is chosen</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs (KEEP path: security-auth)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-112-collapse-concurrency.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The shortening interleaving is pinned by a test that spans two writers: rows at today+10 (lower id) and today+200, a date-less grant that reads both, the elected row's expiry moved to today+1 between the read and the collapse — and the outcome is NOT "the longer row deactivated while the caller receives 200".</criterion>
+    <criterion testable="true">On a detected conflict the endpoint's behaviour matches the escalation answer exactly (retry-once on a fresh read, or refuse with a stable reason code), and a test asserts it.</criterion>
+    <criterion testable="true">The collapse never deactivates a row whose state changed since the read that elected the survivor.</criterion>
+    <criterion testable="true">Negative case — no concurrency: a grant over a key with duplicates and no competing writer still collapses exactly as it does today, with the same survivor, the same level and expiry writes, and the same 200.</criterion>
+    <criterion testable="true">The ADR-003 expired-survivor 409 (`:306-319`) still fires on the same inputs and still speaks for the whole key.</criterion>
+    <criterion testable="true">Request-independence is intact: `ElectSurvivor` still takes no request value, and the existing test that the same survivor is elected whether or not the request carries an expiry (`GrantLifecycleCharacterizationTests.cs:1089`) stays green.</criterion>
+    <criterion testable="true">The revoke-race half is either covered by a test (a racer deactivates the elected row; the key does not end with zero active rows reported as success) or explicitly recorded as out of scope with a reason in the notes.</criterion>
+    <criterion testable="true">No conflict is silently swallowed: the `CollapseDuplicatesAsync` catch (`:480-485`) does not absorb a precondition failure into a logged warning that reports success to the caller.</criterion>
+    <criterion testable="true">If the shared client changed: the precondition is OPTIONAL and every existing caller's behaviour is byte-identical without it, `RevokeExternalAccessEndpoint.cs:152` still compiles and behaves as before, and the existing revoke tests stay green.</criterion>
+    <criterion testable="true">Perturbation: removing the precondition (or the re-read) fails at least one test; and reintroducing a request value into the election fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; ArchTests green; publish size reported against a fresh master worktree and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-19. Premises re-verified against HEAD. The DEFECT is real and reachable; the register's FIX was under-scoped.
+
+**VERIFIED TRUE** — read→elect→write→collapse with no concurrency control of any kind (`GrantExternalAccessEndpoint.cs:204`, `:215`, `:260`, `:321`; `ExternalGrantLifecycle.DeactivateAsync:416`). The election key IS the mutable `sprk_expiresdate`, read at T₀ (`ConferralRank:217-218`, `RowSelect:261-264`, ordering `:252-255`). `ElectSurvivor` (`:245`) takes no request value — request-independence is structural. The concurrent writer exists and writes ONLY `sprk_expiresdate` (`SetRecordShareExpiryEndpoint.cs:213-216`).
+
+**VERIFIED UNDER-SCOPED — the suggested fix.** `defer-issues.md:729-731` proposes "`If-Match` on the row's ETag … the read-then-write pair currently has no optimistic concurrency at all". The second half is exactly right. The first half is not a one-line change: `ExternalGrantRow` has NO etag property (`:78-120`), `RowSelect` never asks for one (`:261-264`), `DataverseWebApiClient.UpdateAsync` has no header hook (`:204-214`, request built at `:161-167`), there is no If-Match support anywhere in that client, and `EnsureSuccessStatusCode()` turns a 412 into a bare `HttpRequestException`. The fix therefore reaches `src/server/shared/Spaarke.Dataverse`, which is why this task was re-tiered to opus and marked parallel-unsafe beyond `Api/ExternalAccess/**`.
+
+**Also verified, and not in the register**: `DeactivateAsync` has a second caller (`RevokeExternalAccessEndpoint.cs:152`), so a required-precondition signature changes the revoke path too. And the two racing writers use different clients — Web API PATCH for the collapse, SDK `BulkUpdateAsync` for the expiry setter (`DataverseServiceClientImpl.cs:2327`) — so they share no transaction; a row-version precondition detects the other writer but nothing can make them coordinate.
+
+Existing coverage, checked: `GrantLifecycleCharacterizationTests.cs` has the request-independence test (`:1089`) and no concurrency test; `RecordShareExpiryTests.cs` has eighteen tests and none interleaves a second writer. Per plan §7 this is one of three queued items whose defect lives BETWEEN requests — a green suite is not evidence.
+
+Related: tasks 010 (convergence semantics), 023 (the match path's expiry write), 098 (write-path row reads), 106 (the election), 113 (ISS-023, the LEVEL half of the same collapse — coordinate if both are in flight).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load every file in knowledge/files. Follow task-execute's mandatory pre-execution checklist. Step 9.5 (code-review + adr-check) is required at FULL rigor.</protocol>
+  </execution>
 </task>

@@ -5,30 +5,131 @@
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
     <status>pending</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Evaluator hot path (.cs); tags bff-api/auth.</rigor-reason>
+    <rigor-reason>Evaluator hot path (.cs); tags bff-api/auth; modifies tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>A bounded, well-specified performance change with an existing precedent to copy (the membership walk's `Capped` surfacing).</model-tier-reason>
+    <model-tier-reason>A bounded performance change with an existing precedent to copy (the membership walk's `Capped` surfacing) and a named escalation for the one design choice. Unchanged from the stub: premise verification did not widen the blast radius — it narrowed it, by showing the guard tests do not pin this path.</model-tier-reason>
     <effort>medium</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project; this also edits the shared `ISubjectStandingGrantReader` seam.</parallel-reason>
     <deps>043</deps>
     <tags>bff-api, auth, testing</tags>
-    <origin>Register ISS-021 / GitHub #1000. Filed by task 043 Step 9.5 code-review finding M-3. Queued by the owner's 2026-09-18 directive.</origin>
+    <estimated-effort>3–4 hours</estimated-effort>
+    <origin>Register ISS-021 / GitHub #1000. Filed by task 043 Step 9.5 code-review finding M-3. Queued by the owner's 2026-09-18 directive. Authored 2026-09-19 with premises re-verified against HEAD — one register claim was FALSE, see `&lt;notes&gt;`.</origin>
   </metadata>
 
-  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create, which must verify every path and
-       line number below against the code. See notes/task-accuracy-audit-2026-09-18.md. -->
+  <prompt>`AccessibleRecordSetService.ComposeForContactAsync` (`:1114`) awaits one `ISubjectStandingGrantReader.ReadForOrganizationAsync` per distinct active organization, SERIALLY — `foreach` at `:1200`, `await` at `:1215-1216` — and each call is a single-row Dataverse retrieve (`SubjectStandingGrantReader.cs:164-166`). The org id list comes from `QueryActiveOrgIdsAsync`, which applies no `$top` (`ExternalParticipationService.cs:1092-1094`), so N is unbounded by construction. `IsRecordAccessibleAsync` (`:758`) and `IsOperationPermittedAsync` (`:794`) each call `ComposeAsync`, and `ComposeAsync` (`:728-745`) is a bare switch with no cache — so the cost is paid again on every authorization decision.
 
-  <prompt>`AccessibleRecordSetService.ComposeForContactAsync` awaits one `ISubjectStandingGrantReader.ReadForOrganizationAsync` per distinct active organisation, SERIALLY, and `QueryActiveOrgIdsAsync` applies no `$top` — so N is unbounded by construction. `IsRecordAccessibleAsync` and `IsOperationPermittedAsync` call `ComposeAsync` once per authorization check with no composition-level cache, so the cost multiplies per decision.</prompt>
+🔴 **Correct the register's cost claim before you scope the work.** ISS-021 says "zero organisations hold a standing grant, so N is currently 0 and the loop never executes." **The loop DOES execute.** It iterates the contact's ACTIVE ORG MEMBERSHIPS (`:1200`), and the `Rights == None` skip happens AFTER the read (`:1218-1221`). Standing grants decide only whether a membership WALK follows — never whether the READ happens. So the round trips are paid per active org membership even when no organization holds a standing grant, which is the current state. Re-measure N yourself; do not inherit either number.</prompt>
   <role>SPAARKE platform developer, C#/.NET, the external access evaluator.</role>
-  <goal>The org-baseline read is bounded and does not scale with the number of organisations on the authorization hot path — either one batched query for N organisation ids, or an explicit bound whose truncation is VISIBLE per NFR-03 rather than silent.</goal>
+  <goal>The org-baseline read is bounded and does not scale with the number of organizations on the authorization hot path — either one batched query for N organization ids, or an explicit bound whose truncation is VISIBLE per NFR-03 rather than silent.</goal>
+
+  <context>
+    <background>The org-expansion term is task 043's (design §4.5 term 4 / FR-24 + FR-25). The read it loops over is task 042's level-bearing seam. The N+1 is structural, not a bug in either: `ReadForOrganizationAsync` is per-subject BY CONSTRUCTION (one `IGenericEntityService.RetrieveAsync` per call, `IGenericEntityService.cs:12`), so bounding it means either a new batched read or an explicit cap.
+
+Batching IS feasible on the existing client — `IGenericEntityService.RetrieveMultipleAsync(QueryExpression, ct)` at `IGenericEntityService.cs:70` supports one query over N ids (`ConditionOperator.In`). No new client, package or interface-family is needed; at most one method on the existing reader.
+
+The `Capped` precedent to copy, rather than inventing a second shape: `AccessibleRecordSet.Capped` (`:138`) plus `CapCeiling` (`:141-142`) so a caller renders the NFR-03 message without hard-coding the number, `MembershipPageWalk` (`:811`), and the walk's own cap sites (`:904-956`). Spec NFR-03 is at `spec.md:132`.
+
+⚠️ Verified NOT a constraint: `tests/Spaarke.ArchTests/ExternalAccessQueryIntegrityGuardTests.cs` does not reference `ReadForOrganizationAsync` or the standing-grant reader at all, so this change does not have to satisfy that guard. Do not assume it does.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (the org loop, :1197-1249)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SubjectStandingGrantReader.cs (only if the chosen shape is a batched read — the interface is at :79-104)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs (the org-expansion region, :1386-1496)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/SubjectStandingGrantReaderTests.cs (only if the reader gains a method)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:780-960 (WalkMembershipPagesAsync — the existing bound-and-surface-Capped implementation to copy)</file>
+    </relevant-files>
+  </context>
 
   <constraints>
-    <constraint source="NFR-03">A truncated read must be visibly truncated, never silently. Reuse the `Capped` surfacing the membership walk already has rather than inventing a second shape.</constraint>
-    <constraint source="ADR-003">Fail closed: a batched read that partially fails must not resolve to "fewer organisations confer".</constraint>
-    <constraint source="register ISS-021">Not urgent, and the reason is measurable: N is currently 0 because no organisation holds a standing grant. Do not let that make the change untested — the tests must exercise N &gt; 1.</constraint>
+    <constraint source="NFR-03">Scope: truncation. A truncated read must be visibly truncated, never silently. Reuse the existing `Capped` + `CapCeiling` surfacing rather than inventing a second shape.</constraint>
+    <constraint source="ADR-003">Scope: fail direction. Fail closed. A batched read that partially fails must not resolve to "fewer organizations confer" — that is a silent under-grant on the additive term, and the existing per-org behaviour already fails closed to `Rights == None` per organization (`:1218-1221`). Preserve that: one unreadable organization must not decide the others.</constraint>
+    <constraint source="register ISS-021 (CORRECTED)">Scope: the cost claim. Do NOT repeat "N is currently 0". N is the count of ACTIVE ORG MEMBERSHIPS, not of standing-grant holders, and the read is unconditional per membership. Re-measure and record what you measured.</constraint>
+    <constraint source="task 042">Scope: the seam's contract. `ReadForOrganizationAsync`'s fail-closed contract and its `isFlsSecured: false` asymmetry versus the contact read (`SubjectStandingGrantReader.cs:148-152`) are deliberate and live-verified. A batched read must keep the same fail-closed value per subject and must not silently adopt the contact path's FLS log wording.</constraint>
+    <constraint source="task 043">Scope: the single-snapshot invariant. The ONE junction read shared by the additive term and the deny-veto subject (`:1134-1137`) must stay one read. Do not add a second org query while removing the N+1 — that trades a bounded cost for the two-snapshot hazard 043 deliberately removed.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: new surface. Prefer extending the existing reader over a new service or interface family. If the chosen shape adds a method, it replaces the loop — the per-org method must not survive as a second way to do the same thing unless a caller still needs it.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification; publish size versus a FRESH master worktree (hazards 3 + 4 — short paths, equal file counts on both sides); no new HIGH CVE.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Pair positives with negatives; perturbation is mandatory.</constraint>
   </constraints>
 
-  <notes>Register: `notes/defer-issues.md` § ISS-021. Related: tasks 042, 043, 105 (the collection-read rewrite — check for overlap before starting).</notes>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+      <file>projects/unified-access-control-r2/notes/task-042-standing-grant-levels.md</file>
+      <file>projects/unified-access-control-r2/notes/task-043-org-expansion-term.md</file>
+      <file>projects/unified-access-control-r2/notes/task-020-org-grant-spe-cleanup.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bound-and-surface-Capped" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:780-960">
+        The membership walk's existing NFR-03 treatment: a hard ceiling, a page ceiling, and a `Capped` flag plus `CapCeiling` carried out on the result so the caller can render the message without hard-coding the number. Copy this shape if the chosen fix is a bound rather than a batch.
+      </pattern>
+      <pattern name="Per-subject fail-closed read" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SubjectStandingGrantReader.cs:155-238">
+        One read for both attributes, try/catch to `StandingGrantState.NotHeld`, and an observable warning when a secured attribute is absent from an otherwise-successful retrieve. A batched read must preserve the per-subject fail-closed value.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-measure N and record it. Count what the loop actually costs: distinct active org memberships per contact (the junction, `sprk_contactorganizations`, `statecode eq 0`), NOT organizations holding a standing grant. `notes/task-020-org-grant-spe-cleanup.md` §1 records 2 active membership rows across 2 organizations from live Dataverse on 2026-08-26 — treat that as a prior, re-derive if the environment is reachable, and state plainly which it is. Then decide the shape: one batched read, or an explicit bound with `Capped`. The choice is the escalation below.</step>
+    <step order="1">Implement the chosen shape in the org-expansion term, preserving task 043's single junction read and the per-subject fail-closed value. Keep the bucketing by distinct baseline (`:1223-1228`) — that is what collapses the WALKS to at most three and is a separate, already-correct optimization.</step>
+    <step order="2">Update the existing org-expansion tests. Two sites break by construction if the read is batched: the per-org Moq setup (`AccessibleRecordSetServiceTests.cs:1455`) and the `Times.Never` verification that no org read happens when the contact belongs to no organization (`:1493-1495`). The second is a real negative case — preserve its MEANING, do not delete it.</step>
+    <step order="3">Add the tests in the closed set, including N greater than 1 and the partial-failure case. Run perturbations.</step>
+    <step order="4">Build, full suite, ArchTests, publish size versus a fresh master worktree; write notes; report. Leave TASK-INDEX to the main session.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The SHAPE is a judgment call, and the register names two options without choosing: (a) one batched read for N organization ids, or (b) an explicit bound with `Capped` surfaced per NFR-03. They are not equivalent — (a) removes the cost and adds a method to a shared seam; (b) keeps N round trips but makes the ceiling honest, and on this path a cap means SILENTLY DROPPING organizations that confer access unless `Capped` is consumed by a caller that can act on it. Present both with a recommendation and the measured N before implementing. Do not pick silently.</trigger>
+    <trigger>If the measurement shows N can exceed a few dozen for a real contact, say so and stop: that changes this from a shape cleanup into a correctness question about whether an unbounded additive term can be evaluated on the hot path at all, which is wider than this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ISubjectStandingGrantReader.ReadForOrganizationAsync` (per-subject, `SubjectStandingGrantReader.cs:141`), and the membership walk's `Capped` bound-and-surface machinery (`AccessibleRecordSetService.cs:780-960`).</existing>
+    <extension>Both candidate shapes EXTEND what exists: a batched read is one method on the existing reader over the already-registered `IGenericEntityService.RetrieveMultipleAsync`; a bound reuses the existing `Capped`/`CapCeiling` fields. No new service, interface family, package or client.</extension>
+    <cost-of-doing-nothing>Every authorization decision for a contact with M active org memberships pays M serial single-row Dataverse retrieves, and `ComposeAsync` has no cache, so the cost repeats per decision. Today those reads return `NotHeld` and contribute nothing — the round trips are pure waste on the hot path, and they grow with firm membership, which is operator-editable data rather than anything the code bounds.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/{AccessibleRecordSetService,SubjectStandingGrantReader}.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/{AccessibleRecordSetServiceTests,SubjectStandingGrantReaderTests}.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-111-org-baseline-read-bound.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The measured N is recorded in the notes, with its definition stated (active org memberships, not standing-grant holders) and whether it came from live Dataverse or from the 2026-08-26 prior.</criterion>
+    <criterion testable="true">A contact with N greater than 1 active org memberships resolves the org baseline without one Dataverse round trip per organization — or, if the bound shape was chosen, with the ceiling applied and `Capped` true.</criterion>
+    <criterion testable="true">The composed rights are UNCHANGED by this task for every existing org-expansion case: per-organization baseline levels, the at-most-three walks bucketed by distinct baseline, and Secure suppression of the derived term.</criterion>
+    <criterion testable="true">Negative case preserved: a contact belonging to NO organization performs no org-baseline read at all and sets `Sources.OrgExpansionMembership` false (the meaning of the current `Times.Never` assertion at `AccessibleRecordSetServiceTests.cs:1493-1495`).</criterion>
+    <criterion testable="true">Fail-closed, per subject: an organization whose row is missing, whose flag is unreadable, or whose baseline is unset contributes NOTHING, and does not prevent the other organizations in the same read from contributing.</criterion>
+    <criterion testable="true">Fail-closed, whole read: a transport-level failure of the batched read contributes nothing and never resolves to "fewer organizations confer" reported as success.</criterion>
+    <criterion testable="true">Authorization outcome unchanged at the two entry points: `IsRecordAccessibleAsync` and `IsOperationPermittedAsync` return the same answers as before for an org-derived record, including the `requiredRights == None` caller-bug denial (`AccessibleRecordSetService.cs:784-792`).</criterion>
+    <criterion testable="true">If the bound shape was chosen: truncation is visible — `Capped` is true and `CapCeiling` carries the ceiling, per NFR-03, and a test asserts the flag rather than only the id count.</criterion>
+    <criterion testable="true">If a batched method was added: the per-organization loop is gone from the evaluator, and no second code path reads the org baseline one id at a time unless a caller still requires it.</criterion>
+    <criterion testable="true">Perturbation: reverting to the per-organization loop (or removing the bound) fails at least one test; and making the batched read fail closed to "all organizations confer" instead of "none" fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; ArchTests green; publish size reported against a fresh master worktree and ≤60 MB.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-19. Premises re-verified against HEAD; one register claim is FALSE and is corrected in `&lt;prompt&gt;` + the constraints.
+
+**VERIFIED TRUE** — serial per-org await (`AccessibleRecordSetService.cs:1200` foreach, `:1215-1216` await); each call is one single-row retrieve (`SubjectStandingGrantReader.cs:164-166` via `IGenericEntityService.cs:12`); no `$top` on the org id query (`ExternalParticipationService.cs:1092-1094`); no composition-level cache (`ComposeAsync` `:728-745` is a bare switch; `IsRecordAccessibleAsync` `:758` and `IsOperationPermittedAsync` `:794` each call it per check); the `Capped` precedent exists (`:138`, `:141-142`, `:811`, `:904-956`).
+
+**VERIFIED FALSE — the register's urgency rationale.** `defer-issues.md:695-696`: *"zero organisations hold a standing grant, so N is currently 0 and the loop never executes."* The loop iterates active ORG MEMBERSHIPS (`:1200`) and the `Rights == None` skip is AFTER the read (`:1218-1221`), so the reads are paid per membership regardless of standing grants. Live evidence contradicts N=0 outright: `notes/task-020-org-grant-spe-cleanup.md` §1 (live Dataverse 2026-08-26) records *"2 active membership rows across 2 organizations; active org grants exist for `Morrison Foerster LLP`, which has an active member."* Two Ns were conflated: reads scale with memberships, WALKS scale with standing-grant holders. The task stays low priority — the wasted reads are small and return nothing — but "the cost is unpaid" is not true, and the remediation plan's "safe alone because N is 0" rests on the same conflation.
+
+Sequencing: 111 touches the ORG-ID CONSUMER, and the direct call is `ReadActiveOrgMembershipsAsync` (`:1137`, body `:486-516`) which delegates to `QueryActiveOrgIdsAsync` (`:500`). Tasks 109/110 rewrite that query to return an outcome plus two named sets. If 109/110 land first, rebase onto their shape and read the org ids from it. This task must NOT change the junction query itself.
+
+Related: tasks 042 (the seam), 043 (the term + the single-snapshot invariant), 105 (collection-read rewrite — check for overlap before starting), 109/110 (the same org-id read).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load every file in knowledge/files. Follow task-execute's mandatory pre-execution checklist. Step 9.5 (code-review + adr-check) is required at FULL rigor.</protocol>
+  </execution>
 </task>

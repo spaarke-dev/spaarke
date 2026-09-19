@@ -1,40 +1,146 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="113" project="unified-access-control-r2">
   <metadata>
-    <title>ISS-023 (#1002) — on renewal, a grantee keeps the previous period's access LEVEL (owner-decided)</title>
+    <title>ISS-023 (#1002) — a renewal keeps the previous period's access LEVEL (pin what exists, no contract change); folds in ISS-028 (#1008) — the ADR-003 refusal must not have already written the level</title>
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
     <status>pending</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth. Changes what level a re-grant writes.</rigor-reason>
+    <rigor-reason>Grant write path (.cs under Api/ExternalAccess); tags bff-api/auth; modifies tests. Reorders a security check relative to a write. Both the FULL triggers (auth-tagged .cs) and the TEST-MODIFYING override row (CLAUDE.md §8) apply, so code-review + adr-check at Step 9.5 are unconditional.</rigor-reason>
     <model-tier>opus</model-tier>
-    <model-tier-reason>A contract decision inside the implementation: the renewal-vs-explicit-change discriminator, with an explicit-downgrade path that must keep working.</model-tier-reason>
+    <model-tier-reason>Security-sensitive ordering change on the external grant write path, plus a renewal-vs-explicit-change contract distinction whose obvious fix (max of requested and existing) is wrong. The failure mode is a plausible-looking fix that passes a test unable to see the defect.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project. Tasks 112 and 114 touch the same region and the same two test classes; never run them concurrently with this one.</parallel-reason>
     <deps>106</deps>
     <tags>bff-api, auth, testing</tags>
-    <origin>Register ISS-023 / GitHub #1002. Filed by task 106 Step 9.5 (code-review F10 / adr-check W3). Owner decision received 2026-09-18. Queued by the owner's 2026-09-18 directive.</origin>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <origin>Register ISS-023 / GitHub #1002 (filed by task 106 Step 9.5 — code-review F10 / adr-check W3) and ISS-028 / GitHub #1008 (found while verifying the ISS-023 renewal-level design). Owner decisions received 2026-09-18; queued by the owner's 2026-09-18 directive. ISS-028 folded in here by the owner's recommendation: same endpoint, same region, and this task already opens that file.</origin>
   </metadata>
 
-  <!-- ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create. Task 106 rewrote this region, so
-       any line number below is already suspect. See notes/task-accuracy-audit-2026-09-18.md. -->
+  <owner-decision date="2026-09-18">ISS-023: "When access is renewed the user should have the same level as previous access period." Resolved as D-7 option 1 — PIN WHAT EXISTS, no contract change. AccessLevel stays non-nullable; the renewal-versus-set distinction already exists as two ROUTES, and the rule already holds by construction on the renewal route. ISS-028: "Fix." Move the conferral check ahead of the write, so a request that will be refused changes nothing.</owner-decision>
 
-  <owner-decision date="2026-09-18">"When access is renewed the user should have the same level as previous access period." A renewal must NOT lower the effective level; the prior period's level carries forward rather than the requested level overwriting it.</owner-decision>
+  <prompt>Two register entries on one endpoint, deliberately one task.
 
-  <prompt>The read path composes effective access as `GroupBy(root).Max(level)` over active, unexpired rows. The write path's `CollapseDuplicatesAsync` writes the REQUESTED level to the survivor and deactivates every other row. So a re-grant at ViewOnly over a key holding a FullAccess duplicate reduces effective access from FullAccess to ViewOnly — on a request whose caller may have meant only to renew. This is pre-existing (task 010 convergence semantics); task 106 provably does not change level outcomes, because the requested level is written to whichever row is elected.</prompt>
-  <role>SPAARKE platform developer, C#/.NET, the external grant lifecycle.</role>
-  <goal>A renewal preserves the previous period's effective level, while an explicit level change — including a DOWNGRADE — still applies exactly as requested.</goal>
+ISS-023. The read path composes effective access as GroupBy(root).Max(level) over active, unexpired rows (ExternalParticipationService.cs:945-950 and :993-1000). The /grant write path writes the REQUESTED level to the elected survivor (GrantExternalAccessEndpoint.cs:248-255, the UpdateAsync at :260) and then deactivates every other row (CollapseDuplicatesAsync, :459-486), so a re-grant at ViewOnly over a key holding a FullAccess duplicate lowers effective access — on a request whose caller may have meant only to renew. Under D-7 option 1 the answer is NOT to change what /grant writes. The distinction already exists as two routes: set-record-share-expiry writes only sprk_expiresdate and no level (SetRecordShareExpiryEndpoint.cs:213-216; the file contains no reference to AccessLevel or sprk_accesslevel at all), so the owner's rule already holds there. What is missing is that nothing NAMES the rule, and /grant's own explicit-level-change behaviour is only half tested. So this half of the task is a pinning job, not a behaviour change.
 
-  <escalation>
-    <trigger>The renewal-vs-explicit-change discriminator is a CONTRACT decision. If it cannot be made without a request-shape change (a new field, a new route, or a changed meaning for an existing one), STOP and escalate with options rather than inferring intent from the payload.</trigger>
-  </escalation>
+ISS-028. On the same endpoint, in the same region, the write happens BEFORE the refusal. :248 computes levelChanged; :250-260 writes sprk_accesslevel = requestedLevel; only then, at :306-319, does the ADR-003 conferral check fire and return the outcome that the caller sees as 409 sdap.grant.expired_not_restored (emitted at :137-145, titled "Grant did not take effect"). The 409's own message tells the caller the request did not take effect — and the expired row's level has already been changed. It bites only when the request carries no new expiry AND a different level, because a supplied expiry resolves the conferral question first (:281-282). It is pre-existing; task 106 changed the survivor election, not this ordering. It is unpinned: GrantLifecycleCharacterizationTests.cs:812-825, the one test aimed at this path, sends the SAME level, so levelChanged is false, the write is skipped, and the defect is invisible to it.
+
+Fix the ordering, and pin it with a test that can actually see it.</prompt>
+  <role>SPAARKE platform developer — C#/.NET, the external grant lifecycle and its characterization suite.</role>
+  <goal>A /grant request that will be refused mutates nothing. The renewal route's "no level is written" property is named and pinned rather than merely true. An explicit level change on /grant still applies exactly as requested, in BOTH directions. No request shape, status code or reasonCode changes.</goal>
+
+  <context>
+    <background>Verified at HEAD on 2026-09-19 while authoring (see notes for the full premise record). The conferral check is movable because it depends on nothing the write produces: effectiveExpiry = ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today) (:306) and both helpers are pure — EffectiveExpiry returns explicitExpiry ?? rowExpiry ?? DefaultExpiry(today) (ExternalGrantLifecycle.cs:187-188) and ConfersAccessOn(expiresDate, today) returns expiresDate is null || expiresDate.Value greater-or-equal today (ExternalParticipationService.cs:124-125). All three inputs are available before the write, so hoisting the check above the update block is behaviour-preserving on the success path.
+
+Two things the register states that source contradicts, both already corrected in this POML. (1) CollapseDuplicatesAsync does NOT write the level — it only deactivates non-survivors via DeactivateAsync (:459-486); the level write is the update block at :250-260. The effect the register describes still holds, by two mechanisms rather than one. (2) task 063's share-user path is NOT a sprk_accesslevel write and cannot be broken by anything this task does inside CreateGrantAsync: it writes a Dataverse POA share through IDataverseRecordShareService (GrantAccessAsync/ModifyAccessAsync at InternalShareEndpoints.cs:344-346) with a rights mask from RecordShareLevels, and its own class doc states at :26 that "nothing here reads or writes sprk_externalrecordaccess". The downgrade that this task must not break is therefore /grant's OWN explicit downgrade — which has no test today: GrantLifecycleCharacterizationTests.cs:325 covers ViewOnly to FullAccess (an upgrade) only.
+
+Also already true, and the reason the ISS-023 half is small: the renewal route's payload is already asserted to carry the expiry and nothing else, at RecordShareExpiryTests.cs:132-133 — OnlyContain(u =&gt; u.fields.Count == 1 andalso u.fields.ContainsKey("sprk_expiresdate")), with the message "the change writes the expiry and nothing else — level, grantee and state stay as they were". That count-based assertion is strong (a level would make it 2) but it does not NAME the owner's rule and does not cover the lapsed-row case explicitly. Strengthen and name it; do not rebuild it.
+
+Contract facts behind D-7 option 1: GrantAccessRequest.cs:39 is a non-nullable ExternalAccessLevel beside a nullable DateOnly? ExpiryDate at :40, and :22-25 documents ExpiryDate as "Optional in the REQUEST" while :21 carries no such clause; InviteExternalUserRequest.cs:29 is likewise a non-nullable int AccessLevel beside DateOnly? ExpiryDate at :32. The enum has no zero member (ExternalCallerContext.cs:314-319: 100000000 / 100000001 / 100000002), so an omitted level binds to 0 and is refused. Making the level omissible is option 2, which the owner did NOT choose.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (hoist the :306-319 conferral check above the :250-260 update block; correct the :296-302 comment)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs (the ISS-028 pin at/beside :812-825; the missing /grant downgrade guard beside :325)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/RecordShareExpiryTests.cs (name and strengthen the no-level pin at :132-133)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs (the renewal route — :213-216 writes only sprk_expiresdate; READ, do not change)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs (EffectiveExpiry :187-188, ElectSurvivor, ConferralRank — pure, request-independent)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (ConfersAccessOn :124-125; the read path's GroupBy/Max at :945-950 and :993-1000)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs (share-user is a POA share, NOT a grant-row level write — see :26 and :344-346)</file>
+    </relevant-files>
+  </context>
 
   <constraints>
-    <constraint source="owner 2026-09-18">🔴 The rule CANNOT be implemented as "always take `max(requested, existing)`" — that makes downgrades impossible. Task 063's `share-user` path exists to set a system user to View Only, and the pre-merge real-Dataverse DOWNGRADE check (task 063 notes §9.4) is about exactly that working. An explicit downgrade MUST remain possible.</constraint>
-    <constraint source="audit 2026-09-18">⚠️ Constrain task **099** as part of this: 099 is the renewal UI and its acceptance criteria say nothing about level, so as specified it would present a date picker while the server silently changed the level. Check task **101**'s views too.</constraint>
-    <constraint source="project">Response contract: status codes and reasonCodes unchanged; needing a new one is an escalation.</constraint>
+    <constraint source="owner 2026-09-18 (D-7 option 1)">Scope: contract. No request-shape change. AccessLevel stays non-nullable on both request records; no new field, no new route, no changed meaning for an existing one. The renewal-versus-set distinction IS the two existing routes. Making the level omissible (option 2) was considered and NOT chosen.</constraint>
+    <constraint source="owner 2026-09-18 / ISS-023">Scope: level semantics on /grant. 🔴 Do NOT implement the rule as max(requested, existing), and do not infer "renewal" from row state. Max makes downgrades impossible; row-state inference is clock-dependent (the same payload is a set at 23:59Z and a renew at 00:01Z) and, because reminders fire 30/14/7/3/1 days BEFORE expiry, the ordinary renewal arrives on a still-live key and would be classified "set" anyway — leaving ISS-023 unfixed in the common case. An explicit level change on /grant must still apply exactly as requested, in EITHER direction.</constraint>
+    <constraint source="owner 2026-09-18 / ISS-028">Scope: ordering. The ADR-003 conferral check moves AHEAD of the write, so a request that will be refused mutates nothing. Two non-fixes are forbidden: a compensating write (write the level, then restore it after refusing) leaves a real mutation and a real failure window; and suppressing or softening the 409 removes the true statement the caller depends on. The refusal stays exactly as it is — only the write moves.</constraint>
+    <constraint source="ADR-003">Scope: fail-closed. Fail closed on every path that cannot be evaluated. "Do not report success over a grant that confers nothing" now also means "do not mutate the row you are about to refuse". The check must remain a statement about the WHOLE key (it reads the elected survivor, and an expired survivor proves every active row is expired — task 106).</constraint>
+    <constraint source="ADR-019">Scope: response shape. ProblemDetails unchanged. The 409 keeps its status, title ("Grant did not take effect"), detail text, reasonCode sdap.grant.expired_not_restored, traceId and accessRecordId exactly as emitted at :137-145. A changed status code or reasonCode is an escalation, not an implementation choice.</constraint>
+    <constraint source="ADR-038 / review-2026-08-24">Scope: verification. Test-first is mandatory here, not stylistic: the new ISS-028 pin MUST be written against unmodified production code and MUST be observed to FAIL before the reorder lands. The defect survived precisely because the one test aimed at this path could not see it; a pin that has never failed has not been shown to be able to. Pair positives with negatives; perturbation is mandatory. Tests stay at the existing KEEP path (tests/integration/auth/UnifiedAccessControl/), no new mock-boundary shapes.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. BFF-touching: state the Placement Justification explicitly (it is "in BFF, existing endpoint, no new surface"); verify publish size against a FRESH worktree of origin/master rather than the recorded baseline, publish and zip both sides from SHORT paths with the same tool, and sanity-check that the file counts match; no new HIGH-severity CVE; tests updated per the test obligation.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: surface. Modification only. Add no new service, endpoint, DTO, request field, DI registration or package. Reuse the existing pure helpers (EffectiveExpiry, ConfersAccessOn) and the existing FakeGrantTable observables (LevelUpdateCount, ExpiryUpdateCount, ActiveRows) rather than adding new test scaffolding.</constraint>
+    <constraint source="audit 2026-09-18">Scope: boundaries. Do NOT edit task 099, TASK-INDEX beyond this task's own row, or notes/defer-issues.md. Task 099 needs its own level constraint (owner: non-negotiable) but that is 099's amendment, recorded in this task's notes so it is not lost. Task 101 needs nothing — its column list already includes access level.</constraint>
   </constraints>
 
-  <notes>Register: `notes/defer-issues.md` § ISS-023. Related: tasks 010, 023, 063, 097, 098, 099, 101, 106.</notes>
+  <knowledge>
+    <topic>external grant upsert: level semantics, the ADR-003 conferral refusal, and the write/check ordering</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+      <file>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/task-106-regrant-expired-survivor.md</file>
+      <file>projects/unified-access-control-r2/notes/task-023-grant-upsert-expiry.md</file>
+      <file>projects/unified-access-control-r2/notes/task-010-grant-lifecycle.md</file>
+      <file>projects/unified-access-control-r2/notes/task-097-mandatory-expiry.md</file>
+      <file>projects/unified-access-control-r2/notes/task-098-record-share-expiry.md</file>
+    </files>
+    <patterns>
+      <pattern name="highest-wins read composition" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">GroupBy(...).Max(AccessLevel) at :945-950 and :993-1000 is what makes a write-side level reduction observable as an effective-access reduction. ConfersAccessOn at :124-125 is the in-memory mirror of the read filter's own expiry predicate.</pattern>
+      <pattern name="request-independent survivor election" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs">ElectSurvivor / ConferralRank take NO request value (task 106), which is what lets the conferral check speak for the whole key. EffectiveExpiry at :187-188 answers a per-request question and must not be used to rank rows.</pattern>
+      <pattern name="refusal writes nothing" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs">The sibling endpoint's refusal paths are the shape to copy: every 4xx/5xx branch returns before any write, and its tests assert _bulkUpdates is empty ("a refused request writes nothing", RecordShareExpiryTests.cs:243).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Re-verify every premise at HEAD before touching anything: the update block and its line span, the conferral check and its line span, the 409 emission site, the renewal route's payload, and the existing tests at GrantLifecycleCharacterizationTests.cs:325 and :812-825 and RecordShareExpiryTests.cs:132-133. Line numbers in this POML were true on 2026-09-19 and will drift. Record any premise that has changed, and re-read the two register entries before deciding anything.</step>
+    <step order="1">RED FIRST, against unmodified production code. Write the ISS-028 pin — an expired survivor, no new expiry, a DIFFERENT requested level — and assert the stored level is unchanged after the refusal. Run it and OBSERVE IT FAIL. Do not proceed until it has failed for the right reason (the level was written), not for a setup reason. This ordering is the task's one binding sequence: the defect survived because the test aimed at it could not see it.</step>
+    <step order="2">Now hoist the conferral check above the update block in CreateGrantAsync, leaving the refusal itself byte-identical. Re-run: the new pin goes green, and the existing same-level test at :812-825 and the with-new-expiry test at :835 stay green. Correct the :296-302 comment so it no longer vouches for an ordering that was right for expiry and wrong for level.</step>
+    <step order="3">Close the ISS-023 half: add the missing /grant explicit-DOWNGRADE guard beside :325 (FullAccess to ViewOnly on a live row lowers the row), and name plus strengthen the renewal route's no-level pin in RecordShareExpiryTests so it asserts the absence of an sprk_accesslevel key explicitly, including for an already-lapsed row that is renewed.</step>
+    <step order="4">Perturbations: restore the original order and confirm at least one test fails; replace the reorder with a compensating write-then-restore and confirm at least one test fails; seed a max(requested, existing) level rule and confirm the new downgrade guard fails.</step>
+    <step order="5">Build, the two full test classes, the full suite, publish size against a fresh master worktree per the §10 procedure, CVE check. Write notes/task-113-renewal-preserves-level.md; update this task's TASK-INDEX row and current-task.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The renewal-versus-explicit-change distinction is a CONTRACT decision, and D-7 option 1 asserts it is already expressed as two routes. If verification at HEAD contradicts that — a shipped caller that renews through /grant rather than set-record-share-expiry, or a renewal surface that cannot reach the renewal route — then the owner's rule is NOT expressible without a request-shape change. STOP and escalate with options (the owner's own option 2, a nullable AccessLevel, is on file). Do NOT infer renewal intent from the payload or from row state.</trigger>
+    <trigger>If hoisting the conferral check would change ANY observable of the response — status code, title, detail text, reasonCode, accessRecordId, or which requests are refused at all — STOP and escalate. Option 1 explicitly excluded contract change, so a behavioural difference beyond "the refused request no longer mutates the row" is out of scope for this task, not a judgment call to make inside it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/RecordShareExpiryTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-113-renewal-preserves-level.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A refused /grant request — expired survivor, no new expiry, a DIFFERENT requested level — leaves sprk_accesslevel UNCHANGED on the row, and no update carrying sprk_accesslevel is issued at all.</criterion>
+    <criterion testable="true">That pin was observed to FAIL against unmodified production code before the reorder landed, and the failure is recorded in the task notes. A pin that has never failed does not satisfy this criterion.</criterion>
+    <criterion testable="true">The refusal itself is unchanged: same 409, same title, same detail text, same reasonCode sdap.grant.expired_not_restored, same traceId and accessRecordId extensions. The existing same-level test at GrantLifecycleCharacterizationTests.cs:812-825 still passes, unmodified in meaning.</criterion>
+    <criterion testable="true">Negative — the check still does not fire when it should not: a request WITH a new expiry over an expired row still succeeds, still writes the requested level, and still returns success (the :281-282 property).</criterion>
+    <criterion testable="true">Negative — an explicit level change on /grant still applies in BOTH directions: the existing upgrade test (:325, ViewOnly to FullAccess) stays green, and a new guard proves an explicit FullAccess-to-ViewOnly re-grant on a live row does lower the stored level.</criterion>
+    <criterion testable="true">The renewal route still writes NO level: set-record-share-expiry's payload is asserted to contain no sprk_accesslevel key (not merely a field count), for a live share and for an already-lapsed share that is renewed, and the stored level is unchanged afterwards.</criterion>
+    <criterion testable="true">No contract change: AccessLevel remains non-nullable on both request records, no request field is added or removed, no new route, and no status code or reasonCode is added, removed or changed on any /grant path.</criterion>
+    <criterion testable="true">Perturbation: restoring the write-before-check order fails at least one test; a compensating write-then-restore fails at least one test; a max(requested, existing) level rule fails the downgrade guard.</criterion>
+    <criterion testable="true">The :296-302 comment no longer vouches for an ordering it was wrong about for level, and says which property the ordering does and does not carry.</criterion>
+    <criterion testable="true">Build green; both full test classes green; full suite green; publish size reported as both absolute sizes plus the delta against a fresh origin/master worktree with matching file counts, and ≤60 MB; no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register: notes/defer-issues.md § ISS-023 and § ISS-028. Owner brief: notes/owner-decision-brief-2026-09-18.md § D-7 (lines 357-417) and § ISS-028 (lines 516-535). Related: tasks 010, 023, 063, 097, 098, 099, 101, 106.
+
+TWO ISSUES, ONE TASK. ISS-028 (#1008) is folded in here on the owner's recommendation — same endpoint, same region, and this task already opens the file. Closing task 113 closes BOTH #1002 and #1008. Close them together or not at all: the ISS-023 half is a pinning job whose value is mostly that it names a rule, and the ISS-028 half is the actual defect.
+
+⚠️ TASK 099 MUST SEPARATELY GAIN THE LEVEL CONSTRAINT (owner: non-negotiable) — and it is 099's amendment, NOT this task's scope. Do not edit 099 from here. As specified, 099's acceptance criteria never mention level, so it would present a date picker while the server changed the level. The owner's exact text, preserved so it is not lost: the Expiration picker is the only renewal control and MUST NOT change any level — a picker change calls only set-record-share-expiry (test: zero /grant calls, body carries no accessLevel); after refresh every Current Access level badge is unchanged; a "+ Contact" or "+ Organization" re-add of a principal already listed is an explicit SET and MUST send the picked level. Task 101 needs nothing; its column list already includes access level (101 POML :34).
+
+STEPS MODE — why prescriptive. The mode binds the task's step sequence, and here exactly one sequence is load-bearing: the pin must be written and observed to FAIL before the production change. That is not process decoration, it is the same shape as the defect being fixed. ISS-028 survived because GrantLifecycleCharacterizationTests.cs:812-825 — the one test aimed at this path — sends the same level, so levelChanged is false and the defect is invisible to it. An executor who reorders first and then writes the pin gets a green test and no evidence it can see anything, which reproduces the original failure exactly. Directional mode would leave that sequence adaptable, so it is wrong for this task. The rest of the sequence is genuinely coarse and the constraints, not the step order, carry the semantics.
+
+NO justification element, deliberately. This task modifies existing files only: one reorder inside an existing method, one comment correction, and tests for existing surface. Per CLAUDE.md §11 that is explicitly outside the justification rule, and the validator only requires the element when a relevant-file carries role="new". A hollow justification would fail review, so none is offered — this note records that as a decision, not an omission.
+
+PREMISE RECORD — verified against source at HEAD on 2026-09-19 while authoring. Every load-bearing claim below was read, not inferred. Premise rot is this project's documented failure mode — notes/task-accuracy-audit-2026-09-18.md:9 records 19 prior instances of a task's factual claims drifting out of step with the code — and two of this task's own inherited premises were wrong, corrected above.
+- TRUE. Update block: GrantExternalAccessEndpoint.cs:248 levelChanged; :254-255 sets sprk_accesslevel = requestedLevel in the payload; :260 UpdateAsync. Conferral check: :306 effectiveExpiry, :307 ConfersAccessOn, :315-319 the refusal outcome. So the write does precede the refusal.
+- TRUE. The 409 is emitted by the caller at :137-145: status 409, title "Grant did not take effect", reasonCode sdap.grant.expired_not_restored, plus traceId and accessRecordId.
+- TRUE, exact lines. The supplied-expiry note is at :281-282. Task 106's comment block is :296-302, and the phrase "the ADR-003 ordering below ... are load-bearing and true" is at :301-302.
+- TRUE. GrantLifecycleCharacterizationTests.cs:812-825 calls Request(expiryDate: null); Request's level parameter defaults to ViewOnly (:233) and the row is seeded ViewOnly (:816), so levelChanged is false and the write is skipped. The defect is invisible to it.
+- TRUE, and this is the feasibility premise for the whole fix: the check depends on nothing the write produces. EffectiveExpiry (ExternalGrantLifecycle.cs:187-188) and ConfersAccessOn (ExternalParticipationService.cs:124-125) are pure, and all three inputs exist before the write.
+- TRUE. Renewal route writes only the date: SetRecordShareExpiryEndpoint.cs:213-216, and a grep of that entire file for AccessLevel or sprk_accesslevel returns NO matches. Its doc at :29-31 confirms lapsed rows are renewed too (owner 2026-09-11).
+- TRUE. D-7's contract facts: GrantAccessRequest.cs:39-40 (non-nullable level beside nullable ExpiryDate) and :21-25 (only ExpiryDate is documented optional); InviteExternalUserRequest.cs:29 and :32; enum ExternalCallerContext.cs:314-319 has no zero member.
+- FALSE as written, corrected. The register says "the write path's CollapseDuplicatesAsync writes the requested level to the survivor". It does not: CollapseDuplicatesAsync (:459-486) only deactivates non-survivors via DeactivateAsync. The level write is the update block at :250-260. The EFFECT the register describes still holds — via two mechanisms rather than one, and for either election outcome — so ISS-023 stands; only the mechanism attribution was wrong.
+- FALSE as framed, corrected. "Task 063's share-user path exists to downgrade" is true of the feature but NOT of this code path: share-user writes a Dataverse POA share through IDataverseRecordShareService (InternalShareEndpoints.cs:344 GrantAccessAsync / :346 ModifyAccessAsync) using a RecordShareLevels rights mask, and its class doc states at :26 that "nothing here reads or writes sprk_externalrecordaccess". It is a different store and cannot be broken by a change inside CreateGrantAsync. The downgrade actually at risk from a max() rule is /grant's own, and that one has NO test today — :325 covers the upgrade direction only. Hence the new downgrade guard in step 3, which is the real forcing function the constraint needs.
+- ALREADY SATISFIED, in part. The renewal route's no-level property is already pinned implicitly at RecordShareExpiryTests.cs:132-133, which asserts fields.Count == 1 and ContainsKey("sprk_expiresdate") with the message "the change writes the expiry and nothing else — level, grantee and state stay as they were". Strong, but unnamed and count-based, and the lapsed-row case (:141) does not assert it. Strengthen and name; do not rebuild.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

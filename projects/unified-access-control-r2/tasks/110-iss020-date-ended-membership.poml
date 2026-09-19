@@ -1,46 +1,99 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="110" project="unified-access-control-r2">
   <metadata>
-    <title>ISS-020 (#999) — should a date-ended but still state-active org membership stop conferring access?</title>
-    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <title>ISS-020 (#999) — a date-ended org membership stops conferring access · EXECUTED AS PART OF TASK 109, verified here</title>
+    <phase>Register-driven (authored 2026-09-19 after owner decision D-2)</phase>
+    <gate>blocked — ships with 109; do NOT execute independently</gate>
     <status>pending</status>
-    <rigor>FULL</rigor>
-    <rigor-reason>Evaluator membership path (.cs); tags bff-api/auth. Changes who has access today.</rigor-reason>
-    <model-tier>opus</model-tier>
-    <model-tier-reason>A fail-direction decision on a query serving both an additive term and a veto subject, plus a live-data narrowing.</model-tier-reason>
-    <effort>high</effort>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification-and-closure task. The implementation is task 109's; this file exists so ISS-020's own acceptance is checked explicitly and #999 closes against evidence rather than by association.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Confirming a closed set of criteria against an implementation another task delivered. The judgment was spent in D-2 and in 109's design.</model-tier-reason>
+    <effort>medium</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
-    <deps>043</deps>
-    <tags>bff-api, auth, testing</tags>
-    <origin>Register ISS-020 / GitHub #999. Filed onto task 043 by task 020; decided-and-recorded in 043 notes §4.1; sharpened by 043's code-review finding H-3. Queued by the owner's 2026-09-18 directive.</origin>
+    <parallel-reason>Shares task 109's files entirely (Infrastructure/ExternalAccess/**, parallel-unsafe in this project) and must not run beside it.</parallel-reason>
+    <deps>109</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>under 1 hour (verification only)</estimated-effort>
+    <origin>Register ISS-020 / GitHub #999. Filed onto task 043 by task 020; decided-and-recorded in 043 notes §4.1; sharpened by 043's code-review finding H-3. Queued by the owner's 2026-09-18 directive; ANSWERED by owner decision D-2 on 2026-09-18/19.</origin>
   </metadata>
 
-  <!-- 🔴 BLOCKED — DO NOT START. The owner's question was formally put on 2026-09-18 and is UNDECIDED.
-       ⚠️ STUB — PREMISES NOT YET VERIFIED. Author with /task-create AFTER the decision, and have it
-       verify every claim below against the code. See notes/task-accuracy-audit-2026-09-18.md for why. -->
+  <prompt>ISS-020 is implemented by task 109, because a separate query for this half would re-introduce the two-snapshot hazard task 043 deliberately removed. Do not implement it again. Confirm task 109 delivered ISS-020's specific contract, record the evidence, and close #999.</prompt>
+  <role>SPAARKE platform developer verifying a delivered authorization change against the register entry that asked for it.</role>
+  <goal>ISS-020's three parts are each accounted for against task 109's shipped implementation, with evidence, and #999 is closed — or the gap is reported rather than assumed closed.</goal>
 
-  <escalation>
-    <trigger>This task is blocked on an owner decision and MUST NOT be started until it is answered. Starting it means choosing the answer.</trigger>
-  </escalation>
+  <context>
+    <background>🔴 THE OWNER QUESTION IS ANSWERED. It was open when this file was a stub; decision D-2 (2026-09-18, confirmed 2026-09-19 "follow recommendation") settled all three parts:
 
-  <prompt>The `sprk_contactorganization` junction carries `sprk_enddate`, but `QueryActiveOrgIdsAsync` filters `statecode eq 0` ALONE. A membership ended by date but never deactivated still confers inherited access — via the org-grant term today, and via task 043's org-expansion term from now on.</prompt>
-  <role>SPAARKE platform developer, C#/.NET, the external access evaluator.</role>
-  <goal>Whatever the owner decides, implemented so that BOTH fail directions stay closed — the additive terms cannot over-grant, and the ethical-wall veto cannot stop matching a subject it should wall.</goal>
+- **Part 1 = YES.** The ADDITIVE path is bound on `sprk_enddate`: a date-ended membership stops conferring, and access must be re-granted explicitly. The owner's words: "if an external user is removed from an organization then that external user must be reassigned access."
+- **Part 2 = NO.** The deny-veto subject stays on `statecode` ALONE and deliberately OVER-matches — an org-keyed ethical wall KEEPS binding a former member. Support: FR-23 (`spec.md:86`), `AccessibleRecordSetService.cs:550-554` "Denial deliberately OVER-matches."
+- **Part 3.** Count and list date-ended-but-active rows BEFORE deploy; shipping part 1 removes live access.
+- **Part 4.** The deactivation WRITER is task 117 (D-1 option B), designed once and shared.
 
-  <owner-question status="UNDECIDED" put="2026-09-18">
-    <part n="1">Should a date-ended but still state-active membership stop conferring access — i.e. should the additive terms bound on `sprk_enddate`?</part>
-    <part n="2">If yes: should the ethical-wall veto keep matching that person anyway? The SAME query feeds an additive term (over-inclusion = over-GRANT, so a date bound is a tightening) AND the deny-veto subject (over-inclusion = a stricter wall, so the same date bound makes the wall match FEWER people — a fail-OPEN change to a veto). One query shape cannot be correct for both.</part>
-    <part n="3">Should date-ended junction rows be backfilled or deactivated in data?</part>
-    <recommendation>Yes to (1), no to (2) — a date-bounded variant for additive callers only, leaving the veto subject on statecode-only, which keeps both fail directions closed. (3) as a separate, audited data action.</recommendation>
-  </owner-question>
+WHY THIS FILE DOES NOT IMPLEMENT ANYTHING. The dilemma recorded on this task — "one query serves an additive term and a veto subject, so one filter shape cannot be right for both" — DISSOLVED: it was an artifact of projecting bare ids. It is one READ, not one FILTER. ISS-019's suggested fix was a SECOND query (`QueryActiveOrgIdsOutcomeAsync`) for the veto path, which would restore the two-snapshot hazard. So 109 and 110 are ONE change, and it is task 109 — which also carries ISS-019 and ISS-026's read guard.
+
+⚠️ The stale premises this stub used to assert have been removed: the `&lt;owner-question status="UNDECIDED"&gt;` block (now answered), and the claim that "exposure is nil because zero organisations hold a standing grant." That claim was FALSE — only the org-EXPANSION term is standing-gated (`ExternalParticipationService.cs:1209-1221`); the older org-GRANT term (`QueryOrganizationGrantRowsAsync`, `:1011-1051`) has no standing check at all, and live org grants existed (`notes/task-020-org-grant-spe-cleanup.md:18`). Real exposure was bounded only by dev being a test environment.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/unified-access-control-r2/tasks/109-iss019-junction-fault-deny-veto-org-axis.poml</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">projects/unified-access-control-r2/notes/defer-issues.md (ISS-020 disposition only, at closure)</file>
+    </relevant-files>
+  </context>
 
   <constraints>
-    <constraint source="task 020">"Do not inherit the revoke's shape by default, because its fail direction is inverted relative to yours."</constraint>
-    <constraint source="task 043">Today's safety is a DATA STATE, not a control: exposure is nil only because zero organisations hold a standing grant. One administrator ticking `sprk_standinggrant` arms an over-grant to every stale member.</constraint>
-    <constraint source="owner">Fixing this NARROWS live org-grant inheritance — it changes who has access today. Treat the data change as its own audited action with a recorded before-state.</constraint>
+    <constraint source="plan-2026-09-18 §3">Scope: implementation. Do NOT write a second junction query, a second outcome type, or a parallel date-bounding path. If ISS-020's contract is unmet, the fix belongs in task 109's files, as an amendment to 109 — not as a second mechanism here.</constraint>
+    <constraint source="owner D-2 part 2">Scope: the veto. Do not date-bound the deny-veto subject. If task 109 date-bounded it, that is a DEFECT to report, not a behaviour to verify — it would be a fail-OPEN change to a veto.</constraint>
+    <constraint source="owner D-2 part 3">Scope: closure evidence. #999 does not close without the recorded before-state (count plus row list) from task 109's Step 1.</constraint>
+    <constraint source="CLAUDE.md §7">Scope: bookkeeping. Update BOTH this POML's `&lt;status&gt;` and its TASK-INDEX row, then run `pwsh scripts/check-task-status-drift.ps1` and require exit 0.</constraint>
   </constraints>
 
-  <notes>Register: `notes/defer-issues.md` § ISS-020. Related: tasks 020, 042, 043.</notes>
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+      <file>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/remediation-and-sequencing-plan-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/tasks/109-iss019-junction-fault-deny-veto-org-axis.poml</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm task 109 is complete. If it is not, STOP — this task cannot verify an implementation that does not exist yet.</step>
+    <step order="1">Check each acceptance criterion below against 109's shipped code and tests, naming the test that pins each one. A criterion with no test behind it is unmet, not satisfied.</step>
+    <step order="2">Confirm the before-state from 109's Step 1 is recorded, and that the rows which lost access are listed.</step>
+    <step order="3">Update the ISS-020 disposition row in `notes/defer-issues.md` with the evidence, close **#999**, set this POML's status and its TASK-INDEX row, and verify `check-task-status-drift.ps1` exits 0.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any criterion below is unmet, do NOT implement it here. Report the gap and amend task 109 — a second mechanism for this half is the exact hazard the consolidation exists to prevent.</trigger>
+    <trigger>If task 109 date-bounded the deny-veto SUBJECT, stop and escalate: that contradicts owner decision D-2 part 2 and weakens a veto.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/unified-access-control-r2/notes/defer-issues.md (ISS-020 disposition)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-109-junction-read-two-named-sets.md (ISS-020 verification section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A membership with a null `sprk_enddate`, or one dated today or later, still confers inherited access — and a named test pins it.</criterion>
+    <criterion testable="true">A membership whose `sprk_enddate` has passed confers NOTHING while its `statecode` is still active — and a named test pins it.</criterion>
+    <criterion testable="true">An org-keyed deny row STILL matches a subject whose membership ended by date (part 2: the wall over-matches by design) — and a named test pins the over-match explicitly.</criterion>
+    <criterion testable="true">The conferring set and the wall-subject set come from ONE junction read, asserted by a read-count test, preserving task 043's single-snapshot invariant.</criterion>
+    <criterion testable="true">The before-state required by part 3 is recorded — the count AND the list of date-ended-but-active rows — before the behaviour shipped.</criterion>
+    <criterion testable="true">No second junction query, second outcome record, or parallel date-bounding path exists anywhere (verified by grep).</criterion>
+    <criterion testable="true">The ISS-020 disposition row in `notes/defer-issues.md` cites the tests and the before-state; **#999** is closed; both status artifacts agree and `check-task-status-drift.ps1` exits 0.</criterion>
+    <criterion testable="true">Test scope: this task adds no new tests of its own — it names the tests task 109 shipped. If a criterion needs a test that does not exist, that is a gap to report, not a test to add here.</criterion>
+  </acceptance-criteria>
+
+  <notes>Rewritten 2026-09-19 (session 17) via /task-create. Was a deliberate stub carrying the unverified-premises warning, an `&lt;owner-question status="UNDECIDED"&gt;` block, and **no `&lt;steps&gt;` element** — which made `pwsh scripts/Validate-TaskPoml.ps1 projects/unified-access-control-r2/tasks` exit 1 from session 15 until now. That validator is invoked manually and is NOT wired into `/push-to-github` (Step 1.65 gates on the drift script only), which is why six broken POMLs sat unnoticed.
+
+Part 4 of ISS-020 — the deactivation writer — is task **117**, shared with D-1 option B and ISS-026's write half. Once 117 has run, `statecode` alone is the truth and this task's date comparison becomes belt-and-braces rather than load-bearing. Keep it: it is the fail-closed half.
+
+Register: `notes/defer-issues.md` § ISS-020. Related: tasks 020, 042, 043, 109, 117.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Verification task. Load task 109's POML and notes first; this file's criteria are checked against 109's delivered tests, never re-implemented.</protocol>
+  </execution>
 </task>
