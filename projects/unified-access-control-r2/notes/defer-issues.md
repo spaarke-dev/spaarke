@@ -41,13 +41,16 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
 | ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
 | ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
-| ISS-019 — junction query failure removes the deny veto's org axis | #998 | **In project** | Task **109** (queued 2026-09-18). Pre-dates task 043; 043 briefly documented the property as HELD using a double that throws where the real path does not |
-| ISS-020 — date-ended membership still confers | #999 | **In project** — 🔔 **question put to the owner 2026-09-18, UNDECIDED** | Task **110** (queued, BLOCKED on the answer). Fixing it narrows live org-grant inheritance, i.e. changes who has access today |
+| ISS-019 — junction query failure removes the deny veto's org axis | #998 | **In project** — ⚠️ **NOT independently runnable** | Task **109**, and it is **ONE CHANGE with task 110** (ISS-020 / #999), so it **inherits 110's owner gate**. 🔴 Corrected 2026-09-18: this entry's own suggested fix — a *second* query (`QueryActiveOrgIdsOutcomeAsync`) for the veto path — would **re-introduce the two-snapshot hazard task 043 deliberately removed** by hoisting ONE junction read. The right shape is one read projecting `sprk_enddate`, returning an outcome plus two named sets. Pre-dates task 043; 043 briefly documented the property as HELD using a double that throws where the real path does not |
+| ISS-020 — date-ended membership still confers | #999 | **In project** — ✅ **FULLY DECIDED 2026-09-19** | Task **110**, and ⚠️ **one change with task 109** (a second query would re-introduce the two-snapshot hazard task 043 removed). **Owner**: *"if an external user is removed from an organization then that external user must be reassigned access"* → **bound the ADDITIVE path**. ✅ **(2) DECIDED — NO**: an org-keyed **ethical wall KEEPS binding a former member**; the veto subject stays on `statecode` alone and deliberately over-matches (FR-23 `spec.md:86`; `AccessibleRecordSetService.cs:550-554`). ✅ **(3)** count + list date-ended-but-active rows **before** deploy — part 1 removes live access. ✅ **(4)** the deactivation writer is **D-1 option B**, one shared scheduled job (also serves ISS-026 and the rescoped #974). The dilemma **dissolved**: it was an artifact of `$select`ing bare ids, not a real conflict — one READ can serve both with two named sets |
 | ISS-021 — org-baseline N+1 on the hot path | #1000 | **In project** | Task **111** (queued 2026-09-18). N is currently 0 (no org holds a standing grant), so the shape is wrong but the cost is not yet paid |
 | ISS-022 — a stale snapshot can shorten access | #1001 | **In project** | Task **112** (queued 2026-09-18). Task **106** Step 9.5 (code-review F5). The election key is now a MUTABLE column; V1's fix does not cover it, and the revoke-race half is pre-existing |
-| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — ✅ **owner decided 2026-09-18** | Task **113** (queued 2026-09-18). Task **106** Step 9.5 (code-review F10 / adr-check W3). **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected. Filed because 106's own argument about duration applies verbatim to amount |
+| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — ✅ **decided 2026-09-18; design chosen (D-7 option 1)** | Task **113**. ✅ **Owner D-7 = option 1: pin what exists, NO contract change** — `AccessLevel` stays non-nullable. The rule *already holds* on the renewal route: `SetRecordShareExpiryEndpoint.cs:213-216` writes **only** `sprk_expiresdate`; the gap is that nothing pins it. 🔴 **Task 099 MUST gain the level constraint** — its criteria never mention level, so as specified it shows a date picker while the server changes the level. ⚠️ **ISS-028 folds into this task** (same endpoint, same region). Rejected: "infer renewal from row state" — **clock-dependent** (same payload = set at 23:59Z, renew at 00:01Z) and reminders fire *before* expiry, so the ordinary renewal hits a live key and is misclassified. **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected |
 | ISS-024 — external licensed user refused as "not internal" | #1003 | **In project** — ✅ **owner decided 2026-09-18** | Task **114** (queued 2026-09-18). Found by task 063; the owner has ruled an external **licensed** user is treated the same as an internal one. ⚠️ The stale surface is SHIPPED CODE plus an **asserting** contract test, not a POML |
-| ISS-025 — the drift check cannot see an index row with no POML | #1004 | **In project** | No task yet. Found 2026-09-18 by creating the condition: six index rows with no POML, and `scripts/check-task-status-drift.ps1` printed both counts and still said "No drift". The mirror of a guard it already has |
+| ISS-025 — the drift check cannot see an index row with no POML | #1004 | **In project** — ✅ **owner approved queuing 2026-09-18** | Task **116**. Found 2026-09-18 by creating the condition: six index rows with no POML, and `scripts/check-task-status-drift.ps1` printed both counts and still said "No drift". The mirror of a guard it already has. ⚠️ Re-verified by hand 2026-09-18: **111 POMLs / 111 index rows, zero orphans in BOTH directions** — no live drift, only a blind instrument |
+| ISS-026 — a DEACTIVATED organization still confers access | #1006 | **In project** — ✅ **owner decided 2026-09-18** | Task TBD. *"Check statecode and deactivate if org is inactive"* — a **read guard** AND a **write action**. The write half needs a scheduled reconciliation writer; nothing in the repo writes the junction today. **Same mechanism** ISS-020 part 4 and the rescoped #974 need — design it once |
+| ISS-027 — the To Do wizard silently DISCARDS uploaded files | #1007 | **In project** — ✅ **owner decided 2026-09-18** | Task TBD. *"Fix; To Do needs files."* The only one of the three a **user** can notice. Shows a files step promising association, then never reads `context.uploadedFiles` |
+| ISS-028 — a 409 saying "did not take effect" has already written the level | #1008 | **In project** — ✅ **owner decided 2026-09-18** | **Folds into task 113.** *"Fix."* Write at `GrantExternalAccessEndpoint.cs:260`, ADR-003 refusal at `:306-319` — wrong order. Bites only when expiry is absent AND level differs; pre-existing, not from task 106 |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -852,6 +855,146 @@ had changed. Same class as this project's recurring root error: *an observation 
 being observed.* The 105/111 mismatch was printed and I nearly accepted the green over it.
 
 **Estimated effort**: small. **Blockers**: none. **Related**: task 106 Step 10; the 2026-09-03 drift audit.
+
+---
+
+### ISS-026 — ✅ a DEACTIVATED organization still confers access
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 |
+| **Source** | Found while verifying ISS-020's consumer census — by asking a question the census did not: *is the ORGANISATION itself active?* |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1006 |
+
+**Neither query on the organization access path ever consults `sprk_organization.statecode`.**
+
+- `BuildOrganizationGrantFilter` (`ExternalParticipationService.cs:68-72`) —
+  `({orgs}) and _sprk_contact_value eq null and statecode eq 0 and {ExpiryPredicate(today)}`.
+  That `statecode` is the **grant row's**.
+- `QueryActiveOrgIdsAsync` (`:1092-1094`) — `statecode eq 0` is the **junction row's**.
+
+So **deactivating a firm revokes nothing**: its grants stay active, its memberships stay active, and
+every member keeps inherited access. Deactivation is the obvious operator gesture for *"this firm is
+no longer engaged"* and it is a **silent no-op**.
+
+**Strictly separate from ISS-020** — that one is an ended *membership*, this is an ended
+*organization*. Arguably worse: it is the gesture an operator would most expect to work.
+
+### ✅ Owner decision (2026-09-18)
+
+> **"Need to check statecode and deactivate if org is inactive."**
+
+Two halves: a **read guard** (conferring queries exclude grants/memberships of an inactive org) and a
+**write action** (when an org goes inactive, deactivate its rows, so `statecode` on the row is the
+single truth rather than something re-derived from the parent on every read).
+
+⚠️ The write half needs a **scheduled reconciliation writer** — nothing in the repo writes the
+junction today; those rows are maker-authored. **The same mechanism is required by ISS-020 part 4 and
+by the rescoped #974**, so it must be designed **once**, on the ADR-036 `IScheduledJob`
+infrastructure task 103 hardened (lease, slot guard, `AddScheduledJob<TJob>`).
+`GrantExpiryReminderJob` is the working precedent — it already queries these rows daily.
+
+⚠️ **Undeterminable offline**: whether any inactive organization currently holds active grants. Must
+be counted before the read guard ships — it removes live access.
+
+**Estimated effort**: medium. **Blockers**: shares D-1's mechanism decision. **Related**: ISS-020,
+ISS-021, tasks 020, 043, 109, 110.
+
+---
+
+### ISS-027 — ✅ the Create To Do wizard silently DISCARDS uploaded files
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 |
+| **Source** | Found while verifying task 093's scope — the wizard census asked "does it upload?" and this one answered "it shows a files step" |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1007 |
+
+The wizard **shows a file-upload step, promises to associate the files, and throws them away without
+telling the user.**
+
+- Files step shown and captioned: `TodoWizardDialog.tsx:178` — *"Upload documents to associate with
+  this to do, or click Next to skip."*
+- `onFinish` (`:236-305`) reads `association`, `selectedActions`, `followOn` — and **never
+  `context.uploadedFiles`**.
+- Grep of the **entire** `CreateTodoWizard` directory for
+  `uploadedFiles|uploadFilesToSpe|createDocumentRecords` → **no matches**.
+- The shell does not upload either: `CreateRecordWizard.tsx` holds the state and hands it to
+  `onFinish` (`:612`), but calls **no** upload method. Every other wizard uploads inside its own
+  `onFinish` (e.g. `matterService.ts:243-248`).
+- `resolveSpeContainerId` falls back to `() => Promise.resolve('')` (`:224`) — vestigial, a relic of
+  the pre-076 client-supplied-container shape.
+
+User sees **"To Do created!"**, no warning. **The only one of the three 2026-09-18 findings a USER
+can notice.**
+
+### ✅ Owner decision (2026-09-18)
+
+> **"Fix; To Do needs files."**
+
+Shape: `createTodo(...)` → `uploadFilesToSpe('sprk_todo', todoId, files)` → `createDocumentRecords(...)`.
+
+⚠️ `uploadFilesToSpe` **requires the record id** (`EntityCreationService.ts:479-484`, `:475`) —
+create-first is compiler-enforced since task 076 changed its arity. Do **not** use
+`uploadFilesWithoutRecord`: the to-do exists by then.
+
+⚠️ `sprk_document` **can** reference a to-do — `sprk_relatedtodo → sprk_todo`
+(`Spaarke.Dataverse/Models.cs:214`). Three prior records in this repo wrongly claimed it could not,
+each having looked for a bare `sprk_todo` column and never the `sprk_related*` family
+(`Models.cs:393-399`). Do not make that mistake a fourth time.
+
+Decide and record: a partial upload failure should surface as a **warning** on the success panel
+(the `warnings` array `onFinish` already returns), not discard a created to-do — matching
+`matterService.ts`'s soft-warning contract.
+
+**Estimated effort**: small-medium. **Blockers**: none. **Related**: tasks 076, 093.
+
+---
+
+### ISS-028 — ✅ a 409 saying "did not take effect" has already written the level
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-18 |
+| **Source** | Found while verifying the ISS-023 renewal-level design |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1008 |
+
+The write happens **before** the refusal in `GrantExternalAccessEndpoint.cs`:
+
+- `:248` — `levelChanged = survivor.AccessLevel != requestedLevel`
+- `:250-260` — `UpdateAsync` writes `sprk_accesslevel = requestedLevel`
+- `:306-319` — **only then** the ADR-003 conferral check returns 409 `sdap.grant.expired_not_restored`
+
+whose message says *"it still confers no access. Re-send with an expiryDate to restore it."* The
+level has already changed.
+
+**Precise scope**: bites **only** when expiry is absent **and** level differs (`:281-282` correctly
+notes a supplied expiry resolves first). **Pre-existing** — task 106 changed the *election*, not this
+ordering. **Unpinned**: `GrantLifecycleCharacterizationTests.cs:812-825` sends the **same** level, so
+`levelChanged` is false and the write is skipped — the one test aimed at this path cannot see it.
+
+**The detail worth keeping**: task 106's own comment (`:296-302`) cites *"the ADR-003 ordering
+below"* as **load-bearing and true**. It is — for *expiry*. It is wrong for *level*. A comment
+vouching for an ordering is what stopped anyone asking what else that ordering covers.
+
+### ✅ Owner decision (2026-09-18)
+
+> **"Fix."**
+
+Move the conferral check **ahead of** the write, so a refused request mutates nothing — ADR-003's
+"do not report success over a grant that confers nothing" should also mean "do not mutate the row you
+are about to refuse". Then pin it: send a **different** level and assert the level is unchanged after
+the 409.
+
+**Folds into task 113** — same endpoint, same region, and 113 already opens this file for ISS-023.
+
+**Estimated effort**: small. **Blockers**: none. **Related**: tasks 010, 106, 113.
 
 ---
 
