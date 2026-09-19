@@ -89,7 +89,7 @@ This is a UX and productivity project, not an AI project. It fixes UAT-reported 
 
     **Run Index** submits the file to the indexing pipeline and, on success, `sprk_searchindexed` flips to yes (with `sprk_searchindexedon` stamped) — written by `RagIndexingJobHandler`, not by the add-in. ⚠️ Per [`.claude/patterns/ai/indexing-pipeline.md`](.claude/patterns/ai/indexing-pipeline.md), the call **MUST pass `documentId`** (the `sprk_document` GUID) or chunks land as orphans and the tracking fields cannot be written. — *Acceptance*: each of the three states renders correctly; Run Index flips the field and results appear afterwards; results are permission-trimmed (NFR-02) and lazy-scrolled (NFR-05).
 17. **FR-17 — Word ribbon commands.** Wire the stubbed `quickSave` and `shareDocument` commands. — *Acceptance*: both execute from the ribbon without opening the pane where that is the intended behavior.
-18. **FR-18 — Typecheck debt.** Clear the ~397 pre-existing `exactOptionalPropertyTypes` errors in `src/client/office-addins`. **Do this first**, so new errors are visible during feature work. — *Acceptance*: `npm run typecheck` is clean; CI gates it going forward.
+18. **FR-18 — Typecheck debt.** Clear the ~397 pre-existing `exactOptionalPropertyTypes` errors in `src/client/office-addins`. **Do this first**, so new errors are visible during feature work. — *Acceptance* (**amended 2026-09-19, task 056 / [#996](https://github.com/spaarke-dev/spaarke/issues/996)**): `npm run typecheck` reports **0 production errors**; the ~111 remaining errors are test-file only (`__tests__/`, `*.test.*`, `__mocks__`) and are the owner-approved 2026-09-09 accept, narrowed 290 → 111 on 2026-09-12. CI gates the **production** count via the `typecheck` job in `.github/workflows/office-addins-tests.yml`. ⚠️ The original wording — "is clean; CI gates it going forward" — asserted a property that was never true and never built; it is superseded here rather than left to read as satisfied.
 19. **FR-19 — Outlook parity.** Every shared-tier capability works in both hosts or is explicitly gated by `hostAdapter.getCapabilities()`. — *Acceptance*: no host-type conditionals scattered through views; parity verified per capability.
 20. **FR-20 — Copilot agent launch affordance** *(spike-gated, see Spike-3)*. If a mechanism exists to open the Copilot pane / the "Spaarke AI" agent, expose it as a **button or icon** — not a tab. If none exists, omit it. — *Acceptance*: either the affordance opens the agent, or the spike is documented as negative and the item is closed.
 
@@ -211,7 +211,7 @@ To Do (FR-14), Send Email (FR-15) and the ribbon commands (FR-17) are **adaptati
 9. [ ] Find returns content-similar results, permission-trimmed — *Verify*: negative test (a user denied access to a matter sees none of its documents)
 10. [ ] A To Do created from Word carries document **and** record as regarding — *Verify*: integration test
 11. [ ] Every shared capability works in both hosts or is capability-gated — *Verify*: parity checklist
-12. [ ] `npm run typecheck` is clean — *Verify*: CI
+12. [ ] `npm run typecheck` reports **0 production errors** (test-file errors are the accepted 2026-09-09 baseline) — *Verify*: CI, via the `typecheck` job in `office-addins-tests.yml` (added by task 056 / [#996](https://github.com/spaarke-dev/spaarke/issues/996); measured at `23fd17991`: 111 total, 0 production, 9 files)
 13. [ ] Publish-size delta measured and within ceiling — *Verify*: per-task measurement
 
 ---
@@ -261,7 +261,7 @@ To Do (FR-14), Send Email (FR-15) and the ribbon commands (FR-17) are **adaptati
 | Event vs To Do | Both in r1? | **To Do only; defer Event** | FR-14; Event in design.md §4.2 |
 | Record open | Dialog API, browser tab, or read-only pane? | **Dialog API (a) preferred — investigate first** | Spike-2; (c) is the documented fallback |
 | Ribbon commands | Wire `quickSave`/`shareDocument`? | **Include** | FR-17 |
-| Typecheck debt | Clean in this project? | **Yes** | FR-18, sequenced first |
+| Typecheck debt | Clean in this project? | **Production yes (0); test-file no (~111, accepted)** | FR-18, sequenced first. Amended 2026-09-19 by task 056 — the 290 → 111 narrowing was owner-approved 2026-09-12, and CI now gates the production count ([#996](https://github.com/spaarke-dev/spaarke/issues/996)) |
 | Wizard migration | Should the server-side service replace client-side wizard creation? | **Evaluate after r1** | Out of scope; `design.md` §7.1 |
 
 ---
