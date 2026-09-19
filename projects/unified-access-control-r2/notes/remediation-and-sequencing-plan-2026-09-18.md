@@ -18,7 +18,7 @@ first, because three of the four would have propagated into this plan.
 |---|---|---|---|
 | **C-1** | *"on `3b409bfc1` two checks were pending and `Router` (the ONLY required context) had not reported at all; **no failures**"* | `Router` **reported `failure`** on `3b409bfc1` **and** on `597882f7c`. Trivy also failed. | I recorded a non-failure where a **red required check** stood. Wrong in the dangerous direction. |
 | **C-2** | *"count pending explicitly (`gh pr checks 950 \| grep -c pending` must be 0)"* | `gh pr checks` **never lists `Router` at all** when the job has not started. The recipe cannot see the one check that gates the merge. | A merge-readiness probe blind to the required check. Same class as this project's recurring root error: **an observation taken outside the thing being observed.** |
-| **C-3** | *"docs-only shapes skip Tier 1 while `Router` still succeeds"* | True as designed (`ci-router.yml:181`, `allowed-skips: tier1`) — but **not why those SHAs were red**. See §1.1. | The right conclusion for the wrong reason is not evidence. |
+| **C-3** | *"docs-only shapes skip Tier 1 while `Router` still succeeds"* | 🔴 **WRONG FOR THIS PR — corrected 2026-09-19 by observation.** True for a docs-only **PR**; false for a docs-only **commit** on a mixed PR. Verified on `d8c139697`, a commit touching only `projects/**`: **both tier jobs dispatched**, and they are gated `if: needs.classify.outputs.docs_only != 'true'` (`ci-router.yml:211`, `:229`) — so `docs_only` was **false**. Run `event` = `pull_request`, and `:140-142` states PRs classify against the **PR base**; #950 touches BFF throughout, so **no push on this PR can ever be `docs_only`, and Tier 1 always runs.** | Third time this claim has been wrong in a different way, and it is load-bearing for a merge decision. **Tier 1 must be green on the head SHA — never expect it to be skipped here.** |
 | **C-4** | *"75 done · 32 open · **3 escalated / blocked**"* | 75 done · 32 open · **3 escalated (012, 023, 062) + 1 blocked (034)** = 111. | Undercount of one; 034 is a distinct state with a distinct owner decision behind it. |
 
 ### Verified clean (recomputed independently, not trusted)
@@ -53,7 +53,8 @@ push cancels the previous run**. alls-green treats a `cancelled` dependency as a
 |---|---|---|---|---|
 | `597882f7c` | cancelled | success | **all jobs cancelled** | **failure** |
 | `3b409bfc1` | cancelled | **cancelled** | skipped | **failure** |
-| `cb9ec2ea2` (head) | **in_progress** | success | **all 8 jobs success** | **not started** |
+| `cb9ec2ea2` | **completed** | success | **all 8 jobs success** | ✅ **success** (final) |
+| `d8c139697` (head, session 16) | in_progress | success | running — **not skipped**, see C-3 | not started |
 
 So both reds are artefacts of pushing a follow-up commit seconds later — the exact hazard
 `ci-router.yml:79-96` documents for master and explicitly leaves in place for PRs ("PR behaviour is
@@ -77,8 +78,12 @@ Three rules that follow from §1.1 and belong in the merge routine:
 
 1. **Name `Router` explicitly on the head SHA.** `gh pr checks` is not sufficient — absence there is
    indistinguishable from pending.
-2. **A red `Router` on a superseded SHA is expected** after any follow-up push. Only the head's
-   verdict exists. Do not investigate it as a regression; do not report it as one either.
+2. **A red `Router` on a superseded SHA is expected ONLY IF that run was still in flight** when the
+   next push landed — narrowed 2026-09-19, because I had written this too strongly. Evidence:
+   `cb9ec2ea2` finished its run *before* the session-16 push and kept a genuine
+   **`completed / success`**, whereas `3b409bfc1` and `597882f7c` were both cancelled mid-run and went
+   red. So: check whether the superseded run **completed** before dismissing its red. Writing
+   "expected" without that qualifier teaches the next session to wave away a real failure.
 3. **Do not push while judging.** A push during adjudication cancels the run and manufactures the
    red. If the head must change, re-probe after.
 4. **Do not poll it in a loop.** Probed twice on 2026-09-18, minutes apart: both returned *no `Router`
