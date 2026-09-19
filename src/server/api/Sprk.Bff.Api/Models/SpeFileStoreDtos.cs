@@ -83,3 +83,38 @@ public record SpeDriveItemSummary(
     string? ParentReferencePath,
     DateTimeOffset? LastModifiedDateTime,
     DateTimeOffset? CreatedDateTime);
+
+/// <summary>
+/// What Graph <c>/shares</c> said about an absolute document URL (FR-01, task 012).
+/// </summary>
+public enum SpeSharedItemOutcome
+{
+    /// <summary>Graph returned a drive item with an id and a parent drive id.</summary>
+    Resolved,
+
+    /// <summary>Every encoding form came back 400/404: the URL names nothing Graph can resolve.</summary>
+    NotFound,
+
+    /// <summary>Graph answered 401/403 for the caller and no form resolved.</summary>
+    AccessDenied,
+
+    /// <summary>
+    /// Throttled, a Graph 5xx, or a transport failure. INDETERMINATE — it says nothing about whether the URL is
+    /// a Spaarke document, and a caller must never read it as "not one".
+    /// </summary>
+    Unavailable,
+}
+
+/// <summary>One <c>/shares</c> call: which encoding form, and the HTTP status / Graph error code it produced.</summary>
+public sealed record SpeSharedItemAttempt(string Form, int? StatusCode, string? ErrorCode);
+
+/// <summary>
+/// Result of resolving a document URL through Graph <c>/shares</c>. <see cref="Attempts"/> records every form
+/// tried so the logs carry the evidence for which encoding Graph accepts (task 012, SPIKE-1 link 2).
+/// </summary>
+public sealed record SpeSharedItemResolution(
+    SpeSharedItemOutcome Outcome,
+    string? DriveId,
+    string? ItemId,
+    string? ResolvedForm,
+    IReadOnlyList<SpeSharedItemAttempt> Attempts);

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>A typed-name Email/Attachment save still overwrites on collision — the half of the 2026-09-15 owner decision task 025 could not carry</title>
+    <phase>2 Save flow</phase>
+    <gate>025 merged — its refuse-before-upload mechanism and its `OFFICE_020` contract are what this extends</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the BFF save spine for immutable content types, where the failure mode is one document's file being overwritten by another. Tags include bff-api and data-integrity.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The blocker is an ORDERING conflict, not a missing feature: the immutable content-hash dedup-suppress safety net runs AFTER upload, and refusing before upload changes what that net sees. Task 025 reproduced the breakage and stopped rather than guess. Getting the order wrong either reopens the overwrite or breaks suppress — both are silent data outcomes.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`OfficeService.cs` / `OfficeStorageUploader.cs` / `OfficeDocumentPersistence.cs` are the shared save spine, also modified by tasks 014, 045, 052.</parallel-reason>
+    <deps>025</deps>
+    <tags>bff-api, save-flow, data-integrity, integration-test</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Task 046(b) gave system-derived `.eml` names a unique suffix, and the owner decided that **typed** names would be protected instead by task 025's refuse-and-ask prompt. Task 025 shipped that prompt for `SaveContentType.Document` only — applying it to Email/Attachment broke the immutable-save safety tests, because their dedup-suppress net runs after the upload. So a typed-name Email/Attachment collision still overwrites exactly as it did before. Close that gap without breaking suppress.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Office save spine, SharePoint Embedded upload conflict semantics, and the content-hash dedup/suppress path for immutable captures. Follow ADRs strictly.</role>
+
+  <goal>A colliding Email or Attachment save with a USER-TYPED name no longer overwrites another document's stored file. The immutable content-hash dedup-suppress behaviour is unchanged for every case where it is correct today, proven by the existing safety tests passing unmodified.</goal>
+
+  <context>
+    <background>
+      **The owner decision this completes** — `notes/046-immutable-save-safety.md`, Owner decisions §1 (2026-09-15), verbatim:
+
+      > "Only a SYSTEM-DERIVED `.eml` name gets the short unique suffix. A name the user typed in the pane's Document Name box is never changed. **Typed-name collisions are left exactly as today until task 025's refuse-and-ask prompt.**"
+
+      046(b) delivered the first half (the suffix, gated on the new `EmailMetadata.IsNameSystemDerived` flag, default `false` = treated as typed). The second half — the prompt covering typed names — was assigned to 025 and **is not implemented**.
+
+      **Why 025 stopped, and it stopped for a good reason.** It set `ConflictBehavior.Fail` on create uploads so Graph refuses a colliding PUT atomically before any bytes move. Applying that to Email/Attachment made `OfficeImmutableSaveFileSafetyTests` fail, which it reproduced rather than assumed: for immutable captures the **content-hash dedup-suppress safety net runs AFTER the upload, not before**, so a pre-upload refusal changes what that net observes. It therefore scoped `Fail`/`Rename` to `SaveContentType.Document` and recorded the gap instead of guessing. Read its note before designing anything.
+
+      **The shape of the problem.** For an immutable capture, two different emails that happen to share a typed name are two distinct documents and must become two files. But two saves of the *same* email are a duplicate that suppress is right to collapse. A pre-upload name refusal cannot tell those apart on the name alone — the content hash is what distinguishes them, and today it is only available after the bytes are uploaded. That ordering is the actual design problem; the fix is wherever it is resolved honestly.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/046-immutable-save-safety.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/025-collision-decision.md</file>
+      <file role="canonical-reference">tests/integration/data-mutation/OfficeVersionSave/OfficeCreateCollisionTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/ContentDedupDetector.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="pending">The refuse-before-upload mechanism, the `OFFICE_020` (409) contract, the pane's inline two-option choice, and `FindDocumentIdByLocationAsync`. This task extends all four to immutable content types rather than inventing a parallel mechanism.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-08">The immutable suppress path stays correct for Email/Attachment — that is what NFR-08 permits for immutable captures, and it is not this task's job to change it. Do NOT convert immutable captures to link/graduate.</constraint>
+    <constraint source="project">`OfficeImmutableSaveFileSafetyTests` and `OfficeEmailSaveNamingTests` MUST pass **unmodified**. They encode task 046's fixes — including a live-on-master defect where an Email save could delete another document's file. If a change requires editing either file's assertions, that is a signal the design is wrong, not that the test is stale. Escalate instead.</constraint>
+    <constraint source="project">MUST NOT weaken 046(b): a system-derived `.eml` name still gets its unique suffix, and a name the user typed is still never silently changed. Verify both by running that task's tests.</constraint>
+    <constraint source="project">Do NOT introduce a second collision mechanism. Extend 025's (`OFFICE_020`, the two-option choice, the reclaim-if-unreferenced rule). Root CLAUDE.md §11: one component that works well beats two that overlap.</constraint>
+    <constraint source="project">MUST NOT modify `ContentDedupDetector.cs` without escalating first — it is shared with `email-communication-intelligence-r2` and Compose, and task 046 deliberately left it untouched because its answer is correct for its other callers.</constraint>
+    <constraint source="ADR-007">SPE conflict behaviour travels through the `SpeFileStore` facade; no `Microsoft.Graph` type leaks into `OfficeStorageUploader` or `OfficeService`.</constraint>
+    <constraint source="ADR-019">A refusal is a typed, distinguishable ProblemDetails the client already branches on — reuse `OFFICE_020` rather than minting a new code unless the client genuinely must tell the cases apart, and say why if you do.</constraint>
+    <constraint source="ADR-038">Reproduce first: a test that fails on today's merged code proving a typed-name Email collision overwrites, then passes. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration and ctor null-check tests, `Stopwatch` + `Task.Delay`.</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size against a FRESH master build (PowerShell `Compress-Archive -CompressionLevel Optimal`, short path), CVE check, and a Placement Justification stating that this extends the existing save spine and adds no route, service, DI registration or package.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md, `notes/046-immutable-save-safety.md` (Owner decisions + Design), `notes/025-collision-decision.md`, and `OfficeImmutableSaveFileSafetyTests`. Declare FULL / opus / xhigh / DIRECTIONAL. Run `/conflict-check` — this is the BFF save-spine hot path.</step>
+    <step order="1">Reproduce the gap: a failing test showing that two different emails with the SAME user-typed name end with one file, the first overwritten. Show it failing on the merged code.</step>
+    <step order="2">Write down the ordering problem explicitly before coding: what suppress needs (the content hash, available after upload) versus what a name refusal needs (a decision before upload), and the options for reconciling them — e.g. resolving the collision by name AND hash before the upload, or refusing only when the name is taken by a document whose content differs. State which you chose and what it costs.</step>
+    <step order="3">Implement it, extending 025's mechanism. Keep Document behaviour exactly as 025 left it.</step>
+    <step order="4">Run `OfficeImmutableSaveFileSafetyTests`, `OfficeEmailSaveNamingTests` and `OfficeCreateCollisionTests` **unmodified** — all three must pass.</step>
+    <step order="5">Full `Sprk.Bff.Api.Tests`, ArchTests, publish size vs a fresh master build, CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If closing this gap requires editing the assertions in `OfficeImmutableSaveFileSafetyTests` or `OfficeEmailSaveNamingTests`, STOP and escalate. Those tests encode a live-on-master data-loss fix; a design that needs them loosened is the wrong design.</trigger>
+    <trigger>If it requires modifying `ContentDedupDetector.cs`, STOP and escalate — the change would reach `email-communication-intelligence-r2` and Compose.</trigger>
+    <trigger>If the honest answer turns out to be that a pre-upload refusal is impossible for immutable captures without a post-upload compensating step, STOP and report that with the evidence, rather than shipping a partial guard that looks like protection and is not.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 025 built the refuse-before-upload mechanism, the `OFFICE_020` contract and the pane's choice UI; 046 built the `.eml` naming and the safety net. This extends 025's mechanism to the content types it deliberately excluded.</existing>
+    <extension>Yes — the same mechanism applied to a second `SaveContentType`, plus the ordering fix that made 025 exclude it. No new route, service, DI registration or package.</extension>
+    <cost-of-doing-nothing>Two different emails saved with the same typed name still collapse to one stored file, and the first document's bytes are gone — the exact class of loss task 046 fixed for system-derived names and the owner expected 025 to close for typed ones. It is silent: the pane reports success.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/054-typed-name-email-collision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on the merged pre-054 code proving two different emails with the same user-typed name end with one file and the first overwritten.</criterion>
+    <criterion testable="true">After the fix, that case keeps both documents' files intact — neither is overwritten and neither is deleted.</criterion>
+    <criterion testable="true">Two saves of the SAME email still dedup exactly as today — suppress is not broken in the name of fixing the collision.</criterion>
+    <criterion testable="true">`OfficeImmutableSaveFileSafetyTests`, `OfficeEmailSaveNamingTests` and `OfficeCreateCollisionTests` all pass with their assertions UNMODIFIED.</criterion>
+    <criterion testable="true">Negative: a system-derived `.eml` name still receives its unique suffix, and a typed name is still never silently altered (046(b) intact).</criterion>
+    <criterion testable="true">Negative: `git diff --name-only` shows no change to `ContentDedupDetector.cs`, or an escalation record explaining why it was unavoidable.</criterion>
+    <criterion testable="true">Negative: Document-type save behaviour is byte-for-byte what task 025 left — its tests pass unmodified.</criterion>
+    <criterion testable="true">`dotnet build` green; ArchTests 191/191; full `Sprk.Bff.Api.Tests` passes with no new failure; publish size vs a fresh master build and the CVE result recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-17 by the main session from task 025's closing report. It is the unimplemented half of the owner's 2026-09-15 decision (`notes/046-immutable-save-safety.md` §Owner decisions 1), and it is filed here rather than deferred because unowned work belongs to this project and a GitHub issue alone is not a hand-off (policy 2026-09-09). Task 025 surfacing this gap instead of claiming coverage is why it is actionable at all.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

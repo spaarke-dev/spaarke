@@ -534,7 +534,14 @@ public static class ChatEndpoints
         {
             response.StatusCode = err.statusCode;
             response.ContentType = "application/problem+json";
-            await response.WriteAsJsonAsync(err.payload, cancellationToken);
+            // GitHub #975 (ADR-019 / RFC 7807), task 052: WriteAsJsonAsync's convenience overload
+            // always sets Content-Type to "application/json; charset=utf-8", unconditionally
+            // overwriting the "application/problem+json" set immediately above — it never consults
+            // the response's existing header. Passing contentType explicitly (the framework's own
+            // 4-arg overload, same fix task 050 applied to the global exception handler) fixes the
+            // header without changing the serialized body in any way.
+            await response.WriteAsJsonAsync(
+                err.payload, options: (JsonSerializerOptions?)null, contentType: "application/problem+json", cancellationToken);
             return;
         }
 

@@ -1,6 +1,6 @@
 # GitHub Actions Workflows — Spaarke Repository
 
-> **Last updated**: 2026-06-01 (github-actions-rationalization-r1)
+> **Last updated**: 2026-09-10 — corrected "Required-status-checks on master" (live ruleset 21824191 requires exactly ONE check, `Router`; classic branch protection listing 4 contexts was stale); added `office-addins-tests.yml`, `client-tests.yml`, `css-reset-gate.yml` entries. Originally 2026-06-01 (github-actions-rationalization-r1)
 > **Purpose**: Per-workflow operator reference. Triggers, owners, SLAs, common failures.
 > **Companion runbook**: [`docs/procedures/workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md) — "a workflow failed, what now?"
 > **Weekly health report**: [CI Health Report issue](https://github.com/spaarke-dev/spaarke/issues?q=is%3Aissue+%22CI+Health+Report%22) (updated weekly by `report-workflow-health.yml` per D-02)
@@ -19,17 +19,24 @@ This document is the operator-facing index of every workflow in `.github/workflo
 | `sdap-ci.yml` | Primary CI: security scan, build/test matrix (Debug+Release), client quality, ADR checks | `pull_request`, `push` on master | Platform | Per-PR ~15 min |
 | `workflows-validate.yml` | `actionlint` pre-merge validation (FR-07) | `pull_request` on `.github/workflows/**` | DevOps | Per-PR <5 sec |
 | `report-workflow-health.yml` | Weekly per-workflow success-rate snapshot to "CI Health Report" issue (FR-11) | `schedule` (Monday 09:00 UTC), `workflow_dispatch` | DevOps | Weekly |
+| `office-addins-tests.yml` (added 2026-09-10) | Runs the `src/client/office-addins` jest suite on every PR touching that package; **reports** pass/fail but does NOT block merge (not in the required-check list — see "Required-status-checks on master" below). Suite allow-list: `src/client/office-addins/ci-gated-suites.txt` | `pull_request` on `src/client/office-addins/**` | Apps | Per-PR (report-only) |
+| `client-tests.yml` | Phase-1 visibility-only jest runner across 40 client packages (issue #851) — per-package pass/fail table; does not gate PRs (deliberately `schedule` + `workflow_dispatch`, not `pull_request`, pending Phase-2 promotion) | `schedule`, `workflow_dispatch` | Platform | Nightly (report-only) |
+| `css-reset-gate.yml` | Verifies the universal box-sizing CSS reset is present in every Code Page host `index.html` | `pull_request` + `push` on master, scoped to `**/index.html` under Code Page/solution roots + the workflow file | DevOps | Per-PR <5 sec |
 
 ## Required-status-checks on master
 
-Per FR-08, branch protection on `master` requires these 4 contexts to pass before merge:
+**Corrected 2026-09-10 — this section was stale.** Classic branch protection is disabled on this repo; the live enforcement mechanism is a GitHub **ruleset**. Verified via:
 
-- `Build & Test (Debug)` (from `sdap-ci.yml`)
-- `Build & Test (Release)` (from `sdap-ci.yml`)
-- `Code Quality` (from `sdap-ci.yml`)
-- `actionlint` (from `workflows-validate.yml`)
+```bash
+gh api repos/spaarke-dev/spaarke/rules/branches/master
+gh api repos/spaarke-dev/spaarke/rulesets/21824191
+```
 
-`enforce_admins: true` — admins cannot bypass. See [`docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`](../docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md) for the full branch-protection configuration.
+Ruleset `21824191` ("master: require CI Router") requires exactly **ONE** status check to pass before merge:
+
+- `Router`
+
+It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `pull_request` rule (0 required approving reviews, all merge methods allowed). `current_user_can_bypass: "never"` — no bypass actors configured. `sdap-ci.yml`'s individual jobs (`Build & Test (Debug)`, `Build & Test (Release)`, `Code Quality`) and `workflows-validate.yml`'s `actionlint` job are NOT themselves required contexts — `Router` (from `ci-router.yml`) is the single gate; it fans out to the tiered workflows and reports the aggregate result as one check. See [`docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`](../docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md) for background, noting that document may also predate the ruleset migration.
 
 ## Per-workflow detail
 
@@ -87,6 +94,27 @@ Per FR-08, branch protection on `master` requires these 4 contexts to pass befor
 - **Purpose**: Weekly per-workflow success-rate snapshot (last 7 days). Queries the GitHub Actions API, computes per-workflow run counts + success rates + loader-failure rates, creates or updates the rolling "CI Health Report" issue (per D-02).
 - **Triggers**: weekly schedule (Monday 09:00 UTC), `workflow_dispatch`.
 - **Common failures**: GitHub API rate limit (mitigated by paginated queries), token permission missing `issues: write` or `actions: read`.
+- **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
+
+### office-addins-tests.yml (added 2026-09-10)
+
+- **Purpose**: Runs the `src/client/office-addins` jest suite on every PR touching that package. It closes the "vacuous-green" gap where the suite previously only ran nightly (via `client-tests.yml`, with `continue-on-error: true`) and could never fail a PR. It **reports** a real pass/fail; it is not a required status check (`Router` is the only one, per ruleset 21824191), so a red run does not block a merge.
+- **Triggers**: `pull_request` scoped to `src/client/office-addins/**`.
+- **Common failures**: real jest regressions in the office-addins suite (working-as-intended); suite additions not on the `ci-gated-suites.txt` allow-list silently not gated (by design — see the workflow's own header comment).
+- **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
+
+### client-tests.yml
+
+- **Purpose**: Phase-1 CI visibility for the broader client test surface — makes ~730 tracked jest test files across 40 client packages visible in CI (previously none ran anywhere). Produces a per-package pass/fail table. Deliberately does not fix tests or gate PRs in Phase 1 (see the workflow's own header comment); promotion to a `pull_request`-gated Tier 2 check is a separate, later phase.
+- **Triggers**: `schedule`, `workflow_dispatch`.
+- **Common failures**: pre-existing per-package test failures (expected during Phase 1; the table is the deliverable, not a green bar).
+- **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
+
+### css-reset-gate.yml
+
+- **Purpose**: Repository-wide enforcement of the universal `box-sizing` CSS reset in every Code Page host `index.html` (Vite + Webpack), preventing the class of DataGrid-overflow regression documented in `docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md` §2.
+- **Triggers**: `pull_request` + `push` on master, path-filtered to `src/solutions/**/index.html`, `src/client/code-pages/**/index.html`, `scripts/check-html-css-reset.mjs`, and the workflow file itself.
+- **Common failures**: a new or edited Code Page host `index.html` missing the reset.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ## Notification routing (FR-12 / D-05)

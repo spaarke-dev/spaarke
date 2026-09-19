@@ -12,7 +12,7 @@
  *
  * @see spec.md - FR-09 (Save Word document), FR-10 (Version Word document)
  * @see SaveView.tsx - Component implementation
- * @see WordHostAdapter.ts - Word-specific adapter
+ * @see shared/adapters/WordAdapter.ts - the single Word adapter (task 010 / FR-04; the duplicate word/WordHostAdapter.ts was deleted)
  * @see POST /office/save - API endpoint
  */
 
@@ -817,8 +817,28 @@ test.describe('Word Save Flow - Embedded Content @e2e @word', () => {
           return await callback(context);
         },
       };
+        // Task 010 / FR-04: the Word save path no longer calls `body.getOoxml()`. It reads the real
+        // .docx via `Office.context.document.getFileAsync(Office.FileType.Compressed, {sliceSize})`
+        // and assembles the slices. The pane also now obtains its adapter from `HostAdapterFactory`,
+        // whose `detectHostType()` reads `Office.context.host` — absent from these stubs, Stage 4
+        // threw INVALID_HOST and the pane never rendered. Both gaps are filled below.
+        // (code-review W-4, 2026-09-09.)
+        const docxBytes = new Uint8Array(4096);
+        docxBytes[0] = 0x50; docxBytes[1] = 0x4b; docxBytes[2] = 0x03; docxBytes[3] = 0x04;
+        const mockWordFile = {
+          size: docxBytes.length,
+          sliceCount: 1,
+          getSliceAsync: (i: number, cb: (r: any) => void) =>
+            cb({ status: 'succeeded', value: { index: i, size: docxBytes.length, data: docxBytes }, error: null }),
+          closeAsync: (cb: () => void) => cb(),
+        };
       (window as any).Office = {
         context: {
+          host: 'Word',
+          document: {
+            getFileAsync: (_t: any, _o: any, cb: (r: any) => void) =>
+              cb({ status: 'succeeded', value: mockWordFile, error: null }),
+          },
           requirements: {
             isSetSupported: () => true,
           },
@@ -826,7 +846,9 @@ test.describe('Word Save Flow - Embedded Content @e2e @word', () => {
         onReady: (callback: (info: any) => void) => {
           callback({ host: 'Word', platform: 'PC' });
         },
-        HostType: { Word: 'Word' },
+        HostType: { Word: 'Word', Outlook: 'Outlook', Excel: 'Excel', PowerPoint: 'PowerPoint' },
+        FileType: { Text: 'text', Compressed: 'compressed', Pdf: 'pdf' },
+        AsyncResultStatus: { Succeeded: 'succeeded', Failed: 'failed' },
       };
     });
 
@@ -877,14 +899,36 @@ test.describe('Word Save Flow - Empty Document @e2e @word', () => {
           return await callback(context);
         },
       };
+        // Task 010 / FR-04: the Word save path no longer calls `body.getOoxml()`. It reads the real
+        // .docx via `Office.context.document.getFileAsync(Office.FileType.Compressed, {sliceSize})`
+        // and assembles the slices. The pane also now obtains its adapter from `HostAdapterFactory`,
+        // whose `detectHostType()` reads `Office.context.host` — absent from these stubs, Stage 4
+        // threw INVALID_HOST and the pane never rendered. Both gaps are filled below.
+        // (code-review W-4, 2026-09-09.)
+        const docxBytes = new Uint8Array(4096);
+        docxBytes[0] = 0x50; docxBytes[1] = 0x4b; docxBytes[2] = 0x03; docxBytes[3] = 0x04;
+        const mockWordFile = {
+          size: docxBytes.length,
+          sliceCount: 1,
+          getSliceAsync: (i: number, cb: (r: any) => void) =>
+            cb({ status: 'succeeded', value: { index: i, size: docxBytes.length, data: docxBytes }, error: null }),
+          closeAsync: (cb: () => void) => cb(),
+        };
       (window as any).Office = {
         context: {
+          host: 'Word',
+          document: {
+            getFileAsync: (_t: any, _o: any, cb: (r: any) => void) =>
+              cb({ status: 'succeeded', value: mockWordFile, error: null }),
+          },
           requirements: { isSetSupported: () => true },
         },
         onReady: (callback: (info: any) => void) => {
           callback({ host: 'Word', platform: 'PC' });
         },
-        HostType: { Word: 'Word' },
+        HostType: { Word: 'Word', Outlook: 'Outlook', Excel: 'Excel', PowerPoint: 'PowerPoint' },
+        FileType: { Text: 'text', Compressed: 'compressed', Pdf: 'pdf' },
+        AsyncResultStatus: { Succeeded: 'succeeded', Failed: 'failed' },
       };
     });
 

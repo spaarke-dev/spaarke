@@ -780,12 +780,25 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     {
         var aiOptions = payload.AiOptions ?? new AiProcessingOptions();
 
+        // Task 029 (spaarkeai-word-add-in-r1): a VERSION save must re-profile and re-index. It keeps the first save's
+        // document id and drive item, so the per-document / per-item keys would be answered "already processed" by
+        // the handlers (7-day marks) and de-duplicated by Service Bus (MessageId = key) — the new version would never
+        // be analysed or indexed. Its keys therefore carry THIS save's discriminator (its ProcessingJob id, stamped
+        // only by the version-save path): a redelivery or retry of the same save repeats it and still skips; every
+        // new save — even one whose bytes repeat an earlier version — has its own. Every other save carries none and
+        // keeps its key string byte-for-byte.
+        var versionSaveJobId = payload.VersionSaveJobId;
+        var analysisIdempotencyKey = versionSaveJobId is { } saveJobId
+            ? $"analysis-{documentId}-documentprofile-version-{saveJobId:N}"
+            : $"analysis-{documentId}-documentprofile";
+
         _logger.LogWarning(
-            "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}",
+            "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}, VersionSaveJobId={VersionSaveJobId}",
             originalMessage.JobId,
             documentId,
             aiOptions.ProfileSummary,
-            aiOptions.RagIndex);
+            aiOptions.RagIndex,
+            versionSaveJobId?.ToString() ?? "(none)");
 
         // Use the EXACT SAME pattern as EmailToDocumentJobHandler.EnqueueAiAnalysisJobAsync()
         // This ensures correct camelCase serialization via JobSubmissionService
@@ -795,7 +808,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName, // Use constant, same as EmailToDocumentJobHandler
             SubjectId = documentId.ToString(),
             CorrelationId = Activity.Current?.Id ?? originalMessage.CorrelationId ?? Guid.NewGuid().ToString(),
-            IdempotencyKey = $"analysis-{documentId}-documentprofile",
+            IdempotencyKey = analysisIdempotencyKey,
             Attempt = 1,
             MaxAttempts = 3,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -819,7 +832,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // Also queue RAG indexing if requested (same pattern as EmailToDocumentJobHandler)
         if (aiOptions.RagIndex)
         {
-            await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, cancellationToken);
+            await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, versionSaveJobId, cancellationToken);
         }
 
         // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
@@ -1159,8 +1172,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // Enqueue AI analysis for attachment document (same pattern as EmailToDocumentJobHandler)
         await EnqueueAiAnalysisForAttachmentAsync(childDocumentId, cancellationToken);
 
-        // Enqueue RAG indexing for attachment document (same pattern as EmailToDocumentJobHandler)
-        await EnqueueRagIndexingAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, cancellationToken);
+        // Enqueue RAG indexing for attachment document (same pattern as EmailToDocumentJobHandler).
+        // A new child item, never a version: no version discriminator, so today's key.
+        await EnqueueRagIndexingAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, versionSaveJobId: null, cancellationToken);
     }
 
     /// <summary>
@@ -1222,12 +1236,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// the helper), same idempotency key (<c>rag-index-{driveId}-{itemId}</c>),
     /// same payload shape, same <c>Source="OfficeAddin"</c> tag for telemetry.
     /// </para>
+    /// <para>
+    /// Task 029: <paramref name="versionSaveJobId"/> is non-null only for a version save. It becomes the request's
+    /// <see cref="PostUploadIndexingRequest.VersionDiscriminator"/>, which makes the key per-save and asks the index
+    /// job to replace the file's previous chunks. Null keeps both exactly as above.
+    /// </para>
     /// </remarks>
     private async Task EnqueueRagIndexingAsync(
         string driveId,
         string itemId,
         Guid documentId,
         string fileName,
+        Guid? versionSaveJobId,
         CancellationToken cancellationToken)
     {
         var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
@@ -1244,7 +1264,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ParentEntity: null,
             SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
             Source: "OfficeAddin",
-            CorrelationId: correlationId);
+            CorrelationId: correlationId,
+            VersionDiscriminator: versionSaveJobId?.ToString("N"));
 
         // App-only path: Office Add-in finalization uploads files AS MI, so MI can read them
         // (writer-identity rule per sdap-auth-patterns.md Pattern 4).

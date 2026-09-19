@@ -8,6 +8,26 @@ public class CreateDocumentRequest
     public required string Name { get; set; }
     public required string ContainerId { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
+    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
+    /// save stamps the <c>sprk_document</c> GUID INTO the bytes it uploads, and on a CREATE the upload
+    /// necessarily precedes the row — so the id has to be known before Dataverse would otherwise mint it. The
+    /// BFF pre-assigns it, stamps it, uploads, and then creates the row WITH that key. The alternatives were
+    /// worse: reordering the save to create-row-before-upload changes when content dedup runs (an explicit
+    /// escalation trigger on that task), and uploading unstamped then writing a second stamped version doubles
+    /// the SPE writes and leaves a window where the stored bytes carry no stamp.</para>
+    /// <para><b>Additive and opt-in.</b> Existing callers are unchanged; this is stated explicitly in the PR
+    /// per root CLAUDE.md §10 because <c>Spaarke.Dataverse</c> is consumed beyond the BFF.</para>
+    /// <para><b>Honest cost.</b> Microsoft's guidance prefers platform-generated sequential GUIDs for
+    /// clustered-index locality. A caller-supplied random GUID is supported but gives that up for these rows —
+    /// a performance note, not a correctness one.</para>
+    /// </remarks>
+    public Guid? Id { get; set; }
 }
 
 /// <summary>
@@ -339,11 +359,33 @@ public class DocumentEntity
     /// <summary>Full summary (2-4 paragraphs). Maps to sprk_filesummary.</summary>
     public string? Summary { get; set; }
 
-    /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>
+    /// <summary>
+    /// Comma-separated keywords. Maps to <c>sprk_filekeywords</c> (corrected
+    /// spaarkeai-word-add-in-r1 task 021 — this comment previously said "sprk_keywords", which is
+    /// not a column on <c>sprk_document</c>; the real column is the one
+    /// <c>DataverseServiceClientImpl</c>'s writer and <c>DocumentProfileFieldMapper</c> both already use).
+    /// </summary>
     public string? Keywords { get; set; }
 
-    /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
+    /// <summary>
+    /// Document type classification (e.g., Contract, NDA, Invoice). Maps to <c>sprk_documenttype</c>,
+    /// a Choice (Picklist) column — verified live 2026-09-12. This is the Choice's DISPLAY LABEL
+    /// (from Dataverse's <c>FormattedValues</c>), not free text and not the raw option integer;
+    /// <see cref="DataverseServiceClientImpl.MapToDocumentEntity"/> is the one place that reads it —
+    /// see its remarks for the OptionSetValue-cast regression this comment exists to prevent
+    /// recurring.
+    /// </summary>
     public string? DocumentType { get; set; }
+
+    /// <summary>
+    /// AI profiling status for this document (task 021 / FR-07). Maps to the <c>sprk_filesummarystatus</c>
+    /// Choice column — exactly SEVEN values, verified live: None=100000000, Pending=100000001,
+    /// Completed=100000002, OptedOut=100000003, Failed=100000004, NotSupported=100000005,
+    /// Skipped=100000006. <c>null</c> means the column has never been set on this row (Dataverse
+    /// applies no implicit default), which callers should treat identically to None — profiling has
+    /// not been attempted.
+    /// </summary>
+    public int? SummaryStatus { get; set; }
 
     /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
     public string? Entities { get; set; }

@@ -1,0 +1,212 @@
+# ============================================================================
+# Gated jest suites — office-addins PR gate
+# ============================================================================
+# Consumed by: .github/workflows/office-addins-tests.yml
+#
+# WHAT THIS FILE IS
+# -----------------
+# The ALLOW-LIST of jest suites in this package that a pull request MUST keep
+# green. Every path below is run by `npm test -- --runTestsByPath` on any PR
+# that touches this package. If one of them goes red, the PR's checks go red.
+#
+# WHY AN ALLOW-LIST AND NOT THE WHOLE SUITE
+# -----------------------------------------
+# As of 2026-09-10 this package is 12 of 22 suites green (164 of 380 tests).
+# The other 10 fail on pre-existing mock/assertion defects that predate this
+# gate and are nobody's PR to fix. Gating the whole suite would have been red
+# on the day it was created, which trains people to ignore it — strictly worse
+# than no gate. So the gate starts at the green line and ratchets upward.
+#
+# NOTHING IS SKIPPED OR DELETED TO ACHIEVE THIS. The 10 red suites
+# still run, unchanged, every night in `.github/workflows/client-tests.yml`,
+# which reports this package's full pass/fail table. This file only decides
+# what this gate REPORTS ON; it does not decide what runs.
+#
+# HOW TO PROMOTE A SUITE INTO THE GATE (the ratchet)
+# --------------------------------------------------
+# When the nightly Client Tests (Jest) baseline shows one of the 10 green,
+# add its path here in the same PR that fixed it. The list only grows. The
+# end state is every suite in this package listed here, at which point this
+# file can be replaced by a plain full-suite run.
+#
+# The gate FAILS if any path below no longer exists. That is deliberate: it
+# means a gated test file cannot be renamed away or deleted silently, and it
+# is the mechanism that stops "make the gate green by removing the test".
+#
+# Paths are relative to this package root. `#` comments and blank lines OK.
+#
+# STABILITY EVIDENCE (2026-09-10, projects/spaarkeai-word-add-in-r1/notes/
+# 043-office-addins-ci-gate.md): three consecutive runs of exactly this list
+# produced byte-identical per-test results (12/12 suites, 164/164 tests), and
+# a fourth run on a from-scratch `npm install` tree also passed 164/164. The
+# documented run-to-run count drift in this package lives in the 10 red RTL
+# suites, which bail at different points under load; none of it is here.
+# ============================================================================
+
+# --- the .docx binary save path (task 010 / the 2026-09-03 UAT defect) ------
+# WordAdapter.test.ts holds the guards that keep `getDocumentContent()` on
+# `getFileAsync(Office.FileType.Compressed)` slice assembly and OFF
+# `body.getOoxml()`: multi-slice ordering, the 50 4b 03 04 zip signature, the
+# 65536-byte sliceSize, "never falls back to body.getOoxml()", and handle
+# close on both the success and failure paths.
+shared/adapters/__tests__/WordAdapter.test.ts
+shared/adapters/__tests__/HostAdapterFactory.test.ts
+
+# --- accessibility regression (task 018) ------------------------------------
+shared/taskpane/hooks/__tests__/useAnnounce.test.ts
+
+# --- remaining green suites -------------------------------------------------
+shared/taskpane/components/__tests__/LinkedTodosBanner.test.tsx
+shared/taskpane/components/__tests__/TaskPaneHeader.test.tsx
+shared/taskpane/hooks/__tests__/useCreateTodoFromEmail.test.ts
+shared/taskpane/hooks/__tests__/useLinkedTodosForCommunication.test.ts
+shared/taskpane/hooks/__tests__/useTheme.test.ts
+shared/taskpane/services/__tests__/communicationLookupService.test.ts
+shared/taskpane/services/__tests__/communicationSuggestionsService.test.ts
+shared/taskpane/services/__tests__/createTodoLauncher.test.ts
+shared/taskpane/services/__tests__/quickSaveHelpers.test.ts
+
+# --- document identity (task 013, FR-01 client) — green from creation --------
+# Pins the rule that a 503 or a system_failure 403 from /resolve-identity is
+# "indeterminate", never "new" (treating it as new mints duplicate rows).
+shared/taskpane/services/__tests__/documentIdentityService.test.ts
+shared/taskpane/utils/__tests__/cleanGuid.test.ts
+
+# --- document profile (task 021, FR-07) — green from creation ---------------
+# Pins the six non-Completed profile states rendering distinct messages (never
+# blank fields) and that the section is read-only.
+shared/taskpane/components/__tests__/DocumentProfileSection.test.tsx
+
+# --- version save + save-as-new override (task 024, FR-11) — green from creation
+# Pins: an identified document defaults to a VERSION save; `conflict` never offers
+# save-as-new; `indeterminate` is never treated as new; each OFFICE_016-019
+# refusal has a way forward; the override sends no existingDocumentId.
+shared/taskpane/hooks/__tests__/useSaveFlow.versionSave.test.ts
+shared/taskpane/components/__tests__/SaveModeSection.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
+
+# --- required Matter Type on quick-create (task 038) — green from creation --
+# Pins: a Matter cannot be created without a type; matterTypeId is sent
+# canonical; a failed type load offers Retry (never a dead field); the list is
+# cached only on success and cleared when the server says the type is gone.
+shared/taskpane/components/__tests__/RelatedToPicker.matterType.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.matterTypeQuickCreate.test.tsx
+shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts
+
+# --- related-record card (task 026, FR-09) - green from creation ----------
+# Pins: the card reads only the four direct slots (never sprk_related* or the
+# non-existent sprk_event), shows descriptive name AND number per type, and is
+# absent when the document has no resolved identity.
+shared/taskpane/components/__tests__/RelatedRecordCard.test.tsx
+shared/taskpane/hooks/__tests__/useRelatedRecord.test.ts
+
+# --- Find view (task 033, FR-16b) - green from creation ----------------------
+# Pins: the six identity outcomes map to honest Find states (only `new` shows
+# the save prompt), Run Index sends a lowercased documentId, and a 200 with
+# ChunksIndexed = 0 is shown as a failure, never as success.
+shared/taskpane/components/views/__tests__/FindView.test.tsx
+
+# --- email file names (task 046b) - green from creation ------------------------
+# Pins: only a system-derived .eml name gets the unique suffix; a name the user
+# typed is sent as typed (isNameSystemDerived = false) and never changed.
+shared/taskpane/hooks/__tests__/useSaveFlow.emailName.test.ts
+
+# --- open a record from the pane (task 027, FR-10) - green from creation ------
+# Pins: the record opens in a browser tab (never the Dialog API), the URL is
+# built from ORG_URL + a canonical id, and an unset ORG_URL opens nothing.
+shared/taskpane/services/__tests__/openRecordLauncher.test.ts
+shared/taskpane/components/__tests__/SaveFlow.openRecord.test.tsx
+
+# --- Find results list (task 034, FR-16c) - green from creation ---------------
+# Pins: rows already fetched are revealed on scroll with no second request,
+# hasMore means only "unrevealed rows", and there is no pager of any kind.
+shared/taskpane/hooks/__tests__/useLazyResults.test.tsx
+shared/taskpane/components/__tests__/FindResultsList.test.tsx
+# --- Send Email via Outlook (task 036, FR-15) - green from creation -----------
+# Pins: the document link is minted only through the existing share-link route
+# (no expiry override), a failed mint opens no compose window, the record link
+# reuses 027's URL builder, and Word reports the capability absent.
+shared/adapters/__tests__/OutlookAdapter.composeEmail.test.ts
+shared/adapters/__tests__/WordAdapter.composeEmail.test.ts
+shared/taskpane/services/__tests__/sendEmailService.test.ts
+# --- host capabilities (task 040, FR-19/NFR-10) - green from creation ---------
+# Pins: each adapter reports its capability set honestly per host, so a view that
+# gates on a capability cannot silently enable a feature the host lacks.
+shared/adapters/__tests__/capabilities.test.ts
+# --- Document Name field (task 020, FR-06) - green from creation --------------
+# Pins: the field defaults to the open document's name minus its extension, the
+# pencil edit commits/reverts, the edited value is what reaches the wire as
+# document.title, and Outlook is untouched (no default, no pencil).
+shared/taskpane/components/__tests__/SaveFlow.documentName.test.tsx
+# --- create-path name collision (task 025, FR-12) - green from creation -------
+# Pins the refuse-before-upload contract at the pane: an OFFICE_020 (409) shows
+# the inline two-option choice rather than a dead error; "Keep both" sends
+# AllowRename; "Save as new version" routes through the SHIPPED FR-11 version
+# path (never a second create); dismissing writes nothing. The typed collision
+# message must name the file and never render a raw server string.
+shared/taskpane/components/__tests__/SaveFlowCollision.test.tsx
+shared/taskpane/utils/__tests__/errorMessages.collision.test.ts
+# --- pane surfaces server failures (task 053) - green from creation ----------
+# Pins that a failed quick-create or entity search is never swallowed: the
+# server's own `detail` reaches the user (not a generic client string), a failed
+# search is visibly distinct from "no matches", and a non-ProblemDetails failure
+# still yields a sensible message instead of throwing into the save flow.
+# NOTE the shape these pin: the QuickCreate endpoint's own catch(SdapProblemException)
+# returns errorCode/detail/correlationId as TOP-LEVEL properties via Results.Problem
+# extensions-flattening — NOT nested under `extensions.code`, which is the separate
+# global-handler shape task 050 fixed. Verified against the C# and the existing
+# OfficeQuickCreate*ContractTests before these tests were written.
+shared/taskpane/utils/__tests__/errorMessages.fetchFailure.test.ts
+shared/taskpane/components/__tests__/RelatedToPicker.errorSurfacing.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.quickCreateErrorSurfacing.test.tsx
+# --- bytes are captured at Save press, not at mount (task 045) ---------------
+# Pins the silent-data-loss guard: the pane must NOT read the document once at
+# Save-tab mount and reuse it. All THREE submit paths re-read current bytes —
+# the initial Save, the hook's own retry(), and the next save after "Save
+# Another" — plus task 025's "Keep both" collision retry. A rejected capture
+# surfaces a handled error and sends ZERO requests to /api/office/save.
+# These fail if the live callback is ever replaced by a cached value again:
+# reverting that one line turned 5 of the 7 red.
+shared/taskpane/components/__tests__/SaveFlow.captureAtSave.test.tsx
+shared/taskpane/components/views/__tests__/SaveView.captureAtSave.test.tsx
+# --- the client half of FR-02: read the stamp (task 051) --------------------
+# Completes FR-02 — task 014 writes the invisible marker, these pin that the
+# pane READS it, which is what stops a downloaded/edited/re-uploaded document
+# forking its record. They pin the owner's binding PRECEDENCE: a resolved cloud
+# URL wins (asserted by same-object-reference, not equality); the stamp is used
+# only on 012's not_cloud_document / not_resolvable / not_spaarke_document; and
+# a resolved URL whose id DISAGREES with the stamp is a conflict with no default
+# save target -- never a silent choice between them. Stamp-first is a data-loss
+# path (a copy carries its SOURCE's stamp X while its URL resolves to row W),
+# which is why task 014's own POML step 5 was overridden by owner decision.
+# Also pinned: every null path (absent, malformed, non-GUID, two disagreeing
+# ids, API failure) resolves null and never throws, and a false capability means
+# getByNamespaceAsync is never invoked at all -- 019 conditions 1 and 4.
+shared/adapters/__tests__/WordAdapter.readDocumentStamp.test.ts
+shared/adapters/__tests__/OutlookAdapter.readDocumentStamp.test.ts
+shared/taskpane/services/__tests__/documentIdentityService.stampPrecedence.test.ts
+# --- Word ribbon commands (task 037, FR-17) - green from creation -----------
+# NOTE: `word/...` paths only resolve because task 037 widened jest.config.js
+# `roots` to ['shared','word','outlook'] — commands.test.ts was the first test
+# file in this package outside shared/. Do not narrow `roots` back.
+# These pin the ribbon contract that cannot be checked by inspection: every
+# branch of BOTH commands calls event.completed() exactly once — success,
+# doc-extraction failure, auth failure, network failure, mint failure, identity
+# throw, clipboard failure — because omitting it on any error path leaves the
+# Word ribbon spinner stuck forever. Two tests further pin that a BROKEN
+# notification surface still cannot block completion. Also pinned: quickSave's
+# idempotency key hashes document content, so a double click collapses to one
+# key while a real edit does not.
+word/commands/__tests__/commands.test.ts
+shared/taskpane/services/__tests__/shareLinkService.test.ts
+# --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
+# shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
+# shared/services/__tests__/ApiClient.test.ts                    19/20
+# shared/taskpane/components/__tests__/EntityPicker.test.tsx      28/32
+# shared/taskpane/components/__tests__/SaveFlow.test.tsx          16/25
+# shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx 6/7
+# shared/taskpane/components/__tests__/TaskPaneShell.test.tsx      5/10
+# shared/taskpane/components/views/__tests__/SaveView.test.tsx     4/26
+# shared/taskpane/components/views/__tests__/ShareView.test.tsx    4/20
+# shared/taskpane/hooks/__tests__/useEntitySearch.test.ts         20/21
+# shared/taskpane/hooks/__tests__/useSaveFlow.test.ts             19/26

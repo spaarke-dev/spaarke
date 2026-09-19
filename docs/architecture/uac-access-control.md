@@ -2,8 +2,8 @@
 
 > **Domain**: Authorization, Access Control, Permission Management
 > **Status**: Verified (Production-Ready Internal; Design External)
-> **Last Updated**: 2026-08-20
-> **Last Reviewed**: 2026-08-20
+> **Last Updated**: 2026-09-10 — corrected stale app-only/`userAccessToken: null` claims: `AuthorizationService` now fails closed and runs AS THE CALLER (task 004 / FR-02, finding A-2, code changed 2026-08-21, one day after this doc's prior correction pass)
+> **Last Reviewed**: 2026-09-10
 > **Reviewed By**: unified-access-control-r2 (drift correction); previously ai-procedure-refactoring-r2 (2026-04-05)
 > **Source ADRs**: ADR-003, ADR-008, ADR-009, ADR-028 (Amendment A1 — broker-only external access)
 
@@ -23,7 +23,7 @@
 | Direct-query `DataverseAccessDataSource` | BOTH auth modes (app-only service principal AND OBO) use the same direct query (`GET sprk_documents({id})?$select=sprk_documentid`, `Spaarke.Dataverse/DataverseAccessDataSource.cs:323`) and grant at most `Read` (`:368-372`). `RetrievePrincipalAccess` has ZERO call sites in this path — it appears only in comments |
 | `CachedAccessDataSource` decorator (ADR-009) | Cache permission **data**, not decisions; fail-open on Redis errors (falls through to Dataverse) |
 | Endpoint filters, not global middleware (ADR-008) | 23 domain-specific filters apply authorization at endpoint level |
-| Single `OperationAccessRule` | Dataverse's own row-level security (roles, teams, business units, record sharing) is enforced by the direct-query probe — the record is only retrievable if the probe identity can read it — so one rule is sufficient. NOTE: `AuthorizationService` passes `userAccessToken: null` (`Spaarke.Core/Auth/AuthorizationService.cs:48-52`), so the probe runs as the service principal, NOT scoped to the calling user |
+| Single `OperationAccessRule` | Dataverse's own row-level security (roles, teams, business units, record sharing) is enforced by the direct-query probe — the record is only retrievable if the probe identity can read it — so one rule is sufficient. NOTE (corrected 2026-09-10): `AuthorizationService` FAILS CLOSED (denies) when no caller token is present and otherwise forwards the caller's own bearer token — the probe runs AS THE CALLER, never as the service principal (`Spaarke.Core/Auth/AuthorizationService.cs:45-54` fail-closed check, `:74` "Evaluate AS THE CALLER", `:223-225` forwards the caller's token; task 004 / FR-02, finding A-2, "ZERO app-only consumers" verified 2026-08-21) |
 
 ---
 
@@ -41,14 +41,14 @@
 
 ## Dual-Mode DataverseAccessDataSource
 
-Two auth modes exist, but BOTH run the SAME direct-query check (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323`) — `RetrievePrincipalAccess` is NOT called in either mode (zero call sites; corrected 2026-08-20):
+Two auth modes exist on `DataverseAccessDataSource.GetUserAccessAsync` (its `userAccessToken` parameter still defaults to `null`), but BOTH run the SAME direct-query check (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323`) — `RetrievePrincipalAccess` is NOT called in either mode (zero call sites; corrected 2026-08-20):
 
 | Auth Mode | When Used | Method |
 |-----------|-----------|--------|
-| **App-only** | Default — `AuthorizationService` always passes `userAccessToken: null` (`Spaarke.Core/Auth/AuthorizationService.cs:48-52`) | Direct query: `GET sprk_documents({id})?$select=sprk_documentid` with the service principal token |
-| **OBO** | Only when a caller passes a user token (e.g. `AiAuthorizationService`) | Same direct query with the OBO-exchanged user token |
+| **App-only** | NOT reachable via `AuthorizationService` (corrected 2026-09-10): `AuthorizationService.GetCallerAccessAsync` FAILS CLOSED (returns `AccessRights.None`, data source not consulted) when no caller token is present, rather than degrading to app-only (`Spaarke.Core/Auth/AuthorizationService.cs:45-54`, `:207-221`; task 004 / FR-02, finding A-2, "ZERO app-only consumers" verified 2026-08-21) | Direct query: `GET sprk_documents({id})?$select=sprk_documentid` with the service principal token, if reached by some other caller of the data source |
+| **OBO** | `AuthorizationService.AuthorizeAsync` / `GetCallerAccessAsync` (mandatory caller token — `:74` "Evaluate AS THE CALLER", `:223-225` forwards it) and `AiAuthorizationService` | Same direct query with the OBO-exchanged user token |
 
-Direct query pattern: query the document directly → 200 = grant `AccessRights.Read` (at most — Write/Delete etc. are never granted by this probe, `:368-372`); 403/404 = access denied (empty permission set). In app-only mode the probe runs as the service principal, so it is NOT scoped to the calling user's Dataverse privileges. See [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md) for the OBO bugs that were fixed.
+Direct query pattern: query the document directly → 200 = grant `AccessRights.Read` (at most — Write/Delete etc. are never granted by this probe, `:368-372`); 403/404 = access denied (empty permission set). Via `AuthorizationService`, the probe always runs AS THE CALLER (OBO) — an absent caller token denies rather than degrading to app-only (corrected 2026-09-10; see the Key Design Decisions table above). See [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md) for the OBO bugs that were fixed.
 
 ---
 

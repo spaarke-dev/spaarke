@@ -93,6 +93,23 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lists the active <c>sprk_mattertype_ref</c> reference rows for the pane's required Matter Type
+    /// field (spaarkeai-word-add-in-r1 task 038).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The active matter types, ordered by name.</returns>
+    /// <remarks>
+    /// <para>
+    /// A small (five rows in dev), load-once reference list — a sibling of <see cref="SearchEntitiesAsync"/>
+    /// under the same <c>/api/office/search</c> group, not a filter on it. <c>sprk_mattertype_ref</c> is a
+    /// reference/lookup table, not an association-target entity, and the caller loads this once rather than
+    /// per keystroke, so it does not fit the 2-character-minimum typeahead contract.
+    /// </para>
+    /// </remarks>
+    Task<MatterTypeListResponse> GetMatterTypesAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Searches for documents to share from the Office add-in.
     /// Returns documents the user has permission to share.
     /// </summary>
@@ -147,7 +164,12 @@ public interface IOfficeService
     /// <param name="request">Quick create request with entity fields.</param>
     /// <param name="userId">Authenticated user ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Quick create response with created entity details, or null if creation failed.</returns>
+    /// <returns>Quick create response with created entity details, or null if creation is unavailable for the type.</returns>
+    /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
+    /// Matter only (spaarkeai-word-add-in-r1 task 030): the server-side creation service refused — the caller has
+    /// no Dataverse user (403) or the request is invalid (400). No row was written; the exception carries the stable
+    /// code and HTTP status.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// This supports inline entity creation from the Office add-in when the user
@@ -188,6 +210,36 @@ public interface IOfficeService
         CreateTodoRequest request,
         string userId,
         string? ownerSystemUserId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-08 (spaarkeai-word-add-in-r1 task 022): re-runs document profiling for the given
+    /// <c>sprk_document</c> on user request from the pane's "Generate Profile" control. Fire-and-forget,
+    /// best-effort — mirrors Compose's shipped <c>refresh-profile</c> semantics exactly: dispatches the
+    /// SAME OBO direct-Action profile pipeline (<c>IDocumentProfileAi</c>) and returns as soon as the
+    /// DISPATCH DECISION is made (fast, synchronous), never awaiting the profile itself. Unconditionally
+    /// OVERWRITES any existing profile — no confirmation, no idempotency gate (deliberately NOT the
+    /// <c>AppOnlyDocumentAnalysis</c> Service-Bus job path, whose idempotency key would silently skip an
+    /// already-profiled or Failed document).
+    /// </summary>
+    /// <param name="documentId">The target <c>sprk_document</c> id. Caller (the endpoint filter) has
+    /// already authorized <c>write</c> on this record.</param>
+    /// <param name="httpContext">The current request context — the OBO bearer token and claims are
+    /// captured from it before the background dispatch detaches.</param>
+    /// <param name="cancellationToken">Request-scope cancellation token (not used by the detached
+    /// background profile itself, which runs under the app-shutdown token instead).</param>
+    /// <returns>
+    /// The dispatch outcome (<see cref="GenerateProfileDispatchOutcome"/>). The caller MUST branch on
+    /// this — coordinator-review fix: an earlier draft ignored a bare <see langword="bool"/> return and
+    /// always answered 202, which let the endpoint claim success for a profile that would never run
+    /// (compound AI gate off). Only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce
+    /// a 202; <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> and
+    /// <see cref="GenerateProfileDispatchOutcome.NoBearer"/> are honest non-success outcomes the endpoint
+    /// maps to 503 and 401 respectively.
+    /// </returns>
+    Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
+        Guid documentId,
+        HttpContext httpContext,
         CancellationToken cancellationToken = default);
 
     /// <summary>

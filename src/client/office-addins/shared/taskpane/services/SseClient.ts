@@ -201,10 +201,10 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
             }
 
             onEvent({
-              event: currentEvent.event,
               data: parsedData,
-              id: currentEvent.id,
-              retry: currentEvent.retry,
+              ...(currentEvent.event !== undefined ? { event: currentEvent.event } : {}),
+              ...(currentEvent.id !== undefined ? { id: currentEvent.id } : {}),
+              ...(currentEvent.retry !== undefined ? { retry: currentEvent.retry } : {}),
             });
           }
           currentEvent = {};

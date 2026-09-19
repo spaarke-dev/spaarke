@@ -1,0 +1,281 @@
+# ============================================================================
+# Office Add-ins Tests (Gate)
+# ============================================================================
+# spaarkeai-word-add-in-r1 · task 043
+#
+# WHY THIS EXISTS
+# ---------------
+# The `src/client/office-addins` jest suite already ran in CI before this file
+# — `.github/workflows/client-tests.yml` auto-discovers every package with a
+# real jest `test` script, and this package has one. But that workflow triggers
+# on `schedule` + `workflow_dispatch` ONLY, and every matrix leg is
+# `continue-on-error: true`. So the suite ran NIGHTLY and could never fail a
+# pull request. A break was recorded the next morning, on master, by which time
+# it had already merged.
+#
+# What that left unprotected, concretely: the guards on the `.docx` binary save
+# path (the 2026-09-03 UAT defect was `body.getOoxml()` returning flat OOXML
+# text where a zip container was required — SPE could not preview it and Word
+# could not open it), and the `useAnnounce` accessibility regression tests.
+# A PR reverting either would have merged green.
+#
+# 🔴 WHAT THIS FILE DOES AND DOES NOT DO (corrected 2026-09-10 by adr-check)
+# --------------------------------------------------------------------------
+# It REPORTS a real pass/fail on every PR touching this package. It does NOT
+# block a merge, and earlier revisions of this header wrongly said it did.
+#
+# Master's ruleset (21824191) requires exactly ONE status check, by name:
+#
+#     gh api repos/spaarke-dev/spaarke/rules/branches/master
+#     -> required_status_checks: [ "Router" ]
+#
+# GitHub rulesets have no "require all checks" concept — only that named list.
+# This workflow is not in it, so a red here renders a red X and the PR can
+# still merge. `on: pull_request` plus no `continue-on-error` makes a check
+# that CAN REPORT FAILURE; it does not make a check that BLOCKS. Those are not
+# the same claim, and conflating them is FAILURE-MODES AP-12 (prose outliving
+# the mechanism it describes).
+#
+# PROMOTION IS NOT A SETTINGS FLIP. Adding a PATH-FILTERED workflow to the
+# required list deadlocks: on any PR outside its paths the check is "expected
+# but never reported" and blocks forever — observed on PR #322, and the reason
+# `workflows-validate.yml` and the router both classify paths INSIDE the job
+# rather than in `on:`. Promotion therefore needs BOTH:
+#   1. path classification hoisted into the job so the check always reports, and
+#   2. N consecutive green runs ON `ubuntu-latest`.
+#
+# (2) is a settled repo standard, stated independently in three places: this
+# package's originating filing (`record-header-and-notepad-r2/notes/
+# ci-gap-client-jest-never-runs.md` §4), `client-tests.yml`'s promotion header,
+# and `sdap-ci.yml`'s `compose-client-gate`, which landed advisory for exactly
+# this reason — "a blocking gate whose first red is an environment artifact
+# gets ignored, then disabled, and the surface silently reverts to having no
+# gate." This gate's evidence at landing was five green runs, ALL on a local
+# Windows box and NONE on `ubuntu-latest`.
+#
+# What the shadow window does and does not gate, since these were conflated:
+# it gates DELETING `sdap-ci.yml` (task 077). It does not gate HAVING a gate.
+# Adding this file now is correct; calling it blocking was not.
+#
+# THIS FILE IS THE GATE. `client-tests.yml` REMAINS THE BASELINE.
+# ---------------------------------------------------------------
+# The two are complements and neither replaces the other:
+#
+#   client-tests.yml   40 packages · nightly · advisory · reports everything
+#   this file           1 package  · per-PR  · REPORTS  · reports one subset
+#
+# `client-tests.yml` was NOT extended to do this job, deliberately. Its own
+# header states the reason it has no `pull_request` trigger — 40 packages with
+# no npm workspace root means 40 independent `npm install`s, and hanging that
+# off every PR contends for runners with the CI shadow window — and it states
+# its promotion path: into Tier 2 as a real gate, only AFTER the shadow window
+# closes AND the baseline is green. Neither precondition holds today. Adding a
+# `pull_request` trigger there would have fired all 40 packages on every PR;
+# making its legs conditionally blocking would have falsified the "advisory by
+# construction" invariant its header rests on. Either change turns a 40-package
+# observation report into something else. One package's gate does not get to do
+# that to the other 39.
+#
+# NOR IS THIS IN THE TIER WORKFLOWS. `ci-router.yml`, `ci-tier1-blocking.yml`
+# and `ci-tier2-advisory.yml` are FROZEN under the shadow-comparison window
+# (opened 2026-08-27), which additionally holds an unresolved measurement latch
+# awaiting an operator decision. Editing any of them restarts the cutover clock.
+# `client-tests.yml`'s header separately says "do not add it to
+# ci-tier1-blocking.yml or ci-tier2-advisory.yml". `sdap-ci.yml` is the legacy
+# system pending retirement and is not somewhere to add new work.
+#
+# That leaves a standalone path-filtered gate — which is an established repo
+# pattern, not an invention: `css-reset-gate.yml` is the same shape (one
+# regression class, `pull_request` + `push: master`, path-filtered, standalone,
+# outside the tiers). This file follows it deliberately.
+#
+# IT GATES A SUBSET, AND THE SUBSET IS THE POINT
+# ----------------------------------------------
+# This package is 12 of 22 suites green (164 of 380 tests) as of 2026-09-10.
+# The 10 red suites fail on pre-existing mock/assertion defects that long
+# predate this gate. Gating the full suite would have been red the moment it
+# was created — a check that is always red is a check everyone learns to
+# ignore, which is worse than no check. So the gated set is the green line,
+# recorded in `src/client/office-addins/ci-gated-suites.txt`, and it ratchets
+# upward as suites are fixed.
+#
+# No test is deleted, skipped, or modified to achieve that. All 22 suites still
+# run nightly in `client-tests.yml`, which is the promotion signal for this list.
+#
+# The manifest step fails if a gated path no longer exists, so a gated test
+# cannot be renamed away or deleted to turn the gate green.
+# ============================================================================
+
+name: Office Add-ins Tests (Gate)
+
+on:
+  pull_request:
+    paths:
+      # Path pair copied from deploy-office-addins.yml: the add-ins consume
+      # @spaarke/auth as a `file:` dependency and build it from source, so a
+      # change there changes what ships.
+      - 'src/client/office-addins/**'
+      - 'src/client/shared/Spaarke.Auth/**'
+      # Third path, which the deploy workflow does NOT carry (reported as a
+      # separate finding in notes/043): jest.config.js AND webpack.config.js
+      # both map `@spaarke/communication-components/logic/connections/provenance`
+      # straight at this one file, and `communicationSuggestionsService.ts`
+      # imports it. It is a leaf module with no imports of its own, so the exact
+      # file is the precise filter — nothing else in that package reaches here.
+      - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+      # (ci-gated-suites.txt needs no entry — 'src/client/office-addins/**' covers it.)
+      - '.github/workflows/office-addins-tests.yml'
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/client/office-addins/**'
+      - 'src/client/shared/Spaarke.Auth/**'
+      - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+      - '.github/workflows/office-addins-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: office-addins-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gated-jest:
+    name: Gated jest suites (office-addins)
+    runs-on: ubuntu-latest
+    # The gated set runs in ~16s on a cold from-scratch tree. 15 minutes is a
+    # hang guard, not a budget.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          # Node 20 matches client-tests.yml, the nightly baseline this gate is
+          # a scoped promotion of. Same Node in both places means the gate and
+          # the baseline can never disagree about a suite for toolchain reasons.
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: src/client/office-addins/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/client/office-addins
+        # NOT `npm ci` (root CLAUDE.md §12). A bare `npm install` also fails
+        # here with ERESOLVE: @testing-library/react@14 peer-requires React 18
+        # while this package is on React 19.
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      # No build step, and that is not an oversight. jest.config.js maps
+      # `@spaarke/auth` to the sibling package's TypeScript SOURCE (ts-jest
+      # transforms it) precisely to sidestep the ESM/CJS mismatch in its
+      # compiled `dist/`, so the tests do not need @spaarke/auth built — unlike
+      # deploy-office-addins.yml, whose webpack build does. Verified on a
+      # from-scratch install with no `dist/` anywhere: 164/164.
+
+      - name: Resolve gated suite manifest
+        id: manifest
+        working-directory: src/client/office-addins
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest='ci-gated-suites.txt'
+
+          if [ ! -f "$manifest" ]; then
+            echo "::error::$manifest is missing. The gate cannot decide what to run, and a gate that silently runs nothing is the false green this workflow exists to prevent."
+            exit 1
+          fi
+
+          suites=()
+          while IFS= read -r line; do
+            line="${line%%#*}"
+            line="$(printf '%s' "$line" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [ -n "$line" ] || continue
+            suites+=("$line")
+          done < "$manifest"
+
+          if [ ${#suites[@]} -eq 0 ]; then
+            echo "::error file=src/client/office-addins/ci-gated-suites.txt::No gated suites listed. Failing loudly rather than reporting a vacuous green."
+            exit 1
+          fi
+
+          # A gated suite that no longer exists is either a rename that forgot
+          # to update this list, or a deletion that would have quietly shrunk
+          # the gate. Both are failures, not warnings.
+          missing=0
+          for s in "${suites[@]}"; do
+            if [ ! -f "$s" ]; then
+              echo "::error file=src/client/office-addins/ci-gated-suites.txt::Gated suite '$s' does not exist. If it was renamed, update ci-gated-suites.txt in this PR. If it was deleted, this gate requires a same-PR replacement."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          printf '%s\n' "${suites[@]}" > "$RUNNER_TEMP/gated-suites.txt"
+          echo "count=${#suites[@]}" >> "$GITHUB_OUTPUT"
+          echo "Gated suites (${#suites[@]}):"
+          printf '  %s\n' "${suites[@]}"
+
+      - name: Run gated jest suites
+        working-directory: src/client/office-addins
+        shell: bash
+        # `npm test --` rather than `npx jest`, so the gate goes through the
+        # package's own declared entry point — the same one client-tests.yml
+        # invokes. If that script changes, both move together.
+        env:
+          GATED_COUNT: ${{ steps.manifest.outputs.count }}
+        run: |
+          set -euo pipefail
+          mapfile -t suites < "$RUNNER_TEMP/gated-suites.txt"
+          npm test -- --ci --reporters=default --passWithNoTests=false \
+            --json --outputFile "$RUNNER_TEMP/jest-result.json" \
+            --runTestsByPath "${suites[@]}"
+
+          # ── THE NO-VACUOUS-GREEN ASSERTION (added 2026-09-10 by code-review W-2/W-3)
+          # The manifest step proves every gated path EXISTS. It does not prove jest
+          # RAN it, and jest does not complain when it doesn't: passing a real file
+          # that jest does not treat as a test is silently ignored and the run still
+          # exits 0. Reproduced —
+          #     npx jest --runTestsByPath <a real test> jest.setup.js
+          #     -> "Test Suites: 1 passed, 1 total"   EXIT 0
+          #
+          # That is LIVE here, not theoretical: jest.config.js sets
+          # `roots: ['<rootDir>/shared']`, so the moment anyone promotes a suite
+          # under word/ or outlook/ — exactly the coverage gap notes/043 F-5 flags —
+          # the file exists, the manifest check passes, jest runs nothing for it, and
+          # this gate reports a green covering 12 of a claimed 13.
+          #
+          # It also closes a second, quieter hole: a manifest whose final line lacks
+          # a trailing newline is dropped by `while read` without a word, shrinking
+          # the gate silently. .editorconfig makes that latent, not impossible.
+          #
+          # Asserting that jest ran exactly as many suites as the manifest declared
+          # makes "no vacuous green" true BY CONSTRUCTION rather than by argument.
+          ACTUAL="$(node -e 'process.stdout.write(String(require(process.argv[1]).numTotalTestSuites))' "$RUNNER_TEMP/jest-result.json")"
+          if [ "$ACTUAL" != "$GATED_COUNT" ]; then
+            echo "::error file=src/client/office-addins/ci-gated-suites.txt::Vacuous green: the manifest declares $GATED_COUNT gated suite(s) but jest ran $ACTUAL. A gated path exists but jest did not treat it as a test — most likely it is outside jest.config.js \`roots\` (currently '<rootDir>/shared'), or excluded by testMatch/testPathIgnorePatterns. The gate is NOT covering what it claims."
+            exit 1
+          fi
+          echo "Suite-count assertion OK: jest ran $ACTUAL suite(s), manifest declares $GATED_COUNT."
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          GATED_COUNT: ${{ steps.manifest.outputs.count }}
+        run: |
+          set -euo pipefail
+          {
+            echo "# Office Add-ins gated jest suites"
+            echo
+            echo "**Blocking.** ${GATED_COUNT:-0} suite(s) gated, of 22 in the package."
+            echo
+            echo "The ungated suites are not skipped — they run nightly, unchanged, in"
+            echo "client-tests.yml. When the nightly baseline shows one of them green, add"
+            echo "it to src/client/office-addins/ci-gated-suites.txt in the PR that fixed"
+            echo "it. The list only grows."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Replace a document's search chunks on every re-index (Compose save-back, manual Run Index), not only version saves</title>
+    <phase>2 Save flow</phase>
+    <gate>029 merged (IRagService.DeleteChunksBeyondCountAsync + FileIndexRequest.ReplaceStaleChunks exist)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs in the shared indexing path used by Compose, the pane and Find.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The mechanism already exists (task 029); this task turns it on for named callers and proves it.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>029</deps>
+    <tags>bff-api, ai, indexing, integration-test</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Chunk ids are `{speFileId}_{index}` and are overwritten in place, so when a document that is re-indexed gets shorter, its old tail chunks stay in the index, and Find can rank on text that no longer exists. Task 029 fixed this for Office version saves only (upload the new chunks, then trim the leftovers in the same index). Turn the same trim on for every other path that re-indexes an EXISTING item.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the RAG indexing pipeline and its callers. Follow ADRs strictly.</role>
+
+  <goal>After any re-index of an existing SPE item, the index holds that item's current chunks only — no leftover tail — and a first index behaves exactly as today.</goal>
+
+  <context>
+    <background>
+      Owner decision 2026-09-15: "Yes, new task here" — this project owns the fix for the other paths once 029 lands. Existing stale chunks in dev are NOT cleaned up (owner: dev data).
+      Read `notes/029-version-ai-refresh.md` first: it names the known paths — Compose save-back re-index (`EnqueueIfApplicableAsync` → `IndexFileAsync` → `IndexTextInternalAsync`, no idempotency gate) and manual Run Index (`POST /api/ai/rag/send-to-index`) — and the playbook Index node. Audit for any other caller that can re-index an item that already has chunks.
+      The trim only deletes ids shaped `{speFileId}_{chunkIndex}`; chunks other writers store under their own schemes are not touched (029 design).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/029-version-ai-refresh.md</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Upload first, then trim, in the SAME index the upload went to. A document must never be left without chunks. Reuse `DeleteChunksBeyondCountAsync`; no second delete method.</constraint>
+    <constraint source="project">Do not change any path's idempotency key or skip behaviour. Only whether the trim runs after a successful upload.</constraint>
+    <constraint source="project">Compose code (`Services/Compose/**`) belongs to the Compose projects. Prefer turning the trim on inside the shared indexing layer or at the enqueue boundary; if a change inside `Services/Compose/**` is unavoidable, run `/conflict-check` first and escalate if another active project has open changes there.</constraint>
+    <constraint source="ADR-038">Tests: for each path, a shorter re-index leaves no tail and a first index is unchanged. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size vs a FRESH master build (Compress-Archive, short paths), CVE check, placement statement in notes.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md and 029's note. Declare FULL, sonnet @ high, DIRECTIONAL. Run `/conflict-check` (BFF hot path).</step>
+    <step order="1">List every caller that can re-index an existing item; record it in `notes/048-reindex-trim-all-paths.md` with evidence.</step>
+    <step order="2">Turn the trim on for each; add the tests.</step>
+    <step order="3">BFF build, affected tests, ArchTests, the full `Sprk.Bff.Api.Tests` once; publish size + CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a path stores chunks under an id scheme the trim does not cover and leaves stale tails there, STOP and report with options.</trigger>
+    <trigger>If turning the trim on requires changing a path's key or retry behaviour, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>029 added the trim and the request flag; only the version-save job sets it.</existing>
+    <extension>Yes — set the existing flag for more callers; no new method, route or service.</extension>
+    <cost-of-doing-nothing>Every Compose document that gets shorter, and every manual re-index after an edit, leaves old text in the index that Find ranks on.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/048-reindex-trim-all-paths.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For Compose save-back and manual Run Index (and any other re-index path found in step 1): a re-index with fewer chunks than before leaves no chunk at or beyond the new count, proven by test.</criterion>
+    <criterion testable="true">Negative: a first index of a new item behaves exactly as before (no trim call, or a trim that deletes nothing), proven by test.</criterion>
+    <criterion testable="true">Negative: no path's idempotency key or skip behaviour changes.</criterion>
+    <criterion testable="true">`dotnet build` green; affected tests, ArchTests and the full suite pass; publish size vs a fresh master build and the CVE result are recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-15 by the main session on the owner's answer to 029's follow-up question.
+
+Completed 2026-09-15 by an isolated agent worktree. 13 re-index paths audited with evidence (11 fixed: 6 via
+the shared PostUploadIndexingEnqueuer seam unconditionally, BulkRagIndexingJobHandler tied to its own
+ForceReindex flag, 4 direct producers incl. 2 found beyond the brief — the Knowledge Base admin reindex route
+and the document check-in trigger; 1 minor caller-controlled pass-through fix; 1 left unchanged as
+already-caller-controlled; 1 confirmed dead code, no fix). 9 production files changed (all comment/property
+additions to existing initializers — no new component). 5 new KEEP-path tests + 1 pre-existing protected test
+updated (renamed + 2 stale assertions corrected + 2 assertions added, net coverage up) after the full targeted
+run surfaced it as an expected, task-048-intended behavior change; full reasoning + mutation-test proof in
+notes/048-reindex-trim-all-paths.md §4.5–4.6. Gates: build 0/0, ArchTests 191/191, full suite 12,311
+passed/0 failed/56 skipped (matches baseline + this task's 10 new tests), 0 vulnerable packages, publish-size
+isolated contribution +9 B. Full detail, evidence table, and Step 9.5 findings:
+notes/048-reindex-trim-all-paths.md.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -4,10 +4,8 @@ import {
   tokens,
   Button,
   Card,
-  CardHeader,
   Text,
   Body1,
-  Switch,
   Spinner,
   MessageBar,
   MessageBarBody,
@@ -15,10 +13,9 @@ import {
   MessageBarActions,
   Badge,
   ProgressBar,
-  Divider,
-  Link,
   mergeClasses,
   Textarea,
+  Input,
   Label,
 } from '@fluentui/react-components';
 import {
@@ -26,29 +23,36 @@ import {
   ArrowResetRegular,
   CheckmarkCircleRegular,
   ErrorCircleRegular,
-  InfoRegular,
-  SparkleRegular,
-  SearchRegular,
   OpenRegular,
   CopyRegular,
-  PersonSearchRegular,
   EditRegular,
 } from '@fluentui/react-icons';
-import { RelatedToPicker } from './RelatedToPicker';
+import { RelatedToPicker, type CreateRecordResult } from './RelatedToPicker';
+import { RelatedRecordCard } from './RelatedRecordCard';
 import { AttachmentSelector } from './AttachmentSelector';
-import { ALL_ENTITY_TYPES } from '../hooks/useEntitySearch';
+import { DocumentProfileSection } from './DocumentProfileSection';
+import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
+import type { RelatedRecordView } from '../hooks/useRelatedRecord';
 import {
   useSaveFlow,
   type SaveFlowContext,
-  type SaveFlowState,
-  type ProcessingOptions,
-  type JobStatus,
+  type SaveTarget,
   type StageStatus,
   type UseSaveFlowOptions,
 } from '../hooks/useSaveFlow';
+import type { DocumentIdentityState } from '../services/documentIdentityService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
+import {
+  fetchMatterTypes,
+  clearMatterTypesCache,
+  warningsIndicateMatterTypeNotFound,
+  type MatterTypeChoice,
+} from '../services/matterTypeLookupService';
+import { openRecord } from '../services/openRecordLauncher';
+import { cleanGuid } from '../utils/cleanGuid';
+import { describeFetchFailure } from '../utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 
@@ -59,6 +63,16 @@ function isBrowserTestMode(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Task 020 (FR-06): strips a trailing `.docx`/`.doc` extension (case-insensitive) from a display name,
+ * for deriving the default Document Name from the filename-shaped `itemName` prop. A value with no such
+ * extension (e.g. Word's "Untitled Document" fallback) is returned unchanged — this is normalization,
+ * not a requirement that an extension be present.
+ */
+function stripDocumentExtension(name: string): string {
+  return name.replace(/\.docx?$/i, '');
 }
 
 /**
@@ -100,6 +114,19 @@ const DEMO_RELATED_CANDIDATES: RelatedCandidate[] = [
     displayInfo: 'PROJ-2025-014',
     confidence: 0.88,
   },
+];
+
+/**
+ * Demo Matter Type options for the browser test harness ONLY — mirrors the real
+ * `GET /api/office/search/matter-types` five-row dev list (task 038) so the required-field UX is
+ * iterable without the BFF.
+ */
+const DEMO_MATTER_TYPES: MatterTypeChoice[] = [
+  { id: '6cedd99b-30da-f011-8406-7ced8d1dc988', name: 'Commercial', code: 'CMRCL' },
+  { id: 'cdbf53b0-30da-f011-8406-7ced8d1dc988', name: 'Employment', code: 'EMPL' },
+  { id: '11aed095-30da-f011-8406-7ced8d1dc988', name: 'Litigation', code: 'LITG' },
+  { id: '46c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Patent', code: 'PAT' },
+  { id: '60c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Trademark', code: 'TMRK' },
 ];
 
 /**
@@ -162,6 +189,21 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
+  },
+  // Task 020 (FR-06): the read-only Document Name row (value + pencil). ADR-021 / fluent-v9-host-visual-fit —
+  // tokens only, sized for the narrow pane; the value truncates rather than wrapping/overflowing.
+  documentNameDisplay: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    minHeight: '32px',
+  },
+  documentNameText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
   },
   actions: {
     display: 'flex',
@@ -292,8 +334,63 @@ export interface SaveFlowProps {
   emailBody?: string;
   /** Document URL (Word only) */
   documentUrl?: string;
-  /** Document content as base64 (Word only) */
+  /**
+   * Document content as a base64 VALUE (Word only) — already in hand. Used only when
+   * {@link captureDocumentContent} is absent (tests, or any future non-live caller); production
+   * `SaveView` supplies the live capture function instead (task 045).
+   */
   documentContentBase64?: string;
+  /**
+   * Task 045: reads the open document's CURRENT bytes, live, at the moment a save is submitted —
+   * threaded from `SaveView` (`hostAdapter.getDocumentContent()`), gated on the adapter's
+   * `canGetDocumentContent` capability (NFR-10, never a `hostType` check). Forwarded into every save
+   * attempt's context by `buildSaveContext` below, so the first Save, "Keep both", "Save as new
+   * version", the hook's `retry()` (which resends the same context/callback), and "Save Another"'s
+   * next Save press all re-invoke it and upload the document as it is at THAT moment — never a
+   * mount-time snapshot. `undefined` on Outlook (no document bytes) or while the capability is absent.
+   */
+  captureDocumentContent?: () => Promise<string>;
+  /**
+   * `sprk_document` id resolved by task 013's FR-01 identity resolution (task 021 / FR-07), threaded
+   * down from `App.savedContext` via `SaveView`. `undefined` when unresolved (a new document, or
+   * resolution hasn't completed) — the Profile section renders its no-identity state and makes no
+   * profile read call.
+   */
+  resolvedDocumentId?: string;
+  /**
+   * The open document's identity state (task 024 / FR-11), threaded from `App` via `SaveView`. A resolved
+   * identity makes Save DEFAULT to a new version of that record, with an explicit "a new document"
+   * override; `undefined` means identity does not apply (Outlook) → a plain create save, as before.
+   */
+  documentIdentity?: DocumentIdentityState;
+  /** Re-runs identity resolution ("Check again" / "Try again"). Also the task 027 / FR-10
+   * return-path re-read for the related-record card, fired on focus/visibility after the pane
+   * regains focus following a record opened via the browser-tab escape hatch. */
+  onRetryDocumentIdentity?: () => void;
+  /**
+   * task 027 / FR-10 (NFR-10): whether this host can open a browser tab
+   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `SaveView` from the live
+   * adapter — never a `hostType` check here). `false`/absent renders the related-record card and
+   * the Document-record affordance WITHOUT their open action — the fallback surface, not an error.
+   */
+  canOpenRecord?: boolean;
+  /**
+   * task 040 / FR-19 (NFR-10): whether this host can fetch the Association Engine's "Related to"
+   * auto-match candidates (`hostAdapter.getCapabilities().canSuggestRelatedRecords`, decided by
+   * `SaveView` from the live adapter — never a `hostType` check here). `false`/absent skips the
+   * fetch entirely — the "Related to" picker still works via manual search/create, just without
+   * pre-ranked suggestion cards.
+   */
+  canSuggestRelatedRecords?: boolean;
+  /**
+   * task 020 / FR-06 (NFR-10): whether this host can supply the open item's own name as the
+   * Document Name field's default (`hostAdapter.getCapabilities().canProvideDocumentName`, decided
+   * by `SaveView` from the live adapter — never a `hostType` check here). `false`/absent leaves the
+   * field as a plain, empty Textarea with no default and no pencil affordance — Outlook's existing,
+   * pre-task-020 behavior (see the capability's doc comment in `shared/adapters/types.ts` for why
+   * Outlook is false despite technically having a subject it could offer).
+   */
+  canProvideDocumentName?: boolean;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -362,20 +459,24 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     emailBody,
     documentUrl,
     documentContentBase64,
+    captureDocumentContent,
+    resolvedDocumentId,
+    documentIdentity,
+    onRetryDocumentIdentity,
+    canOpenRecord = false,
+    canSuggestRelatedRecords = false,
+    canProvideDocumentName = false,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
     onSaved,
-    onQuickCreate,
     onViewDocument,
-    onNavigate,
-    allowedEntityTypes,
     showDocumentInfo = true,
     className,
   } = props;
 
   const styles = useStyles();
-  const { announce } = useAnnounce();
+  const { announce, liveRegion } = useAnnounce();
 
   // Initialize save flow hook
   const saveFlowOptions: UseSaveFlowOptions = useMemo(
@@ -389,7 +490,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       onError: error => {
         announce(`Error: ${error.message}`, 'assertive');
       },
-      onDuplicate: (docId, message) => {
+      onDuplicate: (_docId, message) => {
         announce('Duplicate detected: ' + message, 'polite');
       },
     }),
@@ -402,10 +503,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     setSelectedEntity,
     selectedAttachmentIds,
     setSelectedAttachmentIds,
-    includeBody,
-    setIncludeBody,
-    processingOptions,
-    toggleProcessingOption,
     jobStatus,
     error,
     clearError,
@@ -415,13 +512,108 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     startSave,
     reset,
     retry,
-    savedDocumentId,
     savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
 
-  // Local state for document metadata fields
-  const [documentName, setDocumentName] = useState<string>('');
-  const [documentDescription, setDocumentDescription] = useState<string>('');
+  // Local state for document metadata fields.
+  //
+  // Task 020 (FR-06): gated on `canProvideDocumentName` (NFR-10 — converted from an initial
+  // `hostType === 'word'` gate per task 040's precedent; see that capability's doc comment in
+  // `shared/adapters/types.ts`). When true, the field defaults to the open item's own name minus its
+  // extension (derived from `itemName` — see `defaultDocumentName` below) and is editable in-pane
+  // behind a pencil affordance. When false (Outlook, always, today), `documentName` still starts
+  // empty with no default and no pencil, exactly as before task 020, so `effectiveDocumentName` /
+  // `email.isNameSystemDerived` (useSaveFlow.ts, task 046 (b)) keep their existing meaning.
+  // Lazy-initialized from the default so a capable pane's very first render already shows it
+  // (SaveView only mounts SaveFlow once its own itemName load completes) rather than flashing
+  // empty-then-populated.
+  const [documentName, setDocumentName] = useState<string>(() =>
+    canProvideDocumentName && itemName ? stripDocumentExtension(itemName) : ''
+  );
+  // Whether the user has ever edited the value (typed a character while the pencil was open). Once true, the
+  // default-sync effect below never overwrites it again — an identity/itemName refresh must not clobber an
+  // edit. Reset by Cancel (the wizard "Cancel" pattern) and by a fully-emptied commit (§ closeDocumentNameEditing).
+  const [documentNameTouched, setDocumentNameTouched] = useState(false);
+  // Read-only display (with a pencil affordance) vs. an editable Input. Word only — see above.
+  const [isEditingDocumentName, setIsEditingDocumentName] = useState(false);
+  // The value at the moment editing opened, so Escape can revert to it without depending on effect timing.
+  const documentNameBeforeEditRef = useRef('');
+  // Suppresses the onBlur "commit" handler for a blur the component itself triggers (Enter-commit or
+  // Escape-cancel unmount the <Input>, which can also fire a native blur) — see closeDocumentNameEditing.
+  const suppressNextDocumentNameBlurRef = useRef(false);
+
+  // Task 020 (FR-06): the FR-06 default — the open item's own name, minus its extension. `undefined`
+  // when the host has no `canProvideDocumentName` capability (Outlook, today) and while `itemName`
+  // hasn't loaded yet.
+  const defaultDocumentName = useMemo(
+    () => (canProvideDocumentName && itemName ? stripDocumentExtension(itemName) : undefined),
+    [canProvideDocumentName, itemName]
+  );
+
+  // Keeps the field in sync with the default until the user edits it or opens the editor — covers the
+  // ordinary case where SaveView mounts SaveFlow before its own `itemName` load resolves, and the
+  // identity-retry re-read (task 027 / FR-10) which can re-fire `itemName`/the capability.
+  useEffect(() => {
+    if (!canProvideDocumentName) return;
+    if (documentNameTouched || isEditingDocumentName) return;
+    if (defaultDocumentName !== undefined) setDocumentName(defaultDocumentName);
+  }, [defaultDocumentName, canProvideDocumentName, documentNameTouched, isEditingDocumentName]);
+
+  const handleStartEditDocumentName = useCallback(() => {
+    documentNameBeforeEditRef.current = documentName;
+    setIsEditingDocumentName(true);
+    announce('Editing document name', 'polite');
+  }, [documentName, announce]);
+
+  const handleDocumentNameChange = useCallback((_e: unknown, data: { value: string }) => {
+    setDocumentName(data.value);
+    setDocumentNameTouched(true);
+  }, []);
+
+  // commit=true (Enter, or blur-to-commit — the standard inline-edit convention): an emptied value falls
+  // back to the FR-06 default rather than left showing a blank name (the "never empty" acceptance criterion
+  // holds either way, via buildSaveContext's truthy check below, but this avoids the confusing blank label).
+  // commit=false (Escape): reverts to the pre-edit value.
+  const closeDocumentNameEditing = useCallback(
+    (commit: boolean) => {
+      suppressNextDocumentNameBlurRef.current = true;
+      if (commit) {
+        const trimmed = documentName.trim();
+        if (trimmed) {
+          setDocumentNameTouched(true);
+        } else {
+          setDocumentName(defaultDocumentName ?? '');
+          setDocumentNameTouched(false);
+        }
+      } else {
+        setDocumentName(documentNameBeforeEditRef.current);
+      }
+      setIsEditingDocumentName(false);
+      announce(commit ? 'Document name updated' : 'Document name edit canceled', 'polite');
+    },
+    [documentName, defaultDocumentName, announce]
+  );
+
+  const handleDocumentNameKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        closeDocumentNameEditing(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDocumentNameEditing(false);
+      }
+    },
+    [closeDocumentNameEditing]
+  );
+
+  const handleDocumentNameBlur = useCallback(() => {
+    if (suppressNextDocumentNameBlurRef.current) {
+      suppressNextDocumentNameBlurRef.current = false;
+      return;
+    }
+    closeDocumentNameEditing(true);
+  }, [closeDocumentNameEditing]);
 
   // Auto-match candidates for the "Related to" cards (engine suggestions, ranked
   // highest-first). Replaces the old single pre-selection with the reconciliation-
@@ -429,29 +621,197 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [relatedCandidates, setRelatedCandidates] = useState<RelatedCandidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
 
+  // Matter Type list for the required field on Matter quick-create (task 038). A small reference list
+  // (5 rows in dev) loaded once on mount, host-neutral (NFR-10: no hostType check), never gated on a
+  // keystroke like the /search/entities typeahead.
+  //
+  // A failed load and "the table has zero active rows" are different states (coordinator fix,
+  // 2026-09-13): fetchMatterTypes THROWS on failure, so a transient BFF/network fault surfaces as
+  // `matterTypesError` — a readable, announced (NFR-11), non-blocking message with a single
+  // user-initiated Retry — rather than silently making Matter quick-create permanently unsatisfiable
+  // for the rest of the session. Project/Invoice quick-create never reads this state at all.
+  const [matterTypes, setMatterTypes] = useState<MatterTypeChoice[]>([]);
+  const [matterTypesLoading, setMatterTypesLoading] = useState(false);
+  const [matterTypesError, setMatterTypesError] = useState<string | null>(null);
+  const matterTypesMountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      matterTypesMountedRef.current = false;
+    },
+    []
+  );
+
+  const loadMatterTypes = useCallback(async () => {
+    if (isBrowserTestMode()) {
+      setMatterTypes(DEMO_MATTER_TYPES);
+      setMatterTypesError(null);
+      return;
+    }
+    if (!apiBaseUrl || !getAccessToken) return;
+    setMatterTypesLoading(true);
+    setMatterTypesError(null);
+    try {
+      const token = await getAccessToken();
+      const types = await fetchMatterTypes(apiBaseUrl, token, getAccessToken);
+      if (!matterTypesMountedRef.current) return;
+      setMatterTypes(types);
+    } catch {
+      if (!matterTypesMountedRef.current) return;
+      const message = "Couldn't load matter types. Try again, or search for an existing record instead.";
+      setMatterTypesError(message);
+      // NFR-11: the failure is announced — this is the one state change here a screen-reader user
+      // could otherwise miss entirely (the field just stays a disabled, empty-looking dropdown).
+      announce(message, 'assertive');
+    } finally {
+      if (matterTypesMountedRef.current) setMatterTypesLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apiBaseUrl/getAccessToken are stable for the pane's lifetime; announce is stable per useAnnounce
+  }, [apiBaseUrl, getAccessToken]);
+
+  useEffect(() => {
+    void loadMatterTypes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetched once per mount; loadMatterTypes is re-invoked explicitly by the Retry action, not by a dependency change
+  }, []);
+
+  // ── FR-11 save mode (task 024) ──────────────────────────────────────────────────────────────────
+  // The user's EXPLICIT choice; null = the identity's default (a new version when resolved). A new identity
+  // (first resolution, or a retry) starts again from its own default — never from a stale override.
+  const [saveModeChoice, setSaveModeChoice] = useState<SaveModeChoice | null>(null);
+  useEffect(() => {
+    setSaveModeChoice(null);
+  }, [documentIdentity]);
+  const saveMode = useMemo(() => resolveSaveMode(documentIdentity, saveModeChoice), [documentIdentity, saveModeChoice]);
+  const isVersionMode = saveMode.target?.mode === 'version';
+  // What the LAST submitted save was — drives the success copy and whether "Related to" is handed on.
+  const [submittedTarget, setSubmittedTarget] = useState<SaveTarget | null>(null);
+
+  const handleSaveModeChange = useCallback(
+    (choice: SaveModeChoice | null) => {
+      setSaveModeChoice(choice);
+      // NFR-11: every mode change is announced.
+      if (choice === 'new') {
+        announce('Save mode: a new document. The existing document will not be changed.', 'polite');
+      } else if (choice === 'version') {
+        announce(`Save mode: a new version of ${saveMode.documentLabel ?? 'the existing document'}.`, 'polite');
+      } else {
+        announce('Save as a new document is no longer selected. Save is unavailable.', 'polite');
+      }
+    },
+    [announce, saveMode.documentLabel]
+  );
+
+  // NFR-11: announce what identity resolution decided for Save.
+  useEffect(() => {
+    switch (saveMode.view) {
+      case 'version':
+        announce(
+          `This document is already in Spaarke. Save will add a new version of ${saveMode.documentLabel ?? 'it'}.`,
+          'polite'
+        );
+        break;
+      case 'conflict':
+        announce(
+          'This document can’t be saved from here: Spaarke has a conflicting record for this file.',
+          'assertive'
+        );
+        break;
+      case 'undetermined':
+        announce(
+          'Couldn’t check whether this document is already in Spaarke. Try again, or choose to save it as a new document.',
+          'polite'
+        );
+        break;
+      case 'denied':
+        announce('You can’t add a version to this document. You can save your copy as a new document.', 'polite');
+        break;
+      default:
+        break;
+    }
+  }, [saveMode.view, saveMode.documentLabel, announce]);
+
+  // ── task 027 / FR-10: open the related record / Document record from the pane ──────────────────
+  // Spike-2 (notes/spikes/spike-2-dialog-api.md) selected Option 3 — a browser-tab escape hatch via
+  // Office.context.ui.openBrowserWindow, never the Office Dialog API. `canOpenRecord` (NFR-10) is a
+  // capability flag threaded from SaveView's hostAdapter.getCapabilities().canOpenBrowserWindow —
+  // gating happens here and in the JSX below, never on `hostType`.
+  // The Open buttons also need ORG_URL. Unset, `openRecord` can only no-op, so a visible button would
+  // do nothing when clicked; hide it instead. The deploy workflow sets ORG_URL.
+  const openRecordAvailable = canOpenRecord && Boolean(process.env.ORG_URL);
+  const hasOpenedExternalRecordRef = useRef(false);
+  const [profileRefreshSignal, setProfileRefreshSignal] = useState(0);
+
+  const handleOpenRelatedRecord = useCallback((record: RelatedRecordView) => {
+    const result = openRecord({
+      orgUrl: process.env.ORG_URL,
+      entityType: record.entityType,
+      recordId: record.id,
+    });
+    if (result.opened) {
+      hasOpenedExternalRecordRef.current = true;
+    }
+  }, []);
+
+  const handleOpenDocumentRecord = useCallback(() => {
+    if (!resolvedDocumentId) return;
+    const result = openRecord({
+      orgUrl: process.env.ORG_URL,
+      entityType: 'sprk_document',
+      recordId: resolvedDocumentId,
+    });
+    if (result.opened) {
+      hasOpenedExternalRecordRef.current = true;
+    }
+  }, [resolvedDocumentId]);
+
+  // Return path (Spike-2 §d): an unmodified Dataverse form never calls `messageParent`, so every
+  // option Spike-2 compared — including this one — falls back to a focus/visibility-triggered
+  // re-read rather than a push notification. Weaker ("the user came back", not "the user saved a
+  // change") but explicit and the SAME limitation the spike found for every mechanism, not a
+  // shortcut taken here. Scoped to fire only once the user has actually opened a record via this
+  // pane (hasOpenedExternalRecordRef), so ordinary Word/pane focus churn never triggers a re-read.
+  useEffect(() => {
+    function handlePaneReturn(): void {
+      if (!hasOpenedExternalRecordRef.current) return;
+      if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return;
+      onRetryDocumentIdentity?.();
+      setProfileRefreshSignal(signal => signal + 1);
+      announce('Refreshed with the latest changes from the record.', 'polite');
+    }
+    document.addEventListener('visibilitychange', handlePaneReturn);
+    window.addEventListener('focus', handlePaneReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', handlePaneReturn);
+      window.removeEventListener('focus', handlePaneReturn);
+    };
+  }, [onRetryDocumentIdentity, announce]);
+
   // Build save context
   const buildSaveContext = useCallback(
     (): SaveFlowContext => ({
       hostType,
-      itemId,
-      itemName,
-      documentName: documentName || undefined,
-      documentDescription: documentDescription || undefined,
       attachments,
-      senderEmail,
-      senderDisplayName,
-      recipients,
-      sentDate,
-      emailBody,
-      documentUrl,
-      documentContentBase64,
+      ...(saveMode.target ? { saveTarget: saveMode.target } : {}),
+      ...(itemId !== undefined ? { itemId } : {}),
+      ...(itemName !== undefined ? { itemName } : {}),
+      ...(documentName ? { documentName } : {}),
+      ...(senderEmail !== undefined ? { senderEmail } : {}),
+      ...(senderDisplayName !== undefined ? { senderDisplayName } : {}),
+      ...(recipients !== undefined ? { recipients } : {}),
+      ...(sentDate !== undefined ? { sentDate } : {}),
+      ...(emailBody !== undefined ? { emailBody } : {}),
+      ...(documentUrl !== undefined ? { documentUrl } : {}),
+      ...(documentContentBase64 !== undefined ? { documentContentBase64 } : {}),
+      // Task 045: the LIVE capture function, forwarded as-is (never invoked here) — `startSave` calls
+      // it at submission time, fresh, for every attempt that reaches it (first Save, "Keep both",
+      // "Save as new version", a hook `retry()` that resends this same context, and the next Save
+      // press after "Save Another").
+      ...(captureDocumentContent ? { captureDocumentContent } : {}),
     }),
     [
       hostType,
       itemId,
       itemName,
       documentName,
-      documentDescription,
       attachments,
       senderEmail,
       senderDisplayName,
@@ -460,22 +820,61 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       emailBody,
       documentUrl,
       documentContentBase64,
+      captureDocumentContent,
+      saveMode.target,
     ]
   );
 
-  // Handle save button click
+  // Handle save button click. A null target means the save mode is not settled (identity still checking,
+  // a conflict, or an undetermined identity with no explicit choice) — the button is disabled then, and this
+  // guard makes sure nothing is sent even if it were not.
   const handleSave = useCallback(() => {
-    const context = buildSaveContext();
-    startSave(context);
-  }, [buildSaveContext, startSave]);
+    if (!saveMode.target) return;
+    setSubmittedTarget(saveMode.target);
+    startSave(buildSaveContext());
+  }, [buildSaveContext, saveMode.target, startSave]);
 
-  // Cancel = clear the current selection + fields (wizard "Cancel" pattern).
+  // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
+  // the identity's default.
   const handleCancel = useCallback(() => {
     setSelectedEntity(null);
     setDocumentName('');
-    setDocumentDescription('');
+    // Task 020: un-touch so the sync effect re-applies the Word FR-06 default (Outlook has none, so this
+    // is a no-op there — the field simply stays empty, exactly as before task 020).
+    setDocumentNameTouched(false);
+    setIsEditingDocumentName(false);
+    setSaveModeChoice(null);
     reset();
   }, [setSelectedEntity, reset]);
+
+  // A refused VERSION save whose cause is the existing document (task 024): switch to "a new document" so
+  // the user can choose where to file it and save. Deliberately does not save on its own.
+  const handleSaveAsNewInstead = useCallback(() => {
+    setSaveModeChoice('new');
+    clearError();
+    announce('Save mode: a new document. Choose where to file it, then select Save.', 'polite');
+  }, [clearError, announce]);
+
+  // Task 025: the pane's "Keep both" choice after a refused CREATE collision (OFFICE_020) — an immediate
+  // retry (unlike handleSaveAsNewInstead, no new required input is unlocked: the entity, content and name
+  // are already fully specified) asking the server to upload under a Graph-chosen non-colliding name
+  // instead of refusing again.
+  const handleKeepBoth = useCallback(() => {
+    clearError();
+    startSave({ ...buildSaveContext(), allowRename: true });
+    announce('Saving under a new name.', 'polite');
+  }, [buildSaveContext, clearError, startSave, announce]);
+
+  // Task 025: the pane's "Save as new version" choice after a refused CREATE collision — resubmits
+  // through the ALREADY-SHIPPED FR-11 version-save path, targeting the document the server's refusal
+  // resolved. No-op if the server could not resolve one (the button is hidden in that case).
+  const handleSaveAsVersionInstead = useCallback(() => {
+    const existingDocumentId = error?.collisionExistingDocumentId;
+    if (!existingDocumentId) return;
+    clearError();
+    startSave({ ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } });
+    announce('Saving as a new version of the existing document.', 'polite');
+  }, [buildSaveContext, clearError, startSave, announce, error]);
 
   // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
@@ -489,12 +888,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   );
 
   // Fetch the engine's ranked "Related to" candidates for the auto-match cards.
-  // Reuses the SHARED derivePrimaryReview model (no fork; ADR-045). Outlook only,
-  // best-effort: a 404 (email not captured) / failure → no cards (the user searches
-  // instead — never an auto-filed guess). The browser test harness seeds demo
-  // candidates so the card UX is iterable.
+  // Reuses the SHARED derivePrimaryReview model (no fork; ADR-045). Capability-gated (task 040 /
+  // FR-19, NFR-10) — never a `hostType` check: `canSuggestRelatedRecords` is always false on Word
+  // (no captured-communication record for the engine to key off), so this is a no-op there without
+  // needing to know which host is running. Best-effort: a 404 (email not captured) / failure → no
+  // cards (the user searches instead — never an auto-filed guess). The browser test harness seeds
+  // demo candidates so the card UX is iterable.
   useEffect(() => {
-    if (hostType !== 'outlook' || !itemId) return;
+    if (!canSuggestRelatedRecords || !itemId) return;
     let cancelled = false;
     setCandidatesLoading(true);
     (async () => {
@@ -513,87 +914,149 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [hostType, itemId]);
+  }, [canSuggestRelatedRecords, itemId]);
 
   // §C — when a save completes, hand the selected "Related to" record to the host once so it can
   // seed the Create To Do tab's regarding. Reset on a fresh save (idle/selecting) so a second save
   // re-notifies. Fires on 'complete' and 'duplicate' (both mean "this email is now filed to X").
+  // A VERSION save (task 024) files nothing: it never re-associates the existing record, and it does not send
+  // the picker's selection, so there is no "Related to" to hand on.
   const savedNotifiedRef = useRef(false);
   useEffect(() => {
-    if ((flowState === 'complete' || flowState === 'duplicate') && selectedEntity && !savedNotifiedRef.current) {
+    if (
+      (flowState === 'complete' || flowState === 'duplicate') &&
+      selectedEntity &&
+      submittedTarget?.mode !== 'version' &&
+      !savedNotifiedRef.current
+    ) {
       savedNotifiedRef.current = true;
       onSaved?.(selectedEntity);
     } else if (flowState === 'idle' || flowState === 'selecting') {
       savedNotifiedRef.current = false;
     }
-  }, [flowState, selectedEntity, onSaved]);
+  }, [flowState, selectedEntity, submittedTarget, onSaved]);
 
   // "Look up another record" search — scoped to the selected chip type.
+  //
+  // Task 053: a failed search used to render identically to "nothing matched" (`return []` on both a
+  // non-OK response and a thrown exception) — the user could never tell the two apart. Now a failure
+  // THROWS a descriptive Error (server `detail` when the response is ProblemDetails-shaped, a sensible
+  // status-aware fallback otherwise, via `describeFetchFailure`); `RelatedToPicker`'s `runSearch` catches
+  // it and renders it distinctly from an empty result set, with a Retry. A genuinely empty search still
+  // resolves to `[]`, unchanged.
   const relatedSearch = useCallback(
     async (query: string, type: EntityType): Promise<EntitySearchResult[]> => {
-      if (!apiBaseUrl || !getAccessToken) return [];
+      if (!apiBaseUrl || !getAccessToken) {
+        throw new Error("Couldn't search: the pane isn't fully configured. Reload and try again.");
+      }
+
+      let res: Response;
       try {
         const token = await getAccessToken();
-        const res = await authenticatedJsonFetch(
+        res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10`,
           { headers: { 'Content-Type': 'application/json' } },
           token,
           { getRetryToken: getAccessToken }
         );
-        if (!res.ok) return [];
-        const data = await res.json();
-        const rows = (data.results ?? []) as Array<{
-          id: string;
-          entityType: string;
-          logicalName: string;
-          name: string;
-          displayInfo?: string;
-        }>;
-        return rows.map(item => ({
-          id: item.id,
-          entityType: item.entityType as EntityType,
-          logicalName: item.logicalName,
-          name: item.name,
-          ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
-        }));
       } catch {
-        return [];
+        // Network/token failure before any response existed — never silently "no matches".
+        throw new Error("Couldn't reach Spaarke to search. Check your connection and try again.");
       }
+
+      if (!res.ok) {
+        const errorMsg = await describeFetchFailure(res);
+        throw new Error(errorMsg.message);
+      }
+
+      const data = await res.json();
+      const rows = (data.results ?? []) as Array<{
+        id: string;
+        entityType: string;
+        logicalName: string;
+        name: string;
+        displayInfo?: string;
+      }>;
+      return rows.map(item => ({
+        id: item.id,
+        entityType: item.entityType as EntityType,
+        logicalName: item.logicalName,
+        name: item.name,
+        ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
+      }));
     },
     [apiBaseUrl, getAccessToken]
   );
 
   // "New record" — BFF-backed inline create (Slice 3, #10). POST /api/office/quickcreate/{type}
   // creates the sprk_matter/sprk_project under the caller's ownership and returns it; the picker
-  // auto-selects the created record as the Related-to.
+  // auto-selects the created record as the Related-to. Matter (task 038): the request always carries
+  // `matterTypeId` — a bare lowercase GUID (ADR-044) — and any server warning (e.g. an unresolvable
+  // type, or numbering not existing yet) is surfaced, never swallowed. The pane never sends or
+  // constructs a matter number; that is a separate server-side numbering project.
+  //
+  // Task 053: task 031 made Project owner resolution load-bearing — an unresolvable caller now gets a
+  // 403 `owner_unresolved` with an actionable `detail` and NO row created. This used to be discarded
+  // (`if (!res.ok) return null`), so the user clicked Create and saw nothing happen — the server did the
+  // right thing and the pane hid it. A failure now THROWS a descriptive Error carrying the server's own
+  // message (via `describeFetchFailure` — the same ProblemDetails-parsing path `errorMessages.ts` already
+  // uses for the top-level save/collision flows); `RelatedToPicker`'s `handleCreate` catches it and shows
+  // the real message instead of a generic "Couldn't create the {type}."
   const createRelatedRecord = useCallback(
-    async (type: EntityType, name: string): Promise<EntitySearchResult | null> => {
+    async (type: EntityType, name: string, matterTypeId?: string): Promise<CreateRecordResult> => {
       // Test harness: return a mock created record so the flow is iterable without the BFF.
       if (isBrowserTestMode()) {
         await new Promise(resolve => setTimeout(resolve, 400));
         return {
-          id: `demo-new-${Date.now()}`,
-          entityType: type,
-          logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
-          name,
-          displayInfo: 'New',
+          record: {
+            id: `demo-new-${Date.now()}`,
+            entityType: type,
+            logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
+            name,
+            displayInfo: 'New',
+          },
         };
       }
-      if (!apiBaseUrl || !getAccessToken) return null;
+      if (!apiBaseUrl || !getAccessToken) {
+        throw new Error(`Couldn't create the ${type}: the pane isn't fully configured. Reload and try again.`);
+      }
+
+      let res: Response;
       try {
         const token = await getAccessToken();
-        const res = await authenticatedJsonFetch(
+        const body = type === 'Matter' && matterTypeId ? { name, matterTypeId: cleanGuid(matterTypeId) } : { name };
+        res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/quickcreate/${type.toLowerCase()}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) },
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
           token,
           { getRetryToken: getAccessToken }
         );
-        if (!res.ok) return null;
-        const data = (await res.json()) as { id: string; logicalName: string; name: string };
-        return { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name };
       } catch {
-        return null;
+        // Network/token failure before any response existed — never silently "nothing happened".
+        throw new Error(`Couldn't reach Spaarke to create the ${type}. Check your connection and try again.`);
       }
+
+      if (!res.ok) {
+        const errorMsg = await describeFetchFailure(res);
+        throw new Error(errorMsg.message);
+      }
+
+      const data = (await res.json()) as {
+        id: string;
+        logicalName: string;
+        name: string;
+        warnings?: string[];
+      };
+      // The chosen matterTypeId didn't resolve (renamed/removed on the server since this pane's
+      // cache was populated) — clear the cache so the NEXT fetch (a later create, or the pane's next
+      // open) picks up the current reference table rather than serving the same stale entry again.
+      if (type === 'Matter' && warningsIndicateMatterTypeNotFound(data.warnings)) {
+        clearMatterTypesCache();
+      }
+      return {
+        record: { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name },
+        ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+      };
     },
     [apiBaseUrl, getAccessToken]
   );
@@ -654,7 +1117,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         <ProgressBar value={progressPercentage / 100} />
 
         <div className={styles.stageList} role="list" aria-label="Processing stages">
-          {jobStatus.stages.map(stage => (
+          {(jobStatus.stages ?? []).map(stage => (
             <div
               key={stage.name}
               className={styles.stageItem}
@@ -677,11 +1140,20 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     <Card className={styles.successCard}>
       <CheckmarkCircleRegular className={styles.successIcon} aria-hidden="true" />
       <Text size={500} weight="semibold">
-        Document Saved
+        {submittedTarget?.mode === 'version' ? 'New Version Saved' : 'Document Saved'}
       </Text>
       <Body1 style={{ marginTop: tokens.spacingVerticalS }}>
-        Your document has been saved to Spaarke and associated with{' '}
-        <Text weight="semibold">{selectedEntity?.name}</Text>.
+        {submittedTarget?.mode === 'version' ? (
+          <>
+            A new version of <Text weight="semibold">{saveMode.documentLabel ?? 'the document'}</Text> was saved to
+            Spaarke.
+          </>
+        ) : (
+          <>
+            Your document has been saved to Spaarke and associated with{' '}
+            <Text weight="semibold">{selectedEntity?.name}</Text>.
+          </>
+        )}
       </Body1>
       <div className={styles.successActions}>
         <Button appearance="primary" icon={<OpenRegular />} onClick={handleViewDocument} disabled={!savedDocumentUrl}>
@@ -745,6 +1217,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             Retry
           </Button>
         )}
+        {error?.offerSaveAsNew && saveMode.view === 'version' && (
+          <Button appearance="outline" size="small" onClick={handleSaveAsNewInstead}>
+            Save as new document
+          </Button>
+        )}
         <Button appearance="subtle" size="small" onClick={clearError}>
           Dismiss
         </Button>
@@ -752,48 +1229,64 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     </MessageBar>
   );
 
-  // Render processing options
-  const renderProcessingOptions = () => (
-    <div className={styles.section}>
-      <div className={styles.sectionTitle}>
-        <SparkleRegular />
-        <Text weight="semibold">AI Processing</Text>
-      </div>
-      <Card>
-        <div className={styles.processingOptions}>
-          <div className={styles.processingOption}>
-            <div className={styles.processingLabel}>
-              <PersonSearchRegular />
-              <Text>Profile Summary</Text>
-            </div>
-            <Switch
-              checked={processingOptions.profileSummary}
-              onChange={() => toggleProcessingOption('profileSummary')}
-              disabled={isSaving}
-              aria-label="Enable profile summary generation"
-            />
-          </div>
-
-          <Divider />
-
-          <div className={styles.processingOption}>
-            <div className={styles.processingLabel}>
-              <SearchRegular />
-              <Text>Search Index</Text>
-            </div>
-            <Switch
-              checked={processingOptions.ragIndex}
-              onChange={() => toggleProcessingOption('ragIndex')}
-              disabled={isSaving}
-              aria-label="Enable search indexing"
-            />
-          </div>
-        </div>
-      </Card>
-    </div>
+  // Task 025: a refused CREATE save's filename collision (OFFICE_020) — the shipped two-option choice,
+  // mirroring the OBO upload wizard's own dialog (Keep both / Save as new version) without importing it
+  // (ADR-012 exception). Kept as ITS OWN MessageBar, separate from renderErrorState, so a collision never
+  // reads as a failure: `intent="warning"` (never "error"), stated in neutral text — "Nothing was saved"
+  // — per the shipped wizard's own copy convention. Dismissing (the Dismiss button, same clearError as
+  // every other error state) writes nothing further: the refusal itself already left no bytes and no
+  // sprk_document row (server-side; task 025's non-destructive invariant).
+  const renderCollisionState = () => (
+    <MessageBar intent="warning">
+      <MessageBarBody>
+        <MessageBarTitle>{error?.title || 'Name Already Exists'}</MessageBarTitle>
+        {error?.message}
+        {/* Task 055 (#1005): NAME the document the version retry would write into. Offering that retry
+            against an opaque id is what let a document be written as a new version of an unrelated one
+            that merely shared Word's default file name. Absent when the server withheld it (the caller
+            cannot read that document) — and then no version retry is offered either. */}
+        {error?.collisionExistingDocumentName && (
+          <Text
+            size={200}
+            style={{
+              display: 'block',
+              marginTop: tokens.spacingVerticalXS,
+              fontWeight: tokens.fontWeightSemibold,
+            }}
+          >
+            That name belongs to: {error.collisionExistingDocumentName}
+          </Text>
+        )}
+        <Text size={200} style={{ display: 'block', marginTop: tokens.spacingVerticalXS }}>
+          {error?.collisionExistingDocumentId
+            ? 'Keep both uploads this file under a new name. Save as new version keeps the existing document and adds this file as its latest version.'
+            : 'Keep both uploads this file under a new name.'}
+        </Text>
+      </MessageBarBody>
+      <MessageBarActions>
+        <Button appearance="primary" size="small" onClick={handleKeepBoth}>
+          Keep both
+        </Button>
+        {error?.collisionExistingDocumentId && (
+          <Button appearance="secondary" size="small" onClick={handleSaveAsVersionInstead}>
+            Save as new version
+          </Button>
+        )}
+        <Button appearance="subtle" size="small" onClick={clearError}>
+          Dismiss
+        </Button>
+      </MessageBarActions>
+    </MessageBar>
   );
 
   // Render main form
+  //
+  // task 040 / FR-19 audit: the `hostType === 'outlook'` reads below (label, sender, sent date,
+  // attachments) are host-shaped DATA, not feature gates — by the time these props reach SaveFlow,
+  // SaveView has already capability-gated WHICH VALUES got populated (canGetSender/canGetAttachments/
+  // etc.), so senderEmail/senderDisplayName/sentDate/attachments are already empty on Word regardless
+  // of this check. Left as-is (documented in notes/parity-checklist.md) rather than threading a
+  // separate `itemType` prop through for a condition the data already enforces.
   const renderForm = () => (
     <>
       {/* Document Info */}
@@ -821,59 +1314,125 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         </div>
       )}
 
-      {/* Related to — the RelatedToPicker renders its own header + type chips
-          (UI feedback 2026-09-02); reconciliation-style auto-match cards. */}
-      <div className={styles.section}>
-        <RelatedToPicker
-          value={selectedEntity}
-          onChange={handleEntitySelect}
-          candidates={relatedCandidates}
-          candidatesLoading={candidatesLoading}
-          onSearch={relatedSearch}
-          onCreateRecord={createRelatedRecord}
-          // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
-          allowedTypes={['Matter', 'Project', 'Invoice']}
-          defaultType="Matter"
-          disabled={isSaving}
-        />
-      </div>
+      {/* Filed-to card — task 026 / FR-09. A READ-BACK of what the identified document is ALREADY filed to,
+          sourced from the SAME resolved identity SaveModeSection reads (no second network call, so the pane
+          never shows two different answers). Deliberately OUTSIDE the `!isVersionMode` gate below: a resolved
+          identity DEFAULTS to a version save (task 024), which is exactly when RelatedToPicker is hidden — the
+          filed-to card is the pane's only indication of the record in that common case. It stays visually and
+          functionally distinct from RelatedToPicker (an INPUT for an unfiled document) even when both render
+          together for an explicit "a new document" override. The click seam (`onOpenRecord`) is task 027 /
+          FR-10 (NFR-10): supplied only when `canOpenRecord` is true — absent it, the card renders as
+          plain, non-interactive text (its own fallback, not a host-type branch here). */}
+      <RelatedRecordCard
+        {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+        {...(openRecordAvailable ? { onOpenRecord: handleOpenRelatedRecord } : {})}
+      />
 
-      {/* Document Metadata Fields */}
+      {/* Related to + Document Details apply to a NEW document only. A version save (task 024) keeps the
+          existing record's name and associations — the server never renames or re-associates on that path
+          (task 023 D-5) — so these inputs would have no effect there, and are not shown. They appear as soon
+          as the user chooses "A new document". */}
+      {!isVersionMode && (
+        <>
+          {/* Related to — the RelatedToPicker renders its own header + type chips
+              (UI feedback 2026-09-02); reconciliation-style auto-match cards. */}
+          <div className={styles.section}>
+            <RelatedToPicker
+              value={selectedEntity}
+              onChange={handleEntitySelect}
+              candidates={relatedCandidates}
+              candidatesLoading={candidatesLoading}
+              onSearch={relatedSearch}
+              onCreateRecord={createRelatedRecord}
+              // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
+              allowedTypes={['Matter', 'Project', 'Invoice']}
+              defaultType="Matter"
+              matterTypeOptions={matterTypes}
+              matterTypesLoading={matterTypesLoading}
+              matterTypesError={matterTypesError}
+              onRetryMatterTypes={loadMatterTypes}
+              disabled={isSaving}
+            />
+          </div>
+
+          {/* Document Metadata Fields */}
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>
+              <EditRegular />
+              <Text weight="semibold">Document Details</Text>
+            </div>
+            <Card>
+              <div className={styles.fieldContainer}>
+                <Label htmlFor="document-name" className={styles.fieldLabel}>
+                  Document Name
+                </Label>
+                {canProvideDocumentName ? (
+                  isEditingDocumentName ? (
+                    <Input
+                      id="document-name"
+                      value={documentName}
+                      onChange={handleDocumentNameChange}
+                      onKeyDown={handleDocumentNameKeyDown}
+                      onBlur={handleDocumentNameBlur}
+                      placeholder="Enter document name"
+                      disabled={isSaving}
+                      aria-label="Document name"
+                      maxLength={850}
+                      autoFocus
+                    />
+                  ) : (
+                    <div className={styles.documentNameDisplay}>
+                      <Text className={styles.documentNameText}>{documentName || 'Untitled Document'}</Text>
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<EditRegular />}
+                        onClick={handleStartEditDocumentName}
+                        disabled={isSaving}
+                        aria-label="Edit document name"
+                      />
+                    </div>
+                  )
+                ) : (
+                  <Textarea
+                    id="document-name"
+                    value={documentName}
+                    onChange={(_e, data) => setDocumentName(data.value)}
+                    placeholder="Enter document name"
+                    disabled={isSaving}
+                    aria-label="Document name"
+                    rows={2}
+                  />
+                )}
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
+
+      {/* Profile — task 021 / FR-07. Read-only AI profile (sprk_filesummary, sprk_filetldr,
+          sprk_filekeywords, sprk_documenttype) for the document identity task 013 resolved, or an
+          honest per-status / no-identity state. Threaded down rather than re-resolved.
+          `refreshSignal` is the task 027 / FR-10 return-path re-read (see the effect above). */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>
-          <EditRegular />
-          <Text weight="semibold">Document Details</Text>
-        </div>
-        <Card>
-          <div className={styles.fieldContainer}>
-            <Label htmlFor="document-name" className={styles.fieldLabel}>
-              Document Name
-            </Label>
-            <Textarea
-              id="document-name"
-              value={documentName}
-              onChange={(e, data) => setDocumentName(data.value)}
-              placeholder="Enter document name"
-              disabled={isSaving}
-              aria-label="Document name"
-              rows={2}
-            />
-          </div>
-          <div className={styles.fieldContainer} style={{ marginTop: tokens.spacingVerticalM }}>
-            <Label htmlFor="document-description" className={styles.fieldLabel}>
-              Description
-            </Label>
-            <Textarea
-              id="document-description"
-              value={documentDescription}
-              onChange={(e, data) => setDocumentDescription(data.value)}
-              placeholder="Enter document description (optional)"
-              disabled={isSaving}
-              aria-label="Document description"
-              rows={6}
-            />
-          </div>
-        </Card>
+        <DocumentProfileSection
+          {...(resolvedDocumentId !== undefined ? { documentId: resolvedDocumentId } : {})}
+          refreshSignal={profileRefreshSignal}
+        />
+        {/* task 027 / FR-10: the Document-record affordance — opens the `sprk_document` record
+            itself, the same browser-tab escape hatch and the SAME capability gate (NFR-10) as the
+            related-record card above. Only rendered once there is a resolved document to open. */}
+        {openRecordAvailable && resolvedDocumentId && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<OpenRegular />}
+            onClick={handleOpenDocumentRecord}
+            aria-label="Open this document's record in Dataverse"
+          >
+            Open document record
+          </Button>
+        )}
       </div>
 
       {/* Attachment Selector (Outlook only) */}
@@ -892,13 +1451,25 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           saved to Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles
           (UI feedback 2026-09-02). */}
 
-      {/* Footer actions — wizard pattern: Cancel (left), Save (right). */}
+      {/* FR-11 save mode (task 024) — in the footer area, directly above Cancel / Save: a resolved
+          document defaults to "a new version", with an explicit "a new document" override; every other
+          identity outcome states what happens and what the user can do. Inline, not a modal (narrow pane). */}
+      <SaveModeSection
+        identity={documentIdentity}
+        resolution={saveMode}
+        onChoiceChange={handleSaveModeChange}
+        {...(onRetryDocumentIdentity ? { onRetryIdentity: onRetryDocumentIdentity } : {})}
+        disabled={isSaving}
+      />
+
+      {/* Footer actions — wizard pattern: Cancel (left), Save (right). Save stays disabled while the save
+          mode is unsettled (identity checking, a conflict, or an undetermined identity with no choice). */}
       <div className={styles.footer}>
         <Button appearance="secondary" onClick={handleCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid}>
-          {isSaving ? 'Saving...' : 'Save'}
+        <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid || !saveMode.target}>
+          {isSaving ? 'Saving...' : isVersionMode ? 'Save version' : 'Save'}
         </Button>
       </div>
     </>
@@ -926,7 +1497,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       case 'error':
         return (
           <>
-            {renderErrorState()}
+            {error?.offerCollisionChoice ? renderCollisionState() : renderErrorState()}
             {renderForm()}
           </>
         );
@@ -939,6 +1510,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   return (
     <div className={mergeClasses(styles.container, className)} role="form" aria-label="Save to Spaarke">
+      {/* React-owned ARIA live regions (task 018 / NFR-11) -- must be rendered
+          by this component per useAnnounce's contract; placement doesn't
+          matter visually since the regions are sr-only. */}
+      {liveRegion}
       {renderContent()}
     </div>
   );
