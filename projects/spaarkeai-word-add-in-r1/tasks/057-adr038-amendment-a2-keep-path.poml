@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>ADR-038 Amendment A2 — `tests/unit/Sprk.Bff.Api.Tests/**` is the ninth KEEP path</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>startable — owner authorised the amendment 2026-09-19 (CLAUDE.md §6.5 Path B)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits `.claude/` directive surface (main-session-only per CLAUDE.md §3) and amends a binding ADR. The failure mode is silent: an amendment that updates some copies of the KEEP-path list and not others leaves `/test-diet` recommending deletion of protected tests — which is exactly what A1 did and what this task must repair.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR amendment authoring — the reasoning (why the category deserves protection, what the amendment does NOT grant) is the deliverable, not the edit.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`.claude/skills/**` and `.claude/constraints/**` are hot-path (serial PRs only) and sub-agents cannot write to `.claude/` at all.</parallel-reason>
+    <deps>none</deps>
+    <tags>skill-directive, testing, adr, documentation</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend ADR-038 to add `tests/unit/Sprk.Bff.Api.Tests/**` as the NINTH KEEP path category, and repair the two copies of the KEEP-path list that Amendment A1 left stale.</prompt>
+
+  <role>SPAARKE platform developer amending a binding ADR. The deliverable is the reasoning — why this category deserves protection and what the amendment does not grant — not the mechanical edit.</role>
+
+  <goal>`/test-diet` stops classifying the repo's largest test project as a path violation, and every copy of the KEEP-path list says the same thing.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-19 by `/test-diet` at this project's pre-wrap-up pass. This project added **71 test
+      methods across 8 files** under `tests/unit/Sprk.Bff.Api.Tests/**`, which is not among ADR-038's eight
+      KEEP paths. `constraints/testing.md` says a test MUST NOT be introduced outside them — so taken
+      literally, every one is a violation and `/test-diet` heuristic 1 recommends `git mv` or deletion.
+
+      That reading is wrong, and the same wrongness has occurred twice before. The `Sprk.Bff.Api.Tests`
+      project holds roughly **12,400 tests** — the repo's largest suite. A classifier that flags it wholesale
+      is describing a target state the codebase does not occupy. This is the identical shape as Amendment A1
+      (2026-08-24), which added `tests/Spaarke.ArchTests/**` after `/test-diet` classified every architecture
+      test as a delete candidate — *"recommended deleting the mechanism the ADR requires"* — and as the
+      2026-07-09 `tests/integration/seam/**` drift.
+
+      Owner decision 2026-09-19: **Path B — amend the ADR** (CLAUDE.md §6.5).
+    </background>
+
+    <notes>
+      **A1 IS THE TEMPLATE.** `docs/adr/ADR-038-testing-strategy.md:543-600` carries Amendment A1's shape:
+      a dated section header, a "what it said before" table, the new MUST rule, and an explicit "what this
+      does NOT grant" scope limit. A2 mirrors it.
+
+      **THE BLAST RADIUS IS SIX FILES, AND TWO ARE ALREADY STALE.** Measured 2026-09-19 — these enumerate the
+      KEEP paths:
+
+      | File | State after A1 |
+      |---|---|
+      | `docs/adr/ADR-038-testing-strategy.md` | current |
+      | `.claude/constraints/testing.md` | current |
+      | `.claude/skills/test-diet/SKILL.md` | current |
+      | `tests/CLAUDE.md` | current |
+      | `.claude/adr/INDEX.md` | **STALE — still says "6 KEEP path categories"; missing `seam` AND `ArchTests`** |
+      | `docs/standards/TEST-ARCHITECTURE.md` | **STALE — does not mention `Spaarke.ArchTests`** |
+
+      Note there is **no concise `.claude/adr/ADR-038-*.md`** — the concise form is the single row at
+      `.claude/adr/INDEX.md:60`. A2 must fix that row's count AND its list, not just append to it.
+
+      **THE POINT OF THIS TASK IS THAT PARTIAL UPDATES ARE THE FAILURE MODE.** A1 updated four of six copies.
+      The two it missed are why this list has been wrong for a month. Update all six or the amendment has not
+      landed.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3">`.claude/**` edits are MAIN-SESSION-ONLY. Do not dispatch this to a sub-agent — it will fail with "Edit denied", which is the boundary working correctly.</constraint>
+    <constraint source="CLAUDE.md §6.5">This is a Path B amendment. It MUST state what it does NOT grant, mirroring A1's scope limit — protection is not exemption from review.</constraint>
+    <constraint source="A1 precedent">Do NOT weaken any existing ban. B1-B17 continue to apply to the new category in full; this amendment changes WHERE a test may live, never WHAT it may do.</constraint>
+    <constraint source="this task">Do NOT move or delete any existing test. The amendment legitimises the location; it does not license churn.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>`docs/adr/ADR-038-testing-strategy.md` carries a new "Amendment A2" section mirroring A1's structure (dated header, what-it-said-before, new MUST rule, explicit non-grants).</criterion>
+    <criterion>The §2 KEEP-path table in that ADR gains a ninth row for `tests/unit/Sprk.Bff.Api.Tests/**`, with a category name and a description of what legitimately lives there (BFF service/filter/infrastructure tests that are neither pure domain logic nor integration).</criterion>
+    <criterion>The ADR's "Encode N KEEP path categories" line reads **9**, not 8.</criterion>
+    <criterion>`.claude/constraints/testing.md` §1 table gains the ninth row and its heading count is corrected.</criterion>
+    <criterion>`.claude/skills/test-diet/SKILL.md` heuristic 1 path list includes the new path — this is the line that actually drives the classifier.</criterion>
+    <criterion>`tests/CLAUDE.md` KEEP-path list gains the row.</criterion>
+    <criterion>`.claude/adr/INDEX.md:60` is REPAIRED: count corrected to 9 and the list updated to include `seam`, `Spaarke.ArchTests` AND the new path. Its two-amendment staleness is fixed, not merely appended to.</criterion>
+    <criterion>`docs/standards/TEST-ARCHITECTURE.md` is REPAIRED the same way — it is missing `ArchTests` from A1 as well as the new path.</criterion>
+    <criterion>A grep for `tests/unit/domain` across `.claude/`, `docs/`, `tests/` returns no file whose KEEP-path list disagrees with any other. State the command and its output in the task note.</criterion>
+    <criterion>The amendment explicitly states it does NOT exempt the category from B1-B17, from code-review, or from the same-PR-replacement rule on deletion.</criterion>
+    <criterion>No test file is added, moved, or deleted by this task.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a seventh file enumerating the KEEP paths is discovered that this task's list does not name, STOP and report it before editing — an incomplete list is the defect being fixed, and silently extending the scope mid-task reproduces A1's error.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read `docs/adr/ADR-038-testing-strategy.md:543-600` (Amendment A1) and adopt its structure.</step>
+    <step>Write Amendment A2, including the non-grants section.</step>
+    <step>Update the ADR's §2 table and its "Encode N categories" line.</step>
+    <step>Update the four current copies; REPAIR the two stale ones (`.claude/adr/INDEX.md`, `docs/standards/TEST-ARCHITECTURE.md`) including their A1 gaps.</step>
+    <step>Re-grep to prove all six now agree; record the command and output.</step>
+    <step>Write `notes/057-adr038-amendment-a2.md` recording the finding, the owner decision, and the six-file reconciliation.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">docs/adr/ADR-038-testing-strategy.md</file>
+    <file role="edit">.claude/constraints/testing.md</file>
+    <file role="edit">.claude/skills/test-diet/SKILL.md</file>
+    <file role="edit">.claude/adr/INDEX.md</file>
+    <file role="edit">docs/standards/TEST-ARCHITECTURE.md</file>
+    <file role="edit">tests/CLAUDE.md</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/057-adr038-amendment-a2.md</file>
+  </relevant-files>
+
+  <outputs>
+    <file>docs/adr/ADR-038-testing-strategy.md</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/057-adr038-amendment-a2.md</file>
+  </outputs>
+</task>

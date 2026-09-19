@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Office job status lives in a static in-memory dictionary — it does not survive a restart or a second instance</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>blocked until 058 merges (058 removes attachment/share members that also touch the job path)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A live correctness defect on the deployed save path, not a refactor. Tags include bff-api. The storage decision is architectural (ADR-009 Redis-first) and the extraction is a hot-path change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The storage decision is a genuine architectural choice (Redis per ADR-009 vs the existing Dataverse ProcessingJob row vs accepting in-memory with a documented constraint), and it interacts with the already-shipped SSE stream and idempotency spine. Not a mechanical move.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`OfficeService.cs` / `OfficeEndpoints.cs` hot-path, shared with `unified-access-control-r2`.</parallel-reason>
+    <deps>058</deps>
+    <tags>bff-api, api, office, data, reliability, refactor</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Office job status is held in a process-wide static dictionary. Decide and implement the correct store, then extract the job-status and SSE cluster out of OfficeService.</prompt>
+
+  <role>SPAARKE platform developer. The storage decision comes first; the extraction is the cleanup that follows it.</role>
+
+  <goal>A user polling a job's status gets a truthful answer after an app restart and from any instance. OfficeService no longer owns job-status storage or SSE streaming.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-19 by this project's pre-wrap-up `/code-review`.
+
+      `OfficeService.cs:74`:
+
+          private static readonly ConcurrentDictionary&lt;Guid, JobStatusResponse&gt; _jobStore = new();
+
+      That is **all** Office job state, held in one process's memory, written at 8+ sites (`:408`, `:498`,
+      `:648`, `:663`, `:694`, `:741`, `:796`, …). The pane polls it at
+      `src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts:669`
+      (`GET /api/office/jobs/{jobId}`) and streams it via `/jobs/{jobId}/stream`.
+
+      **This is not theoretical.** `spaarke-bff-dev` was stopped and restarted three times on 2026-09-19
+      during deployment; every in-flight job's status was discarded silently. A user polling across that window
+      sees a job vanish, not fail. The same happens on any scale-out: instance B has never heard of instance
+      A's job.
+
+      `OfficeService.cs:1487` already carries the marker `TRACKED: GitHub #229 - Replace with Dataverse query
+      once ProcessingJob exists` — and `ProcessingJob` **does** now exist; `IProcessingJobService` is already a
+      constructor dependency of this very class, and `_documentPersistence.CheckForExistingJobAsync` already
+      queries it for idempotency. So the durable store the comment is waiting for is already wired in.
+    </background>
+    <notes>
+      **DECIDE THE STORE BEFORE MOVING ANY CODE.** Three candidates, and the task must pick one with reasons:
+      (a) the existing Dataverse `ProcessingJob` row — already queried on the idempotency path, already a
+      dependency, no new infrastructure; (b) Redis per ADR-009 (Redis-first for cross-request state) — better
+      fit for high-frequency polling, but new infrastructure on this path; (c) keep in-memory and document the
+      constraint honestly — only defensible if job status is genuinely ephemeral, which the SSE reconnect path
+      suggests it is not.
+
+      Evaluate (a) first: it needs no new dependency and the idempotency path already proves the query works.
+
+      **DO NOT silently keep in-memory.** If (c) is chosen, the pane must be told — a status that can vanish
+      needs a defined client behaviour, not a 404 the user reads as failure.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first for cross-request cached state. `IMemoryCache`-shaped in-process storage for data that must survive a request is the documented anti-pattern — a static dictionary is a stronger form of it.</constraint>
+    <constraint source="ADR-010">Register any new collaborator as a concrete class; do not add a single-implementation interface.</constraint>
+    <constraint source="task 039 / 047">The idempotency spine and the content-hash version-save key are already correct and shipped. Do NOT change key derivation. This task changes WHERE status is stored, never HOW a job is identified.</constraint>
+    <constraint source="task 029">The SSE stream and the post-save AI refresh depend on job records. Their behaviour must be unchanged.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>REPRODUCE-FIRST: a test proves status is lost across a simulated process boundary (new service instance / cleared store) BEFORE the fix, and survives it after. Record the red verbatim in the task note.</criterion>
+    <criterion>The storage decision is written down with its reasons and the two rejected alternatives, in the task note, BEFORE implementation.</criterion>
+    <criterion>`_jobStore` as a `private static` field is gone; job status reads and writes go through the chosen store.</criterion>
+    <criterion>Job status survives a service-instance replacement in test, and the SSE stream still delivers the same event sequence.</criterion>
+    <criterion>Job-status and SSE members move to a new concrete `OfficeJobStatusService`, registered unconditionally in `OfficeModule`; `IOfficeService` is UNCHANGED (interface-last, as in 059).</criterion>
+    <criterion>`OfficeService` constructor parameter count and line count both DROP. State before/after.</criterion>
+    <criterion>All existing job-status, idempotency (039) and AI-refresh (029) tests pass UNMODIFIED. Name them. A test needing modification means behaviour changed — stop and explain.</criterion>
+    <criterion>Full BFF suite green; ArchTests 191/191; publish size vs a fresh master build; no new HIGH CVE.</criterion>
+    <criterion>`OfficeService.cs:1487`'s stale `TRACKED: GitHub #229` comment is removed or corrected — the ProcessingJob it waits for already exists.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the chosen store cannot preserve the SSE stream's event ordering or its reconnect/`lastEventId` semantics, STOP and escalate. Job-status durability must not be bought by breaking the stream task 029 depends on.</trigger>
+    <trigger>If evidence shows job status is genuinely ephemeral and in-memory is correct, STOP and escalate rather than implementing (c) unilaterally — that decision changes the client contract.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Confirm 058 merged. /conflict-check.</step>
+    <step>Reproduce the loss; record the red.</step>
+    <step>Evaluate the three stores, starting with the existing ProcessingJob row; write the decision and the rejected alternatives down.</step>
+    <step>Implement the store change with the existing tests unmodified.</step>
+    <step>Extract the job-status and SSE cluster into `OfficeJobStatusService`; register concretely.</step>
+    <step>Gates, then `notes/060-job-status-store-and-extraction.md` with the decision record and before/after metrics.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="new">src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobStatusService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs</file>
+    <file role="read">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/060-job-status-store-and-extraction.md</file>
+  </relevant-files>
+
+  <justification>
+    <existing>`IProcessingJobService` is ALREADY a constructor dependency of `OfficeService`, and `OfficeDocumentPersistence.CheckForExistingJobAsync` already queries the Dataverse ProcessingJob row on the idempotency path (`OfficeService.cs:245`). Grep evidence: `_jobStore` appears at `:74` plus 8 write sites; `IProcessingJobService` is injected at `:78`.</existing>
+    <extension>Yes for storage — extend the existing ProcessingJob path rather than add a store. No for the service class: the goal is to REMOVE surface from `OfficeService`, and `OfficeJobStatusService` is a peer of the existing `OfficeDocumentPersistence` / `OfficeStorageUploader` collaborators.</extension>
+    <cost-of-doing-nothing>A user who saves a document and polls its status across an app restart is told the job does not exist — observed on 2026-09-19, when three restarts discarded all in-flight job state. On scale-out, a poll routed to a second instance returns 404 for a job that is running. Both present as "the save vanished," which is the failure class this project spent tasks 039 and 047 eliminating from the save spine.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobStatusService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/060-job-status-store-and-extraction.md</file>
+  </outputs>
+</task>

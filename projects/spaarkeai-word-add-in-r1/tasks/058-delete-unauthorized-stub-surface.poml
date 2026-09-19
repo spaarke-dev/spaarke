@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Live Office endpoints serve fabricated data with NO per-document authorization — delete the unused stub surface</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>startable — no dependencies; findings confirmed against the deployed build 2026-09-19</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: removes an authorization gap on a LIVE deployed route. Also a breaking contract change to `IOfficeService` (9 consumers). Tags include bff-api + security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The judgment is "delete vs implement" on a live authorization gap, and the deletion is a public-contract change. Getting the blast radius wrong either leaves the gap open or breaks a caller.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`OfficeService.cs` / `OfficeEndpoints.cs` are hot-path and shared with `unified-access-control-r2`. Run /conflict-check first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, security, authorization, office, tech-debt, testing</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Three live Office route families return fabricated data, and two of them have NO per-document authorization. No Spaarke client calls any of them. Delete the routes and their stub implementations; do not implement them.</prompt>
+
+  <role>SPAARKE platform developer. Treat this as a security fix first and a cleanup second.</role>
+
+  <goal>No deployed Spaarke endpoint returns fabricated document metadata, and no endpoint mints a share link without a real per-document authorization check.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-19 during this project's pre-wrap-up `/code-review`. All of it verified against the tree
+      deployed to `spaarke-bff-dev` that same day.
+
+      **1. `/office/share/links` — AUTHORIZATION GAP (the serious one).**
+      Mapped at `OfficeEndpoints.cs:1950`. Filter chain: `AddOfficeRateLimitFilter` + `AddIdempotencyFilter`
+      + `AddOfficeAuthFilter`. There is **no `DocumentAuthorizationFilter`**. The only per-document gate is
+      `OfficeService.SimulateSharePermissionCheckAsync` (`:2183`), whose entire body is:
+
+          return Task.FromResult(true);
+
+      So the `if (!hasSharePermission)` branch at `:2120` that would return `OFFICE_009 "Access denied"` is
+      **unreachable**, and the route's declared `ProducesProblem(403)` is a status it can never emit. Any
+      authenticated Office caller can mint a share link for **any** document GUID they can name. The metadata
+      returned is also fabricated: `GetDocumentMetadataForLinkAsync` (`:2200`) synthesises `DisplayName`,
+      `FileName`, `ContentType` and a hardcoded `Size = 245678` from the GUID, and `GenerateShareLinkUrl`
+      hardcodes `https://spaarke.app/doc`.
+
+      **2. `/office/share/attach` — same shape.** Mapped at `:1968`, same filters, no per-document gate. Its
+      handler carries a TODO listing what it does not do, including *"Verify user has share permission via
+      UAC"* and *"Check size limits"* — while its own `WithDescription` claims it *"Validates user share
+      permission and size limits."*
+
+      **3. `/office/recent` — 100% fabricated.** Mapped at `:2270`. `GetRecentDocumentsAsync` (`:2645`) calls
+      `GenerateStubRecentAssociations` / `GenerateStubRecentDocuments` / `GenerateStubFavorites` and
+      `await Task.CompletedTask; // Simulate async operation`. Nothing touches Dataverse or Redis.
+
+      **4. `/office/search/documents` — stubbed.** Mapped at `:1029`; `SearchDocumentsAsync` (`:1931`) returns
+      `GenerateStubDocumentResults`.
+
+      **NO SPAARKE CLIENT CALLS ANY OF THESE.** Verified: the pane's `shareLinkService.ts:41` and
+      `sendEmailService.ts:89` both resolve to `/api/documents/${documentId}/share-link` — a DIFFERENT and
+      real route (`FileAccessEndpoints.cs:130`). The pane's full Office route list is save, jobs, search
+      /entities, search/matter-types, quickcreate, todo, documents, communications. Neither `/office/recent`,
+      `/office/share/*` nor `/office/search/documents` appears.
+
+      All are tagged `TRACKED: GitHub #229`, which is **OPEN and last updated 2026-03-13** — six months stale,
+      labelled `tech-debt`, while guarding a live authorization gap.
+    </background>
+
+    <notes>
+      **WHY DELETE RATHER THAN IMPLEMENT.** Implementing means building Redis recency, a favourites table, a
+      real share-link minting path and UAC checks — for surface no client requests, duplicating
+      `FileAccessEndpoints`' share-link route that already works and is the one the pane uses. Deletion closes
+      the authorization gap immediately, removes ~800 lines, and eliminates three of the ten responsibility
+      clusters in `OfficeService` at no design cost. It is the cheapest correct action, not the laziest one.
+
+      **THIS IS A BREAKING CONTRACT CHANGE.** `IOfficeService` has 27 members and 9 consumers including three
+      test fixtures. Removing members touches `OfficeEndpoints.cs`, `OfficeModule.cs`, `JobOwnershipFilter.cs`,
+      `OfficeProfileDispatcher.cs` and the contract/regression tests.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="this task">MUST NOT implement the stubs. If implementation looks warranted for any one of them, that is an escalation, not a decision to take inside this task.</constraint>
+    <constraint source="ADR-038">Contract tests that exercise a deleted route MUST be deleted in the SAME PR (they are KEEP-path files; their same-PR "replacement" is the route's removal). Record each one.</constraint>
+    <constraint source="CLAUDE.md §10">Report publish-size delta against a FRESH `origin/master` build. This task should REDUCE it — report the reduction.</constraint>
+    <constraint source="ADR-008">Do not "fix" the gap by adding a filter to a route that is being deleted. Delete it.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>REPRODUCE-FIRST: before deleting, write a temporary probe proving `/office/share/links` returns 200 for a document the caller has no access to. Record the observed response verbatim in the task note, then remove the probe. This is the evidence the gap was real.</criterion>
+    <criterion>`/office/share/links`, `/office/share/attach`, `/office/recent` and `/office/search/documents` are removed from `OfficeEndpoints.cs`, including `MapShareEndpoints` and the `share` MapGroup.</criterion>
+    <criterion>These `OfficeService` members are removed: `CreateShareLinksAsync`, `SimulateSharePermissionCheckAsync`, `GetDocumentMetadataForLinkAsync`, `GenerateShareLinkUrl`, `GetDocumentIconUrl`, `ProcessShareInvitationsAsync`, `GetAttachmentsAsync`, `PackageAttachmentAsync`, `GetRecentDocumentsAsync`, `GenerateStubRecentAssociations`, `GenerateStubRecentDocuments`, `GenerateStubFavorites`, `SearchDocumentsAsync`, `GenerateStubDocumentResults`.</criterion>
+    <criterion>The corresponding members are removed from `IOfficeService`, and all 9 consumers still compile.</criterion>
+    <criterion>Dead models are removed if unreferenced (`RecentDocumentsResponse`, `ShareLinksResponse`, `ShareAttachResponse`, `ShareLinkDocumentMetadata`, `ShareInvitation`, `ShareLinkError`) — verify each by grep before deleting; leave any that a surviving path uses.</criterion>
+    <criterion>`OfficeRateLimitCategory.Share` / `.Recent` and their `OfficeRateLimitOptions` entries are removed if they become unreferenced.</criterion>
+    <criterion>Every test referencing a deleted route is removed or updated in the same PR, named individually in the task note: `OfficeEndpointAuthorizationContractTests.cs`, `OfficeEndpointsContractTests.cs`, `tests/e2e/specs/outlook-addins/share-flow.spec.ts`, `tests/e2e/specs/outlook-addins/save-flow.spec.ts`, `tests/e2e/pages/addins/WordTaskPanePage.ts`, `tests/load/office-endpoints.k6.js`, `OfficeEntitySearchMappingTests.cs`.</criterion>
+    <criterion>Full BFF suite green. Report the count and reconcile the delta against 12,379 passed / 0 failed, since this task REMOVES tests.</criterion>
+    <criterion>ArchTests 191/191. Publish size measured against a fresh master build and reported (expected: a reduction).</criterion>
+    <criterion>GitHub #229 is updated with what was deleted and what genuinely remains; if nothing remains, propose closing it.</criterion>
+    <criterion>A grep proves zero references to the deleted routes remain anywhere under `src/` and `tests/`.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If ANY caller of these routes is found outside this repo — another Spaarke client, a Power Automate flow, a customer integration — STOP. Deletion becomes a breaking public API change requiring owner sign-off and a deprecation path, not a cleanup.</trigger>
+    <trigger>If the owner decides any of these endpoints must exist, STOP and re-scope: implementing a real UAC check is its own task, and this one must not half-build it.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path, shared with unified-access-control-r2).</step>
+    <step>Reproduce the authorization gap and record the evidence; remove the probe.</step>
+    <step>Confirm once more that no in-repo client calls any of the four route families.</step>
+    <step>Delete routes, then service members, then interface members, then dead models and rate-limit categories.</step>
+    <step>Delete/update every affected test, naming each.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Update #229. Write `notes/058-delete-unauthorized-stub-surface.md` with the reproduce-first evidence and the deletion inventory.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/IOfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/OfficeRateLimitFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Configuration/OfficeRateLimitOptions.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/058-delete-unauthorized-stub-surface.md</file>
+  </relevant-files>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/058-delete-unauthorized-stub-surface.md</file>
+  </outputs>
+</task>

@@ -1,6 +1,46 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-19 (by task-execute Steps 9.5–10) — **task 055 COMPLETE: every gate green.** BFF suite 12,379 passed / 0 failed · ArchTests 191/191 · gated jest 46/46 suites, 540 tests · publish **+0.075 MB** vs a fresh master build · no vulnerable packages · code-review + adr-check **0 critical, 0 ADR violations**.
+> **Last Updated**: 2026-09-19 (by `/context-handoff`) — **055 + 056 COMPLETE and PUSHED; BOTH DEPLOYS LIVE; four new tasks 057–060 authored, validated, NOT started.**
+
+---
+
+## 🔴 HANDOFF 2026-09-19 — READ THIS BLOCK FIRST
+
+**Branch `work/spaarkeai-word-add-in-r1` @ `a71a381fa`, clean, level with origin, PR #960 (draft).**
+
+### What is DONE and LIVE
+
+| Thing | State |
+|---|---|
+| **Task 055** (#1005 / ISS-006 — collision names its target) | ✅ merged `a936353d8`+`23fd17991`. **Server half LIVE** (BFF deployed 2026-09-19, attempt 2, **4/4 SHA-256 verified**, healthz 200, CORS OK). **Client half LIVE** (SWA run `35464159732`, verified by finding the string `That name belongs to` in the deployed `87.bundle.js`). |
+| **Task 056** (#996 / ISS-004 — office-addins typecheck gate) | ✅ merged `a71a381fa`. Production-only gate in `office-addins-tests.yml`; reproduce-first verified BOTH ways. |
+| **Manifest** | **Already at 1.0.9 — do NOT ask the operator to re-upload.** Task 011 closed 2026-09-18; the Admin Center refuses a non-greater version and returns *"Failed. Please update the version number."* An earlier handoff row caused exactly that wasted trip. |
+
+### What is NEXT — tasks 057–060, authored and XML-validated, none started
+
+Run them with `task-execute`. **058 first** (security), then 059/060 in parallel-by-dependency, 057 any time.
+
+- **058 🔴🔴 SECURITY, do this first.** `/office/share/links` + `/office/share/attach` have **no per-document authorization** — the only gate is `SimulateSharePermissionCheckAsync` → `return Task.FromResult(true)`. Any authenticated Office caller can mint a share link for **any** document GUID and gets fabricated metadata. `/office/recent` and `/office/search/documents` are 100% stubs. **No Spaarke client calls any of them** (the pane uses the real `/api/documents/{id}/share-link`), so the decision is **DELETE**. Removes ~800 lines and 3 of 10 clusters.
+- **060 🔴** job status is a `private static ConcurrentDictionary` — lost on restart/scale-out. Proven live: 3 restarts on 2026-09-19 discarded in-flight job state.
+- **059** extract the search cluster (`OfficeService.cs` = 3,479 lines, **18 ctor params** vs ADR-010's **>7**).
+- **057** ADR-038 Amendment A2 (owner-approved Path B). 6 files enumerate KEEP paths; **2 already stale after A1**.
+
+**Owner directive 2026-09-19 (binding):** the divergence work stays **in this project** — a new project would lose the context that produced these findings.
+
+### Still the operator's, not codeable
+
+**042 🔄** — 13 live acceptance criteria + 14 parity rows need a live Office host. **090 🔲** wrap-up, blocked on 042.
+⚠️ `090-project-wrap-up.poml` is one of **six POMLs that fail XML validation** — `task-execute` cannot load it. Pre-existing, not this project's doing, but it sits on the path to closing.
+
+### Process lessons earned today — apply them
+
+1. **`grep -c … || echo 0` yields `0\n0`** and breaks `[ -gt ]`. Bit me **three times**. Use `grep -c` alone.
+2. **A pipeline's exit code is the LAST command's.** `npx jest … | tail` reported exit 0 over a real failure. Use `${PIPESTATUS[0]}`.
+3. **Verify pushes by SHA.** A push printed `Everything up-to-date` *after* a connection reset; only `LOCAL == REMOTE` caught it.
+4. **Grep matches prose.** I nearly reported three regression tests as B1 violations — the "hits" were comments saying `NO Mock<HttpMessageHandler>`.
+5. **The deploy script's recovery leaves the app STOPPED** if the Kudu upload dies. Happened twice. Always guard: check state after, start if not `Running`.
+
+---
 > **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-word-add-in-r1`, PR #960.
 
 ---
