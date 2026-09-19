@@ -1,12 +1,44 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-19 (by `/context-handoff`) — **055 + 056 COMPLETE and PUSHED; BOTH DEPLOYS LIVE; four new tasks 057–060 authored, validated, NOT started.**
+> **Last Updated**: 2026-09-19 (by `/context-handoff`) — **055 COMPLETE + LIVE on both halves; 056 merged but ITS CI GATE IS BROKEN (one-line fix, undecided); tasks 057–060 authored, validated, NOT started.**
 
 ---
 
 ## 🔴 HANDOFF 2026-09-19 — READ THIS BLOCK FIRST
 
-**Branch `work/spaarkeai-word-add-in-r1` @ `a71a381fa`, clean, level with origin, PR #960 (draft).**
+**Branch `work/spaarkeai-word-add-in-r1` @ `090784afb`, clean, level with origin, PR #960 (draft).**
+
+### ⛔ FIRST: task 056's CI gate is BROKEN and I broke it — one-line fix, owner decision pending
+
+`Production typecheck (office-addins)` **failed on its first real CI run** (run `35468805634`, 36 s). The log's
+own invocation line is the whole diagnosis:
+
+```
+shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+##[error]Process completed with exit code 2.
+```
+
+**GitHub Actions injects `-e` into the shell itself.** My in-script `set -uo pipefail` does not remove it, so
+`npm run typecheck` exiting **2** on the owner-accepted 111 test-file errors killed the step at ~4 s — before
+the classifier, the no-vacuous-green guard, or the summary ever ran. The gate built *specifically* to never
+trust the exit code was killed by the exit code. The comment immediately above the failing line reads
+*"NOTE: no `set -e`."*
+
+**Fix** (not yet applied — needs owner go-ahead): add `set +e` immediately before the
+`npm run typecheck > "$RUNNER_TEMP/tsc.txt" 2>&1` line in `.github/workflows/office-addins-tests.yml`, **or**
+override the step with `shell: bash --noprofile --norc {0}` to drop `-e`. Then it MUST be proven by a real CI
+run — local validation is what produced this defect.
+
+**Why it happened, so it isn't repeated**: I verified the classifier in my own shell and never in the runner's.
+That is the same "a mock passing proves nothing about the real thing" failure this session flagged twice
+elsewhere (the `sprk_contact` lesson; the fixture-vs-live gap in 055).
+
+✅ **`actionlint` PASSED** on `a71a381fa` — task 056's one criterion recorded as *pending, not claimed*, is now
+genuinely satisfied.
+
+⚠️ **CI verdict is NOT quotable yet**: 2 checks pending at last read (legacy `Build & Test`, Tier 2 Full Unit
+Tests — advisory). `Router` reported nothing on `090784afb`, expected for a docs-only commit. Require
+`gh pr checks 960 | grep -c pending` == 0 before trusting any result.
 
 ### What is DONE and LIVE
 
