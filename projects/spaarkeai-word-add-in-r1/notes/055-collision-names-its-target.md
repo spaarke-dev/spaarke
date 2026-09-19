@@ -191,10 +191,10 @@ task is the kind of silent scope widening CLAUDE.md §11 forbids. **Surfaced to 
 
 ---
 
-## 5A. Two fixture gaps this change exposed (found by running, not by reading)
+## 5A. Three fixture gaps this change exposed (found by running, not by reading)
 
-`OfficeVersionSaveWorld` had modelled neither half of what the refusal now reads. Both were invisible while
-nothing read them, and both surfaced the moment something did.
+`OfficeVersionSaveWorld` had modelled none of what the refusal now reads. All three were invisible while
+nothing read them, and all three surfaced the moment something did.
 
 | Gap | What the fake did | Why it was invisible | Fixed by |
 |---|---|---|---|
@@ -212,10 +212,10 @@ The tempting move — relax the three assertions so they match the fake — woul
 deleting the guarantee the version retry depends on: **that the target is filed where the caller is filing.**
 That is precisely the property #1005 is about. The failure was the fake's, and the fix belongs in the fake.
 
-Worth stating as a general lesson, since this project has now hit it twice in one task: a fake that models
-only what was previously read will fail *for the wrong reason* the first time something new reads it, and the
-red will point at the new code rather than at the model. Both gaps here were caught only because the
-reproduce-first discipline demanded a specific expected failure and these did not match it.
+Worth stating as a general lesson, since this project has now hit it three times in one task: a fake that
+models only what was previously read will fail *for the wrong reason* the first time something new reads it,
+and the red will point at the new code rather than at the model. All three gaps here were caught only because
+the reproduce-first discipline demanded a specific expected failure and these did not match it.
 
 ---
 
@@ -229,3 +229,42 @@ reproduce-first discipline demanded a specific expected failure and these did no
 - **The live dev row** holding another document's content/profile/index chunks. Operator confirmed
   2026-09-19 that dev-only data can be ignored.
 - **The five unparseable POMLs** (005/010/018/028/053) found while fixing the validator — separate finding.
+
+---
+
+## 7. Verification (2026-09-19 — task-execute Steps 9 and 9.5)
+
+| Gate | Result |
+|---|---|
+| BFF `Sprk.Bff.Api.Tests` | **12,379 passed / 0 failed / 56 skipped** (12,435 total) |
+| ArchTests | **191/191, 0 failed** — the log shows it rebuilt `Sprk.Bff.Api.dll`, so this is not a stale-binary green |
+| Gated jest (46 suites, by path) | **46/46 suites · 540 tests** — the 537 baseline plus this task's 3 |
+| BFF publish size | branch **45.430 MB** vs a fresh `origin/master` @ `e0a6f87c4` at **45.355 MB** = **+0.075 MB**. Release, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, **PDBs included** (4 each). Ceiling ≤60 MB; escalation at +5 MB. Both sides built in isolated worktrees, per CLAUDE.md §10 |
+| CVE | `dotnet list package --vulnerable --include-transitive` → *"no vulnerable packages"* |
+| `/code-review` + `/adr-check` | **0 critical, 0 ADR violations.** ADR-008 ✅ · ADR-010 ✅ · ADR-012 Path A ✅ · ADR-021 ✅ · ADR-038 ✅ |
+
+**Two things the gates checked rather than assumed**, because either could have made the fix only half-real:
+
+- **The gate has no bypass.** `MapSaveErrorToProblem` has exactly ONE call site in the codebase, and it is the
+  gated one. A collision cannot leave by an ungated path.
+- **`AuthorizationService` is registered unconditionally** (`SpaarkeCore.cs:26`), not behind a feature flag.
+  The handler takes it as a parameter, so a conditional registration would have failed at **runtime**, not at
+  build — the asymmetric-registration rule in CLAUDE.md §10 bullet 6 (RB-T028).
+
+**Two findings, both fixed, neither a logic defect:**
+
+1. `OfficeEndpoints.cs` — the new method had been inserted *between* `MapSaveErrorToProblem`'s doc comment and
+   the method it documents, so the new method carried **two** `<summary>` tags and `MapSaveErrorToProblem` had
+   none. The build never complained because `GenerateDocumentationFile` is not set for this project, so CS1571
+   cannot fire despite repo-wide `TreatWarningsAsErrors`. Comment restored; rebuild clean (0 warnings, 0 errors).
+2. §5A above was headed *"Two fixture gaps"* over a table listing **three**, with the prose still reading
+   "neither half" / "Both" / "twice". A third row had been added without updating the surrounding text.
+
+**One false alarm, recorded so nobody re-investigates it.** The first gated-jest pass reported
+`1 failed, 45 passed of 46` — `SaveFlow.matterTypeQuickCreate.test.tsx` (task 038, untouched by this task)
+timing out at 60 s, its suite taking 386 s. Re-run alone it passes **3/3 in 21.9 s**, the timed-out test itself
+in **7.9 s** — a ~17× margin. It had been sharing the machine with an ArchTests build and a full Release
+publish. Two lessons worth keeping: that pass's shell **exit code was 0 despite the failure**, because the
+command piped `jest` through `tail` and a pipeline reports the *last* command's status — read the summary line
+or use `${PIPESTATUS[0]}`; and heavy parallelism can manufacture a red in a 60 s-timeout React suite, so
+isolate before believing one.

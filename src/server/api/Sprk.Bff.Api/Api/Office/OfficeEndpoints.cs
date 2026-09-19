@@ -522,9 +522,6 @@ public static class OfficeEndpoints
     }
 
     /// <summary>
-    /// Maps a SaveError to an appropriate ProblemDetails response.
-    /// </summary>
-    /// <summary>
     /// Task 055 (#1005 / ISS-006): strips a name-collision refusal's <c>ExistingDocumentName</c> and
     /// <c>ExistingDocumentId</c> unless the caller holds <see cref="AccessRights.Read"/> on that document.
     /// Every other error passes through untouched.
@@ -588,6 +585,9 @@ public static class OfficeEndpoints
         return error with { ExistingDocumentId = null, ExistingDocumentName = null };
     }
 
+    /// <summary>
+    /// Maps a SaveError to an appropriate ProblemDetails response.
+    /// </summary>
     private static IResult MapSaveErrorToProblem(SaveError? error, string correlationId)
     {
         if (error is null)

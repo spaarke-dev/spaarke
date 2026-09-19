@@ -4,7 +4,7 @@
     <title>The collision prompt must name the document it would write into, and must not silently discard the selected record</title>
     <phase>2 Save flow</phase>
     <gate>startable — deps 025 ✅, 026 ✅, 054 ✅ are all merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.cs` and `.tsx` on the deployed Office save spine; tags include bff-api + security. Widens an error body, which is an authorization-disclosure question, not a cosmetic change.</rigor-reason>
     <model-tier>opus</model-tier>
