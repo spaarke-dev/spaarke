@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
@@ -91,6 +92,42 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Principal whose share throws, to model a partial-share failure.</summary>
     public Guid? FailShareForPrincipal { get; set; }
 
+    /// <summary>Principal whose REVOKE throws, to model a partial-sweep failure.</summary>
+    /// <remarks>
+    /// Separate from <see cref="FailShareForPrincipal"/>, which is consulted only by the GRANT. Until
+    /// task 108 no knob failed a revoke at all, so "a share whose revoke fails stays non-fatal" was an
+    /// acceptance criterion that passed without testing anything.
+    /// </remarks>
+    public Guid? FailRevokeForPrincipal { get; set; }
+
+    /// <summary>
+    /// When false, the STRICT share read throws — the "incomplete counts as failed" cases.
+    /// </summary>
+    /// <remarks>
+    /// ISS-018 (task 108). This models an unreadable table code, an unreadable row, or a response that
+    /// continues on another page. Note it leaves the SOFT read working, and that asymmetry is the
+    /// point: on those refusals the soft read still returns the rows it could parse, so a caller that
+    /// falls back to it makes partial progress. Before this knob existed the double's strict read
+    /// delegated to the soft one and could never refuse, so pointing a caller at the strict read was
+    /// unobservable — the failure mode this fixture warns about under <see cref="RowsJsonFor"/>.
+    /// </remarks>
+    public bool StrictShareReadSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When false, the SOFT share read throws too — a total read failure where NEITHER read can
+    /// enumerate anything.
+    /// </summary>
+    /// <remarks>
+    /// Real: the soft read swallows a non-success status and an unreadable object type code, but a
+    /// transport failure or malformed JSON still throws out of it. Without this knob the endpoint's
+    /// "nothing could be enumerated at all" fallback would be unseedable dead code — which is ISS-018's
+    /// own shape (an unreachable catch) reproduced inside its fix.
+    /// </remarks>
+    public bool SoftShareReadSucceeds { get; set; } = true;
+
+    /// <summary>Captured log entries, so a test can assert a warning was actually WRITTEN.</summary>
+    public LogCapture Logs { get; } = new();
+
     /// <summary>One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke.</summary>
     public sealed record RecordedShare(
         string EntitySet, Guid RecordId, DataversePrincipalRef Principal, string? AccessRightsCsv);
@@ -173,6 +210,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         Revokes.Clear();
         CallerSystemUserIdResolves = true;
         FailShareForPrincipal = null;
+        FailRevokeForPrincipal = null;
+        StrictShareReadSucceeds = true;
+        SoftShareReadSucceeds = true;
+        Logs.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -265,6 +306,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // assert the success path — the real store reaches unavailable Graph services.
             services.RemoveAll<SpeFileStore>();
             services.AddSingleton<SpeFileStore>(sp => new StubSpeFileStore(sp, this));
+
+            // Capture logs in-memory so a test can assert the endpoint actually WROTE its warning.
+            services.AddSingleton<ILoggerProvider>(Logs);
         });
     }
 
@@ -630,17 +674,33 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             string entitySetName, Guid recordId, DataversePrincipalRef principal,
             CancellationToken ct = default)
         {
+            // Checked BEFORE recording, matching GrantAccessAsync above: `Revokes` means "shares that
+            // were actually removed", and tests assert emptiness on it to prove nothing was torn down.
+            // Recording a revoke that threw would make that assertion lie.
+            if (_fixture.FailRevokeForPrincipal == principal.Id)
+                throw new InvalidOperationException($"Seeded revoke failure for {principal.Id}.");
+
             _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null));
             return Task.CompletedTask;
         }
 
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
             string entityLogicalName, Guid recordId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<DataversePrincipalAccess>>(
+        {
+            // The real soft read swallows a non-success status and an unreadable table code, but a
+            // transport failure still throws out of it — see SoftShareReadSucceeds.
+            if (!_fixture.SoftShareReadSucceeds)
+            {
+                throw new InvalidOperationException(
+                    $"Seeded transport failure reading the shares on {entityLogicalName}({recordId}).");
+            }
+
+            return Task.FromResult<IReadOnlyList<DataversePrincipalAccess>>(
                 _fixture.Grants
                     .Where(g => g.RecordId == recordId)
                     .Select(g => new DataversePrincipalAccess(g.Principal, 1, DateTimeOffset.UtcNow))
                     .ToList());
+        }
 
         // Task 063 widened the seam. Provisioning creates shares and never changes one, so a call here means the
         // endpoint's behaviour changed — fail loudly rather than record something no assertion expects.
@@ -651,6 +711,65 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
             string entityLogicalName, Guid recordId, CancellationToken ct = default)
-            => GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+        {
+            // Mirrors DataverseWebApiService.ShareReadFailed: the complete answer, or an exception.
+            // This used to delegate straight to the soft read, which means it could NEVER refuse —
+            // so re-pointing a caller at the strict read changed nothing any test could see.
+            if (!_fixture.StrictShareReadSucceeds)
+            {
+                throw new InvalidOperationException(
+                    $"The shares on {entityLogicalName}({recordId}) could not be read completely: " +
+                    "seeded refusal.");
+            }
+
+            return GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+        }
     }
+
+    /// <summary>
+    /// In-memory <see cref="ILoggerProvider"/> capturing what the host logged, for assertion.
+    /// </summary>
+    /// <remarks>
+    /// Load-bearing for ISS-018 (task 108) rather than decoration. HALF of that defect was that the
+    /// warning naming the failure could never be written at all — the soft read swallowed the failure
+    /// and answered an empty list, so the <c>catch</c> holding the warning was unreachable for the
+    /// case it named. A test asserting only the response would leave that half unverified: the field
+    /// could be right while the operator still got no signal. Cleared by <see cref="Reset"/>, because
+    /// the fixture is shared across the class and a "a warning was logged" assertion would otherwise
+    /// pass on a previous test's entry.
+    /// </remarks>
+    public sealed class LogCapture : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<LogEntry> _entries = new();
+
+        public IReadOnlyCollection<LogEntry> Entries => _entries.ToArray();
+
+        public void Clear()
+        {
+            while (_entries.TryDequeue(out _)) { }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new QueueLogger(_entries);
+
+        public void Dispose() { }
+
+        private sealed class QueueLogger : ILogger
+        {
+            private readonly ConcurrentQueue<LogEntry> _entries;
+
+            public QueueLogger(ConcurrentQueue<LogEntry> entries) => _entries = entries;
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+                => _entries.Enqueue(new LogEntry(logLevel, formatter(state, exception)));
+        }
+    }
+
+    /// <summary>One captured log entry.</summary>
+    public sealed record LogEntry(LogLevel Level, string Message);
 }

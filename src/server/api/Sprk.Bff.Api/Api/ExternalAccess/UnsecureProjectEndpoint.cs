@@ -139,7 +139,12 @@ public static class UnsecureProjectEndpoint
                 ProjectId: request.ProjectId,
                 NewOwnerSystemUserId: Guid.Empty,
                 SharesRevoked: 0,
-                AlreadyUnsecure: true));
+                AlreadyUnsecure: true,
+                // NOT true. No sweep runs on this path, so this response cannot vouch that the record
+                // carries no shares — and claiming it could would reinstate ISS-018 precisely here: an
+                // operator who reads sweepComplete=false retries, the flag is now clear, and they would
+                // be told "complete sweep of zero" while the surviving rows are still in place.
+                SweepComplete: null));
         }
 
         // ── Step 2: Resolve the new owner ────────────────────────────────────
@@ -220,7 +225,7 @@ public static class UnsecureProjectEndpoint
         }
 
         // ── Step 4: Revoke the explicit shares ───────────────────────────────
-        var sharesRevoked = await RevokeAllSharesAsync(
+        var sweep = await RevokeAllSharesAsync(
             recordShare, request.ProjectId, logger, traceId, ct);
 
         // ── Step 5: Clear the flag ───────────────────────────────────────────
@@ -234,34 +239,45 @@ public static class UnsecureProjectEndpoint
         }
         catch (Exception ex)
         {
-            // Ownership already moved and shares are already gone, so the record IS reachable and no
-            // longer isolated — but it still advertises itself as secure. Report loudly: this is a
-            // half-applied state an operator must finish, and reporting 200 would hide it.
+            // Ownership already moved and the sweep has run, so the record IS reachable and no longer
+            // isolated — but it still advertises itself as secure, and the sweep may not have removed
+            // everything (see sweepComplete). Report loudly: this is a half-applied state an operator
+            // must finish, and reporting 200 would hide it.
             logger.LogError(ex,
                 "[UNSECURE] Project {ProjectId} was reassigned to {OwnerId} and had {Count} share(s) " +
-                "revoked, but sprk_issecure could NOT be cleared. The project is no longer isolated " +
-                "yet still reads as secure. TraceId={TraceId}",
-                request.ProjectId, newOwnerId, sharesRevoked, traceId);
+                "revoked (sweepComplete={SweepComplete}), but sprk_issecure could NOT be cleared. The " +
+                "project is no longer isolated yet still reads as secure. TraceId={TraceId}",
+                request.ProjectId, newOwnerId, sweep.Revoked, sweep.Complete, traceId);
 
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                "Ownership was reassigned and shares revoked, but the secure flag could not be " +
-                "cleared. The project is no longer isolated but still reads as secure — clear " +
-                "sprk_issecure manually, or retry.",
+                sweep.Complete
+                    ? "Ownership was reassigned and every share revoked, but the secure flag could " +
+                      "not be cleared. The project is no longer isolated but still reads as secure — " +
+                      "clear sprk_issecure manually, or retry."
+                    // Prose and machine-readable extension must not disagree: claiming "shares revoked"
+                    // here while sweepComplete=false would hand the human reader the pre-fix claim.
+                    : "Ownership was reassigned, but the share sweep could NOT account for every share " +
+                      "AND the secure flag could not be cleared. The project is no longer isolated, " +
+                      "still reads as secure, and may retain shares — clear sprk_issecure manually and " +
+                      "check the record's remaining shares.",
                 traceId,
                 (ReasonKey, ReasonFlagNotCleared),
                 ("newOwnerSystemUserId", newOwnerId),
-                ("sharesRevoked", sharesRevoked));
+                ("sharesRevoked", sweep.Revoked),
+                ("sweepComplete", sweep.Complete));
         }
 
         logger.LogInformation(
-            "[UNSECURE] Project {ProjectId} un-secured: owner={OwnerId}, sharesRevoked={Count}. TraceId={TraceId}",
-            request.ProjectId, newOwnerId, sharesRevoked, traceId);
+            "[UNSECURE] Project {ProjectId} un-secured: owner={OwnerId}, sharesRevoked={Count}, " +
+            "sweepComplete={SweepComplete}. TraceId={TraceId}",
+            request.ProjectId, newOwnerId, sweep.Revoked, sweep.Complete, traceId);
 
         return TypedResults.Ok(new UnsecureProjectResponse(
             ProjectId: request.ProjectId,
             NewOwnerSystemUserId: newOwnerId.Value,
-            SharesRevoked: sharesRevoked,
-            AlreadyUnsecure: false));
+            SharesRevoked: sweep.Revoked,
+            AlreadyUnsecure: false,
+            SweepComplete: sweep.Complete));
     }
 
     /// <summary>
@@ -290,34 +306,64 @@ public static class UnsecureProjectEndpoint
     }
 
     /// <summary>
-    /// Removes every POA share on the project, returning how many were removed.
+    /// The outcome of the share sweep: how many rows were revoked, and whether the enumeration that
+    /// drove it accounted for every share on the record.
     /// </summary>
     /// <remarks>
-    /// Best-effort per share and never fatal. Ownership has already moved by the time this runs, so
-    /// the record is reachable regardless; a share that survives is a stale access path to report, not
-    /// a reason to abandon a reassignment that already succeeded. Each failure is logged with its
-    /// principal so an operator can finish the job.
+    /// A bare count cannot express "I removed none because there were none" separately from "I removed
+    /// none because I could not see them" — which is the whole of ISS-018. The two facts travel
+    /// together or the count is not evidence of anything.
     /// </remarks>
-    private static async Task<int> RevokeAllSharesAsync(
+    private readonly record struct ShareSweep(int Revoked, bool Complete);
+
+    /// <summary>
+    /// Removes every POA share on the project, reporting how many were removed AND whether that is
+    /// the complete set.
+    /// </summary>
+    /// <remarks>
+    /// <para>Best-effort per share and never fatal. Ownership has already moved by the time this runs,
+    /// so the record is reachable regardless; a share that survives is a stale access path to report,
+    /// not a reason to abandon a reassignment that already succeeded. Each failure is logged with its
+    /// principal so an operator can finish the job.</para>
+    ///
+    /// <para><b>The enumeration is STRICT, with a soft fallback</b> (ISS-018 / #995, task 108). It was
+    /// <see cref="IDataverseRecordShareService.GetPrincipalAccessAsync"/>, which answers an EMPTY LIST
+    /// when the read fails — so a failed read was indistinguishable from "no shares", nothing was
+    /// revoked, and the endpoint answered success with <c>sharesRevoked = 0</c>. The <c>catch</c> below
+    /// could not fire for that case either: the soft read swallows a non-success status and an
+    /// unreadable object type code internally, and only a transport-level throw ever reached it. An
+    /// unsecure could therefore leave every share in place, silently.</para>
+    ///
+    /// <para><b>Why partial progress, rather than refusing.</b> The strict read refuses an incomplete
+    /// answer — more than one page of shares, or a row whose principal or mask will not parse. For a
+    /// "remove every share" sweep that is not a reason to stop: ownership has already moved and been
+    /// read back, so refusing outright would leave ALL shares in place, while sweeping what can be
+    /// enumerated removes some stale access. So the strict read decides COMPLETENESS and the soft read
+    /// supplies whatever rows it can. What is never allowed is reporting the shortfall as success.</para>
+    ///
+    /// <para><b>The secure flag is still cleared on an incomplete sweep, deliberately.</b> Per ADR-003
+    /// <c>sprk_issecure</c> suppresses the derived-member and org-expansion terms; it does NOT suppress
+    /// explicit grants or Dataverse's own answer. A surviving POA row IS Dataverse's answer, so leaving
+    /// the flag set buys no protection <i>against the surviving share</i>, while manufacturing the
+    /// half-applied "no longer isolated yet still reads as secure" state this endpoint already treats as
+    /// a defect. The honest report is a cleared flag plus <c>sweepComplete = false</c>.</para>
+    ///
+    /// <para><b>Clearing the flag is not free, though</b> — it is simply not a mitigation for THIS risk.
+    /// <c>sprk_issecure</c> also drives container placement (<c>SecureContainerDecision</c>): a secure
+    /// record gets its own container, a non-secure one may fall back to the owning business unit's
+    /// SHARED container, and SPE permissions are additive-only, so that is not retractable later. That
+    /// consequence is intended for a completed unsecure and is accepted here for an incomplete one,
+    /// because the alternative — a record that is owner-reassigned but still flagged secure — is the
+    /// half-applied state above.</para>
+    /// </remarks>
+    private static async Task<ShareSweep> RevokeAllSharesAsync(
         IDataverseRecordShareService recordShare,
         Guid projectId,
         ILogger logger,
         string traceId,
         CancellationToken ct)
     {
-        IReadOnlyList<DataversePrincipalAccess> shares;
-        try
-        {
-            shares = await recordShare.GetPrincipalAccessAsync(ProjectEntityLogicalName, projectId, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[UNSECURE] Could not read the shares on project {ProjectId}; none were revoked. " +
-                "TraceId={TraceId}", projectId, traceId);
-
-            return 0;
-        }
+        var (shares, complete) = await EnumerateSharesAsync(recordShare, projectId, logger, traceId, ct);
 
         var revoked = 0;
         foreach (var share in shares)
@@ -329,14 +375,72 @@ public static class UnsecureProjectEndpoint
             }
             catch (Exception ex)
             {
+                // Unchanged: best-effort per share, logged with its principal, never fatal. What is new
+                // is that a share we failed to remove stops the sweep claiming completeness — the
+                // record is demonstrably not fully revoked.
+                complete = false;
+
                 logger.LogWarning(ex,
                     "[UNSECURE] Could not revoke the {Kind} share for {PrincipalId} on project " +
-                    "{ProjectId}. TraceId={TraceId}",
+                    "{ProjectId}; the sweep is reported as INCOMPLETE. TraceId={TraceId}",
                     share.Principal.Kind, share.Principal.Id, projectId, traceId);
             }
         }
 
-        return revoked;
+        return new ShareSweep(revoked, complete);
+    }
+
+    /// <summary>
+    /// The record's shares, and whether that list is known to be complete: the strict read's answer,
+    /// else whatever the soft read can still parse, else nothing.
+    /// </summary>
+    /// <remarks>
+    /// Split out of <see cref="RevokeAllSharesAsync"/> so the sweep reads as enumerate → revoke → report.
+    /// <para><b>No cancellation filter on these catches, deliberately.</b> A draft guarded them with
+    /// <c>when (!ct.IsCancellationRequested)</c>; review showed that tests the TOKEN's state rather than
+    /// the exception's identity, so a genuine read failure that merely coincided with a client
+    /// disconnect would be swallowed with no fallback and no warning. It also removed a diagnostic: a
+    /// cancelled read previously fell through to the flag-clear, which threw on the dead token and
+    /// produced the "half-applied state" error the operator needs. Both are the opposite of this task's
+    /// goal, so the catches stay unfiltered.</para>
+    /// </remarks>
+    private static async Task<(IReadOnlyList<DataversePrincipalAccess> Shares, bool Complete)> EnumerateSharesAsync(
+        IDataverseRecordShareService recordShare,
+        Guid projectId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var strict = await recordShare.GetPrincipalAccessOrThrowAsync(
+                ProjectEntityLogicalName, projectId, ct);
+
+            return (strict, true);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[UNSECURE] The shares on project {ProjectId} could not be read COMPLETELY. Sweeping " +
+                "only the rows that can be enumerated and reporting the sweep as INCOMPLETE — a " +
+                "surviving share is a stale access path an operator must remove. TraceId={TraceId}",
+                projectId, traceId);
+        }
+
+        try
+        {
+            var soft = await recordShare.GetPrincipalAccessAsync(ProjectEntityLogicalName, projectId, ct);
+
+            return (soft, false);
+        }
+        catch (Exception fallbackEx)
+        {
+            logger.LogWarning(fallbackEx,
+                "[UNSECURE] No shares on project {ProjectId} could be enumerated at all; NONE were " +
+                "revoked. This is not a clean sweep. TraceId={TraceId}", projectId, traceId);
+
+            return (Array.Empty<DataversePrincipalAccess>(), false);
+        }
     }
 
     private static IResult Problem(
