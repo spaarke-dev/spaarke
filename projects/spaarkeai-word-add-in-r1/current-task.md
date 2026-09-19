@@ -6,7 +6,7 @@
 
 ## 🔴 HANDOFF 2026-09-19 — READ THIS BLOCK FIRST
 
-**Branch `work/spaarkeai-word-add-in-r1` @ `090784afb`, clean, level with origin, PR #960 (draft).**
+**Branch `work/spaarkeai-word-add-in-r1` @ `cca9c221e` (this checkpoint), clean, level with origin, PR #960 (draft).** Prior commits today: `23fd17991` (task 055 close-out) → `a71a381fa` (task 056) → `090784afb` (tasks 057–060 + plan).
 
 ### ⛔ FIRST: task 056's CI gate is BROKEN and I broke it — one-line fix, owner decision pending
 
