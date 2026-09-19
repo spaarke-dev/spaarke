@@ -51,6 +51,35 @@ describe('describeCollisionFailure', () => {
     expect(result.collisionFileName).toBe('Brief.docx');
   });
 
+  // ── Task 055 (#1005): the refusal must NAME the document it would write into ────────────────────
+
+  it('carries the existing document NAME so the pane can say which document it would write into', () => {
+    // Task 055: before this, the pane offered "Save as new version" against an opaque GUID, so a user had
+    // no way to see the target was an unrelated document. The server now supplies its display name
+    // (sprk_documentname — NOT the filename; task 020 split them), gated on the caller's read access.
+    const result = describeCollisionFailure({
+      ...baseProblem,
+      existingDocumentName: 'Examiner Report — Canadian Application',
+    } as ProblemDetails);
+
+    expect(result.collisionExistingDocumentName).toBe('Examiner Report — Canadian Application');
+    expect(result.collisionExistingDocumentId).toBe(baseProblem.existingDocumentId);
+  });
+
+  it('omits the name when the server withheld it — the caller cannot read that document', () => {
+    // The authorization gate (task 055 §1.3): a caller without Read on the colliding document is told only
+    // that the NAME is taken, never what the document is or where it is filed. The id is withheld in the
+    // same breath, so the pane falls back to the already-shipped "Keep both only" state.
+    const { existingDocumentId: _id, ...withheld } = baseProblem;
+
+    const result = describeCollisionFailure(withheld as ProblemDetails);
+
+    expect(result.offerCollisionChoice).toBe(true);
+    expect(result.collisionFileName).toBe('Brief.docx');
+    expect(result.collisionExistingDocumentName).toBeUndefined();
+    expect(result.collisionExistingDocumentId).toBeUndefined();
+  });
+
   it('leaves any OTHER error code unaffected — safe to call unconditionally on every create-path failure', () => {
     const genericFailure: ProblemDetails = {
       type: 'https://spaarke.com/errors/office/service-error',

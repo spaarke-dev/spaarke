@@ -272,4 +272,101 @@ public class OfficeCreateCollisionTests
             .Should().Be("draft A", "the version save's content is what the user actually chose to keep");
         world.ReplaceCalls.Should().Be(1, "the version write went through the item-keyed path, never a second create upload");
     }
+
+    // ── Task 055 (#1005 / ISS-006): the refusal must NAME its target, and must not offer a retry that ──
+    // ── would write into a document filed somewhere other than where the caller is filing.            ──
+    //
+    // The live defect, 2026-09-18: Word's default upload name is "Untitled Document.docx"
+    // (WordAdapter.getSubject() falls back to it when the Title property is blank, which is the norm), and
+    // containers are BUSINESS-UNIT scoped with a flat root — so that one name is a single shared slot for an
+    // entire business unit. A collision resolved an UNRELATED orphan row, the pane offered "Save as new
+    // version" against its opaque GUID without naming it, and the version path (correctly, per task 023
+    // D-4/D-5) sends no targetEntity. A patent report was written as a version of a stranger's document,
+    // profiled and RAG-indexed under it, while the matter the user selected received nothing.
+
+    [Fact]
+    public async Task Collision_WhenTheCallerCanReadTheCollidingDocument_NamesIt_SoTheyCanSeeWhatTheyWouldWriteInto()
+    {
+        var world = new OfficeVersionSaveWorld();
+        // Seeded rather than created through a save: the create path records no sprk_documentname distinct
+        // from the filename and no association, and BOTH are what this refusal must report.
+        var (existingId, _) = world.SeedDocument(
+            SaveContainer, "Brief.docx", B,
+            documentName: "Examiner Report — Canadian Application",
+            matterId: Target.EntityId);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+
+        var collision = await client.PostAsJsonAsync("/api/office/save", CreateSave("Brief.docx", A));
+
+        collision.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await ReadProblemAsync(collision);
+        problem.Should().ContainKey("existingDocumentName").WhoseValue.Should().Be(
+            "Examiner Report — Canadian Application",
+            "an opaque GUID cannot tell a user the target is not their document — the name is what makes declining possible");
+        problem.Should().ContainKey("existingDocumentId").WhoseValue.Should().Be(existingId.ToString("D"),
+            "the document IS filed to the record the caller is filing to, so the version retry is legitimate here");
+    }
+
+    [Fact]
+    public async Task Collision_WhenTheCallerCannotReadTheCollidingDocument_WithholdsItsNameAndItsId()
+    {
+        // Task 055 escalation trigger (b): a name plus the record it is filed to IS the description of a
+        // document — materially more disclosive than an opaque id. A caller with no rights on it learns only
+        // that the NAME is taken. The id goes too: without Write they would be refused the retry by
+        // OfficeVersionSaveAuthorizationFilter anyway, so withholding it removes a disclosure and costs
+        // nothing. The pane then renders the already-shipped "Keep both only" state.
+        var world = new OfficeVersionSaveWorld();
+        var (existingId, _) = world.SeedDocument(
+            SaveContainer, "Brief.docx", B,
+            rights: AccessRights.None,
+            documentName: "Project Falcon — Termination Letter",
+            matterId: Target.EntityId);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+
+        var collision = await client.PostAsJsonAsync("/api/office/save", CreateSave("Brief.docx", A));
+
+        collision.StatusCode.Should().Be(HttpStatusCode.Conflict, "the refusal itself is unchanged — only what it reveals");
+        var problem = await ReadProblemAsync(collision);
+        problem.Should().ContainKey("fileName").WhoseValue.Should().Be("Brief.docx",
+            "that the name is taken is unavoidable — it is what the refusal MEANS");
+        problem.Should().NotContainKey("existingDocumentName",
+            "naming a document the caller cannot read discloses its subject to someone with no rights on it");
+        problem.Should().NotContainKey("existingDocumentId",
+            "the id is withheld in the same breath, so the pane falls back to \"Keep both\" only");
+        world.AccessChecks.Should().Contain(existingId.ToString("D"),
+            "the gate must actually evaluate the caller's rights — a withheld field that was never checked "
+            + "would pass this test today and leak the moment the seeding changed");
+    }
+
+    [Fact]
+    public async Task Collision_WhenTheCollidingDocumentIsFiledToADifferentRecord_WithholdsTheIdSoNoVersionRetryIsOffered()
+    {
+        // THE #1005 CASE. The colliding document belongs to a different matter than the one the caller
+        // selected. Offering "Save as new version" here is what wrote a patent report onto a stranger's row:
+        // the version path sends no targetEntity, so the caller's selection is silently discarded and the
+        // bytes land wherever the COLLIDING document happens to be filed.
+        //
+        // Withholding the id is the fix, and it is deliberately NOT "re-associate the document to the
+        // caller's record" — that would re-file another user's document onto the caller's matter, which is
+        // worse than the defect and crosses the boundary task 023 D-4/D-5 drew (escalation trigger (a)).
+        var world = new OfficeVersionSaveWorld();
+        var someoneElsesMatter = Guid.NewGuid();
+        world.SeedDocument(
+            SaveContainer, "Brief.docx", B,
+            documentName: "Unrelated Matter — Draft",
+            matterId: someoneElsesMatter);
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+
+        var collision = await client.PostAsJsonAsync("/api/office/save", CreateSave("Brief.docx", A));
+
+        collision.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await ReadProblemAsync(collision);
+        problem.Should().NotContainKey("existingDocumentId",
+            "a version retry against a document filed elsewhere silently discards the caller's chosen record");
+        problem.Should().NotContainKey("existingDocumentName",
+            "nor is the other record's document named — the caller never selected it and cannot infer it from here");
+    }
 }

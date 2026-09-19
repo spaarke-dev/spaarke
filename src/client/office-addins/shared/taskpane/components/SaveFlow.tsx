@@ -1241,9 +1241,26 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       <MessageBarBody>
         <MessageBarTitle>{error?.title || 'Name Already Exists'}</MessageBarTitle>
         {error?.message}
+        {/* Task 055 (#1005): NAME the document the version retry would write into. Offering that retry
+            against an opaque id is what let a document be written as a new version of an unrelated one
+            that merely shared Word's default file name. Absent when the server withheld it (the caller
+            cannot read that document) — and then no version retry is offered either. */}
+        {error?.collisionExistingDocumentName && (
+          <Text
+            size={200}
+            style={{
+              display: 'block',
+              marginTop: tokens.spacingVerticalXS,
+              fontWeight: tokens.fontWeightSemibold,
+            }}
+          >
+            That name belongs to: {error.collisionExistingDocumentName}
+          </Text>
+        )}
         <Text size={200} style={{ display: 'block', marginTop: tokens.spacingVerticalXS }}>
-          Keep both uploads this file under a new name. Save as new version keeps the existing document and adds this
-          file as its latest version.
+          {error?.collisionExistingDocumentId
+            ? 'Keep both uploads this file under a new name. Save as new version keeps the existing document and adds this file as its latest version.'
+            : 'Keep both uploads this file under a new name.'}
         </Text>
       </MessageBarBody>
       <MessageBarActions>

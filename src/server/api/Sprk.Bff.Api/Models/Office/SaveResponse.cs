@@ -138,4 +138,23 @@ public record SaveError
     /// <c>IsNewVersion: true</c>) instead of a second create.
     /// </summary>
     public Guid? ExistingDocumentId { get; init; }
+
+    /// <summary>
+    /// Task 055 (OFFICE_020 name-collision only; #1005 / ISS-006): the DISPLAY NAME
+    /// (<c>sprk_documentname</c> — not <see cref="FileName"/>; task 020 split them) of the document that
+    /// already holds the collided name, so the pane can say WHICH document "Save as new version" would
+    /// write into instead of offering that retry against an opaque id.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Withheld in two cases, and then <see cref="ExistingDocumentId"/> is withheld with it.</b>
+    /// (1) The colliding document is filed to a record OTHER than the one the caller is filing to — a
+    /// version retry there would silently discard the caller's chosen record, which is the #1005 defect.
+    /// Decided in <c>OfficeService.ResolveNameCollisionAsync</c>, which is a pure comparison, not an
+    /// authorization decision. (2) The caller does not hold <c>Read</c> on that document — decided at the
+    /// ENDPOINT (ADR-008), because a name plus what it is filed to is the description of a document and is
+    /// materially more disclosive than an opaque id.</para>
+    /// <para>Both cases land the pane in its already-shipped "Keep both only" state, so neither needs new
+    /// client behaviour.</para>
+    /// </remarks>
+    public string? ExistingDocumentName { get; init; }
 }

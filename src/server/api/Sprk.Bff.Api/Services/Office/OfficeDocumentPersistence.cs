@@ -33,6 +33,30 @@ public class OfficeDocumentPersistence
     internal const string GraphDriveIdAttribute = "sprk_graphdriveid";
     internal const string FileNameAttribute = "sprk_filename";
 
+    // Task 055 (#1005): the collision refusal must NAME its target and know where that target is FILED.
+    // `sprk_documentname` is the user-facing name and is NOT `sprk_filename` — task 020 split them
+    // deliberately, so reporting the filename back would tell the user nothing they did not just type.
+    internal const string DocumentNameAttribute = "sprk_documentname";
+
+    /// <summary>
+    /// Task 055: the FOUR direct association slots, in task 012's shipped precedence order. Closed set —
+    /// `notes/026-slot-scope-decision.md` §1: the Office save path writes ONLY this family, never any of the
+    /// twelve `sprk_related*` columns, so a collision target filed by this add-in is always found here.
+    /// </summary>
+    internal static readonly string[] DirectAssociationAttributes =
+        { "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment" };
+
+    /// <summary>
+    /// Task 055: what a name collision resolved to — the owning document, its display name, and the records
+    /// it is filed to. Replaces the bare <c>Guid?</c> this lookup used to return, because an id alone cannot
+    /// answer either question the refusal now has to answer: WHICH document is this, and is it filed where
+    /// the caller is filing?
+    /// </summary>
+    public sealed record CollisionTarget(
+        Guid DocumentId,
+        string? DocumentName,
+        IReadOnlyCollection<Guid> DirectAssociationIds);
+
     /// <summary>
     /// Task 020 (FR-06): <c>sprk_documentname</c> is NVARCHAR(850). Bounded HERE — at the boundary where the
     /// user-facing name is about to become <see cref="CreateDocumentRequest.Name"/> — rather than an ad-hoc
@@ -398,7 +422,7 @@ public class OfficeDocumentPersistence
     /// pane still offers "Keep both" (which needs no document id); only "Save as new version" becomes
     /// unavailable. A wrong guess would be worse than no guess: this method never fabricates an id.</para>
     /// </remarks>
-    public async Task<Guid?> FindDocumentIdByLocationAsync(
+    public async Task<CollisionTarget?> FindCollisionTargetByLocationAsync(
         string driveId,
         string fileName,
         CancellationToken cancellationToken)
@@ -416,13 +440,42 @@ public class OfficeDocumentPersistence
         {
             var query = new QueryExpression(DocumentLogicalName)
             {
-                ColumnSet = new ColumnSet(DocumentIdAttribute),
+                // Task 055 (#1005): widened from the id alone. The refusal has to answer two questions an id
+                // cannot — WHICH document is this (its display name), and is it filed where the caller is
+                // filing (its direct associations). Widening THIS projection is deliberately preferred over a
+                // second lookup on the refusal path: one round trip, one place (root CLAUDE.md §11), and no
+                // added latency on what is an interactive save.
+                ColumnSet = new ColumnSet(
+                    new[] { DocumentIdAttribute, DocumentNameAttribute }
+                        .Concat(DirectAssociationAttributes)
+                        .ToArray()),
                 TopCount = 1,
             };
             query.Criteria.AddCondition(GraphDriveIdAttribute, ConditionOperator.Equal, driveId);
             query.Criteria.AddCondition(FileNameAttribute, ConditionOperator.Equal, fileName);
             var matches = await _genericEntityService.RetrieveMultipleAsync(query, cancellationToken);
-            return matches.Entities.Count > 0 ? matches.Entities[0].Id : (Guid?)null;
+            if (matches.Entities.Count == 0)
+            {
+                return null;
+            }
+
+            var row = matches.Entities[0];
+
+            // Dataverse OMITS an unset attribute rather than returning it null, so every read here is
+            // presence-checked. `XrmEntityReference` (not the bare name) because this file aliases it at the
+            // top — `EntityReference` unqualified is Spaarke.Dataverse's, a different type entirely.
+            var associations = new List<Guid>(DirectAssociationAttributes.Length);
+            foreach (var slot in DirectAssociationAttributes)
+            {
+                if (row.Attributes.TryGetValue(slot, out var value) && value is XrmEntityReference reference)
+                {
+                    associations.Add(reference.Id);
+                }
+            }
+
+            var documentName = row.Attributes.TryGetValue(DocumentNameAttribute, out var name) ? name as string : null;
+
+            return new CollisionTarget(row.Id, documentName, associations);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

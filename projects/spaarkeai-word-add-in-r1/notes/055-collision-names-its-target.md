@@ -69,10 +69,28 @@ than as the app"* (`AuthorizationService.cs:223-225`), and fails **closed** with
 app-only. `AccessRights` is `[Flags]` — `None=0, Read=1<<0, Write=1<<1, Delete=1<<2`
 (`IAccessDataSource.cs:122-136`).
 
-For the **association** (a matter/project/invoice/work-assignment name, a *different* record from the
-document) the sibling seam applies: `GetCallerRecordAccessAsync(userId, entitySetName, recordId, token, ct)`
-(`AuthorizationService.cs:255-283`). Read on the document does not by itself authorize naming its parent —
+For the **association** the first draft of this note proposed the sibling seam
+`GetCallerRecordAccessAsync(userId, entitySetName, recordId, token, ct)` (`AuthorizationService.cs:255-283`),
+on the correct principle that read on a document does not by itself authorize naming its parent —
 `defer-issues.md` D-032-1 is the record of this project getting that exact inference wrong once already.
+
+**Refined 2026-09-19, and the refinement is strictly less disclosive.** Do not put a non-matching
+association's NAME on the wire at all. Return:
+
+- the **document's name**, gated on document read (§1.3); and
+- whether the colliding document's association **matches the caller's own selected target record** — a
+  boolean comparison, not a disclosure.
+
+When it matches, naming the record reveals nothing: it is the record the caller just chose from the
+authorized picker, so they can already read it. When it does not match, the pane says only that the document
+is filed elsewhere, and withholds the retry (§4). A caller therefore never learns the name of a record they
+did not already name themselves.
+
+Two consequences worth stating: it removes the need for a second authorization call on the refusal path —
+which is also the latency concern escalation trigger (d) names — and it removes the need to model
+`GetRecordAccessAsync` in the test world, whose `IAccessDataSource` double
+(`OfficeEndpointsContractTests.cs:1843-1848`) sets up **only** `GetUserAccessAsync`. That is a fixture fact
+that would otherwise have had to change to accommodate a design choice, which is the wrong way round.
 
 ---
 
@@ -170,6 +188,34 @@ and the honest response would have been to escalate trigger (b) as unfixable. CL
 docs lag") is what resolved it. Not fixed inside task 055 — `.claude/constraints/auth.md` is a shared
 constraint file on `unified-access-control-r2`'s surface, and editing it as a side effect of a save-path
 task is the kind of silent scope widening CLAUDE.md §11 forbids. **Surfaced to the owner for routing.**
+
+---
+
+## 5A. Two fixture gaps this change exposed (found by running, not by reading)
+
+`OfficeVersionSaveWorld` had modelled neither half of what the refusal now reads. Both were invisible while
+nothing read them, and both surfaced the moment something did.
+
+| Gap | What the fake did | Why it was invisible | Fixed by |
+|---|---|---|---|
+| **The `ColumnSet` was ignored** | `RetrieveMultiple`'s collision branch returned `new Entity(name, id)` — an id and no attributes | Nothing had ever asked for more than the id | `ProjectDocument(row, columnSet)` |
+| **The association was discarded** | `ApplyUpdate` dropped `MatterLookup`, so every save-created row was filed **nowhere** | Nothing had ever read a document's association | `row.MatterId = update.MatterLookup ?? row.MatterId` |
+| **The display name was conflated** | `CreateDocument` recorded the request's `Name` only as `FileName` | `sprk_documentname` vs `sprk_filename` never mattered to a test before | `DocumentName = request.Name` |
+
+**The second one is the instructive failure.** Three *pre-existing* collision tests went red the instant the
+refusal began consulting the association — each asserting `existingDocumentId` for a document their own save
+had filed to the target matter. In production that assertion is correct: `DocumentAssociationMap.TryApply`
+(`Spaarke.Dataverse/Models.cs:78-110`) puts the lookup on the UPDATE and `DataverseServiceClientImpl:922-931`
+writes `sprk_matter`, so those documents genuinely *are* filed there.
+
+The tempting move — relax the three assertions so they match the fake — would have left them green while
+deleting the guarantee the version retry depends on: **that the target is filed where the caller is filing.**
+That is precisely the property #1005 is about. The failure was the fake's, and the fix belongs in the fake.
+
+Worth stating as a general lesson, since this project has now hit it twice in one task: a fake that models
+only what was previously read will fail *for the wrong reason* the first time something new reads it, and the
+red will point at the new code rather than at the model. Both gaps here were caught only because the
+reproduce-first discipline demanded a specific expected failure and these did not match it.
 
 ---
 

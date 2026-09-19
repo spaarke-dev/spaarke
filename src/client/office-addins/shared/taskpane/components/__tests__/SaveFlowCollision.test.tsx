@@ -190,6 +190,34 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
     TEST_TIMEOUT_MS
   );
 
+  // ── Task 055 (#1005): the prompt must name the document it would write into ──────────────────────
+
+  it(
+    'the collision NAMES the document "Save as new version" would write into',
+    async () => {
+      // #1005: the pane offered this retry against an opaque GUID, so a user could not see the target was
+      // an unrelated document that merely shared Word's default filename. It versioned a patent report onto
+      // a stranger's row. Naming the target is what makes declining possible.
+      mockFetch.mockImplementation(async (url: string) => {
+        if (String(url).includes('/api/office/save')) {
+          return textResponse(false, 409, {
+            ...COLLISION_PROBLEM,
+            existingDocumentName: 'Examiner Report — Canadian Application',
+          });
+        }
+        return textResponse(true, 200, {});
+      });
+
+      renderPane();
+      await userEvent.click(await screen.findByRole('button', { name: 'Save' }, WAIT));
+      await screen.findByRole('button', { name: 'Keep both' }, WAIT);
+
+      // The name appears in the prompt — not merely in a tooltip or the raw detail string.
+      expect(screen.getAllByText(/Examiner Report — Canadian Application/).length).toBeGreaterThan(0);
+    },
+    TEST_TIMEOUT_MS
+  );
+
   it(
     'a collision with no resolvable existing document offers ONLY "Keep both" (no version target to retry)',
     async () => {

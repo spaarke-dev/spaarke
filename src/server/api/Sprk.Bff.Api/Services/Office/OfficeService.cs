@@ -638,7 +638,8 @@ public class OfficeService : IOfficeService
                     var collisionUploadError = upload.Error;
                     SaveError? refusal;
                     (refusal, upload) = await ResolveNameCollisionAsync(
-                        upload, containerId, fileName, contentStream, request.ContentType, cancellationToken);
+                        upload, containerId, fileName, contentStream, request.ContentType,
+                        request.TargetEntity, cancellationToken);
 
                     if (refusal is not null)
                     {
@@ -1103,14 +1104,23 @@ public class OfficeService : IOfficeService
         string fileName,
         Stream contentStream,
         SaveContentType contentType,
+        // Task 055 (#1005): the record this save is filing to. Used ONLY to compare against the colliding
+        // document's own associations — a pure comparison, never an authorization decision (that is the
+        // endpoint's, per ADR-008 and notes/055-collision-names-its-target.md §2).
+        SaveEntityReference? targetEntity,
         CancellationToken cancellationToken)
     {
         // Resolve which row already holds this name in this drive — read-only, best-effort — so the pane
         // can offer "Save as new version" as a direct retry through the ALREADY-SHIPPED version-save path
         // (Document.ExistingDocumentId + IsNewVersion), never a second write mechanism.
-        var collidingDocumentId = collidedUpload.DriveId is { } collisionDriveId
-            ? await _documentPersistence.FindDocumentIdByLocationAsync(collisionDriveId, fileName, cancellationToken)
+        //
+        // Task 055: this lookup now also returns the row's display name and direct associations, from the
+        // SAME single query — an id alone cannot answer "which document is this" or "is it filed where the
+        // caller is filing", and both are required before offering to write into it.
+        var collisionTarget = collidedUpload.DriveId is { } collisionDriveId
+            ? await _documentPersistence.FindCollisionTargetByLocationAsync(collisionDriveId, fileName, cancellationToken)
             : null;
+        var collidingDocumentId = collisionTarget?.DocumentId;
 
         if (collidingDocumentId is null)
         {
@@ -1188,14 +1198,48 @@ public class OfficeService : IOfficeService
                 fileName, collidingDocumentId);
         }
 
+        // ══ TASK 055 (#1005 / ISS-006) — the version retry is offered ONLY when the colliding document is
+        // ══ already filed where this save is filing.
+        //
+        // The defect this closes: Word's default upload name is "Untitled Document.docx" (getSubject() falls
+        // back to it whenever the Title property is blank, which is the norm) and containers are
+        // BUSINESS-UNIT scoped with a flat root — so that one name is a single shared slot for an entire
+        // business unit. A collision therefore routinely resolves an UNRELATED document. Offering "Save as
+        // new version" against it wrote a patent report as a version of a stranger's row, profiled and
+        // RAG-indexed under it, while the matter the user selected received nothing: the version path sends
+        // no TargetEntity (task 023 D-4/D-5, deliberately and correctly), so the caller's chosen record is
+        // silently discarded and the bytes land wherever the COLLIDING document happens to be filed.
+        //
+        // The fix is to withhold the offer, NOT to re-associate. Re-associating would re-file another user's
+        // document onto this caller's record — worse than the defect, and across the authorization boundary
+        // task 023 drew. An empty association set (the orphan actually observed on 2026-09-18) is a
+        // non-match by construction, which is why this is phrased as "matches", never "does not conflict".
+        var associationMatches = targetEntity is { EntityId: var targetId }
+            && collisionTarget is not null
+            && collisionTarget.DirectAssociationIds.Contains(targetId);
+
+        // Immutable captures get no version-save retry either — FR-11's version path is Document-only.
+        var offersVersionRetry = isEditable && associationMatches;
+
+        if (isEditable && !associationMatches)
+        {
+            _logger.LogInformation(
+                "Collision refusal for '{FileName}': the owning document {ExistingDocumentId} is not filed to "
+                + "the record this save targets, so no version retry is offered. The pane shows \"Keep both\" only.",
+                fileName, collidingDocumentId);
+        }
+
         return (new SaveError
         {
             Code = OfficeErrorCodes.NameCollision,
             Message = $"A file named \"{fileName}\" already exists here. Nothing was uploaded or changed.",
             Retryable = false,
             FileName = fileName,
-            // Immutable captures get no version-save retry to offer — see the remarks above.
-            ExistingDocumentId = isEditable ? collidingDocumentId : null
+            ExistingDocumentId = offersVersionRetry ? collidingDocumentId : null,
+            // The name travels WITH the id, never without it: naming a document the pane cannot act on
+            // would disclose it for no user benefit. The endpoint strips both again if the caller holds no
+            // Read on that document (ADR-008 gate — this method makes no authorization decision).
+            ExistingDocumentName = offersVersionRetry ? collisionTarget?.DocumentName : null
         }, collidedUpload);
     }
 

@@ -1162,6 +1162,22 @@ public sealed class OfficeVersionSaveWorld
         public string? FilePath { get; set; }
         public string? CanonicalHash { get; set; }
         public Guid? CanonicalDocumentId { get; set; }
+
+        /// <summary>
+        /// Task 055: the row's user-facing <c>sprk_documentname</c>, which is NOT the same value as
+        /// <see cref="FileName"/> (<c>sprk_filename</c>) — task 020 split them deliberately. The collision
+        /// refusal names the document by THIS, so a fixture that conflated the two could not tell a correct
+        /// implementation from one that echoed the filename back.
+        /// </summary>
+        public string? DocumentName { get; set; }
+
+        /// <summary>
+        /// Task 055: the row's <c>sprk_matter</c> association. Only the Matter slot is modelled here — the
+        /// production resolver reads all four direct slots in precedence order (see
+        /// <c>notes/026-slot-scope-decision.md</c> §1), but every scenario these tests exercise files to a
+        /// Matter, and modelling the other three would be fixture surface no test reads.
+        /// </summary>
+        public Guid? MatterId { get; set; }
     }
 
     public sealed class SpeItem
@@ -1202,7 +1218,12 @@ public sealed class OfficeVersionSaveWorld
         AccessRights rights = AccessRights.Read | AccessRights.Write,
         bool withPointers = true,
         Guid? linkedToCanonical = null,
-        string? linkedHash = null)
+        string? linkedHash = null,
+        // Task 055: the display name and association a collision refusal reports. Both default to null so
+        // every existing caller is byte-for-byte unaffected — a seeded row without them behaves exactly as
+        // it did before this task.
+        string? documentName = null,
+        Guid? matterId = null)
     {
         var itemId = $"item-{Guid.NewGuid():N}";
         var item = new SpeItem { DriveId = driveId, Id = itemId, Name = fileName };
@@ -1220,6 +1241,8 @@ public sealed class OfficeVersionSaveWorld
             FilePath = item.WebUrl,
             CanonicalHash = linkedHash ?? Hash(bytes),
             CanonicalDocumentId = linkedToCanonical,
+            DocumentName = documentName,
+            MatterId = matterId,
         };
         AccessByDocumentId[id] = rights;
         return (id, itemId);
@@ -1292,7 +1315,24 @@ public sealed class OfficeVersionSaveWorld
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare
             // it against the created row — a world that always minted its own id could not observe the link.
             var id = request.Id ?? Guid.NewGuid();
-            Documents[id] = new DocumentRow { Id = id, FileName = request.Name };
+            // Task 055: the create's Name is the user-facing sprk_documentname, which task 020 split from
+            // sprk_filename. The fixture previously recorded it ONLY as FileName, so a save-created row had
+            // no display name at all — invisible until the collision refusal began reporting one.
+            Documents[id] = new DocumentRow { Id = id, FileName = request.Name, DocumentName = request.Name };
+            // Task 055: the SAVER holds rights on the document they just created. In real Dataverse that is
+            // simply true — the row is created in their business unit and their role grants Read/Write on
+            // sprk_document. This world granted rights ONLY through SeedDocument, so every save-created
+            // document was unreadable by the very caller who saved it.
+            //
+            // Invisible until something asked. OfficeVersionSaveAuthorizationFilter already hit it and the
+            // affected test worked around it with an explicit grant at its call site
+            // (OfficeCreateCollisionTests, "a right the create path itself never records in this fixture").
+            // Task 055's endpoint gate asks on EVERY collision refusal, so the workaround no longer scales
+            // and the gap belongs fixed here — at the fake's model of reality, not in three assertions.
+            //
+            // Does NOT weaken the authorization negative test: that one seeds its document explicitly with
+            // AccessRights.None, and SeedDocument's own assignment still wins for seeded rows.
+            AccessByDocumentId[id] = AccessRights.Read | AccessRights.Write;
             return id.ToString("D");
         }
     }
@@ -1310,6 +1350,18 @@ public sealed class OfficeVersionSaveWorld
             row.FileSize = update.FileSize ?? row.FileSize;
             row.FilePath = update.FilePath ?? row.FilePath;
             row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
+            // Task 055: the ASSOCIATION the save writes. DocumentAssociationMap.TryApply puts it on the
+            // UPDATE (Spaarke.Dataverse/Models.cs:78-110) and DataverseServiceClientImpl:922-931 writes it to
+            // sprk_matter — so a document saved to a matter genuinely IS filed to that matter. This world
+            // discarded the lookups, so every save-created row was filed nowhere.
+            //
+            // That gap was invisible until task 055's refusal started READING the association: three
+            // pre-existing collision tests went red at once, all asserting existingDocumentId for a document
+            // their own save had filed to the target matter. They were correct and the fake was wrong — the
+            // fix belongs here, not in their assertions. Relaxing them would have deleted the guarantee the
+            // version retry depends on (that the target is filed where the caller is filing) while leaving
+            // the tests green, which is the worst of both outcomes.
+            row.MatterId = update.MatterLookup ?? row.MatterId;
         }
     }
 
@@ -1468,7 +1520,7 @@ public sealed class OfficeVersionSaveWorld
                         string.Equals(r.DriveId, wantedDrive, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(r.FileName, wantedFileName, StringComparison.OrdinalIgnoreCase));
                     if (match is not null)
-                        result.Entities.Add(new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, match.Id));
+                        result.Entities.Add(ProjectDocument(match, query.ColumnSet));
                 }
             }
 
@@ -1516,6 +1568,48 @@ public sealed class OfficeVersionSaveWorld
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Task 055: builds the returned <c>sprk_document</c> entity carrying the attributes the query actually
+    /// ASKED for.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this exists.</b> Until task 055 the collision branch returned
+    /// <c>new Entity(DocumentEntityName, match.Id)</c> — an id and nothing else — and ignored
+    /// <see cref="Microsoft.Xrm.Sdk.Query.ColumnSet"/> entirely. That is invisible while the production
+    /// projection asks for the id alone, and becomes a trap the moment it asks for more: a reproduce-first
+    /// test for a WIDENED projection would have gone red because the FIXTURE models no columns, not because
+    /// production code omitted them — a failure for the wrong reason, which is exactly what reproduce-first
+    /// exists to rule out.</para>
+    /// <para><b>Additive by construction.</b> The entity still carries its id, so every existing caller that
+    /// reads only <c>.Id</c> is unchanged. An attribute the row has no value for is left ABSENT rather than
+    /// set to null — Dataverse omits unset attributes, and a fixture that materialised nulls would let a
+    /// consumer that mishandles "absent" pass here and fail live.</para>
+    /// </remarks>
+    private static Microsoft.Xrm.Sdk.Entity ProjectDocument(DocumentRow row, Microsoft.Xrm.Sdk.Query.ColumnSet? columns)
+    {
+        var entity = new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, row.Id);
+        if (columns is null)
+            return entity;
+
+        foreach (var column in columns.Columns)
+        {
+            switch (column)
+            {
+                case "sprk_documentname" when row.DocumentName is not null:
+                    entity[column] = row.DocumentName;
+                    break;
+                case "sprk_filename" when row.FileName is not null:
+                    entity[column] = row.FileName;
+                    break;
+                case "sprk_matter" when row.MatterId is { } matterId:
+                    entity[column] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matterId);
+                    break;
+            }
+        }
+
+        return entity;
     }
 
     private const string DocumentEntityName = "sprk_document";

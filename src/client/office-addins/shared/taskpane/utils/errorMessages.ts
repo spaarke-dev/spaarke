@@ -36,6 +36,13 @@ export interface ProblemDetails {
    * no owning document, or the lookup was unavailable — in which case only "Keep both" is offered.
    */
   existingDocumentId?: string;
+  /**
+   * Task 055 (OFFICE_020 name-collision only): the DISPLAY NAME (`sprk_documentname`, not the file name)
+   * of the document that already holds `fileName`. Present only when the caller holds Read on that
+   * document — the server withholds it otherwise, because a name plus what it is filed to IS the
+   * description of a document, and materially more disclosive than an opaque id (#1005 / ISS-006).
+   */
+  existingDocumentName?: string;
 }
 
 /**
@@ -72,6 +79,13 @@ export interface ErrorMessage {
    * Absent → only "Keep both" is offered.
    */
   collisionExistingDocumentId?: string;
+  /**
+   * Task 055: the name of the document "Save as new version" would write into, so the pane can say WHICH
+   * document that is instead of offering the retry against an opaque id. Absent when the server withheld
+   * it (the caller cannot read that document) — in which case `collisionExistingDocumentId` is absent too
+   * and only "Keep both" is offered.
+   */
+  collisionExistingDocumentName?: string;
 }
 
 /**
@@ -370,6 +384,9 @@ export function describeCollisionFailure(problem: ProblemDetails): ErrorMessage 
     offerCollisionChoice: true,
     ...(problem.fileName !== undefined ? { collisionFileName: problem.fileName } : {}),
     ...(problem.existingDocumentId !== undefined ? { collisionExistingDocumentId: problem.existingDocumentId } : {}),
+    ...(problem.existingDocumentName !== undefined
+      ? { collisionExistingDocumentName: problem.existingDocumentName }
+      : {}),
   };
 }
 

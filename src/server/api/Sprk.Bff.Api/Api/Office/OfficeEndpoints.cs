@@ -2,8 +2,11 @@ using System.IO;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Office.Errors;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -242,6 +245,12 @@ public static class OfficeEndpoints
         IOfficeService officeService,
         ILogger<Program> logger,
         HttpContext context,
+        // Task 055 (#1005): the collision refusal's display fields are gated on the caller's Read access to
+        // the colliding document. The gate lives HERE, not in OfficeService — ADR-008 puts resource
+        // authorization at the endpoint, OfficeService has no authorization concern among its fifteen
+        // dependencies, and every caller-scoped check in this codebase is handler-side
+        // (ChatDocumentEndpoints, RecordSearchEndpoints). See notes/055-collision-names-its-target.md §2.
+        AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
@@ -321,8 +330,14 @@ public static class OfficeEndpoints
                     response.Error?.Code,
                     response.Error?.Message);
 
+                // Task 055 (#1005): withhold the colliding document's identity from a caller who cannot read
+                // it. The service resolved it in-process (one lookup, no second round trip); this is the only
+                // code that can put it on the wire, so this is where the authorization decision belongs.
+                var error = await WithholdCollisionIdentityIfUnauthorizedAsync(
+                    response.Error, userId, context, authorizationService, logger, cancellationToken);
+
                 // Map service errors to ProblemDetails
-                return MapSaveErrorToProblem(response.Error, traceId);
+                return MapSaveErrorToProblem(error, traceId);
             }
         }
         catch (Exception ex)
@@ -509,6 +524,70 @@ public static class OfficeEndpoints
     /// <summary>
     /// Maps a SaveError to an appropriate ProblemDetails response.
     /// </summary>
+    /// <summary>
+    /// Task 055 (#1005 / ISS-006): strips a name-collision refusal's <c>ExistingDocumentName</c> and
+    /// <c>ExistingDocumentId</c> unless the caller holds <see cref="AccessRights.Read"/> on that document.
+    /// Every other error passes through untouched.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the id goes too.</b> It is already returned today with no authorization of any kind —
+    /// <c>FindCollisionTargetByLocationAsync</c> queries by drive + file name through the app-only generic
+    /// seam. Withholding the name while still handing back the id would close the new disclosure and leave
+    /// the pre-existing one. It also costs the caller nothing: without <c>Write</c> they would be refused the
+    /// version retry by <c>OfficeVersionSaveAuthorizationFilter</c> anyway, and the pane's "Keep both only"
+    /// state is already shipped and tested.</para>
+    /// <para><b>Fail closed.</b> An access check that throws withholds rather than reveals —
+    /// <c>AuthorizationService</c> is itself fail-closed (it denies outright when the caller's bearer token
+    /// is absent rather than degrading to app-only), and this mirrors that posture instead of assuming the
+    /// happy path.</para>
+    /// </remarks>
+    private static async Task<SaveError?> WithholdCollisionIdentityIfUnauthorizedAsync(
+        SaveError? error,
+        string userId,
+        HttpContext context,
+        AuthorizationService authorizationService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (error is null
+            || error.Code != OfficeErrorCodes.NameCollision
+            || error.ExistingDocumentId is not { } collidingDocumentId)
+        {
+            return error;
+        }
+
+        AccessRights rights;
+        try
+        {
+            var snapshot = await authorizationService.GetCallerAccessAsync(
+                userId,
+                collidingDocumentId.ToString("D"),
+                TokenHelper.ExtractBearerTokenOrNull(context),
+                cancellationToken);
+            rights = snapshot.AccessRights;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not evaluate the caller's access to collision target {DocumentId}; withholding its "
+                + "identity from the refusal (fail closed).",
+                collidingDocumentId);
+            rights = AccessRights.None;
+        }
+
+        if (rights.HasFlag(AccessRights.Read))
+        {
+            return error;
+        }
+
+        logger.LogInformation(
+            "Collision refusal for {FileName}: the caller holds no Read on the owning document, so its name "
+            + "and id are withheld. The pane offers \"Keep both\" only.",
+            error.FileName);
+
+        return error with { ExistingDocumentId = null, ExistingDocumentName = null };
+    }
+
     private static IResult MapSaveErrorToProblem(SaveError? error, string correlationId)
     {
         if (error is null)
@@ -566,7 +645,11 @@ public static class OfficeEndpoints
                     ["correlationId"] = correlationId,
                     ["retryable"] = error.Retryable,
                     ["fileName"] = error.FileName,
-                    ["existingDocumentId"] = error.ExistingDocumentId
+                    ["existingDocumentId"] = error.ExistingDocumentId,
+                    // Task 055 (#1005): names the document the version retry would write into. Null — and so
+                    // omitted from the body — whenever the id is also null, which is how both the
+                    // filed-elsewhere case and the caller-cannot-read case reach the pane.
+                    ["existingDocumentName"] = error.ExistingDocumentName
                 }),
             _ => Results.Problem(
                 title: "Save Failed",
