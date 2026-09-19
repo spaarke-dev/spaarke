@@ -348,7 +348,28 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     private static readonly IReadOnlyList<SinkSite> AllowList = new[]
     {
         // ---------------------------------------------------------------------------------------------
-        // ClientSupplied — the work list. TWO sites, all owned. Both are in Api/DocumentsEndpoints.cs.
+        // ClientSupplied — the work list. ZERO sites. The list is EMPTY, and that is the deliverable of
+        // task 083: no SPE write sink in this codebase takes its container or drive from client input.
+        //
+        // 🔴 EMPTIED 2026-09-07 by task 083. The last two entries described
+        // `Api/DocumentsEndpoints.cs :: UploadSmallAsync #1` (row 4) and `:: DeleteFileAsync #1`
+        // (row 5). Both ROUTES were deleted and the FILE with them, so the declarations went too —
+        // neither became Permanent, which was the standing requirement (task 074's rule: do not convert
+        // a Pending waiver to Permanent to make a build green; that inverts the forcing function).
+        // Their `UNOWNED` waivers in RouteAuthorizationGuardTests were deleted in the same commit.
+        //
+        // ⚠️ AN EMPTY WORK LIST IS THE ONE STATE MOST LIKELY TO BE READ WRONGLY. It does NOT mean the
+        // guard is finished or removable. Rule A still pins AllowList.Count against the DISCOVERED set
+        // on every build, so the value of this file from here on is entirely in what it does to the
+        // NEXT sink somebody adds: an undeclared write sink fails the build, and the only way to
+        // declare one as ClientSupplied is to name an owning task that will remove it. Deleting this
+        // file because "the list is empty" would restore precisely the condition that let rows 9 and 10
+        // (Office save, SpeAdmin container items) survive four manual recounts.
+        //
+        // ORDINALS: no renumbering was needed. Ordinals are assigned per (file, sink) in FILE order,
+        // and DocumentsEndpoints.cs held no other sink of either name — the whole file is gone, so no
+        // surviving entry's ordinal moved. Contrast the 2026-09-03 OBOEndpoints deletion below, where
+        // removing the FIRST of three same-named sites renumbered the two beneath it.
         //
         // COUNT CORRECTED 2026-08-28, TWICE ON 2026-09-01, AND AGAIN AT THE 2026-09-03 MERGE. The header
         // said "nine" on the day the guard was written when the block held TWELVE, then "eleven" while the
@@ -373,24 +394,28 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // Recount with `grep -c "^            Provenance.ClientSupplied,"` rather than by reading — that
         // is a machine count, and the five wrong numbers above are the argument for taking one.
         // ---------------------------------------------------------------------------------------------
-        new SinkSite("Api/DocumentsEndpoints.cs", "UploadSmallAsync", 1,
-            Provenance.ClientSupplied, "083 (row 4)",
-            "route parameter {driveId}",
-            "PUT /api/drives/{driveId}/upload writes app-only (MI) into whatever drive the caller names, "
-            + "gated by the 'canwritefiles' POLICY only — and ResourceAccessHandler.ExtractResourceId "
-            + "accepts driveId/containerId/documentId interchangeably, so the policy authorizes a DRIVE id "
-            + "against DOCUMENT rights (ADR-003 authorization seams; ADR-008 requires the decision be an "
-            + "endpoint filter on the right resource domain). App-only means no container ACL constrains it, "
-            + "so this is a live hole rather than a latent bypass. Task 083 does this row FIRST."),
-
-        new SinkSite("Api/DocumentsEndpoints.cs", "DeleteFileAsync", 1,
-            Provenance.ClientSupplied, "083 (row 5)",
-            "route parameters {driveId} + {itemId}",
-            "DELETE /api/drives/{driveId}/items/{itemId} DESTROYS a caller-named drive item app-only (MI) "
-            + "behind the same wrong-resource-domain 'canwritefiles' policy (ADR-003; ADR-008). A destroy is "
-            + "the worst case for a wrong-resource-domain decision because, unlike a misplaced write, there "
-            + "is not even a record left to audit afterwards."),
-
+        // 🔴 DELETED 2026-09-07 (task 083): the two ClientSupplied entries for
+        // `Api/DocumentsEndpoints.cs :: UploadSmallAsync #1` (PUT /api/drives/{driveId}/upload) and
+        // `:: DeleteFileAsync #1` (DELETE /api/drives/{driveId}/items/{itemId}).
+        //
+        // Both took an SPE drive id off the ROUTE and wrote/destroyed app-only (MI), so no container
+        // ACL constrained them, behind RequireAuthorization("canwritefiles") — a policy that resolves
+        // DOCUMENT rights from a DRIVE id (ADR-003 authorization seams; ADR-008 endpoint-filter rule).
+        // The routes, the file, and the now-orphaned canwritefiles/canreadfiles policies were all
+        // deleted rather than gated: gating would have minted a second record-keyed upload surface and
+        // a second record-keyed delete surface (root §11), and the sanctioned record-keyed replacements
+        // already ship. Deadness was verified first-hand and differed per row — row 4 dead upstream of
+        // its only caller, row 5 reachable but unable to authenticate against any BFF scheme.
+        //
+        // ⚠️ ONE CLAIM IN THE DELETED ENTRIES WAS OVERSTATED AND IS WORTH KEEPING FOR CALIBRATION.
+        // Both said "live hole rather than a latent bypass". Not exploitable as written: the policy
+        // resolves the driveId as sprk_documents({id}), so a real drive id (b!…) is not a GUID and the
+        // lookup 400s to deny, while a valid document GUID passes the gate but is not addressable as a
+        // Graph drive. No constructible request both passed the gate and landed bytes. The safety was
+        // VALUE-SPACE DISJOINTNESS between GUIDs and b!… ids — an accident, not a decision, and one
+        // that stops holding the moment either domain widens. That argues for deletion more strongly
+        // than the overstatement did, so the disposition was right for a reason the entry got wrong.
+        //
         // 🔴 DELETED 2026-09-03: the ClientSupplied entry for
         // `Api/OBOEndpoints.cs :: UploadSmallAsUserAsync #1`, which described
         // `PUT /api/obo/containers/{id}/files/{*path}` — a route that took its container straight

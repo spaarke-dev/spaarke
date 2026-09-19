@@ -120,7 +120,7 @@ public static class WorkspaceModule
             services.AddOptions<TodoGenerationOptions>();
         }
 
-        // TodoGenerationService: BackgroundService with 24-hour PeriodicTimer (ADR-001 mandate).
+        // TodoGenerationService: hand-rolled BackgroundService with 24-hour PeriodicTimer (existing debt — migrates to an IScheduledJob when next touched, ADR-052 §1).
         // Uses IServiceProvider to lazily resolve IDataverseService after host startup
         // (avoids 500.30 if Dataverse connection fails during cold start).
         // Concrete registration per ADR-010 (no interface seam needed).

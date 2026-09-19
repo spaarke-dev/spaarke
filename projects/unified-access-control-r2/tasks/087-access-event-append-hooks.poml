@@ -13,7 +13,7 @@
     <parallel-group>phase5-wave2</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches Api/ExternalAccess/** endpoints and the POA seam — exclusive zone.</parallel-reason>
-    <deps>086, 060, 063, 064</deps>
+    <deps>086, 060, 063, 064, 106</deps>
     <tags>bff-api, auth, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>

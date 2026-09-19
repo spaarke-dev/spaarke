@@ -13,7 +13,7 @@
     <parallel-group>phase4-wave4</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches Api/ExternalAccess/** and Infrastructure/ExternalAccess/** — exclusive zone; must not run concurrently with 063.</parallel-reason>
-    <deps>063, 060, 032, 038, 041, 042</deps>
+    <deps>063, 060, 032, 038, 041, 042, 105</deps>
     <tags>bff-api, auth, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>

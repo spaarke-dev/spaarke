@@ -215,4 +215,34 @@ public class GrantExpiryCharacterizationTests
         ExternalParticipationService.GrantRowSelect.Should().Contain("_sprk_workassignment_value");
         ExternalParticipationService.GrantRowSelect.Should().Contain("sprk_accesslevel");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The IN-MEMORY mirror (task 106) — the write path must answer the SAME question
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>ConfersAccessOn</c> is the in-memory mirror of <see cref="ExternalParticipationService.ExpiryPredicate"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Task 106 needed it because the grant upsert must decide "does this row confer access" over
+    /// MATERIALIZED rows, where an OData <c>$filter</c> string cannot be reused. Two independent
+    /// definitions of "expired" is the drift that would let <c>/grant</c> report an outcome the reader
+    /// contradicts — A-5's shape — so there is exactly one in-memory copy, it lives next to the predicate
+    /// it mirrors, and this pins it to the same two semantics the predicate itself is pinned to above:
+    /// <c>null</c> never expires, and the expiry date ITSELF still confers (<c>ge</c>, never <c>gt</c>).</para>
+    /// <para>Asserting the mirror separately matters because the OData tests assert the STRING. A mirror
+    /// that read <c>&gt; today</c> would leave every one of them green while shortening every dated grant
+    /// on the write path by a day.</para>
+    /// </remarks>
+    [Fact]
+    public void ConfersAccessOn_MirrorsTheReadFiltersExpirySemantics()
+    {
+        ExternalParticipationService.ConfersAccessOn(null, Today).Should().BeTrue(
+            "the predicate's `sprk_expiresdate eq null` branch — an open-ended grant never expires");
+        ExternalParticipationService.ConfersAccessOn(Today, Today).Should().BeTrue(
+            "`ge`, not `gt`: an expiry of 30 June means access still works ON 30 June (task 007, Date Only)");
+        ExternalParticipationService.ConfersAccessOn(Today.AddDays(1), Today).Should().BeTrue();
+        ExternalParticipationService.ConfersAccessOn(Today.AddDays(-1), Today).Should().BeFalse(
+            "a date in the past confers nothing — FR-06's acceptance case");
+    }
 }

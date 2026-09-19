@@ -4,7 +4,7 @@
     <title>Create Project wizard Secure step rework: align to share-only model, fix retired copy (FR-31)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 061 (provisioning rework) merged so copy matches implemented behaviour</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend on the secure-designation auth surface; the step drives the FR-28 provisioning contract.</rigor-reason>
     <model-tier>sonnet</model-tier>

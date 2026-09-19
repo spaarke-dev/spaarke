@@ -102,7 +102,12 @@ export interface ICloseProjectDialogProps {
    */
   onClosed?: (result: ICloseProjectResponse) => void;
   /** MSAL-backed authenticated fetch function for BFF API calls. */
-  authenticatedFetch: typeof fetch;
+  // Narrowed from `typeof fetch` 2026-09-04. `typeof fetch` takes `RequestInfo | URL`, but the
+  // repo-wide `@spaarke/auth` contract (ADR-028) is `(url: string, init?) => Promise<Response>` — so
+  // the wider type REJECTED the real `authenticatedFetch` by parameter contravariance, which is what
+  // blocked WorkspaceGrid from consuming this component. This shape overstates nothing and still
+  // accepts a genuine `fetch`.
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
   /** BFF API base URL. */
   bffBaseUrl: string;
   /**

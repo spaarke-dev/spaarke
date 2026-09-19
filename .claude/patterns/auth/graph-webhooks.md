@@ -11,7 +11,7 @@ Implementing or modifying Graph change notification subscriptions (e.g., email i
 1. `src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs` — Full subscription lifecycle (create, renew, delete)
 
 ## Constraints
-- **ADR-001**: Use BackgroundService for subscription renewal — not Azure Functions
+- **ADR-052**: where subscription renewal runs is decided per workload. Today it is `GraphSubscriptionManager` in the BFF — a hand-rolled timer `BackgroundService`, which migrates to an `IScheduledJob` when next touched (ADR-052 §1)
 - Webhook endpoint must respond to validation handshake within 10 seconds
 
 ## Key Rules

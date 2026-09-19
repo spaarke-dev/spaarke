@@ -116,7 +116,7 @@ Several handlers chain to downstream jobs upon completion:
 
 ## Related
 
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API + BackgroundService (no Azure Functions)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API for every BFF endpoint; where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md)
 - [ADR-004](../../.claude/adr/ADR-004-job-contract.md) — Async job contract and uniform processing
 - [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) — DI minimalism
 - [communication-service-architecture.md](communication-service-architecture.md) — Email processing pipeline

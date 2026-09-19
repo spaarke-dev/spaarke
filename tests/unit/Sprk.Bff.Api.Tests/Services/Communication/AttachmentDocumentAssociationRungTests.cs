@@ -199,4 +199,54 @@ public class AttachmentDocumentAssociationRungTests
         var matches = await act.Should().NotThrowAsync();
         matches.Which.Should().BeEmpty();
     }
+
+    // ── 6. the 2026-09-05 hoist — the two columns invisible to BOTH pre-hoist copies now work ──
+
+    [Fact]
+    public async Task Evaluate_DocumentLinkedViaRelatedInvoiceOrRelatedWorkAssignment_SurfacesBothAsSuggestedCandidates()
+    {
+        // sprk_relatedinvoice / sprk_relatedworkassignment were missing from BOTH the Rung's old
+        // 6-entry list AND ComposeService's — a document linked ONLY through one of these was
+        // invisible to every consumer before the Spaarke.Dataverse.DocumentLinkFields hoist.
+        var invoiceId = Guid.NewGuid();
+        var workAssignmentId = Guid.NewGuid();
+        SetupDocuments(Document(Guid.NewGuid(), "Combined Invoice and WA Packet.pdf",
+            ("sprk_relatedinvoice", "sprk_invoice", invoiceId),
+            ("sprk_relatedworkassignment", "sprk_workassignment", workAssignmentId)));
+
+        var matches = await Rung().EvaluateAsync(
+            MessageWithAttachment("Combined Invoice and WA Packet.pdf"), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().HaveCount(2);
+        matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardinginvoice" && m.Target!.Id == invoiceId);
+        matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingworkassignment" && m.Target!.Id == workAssignmentId);
+    }
+
+    [Fact]
+    public async Task Evaluate_DocumentLinkedThroughEveryVocabularyColumn_SurfacesAMatchForEveryMappedTarget()
+    {
+        // Proves BuildMatches iterates the FULL shared Spaarke.Dataverse.DocumentLinkFields vocabulary
+        // (16 columns) rather than the stale 6-entry list this rung carried before the 2026-09-05
+        // hoist. Restricted to the columns whose target entity has a RegardingFieldMap entry today
+        // (13 of 16 — sprk_agreement/sprk_communication/sprk_todo are deliberately excluded; see the
+        // scope note on DocumentLinkFields and the coverage-gap this rung soft-skips by design).
+        var mappableLinks = DocumentLinkFields.All
+            .Where(f => !string.IsNullOrWhiteSpace(RegardingFieldMap.FieldFor(f.TargetEntityLogicalName)))
+            .Select(f => (field: f.LogicalName, entity: f.TargetEntityLogicalName, id: Guid.NewGuid()))
+            .ToArray();
+
+        SetupDocuments(Document(Guid.NewGuid(), "Omnibus Filing Package 2026.pdf", mappableLinks));
+
+        var matches = await Rung().EvaluateAsync(
+            MessageWithAttachment("Omnibus Filing Package 2026.pdf"), new AssociationContext(), CancellationToken.None);
+
+        matches.Should().HaveCount(mappableLinks.Length,
+            "every vocabulary column whose target has a RegardingFieldMap entry must surface its own candidate");
+        foreach (var (field, entity, id) in mappableLinks)
+        {
+            var expectedRegardingField = RegardingFieldMap.FieldFor(entity);
+            matches.Should().Contain(m => m.RegardingFieldName == expectedRegardingField && m.Target!.Id == id,
+                $"the link via '{field}' must surface as a candidate for {entity}");
+        }
+    }
 }

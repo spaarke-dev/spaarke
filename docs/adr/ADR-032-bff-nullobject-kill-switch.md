@@ -239,7 +239,7 @@ public static class FeatureDisabledResults
 | Service is genuinely optional (e.g., Cosmos persistence) and consumers already use `IServiceProvider.GetService<T>()` with null-tolerance — and that consumer is NOT a minimal-API handler param | Leave as-is. Optional-via-`GetService` is a valid ADR-010 pattern for services NEVER consumed by minimal-API param-inference. |
 | Service is consumed ONLY inside another conditional service (transitively conditional) and never injected directly into an endpoint | Leave as-is. The outer conditional registration is enough. |
 | Feature flag is a true environment-only toggle (e.g., Redis on/off where both branches register a valid `IDistributedCache`) | Leave as-is. That's already a symmetric registration. |
-| Background hosted service (`IHostedService`) or job handler (`IJobHandler<T>`) | Leave conditional. These don't participate in endpoint metadata generation. Under kill switch, fail-fast on dequeue; existing Service Bus retry/DLQ machinery handles per ADR-018. |
+| Background hosted service (`IHostedService`) or job handler (`IJobHandler`) | Leave conditional. These don't participate in endpoint metadata generation. Under kill switch, fail-fast on dequeue; existing Service Bus retry/DLQ machinery handles per ADR-018. |
 
 ---
 

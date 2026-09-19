@@ -5,6 +5,7 @@
 > **Created**: 2026-06-21
 > **Status**: Deployed to spaarkedev1
 > **Schema script**: [`scripts/Create-BackgroundJobEntity.ps1`](../../scripts/Create-BackgroundJobEntity.ps1) (idempotent)
+> **Runtime as built** ([ADR-036 A1 §2](../adr/ADR-036-background-job-infrastructure.md)): this table is **deployed but unused**. Today the only store is `InMemoryBackgroundJobStore` (process-local); no `DataverseBackgroundJobStore` exists yet (deferred — ADR-036 A1 §6). The reads, writes and operator tuning described below are the **target** state; today cron and enablement are set in code at registration.
 
 ---
 
@@ -141,7 +142,7 @@ Once R3 Phase 2 + Phase 3 land, the following services consume this entity:
 
 | ADR | Compliance |
 |---|---|
-| **ADR-001** (BFF Minimal API + BackgroundService) | `Spaarke.Scheduling` library is in-process; no Azure Functions or external schedulers. |
+| **ADR-052** (workload placement) | Where scheduled work runs is [ADR-052](../adr/ADR-052-workload-placement.md); `Spaarke.Scheduling` is the in-BFF mechanism (ADR-036). |
 | **ADR-002** (Late-bound entities) | All Dataverse access is late-bound; no early-bound code generation. |
 | **ADR-027** (Unmanaged solution; `sprk_` prefix) | Entity uses `sprk_` prefix; will be added to the active unmanaged solution. |
 | **ADR-029** (BFF publish hygiene) | This task is a Dataverse-only schema change — 0 MB BFF publish-size delta. |

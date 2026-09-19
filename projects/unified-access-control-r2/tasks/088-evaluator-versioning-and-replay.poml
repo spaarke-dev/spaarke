@@ -13,7 +13,7 @@
     <parallel-group>phase5-wave3</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches Infrastructure/ExternalAccess/** (evaluator refactor for versioned pure-input evaluation) — exclusive zone.</parallel-reason>
-    <deps>087, 032</deps>
+    <deps>087, 032, 036, 043, 055, 064</deps>
     <tags>bff-api, auth, dataverse, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>

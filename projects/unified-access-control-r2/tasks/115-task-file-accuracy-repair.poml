@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="115" project="unified-access-control-r2">
+  <metadata>
+    <title>Repair the nine open task files that carry a wrong load-bearing sentence (036, 054, 055, 056, 087, 088, 089, 094, 095)</title>
+    <phase>Wave 0 — bookkeeping, before any execution</phase>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Edits .poml instruction text only — no .cs / .ts / .tsx, no production surface, no schema. The blast radius is what a LATER executor is told to build, which is why the closed set is per-file and verification is grep-count-based rather than test-based.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical text repair against an enumerated, already-verified defect list; each corrected claim is stated in the acceptance criteria, so no architectural judgment is required. The one judgment boundary (a cited source line no longer matching) is an escalation, not a decision.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Nine files, and the defect count per file is UNDER-STATED in both source notes (see origin) — each file needs a full read plus a residual-reference grep, not a targeted patch.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits nine task files that other work reads as its own instructions. A concurrent agent executing 054/087/088/089 would load a half-repaired premise; task-execute Step 0 reads these files directly.</parallel-reason>
+    <deps>none</deps>
+    <tags>documentation, task-hygiene</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <origin>notes/task-accuracy-audit-2026-09-18.md §3 (ranked rewrite list, count 8) re-verified by notes/remediation-and-sequencing-plan-2026-09-18.md §2 (count 9). BOTH under-state the per-file site counts, and the plan's "Proposed shape" line omits 055/056 — see the constraint on trusting neither count.</origin>
+  </metadata>
+
+  <prompt>Nine open task files each contain at least one wrong load-bearing sentence — an instruction that, obeyed literally, builds the wrong thing or blocks on the wrong work. Fix the sentences in the POML files. This task changes NO production code. Repair every site in each file, not only the sites the source notes enumerate: both notes were re-verified and both were found to under-count.</prompt>
+  <role>SPAARKE task-file maintainer. Reads a POML the way the next executor will read it, and treats a stale sentence in a binding element as a defect.</role>
+  <goal>Each of the nine files states only claims that hold at current HEAD, so no later executor obeys a false premise. Every repaired claim is verified against the actual source file it cites, and a residual-reference grep proves no stale sibling reference survived. No POML status changes; no production file is touched.</goal>
+
+  <context>
+    <background>This project's own count of "a task file was wrong and the code was right" stands at **19** (`notes/task-accuracy-audit-2026-09-18.md:9` — prior instances of premise rot; distinct from the **8** files that audit counts as carrying a wrong load-bearing sentence at `:17`, which this task revises to nine). The repair is cheap; the cost of skipping it is that 054 as written builds a set the owner ruled must not exist, and 089 as written blocks on a live unrelated task.
+
+VERIFIED AT HEAD (each claim below was checked against the cited source, not inherited from the notes):
+
+1. 036 — cites `src/server/api/Sprk.Bff.Api/appsettings.json` in `&lt;file role="modify"&gt;` and in step 1 ("document both states in appsettings.json comments"). THE FILE DOES NOT EXIST. What exists: `appsettings.Testing.json`, `appsettings.template.json`, `appsettings.Development.json.template`, `appsettings.Production.json.template`, `appsettings.tokens.md`.
+
+2. 054 — `&lt;title&gt;`, `&lt;prompt&gt;`, `&lt;goal&gt;` and the acceptance criteria all assert that CallerPrincipal exposes an accessible-service-request set, with the grant allow-list extended to `sprk_servicerequest`. This contradicts the owner's 2026-09-09 ruling (task 028): a service request is CORE but is NEVER externally grantable, and `CallerPrincipal` composes exactly THREE externally-grantable root sets. The amendment currently lives only in `&lt;notes&gt;` — i.e. every BINDING element still states the retired premise.
+
+3. 055 — inherits 054's retired premise in binding elements: `&lt;gate&gt;` ("requires 054 (fourth root set)"), `&lt;dependency task="054"&gt;` ("Fourth root set (service request) so inheritance covers all four core classes"), and step 1 (reads a `servicerequest` stamp column into the inherited term).
+
+4. 056 — also inherits it in binding elements: `&lt;goal&gt;` lists `sprk_regardingservicerequest` as a scope dim, `&lt;constraint source="project"&gt;` says dims may reference "ONLY the four composed core root sets", step 2 says "including the service-request dim where the column exists (054's root set)", and the background says "only the composed root sets can be dims (054 added the fourth)".
+
+5. 087 / 088 / 089 — systematic PRE-RENUMBERING references. The real Phase-5 chain is 086 (table) → 087 (append hooks) → 088 (versioning + replay) → 089 (seam tests). The files cite 080/081/082. Those numbers are NOT vacant: 080 is cross-record search authorization, 081 is the tenant-container-resolver diagnostic, and 082 is the LIVE caller-identity primitive census. So 089's `&lt;gate&gt;` blocks on real, unrelated work. Each file's `&lt;deps&gt;` element is ALREADY correct, so each file contradicts itself. TASK-INDEX row 086 corroborates independently: "POML's Phase-5 cross-numbering is wrong throughout (real chain is 086 to 087 to 088; it says 080/081/082)".
+
+6. 094 — accurate as written; needs an ADDITION. `DriveItemOperations.ListChildrenAsync(string driveId, string? itemId = null, CancellationToken ct)` is DRIVE-KEYED, and the POML tells the implementer to reuse it for the pre-flight probe. Under tasks 076/083 the container is server-resolved from `(entity, recordId)`, and `SpeWriteSinkContainerProvenanceGuardTests` pins its `ClientSupplied` allow-list at ZERO entries ("no SPE write sink in this codebase takes its container or drive from client input"). A drive-keyed probe would reintroduce exactly the shape 083 deleted and fail that guard.
+
+7. 095 — wrong on TWO of three named absences. The background says `sprk_document` has lookups for matter / project / invoice / workassignment / event "but NOT for `sprk_todo`, `account` or `contact`". In `Spaarke.Dataverse/Models.cs` `DocumentLinkFields.All`: `sprk_relatedtodo` maps to `sprk_todo` and `sprk_relatedcontact` maps to `contact`. Only `account` is genuinely absent, corroborated by the `ContactLookup` doc comment ("`sprk_document` has no account lookup in either family"). This matters because the false claim is the stated ARGUMENT FOR the intersection entity's shape. Separately, the same block says Document to WorkAssignment has "one" Many-to-one relationship; `Models.cs` carries a PAIR (`sprk_workassignment` + `sprk_relatedworkassignment`), matching the two-slots-per-type pattern the same block describes for matter and project.
+
+EXPLICITLY OUT OF SCOPE: tasks 082 and 093. Both need judgment, not a sentence patch — 093 has four false premises and closes as delivered; 082 rescopes to a single CLAUDE.md §11 decision memo. A mechanical pass over either would produce a file that reads consistently and still describes the wrong work. They are sequenced in the plan's wave 3, not repaired here.</background>
+    <relevant-files>
+      <file role="modify">projects/unified-access-control-r2/tasks/036-fr20-flag-gated-swap.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/054-accessible-root-set-generalization.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/055-evaluator-child-inheritance-term.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/056-child-module-registration.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/087-access-event-append-hooks.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/088-evaluator-versioning-and-replay.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/089-attestation-seam-tests-and-docs.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/094-upload-collision-preflight-probe.poml</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/095-document-record-multi-association.poml</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/task-028-service-request-root.md (the owner ruling 054/055/056 must be reconciled to — read, do not modify)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/Models.cs (DocumentLinkFields.All — the ground truth for 095)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs (ListChildrenAsync signature — the ground truth for 094)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="plan-2026-09-18 §2">Scope: the file set. EXACTLY these nine files. Tasks 082 and 093 are excluded by decision, not by oversight — do not "helpfully" patch them, and do not treat their exclusion as an error to report.</constraint>
+    <constraint source="audit-2026-09-18 + plan-2026-09-18">Scope: trusting the source notes. Both notes UNDER-COUNT the sites per file, and the plan's "Proposed shape" line omits 055 and 056 entirely. Use the notes as a starting inventory, never as a closed one: read each file end to end and repair every occurrence.</constraint>
+    <constraint source="CLAUDE.md §2">Scope: every repaired claim. Code wins. Verify each corrected claim against the actual source file at HEAD before writing it. A claim copied from a note without checking the code is the defect this task exists to remove — reproducing it here would be the eighteenth instance.</constraint>
+    <constraint source="plan-2026-09-18 §2 (expected-occurrence discipline)">Scope: verification of each edit. Assert each edit by expected occurrence count, so a miss THROWS rather than silently leaving a stale sentence. After repairing 087/088/089, a grep for the stale sibling numbers in each file MUST return zero: no `080` or `082` in 087, no `081` in 088, no `081` or `082` in 089. Legitimate references (060, 063, 064, 106, 032, 036, 043, 055, 086, 087, 088) must survive untouched.</constraint>
+    <constraint source="CLAUDE.md §7">Scope: status vocabulary. This task changes NO other POML's `&lt;status&gt;`. The nine files stay open; repairing a premise is not completing a task. Setting 115's own status is the only status write.</constraint>
+    <constraint source="main-session ownership">Scope: files outside the nine. Do NOT edit `tasks/TASK-INDEX.md` or `current-task.md` — the main session owns both. Do not touch anything under `.claude/`. No production file (`src/**`, `tests/**`, `scripts/**`, `docs/**`) is in scope for this task.</constraint>
+    <constraint source="project CLAUDE.md">Scope: the 054/055/056 reconciliation. The corrected text must say what task 028 actually ruled: a service request IS core, and is NEVER externally grantable. Do not overcorrect into "service request is not core" — that is a different false claim, and the grant table's deliberate omission of a service-request lookup is the evidence for the distinction.</constraint>
+    <constraint source="XML validity">Scope: every file written. Each file must remain parseable XML. Escape `&lt;` as `&amp;lt;` inside element text. A prior session shipped six POMLs containing a literal `&amp;lt;?xml` escape in place of the declaration — verify the declaration is a real processing instruction after editing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>task-file premise repair; POML binding-element hygiene</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-accuracy-audit-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/remediation-and-sequencing-plan-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/task-028-service-request-root.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Read all nine files end to end plus the two source notes. Build the per-file site inventory from the FILES, using the notes only as a cross-check — record where your inventory exceeds theirs.</step>
+    <step order="1">Verify each corrected claim against its cited source at HEAD: the `appsettings*` inventory (036), `notes/task-028-service-request-root.md` plus the project CLAUDE.md three-root rule (054/055/056), the task titles of 080/081/082/086/087/088 (the renumbering), `DriveItemOperations.ListChildrenAsync` and the `ClientSupplied` allow-list (094), and `DocumentLinkFields.All` in `Models.cs` (095). Any mismatch with the audit's description fires the escalation below.</step>
+    <step order="2">Repair the three numbering files (087, 088, 089) in every element — gate, goal, prompt, background, dependency, constraint, step, knowledge, justification, escalation — then run the residual-reference greps from the constraint and confirm each returns zero.</step>
+    <step order="3">Repair the retired-premise chain (054, then 055, then 056) so the binding elements carry the task-028 ruling rather than only `&lt;notes&gt;`; repair 036's two `appsettings.json` sites; add 094's record-keyed-probe requirement; correct 095's two false absences and the workassignment-pair claim.</step>
+    <step order="4">Verify: `pwsh scripts/Validate-TaskPoml.ps1 projects/unified-access-control-r2/tasks` exits 0; `pwsh scripts/check-task-status-drift.ps1` exits 0; every edited file parses as XML; a diff review confirms no `&lt;status&gt;` element and no file outside the nine changed.</step>
+    <step order="5">Write the repair record to `projects/unified-access-control-r2/notes/task-115-task-file-accuracy-repair.md`: per file, the wrong sentence, the corrected sentence, and the source that settled it. Report the sites found beyond the notes' inventory so the next audit knows both notes under-counted.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a cited source line no longer matches the audit's description — the source file moved or was refactored, the line region changed meaning, or the claimed defect is not actually present at HEAD — STOP on that file and report the discrepancy with the evidence. Do NOT write the audit's version of the claim over a file that has since become correct, and do not silently skip the file. The audit has already been found under-stated twice; it can equally be over-stated on a specific line.</trigger>
+    <trigger>If repairing 054/055/056 requires deciding what the requester MAY DO to their own service request's to-dos (the open ISS-003 / #964 product question), STOP at the premise repair. Removing the retired fourth-root premise is in scope; choosing the replacement scope is the owner's decision and must not be improvised into the file.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/unified-access-control-r2/tasks/{036,054,055,056,087,088,089,094,095}-*.poml (repaired instruction text)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-115-task-file-accuracy-repair.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">036 — no reference to `src/server/api/Sprk.Bff.Api/appsettings.json` remains (neither the `&lt;file role="modify"&gt;` entry nor step 1's "appsettings.json comments"); the option's documented home is a file that exists at HEAD.</criterion>
+    <criterion testable="true">054 — no BINDING element (title, prompt, goal, steps, acceptance criteria) asserts an accessible-service-request root set or an extension of the grant allow-list to `sprk_servicerequest`; the file states the task-028 ruling that a service request is core but never externally grantable, and CallerPrincipal composes exactly three externally-grantable root sets.</criterion>
+    <criterion testable="true">055 — the `&lt;gate&gt;`, `&lt;dependency task="054"&gt;` and step-1 text no longer presuppose a "fourth root set"; the inheritance term is described over the roots that actually exist.</criterion>
+    <criterion testable="true">056 — the `&lt;goal&gt;`, the `&lt;constraint source="project"&gt;` ("four composed core root sets"), step 2 ("054's root set") and the background ("054 added the fourth") no longer assert a service-request root set as a scope dimension.</criterion>
+    <criterion testable="true">087 — every `080` now reads `086` (table + vocabulary) and every `082` now reads `088` (replay), across gate, goal, background, dependency, knowledge, step 3 and justification; a grep for `080` and for `082` in the file returns zero; `&lt;deps&gt;` still reads 086, 060, 063, 064, 106.</criterion>
+    <criterion testable="true">088 — every `081` now reads `087` (event backbone), across gate, prompt, goal, background, dependency, constraint, step 1 and justification; a grep for `081` in the file returns zero; `&lt;deps&gt;` still reads 087, 032, 036, 043, 055, 064.</criterion>
+    <criterion testable="true">089 — the `&lt;gate&gt;` reads "requires 087 + 088", the two `&lt;dependency&gt;` elements name 087 (event hooks) and 088 (replay + versioning), and the background and escalation cite the same; a grep for `081` and for `082` in the file returns zero, so the file no longer blocks on task 082, the live caller-identity census.</criterion>
+    <criterion testable="true">094 — the file states that the pre-flight probe MUST be record-keyed `(entity, recordId, name)` with the container server-resolved, and that `ListChildrenAsync` is drive-keyed and therefore cannot be reused as-is without reintroducing the `ClientSupplied` shape task 083 deleted (which `SpeWriteSinkContainerProvenanceGuardTests` pins at zero entries).</criterion>
+    <criterion testable="true">095 — the background no longer claims `sprk_document` lacks a `sprk_todo` or `contact` lookup; it names `sprk_relatedtodo` and `sprk_relatedcontact` as existing, `account` as the only genuine absence, and Document-to-WorkAssignment as a pair rather than one.</criterion>
+    <criterion testable="true">`pwsh scripts/check-task-status-drift.ps1` exits 0 after the repair (POML statuses still agree with their index markers).</criterion>
+    <criterion testable="true">No POML `&lt;status&gt;` element was changed by this task — the nine repaired files remain open, verified by diff; 115's own status is the only status write.</criterion>
+    <criterion testable="true">`pwsh scripts/Validate-TaskPoml.ps1 projects/unified-access-control-r2/tasks` exits 0, every edited file parses as XML, and the diff touches no file outside the nine plus this task's notes file.</criterion>
+  </acceptance-criteria>
+
+  <notes>NOT STARTED. Wave 0 of the 2026-09-18 remediation plan — runs BEFORE any execution task, because nine of the files an executor would load are wrong in a way that survives a green build.
+
+Scope arithmetic, recorded because the two source notes disagree: the audit's headline count is 8; the plan's §2 table has 9 ROWS but two of them (082, 093) are excluded as rescopes, and its "Proposed shape" line names only 7 files. The nine IN-SCOPE files are 036, 054, 055, 056, 087, 088, 089, 094, 095 — 055 and 056 belong because they carry 054's retired premise in BINDING elements (gate, goal, constraint, dependency, steps), not merely "by inheritance" as the audit's §3 item 3 describes them.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -58,7 +58,7 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. Meta-tool runs in-proc within the BFF Chat agent. No Azure Functions.</constraint>
+    <constraint source="ADR-001">.NET 8 Minimal API. Meta-tool runs in-proc within the BFF Chat agent; no Azure Functions inside the BFF assembly.</constraint>
     <constraint source="ADR-008">Endpoint-filter auth applies at the calling endpoint (`/api/chat/`); this meta-tool method receives the authenticated caller via DI / kernel context. Caller authorization is consumed for the result-set filter.</constraint>
     <constraint source="ADR-010">DI minimalism. `SearchClient` registered once via `AddActionEngineModule()` (singleton keyed by index name). Telemetry client via `[FromServices]`.</constraint>
     <constraint source="ADR-013">PublicContracts boundary. `FindResources` is NOT exposed via the PublicContracts facade — it's an internal SK function. CRUD-side callers MUST NOT inject `IFindResourcesTool` directly.</constraint>
@@ -72,7 +72,7 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
       <file>.claude/adr/ADR-008-endpoint-filter-auth.md</file>
       <file>.claude/adr/ADR-010-di-minimalism.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>

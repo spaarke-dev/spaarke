@@ -2,7 +2,7 @@
 
 > **Purpose**: Documents architectural decisions for the Spaarke platform
 > **Audience**: Developers, architects, AI coding agents
-> **Last Updated**: 2026-08-21 (`spaarkeai-compose-r8` task 040 — added the ADR-049 row + its `docs/adr/` extended record, applying the owner-accepted R8 third amendment). Prior: 2026-07-25 (ai-advanced-capabilities-nda-r1 task 001 — reconciled index against `docs/adr/` files: added 11 missing rows 031/032/033/039/040/041/042/043/044/046/047; fixed the mislabeled ADR-030 row + broken link)
+> **Last Updated**: 2026-09-12 (`unified-access-control-r2` task 102 — added ADR-052 Workload Placement; amended ADR-001/004/036 (A1) and re-pointed ADR-013). Prior: 2026-08-21 (`spaarkeai-compose-r8` task 040 — added the ADR-049 row + its `docs/adr/` extended record, applying the owner-accepted R8 third amendment). Prior: 2026-07-25 (ai-advanced-capabilities-nda-r1 task 001 — reconciled index against `docs/adr/` files: added 11 missing rows 031/032/033/039/040/041/042/043/044/046/047; fixed the mislabeled ADR-030 row + broken link)
 
 ## About ADRs
 
@@ -12,10 +12,10 @@ Architecture Decision Records capture important architectural decisions made dur
 
 | ADR | Title | Domain | Status |
 |-----|-------|--------|--------|
-| [ADR-001](ADR-001-minimal-api-and-workers.md) | Minimal API and BackgroundService Workers | Backend | Accepted |
+| [ADR-001](ADR-001-minimal-api-and-workers.md) | Minimal API as the single BFF runtime (A1 2026-09-12: where background work runs → ADR-052) | Backend | Accepted (amended 2026-09-12) |
 | [ADR-002](ADR-002-no-heavy-plugins.md) | Thin Dataverse Plugins | Dataverse | Accepted |
 | [ADR-003](ADR-003-lean-authorization-seams.md) | Lean Authorization Seams | Security | Accepted |
-| [ADR-004](ADR-004-async-job-contract.md) | Async Job Contract | Backend | Accepted |
+| [ADR-004](ADR-004-async-job-contract.md) | Async Job Contract (A1 2026-09-12: queue-driven scope; atomic receive-side idempotency; orchestration hosting → ADR-052 §7) | Backend | Accepted (amended 2026-09-12) |
 | [ADR-005](ADR-005-flat-storage-spe.md) | Flat Storage for SPE | Storage | Accepted |
 | [ADR-006](ADR-006-prefer-pcf-over-webresources.md) | Anti-Legacy-JS: PCF for Form Controls, React Code Pages for Dialogs | Frontend | Accepted |
 | [ADR-007](ADR-007-spe-storage-seam-minimalism.md) | SPE Storage Seam Minimalism | Storage | Accepted |
@@ -43,7 +43,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-032](ADR-032-bff-nullobject-kill-switch.md) | BFF Null-Object Kill-Switch Pattern (conditional service consumed by an unconditional endpoint → Null-Object in the else-branch, P1/P2/P3; `FeatureDisabledException` → 503 ProblemDetails; closes RB-T028 cluster) | Backend / API | Accepted |
 | [ADR-033](ADR-033-streaming-chat-tool-side-channel.md) | Streaming Chat Tool Side-Channel (doc-stream SSE side-channel for streaming compose edits/redlines to the client) | AI / BFF / FE | Accepted |
 | [ADR-034](ADR-034-user-record-membership.md) | User-Record Membership Resolution Pattern (discovery-based `MembershipResolverService` + 6-path identity normalization + Phase 2 junction table `sprk_userentityassociation` + Service Bus topic `sprk-membership-changes`; `LookupUserMembership` playbook node ActionType=52; closes A1/D5 root cause from R2 UAT) | Backend / AI / Dataverse | Accepted (R3 Part 1, 2026-06-21) |
-| [ADR-036](ADR-036-background-job-infrastructure.md) | Background-Job Infrastructure (Spaarke.Scheduling — shared lib + `IScheduledJob` contract + `ScheduledJobHost` + Cronos cron parsing + `sprk_backgroundjob*` Dataverse entities + `/api/admin/jobs/*` admin surface; two reference consumers: `MembershipReconciliationJob` + migrated `PlaybookSchedulerJob`) | Backend / Scheduling | Accepted (R3 Part 2, 2026-06-21) |
+| [ADR-036](ADR-036-background-job-infrastructure.md) | Background-Job Infrastructure (Spaarke.Scheduling — shared lib + `IScheduledJob` contract + `ScheduledJobHost` + Cronos cron parsing + `sprk_backgroundjob*` Dataverse entities + `/api/admin/jobs/*` admin surface; two reference consumers: `MembershipReconciliationJob` + migrated `PlaybookSchedulerJob`; **A1 2026-09-12**: runtime as built, one dispatch per schedule via a distributed lease, slot guard, atomic per-unit claim, retry / heartbeat / `AddScheduledJob` rules; where scheduled work runs → ADR-052) | Backend / Scheduling | Accepted (R3 Part 2, 2026-06-21; amended 2026-09-12) |
 | [ADR-037](ADR-037-multinode-output-composition.md) | Multi-Node Output Composition (NodeType.DeliverComposite + ActionType.DeliverComposite=42; per-section SSE streaming; FE widget rework to sections-by-name; reduces 5 brittle coordination points to 2) | AI / BFF / FE | Accepted (chat-routing-redesign-r1 Phase 5R Wave 5-C, 2026-06-25) |
 | [ADR-038](ADR-038-testing-strategy.md) | Testing Strategy — Integration-heavy pyramid, 6 KEEP path categories as MUST rules (auth/regression/data-mutation/tenant/contract/domain), coverage as observation never gate, ban Mock&lt;HttpMessageHandler&gt; + DI-registration + ctor null-check tests, TimeProvider over Stopwatch. **STANDALONE — does NOT supersede ADR-022 (PCF Platform Libraries — unrelated frontend scope).** | Testing / Backend | Accepted (ci-cd-unit-test-remediation-r1 Phase 1 Stream B, 2026-06-26) |
 | [ADR-039](ADR-039-grounded-execution-closed-catalogs.md) | Grounded Execution & Closed Catalogs (ONE dispatch protocol — Event/Click/Text; TWO closed catalogs — Actions+Bindings, Tools; every output grounded; control-flow-is-code, behavior-is-data). **Amended 2026-07-25**: Output Determinism Modes — `fact` (default, deterministic) vs `advisory` (probabilistic, reasoning depth + Reasoning tier, still prompt-controlled + schema-validated + source-cited) refining invariant (a) | AI | Accepted (2026-07-05; amended 2026-07-25) |
@@ -57,6 +57,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-047](ADR-047-notification-action-spine.md) | Notification & Action Spine — ONE server-initiated **typed-signal → grounded-action → delivery** spine (Layers A–D) collapsing the email-r4/messaging-r3/assistant-r1 push forks; Azure SignalR Serverless + poll fallback; six commitments (typed signals · shared domain actions · per-source policy · SSE-as-presentation · outbox-before-ping · dumb-transport) | Communication / BFF / FE | Proposed |
 | [ADR-048](ADR-048-communication-participant-index.md) | Communication Participant Index — message-grain `sprk_communicationparticipant` junction (parent = `sprk_communication`; thread participation derived by rollup, no thread-grain rows) making participants queryable where `;`-joined `sprk_from/to/cc` TEXT cannot; identity = two typed nullable lookups `sprk_systemuser` XOR `sprk_contact` (**ADR-034 path-C comply-with-intent** — 2 targets not 6, so typed lookups honor the tuple's intent + add FK integrity & DataGrid chip auto-derivation, not an amendment, not polymorphic, no text-name matching); unresolved external rows first-class (`sprk_isresolved=false` + `sprk_addresstext`); `sprk_role` {From/To/Cc/Bcc}; populated by reusing `ParticipantCorrelationRung` (no new resolver/AI/SDK), best-effort + idempotent; powers `participant=` (FR-02) via the R1 impersonation + 2-rule filter. ADR-047 reserved for notification-spine (not claimed) | Communication / BFF / Data | Accepted (messaging-communication-app-r2, 2026-07-19) |
 | [ADR-049](ADR-049-compose-shadow-document.md) | Compose Shadow Document — the Compose save/edit fidelity contract. **Amended 3×; read the R8 amendment before touching the save path.** OOXML server-authoritative; TipTap = lossy view+controller; no text-search in the write path (I-7); ONE body author (I-5). **Current save contract (R8, 2026-08-21)**: render from the content model **AND** preserve untouched content — re-project the retained baseline server-side, pair blocks by **document order** (`paraId` corroborates, never keys), clone unchanged blocks verbatim / render changed ones with property inheritance / thin-render+warn the unmergeable, never a content refusal. **Invariants (1) defined-outcome and (2) preserve-untouched are a PAIR — no amendment may trade one for the other.** Measured 18.08% → 100% overall, 6.67% → 100% near-tier on the 18-doc corpus. Supersedes R4 surgical `(paraId, runIndex, offset)` byte-patch on the save path (the HTTP 422 treadmill) and R6 whole-body rebuild (the silent fidelity loss). R4.5 read/reference invariants F-1…F-5 untouched. **Concise (load this per task)**: [`.claude/adr/ADR-049-compose-shadow-document.md`](../../.claude/adr/ADR-049-compose-shadow-document.md) | Compose / BFF / FE | Accepted — R4 (2026-07-22), R4.5 (2026-07-28), R6 (2026-08-05), **R8 (2026-08-21, `spaarkeai-compose-r8`)** |
+| [ADR-052](ADR-052-workload-placement.md) | Workload Placement — where background, scheduled and event-driven work runs (the BFF, Azure Functions or Container Apps Jobs), decided per workload on stated signals and costs; fewer moving parts wins ties; a Function reuses the stamp's managed identity app-only; Durable Task in its own host, never inside the BFF. Supersedes ADR-001's Functions provisions and ADR-004's Durable prohibition; amends ADR-013 and ADR-036 | Backend / Hosting | Accepted (2026-09-13) — `unified-access-control-r2` task 102 |
 
 ## ADRs by Domain
 
@@ -74,8 +75,10 @@ Architecture Decision Records capture important architectural decisions made dur
 
 | ADR | Summary |
 |-----|---------|
-| [ADR-001](ADR-001-minimal-api-and-workers.md) | .NET Minimal API with BackgroundService |
-| [ADR-004](ADR-004-async-job-contract.md) | Async job patterns |
+| [ADR-001](ADR-001-minimal-api-and-workers.md) | .NET Minimal API as the single BFF runtime |
+| [ADR-004](ADR-004-async-job-contract.md) | Queue-driven async job contract |
+| [ADR-036](ADR-036-background-job-infrastructure.md) | Scheduled jobs inside the BFF (`IScheduledJob`; one dispatch per schedule) |
+| [ADR-052](ADR-052-workload-placement.md) | Where background work runs — the BFF, Azure Functions or Container Apps Jobs |
 | [ADR-010](ADR-010-di-minimalism.md) | Lean DI registrations |
 | [ADR-017](ADR-017-async-job-status-and-persistence.md) | Job status persistence |
 | [ADR-019](ADR-019-api-errors-and-problemdetails.md) | ProblemDetails for errors |

@@ -1,112 +1,1223 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-03** (by `context-handoff`, pre-`/compact`).
-> **Recovery**: read Quick Recovery, then **§ NEXT SESSION — ORDERED WORK ITEMS**. Everything below
-> that is history. ⚠️ If a header ever disagrees with the ordered list, **trust the list**.
-> ⚠️ **This project's own notes have been WRONG ELEVEN times.** Verify before believing — especially
-> counts, route names, "already done" claims, and open-vs-answered questions.
+> **Last Updated**: **2026-09-19, session 17 — POML AUTHORING COMPLETE (109–119), COMMITTED AND PUSHED to PR #950.** ⚠️ **CI is running and UNVERIFIED** on the pushed head; the merge gate is `Router` **green, probed BY NAME via the check-runs API, once, at the merge decision** (`gh pr checks` never lists it), and a push cancels the prior run only if it was still in flight. `/merge-to-master` remains a separate, unmade decision. ✅ Verified after authoring: `Validate-TaskPoml.ps1` on the tasks dir is **110 clean / 0 errors / 6 pre-existing warnings → PASS** (it had been **exiting 1 since session 15**, on six stubs missing `&lt;steps&gt;` — the validator is manual and is NOT wired into `/push-to-github`, whose Step 1.65 gates only on the drift script); drift **116 POMLs / 116 index rows, rc=0**; **zero** `PREMISES NOT YET VERIFIED` markers; **zero** `not-started` (37 `pending`). 🔴 **Eight false claims corrected this session, five of them mine**: "seventeen wrong task files" is **19** per the audit's own `:9`; ISS-021's "N is currently 0" conflated memberships with standing grants (reads are paid per membership, `:1197`/`:1200`/`:1218-1221`; live data = 2 memberships/2 orgs); ISS-024 cited the reason-code **constant** (`:80`) not the refusal (`:677-680`) and wrongly cited `SystemUserIdentityResolver.cs:57`, and has **TWO** asserting tests not one (the second asserts through the constant, invisible to a string grep); task 063's `share-user` "downgrade at risk" is false of this code path (`InternalShareEndpoints.cs:25-26`); #1007 cited `matterService.ts:243-248` (wrong lines — real sequence `:357`/`:375`/`:394`). **New: ISS-029 → #1009** (the drift parser keeps the WRONG line for eight ids — green by luck). ⚠️ **I also shipped malformed XML in task 110 and the validator passed it** — that linter is regex-based and deliberately does not parse XML (`:55`), and **20 pre-existing POMLs are invalid XML** under the same convention. Prior stamp: session 16 handoff, 13 owner decisions. Head = **the commit that carries this file**; read it with `git log -1 --format=%h`. (The session-16 range `cb9ec2ea2..d8c139697..8496e929d` is historical; session 17 added commits from `7c75728bc` onward — read the current endpoint with `git log -1 --format=%h` rather than trusting any SHA written here.) **0 unpushed**, tree **clean**. ⚠️ This row deliberately names no literal head SHA: committing a handoff advances the head, so any SHA written here is stale the instant it is committed (session 16 shipped `8496e929d` in this row while the real head was `7c75728bc`). PR **#950**, no second PR. 📖 **Read `notes/owner-decision-brief-2026-09-18.md` (the 13 decisions) + `notes/remediation-and-sequencing-plan-2026-09-18.md` (the sequencing) FIRST — they supersede this row.** ⚠️ **(SESSION-16 CI NOTE — SUPERSEDED)**: "Tier 1 running, `Router` not started" described `8496e929d`. For session 17, CI on the pushed head is **running and UNVERIFIED** — see the head of this stamp; the mechanism notes (1)–(5) below remain correct and load-bearing. 🔴 **SIX corrected claims — read before judging CI**: (1) `Router` DID report on `3b409bfc1`/`597882f7c`, as a **failure**; (2) cause is **cancellation** — a push cancels an **in-flight** run and `alls-green` treats cancelled as a hard fail; (3) ⚠️ **a red on a superseded SHA is expected ONLY IF that run was still in flight** — `cb9ec2ea2` COMPLETED and kept a genuine **success**, so never dismiss a superseded red without checking it completed; (4) `gh pr checks` **NEVER lists `Router`** — probe **by name** via the check-runs API on the head SHA; (5) 🔴 **"docs-only pushes skip Tier 1" is FALSE ON THIS PR** — `d8c139697` touched only `projects/**` yet **both tier jobs dispatched**; they gate on `if docs_only != 'true'`, the run event is `pull_request`, and paths-filter classifies against the **PR BASE** (`ci-router.yml:140-142`), and #950 touches BFF throughout — so **Tier 1 ALWAYS runs here**; (6) ⚠️ that session's split — "75 done / 32 open / 3 escalated + 1 blocked = 111" — is **SUPERSEDED**; see the Task status row (**116** POMLs after session 17's eleven). **Merge gate: Tier 1 green AND `Router` green on the head SHA, probed by name, once, at the decision point.**
+> **Sessions 9–13 ALL PUSHED — 0 unpushed.** Sessions 9–12 on 2026-09-15 (`c3e85a6dc..fe67eb1c2`, 17 commits); session 13 on 2026-09-17 (`7e60089e2..7a6f1c43d`, **14 commits**). Both to PR **#950**, whose description now carries a session-13 section (tasks 104 + 063, the owner decisions, the before-merge checks, #994/#995, task 108). CI: **Tier 1 fully GREEN at `7a6f1c43d`** — all 8 blocking jobs pass (Classify, Compile, Arch Tests full suite, Auth Smoke, Tenant Isolation, Eval Gate, Compose Fidelity, Changed-Surface Integration Smoke). Required `Router` context: **completed / success** on `7a6f1c43d`, verified via the check-runs API (the master ruleset confirms the required context is literally `Router`). The 5 `cancelled` runs on that SHA are the two advisory/legacy jobs still pending when the handoff commit was pushed seconds later. Head is now `597882f7c` (docs-only) with its own run in flight — docs-only pushes skip Tier 1 and `Router` still reports success on that shape, but **confirm `Router` on the head SHA before merging**. Two NON-blocking jobs were still running at handoff (Tier 2 Full Unit Tests, legacy Build & Test Debug) — Tier 2 is advisory by design, so a red there is not a merge blocker. **Trivy is red and NOT a required check**: 15 of its 16 alerts are pre-existing on master (→ #992, handed off) and 1 is TipTap 2.x from the session-8 LegalWorkspace build repair (→ #991, Compose owns it). Re-check with `gh pr checks 950`.
+> ⚠️ Refresh this stamp every time you write here. A gap between it and
+> `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
+> ⚠️ **One live block. Replace it; never append.** Row headings (`| **Next Action** |`, `| **Task** |`) repeat
+> inside the HISTORICAL blocks below — a scripted edit must touch the FIRST occurrence only (session 7 overwrote
+> six historical rows once by matching all seven; restored from HEAD before anything was committed).
+> **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
+> ⚠️ **This project's task files have been WRONG — the audit's own count is **19 PRIOR INSTANCES OF PREMISE ROT** (`notes/task-accuracy-audit-2026-09-18.md:9`), corrected 2026-09-19 from the stale "seventeen" this row carried since session 13; distinct from the **8** files that audit counts at `:17` as carrying a wrong load-bearing sentence, which task 115 revises to **nine**. Prior instances include — (session 13, task 063 ×2: it put the POA seam at `Services/Communication/Access/` — task 060 had moved it to `Services/Access/` — and told the task to reuse "the 060 seam's single mapping" from level to rights, which **does not exist**: the only candidate, the evaluator's `ExternalAccessLevels.ToAccessRights`, uses Spaarke's own bit layout and includes Create, so obeying the POML literally would have granted the WRONG rights; session 11, task 103: it assumed `IConnectionMultiplexer` is registered only when Redis is on — a Null-Object is always registered; and its criteria read as if a lease alone gives one dispatch per schedule — short runs need an occurrence marker; session 9: task 100 named `OutboxService`, whose client skips unknown kinds, and assumed the granter is on the grant row — 20/28 grants lack it; session 8: task 098 listed
+> `DelegationRuleFilter` only as a reference — without a new `case` the route denies everyone — and built a
+> constraint on a cache "fail-open window" that cannot exist; session 7 ×3: task 097 never considered
+> that NO client sends an expiry, and said `/invite` writes a grant — it writes none; task 096's own constraint
+> had the `ExecuteTransaction` nesting rule backwards — copied from this project's design note, caught at review
+> against Microsoft Learn). **Verify a POML's premises against the code before obeying them — the code has won
+> every time.** Docs-vs-reality mismatches stand at **eleven** (session 13: `DataverseWebApiService.RevokeAccessAsync`'s
+> own doc promised that Dataverse treats a revoke with no share as a no-op — Microsoft Learn documents no such thing,
+> and the promise is now removed; session 7: a test helper calls `ServiceClient`
+> *sealed*; it is not — `Execute` is `virtual final`).
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-03
+## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **State** | Branch **clean**, 0 unpushed, 0 behind master. **PR #939 OPEN** — https://github.com/spaarke-dev/spaarke/pull/939 (14 commits, NOT merged). |
-| **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ · ArchTests **182/182** · BFF unit **11,845 passed / 0 failed** / 58 skipped · client suite **9 suites / 14 tests failing = the documented baseline**, all untouched by this work (verified by diff) · publish **44.14 MB** incl. PDBs (−0.82, ceiling 60). |
-| **Just completed** | **076 COMPLETE** (the container contract, open since 2026-08-25) · **050** + **052** core-ancestor stamping · **034** canary (🟡 shipped-not-closed) · **item 7** association map · **N-1** one upload client. |
-| **Next Action** | **START AT § NEXT SESSION — ORDERED WORK ITEMS.** Item 1 is merging PR #939, and it has TWO deploy obligations that must be honoured or every upload 404s. |
+| **Task** | **NO task in execution** — session 17 was POML authoring + bookkeeping, not `task-execute`. Last completed: **106** (ISS-008/#973, closed 2026-09-18). ⚠️ **Do not resume 106.** ✅ Authoring is **DONE** (109–119, session 17). The next execution step is **wave 1: 108 → 065 → 044**. Task **093 is to be CLOSED as delivered** (owner D-8) — create-first is **compiler-enforced** (`EntityCreationService.ts:467-469`, the arity change "makes every un-migrated call site a COMPILE ERROR"), and its POML was **born stale** (the second `SecureProjectSection` was deleted 2026-09-01; 093 was filed 2026-09-03). Closing it **unblocks 047**. |
+| **Branch** | `work/unified-access-control-r2` · PR **#950** (not a draft) · **pushed through session 17** (2026-09-19, from `7c75728bc`; read the current endpoint with `git log -1 --format=%h`). ⚠️ This row deliberately names **no endpoint SHA** — the commit that carries this file always advances it, so any endpoint written here is stale the instant it lands. ⚠️ Everything that follows in this row is **session-13 history** — the `7a6f1c43d` CI verdicts below describe that SHA, not the current head. CI: **Tier 1 fully GREEN at `7a6f1c43d`** — all 8 blocking jobs pass (Classify, Compile, Arch Tests full suite, Auth Smoke, Tenant Isolation, Eval Gate, Compose Fidelity, Changed-Surface Integration Smoke). Required `Router` context: **completed / success** on `7a6f1c43d`, verified via the check-runs API (the master ruleset confirms the required context is literally `Router`). The 5 `cancelled` runs on that SHA are the two advisory/legacy jobs still pending when the handoff commit was pushed seconds later. Head is now `597882f7c` (docs-only) with its own run in flight — docs-only pushes skip Tier 1 and `Router` still reports success on that shape, but **confirm `Router` on the head SHA before merging**. Two NON-blocking jobs were still running at handoff (Tier 2 Full Unit Tests, legacy Build & Test Debug) — Tier 2 is advisory by design, so a red there is not a merge blocker. **Trivy is red and NOT a required check**: 15 of its 16 alerts are pre-existing on master (→ #992, handed off) and 1 is TipTap 2.x from the session-8 LegalWorkspace build repair (→ #991, Compose owns it). Re-check with `gh pr checks 950`. **Before merge — three items, none of them optional**: (1) 🚨 **real-Dataverse DOWNGRADE check** for task 063 — seed Full Access on a scratch record, `share-user` at View Only, read `accessrightsmask` and assert **1**. Everything offline pins our end of the wire only; if `ModifyAccess` were additive, the read-back would refuse loudly while the user silently KEPT Write and Delete (notes `task-063-…` §9.4). **Not run — no live-Dataverse access in session 13.** (2) real-Dataverse smoke of the reminder `appnotification` write (task-100 notes §7). (3) a real-ARM check of H9's slot guard (#987). Trivy remains red and is **not** a required check: 15 of 16 alerts are pre-existing on master (→ **#992**, handed off), 1 is TipTap 2.x from the session-8 LegalWorkspace build repair (→ **#991**, Compose owns it). Portfolio sync skipped — the `gh` token lacks `read:project` (`gh auth refresh -s read:project,project`). |
+| **Next Action** | ✅ **POML AUTHORING COMPLETE (session 17, 2026-09-19) — 109–119 all authored/rewritten and verified.** ✅ **Committed and pushed** — the authoring work went out as `7c75728bc..dc0d8006e` (15 files) plus `dc0d8006e..d705a1dcf` (a one-line stamp truth-fix), to PR **#950**, 0 unpushed / 0 dirty. 🔴 **NEXT: wave 1 execution — 108 → 065 → 044 — via `task-execute`** (CLAUDE.md §4: invoke the skill, do not read the POML and implement by hand). Still open: **099** must gain the level constraint (D-7, non-negotiable, it is 099's own amendment); **054** rescope (D-4); **093** close as delivered (D-8, unblocks **047**); the two skill-drift notes (`task-create` says `not-started` in its Status Values but `pending` in its status-token table; and it calls POMLs "valid POML/XML documents" while its own linter deliberately does not parse XML). ⚠️ The set described below is now the **RECORD of what was authored**, not remaining work. 🔑 **ONE SCOPING JUDGMENT already made**: D-1 option B + ISS-026's write half + ISS-020 part 4 become **ONE task**, not three — they need the identical mechanism (a scheduled reconciliation job on ADR-036, reusing task 103's lease + slot guard; `GrantExpiryReminderJob` is the working precedent). Three overlapping versions would be the duplication CLAUDE.md §11 forbids. **The set**: (a) the consolidated **reconciliation job**; (b) **rescoped 107** — option **A**, invert the read default so a null `sprk_expiresdate` confers **NOTHING** (drop the `eq null` branch, `ExternalParticipationService.cs:99-100`; blast radius **zero** today but **COUNT before deploy**); (c) the **C task** — 🔴 **prerequisite ordering**: re-point `TrackingFieldTrio:43` off `hasEntityPrivilege(...Create...)` onto the server's real rule (**Write-on-record**, task 008 delegation) **BEFORE** removing `Create` from human roles, or Manage Access vanishes for every user while the BFF app-only write keeps working; (d) properly author the six stubs **109–114** (all still marked `PREMISES NOT YET VERIFIED`) — ⚠️ **109 + 110 ship as ONE change**; (e) **115** the nine-file accuracy repair; (f) **116** ISS-025; (g) **ISS-027** (To Do files). ⚠️ **082 and 093 are RESCOPES, not patches — excluded from 115.** **ISS-028 folds into 113.** Then wave 1. 🔔 **Before merge (D-5)**: 063's real-Dataverse **DOWNGRADE** check — the ONLY evidence `ModifyAccess` replaces rather than adds. `/merge-to-master` is a separate, unmade decision. |
+| **Task status** | **Measured 2026-09-19 in the POMLs' own vocabulary: 74 `completed` · 4 `completed-with-escalation` · 1 `blocked-shipped` · 37 `pending` = 116.** (The prior row said "75 done · 32 open · 3 escalated · 1 blocked = 111" — a different bucketing *and* pre-dating the eleven POMLs authored in session 17; stated here as the measurement rather than a reconciliation of the two.) Register is now **29 ISS + 1 DEF = 30** entries — ISS-029 (**#1009**) added 2026-09-19 — all carrying real issue numbers, **zero** placeholders. Superseded text follows: Recomputed independently: **111 POMLs / 111 index rows, ZERO orphans in BOTH directions** — the comparison ISS-025 says `check-task-status-drift.ps1` structurally cannot perform; drift `rc=0`. Register now **28 ISS + 1 DEF = 29** entries, all carrying real issue numbers, **zero** placeholders (28 disposition rows = 28 ISS headings, id sets equal both ways). **New this session**: ISS-026 **#1006** (a DEACTIVATED organization still confers access — no query consults `sprk_organization.statecode`), ISS-027 **#1007** (the To Do wizard silently DISCARDS uploaded files), ISS-028 **#1008** (a 409 saying "did not take effect" has already written the level). ⚠️ **NINE task files carry a wrong load-bearing sentence, not eight** — task **089** was called benign but its `<gate>` blocks on **082**, a live UNRELATED task; **095** is wrong on **two of three** claims. |
+| **⚠️ ENVIRONMENT** | **The connected system is DEV and its records are TEST records** (owner, 2026-09-17). Read every live-data risk in this file through that lens: task 042's backfill touched **two test contacts**; 🔴 **"ISS-020 has zero real exposure" was FALSE and is RETIRED** — only the org-*expansion* term is standing-gated (`ExternalParticipationService.cs:1209-1221`); the older org-*grant* term (`:1011-1051`) has **no** standing check, and live org grants existed (`notes/task-020-org-grant-spe-cleanup.md:18`). ISS-021's companion claim that "N is 0" separately conflated org **memberships** with standing grants — live data shows **2 memberships across 2 organizations**. Exposure was bounded only by dev being a test environment, never by a control; and the three **before-merge real-Dataverse checks** (063's DOWNGRADE check, task 100's reminder `appnotification` write, H9's ARM slot guard) are verification gaps rather than production incidents. ⚠️ This does NOT retire them — each becomes materially riskier the moment a real customer environment is provisioned, and 063's DOWNGRADE check in particular is the ONLY evidence that `ModifyAccess` replaces rather than adds, which the whole share write-path assumes. It changes urgency, not validity. |
+| **Session 17 record** | **No code changed. Eleven task POMLs authored or rewritten (109–119), plus index/register/plan bookkeeping.** Commits `dc0d8006e` (15 files, +808 −136), `d705a1dcf` (stamp truth-fix), plus the handoff checkpoint commit that carries this row. **Verified at one moment, after the last edit**: `Validate-TaskPoml.ps1` **110 clean / 0 errors / 6 pre-existing warnings PASS** · drift **116/116 rc=0** · XML valid on all 11 authored · **0** stub markers · **0** `not-started` (37 `pending`) · register **30 headings / 30 disposition rows, equal both directions**. 🔴 **A GATE HAD BEEN RED SINCE SESSION 15**: the validator was exiting 1 on six stubs missing `&lt;steps&gt;`; it is invoked manually and is **NOT** wired into `/push-to-github` (Step 1.65 gates only on the drift script). **Filed ISS-029 → #1009** (the drift parser keeps the WRONG line for eight ids: `$map[$id]=…` is last-write-wins and the row regex matches **119 lines for 111 ids**; the second hit is a reference row whose `**` marker reads as *open* — green **by luck**, and it will report phantom drift the day any of those eight completes). **Corrected #1007's citation.** **EIGHT false claims corrected, FIVE of them mine**: (a) ISS-021's "N is currently 0" conflated org MEMBERSHIPS with standing grants — the read is paid per membership at `:1215-1216`, *before* the `Rights == None` skip at `:1218-1221`; live data = 2 memberships/2 orgs, and the plan's wave-2 rationale rested on the same conflation; (b) ISS-024 cited the reason-code **constant** (`:80`) not the refusal (`:677-680`), wrongly cited `SystemUserIdentityResolver.cs:57` (a different feature, still pinned by a live test), and has **TWO** asserting tests — `InternalUserShareTests.cs:439` asserts through the constant and is invisible to a string grep; (c) "seventeen wrong task files" is **19**; (d) task 063's `share-user` "downgrade at risk" is false of this code path (`InternalShareEndpoints.cs:25-26`) — the real untested downgrade is `/grant`'s own; (e) ISS-026/ISS-027 said "Task TBD" and ISS-009 named one task where D-1 split it into three. **Four subagents used; three falsified premises in the briefs I gave them** — delegation earned its keep by catching my errors, not just by parallelising. **Lessons, all one family — the scope or moment of a measurement decides the verdict**: (i) the validator PASSED a single file and FAILED the directory on the same tree; (ii) that linter **deliberately does not parse XML** (`:55`), so PASS never means valid — I shipped malformed XML in 110 and it passed, and **20 pre-existing POMLs are invalid** under the same documented convention (finding retracted, not filed); (iii) a command that exited 1 with **no output** is a broken measurement, not a red; (iv) my own replacement text contained the word I was counting, so "expected 2" was wrong while the edit was right; (v) a find-replace of "seventeen" would have corrupted **two correct sentences** (`TASK-INDEX:843`'s unrelated "Seventeen of its nineteen tasks", and a historical record) — enumerating occurrences beat pattern-replacing them. |
+| **Session 16 record** | **No code changed. Thirteen owner decisions taken, and six of my own recorded claims falsified.** Artefacts: the remediation/sequencing plan, the owner decision brief, 3 new register entries (#1006–#1008), and the live block above. Commits `d8c139697` + `8496e929d`. **Decisions**: D-1 🔴 **no Dataverse plugins repo-wide** → 107 rescoped off every Dataverse-side mechanism, **A+B+C** with **C explicitly not deferred**; D-2 part 1 bound the additive path, **part 2 NO — an ethical wall KEEPS binding a former member** (veto stays `statecode`-only, over-matching); D-3 approve; D-4 yes; D-5 063 DOWNGRADE before merge; D-6 yes; D-7 option 1 (no contract change — the rule **already holds** on the renewal route, `SetRecordShareExpiryEndpoint.cs:213-216` writes only the date; **099 must gain the level constraint**); D-8 close 093; D-9 all three filed; 034 option A. **Three Fable audits, all spot-checked; two had a wrong citation, none a wrong conclusion.** **The ISS-020 dilemma DISSOLVED** — "one filter cannot serve an additive term and a veto" was an artifact of `$select`ing **bare ids**; project `sprk_enddate` and one READ serves both. **Lessons, all of the same family — a claim about a thing is not the thing**: (a) I asserted CI state from `gh pr checks`, which **never lists the required check**; (b) I asserted "expected red on a superseded SHA" and `cb9ec2ea2` came back **green**; (c) I predicted docs-only would skip Tier 1 and **both tiers dispatched** — because paths-filter classifies the **PR**, not the commit; (d) I twice asserted register/heading counts against numbers I **invented** rather than measured (git's baseline settled both); (e) my "exposure is nil" for ISS-020 was **false** — only the *expansion* term is standing-gated; (f) I claimed live 093 scope from a source comment that **miscounts its own flows** (two, not three) and contradicts task 076's classification. Each was caught by computing the expected value from an independent source — git, the tier-gate behaviour, `Models.cs`, a repo-wide grep. |
+| **Session 15 record** | **Closed 106**; **ADR-038 A2** (owner-ratified: ban B8 targets reflection, **not** `InternalsVisibleTo` — the ADR said three incompatible things, and B1 forces the narrow reading because an OData `$filter` is observable only via transport mocking (B1-banned) or the extracted member); **7 issues filed** (#998–#1004) so all **25** register entries now carry real numbers, zero placeholders; **ISS-024** (external licensed = internal, decided) and **ISS-025** (the drift blind spot); **tasks 109–114 queued**; and the owner-requested **accuracy audit** (two Opus agents, ~500K tokens) → `notes/task-accuracy-audit-2026-09-18.md`. **The lesson is the task**: build, 51/51 tests and 4/4 perturbations all passed over a real privilege-loss defect, because **every one of those instruments was single-request and the defect lived between two**. Both gates found it by READING. A suite can be green, perturbation-proven, and still blind to an entire dimension. **Other lessons**: (a) one of my own tests **ENCODED the defect as an invariant** — it asserted the request-dependent tie that *was* the bug, so it could only go green on broken code; (b) I wrote three comments asserting convergence and a fourth asserting a **non-hazard** — a comment that guards nothing teaches the next reader to discount its true neighbours; (c) a stale comment sat **five lines** from my own edit while these notes congratulated themselves on repairing the same drift elsewhere; (d) my notes claimed all seven duplicate tests asserted a precondition when **two did not** — accurate about the design, false about the code, the worse failure because a spot-check confirms it; (e) **seven perturbation non-results** came from the harness racing itself — `CS2012` (a lingering `testhost` owning the output DLL) and `CS2001` (no settle window between writing a file and compiling it) are DIFFERENT faults, and labelling them INVALID rather than MISSED is the only reason the record does not now say my V1 regression test is decorative; (f) my first conflict-check used `git diff HEAD origin/master`, which is **bidirectional**, and handed back my own 457 files as "master touched our file"; (g) six queued POMLs were **invalid XML** (a literal `&lt;?xml` escape) and a handoff commit was **refused by its own gate** for carrying a fabricated commit SHA. (e), (f), (g) and ISS-025 are all the same root error as session 14's three: **an observation taken outside the thing being observed**. |
+| **Session 13 record** | **Closed 063** (`d47b586eb`, `5e84c6b9f`, `1d016f1ed`, + the Step 9.5 fix commit). **Lessons**: (a) a soft-failing read is safe for DISPLAY and unsafe for deciding a WRITE — one call, two contracts; the fix was a second, strict read, not a change to the first; (b) two same-named rights vocabularies (Spaarke's `AccessRights`, where Delete is 4, and Dataverse's, where 4 is Append) will silently swap rights if a mask crosses between them — the tests assert Dataverse's numbers as literals rather than deriving them from the table under test; (c) a live check must exercise the UNDOCUMENTED case: the create-and-read first planned would have confirmed nothing about `ModifyAccess`, which is the assumption the whole design rests on (caught at Step 9.5, notes §9.4); (d) an undocumented Dataverse behaviour is a design input — each of the three here was taken on the unsafe assumption, and the test double models them that way so a wrong choice fails offline; (e) `dotnet test … | tail` buffers, so a background suite gives no interim progress — size the wait accordingly. **Filed** #994 (ISS-017, handed off) and #995 (ISS-018, stays in project → task 108). **Amended 2026-09-16** (`c28c1d0ac`) on the owner's three answers — the intersection rule (Task row above); affected suites 164/164, ArchTests 323/323, perturbations **12/12** including P11 (write the requested level instead of the intersection) and P12 (mis-pair one row of the two rights vocabularies). **Lesson (f)**: P12's first verdict came back **INVALID on a build error** after eleven consecutive `dotnet test` runs in one batch; re-run alone it caught the defect. A broken perturbation is not a result in EITHER direction — this project has now hit that three times, and the script reports INVALID rather than counting it. |
+| **Session 12 record** | **Closed 104** (`6be320e82`, `134bdb73e`, `43ac00a18`): the impersonation helper fails closed (#990); Step 9.5 review F1 made the request builder the single enforcement point (a method-level guard had masked it); lesson: TaskStop leaves an orphaned `testhost` that locks the test binaries, so a follow-up test run silently executes the OLD DLLs. **Owner 2026-09-15**: tasks re-sequenced by dependency (TASK-INDEX § Execution sequence); register triage (104–107, 054 amended, 090 gated, #991–#993). **Owner 2026-09-15**: "#987 must be addressed, do not defer" → fixed by a sub-agent in an isolated worktree (H9 sets `Scheduling__RunScheduledJobs=false` slot-sticky before its Kudu deploy, fails closed; provisioning 1567/0/1), cherry-picked `6149edecf`, plus ArchTest `SchedulingSlotGuardKeyTests` (the key in all four slot-deploy paths). **Accepted** the Function-impersonation recommendation → ADR-052 §5/§6 + ADR-028 A5 amended (`17ce03546`), guard allows impersonation only through the shared helper, prerequisites filed **#988 (SAS), #989 (typed requester), #990 (fail-closed helper)**. **Ratified** task 103's path-A test exceptions. **Closed 100**: catch-up reminders (most urgent unsent threshold, incl. on the expiry day), claim re-check + marker read-back, person = accessmode 0–2, transient-only last-day retry, per-row isolation, attempt number in every heartbeat (`JobRunContext.Attempt`). Verification: reminder 48/48 · Scheduling 75/75 · ArchTests 323/323 · full suite **14,578/0/86** · publish 45.43 MB vs master 45.35 (214 files each; ≈0 for 100) · no CVEs · **13/13 perturbations**. Step 9.5: adr-check 1 violation (notes cited ADR-001) + 8 warnings; code-review 0 H / 3 M / 16 L — all fixed or accepted. **Lessons**: (a) `NotificationService` wraps every exception, cancellation included — decide cancellation by your own token; (b) `IdempotencyService` swallows marker-write failures — read the marker back; (c) a test cache on the real clock can never catch a wrong marker lifetime — put its expiry on the job's fake clock; (d) a perturbation that leaves a field unassigned fails the BUILD (`CS0649`), which is not a result; (e) after `git checkout` a Windows file has CRLF — perturbation regex anchors need `\r?`. |
+| **Session 11 record** | **Closed 103** (`a9c538c72`, `0f1414c37`). **Owner decisions 2026-09-14**: ADR-036 **A1.1** (a lease store that stays down → the tick is not dispatched, recorded failed); task 100 reminders **catch up** a missed threshold; the 8 stale POMLs fixed — a sub-agent in an isolated worktree, cherry-picked `0cf6f0c92`: 9 POMLs, and the drift guard now scans not-started POMLs of active projects; Function impersonation → researched, proposal awaiting sign-off. **Built**: `IScheduledJobLease` (Redis `SET NX PX` + a last-dispatched-occurrence marker; process-local when Redis is off), renewed through every retry, cancelled on a lost lease, on renewal failing for a full lease duration, past `MaxRunDuration` (2 h) and on host shutdown; slot guard set slot-sticky by `Deploy-BffApi.ps1` and `deploy-bff-api.yml` (H9 provisioning → **#987**); `AddScheduledJob` with no bootstrap at all (ArchTest rule 2b); admin trigger 409/503. **Verification**: full suite **14,540 / 0 / 86**; ArchTests **319**; publish 45.43 MB vs master 45.35 (214 files each; own increment ≈ +0.01); no CVEs; perturbations **P1–P8 all caught**. **Step 9.5**: adr-check 4 violations (V1, V2 fixed; V3, V4 path A) + code-review 1 High / 7 Medium (H1, M2–M4 fixed; M5 kept; M6 documented). **Lessons**: (a) a lease is not "once per schedule" — a short run releases before a slower instance wakes, so record the occurrence; (b) a perturbation script that `git checkout`s files reverts uncommitted fixes — commit before perturbing; (c) two hosts on one fake clock race for later ticks — assert on the lease's recorded grants, not on which host ran; (d) review agents read the commit (`git show`), never a tree being perturbed; (e) a first perturbation run can fail on `CS0006` from a concurrent build — re-run it alone, it is not a result. |
+| **Session 10 record** | **Closed 102** (`ae27527a7`, `d5a703f54`). Owner approved the v2 drafts; identity = reuse the stamp UAMI **app-only** (ADR-028 A4 app-only row; CIAM Graph + Power BI clients NOT inherited; no confidential client / OBO / Dataverse impersonation — ArchTest-enforced under `src/server/functions/**`). **ADR-052 Accepted**; ADR-001/004/036 A1; ADR-013/002/032 pointers; all ADR indexes; every `.claude` directive + ~70 docs aligned (sub-agents did `docs/**` and `src` comments — verified comment-only). ArchTests **197 → 288**, all green: `ADR001_MinimalApiTests` (method/param/return/assembly attributes + package-rule controls), `WorkloadPlacementDocDriftTests` (drift guard), `WorkloadPlacementGuardTests` (timer ratchet at 14 · host-neutrality · Functions-project guard). Issues **#976–#986**. Step 9.5: code-review (no Critical) + adr-check (pass with fixes) — all applied. **Lessons**: (a) a drift guard's first run finds its own holes (bold text, `///` wraps, a scope lookahead a later "in the BFF" could satisfy) — test evasions, not just samples; (b) check ADR claims about test coverage and identity against the scan roots and the credential code (I4–I6 scan BFF paths only; SPE grants are per appId → #986); (c) the Grep tool returns nothing for brace globs with sub-paths — grep per path; (d) PowerShell `git commit -F -` needs the message piped, not passed as an argument. |
+| **Session 9 record** | **Task 100 implemented** `e7bd02189`: `GrantExpiryReminderJob` (`IScheduledJob`, daily 06:00 UTC, ONE FetchXML query, outer joins verified live) + 23 tests. Suite **12,327/0/58**; ArchTests **197/197**; publish **45.42 MB** vs pre-task 45.41 / master 45.35 (214 files each); no CVEs; perturbations P2–P9 caught, P1 still needs a re-run. The escalation FIRED (20/28 live grants lack `sprk_grantedby`) → owner: recipient granter → record owner → record creator, MDA bell. The review then exposed a **four-era contradiction about Azure Functions** and **per-instance scheduler dispatch** → owner decisions **D1–D7**: no Functions prohibition; placement on merit; fewer moving parts wins ties; reuse the stamp's managed identity (Model 1 shared OK); a new ADR-052; ALL docs aligned plus a drift guard. → New tasks **102** and **103**. Evidence: `notes/decisions/workload-placement-policy-evaluation.md`. The Fable-tier review of the ADR drafts → v2 (direction held). **ADR synopsis**: ADR-052 = per-workload host decision (signals F1–F5 vs B1–B4, Spaarke costs, guardrails, Durable Task in its own host, no WebJobs, no new hand-rolled timers); ADR-001 A1 = narrowed to the BFF runtime; ADR-004 A1 = queue-only, Durable ban withdrawn, atomic idempotency; ADR-013 = pointers; ADR-036 A1 = runtime truth + lease/slot/claim/retry/heartbeat/helper rules; `bff-extensions` §D/§E rewritten. **POML premise errors now THIRTEEN** (task 100: an outbox kind no client renders; granter assumed present on the grant row). |
+| **Session 8 record** | Closed **098** — `POST /api/v1/external-access/set-record-share-expiry`: ONE expiry on every active share of a record (contact + org) in ONE `BulkUpdateAsync` transaction. **Owner decision 2026-09-11 "Renew them too"** (lapsed-but-active shares get the date). Beyond the literal criteria, from review: **409** for a share also linked to another record, **422** above 1,000 shares, refusal of an id-less row, "not confirmed" (never "not applied") on a failed transaction. `sprk_expiresdate` is **TimeZoneIndependent** (live metadata) → SDK value midnight `Kind=Unspecified`. **7/7 perturbations caught.** Full suite @ `23953342a` **12,300 / 0 / 58**; @ `a0a3f07fe` **see § Session 8 verification below**; ArchTests **197/197** (census 117 → 118 — caught by adr-check before CI). Publish **+0.01 MB** (45.40 → 45.41; master 45.35; 214 files each side). No vulnerable packages. **Lessons**: (a) a new route file moves the ArchTests endpoint census — run ArchTests locally; (b) parallel builds can make a perturbation hit `CS0016` or print NOTHING — neither is a result (P5/P6 re-run); (c) review agents read from a FRESH worktree while perturbations rewrite the main one. |
+| **Session 7 record** | Closed **096** — `IGenericEntityService.BulkUpdateAsync` is genuinely all-or-nothing (`ExecuteTransactionRequest`); escalation fired (no substitutable seam) → **owner chose the pure-builder test approach**. Closed **097** — every external grant carries an expiry: past → 400 `sdap.access.grant.expiry_in_past`; absent → keep the grant's existing expiry, else today + 90 (**owner decision "Server fills +90"** — no client sends an expiry). **Live dev backfill: 25 → 0 unbounded grants** (all now 2026-12-10). Full suite @ `2f2cc158a` **12,280 / 0**; ArchTests 197/197; publish 45.35 → 45.40 MB (project-cumulative; 096 and 097 each ≈ 0). **#970 closed**; filed **#971–#974**. 🔴 **Task 100 must be live by 2026-11-10, and 097 must not reach any non-dev environment without 100.** |
+| **Session 7 lessons** | See § SESSION 7 LESSONS — headline: **enumerate a contract's callers before tightening it** (097 would have broken every sharing screen), and **a broken perturbation is not a result**. |
+| **Session 6 record** | Closed **024** (M1), **ISS-004** (#968), **042**. Filed **#969**, **#970**. CI: the **full ArchTests suite runs blocking** in Tier 1. FR-33 redesigned → tasks 096–101; no Dataverse test in CI (036 manual gate); §10 hazards 3–4 in root CLAUDE.md; path-A exceptions 012/023/062 ratified. |
+| **Session 5 record** | Closed **029, 028, 062, 068, 086, 035**. Filed issues **#963–#967**. |
 
-### 🔴 The five things that will bite a fresh session
+### Commits session 14 (2026-09-17) — **NOT PUSHED**
 
-1. **`Router` is the ONLY required check on master.** It has passed while other jobs were RED —
-   #934 reached master with a **broken solution build** that way, and I had to repair it. **Gate on
-   the FULL rollup; only `CLEAN` merges.**
-2. **The incremental solution build LIES.** `dotnet build Spaarke.sln` came back green while a real
-   compile error sat in a test project. Always `--no-incremental`. Also: `MSB3026`/`MSB3027` file
-   locks mean a *concurrent test run*, not a code error.
-3. **STALE PROSE HAS COST REAL WORK ELEVEN TIMES.** Worst instances: an "open escalation" that had
-   been ANSWERED five days earlier (cost a wrong status report to the owner); "12 container
-   suppliers" that is really ~32; "7 Communication sites need routing" when all 4 were already done;
-   `sprk_todo` described as a live upload target when it has no upload call site at all.
-4. **NEVER `git stash` in this worktree, and never `git add -A` with concurrent agents.** Both
-   happened: a stash swept up another agent's uncommitted work, and a `git add` swept up another
-   agent's file leaving `origin` briefly non-compiling. **Use isolated worktrees for parallel agents.**
-5. **Both arch guards fire on new work and are RIGHT every time** (3 instances now):
-   `RouteAuthorizationGuardTests` (waiver + route-count ratchet) and
-   `SpeWriteSinkContainerProvenanceGuardTests` (provenance inventory). Fix them honestly; never
-   convert a `Pending` waiver to `Permanent` to go green.
+| Commit | What |
+|---|---|
+| `28f833a0e` | task **043** — org-expansion term + registry filter + the `HashOptions` cache-key fix |
+| `e8f57dec9` | 043 notes — verification table + the mis-targeted-filter finding |
+| `47a63314c` | **P5 came back MISSED** — pin the org-walk `IdentityTypes` narrowing in the matcher |
+| `62e5d5d0c` | Step 9.5 review fixes (M-1/M-2/M-4/M-5/L-1) + four doc-drift repairs; **C-1 escalated** |
+| `69e9e39a2` | session-14 checkpoint + registers ISS-019/020/021 |
+| `ad41dcc84` | **C-1 implemented** — platform ownership confers structurally; ADR-034 **A1.1** |
+| `d51370559` | handoff no longer says "blocked" (newline-anchored fix after the row-heading trap) |
+| `1a5b28f9d` | **043 COMPLETE** — POML status + TASK-INDEX row in one transaction; C-1 record |
+| _(this commit)_ | session-14 final handoff |
+
+**Session 14 lessons.** Three of these are ONE root error — *an observation taken outside the thing being
+observed* — which is worth naming because they looked unrelated:
+
+- **(a)** A filtered `dotnet test` reported `Failed: 0, Passed: 16` for a filter that selected the **wrong 16**.
+  `tests/integration/{auth,seam}/**` are globbed into the **unit** csproj, not the integration one, so
+  `StandingGrantRuntimeUnionSeamTests` was never in the run. A filter selecting NOTHING reports identically to
+  one selecting everything → **prove it non-empty via `--list-tests` before trusting it** (re-run: 189 selected,
+  197/197).
+- **(b)** 4 of 11 perturbations returned INVALID on `VBCSCompiler` locks. Cause partly **another agent building
+  the same solution** — the orphaned 6.2 GB `testhost` belonged to
+  `.claude/worktrees/agent-af442ccb79065ad1a`; it was inspected and **left running**, since killing it would
+  have destroyed another agent's test run. `dotnet build-server shutdown` quiesces only this session. All four
+  were CAUGHT on individual cold re-runs, so the three-verdict harness (CAUGHT / MISSED / **INVALID**) earned
+  its keep: counted either way, the conclusion would have been wrong.
+- **(c)** A publish script reported **exit 0 having measured nothing** — it died on a PowerShell parse error
+  (em-dashes read as ANSI by `powershell` 5.1 rather than `pwsh`), and `| tail` took the exit code from `tail`.
+  → **scratchpad PowerShell stays 7-bit ASCII, runs under `pwsh`, and `rc=$?` is captured before any pipe.**
+- **(d)** Self-inflicted: I dirtied the tree under my own harness's clean-tree precondition by editing notes
+  while it ran. The guard refused correctly and left no source perturbed — the lesson is that a background job
+  owning the tree means *documentation edits are not free either*.
+- **(e)** **P5 came back MISSED**, and the fix was to tighten the Moq matcher rather than add a test: a setup is
+  indifferent to option fields it does not mention, so the stripped call still matched. Only a perturbation
+  distinguishes a test that defends behaviour from one that merely passes.
+
+### Commits session 13 (2026-09-15 → 09-17) — pushed 2026-09-17
+
+| Commit | What |
+|---|---|
+| `028db3334` | dependency-ordered execution sequence (owner) |
+| `6be320e82` · `134bdb73e` · `43ac00a18` · `57c5e18b0` | task **104** — impersonation helper fails closed (#990) |
+| `99d3eedf2` | mid-063 checkpoint (design decided, no code) |
+| `d47b586eb` | task **063** — the three share endpoints + tests |
+| `5e84c6b9f` | 063 record; register ISS-017/018 (#994, #995); task 108 |
+| `1d016f1ed` | publish size + Step 9.5 gate records + the two escalations |
+| `852e96eb9` | Step 9.5 fixes (11 of 22 findings) — 063 marked complete |
+| `c28c1d0ac` | **amendment**: a share carries only what the caller holds (owner) |
+| `6f34f5c4f` · `021b218e8` · `7a6f1c43d` | amendment record, Task-row contradiction fix, final suite figure |
+
+### Commits session 12 (2026-09-15) — pushed
+
+| Commit | What |
+|---|---|
+| `17ce03546` | docs(adr): ADR-052 §6 / ADR-028 A5 — conditional Dataverse impersonation (owner-accepted) |
+| `521ab1b9a` | feat(api): task 100 review fixes — catch-up, claim re-check, person test, retry rule |
+| `6149edecf` | fix(provisioning): H9 sets the scheduled-jobs slot guard before the staging deploy (#987) — cherry-picked from the sub-agent |
+| `46656864a` | fix(api): task 100 Step 9.5 round 2 — retry rule, claim/marker accounting, key guard |
+| _(this commit)_ | task 100 complete — POML, TASK-INDEX, notes, handoff |
+
+### Commits session 11 (2026-09-14) — pushed
+
+| Commit | What |
+|---|---|
+| `0cf6f0c92` | docs: 9 not-started POMLs aligned with ADR-052; drift guard scans not-started POMLs (sub-agent; cherry-picked) |
+| `a9c538c72` | feat(scheduling): task 103 — lease, slot guard, `AddScheduledJob` |
+| `0f1414c37` | fix(scheduling): task 103 Step 9.5 — lease liveness, shutdown, slot guard in CI |
+| _(this commit)_ | task 103 complete — POML, TASK-INDEX, notes, handoff |
+
+### Commits session 10 (2026-09-13) — pushed
+
+| Commit | What |
+|---|---|
+| `ae27527a7` | docs(adr): task 102 — ADR-052 + amendments; directives + docs aligned; drift guard + ArchTests |
+| `d5a703f54` | docs(adr): task 102 complete — Step 9.5 fixes; ADR-052 Accepted; guards hardened |
+| _(next)_ | session 10 handoff — this file |
+
+### Commits session 9 (2026-09-12) — pushed
+
+| Commit | What |
+|---|---|
+| `e7bd02189` | feat(api): task 100 — `GrantExpiryReminderJob` + registration + 23 tests |
+| `90c61f000` | docs: placement policy decided; tasks 102/103 created; task 100 paused |
+| `7553e0135` | docs: task 102 step 1 — ADR-052 + amendment drafts |
+| `67f629ace` | docs: task 102 step 2 — drafts v2 after the Fable-tier review |
+| `c1ef7ed78` | checkpoint: session 9 handoff — task 102 awaiting owner approval of the v2 drafts |
+
+### Files modified session 9 — all committed, none pushed
+
+- **Code**: NEW `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/GrantExpiryReminderJob.cs` · `Infrastructure/DI/ExternalAccessModule.cs` (registration + nested `GrantExpiryReminderBootstrapHostedService`).
+- **Tests**: NEW `tests/integration/data-mutation/ExternalAccess/GrantExpiryReminderJobTests.cs` (23; strict FetchXML-evaluating fake).
+- **Project docs**: NEW `notes/decisions/workload-placement-policy-evaluation.md` · NEW `notes/task-100-expiry-reminders.md` (draft; §9 verification not yet filled) · NEW `notes/drafts/` (4 files) · NEW POMLs `102`, `103` · POML `100` (deps + amendment notes) · `TASK-INDEX.md` (governance section; row 100) · this file.
+- **`.claude/agent-memory/researcher/`**: best-practice notes (evidence for ADR-052).
+- **No canonical ADR, constraint or skill has changed yet.** No live Dataverse writes (read-only queries only).
+
+### Task 100 — outstanding review fixes (resume AFTER task 103)
+
+From code-review + adr-check of `e7bd02189`:
+1. **Retry**: throw after the heartbeat when the run can't make progress, or when units failed transiently and no later tick will revisit them, so `JobRetryPolicy` applies (ADR-036 A1 rule 4). With fix 8's catch-up a later tick DOES revisit a missed threshold — re-judge which failures still warrant a throw. Note ADR-036 A1.1: if Redis is down at 06:00 the tick is not dispatched at all; the catch-up is what recovers it.
+2. **Wording**: access holds THROUGH the expiry date (read filter `ge today`). Body → "Access for {grantee} to the {label} "{name}" ends after {date}."
+3. **Idempotency**: atomic claim before the send, completion marker after (ADR-036 A1 rule 3). The current `IIdempotencyService` lock is check-then-set; at minimum re-check "already sent" after taking the lock.
+4. **Person test**: enabled + no `applicationid` + `accessmode` ∈ {0 Read-Write, 1 Administrative, 2 Read} (live dev has Support (3) and Delegated Admin (5) users).
+5. Cancellation during a send counts as cancelled, not failed.
+6. Cap the paging loop.
+7. ~~Move registration onto `AddScheduledJob<TJob>`; delete the nested bootstrap; fix the pause doc comment~~ — **DONE by task 103** (`a9c538c72`).
+8. **Catch-up (owner decision 2026-09-14, Q2)**: a reminder whose exact day was missed (Redis outage → tick not dispatched, deploy, retries exhausted) is still sent — the most urgent unsent threshold whose day has passed, once per threshold, while the share has not expired. Design it into the idempotency key (threshold, not DaysLeft-of-the-day). **Tests**: DaysLeft/threshold in the idempotency key (advance 16 days, expect the 14-day reminder); a missed 1-day tick is sent the next day, and not twice · write failure then re-run sends once · cancellation · project + work-assignment roots · disabled owner → creator · support user excluded · paging past 5,000 · ResultJson breakdown.
+9. Re-run perturbation P1 (its first build hit `MSB3030`, so it isn't a result); add perturbations for the new retry and claim behaviour.
+10. Fill notes §9; the Placement Justification cites ADR-052; the POML closes with the owner decisions.
+
+Verification so far (`e7bd02189`): suite 12,327/0/58 · ArchTests 197/197 · publish master `e0a6f87c4` 45.35 MB / pre-task `c3e85a6dc` 45.41 MB / task 45.42 MB (214 files each; Compress-Archive; fresh short-path worktrees) · no vulnerable packages · FetchXML shape verified live (25 rows).
+
+### Commits session 8 (2026-09-11) — ALL PUSHED to PR #950
+
+| Commit | What |
+|---|---|
+| `23953342a` | 098 — one atomic expiry for every share on a record (endpoint, DTOs, filter case, lifecycle helpers, 20 tests) |
+| `a0a3f07fe` | 098 review follow-up — cross-record 409, truthful titles, census 118, strict fake, +4 refusal tests; task closed |
+| `45e6814ba` | docs — task 098 final verification + session 8 handoff |
+| _(next)_ | handoff — push + CI result recorded |
+
+### Files modified session 8 — committed and pushed
+
+- **Code**: NEW `Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs` · NEW `Dtos/SetRecordShareExpiryRequest.cs` + `…Response.cs` · `DelegationRuleFilter.cs` (new case) · `ExternalAccessEndpoints.cs` (route) · `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs` (`EntityLogicalName`, `ActiveRowsForRootFilter`, `QueryActiveRowsForRootAsync`, `ToSdkDateOnly`) · `ExternalParticipationService.cs` (doc only — the cache holds no dates).
+- **Tests**: NEW `tests/integration/auth/UnifiedAccessControl/RecordShareExpiryTests.cs` (17) · `DelegationRuleCharacterizationTests` (+4) · `ExternalAccessContractTests` (+3) · `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (census 118 + ledger).
+- **Docs**: NEW `notes/task-098-record-share-expiry.md` · POML 098 (completed) · `TASK-INDEX.md` (098 ✅ + 099 sequencing note) · this file.
+- **No live Dataverse writes.** One read-only metadata query (`sprk_expiresdate` / `sprk_granteddate` DateTimeBehavior).
+
+### Session 8 verification
+
+| Run | Result |
+|---|---|
+| full `Sprk.Bff.Api.Tests` @ `a0a3f07fe` (fresh worktree `C:\wt098c`) | **12,304 passed / 0 failed / 58 skipped** |
+| full `Spaarke.ArchTests` @ `a0a3f07fe` | **197 / 197** (first attempt failed at RESTORE — `NU1900`, nuget.org vulnerability feed unreachable, warning-as-error; a network hiccup, not a test result — re-run green) |
+
+### Commits session 7 (2026-09-10 → 2026-09-11) — HISTORICAL, all pushed
+
+| Commit | What |
+|---|---|
+| `3570d24e4` | 096 — `BulkUpdateAsync` sends ONE `ExecuteTransactionRequest` (was a non-transactional `ExecuteMultiple`) |
+| `35dd301be` | 096 review follow-up — "nothing applied" claimed only for an `ExecuteTransactionFault`; cancellation unwrapped; `DBNull` rejected |
+| `04bfb495b` | 096 closed — verification recorded; 097 client gap flagged |
+| `0b154bdac` | FR-33 amended — an absent grant expiry is defaulted server-side (owner decision) |
+| `b6776e32c` | 097 — every external grant carries an expiry: past rejected, absent defaulted |
+| `79c1a8522` | 097 backfill BEFORE-state recorded (25 ids, prior value null) — committed before the live write |
+| `42a7e724f` | 097 backfill done (25 → 0), perturbation recorded; task 023's escalation superseded |
+| `2f2cc158a` | 097 review follow-up — truthful docs; one "today" for `sprk_granteddate` + expiry |
+| `030861434` | 097 closed |
+
+### Files modified session 7 — HISTORICAL, all committed and pushed
+
+- **Code (096)**: `Spaarke.Dataverse/DataverseServiceClientImpl.cs` (`BulkUpdateAsync` → transaction; new public static `BuildBulkUpdateTransaction` + `DescribeBulkUpdateFailure`) · `IGenericEntityService.cs` (contract doc).
+- **Code (097)**: `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs` (`DefaultExpiryDays`, `TodayUtc(TimeProvider)`, `DefaultExpiry`) · `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` (`ValidateRequestedExpiry`; `CreateGrantAsync(today)` keep-else-+90; `BuildGrantPayload(today)`) · `InviteAndGrantExternalUserEndpoint.cs` (validate before onboarding) · both request DTO docs · `Infrastructure/DI/ExternalAccessModule.cs` (`TryAddSingleton(TimeProvider.System)`) · `AuthorizationModule.cs` (stale comment only).
+- **Tests**: `tests/unit/domain/Dataverse/BulkUpdateTransactionTests.cs` (**new**) · `GrantLifecycleCharacterizationTests` (fixed `Today`; +3) · `ExternalAccessContractTests` (`FakeTimeProvider` + create-payload capture; +6) · `DelegationRuleCharacterizationTests` (+2 pin).
+- **Project docs**: `spec.md` (FR-33 (a) amended; null-semantics line) · `notes/decisions/external-grant-expiry-mandatory.md` (§12.2 corrections; "Can it be blank?" amended) · `TASK-INDEX.md` (096 + 097 done; 097 row amended; sequencing: 100-by-2026-11-10, 097-not-without-100) · POMLs **096**, **097** (amended + completed), **023** (escalation superseded) · notes **task-096**, **task-097** (before/after backfill, revert list) · `defer-issues.md` (ISS-005 closed; ISS-006 … ISS-009 added) · `projects/INDEX.md` (this project's row: CI Workflows → Y, status refreshed).
+- **Live dev DATA (owner-authorised in 097's POML)**: `sprk_expiresdate` null → **2026-12-10** on **25** active `sprk_externalrecordaccess` rows (written 2026-09-11 01:17 UTC via the Web API). **Revert** = PATCH back to null on exactly the 25 ids listed in `notes/task-097-mandatory-expiry.md`. Session 6's two `sprk_accesspermissiongrant` rows are unchanged (revert recipe in the session-6 block below).
 
 ---
 
-## ▶ NEXT SESSION — ORDERED WORK ITEMS (owner-directed 2026-09-03)
+## 🔴 THE ONE THING THAT BLOCKS THE CRITICAL PATH (unchanged since 2026-09-10)
 
-### 1. Merge PR #939 — ⚠️ TWO DEPLOY OBLIGATIONS
+Chain A: 035 ✅ → **036** → 054 → 055 → 056 → 057/058 — the longest chain; nothing else unblocks it.
 
-Gate on the FULL check rollup, not `Router`. Then:
-
-- 🔴 **CLIENT + BFF SHIP TOGETHER.** `PUT /api/obo/containers/{id}/files/{*path}` is **DELETED**.
-  BFF-first **or** client-first both **404 every upload**. No compatibility window, no feature flag.
-  Surfaces: BFF · `sprk_documentuploadwizard` · SemanticSearchControl · LegalWorkspace ·
-  `sprk_wizard_commands.js`.
-- 🔴 **REBUILD 7 CHECKED-IN PCF `bundle.js` ARTIFACTS** (dated 2026-07-29). They still contain the
-  OLD inlined fetch to the deleted route. **Source is clean; the built artifacts are not** — so a
-  deploy that ships them 404s even though the repo greps clean. Use `npm run build:prod`, NEVER
-  `npm run build` (root CLAUDE.md §12 / FAILURE-MODES AP-1). Bump PCF versions in all 4 locations.
-
-### 2. Parallel agents → use ISOLATED WORKTREES (owner-directed)
-
-Three agents in one shared worktree collided twice (see trap 4). Next time pass
-`isolation: "worktree"` to the Agent tool, or restrict fan-out to provably disjoint directories.
-Fences that DID help and should be kept: no `.claude/` writes, `git add` by explicit path, explicit
-per-agent file exclusion lists, and leaving `current-task.md` to the main session only.
-
-### 3. Task 083 — container-selection sweep
-
-**Now unblocked by 076** and down from 7 → **6 `ClientSupplied` sinks** (`OBOEndpoints
-UploadSmallAsUserAsync#1` is gone with the deleted route). Parse the live allow-list in
-`SpeWriteSinkContainerProvenanceGuardTests.cs` — do NOT trust the prose count. 083 must not be
-closed while any sink is unclassified.
-
-### 4. Tasks 030 / 031 / 040 — the ADR amendments 🔑 **HIGHEST LEVERAGE**
-
-**MAIN-SESSION-ONLY** — they edit `.claude/**` and sub-agents are blocked there by design
-(root CLAUDE.md §3; "Edit denied" is the boundary working, not a bug).
-
-They are the bottleneck for everything else: **030 → 032** (the evaluator spine, the thing this
-project is NAMED for and still unstarted), **031 → 035**, **040 → 041**. Landing all three converts
-one long dependency chain into several runnable branches — this is what actually unlocks parallelism
-for the remaining ~50 tasks. All three are CLAUDE.md §6.5 **path B** (ADR amendment); the tensions
-are already written up in the project CLAUDE.md "ADR tensions" table.
-
-### 5. Then: the evaluator spine (032 → 033/037/042 → 036/039/043/044)
-
-Task **032** — `(recordId → rights)` with additive terms, highest-wins, then the ordered vetoes
-(deny list → Restricted → Secure). This is the core deliverable and it has not started.
+**036 carries a MANUAL pre-merge gate** (owner decision 2026-09-10: no Dataverse test in CI). Task 034's NFR-04
+canary is run **by hand, before 036 merges**. **PASS = the impersonated set is STRICTLY SMALLER than app-only.
+Equality = STOP** — impersonation is inert and the query returns org-wide rows that look exactly like success.
+It has **never been measured on the fixed environment** (root-BU users inherited System Administrator until
+2026-09-09); **036's run is the first real measurement, not a re-confirmation.**
 
 ---
 
-## 🔔 OPEN OWNER DECISIONS (blocking specific tasks)
+## 🔔 OWNER ITEMS — what is genuinely left
+
+**Resolved this session**: 096's test approach → **pure builder** (owner, at the escalation) · 097's client gap →
+**"Server fills +90"** (owner) — which also settles session 6's open item "ratify the +90-day default": 90 is now
+a server constant, and task 099's picker is specified to match it.
+
+| # | Item | Why it is still open |
+|---|---|---|
+| 1 | 🔴 **Task 100 by 2026-11-10; 097 never to a non-dev environment without 100** | The +90 default starts an expiry clock on every new grant, with no reminder path until 100 (spec FR-33: "do not ship (a) before (d)"). Recorded in TASK-INDEX. Needs the owner's awareness before any deploy of this branch beyond dev. |
+| 2 | **#974 — a Dataverse-side expiry guard** | FR-33 holds only for BFF writes; a row created by a form / Web API / flow can still be unbounded. Fix = required column or create-time default — schema, so an **operator** step. Also the precondition for ever flipping the read filter's `eq null` to fail-closed (the owner's call). |
+| 3 | **Operator: apply task 101's two views** | Live customization is an operator step (directive 2026-09-04). Only when 101 runs. |
+| 4 | **Operator: deploy for task 047** | `Deploy BFF API` is `disabled_manually`. 047 also settles SPE paging (`scripts/Test-SpeContainerPermissionPaging.ps1`) — and would be the first time 096/097 run live through the BFF. |
+| 5 | **#967** — secure-project owner team is a DEFAULT team | Downgraded; guarded by NFR-05 clause 2. On the C-item list. |
+| 6 | **Trivy** (legacy SDAP CI) | The one red check on #950; confirmed pre-existing (red on `0a592b7a7` and since). Not this project's surface. On the C-item list. |
+| 7 | **`gh auth refresh -s read:project,project`** | The token still holds only `gist, read:org, repo, workflow` (checked 2026-09-11), so the portfolio sync keeps degrading to a warning. |
+
+**Standing owner directions — do NOT re-raise:**
+- (2026-09-09) *"let's not focus on relocating users — we have test users that are in the correct BU."*
+- (2026-09-04) Schema work is **CODE + DOCS ONLY**; live table / column / view creation is an operator step.
+- (2026-09-10) **No Dataverse test in CI.** Live assertions are manual gates (036) and UAT checks.
+- (2026-09-10) A failed revoke must give the user a **message**, not a bare 500 — in tasks 065 and 099.
+- (2026-09-10, session 7) **"Server fills +90"**: an absent grant expiry keeps the grant's existing expiry, else
+  today + 90; a past one is rejected. Required in the stored data, not in the request. No tenant cap.
+
+---
+
+## ▶ NEXT SESSION — owner's call between two ready paths
+
+> ⚠️ **Session 11: Quick Recovery → Next Action wins over this section** — task 103, then finish 100 (102 ✅ done
+> 2026-09-13). The chains and C-items below remain the valid backlog after that, with 103 and 100 as the FR-33
+> chain's prerequisites.
+
+### Path (a) — the C-items (owner directive 2026-09-10; mostly verification, little or no code) — NONE DONE YET
+
+> *"C ok noted; ensure these are resolved and following our objectives and consistent with the overall
+> solution approach for our UAC"*
+
+| Item | What "resolved" means |
+|---|---|
+| **#967** | Re-verify NFR-05 clause 2 still guards the default-owner-team shape; close with evidence, or keep with a stated reason. |
+| **Org FLS residual** | `sprk_organization.sprk_standinggrant` has **no FLS**; mitigated only by entity-level security (no non-admin role holds `prvWritesprk_organization` — verified live 2026-09-10). Add a constraint to **task 043** recommending FLS parity with contact — or record the owner's acceptance. Evidence: `notes/task-042-standing-grant-levels.md` §7. |
+| **#969 residuals** | (1) `sdap-ci.yml:799` `listComments` unpaginated; (2) whether the `createComment` branch is also broken; (3) whether to keep the two redundant `continue-on-error` full-suite runs. `sdap-ci.yml` is legacy (CICD-077) and **PR #806 has it open** — coordinate, do not edit blind. |
+| **Audit retention** | `organization.auditretentionperiodv2` read **empty**. Confirm what it resolves to and state task 088's replay horizon. Evidence: `notes/task-086-access-event-schema.md`, final section. |
+| **B3 — Compose sixth residual-loss row** | The owner said **"ok"** (2026-09-10) to `section-break-flattened`. Record it **in `spaarkeai-compose-r8`** (their PR / issue), not from this worktree. **Not yet done.** |
+| **Trivy** | Identify the owning surface / project and hand it over, or record why it stays red. Now known: red since at least `0a592b7a7`. |
+
+### Path (b) — tasks (27 open; most are `parallel-safe: false`)
+
+| Chain | Order | Note |
+|---|---|---|
+| **FR-33** | 096 ✅ · 097 ✅ · 098 ✅ → **099**; **100**, **101** | 098 done 2026-09-11 (contract for 099 in its notes §6). **099 ↔ 065** share `AccessGrantModal.tsx` and finding M8 — never concurrently. 🔴 **100 by 2026-11-10.** 101's views are operator-applied. |
+| **A — critical path** | **036** → 054 → 055 → 056 → 057/058 | 036 = manual canary pre-merge gate (above) |
+| **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready |
+| **C** | **043** → 044 | 043 ready — the natural home for the org-FLS hedge |
+| Independent | **082** · **093** · **094** · **095** | |
+| Operator-gated | **047** | needs a deploy |
+| Last | **090** wrap-up | runs `/test-diet` (CLAUDE.md §7) |
+
+**Recipes that worked**: (1) **session 5's parallel wave** — verify the declared `<outputs>` do not overlap;
+forbid agents from editing `TASK-INDEX.md` / `current-task.md`, running `git`, or solution-wide `dotnet`; the main
+session does the authoritative build + suite + ONE commit. (2) **Session 7's long-verification pattern** — run
+publish-size and the full suite in **fresh short-path worktrees** (`C:\wtNNNm` / `C:\wtNNNb` / `C:\wtNNNc`) in the
+background, which keeps the main worktree free for perturbations; remove them afterwards.
+
+---
+
+## ⚙️ ENVIRONMENT — read before any Dataverse or measurement work
+
+- 🔴 **Dataverse MCP is DOWN** (`CONNECTION_CLOSED`, still so in session 7). Use `az account get-access-token
+  --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv` + PowerShell `Invoke-RestMethod`.
+  For a **PATCH by id, send `If-Match: *`** — without it the Web API PATCH is an UPSERT and a bad id silently
+  CREATES a row (097's backfill used it).
+- 🔴 **The UTC date rolls over in the local evening.** The grant code's "today" is the **UTC** date (the read
+  filter's calendar); 097's backfill ran at 01:14 UTC on 2026-09-11 while local time was still 2026-09-10.
+  Compute dates from UTC and assert the value before writing.
+- 🔴 **The pre-commit hook (lint-staged) STASHES unstaged changes while it runs.** Never commit in a worktree where
+  a perturbation or a test build is in flight — the hook hides the perturbed file mid-build.
+- 🔴 **Python is a Microsoft Store stub** and hangs. Never pipe to python.
+- 🔴 **Don't embed large quoted content in a `bash -c` heredoc** — write it with the Write tool, assemble with a
+  short script.
+- **Azure.Identity 1.16**: set `AZURE_TOKEN_CREDENTIALS=dev`, or `DefaultAzureCredential` fails like a
+  permissions problem.
+- **Publish size**: publish + zip from **short paths**, **compare file counts** (root CLAUDE.md §10 hazards 3 + 4).
+  The `C:\` root is **not writable** for the zip — zip inside the worktree or the scratchpad.
+- 🔴 **`git checkout <file>` on UNCOMMITTED work discards the whole file.** Commit or copy before you perturb.
+- **Moq**: an un-stubbed virtual returning `Task<T>` yields `null` → an NRE that looks like a product defect.
+- **Web API**: `roleprivilegescollection` cannot `$expand=roleid` — `$filter=roleid eq …` per role.
+- **Graph / SPE**: an `az` CLI Graph token **403s** on container permissions — needs the BFF's own identity.
+- **Portfolio sync (context-handoff hook)**: fails `INSUFFICIENT_SCOPES` (token lacks `read:project`; checked
+  2026-09-11). Degrades to a warning per its contract; Board #2 / Issue #808 NOT updated. Local truth: **98 tasks,
+  67 done**.
+
+---
+
+## 🧠 SESSION 7 LESSONS — these change how the next task should be done
+
+1. **Enumerate a contract's callers before tightening it.** 097's POML made a request field required and looked
+   only at the server. One grep of the clients found that **none** sends it — the "fix" would have broken every
+   sharing screen. Check who calls an endpoint before changing what it accepts.
+2. **Bring the answer with the escalation.** 096's trigger ("no testable seam") was real, but the class already had
+   a precedent for exactly this (`StageAnalysisRegardingFields`). Offering it as the recommended option made the
+   owner's decision a one-click choice.
+3. **Platform facts come from the platform, not from our notes.** 096's docs had the `ExecuteTransaction` nesting
+   rule backwards because this project's own design note did. The reviewer caught it against Microsoft Learn and
+   the SDK source.
+4. **A broken perturbation is not a result.** 097's first P1 replaced an expression with a bare `;` and failed to
+   COMPILE — no test ran. Check that a perturbation applied AND compiles before reading its outcome.
+5. **Scripted edits: first occurrence only.** Row headings repeat across this file's historical blocks; a
+   line-start match hit seven rows, not one. Caught by the hit count, fixed from HEAD before commit — always print
+   and check hit counts.
+6. **A singleton SDK client can hand one request another request's error** (`ServiceClient` throws the client-wide
+   `LastException`; #971). Never decide behaviour from exception text on that client.
+
+---
+
+## ⚠️ Residual risk carried forward (push-to-github gate 1.7)
+
+| Change | Verified by | NOT verified |
+|---|---|---|
+| 029 matter / WA to-do list + create (session 5) | live metadata; unit + seam tests | 🔴 no real create+read of a matter-parented to-do against Dataverse |
+| 035 impersonated root-set reads (session 5) | hand-run impersonated reads | not exercised through the new code path |
+| 024 SPE paging (session 6) | offline tests via a fake Kiota `IRequestAdapter`; ArchTest seam 5 | 🔴 whether the endpoint pages at all — task 047 owns it |
+| ISS-004 org-revoke convergence (session 6) | paging + org-revoke tests | never run against a real container |
+| 042 level-bearing standing term (session 6) | reader / composition / seam tests; live data backfilled and read back | never end to end through the BFF against live |
+| **096 transactional `BulkUpdateAsync`** (session 7) | pure-builder unit tests; both callers' tests; full suite | 🔴 never executed against live Dataverse (no deploy); the SDK's fault shape is from source reading, not observation |
+| **097 grant expiry default / past check** (session 7) | core + contract + delegation tests; the live backfill wrote and re-read 25 rows | 🔴 the BFF endpoints' default was never exercised live (the backfill went straight to the Web API, not through `/grant`) — needs the 047 deploy |
+| **098 record-wide share expiry** (session 8) | handler + delegation + contract tests (strict filter-interpreting fake); 7/7 perturbations; full suite; live READ of the column's DateTimeBehavior (TimeZoneIndependent) | 🔴 never executed against live Dataverse (no deploy): the SDK write of a TZI date via `BulkUpdateAsync` is reasoned from metadata, not observed. **Smoke when 047 deploys**: call the endpoint on a dev matter, then Web-API-read `sprk_expiresdate` on its shares and confirm the exact date |
+
+**Recommend a real create+read smoke against dev before merging #950** — metadata and offline tests prove the
+names and the logic, not that the deployed code composes them correctly.
+
+---
+
+## Filed this session (session 7) — all have GitHub Issues; `defer-issues.md` is current
+
+| ID | Issue | What | State |
+|---|---|---|---|
+| ISS-005 | **#970** | `BulkUpdateAsync` claimed transactional behaviour `ExecuteMultiple` does not provide | ✅ **closed** by task 096 |
+| ISS-006 | **#971** | Singleton `ServiceClient` throws the client-wide `LastException` — concurrent requests can surface each other's errors (system-wide; `AssociateAsync` can mistake another request's "duplicate" for success) | 🔲 open, next-round |
+| ISS-007 | **#972** | `WorkspaceLayoutService` writes a new default layout even when clearing the old ones failed (two defaults) | 🔲 open, low |
+| ISS-008 | **#973** | Re-grant over an EXPIRED survivor → 409 without looking at live duplicates (pre-existing, task 023) | 🔲 open, next-round |
+| ISS-009 | **#974** | Grant rows created outside the BFF can still have no expiry — needs a Dataverse-side guard | 🔲 open, next-round |
+
+⚠️ `defer-issues.md`'s rollup label still does not exist — use
+`gh issue view 961 962 963 964 965 966 967 968 969 970 971 972 973 974`.
+
+---
+
+## 🗄️ HISTORICAL — session 6 live block (superseded 2026-09-11 by session 7). NOT CURRENT — the live block is above.
+
+### Commits this session (session 6, 2026-09-09 → 2026-09-10) — ALL 15 PUSHED, nothing at risk
+
+| Commit | What |
+|---|---|
+| `322513399` | 024 — SPE permission reads follow `@odata.nextLink` (M1) |
+| `ffc6f856d` | 024 closed for M1; M2 transferred to task 065 |
+| `954509a9b` | seam-4 guard widened to the split listing path; ADR-010 ceiling 156 → 157 (task 035's unpaid debt) |
+| `4d7dee9bd` | Tier 1: arm the ADR-010 ceiling + the ExternalAccess integrity guards |
+| `a1bd3a7e8` | ISS-004 — org revoke reads the container once, not once per member (#968 closed) |
+| `a46857d68` | owner directive — a failed revoke needs a user message, not just a 500 (→ 065) |
+| `4c9d7b74a` | 042 step 1 — schema verified; escalation trigger 2 fired |
+| `da18ad9c0` | 042 — the standing grant is level-bearing (FR-25) |
+| `7904e3637` | 042 closed — option B + the live backfill documented |
+| `3c74b010a` | Tier 1: the FULL ArchTests suite runs blocking; inclusion filter deleted (#969) |
+| `abfbbe450` | all three audit gaps closed by the owner, verified live |
+| `086348387` | FR-33 answered; root CLAUDE.md §10 hazards 3 + 4; path-A exceptions ratified |
+| `570ff108c` | FR-33 redesigned around a per-record Expiration; no Dataverse test in CI |
+| `77b2f6e43` | FR-33 reuses `sprk_expiresdate` (no new root columns); ISS-005 / #970 filed |
+| `a492fb4d9` | FR-33 filed as tasks 096–101; `BulkUpdateAsync` gets fixed, not bypassed |
+
+### Files modified this session — ALL COMMITTED AND PUSHED
+
+- **Code**: `SpeContainerMembershipService.cs` (paged reader, honesty rule, `RemoveMembershipsAsync`) · `RevokeExternalAccessEndpoint.cs` (shared constant; org sweep = one read) · `SubjectStandingGrantReader.cs` (**new** — renamed from `ContactStandingGrantReader`; level-bearing; contact + org) · `AccessibleRecordSetService.cs` (standing term contributes the mapped baseline; `None` ⇒ absent) · DI + doc-reference updates.
+- **Tests**: `SpeContainerPagingTests.cs` (**new**, fake Kiota `IRequestAdapter`) · `SubjectStandingGrantReaderTests.cs` (renamed + extended) · `ExternalAccessQueryIntegrityGuardTests.cs` (seam 5; seam 4 widened) · `ADR010_DITests.cs` (ceiling 157) · fixture updates in `SpeRevokeMatcherTests`, `StandingGrantRuntimeUnionSeamTests`, `MembershipPagingCharacterizationTests`, `AccessibleRecordSetServiceTests`.
+- **CI**: `.github/workflows/ci-tier1-blocking.yml` — full ArchTests suite blocking.
+- **Scripts**: `scripts/Test-SpeContainerPermissionPaging.ps1` (**new**, read-only probe) + `scripts/README.md`.
+- **Procedure surface**: root `CLAUDE.md` §10 (hazards 3 + 4) + `.claude/CHANGELOG.md`.
+- **Project docs**: `spec.md` (FR-33 rewrite; ADR Tensions path-A ratifications; success criteria 3–4; "No Dataverse credential in CI") · `TASK-INDEX.md` (024 + 042 closed; FR-33 section 096–101) · POMLs 024 / 036 / 042 / 047 / 065 + **new 096–101** · notes: task-024, task-042, task-086 (audit closure), FR-33 decision §9–§12, `defer-issues.md` (ISS-004, ISS-005).
+- **Live dev DATA (owner-authorised 2026-09-10)**: `sprk_accesspermissiongrant` = Collaborate (`100000001`) on contacts `8e9918a9-9021-f111-88b5-7c1e520aa4df` (Ralph Schroeder) and `8cb95c16-e974-f111-ab0e-7ced8ddc4a05` (Eyal Iffergan). **Revert** = PATCH the field back to `null` on both.
+
+---
+
+## 🔴 THE ONE THING THAT BLOCKS THE CRITICAL PATH (updated 2026-09-10)
+
+Chain A: 035 ✅ → **036** → 054 → 055 → 056 → 057/058 — the longest chain; nothing else unblocks it.
+
+**036 now carries a MANUAL pre-merge gate.** The owner decided on 2026-09-10 that the live Dataverse
+assertions will **not** run in CI. So task 034's NFR-04 canary is run **by hand, before 036 merges** —
+written into 036's POML. **PASS = the impersonated set is STRICTLY SMALLER than app-only. Equality =
+STOP**: it means impersonation is inert and the query is returning org-wide rows that look exactly like
+success.
+
+⚠️ **It has never been measured on the fixed environment.** Until 2026-09-09 it was guaranteed to lie —
+every root-BU user inherited System Administrator through the BU's default owner team, so both reads
+returned everything. The owner removed that role and it was verified (`roles=[]`; the previously exposed
+user now gets 403). **036's run is the first real measurement, not a re-confirmation.**
+
+---
+
+## 🔔 OWNER ITEMS — what is genuinely left
+
+**Resolved this session** (session 5's table is otherwise closed): audit enabled on all three gaps
+(verified live) · CI Dataverse credential → **not doing it** (manual gates instead) · §10 hazards 3 + 4 →
+in root CLAUDE.md · FR-33's five questions → answered, then **redesigned** (no cap; per-record
+Expiration reusing `sprk_expiresdate`; required, +90 default; reminders 30/14/7/3/1; "shares on this
+record end") · path-A exceptions 012 / 023 / 062 → ratified · #969 policy → full suite blocking · 042's
+empty-baseline default → option B.
+
+| # | Item | Why it is still open |
+|---|---|---|
+| 1 | **Ratify the +90-day picker default** | Adopted by tasks 097 / 099 on my recommendation (FR-33 note §9.2 / §10.3). The owner redesigned around it but never said "yes, 90". Cheap to confirm before 099 ships. |
+| 2 | **Operator: apply task 101's two views** | Live customization is an operator step (binding directive 2026-09-04). Only when 101 runs. |
+| 3 | **Operator: deploy for task 047** | `Deploy BFF API` is `disabled_manually`. 047 also settles the SPE paging question via `scripts/Test-SpeContainerPermissionPaging.ps1`. |
+| 4 | **#967** — secure-project owner team is a DEFAULT team | Downgraded; guarded by NFR-05 clause 2. Not blocking. On the C-item list. |
+| 5 | **Trivy `uuid` CVE** | Still the one red check on PR #950. Not this project's surface. On the C-item list. |
+
+**Standing owner directions — do NOT re-raise:**
+- (2026-09-09) *"let's not focus on relocating users — we have test users that are in the correct BU."*
+- (2026-09-04) Schema work is **CODE + DOCS ONLY**; live table / column / view creation is an operator step.
+- (2026-09-10) **No Dataverse test in CI.** Live assertions are manual gates (036) and UAT checks.
+- (2026-09-10) A failed revoke must give the user a **message**, not a bare 500 — in tasks 065 and 099.
+
+---
+
+## ▶ NEXT SESSION — owner's call between two ready paths
+
+### Path (a) — the C-items (owner directive 2026-09-10; mostly verification, little or no code)
+
+> *"C ok noted; ensure these are resolved and following our objectives and consistent with the overall
+> solution approach for our UAC"*
+
+| Item | What "resolved" means |
+|---|---|
+| **#967** | Re-verify NFR-05 clause 2 still guards the default-owner-team shape; close with evidence, or keep with a stated reason. |
+| **Org FLS residual** | `sprk_organization.sprk_standinggrant` has **no FLS**; mitigated today only by entity-level security (no non-admin role holds `prvWritesprk_organization` — verified live 2026-09-10). Add a constraint to **task 043** (which consumes the field) recommending FLS parity with contact — or record the owner's explicit acceptance of the entity-level-only posture. Evidence: `notes/task-042-standing-grant-levels.md` §7. |
+| **#969 residuals** | (1) `sdap-ci.yml:799` calls `listComments` unpaginated, so the ADR bot cannot find its own comment on long PRs; (2) whether the `createComment` branch is also broken; (3) whether to keep the two now-redundant `continue-on-error` full-suite runs. `sdap-ci.yml` is legacy (CICD-077) and **PR #806 has it open** — coordinate, do not edit blind. |
+| **Audit retention** | `organization.auditretentionperiodv2` read **empty**. Confirm what it resolves to (`-1` = forever) and state task 088's replay horizon. Evidence: `notes/task-086-access-event-schema.md`, final section. |
+| **B3 — Compose sixth residual-loss row** | The owner said **"ok"** (2026-09-10) to accepting `section-break-flattened`. It belongs to `spaarkeai-compose-r8`: record the acceptance **there** (their PR / issue), do not edit their doc from this worktree. **Not yet done.** |
+| **Trivy `uuid`** | Identify the owning surface / project and hand it over, or record why it stays red. |
+
+### Path (b) — tasks (29 open, ~105–145 h at the POMLs' own estimates; most are `parallel-safe: false`)
+
+| Chain | Order | Note |
+|---|---|---|
+| **FR-33** (new) | **096** ∥ **097** → **098** → **099**; **100**, **101** after 097 | No environment dependency. **099 ↔ 065** share `AccessGrantModal.tsx` and finding M8. **100 must be live within 60 days of 097's backfill.** |
+| **A — critical path** | **036** → 054 → 055 → 056 → 057/058 | 036 = manual canary pre-merge gate (above) |
+| **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready |
+| **C** | **043** → 044 | 043 ready — the natural home for the org-FLS hedge |
+| Independent | **082** · **093** · **094** · **095** | |
+| Operator-gated | **047** | needs a deploy |
+| Last | **090** wrap-up | runs `/test-diet` (CLAUDE.md §7) |
+
+**Parallel-wave recipe that worked** (session 5): verify the declared `<outputs>` do not overlap; forbid
+every agent from editing `TASK-INDEX.md` / `current-task.md`, running `git`, or running solution-wide
+`dotnet build` / `test`; the main session does the authoritative build + suite + ONE commit. **096 ∥ 097**
+is the obvious first candidate (different files) — both still run `/conflict-check`.
+
+---
+
+## ⚙️ ENVIRONMENT — read before any Dataverse or measurement work
+
+- 🔴 **Dataverse MCP is DOWN** (`CONNECTION_CLOSED`) — that is not a reason to guess or escalate a metadata question. Use `az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv` and the Web API through **PowerShell `Invoke-RestMethod`**.
+- 🔴 **Python is a Microsoft Store stub** and hangs — a `python - <<EOF` heredoc blocked a command for 120 s this session. Never pipe to python.
+- 🔴 **Don't embed large quoted content in a `bash -c` heredoc** — it failed to parse at the handoff (an apostrophe was read as an open quote). Write content with the Write tool, then assemble with a short script.
+- **Azure.Identity 1.16**: set `AZURE_TOKEN_CREDENTIALS=dev`, or `DefaultAzureCredential` fails in a way that reads like a permissions problem.
+- **Publish size**: publish + zip from **short paths** (`C:\wtNNNm` / `C:\wtNNNb`) and **compare file counts** on both sides (root CLAUDE.md §10 hazards 3 + 4). The `C:\` root is **not writable** — zip into the scratchpad.
+- 🔴 **`git checkout <file>` on UNCOMMITTED work discards the whole file**, not just your perturbation — it happened in task 024. **Commit or copy before you perturb.**
+- **Moq**: an un-stubbed virtual returning `Task<T>` yields `null`, and the SUT throws a `NullReferenceException` that *looks like a product defect*. Inspect the fixture first (CLAUDE.md §10 F.2).
+- **Web API**: `roleprivilegescollection` cannot `$expand=roleid` (not a navigation property) — query it with `$filter=roleid eq …` per role.
+- **Graph / SPE**: an `az` CLI Graph token **403s** on container permissions (no `FileStorageContainer.Selected`, no container-type grant). It needs the BFF's own app identity.
+- **Portfolio sync (context-handoff hook)**: the `gh` token lacks the `read:project` scope (it holds gist, read:org, repo, workflow), so `/devops-project-sync` cannot read or update Board #2 / Issue #808 — it fails with INSUFFICIENT_SCOPES. Fix is the owner running `gh auth refresh -s read:project,project` (interactive). Until then the hook degrades to a warning, exactly as its contract requires. Last attempted 2026-09-10; board values NOT updated (local truth after task 097: 98 tasks, 67 done). Not re-attempted at 096's or 097's completion — same token, same certain failure.
+
+---
+
+## 🧠 SESSION 6 LESSONS — these change how the next task should be done
+
+1. **Look for the working in-repo example before copying the one a doc names.** The 024 design named `PrivilegeGroupResolver` (which double-counts page 1); `SpeAdminGraphService:3097` already paged that exact collection correctly.
+2. **Extend before you add — ask CLAUDE.md §11's extension question BEFORE recommending.** The owner caught me twice in one conversation: a new root column instead of `sprk_expiresdate`, then a new atomic write instead of fixing `BulkUpdateAsync`.
+3. **Question an escalation's option set.** 042's POML offered "ViewOnly floor vs no contribution"; neither preserved behaviour, because today's constant was Collaborate. Naming the third option is what made the decision answerable.
+4. **Verify an owner's security claim against live state.** "Users cannot edit Org / Account / Contact" held for `sprk_organization` and was too strong for `contact`. It was still safe — because of a test written earlier as a "load-bearing negative" (`WhenBaselineSetButFlagFalse_ConfersNothing`). Write that class of negative even when it looks obvious.
+5. **A CI job that "runs" a test may not gate on it.** I claimed the ArchTests suite never ran in CI; it ran **twice**, both `continue-on-error`. Read the workflow before claiming coverage, and confirm from the artifact (`failed="1"` while the check was green).
+6. **The third status home drifted again** — 042's `<dependency status>` said 032 was pending. The drift checker still does not read dependency annotations. Re-derive every dependency from its own POML.
+
+---
+
+## ⚠️ Residual risk carried forward (push-to-github gate 1.7)
+
+| Change | Verified by | NOT verified |
+|---|---|---|
+| 029 matter / WA to-do list + create (session 5) | live metadata; unit + seam tests | 🔴 no real create+read of a matter-parented to-do against Dataverse |
+| 035 impersonated root-set reads (session 5) | hand-run impersonated reads | not exercised through the new code path |
+| 024 SPE paging (session 6) | 14 offline tests via a fake Kiota `IRequestAdapter`; ArchTest seam 5 | 🔴 **whether the endpoint pages at all** — the docs lean against it; probe script ready; task 047 owns it |
+| ISS-004 org-revoke convergence (session 6) | 19 paging tests + 8 org-revoke tests | never run against a real container |
+| 042 level-bearing standing term (session 6) | 18 reader, 55 composition, 3 seam tests; live data backfilled and read back | never exercised end to end through the BFF against live |
+
+**Recommend a real create+read smoke against dev before merging #950** — metadata verification proves
+the names exist, not that the code composes them correctly (the R4 `sprk_contact`-vs-`contact` class).
+
+---
+
+## Filed this session (session 6) — all have GitHub Issues; `defer-issues.md` is current
+
+| ID | Issue | What | State |
+|---|---|---|---|
+| ISS-004 | **#968** | Org-revoke N+1, amplified by 024's paging | ✅ **closed the same day** (`a1bd3a7e8`) |
+| — | **#969** | ArchTests ratchets unenforced in CI; stale "All ADR validations passed" comment | 🟡 partly fixed (`3c74b010a`); residuals on the C-item list |
+| ISS-005 | **#970** | `BulkUpdateAsync` claims transactional behaviour that `ExecuteMultiple` does not provide | 🔲 now **task 096** |
+
+⚠️ `defer-issues.md`'s rollup label still does not exist — use
+`gh issue view 961 962 963 964 965 966 967 968 969 970`.
+
+---
+
+## 🗄️ HISTORICAL — session 5 live block (superseded 2026-09-10 by session 6). NOT CURRENT — the live block is above.
+
+### Commits this session — ALL PUSHED, nothing at risk
+
+| Commit | What |
+|---|---|
+| `c35721e35` | 029 — external To Do read+create parity across all three roots |
+| `fb9a8a070` | 029 review fix — the ADR-024 guard was case-sensitively evadable |
+| `0dba2a58d` | 028 — "core" is not "externally grantable" (doc correction; **no code**) |
+| `1c6eb1ed2` | 062 + 068 + 086 parallel wave |
+| `e38548ce5` | 035 — `ImpersonatedRootSetSource`, registered but **inert** |
+| `f8e652f54` | 062's live exposure recorded as **REMEDIATED** |
+
+---
+
+## 🔴 THE ONE THING THAT BLOCKS THE CRITICAL PATH
+
+The chain **035 ✅ → 036 → 054 → 055 → 056 → 057/058** is the longest in the project and nothing else
+unblocks it. 035 is done. **036 is the next link and its gate is not yet proven.**
+
+**Why.** 036 flips impersonation live behind a flag, gated on task 034's NFR-04 negative canary, which
+requires the impersonated read to return a **strictly smaller** set than app-only. **Equality means
+impersonation is inert and MUST fail the build.**
+
+Until 2026-09-09 that gate was guaranteed to lie: every root-BU user inherited `System Administrator`,
+so both reads returned everything and they would have been equal — a confident false pass. **The owner
+fixed that** (below) and the main session verified it. **But the canary has NOT been re-measured.**
+
+**➡️ Before starting 036: run the NFR-04 canary against the fixed environment and confirm the
+impersonated set is strictly smaller. Do not assume the fix restored a meaningful inequality.**
+
+---
+
+## ✅ The live exposure found and fixed this session
+
+**Found (task 062):** a user with **zero directly-assigned roles** read every project including the
+secure one. **Fixed by the owner the same day; main-session verified:**
+
+```
+root BU 'Spaarke' default team : roles=[]  (was [System Administrator])
+jake.schroeder@demo.spaarke.com -> 403 Forbidden   (before: 19/19 projects incl. the secure one)
+```
+
+**The mechanism, stated correctly** (my first write-up got this wrong and the owner corrected it):
+security role assignment does **NOT** follow business-unit assignment. What follows BU assignment is
+**default owner team membership**, which is system-managed and cannot be curated — the root BU's
+default team had **168 members** against 7 enabled interactive users. Someone had explicitly assigned
+`System Administrator` to that team, and team roles are inherited by members:
+
+> BU assignment → **automatic** default-team membership → a role someone **explicitly** put on that team.
+
+Only the middle step is automatic. That is why the fix was one unassignment, **not** a data migration —
+and why the design's census missed it entirely: the census read `systemuserroles` (**direct**
+assignment), where this privilege never appears.
+
+🔴 **OWNER DIRECTION 2026-09-09 — do not re-raise:** *"let's not focus on relocating users — we have
+test users that are in the correct BU."* Fix A's user relocation is **NOT** the remediation path for
+this finding. 7 of 8 users remaining in the root BU is **fine**; the role is gone.
+
+**Residual, low priority:** `Spaarke Demo`'s default team still holds `System Administrator`. No
+enabled interactive users are in that BU, so it is not a live exposure — but it is the same trap armed
+in a second BU, and **new users land in the ROOT BU by default**, so the class recurs at onboarding
+unless root's default team is kept role-free.
+
+---
+
+## 🔔 OPEN OWNER DECISIONS — nothing else is blocked on you
+
+| # | Decision | Cost | Why it matters |
+|---|---|---|---|
+| **1** | **Turn on audit for `sprk_externalrecordaccess` + `sprk_noaccessentry`** (entity-level; both `False` while the org switch is ON), and `sprk_workassignment.sprk_accesspermission` | Minutes | 🔴 **Time-sensitive.** Task **088**'s point-in-time replay would report a revoked grant as **still live** — a confidently wrong answer to a compliance question. **Audit does not backfill**, so every day of UAT before this is a day 088 can never replay. Main-session verified. |
+| **2** | **A Dataverse credential for CI** | One-time | Unblocks BOTH standing live assertions at once — 034's NFR-04 canary and 062's NFR-05 role-depth. Today they only run by hand, which is exactly how the BU exposure went unnoticed. Options: scheduled job with federated credentials to dev, or standing secrets in Actions. |
+| **3** | **§10 publish-size hazards THREE and FOUR** | Small | Both recorded in project notes; root `CLAUDE.md` untouched because it is hot-path and needs sign-off plus a `.claude/CHANGELOG.md` entry. (3) stale build state faked a **+4.95 MB** delta; (4) a deep worktree path makes §10's *own* procedure fail — MSBuild says *"not found"* for a file that exists, and a partial publish zips **smaller**, reading as a win. |
+| **4** | **FR-33's five scoping questions** | — | Cap default · external-only vs internal POA shares · backfill strategy · renewal authority · notification lead time. See `notes/decisions/external-grant-expiry-mandatory.md` §7. |
+| **5** | **#967 — secure-project owner team is a DEFAULT team** | Design | **Downgraded** after owner clarification; guarded by 062's NFR-05 clause 2. Not blocking. |
+| ~~6~~ | ~~uuid CVE~~ | — | Still the one red check on PR #950. Unchanged, not ours by surface. |
+
+---
+
+## ⚙️ ENVIRONMENT — read before any Dataverse work
+
+🔴 **The Dataverse MCP is DOWN (`CONNECTION_CLOSED`). That is NOT a reason to guess or to escalate a
+metadata question.** Live metadata is reachable directly — `pac auth` and `az` are both authenticated
+against `spaarkedev1`:
+
+```bash
+az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv
+```
+
+Then `EntityDefinitions` / `RelationshipDefinitions` / `Attributes` over the Web API, and
+`MSCRMCallerID` for impersonated reads. **Use PowerShell `Invoke-RestMethod` — Python is a Microsoft
+Store stub here and dies immediately.** Worked examples in `notes/task-029-external-todo-parity.md` §0
+and `notes/task-062-nfr05-role-depth.md`.
+
+⚠️ **Azure.Identity 1.16**: `DefaultAzureCredential` no longer falls through to the CLI credential. Set
+`AZURE_TOKEN_CREDENTIALS=dev` or it dies with *"EnvironmentCredential authentication unavailable"*
+despite a valid `az login` — **and it reads like a permissions problem.** Affects task 034 identically.
+
+---
+
+## 🧠 THE FIVE LESSONS FROM SESSION 5 — these change how the next task should be done
+
+1. **Verify a POML's premises before obeying them. Four were stale in this session alone**, and the
+   code was right every time: 029's entire level constraint (tasks 032+033 had deleted the asymmetry),
+   028's central deliverable (inverted by the owner), 068's "service account" owner and its "4xx"
+   refusals (they are 500s), 035's dependency annotation. **Seven instances across the project now.**
+
+2. **A perturbation that fails ZERO tests is sometimes a PLACEMENT problem, not a coverage problem.**
+   Two of 029's five were invisible because the decisions lived inside `CreateTodoAsync`, a
+   substitution seam every endpoint test replaces. No test at any level could see them. Moving the
+   decisions onto a pure path made both bite (2 and 6). **When you cannot write a test that fails, ask
+   whether the decision is in a testable place.**
+
+3. **A validator stricter about FORM than the bug it hunts will miss the bug.** 029's ADR-024
+   one-parent guard matched `sprk_Regarding*` case-**sensitively**. Dataverse requires PascalCase — but
+   the guard exists to catch a *wrong* second bind, and a wrongly-cased one is the likeliest wrong
+   bind. This very file once held a lowercase `sprk_regardingproject@odata.bind`.
+
+4. **Never derive a schema name from a convention; verify with a query that SUCCEEDS.** `sprk_todo`'s
+   display-name column differs on every root (`sprk_projectname` / `sprk_mattername` / `sprk_name`) and
+   for two of three is **not** the `PrimaryNameAttribute` — reaching for the primary name returns a
+   case NUMBER, the only wrong answer that fails **silently** instead of 400ing.
+
+5. **A measured number AGES.** `sprk_todo` has 14 regarding lookups, not the 13 task 009 measured —
+   because another project added one the day after. **Task 009 was not wrong.** State the as-of date
+   beside every census number and re-measure rather than trusting it. Same hazard class as §10's
+   publish-size baseline.
+
+**Bonus, cheap and repeatedly useful:** a perturbation that does not compile (`if (false)`, a bare
+`throw;` orphaning `ex` under `--warnaserror`) must be **reshaped until it compiles, then counted** —
+three times this session. The compiler enforcing part of a contract is worth knowing and is **not**
+test coverage.
+
+---
+
+## ▶ NEXT SESSION — the efficient path through 25 open tasks
+
+**Reality check, stated plainly**: 25 tasks at the POMLs' own estimates is **~95–130 hours**, and
+**22 are `parallel-safe: false`** because they touch shared authorization paths. Parallelism cannot
+compress this much — session 5's wave found only **3 of 13** ready tasks were parallel-safe. Expect
+multiple sessions.
+
+**Chains** (nothing else unblocks a chain head):
+
+| Chain | Order | Note |
+|---|---|---|
+| **A — critical path** | 035 ✅ → **036** → 054 → 055 → 056 → 057/058 | ⚠️ **036 gated** — re-measure the NFR-04 canary first |
+| **B** | **063** → 064 → {066 → 067, 087 → 088 → 089}, plus 065, 069 | 063 ready now |
+| **C** | **042** → 043 → 044 | 042 ready now, **no environment dependency — best next task** |
+| Independent | **082** (6–10 h) · **093** (2–3 d) · **094** (1 d) · **095** (2–3 d) | |
+| Operator-gated | **047** — cannot complete without a live deploy (`Deploy BFF API` is `disabled_manually`) | |
+| Last | **090** wrap-up — runs `/test-diet` per CLAUDE.md §7 | |
+
+**The parallel-wave recipe that worked** (3 agents, 1 worktree, zero conflicts): verify **declared
+`<outputs>` do not overlap** — group labels are not enough — then forbid in EVERY agent prompt:
+`TASK-INDEX.md` / `current-task.md` edits, any `git` command, and solution-wide `dotnet build`/`test`.
+The main session does the authoritative build + suite + **ONE** commit. Tell agents MSB3026/3027 is
+contention, not a code error. **Both agents correctly refused to write their own status** — the drift
+checker gates POML-vs-index agreement, so an agent writing one side while the main session owns the
+other manufactures exactly the drift it detects.
+
+---
+
+## ⚠️ Residual risk carried forward (push-to-github gate 1.7)
+
+This branch changes **Dataverse query-path code** — 029's matter/work-assignment to-do list + create
+(new `@odata.bind` navigation properties, new `$filter` columns) and 035's impersonated root-set reads.
+**Every column and navigation property was verified against LIVE metadata**, and impersonated reads
+were exercised by hand against `spaarkedev1`.
+
+🔴 **But no real create+read smoke has been run through the new code paths.** No matter-parented to-do
+has actually been created against Dataverse. That is precisely the R4 `sprk_contact`-vs-OOB-`contact`
+failure class this gate exists for: metadata verification proves the names exist, not that the code
+composes them correctly end to end. **Recommend a real create+read against dev before merging #950.**
+
+---
+
+## Filed this session (all have GitHub Issues — `defer-issues.md` is current)
+
+| ID | Issue | What |
+|---|---|---|
+| ISS-002 | **#963** | External data plane truncates at `$top=200`, no `@odata.nextLink`, 4 call sites |
+| ISS-003 | **#964** | Workforce caller cannot PATCH a to-do on their own service request |
+| — | **#965** | ADR-044 raw GUIDs without `cleanGuid` in `CreateProjectWizard` (2 prior outages cited) |
+| — | **#966** | Hoist `IImpersonatedCommunicationQuery` to a neutral name (auth path imports a Communication type) |
+| — | **#967** | Secure-project owner team is a DEFAULT team (**downgraded**; guarded by NFR-05 clause 2) |
+
+⚠️ `defer-issues.md`'s rollup command `gh issue list --label unified-access-control-r2` **returns
+nothing** — that label does not exist and none of the issues carry it. Use
+`gh issue view 961 962 963 964 965 966 967`. Noted in the file rather than left looking functional.
+
+---
+---
+
+## 🗄️ HISTORICAL — superseded Quick Recovery (2026-09-07). NOT CURRENT — the live one is at the top of this file.
+
+> ⚠️ Demoted 2026-09-09 by `context-handoff`. This file has stacked stale "Quick Recovery" blocks
+> before — three of them at one point, and the **top** one was the stale one, which cost real work.
+> **There is exactly ONE current block and it is the first heading in this file.** Everything below
+> here is history, kept for its diff tables and decision records, not for its status claims.
+
+> ⚠️ **This file had THREE stacked "Quick Recovery" blocks**, and the top one was stale — it said
+> "Task 042 next" (it is 083) and "43 completed / 46 pending" (it is 53 / 37). Consolidated
+> 2026-09-07. The other two are demoted to 🗄️ HISTORICAL below. **This block is the only current one.**
+
+| Field | Value |
+|---|---|
+| **Branch** | `work/unified-access-control-r2` @ `80ad8643e` · clean · 0 unpushed · **0 behind** master (merged 2026-09-08) |
+| **Next Action** | **Owner's call — nothing is blocked, no task is in progress.** TASK-INDEX lists **029** then **028** (the task-009 asymmetry: *the write plane is WIDER than the read plane*), then **024** (SPE paging). ⚠️ **024 now has a completed design** — [notes/decisions/spe-paging-and-revoke-honesty-design.md](notes/decisions/spe-paging-and-revoke-honesty-design.md) — which **re-scopes it**: step 0 is a verification spike (does SPE even page? unverified), no enum change is needed, and M2 must NOT ship before the M8 client fix. Read the design before starting 024; its POML now points at it. |
+| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · **ALL-GREEN** (32 pass / 0 fail; Trivy skips by design) verified after each of the five task commits, most recently at 6ce9c52c2. Re-check with gh pr checks 950 after the 80ad8643e docs push. |
+| **PR** | **#950** — https://github.com/spaarke-dev/spaarke/pull/950 · was **ALL-GREEN** at `ae035b41f` (Router, Tier 1 blocking, ArchTests, Trivy) · **re-check `gh pr checks 950`** after the task-060 pushes |
+| **Task status** | **58 completed · 3 completed-with-escalation (012, 071, **023**) · 1 blocked-shipped (034) · 31 open · 92 total.** Session 4 closed **060, 061, 026, 025, 023**. 62 terminal / 31 open. Drift gate green: 92 POMLs = 92 index rows. Counted with grep -cF '[open]' on the ASCII tokens. ⚠️ **Python is NOT available in this environment** (Microsoft Store stubs only) — use **PowerShell** for anything UTF-8-sensitive; the [open]/[done] tokens are ASCII and unaffected by G-16 either way. |
+| **Session 4 record** | Closed **060** (two POA share clients → ONE seam, + revoke), **061** (the explicit creator share — *the locked box is open*), **026** (schema-truth doc repair — the root cause of the C4/C5 defects), **025** (test integrity: 3 H6 seams + the M3 gate + 53 tests that could not fail, deleted), **023** (grant upsert writes the expiry — H1; ⚠️ *completed-with-escalation*, superseded by FR-33). Then recorded **FR-33 / DEF-001**. **PR #950 CI was green after every one.** |
+| **🔴 The locked box is OPEN** | Task 021 shipped the isolation (memberless owner team + named BU) but *not* the share, so a provisioned secure project was **unreachable by any human**. **Task 061 closed that on 2026-09-08**: provisioning now issues the explicit creator share and fails rather than completing without it. ⚠️ **Live proof is still owed** — design §5.1a-2 shows a child BU does not isolate from `Deep` depth, so "only the shared user can read it" is not observable until the §5.2 BU restructure (environment work). UAT items: [`notes/phase4-uat-acceptance.md`](notes/phase4-uat-acceptance.md). |
+| **⚠️ Four stale premises corrected, not followed** | Session 4's recurring theme, and the thing to expect next session. **061**: its POML said provisioning 'creates a BU per project' (task 021 already fixed that) and specified a 'service account' owner (design §5.1a reversed that to an owner TEAM on 2026-08-25). **025**: the POML ranks the central gate above all else — it was **already covered**, by task 045, the day AFTER the review filed it. **M3**: claims const-indirection matches 'ZERO' call sites — it matches one. In every case the code/design beat the task file. **Verify, then act.** |
+| **Task 061 outcome** | Creator share on `/provision-project` (fail-closed; identity from `WhoAmI` over OBO so it cannot be aimed at a third party) + optional named principals (best-effort), ordered **before** container creation so a share failure orphans nothing. New **`POST /unsecure-project`** reverse path: owner reassign with read-back → revoke all POA → clear flag, idempotent. `CallerRecordAccessProbe` extended (not duplicated) to expose the caller systemuserid. **Two POML premises were stale and deliberately not followed** — the "creates a BU per project" background (task 021 already fixed it) and the "configured service account" goal (design §5.1a reversed that to an owner *team* on 2026-08-25); evidence in [`notes/phase4-061-provisioning-inventory.md`](notes/phase4-061-provisioning-inventory.md). Build 0 warnings · ArchTests **194/194** (endpoint census 116→117) · BFF unit **12,191 pass / 0 fail / 58 skipped** · 0 vulnerable · publish **+0.01 MB**. |
+| **Task 060 outcome** | Two POA clients → **one** (`IDataverseRecordShareService`, renamed from `IDataverseAccessGrantService` and moved out of `Communication/Access/` because it is cross-cutting). Grant + **Revoke** + `GetPrincipalAccessAsync`, parameterized by principal kind. `PlaybookSharingService`'s private helpers deleted (525 → 479 lines). Escalation trigger did **not** fire — both clients already sent the same AccessMask CSV. Build 0 warnings · ArchTests **194/194** · BFF unit **12,178 pass / 0 fail / 58 skipped** · 0 vulnerable packages · publish delta **+0.00 MB**. Record: [`notes/phase4-poa-consolidation.md`](notes/phase4-poa-consolidation.md). |
+| **⚠️ New measurement hazard (§10)** | A publish measured from **this worktree** reported **+4.95 MB** — one rounding from §10's escalation threshold — and was **false**. The entire delta was the PDB (7,349 KB in-place vs 2,303 KB fresh) against a DLL that moved 48 KB: accumulated incremental-build state. CLAUDE.md §10 names two hazards (ageing baseline, zip tool); **this is a third — the build environment**. Build **both** sides in fresh worktrees, not just master. An `obj`/`bin` clean that prints nothing may have matched nothing. Full write-up: notes §8. **Recommended (not done — needs owner sign-off since it edits root CLAUDE.md + requires a `.claude/CHANGELOG.md` entry): add this third hazard to §10.** |
+| **Also done 2026-09-07** | **uuid CVE-2026-41907 closed in LegalWorkspace** (`16b75e97f`) — `overrides: uuid ^14.0.0`, resolves 14.0.2, build green (3,874 modules, artifact marginally smaller). Ours by causation: `9edbb011c` on this branch declared the Tiptap deps that brought uuid@10 in. **The other two instances of this CVE (`src/solutions/SpaarkeAi`, `src/client/shared/Spaarke.Compose.Components`) are master-resident since 2026-07-17/21, are NOT this project's surface, and are deliberately untouched.** |
+
+### ⚠️ Status is stored in THREE places, not two — the drift checker covers only two
+
+Found 2026-09-07 while verifying 061's gate. Besides a task's own `<status>` and its `TASK-INDEX.md`
+marker, each POML also carries `<dependency task="NNN" status="…">` annotations — a **third**
+hand-maintained copy. `scripts/check-task-status-drift.ps1` does **not** reconcile these; it compares
+`<status>` to the index only.
+
+Both of 061's were stale (`008` and `010` read `pending` while both were completed weeks earlier),
+which made 061 look blocked on two dependencies when only 060 remains. **Never trust a
+`<dependency status>` attribute — re-derive from the dependency's own POML.** Corrected in 060 and 061;
+the other 90 POMLs are unaudited for this. Extending the checker to cover dependency annotations is the
+obvious follow-up and is **not** done.
+| **SCOPE** | 🔴 **NO CUT. Owner-directed 2026-09-07: "we cannot cut scope."** All 36 open tasks are in. The ~106 h / spin-out-82 h split proposed in § COMPLETION PLAN is **VOID** — do not resurrect it as an approved plan; it was a recommendation the owner rejected. |
+| **Still open (owner)** | The **uuid CVE disposition** (see the Trivy entry) — GHAS-high, introduced by this PR, not reachable (Tiptap uses `v4`), not simply patchable. Unapproved; I proposed accept-with-rationale + a follow-up `overrides` bump and did not assume it. |
+
+### ✅ Task 083 CLOSED 2026-09-07 — the founding defect class is finished
+
+`grep -c "^            Provenance.ClientSupplied," tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`
+returns **0**. No code path lets a caller name the container its bytes land in.
+
+- **Only rows 4 and 5 remained.** Row 6 closed by #858, rows 7/8/9 by task **085**, row 10 by **091** —
+  all while 083 waited on **PR #806, which merged 2026-08-30**, so its "hard block" was long gone.
+  ⚠️ Seven files in this project still carry "behind PR #806" wording. It is stale everywhere.
+- **Both routes DELETED, not gated**, taking `Api/DocumentsEndpoints.cs`, the orphaned
+  `canwritefiles` policy (its only two consumers), the already-orphaned `canreadfiles`, both
+  `UNOWNED` waivers (deleted — *not* promoted to Permanent), the last two `PolicyOnlyRoutes` entries,
+  and the file's `GovernedFiles` entry. Census 117 → 116.
+- **Two notes were wrong and are corrected**: the inventory's "S7/S9 stay `ClientSupplied`
+  deliberately" (the build-enforced guard says all three coordinator sinks converted 2026-09-01 —
+  **guard beats note**), and the "6 pre-existing ControlPlane ArchTest failures" baseline (**now 0**;
+  ArchTests are 191/191). That is wrongs **sixteen and seventeen** for this project's notes.
+- **Calibration**: those two routes were called "live holes" by the POML, the inventory *and* my own
+  earlier reporting. They were **not exploitable** — the policy resolved the route value as
+  `sprk_documents({id})`, so a `b!…` drive id 400s and a document GUID is not addressable as a drive.
+  Accidentally safe via value-space disjointness, with a source comment recording the accident as
+  design (**AP-12**). Right disposition, overstated reason.
+- Verified: build 0 warnings · ArchTests **191/191** · BFF **12,166 pass / 0 fail** · publish
+  **master 45.46 → branch 45.48 MB (+0.02)** vs a *fresh* master build @ `91cecb07d` · **0 vulnerable
+  packages**. Guard perturbation-checked both ways, residue-checked clean.
+
+### 🗄️ HISTORICAL — cold start for task 060 (COMPLETED 2026-09-08; kept for the diff table only)
+
+**First three commands**, in order:
+
+```bash
+git -C c:/code_files/spaarke-wt-unified-access-control-r2 merge origin/master --no-edit   # 6 behind
+pwsh -NoProfile -File scripts/check-task-status-drift.ps1                                 # expect green
+gh pr checks 950                                                                          # Router must be green
+```
+
+**Then invoke `task-execute` on** `projects/unified-access-control-r2/tasks/060-poa-seam-consolidation.poml`
+(`FULL` rigor · **opus @ xhigh** · `parallel-safe=false` · 3–4 h est.).
+
+**What 060 is, in one sentence**: Spaarke has **two** `principalobjectaccess` (POA) share clients;
+merge them into **ONE** seam parameterized by principal kind, and add revoke. This is a CLAUDE.md §11
+consolidation — *two into one*. **Building a third client is a task failure.**
+
+| The two clients | What it has | What it lacks |
+|---|---|---|
+| `Services/Communication/Access/IDataverseAccessGrantService.cs` | `GrantAccess`, systemuser only | **no revoke**, no team principal |
+| `Services/Ai/PlaybookSharingService.cs` **:302-350** | Grant **+ Revoke**, **teams** | it is a private duplicate |
+
+`PlaybookSharingService.cs:302-350` is the **complete reference implementation** — the target seam is
+essentially that, lifted and parameterized. Target shape (state the naming decision in the PR):
+`GrantAccessAsync(entitySet, recordId, principalRef(kind,id), accessMask)` ·
+`RevokeAccessAsync(same key shape)` · `GetPrincipalAccessAsync`.
+
+**Definition of done for 060**: `PlaybookSharingService`'s private POA helpers **DELETED** and
+delegating to the seam · `DirectThreadAccessService` behaviour **unchanged** (its no-leak negatives must
+stay green) · all existing consumers pass their current tests **unmodified in behaviour**.
+
+**Then 061 immediately** (`061-secure-project-provisioning-rework.poml`, sonnet @ high, 3–4 h) — it
+consumes the 060 seam to issue the explicit shares. **That pair is the whole point**: 061 is what makes
+a Secure Project reachable by a human at all.
+
+⚠️ `060` may extend `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs`, a **declared
+exclusive file**, and touches DI registrations consumed across the BFF. Run `/conflict-check` first.
+
+---
+
+### 📋 SESSION 3 RECORD (2026-09-07) — what happened, and the owner decisions made
+
+**Work completed** — 4 commits, all pushed:
+
+| Commit | What |
+|---|---|
+| `8047cca15` | **Task 083 CLOSED** — `ClientSupplied` sink count reaches **0** |
+| `3219fad29` | Handoff; scope-cut proposal **voided** |
+| `16b75e97f` | **uuid CVE-2026-41907 closed** in LegalWorkspace |
+| `c17c4e730` | 061-blocked-on-060-only; the third-status-home finding |
+
+**🔴 OWNER DECISIONS THIS SESSION — binding, do not re-litigate:**
+
+1. **"We cannot cut scope."** All 36 open tasks stay in. The `§ COMPLETION PLAN` ~106 h / spin-out-82 h
+   split is **VOID** — it was my recommendation and the owner **rejected** it. Do not resurrect it.
+2. **The 27-unbuilt-solutions build gap** → *"we will address this build issue as the surface not with a
+   CI change."* **Do NOT add a CI workflow for it.** No gate, no matrix build. Addressed per-surface.
+3. **`code-quality-and-assurance-r4` is MID-EXECUTION, not planning.** I mis-read PR #935 ("r4 design +
+   assessment") as design-phase and proposed handing the build gap to it. **Wrong** — handing work to a
+   mid-execution project forces exactly the context rebuild the owner objects to. Do not hand off.
+4. **Task 061 is the priority** among open work (owner-directed), which is why 060 leads.
+
+**Two surfaces I wrongly tried to absorb into this project** — the owner caught both. Do not repeat:
+- **Compose / Tiptap**: I proposed a Tiptap v2→v3 migration across `Spaarke.Compose.Components` to fix a
+  CVE. That is a Compose decision, not an authorization one.
+- **CI**: I proposed adding a 30-solution build gate. Not this project's surface.
+The rule that applies inbound as well as outbound: *"trying to offload to other projects is very risky
+because they lack the context."* It is equally wrong to adopt another surface's work.
+
+**Still-open, NOT blocking 060/061:**
+- The **27 solutions with a build script that nothing builds** (3 of 30 covered: `CreateMatterWizard`,
+  `SpaarkeAi`, `LegalWorkspace`). Root cause: no "does this solution build?" gate exists as a concept;
+  `client-tests.yml` runs **jest**, never a build; bundling happens only at operator deploy time; and
+  `tsc --noEmit` (tsconfig paths) vs Rollup (Vite aliases) diverge, producing a **false green**. That is
+  how LegalWorkspace stayed broken 2026-07-02 → 2026-09-04. **Per owner decision #2: surface-level, no CI.**
+- The **other two instances of CVE-2026-41907** — `src/solutions/SpaarkeAi/package-lock.json` and
+  `src/client/shared/Spaarke.Compose.Components/package-lock.json`. **Master-resident since 2026-07-17
+  and 2026-07-21. NOT this project's surface. Deliberately untouched.**
+- Extending the drift checker to the **third** status home (see below). Not done.
+
+**Nothing is awaiting an owner answer.** Every decision listed above is settled.
+
+### 🔧 TOOLING CONVENTIONS CHANGED 2026-09-07 — read before measuring anything
+
+Three commits after the main handoff (`0815f021b`, `fc8ea1293`, `3a71e9611`) changed how project
+status is read and written. A resuming session that misses these will produce wrong numbers.
+
+1. 🔴 **NEVER put a character above U+FFFF in a `grep` pattern.** `grep` here **silently returns 0**
+   — no error — for 4-byte UTF-8. The open-task marker 🔲 is U+1F532, so `grep -c '🔲'` reports
+   **zero open tasks on a 37-open project**. ✅ (U+2705) is 3-byte and works, which makes the failure
+   look like bad data rather than bad tooling. It cost three wrong measurements in one session, one
+   written into this very file as a false claim that the index was corrupt (it is clean UTF-8).
+   Filed as [`FAILURE-MODES.md` G-16](../../.claude/FAILURE-MODES.md#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji).
+   **Use Python with `encoding='utf-8'` for any count that will drive a decision.**
+
+2. ✅ **`TASK-INDEX.md` rows now carry a bracketed ASCII token** beside the emoji — owner-directed,
+   because status is a data field and the emoji made it ungreppable. Format is
+   `| ✅ [done] 001 | …` (marker, token and id in the SAME cell). Vocabulary:
+   `[open]`→`pending` · `[wip]`→`in-progress` · `[done]`→`completed` ·
+   `[escalated]`→`completed-with-escalation` · `[blocked]`→`blocked-shipped`.
+   `task-create` now REQUIRES it. This project's 92 rows are retrofitted, so
+   `grep -cF '[open]'` = **37**, `'[done]'` = **53**, `'[escalated]'` = 1, `'[blocked]'` = 1.
+
+3. ⚠️ **Run `pwsh scripts/check-task-status-drift.ps1` after ANY status write** —
+   `task-execute` Step 10 requires it. Status is stored TWICE (POML `<status>` + index marker) and
+   nothing structurally keeps them equal; that duplication produced 17 disagreements across 92 tasks.
+   The token made the index *readable*, it did NOT fix the duplication. **Recorded direction: the
+   index should eventually be DERIVED from the POMLs, not authored beside them** (deferred — it
+   touches 151 projects and three skills that write the index by hand).
+
+### Two open owner decisions — neither is approved
+
+1. **Scope cut for "done".** 37 open ≈ 188 h ≈ 23 working days, and **27 of 37 are
+   `parallel-safe=false`** so parallelism cannot compress it. Task 090's own `<deps>` are narrower
+   than the open set (Phase 3 + Phase 4 + 082 + 083), making the declared contract ~96 h ≈ 12 days.
+   Recommended: that plus 023 / 024 / 047 ≈ **106 h**, spinning out ~82 h (093–095, 086–089, 025,
+   026, 028, 029). **I raised this and withdrew the question — it is unanswered.**
+2. **`uuid@10.0.0` / CVE-2026-41907 (GHAS high), introduced by this PR.** Not reachable (Tiptap uses
+   `v4`; the CVE is in `v3`/`v5`/`v6` external-buffer handling) and not simply patchable (every fixed
+   version is excluded by `@tiptap/extension-unique-id`'s `^10.0.0`). Recommended on the PR: accept
+   with documented rationale, file the npm `overrides` bump as a follow-up.
+
+### The single most important OPEN item (from [`SYNOPSIS.md`](SYNOPSIS.md))
+
+**Task 061 — the explicit share for Secure Projects.** Task 021 shipped *isolation* (named BU +
+memberless owner team) but NOT the share. Until per-record access teams land, **a secure project is
+isolated and unreachable by any human.** Any cut line that defers 061 ships a locked box.
+
+### Read next
+
+- [`SYNOPSIS.md`](SYNOPSIS.md) — objectives, deliverables per phase, user impact, UI/UX implications.
+  **4 of the 9 success criteria need LIVE-environment verification** (5, 6, 8 live dev; 7 UAT), so this
+  project cannot be closed from CI alone — which is why task **047** is not optional.
+- § COMPLETION PLAN (below) — the serial execution order and the effort table.
+- § FULL STATUS AUDIT (below) — how the 17 status disagreements were found and resolved.
+
+### What landed 2026-09-04/05 (verified by the main session, not taken from agent reports)
+
+| | Result |
+|---|---|
+| **039** | Deny veto wired into slot 1. Perturbation re-run here: disabling removal → **9 of 49 red**. ⚠️ Slot ORDER proved **not independently observable** (deny and Restricted commute) — see the TASK-INDEX row |
+| **`sprk_event` live break** | `DataverseServiceClientImpl` wrote a column that does not exist, **failing every event-filed save**. Now `sprk_relatedevent` |
+| **Association set** | `todo` + `contact` added (columns existed all along), **`account` REMOVED** from the Office allow-list, `AssociationType` (ordinal 3 burned) and `EntityAccessFilter.EntitySetByType` |
+| **Vocabulary hoist** | Two copies → ONE `Spaarke.Dataverse.DocumentLinkFields`, completed **6 → 16** columns, each with pinned case-sensitive schema name |
+| **Publish size** | master **45.46** vs branch **45.48** = **+0.02 MB** (both fresh, same zip tool) |
+| **Suite** | **12,158 unit** / 0 failed / 58 skipped · ArchTests **191/191** |
+
+🔴 **The one lesson from this round**: three separate written records agreed a document could not be
+filed to a to-do, and that an `sprk_event` column existed. All three were wrong the **same** way — every
+check enumerated the bare `sprk_{type}` family and never looked at `sprk_related*`. **Verify a column with
+a query that SUCCEEDS, per column. Never infer absence from one family, and never derive a schema name
+from a convention** (`sprk_relatedmatter`/`sprk_relatedproject`/`sprk_relatedvendororg` are lowercase
+while their nine siblings are PascalCase).
+
+### 039 — entry state (step 1 done; start at step 2)
+
+**Step 1 ✅** — org-typed lookup inventory from live metadata:
+[`notes/task-039-org-reference-inventory.md`](notes/task-039-org-reference-inventory.md). All three roots
+are uniform: `sprk_assignedlawfirm1` + `sprk_assignedlawfirm2` → `sprk_organization`. `$select` =
+`_sprk_assignedlawfirm1_value,_sprk_assignedlawfirm2_value`. It also files a **new owner decision** (the
+`sprk_externalaccount` → `account` gap: an account-modelled counterparty is **unwallable**) — not a blocker.
+
+**The seams, all read and confirmed (do not re-derive):**
+
+| Need | Where |
+|---|---|
+| Veto slot 1 (currently a documented no-op) | `AccessibleRecordSetService.ApplyVetoPipeline` **:328-365** — add a third param (the denied set) and remove keys BEFORE the Restricted loop |
+| Both call sites of the pipeline | `ComposeForSystemUserAsync` **:711** (passes `membershipTerm`) and `ComposeForContactAsync` **:807** (passes `EmptyRights`) |
+| Candidate id set is already built | `:682-684` and `:778-780` — the same list fed to `GetRootRecordFlagsAsync`; reuse it, do not rebuild |
+| Contact's active org ids (subject side) | `ExternalParticipationService.QueryActiveOrgIdsAsync` **:852** — the POML's "reuse the existing `sprk_contactorganization` resolution" |
+| Batched-read shape to mirror | `ExternalParticipationService.GetRootRecordFlagsAsync` **:507**, `FlagQueryChunkSize = 50` |
+| Reader contract | `INoAccessListReader.GetDeniedRecordsAsync(contactId, organizationIds, candidates, ct)` → `NoAccessListResult.DeniedRecordIds`. Takes `NoAccessCandidateRecord(EntityLogicalName, RecordId, ReferencedOrganizationIds)` — **the caller resolves the referenced orgs**; the reader is deliberately agnostic |
+
+**Constraints that bite here:**
+1. **A veto REMOVES a key — never writes `None`.** `IsOperationPermittedAsync` **:465-469** rejects
+   `AccessRights.None` as a caller bug, so a `None` written by a veto is refused as *malformed* rather than
+   honoured as a denial. Absence is the only representation of no access.
+2. **Deny runs FIRST**, before Restricted — already true by construction; pin it with a test.
+3. **`ctor` change**: `AccessibleRecordSetService` takes 4 deps today (**:400-414**); adding
+   `INoAccessListReader` is a 5th → **every existing test double must be updated** (037 hit exactly this,
+   surfacing 5 doubles failing closed silently). Expect a compile cascade; that is the forcing function working.
+4. `NoAccessListReader` fails **closed toward DENIAL** (opposite of `ContactStandingGrantReader`). A throwing
+   reader must deny the queried candidates, never skip the veto — acceptance criterion 6.
+
+### 🚨 IF THE COMMIT DID NOT HAPPEN
+
+A 5-agent wave (027/038/041/051/053) plus main-session fixes were being committed when the session
+ended. **Run `git status` before anything else.**
+
+- **Clean tree + `git log -1` shows the wave commit** → all good, proceed to 039.
+- **Dirty tree** → the work is on disk but uncommitted. Solution build was **GREEN**; the full suite was
+  still running at handoff. **Re-run** `dotnet build Spaarke.sln --no-incremental`, the full unit suite,
+  and ArchTests, then commit. Do NOT `git stash`, do NOT `git add -A` — stage explicit paths.
+
+---
+
+## What landed this session
+
+| Task | Result |
+|---|---|
+| **033** | The write gates were already there and **could not fire**. Stamp deleted; rights per-record on all 3 roots. Caught a `HasFlag(None)` fail-open |
+| **037** | Restricted veto + Secure pre-max suppression. The grant dedupe was **destroying the provenance suppression needs** → additive `DirectAccessLevel` |
+| **027** | e2e tier **RETIRED** on evidence: 4 contracts wrong, `beforeAll` impossible, **no workflow runs any of the 29 e2e specs** |
+| **038** | Deny-list store + fail-closed reader. ⚠️ Also created the table LIVE (see below) |
+| **041** | Conferring-column registry — a **rename can no longer grant or revoke access** |
+| **051** | Re-stamp on set/reparent/clear. **Both suites ran 0 tests at HEAD**; a Critical its own report missed was found + fixed |
+| **053** | Backfill script (dry-run default, never run live) — and it found two schema truths the notes had wrong |
+| **LW build** | RED since 2026-07-02 — fixed, and now watched by `nightly-health.yml` |
+| **doc drift** | Two guides repointed at the shared wizards |
+
+---
+
+## 🔴 NEW — the three findings that change other tasks
+
+### 1. `sprk_todo` DOES have `sprk_regardingservicerequest` — **owner decision C is MOOT**
+
+Verified in LIVE metadata. `CoreAncestorResolver.cs:90` **and `:287`** assert the opposite, and `:287`
+calls it "a genuine hole in child inheritance". Two notes (`phase3-derivation-rules.md` F-050-1,
+`phase3-server-writers.md` F-052-1) repeat it. **Correct them at source** — AP-12 again.
+
+### 2. 🔴 `sprk_document` and `sprk_invoice` carry NO `sprk_regarding{core}` columns
+
+They use `sprk_matter` / `sprk_project` / `sprk_workassignment` directly. `CoreAncestorResolver.cs:96-99`
+hard-codes the map as `(core → "sprk_regarding{core}")`, so **documents cannot participate in 1-hop child
+inheritance at all**. Documents are this project's PRIMARY disclosure surface. **Belongs to 054/055/056.**
+
+### 3. 🔴 The *reachable* CLEAR bypasses the PCF entirely (051)
+
+Clearing a regarding lookup natively on a form runs no PCF code. A **core** parent self-heals; a **child**
+parent does not — the record shows no regarding while staying visible to the OLD ancestor's people.
+Needs a Dataverse plugin. `clearRegarding` also has **no caller** in `src/client/**`.
+
+---
+
+## ⚠️ Live-environment change made this session (owner-directed policy now in force)
+
+Task 038's agent created **`sprk_noaccessentry` in `spaarkedev1`** — beyond its POML, whose declared
+output was a schema **document**. A stray `cr140_noaccessentry` (default publisher) was created first;
+**the owner deleted it**.
+
+**BINDING, owner directive 2026-09-04: schema work on this project is CODE + DOCS ONLY.** Live table
+creation is an explicit operator step. Captured as [`FAILURE-MODES.md` **AP-13**](../../.claude/FAILURE-MODES.md).
+`mcp__dataverse__create_table` has **no publisher/solution parameter** and silently uses the default —
+use raw Web API + `MSCRM.SolutionUniqueName` (see `scripts/Deploy-PrecedentEntity.ps1`), then read back
+and assert the **prefix**. Dataverse prefixes are immutable, so a wrong one cannot be fixed in place.
+
+⚠️ **Once 039 wires the reader in, an environment missing `sprk_noaccessentry` denies EVERYTHING**
+(fail-closed by design). Provisioning must create it before or with 039's deploy.
+
+---
+
+## 🔴 The traps that still apply
+
+1. **`Router` is the ONLY required check on master** — gate on the FULL rollup; only `CLEAN` merges.
+2. **The incremental build LIES.** Always `--no-incremental`. `MSB3026`/`MSB3027` = a concurrent run.
+3. **`tsc` PASSING IS NOT EVIDENCE A VITE/PCF BUNDLE BUILDS** — two resolution systems, one unchecked.
+4. **A GREEN SUITE MAY BE RUNNING ZERO TESTS.** Task 051 found *both* RegardingResolver suites executing
+   **0 tests** — they mocked a specifier nothing imported. `CommunicationConnections` has the same shape,
+   **filed not fixed**. Check the test COUNT, not the colour.
+5. **STALE PROSE HAS COST REAL WORK FIFTEEN TIMES.** Newest: the `sprk_regardingservicerequest` claim.
+6. **NEVER `git stash` here; never `git add -A`.** Both caused loss. Stage explicit paths.
+7. **A read authorization is not a write authorization** (AP-13).
+8. **A sub-agent's own report can miss a Critical its own reviewer found** — 051's did. Read the gate
+   output, not just the summary.
+
+---
+
+## ▶ NEXT SESSION — ORDERED
+
+1. **039** — deny-veto wiring. Deps all met. The slot runs first by construction; a veto REMOVES a key.
+   `IsOperationPermittedAsync` rejects `AccessRights.None` as a caller bug, so a `None` written by a veto
+   would be refused as malformed rather than honoured as a denial.
+2. **042** → **043** → **044** (Phase 2 close-out). 043 must route the org-expansion term through the same
+   `isSecure` predicate — the hook is already plane-agnostic.
+3. **054/055/056** — child inheritance. **Fix finding #2 first**, or documents silently never inherit.
+4. **035** (opus) — `ImpersonatedRootSetSource`. **036 stays BLOCKED** on decision B.
+5. **083** — 2 ClientSupplied sinks. Re-run the grep; do not trust this number either.
+
+### The parallel-wave recipe that worked (5 agents, 1 worktree)
+
+Verify **declared outputs do not overlap** — group labels are not enough. Then forbid, in every prompt:
+`TASK-INDEX.md` / `current-task.md` edits, any git command, and solution-wide `dotnet build`/`test`. The
+main session does the authoritative build + suite + ONE commit. Tell agents MSB3026/3027 = contention,
+not a code error. Give each agent the session's hard-won traps — it measurably changed their behaviour.
+
+---
+
+## 🔔 OPEN OWNER DECISIONS
 
 | # | Decision | Blocks |
 |---|---|---|
-| A | **`sprk_account` / `sprk_contact` lookups on `sprk_document`.** Owner is adding them. Use schema names **`sprk_Account`** / **`sprk_Contact`** → logical `sprk_account`/`sprk_contact`, nav props `sprk_Account`/`sprk_Contact` (PascalCase is load-bearing for `@odata.bind`). **Do NOT wire the code before the columns exist** — that converts today's silent drop into a hard write error. Then add cases to `DocumentAssociationMap` + `DataverseServiceClientImpl` + the client `ENTITY_CONFIGS`. | Office saves filed to account/contact are persisted **unassociated** today |
-| B | **034 canary user + CI path.** No non-admin canary user exists in dev (owner action: new `systemuser` + custom role), and no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + required manual gate, over standing CI secrets. | **Task 036 must NOT proceed** until the canary runs truthfully |
-| C | **`sprk_todo` has no `sprk_regardingservicerequest` column** (F-050-2 / F-052-1), so a To Do under a service-request-anchored communication cannot inherit that access. Handled consistently client+server as `unstampable` + warn, write proceeds. Schema change vs accept. | tasks 028 / 056 |
-| D | **Real-Dataverse create+read smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. Field names + case-sensitive `sprk_Project@odata.bind` have never executed against real Dataverse. SPA deploy is manual `workflow_dispatch`. | external SPA deploy |
+| ~~A~~ | ✅ **ANSWERED 2026-09-04** — **drop `account`** from the Office-save allow-list + `AssociationType` enum + `ENTITY_CONFIGS`; map **`contact` → `sprk_relatedcontact`** (the column EXISTS — owner knew, verified live). There is NO `account` lookup in either family, but `sprk_relatedorganization`/`sprk_relatedvendororg` → `sprk_organization` do exist if "file to an organization" is ever wanted | 076/083 |
+| ~~B~~ | ✅ **ANSWERED 2026-09-04** — **nightly scheduled run against `spaarkedev1` + a required manual gate on 036's PR** citing the last green run. NO Dataverse credential in PR builds. ⚠️ Still needs the operator to **provision the non-admin canary user** per `tests/integration/auth/README.md` — that half is not a choice | **036** |
+| ~~C~~ | ~~`sprk_todo` has no `sprk_regardingservicerequest`~~ ✅ **MOOT — the column EXISTS** (verified live) | 028/056 unblocked on this point |
+| D | Real-Dataverse smoke on `POST /api/v1/external/projects/{id}/documents` | external SPA deploy |
+| ~~E~~ | ~~LegalWorkspace build~~ ✅ **FIXED + watched** | — |
+| F | **28 of 30 `src/solutions/**` have NO build signal**, and **none of the 29 e2e specs run in any workflow**. Both need CI infrastructure, not spec fixes | CI-owner call |
+| ~~G~~ | ✅ **ANSWERED 2026-09-04** — **widen the resolver map to the existing DIRECT lookups; no schema change.** See § "The two lookup families" below — reading `sprk_related*` instead would resolve NOTHING for all 509 documents | **054/055/056** |
+| H | 🆕 Native form CLEAR needs a Dataverse plugin (finding #3) | FR-26 completeness |
+| **I** | 🆕 **`CanDownload` aligns DOWN to Read** (D3, answered 2026-09-04) — enforcement already requires Read; the capability required Write, so the UI hid a button that works. Read-only users gain a visible download they already had server-side | FR-05 criterion 5 |
+| **J** | 🆕 **MDA document reads bypass Dataverse row-level security** — on a Matter reachable only by share, the record was correctly DENIED while the Documents PCF listed the files and the Viewer opened + downloaded them (`SemanticSearchControl` v1.1.80 never uses `Xrm.WebApi`). Contradicts design §5's "enforced by Dataverse natively — no code". Traced to TWO defects in `notes/task-046-secure-project-owner-role.md` §7b. **Not filed as a task yet** | ranked above everything else on this list |
+| **K** | 🆕 **Finish the BU restructure, or narrow the depth.** Fix A was operator-**validated** 2026-08-25 (sibling BU, user kept `Deep`, secure record denied, share granted). Everyone else still sits in root BU and existing records were left there — so relocating users is a **data-migration** decision. Correct rule: *"don't let ordinary users sit at or above the secure BU"*, NOT "reduce the depth" | live exposure |
+
+### 🔴 The two lookup families on `sprk_document` — **`sprk_related*` is the standard** (owner, 2026-09-04)
+
+`sprk_document` carries **two parallel parent-lookup families**. **OWNER DIRECTION: `sprk_related{recordtype}`
+is the convention we rely on; the bare `sprk_matter`/`sprk_project`/`sprk_workassignment`/`sprk_invoice`
+lookups are NOT what we build on.** The resolver targets `sprk_related*`.
+
+| Family | Columns | Populated (of **509** docs, `spaarkedev1`) |
+|---|---|---|
+| **`sprk_related*` — THE STANDARD** | `relatedmatter`, `relatedproject`, `relatedworkassignment`, `relatedservicerequest`, `relatedcontact`, `relatedtodo`, `relatedorganization`, `relatedvendororg`, `relatedagreement`, `relatedcommunication`, `relatedevent`, `relatedinvoice` | **0 across the board** |
+| legacy direct | `sprk_matter`, `sprk_project`, `sprk_workassignment`, `sprk_invoice` | 105 / 10 / 1 |
+
+⚠️ **THE `sprk_related*` CONVENTION WAS SETTLED IN OTHER PROJECTS — read them before 054/055/056.**
+(I first claimed it was settled in *this* project's design.md; the owner corrected me — that was a
+downstream record, not the discussion.)
+
+| Where | Standing | What it established |
+|---|---|---|
+| [`email-communication-intelligence-r2` task 029](../email-communication-intelligence-r2/notes/027-028-029-schema-closeout.md) | ✅ **CURRENT — THIS IS THE GUIDANCE** (owner, 2026-09-04) | Operator §11 challenge. `sprk_relatedcommunication` is *"the sibling of `sprk_relatedmatter`/`sprk_relatedproject` = **the confirmed related record this document points at**"*. `sprk_linkedcommunication` was NOT created; `CrossPathLink` was rewired onto the existing column. The POML's contrary justification is recorded as *"simply wrong."* |
+| [`x-financial-intelligence-module-r1` task 002](../x-financial-intelligence-module-r1/notes/scratch/002-document-field-diff.yaml) 2026-02-11 | ⚠️ **HISTORICAL ORIGIN ONLY — do NOT treat as guidance** (owner, 2026-09-04: *"the finance project is old"*) | Where `sprk_relatedmatter`/`sprk_relatedproject`/`sprk_relatedvendororg` were first created. Its narrow framing (*"Confirmed by reviewer — matter this invoice relates to"*; *"'related' prefix to distinguish from primary lookups"*) is **superseded** by 029's general semantic. Cite it for provenance, never for meaning. |
+
+This project only carries the **consequences**: [`design.md` §5.1d](design.md) line 552's census
+(*"`sprk_document` carries **two** distinct project lookups, so any 'is this document on a secure
+project?' test must check **both** or it will miss half the cases"*) and
+[`notes/plan-upload-path-decomposition-2026-08-31.md` §095](notes/plan-upload-path-decomposition-2026-08-31.md)
+(owner screenshots 2026-08-31: two Many-to-one slots per type, **not** N:N; **option (b) intersection
+entity**; default that **a link does NOT confer access — the primary lookup stays the access ancestor**).
+
+✅ **RESOLVED — owner, 2026-09-04: "confirming IS filing."** I raised a tension from the finance project's
+*"Confirmed by reviewer"* framing — would a reviewer confirming an invoice's related matter GRANT access,
+contradicting 095's *a link does not confer access*? **The premise was stale**: that framing is the old
+finance one, superseded by 029's general semantic. Recorded here because the question is the right one to
+ask of any column promoted to an authorization key — the answer just happens to be clean.
+
+**They are the same act.** `sprk_related{recordtype}` becomes the ONE filing lookup per record
+type. Every writer repoints onto it — upload paths, Office save, email attachments, AND the finance
+confirm — so there is **one key for one authorization decision** and the reviewer-confirmed origin is
+historical, not a live distinction. The legacy direct lookups (`sprk_matter`/`sprk_project`/
+`sprk_workassignment`/`sprk_invoice`) retire. 095's "a link does not confer access" still holds — it
+governs the **intersection-entity links**, which remain non-conferring; it was never about these lookups.
+
+**Work this creates for 054/055/056** (do NOT split — the resolver alone ships inert):
+1. Repoint `DocumentAssociationMap` + [`DataverseServiceClientImpl.cs:906-916`](../../src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs#L906-L916) onto `sprk_related*`, **fixing the non-existent `sprk_event` write in the same pass**.
+2. Pin a per-column name map — **the casing is not uniform** (see below); never string-build the name.
+3. Backfill the 116 legacy rows (dry-run default, operator executes — the task 053 pattern).
+4. Read both families ONLY until the backfill lands, then delete the legacy read on a dated follow-up.
+
+🔴 **The nuance §5.1d did NOT settle — POLARITY.** "Check both" is stated for the **secure veto**, where
+checking both is fail-SAFE (more detection ⇒ tighter). For **inheritance** the identical rule is
+access-WIDENING (each extra lookup is another way to be granted). The census settled which columns exist,
+not that a document should *inherit* through both. 054/055/056 must flag the widening explicitly rather
+than inherit it as a free consequence.
+
+✅ **ALREADY RESOLVED ON MASTER by email-r2 — REUSE IT, do not invent a map** (owner, 2026-09-04:
+*"check master for updated code"*). I first wrote "the writers are all on the legacy family." **Wrong** —
+the READ side was solved by `email-communication-intelligence-r2` 061 UAT round-2b (`15e18fc05` →
+`cef295cf4` → `5040d95c5`, all on master). The canonical pattern is **follow EVERY record link a document
+carries, BOTH families, type-agnostically** — `related{X}` targets the same entity as `{X}`
+(*"a related matter is still a matter"*):
+
+```csharp
+// AttachmentDocumentAssociationRung.cs:71-79  — DocumentLinkFields
+("sprk_matter","sprk_matter"), ("sprk_relatedmatter","sprk_matter"),
+("sprk_project","sprk_project"), ("sprk_relatedproject","sprk_project"),
+("sprk_invoice","sprk_invoice"), ("sprk_workassignment","sprk_workassignment"),
+```
+
+So "check both" is not an interim migration hack — it is the **standing, shipped design**, and no backfill
+is required for a READER to be correct. (`DocumentAssociationMap` → `DataverseServiceClientImpl.cs:906-916`
+does still WRITE only the direct columns, which is why related is 0 / direct is 116. That is a write-side
+convergence question, NOT a blocker for the resolver.)
+
+🔴 **THERE ARE ALREADY TWO COPIES OF THIS VOCABULARY — do not make a third (CLAUDE.md §11).**
+[`AttachmentDocumentAssociationRung.DocumentLinkFields`](../../src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AttachmentDocumentAssociationRung.cs#L71)
+and [`ComposeService.DocumentAssociationLookupAttributes`](../../src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs#L96),
+whose own comment concedes it is *"the SAME closed set AttachmentDocumentAssociationRung follows"* and cites
+**task 041 B-MED-3 option C**. This is the exact drift shape item 7 just finished fixing for the association
+*switch*, now present in the association *vocabulary*. **054/055/056 must HOIST it to one home** — task 041's
+access-conferring registry is the natural owner — not add a third copy.
+
+🔴 **BOTH COPIES ARE INCOMPLETE.** Neither lists **`sprk_relatedinvoice`** or **`sprk_relatedworkassignment`**,
+and both exist (owner screenshot + live metadata). A document linked only through those is invisible to
+every consumer of these lists today. Fix at the hoist.
+
+🔴 **THE `sprk_related*` FAMILY IS NOT UNIFORMLY CASED** (owner screenshot, 2026-09-04). PascalCase:
+`sprk_RelatedAgreement`, `sprk_RelatedCommunication`, `sprk_RelatedContact`, `sprk_RelatedInvoice`,
+`sprk_RelatedOrganization`, `sprk_RelatedServiceRequest`, `sprk_RelatedToDo`, `sprk_RelatedWorkAssignment`,
+`sprk_RelatedEvent`. **lowercase: `sprk_relatedmatter`, `sprk_relatedproject`, `sprk_relatedvendororg`.**
+The navigation-property name is **case-sensitive** for `@odata.bind`, so any code building it as
+`$"sprk_Related{type}"` **silently fails for matter and project** — the two that matter most. Pin a
+per-column map; never derive the name from a convention.
+
+🔴 **`sprk_event` DOES NOT EXIST on `sprk_document`** — verified by query, which errors:
+`'sprk_Document' entity doesn't contain attribute with Name = 'sprk_event'`. But
+`DataverseServiceClientImpl.cs:916` writes `document["sprk_event"]` for item 7's `event` case. **Every
+document filed to an event fails or drops.** The only event lookup is `sprk_relatedevent` — more evidence
+the direct family is the wrong target. Item 7's note claiming live metadata has an event lookup was WRONG.
+
+🔴 **Item 7's `sprk_todo` claim is also WRONG (notes wrong #16)**: "`sprk_todo` is NOT mappable … needs a
+SCHEMA change, not code". **`sprk_relatedtodo` EXISTS.** Code-only. Second time this week the notes told us
+to buy schema we already own — same shape as decision C.
+
+⚠️ ~**393 of 509** documents have no parent in EITHER family — 076's parentless-upload problem, in data.
 
 ---
 
 ## Filed, not fixed
 
-- Outbound-attachment path records a wrong `(driveId, itemId)` pair — `CommunicationService.cs:1259/1573` → `:2308` writes the `sprk_document` GUID into `sprk_graphitemid`.
-- **Tasks 005/007/008 parked live-tenant checklists on 034 on a FALSE premise** ("034 is the first task with a real tenant" — it isn't). Nine unverified items need re-homing; enumerated in `notes/task-034-negative-canary.md` §5.
+- Outbound-attachment path records a wrong `(driveId, itemId)` pair — `CommunicationService.cs:1259/1573` → `:2308`.
+- **Tasks 005/007/008 parked live-tenant checklists on 034 on a FALSE premise**; nine unverified items need re-homing (`notes/task-034-negative-canary.md` §5).
 - **F-052-2** (low): `EmailDraftToolHandler` derives app-only under a user-context write.
-- `DocumentOperations.js` supplies a drive to the MI route `/api/drives/{driveId}/upload` — already dead (its `GET /api/containers/{id}/drive` hop is mapped nowhere).
+- ⚠️ **New (031)**: the impersonation fail-closed lives in the **read method**
+  (`DataverseWebApiService.cs:978`), **not** in `DataverseImpersonation`, which adds no header for an
+  empty id. A new impersonated call site that bypasses the read method would silently issue an
+  **unscoped app-only query**. ADR-028 A5 now requires new paths to carry their own refusal.
+- ~~**New (dead-code sweep)**: two docs still cite files deleted by task 096.~~ **✅ FIXED 2026-09-04**
+  (owner: "addressed here, not deferred"). `WORKSPACE-ENTITY-CREATION-GUIDE.md` now points at the
+  shared `Create{Entity}Wizard/` dirs and carries a note explaining the half-finished 2026-03 move;
+  `DATA-ACCESS-DECISION-CRITERIA.md`'s worked example was **stale in three ways**, not one — the path
+  had moved, the deps are now injected params, and the endpoint's contract changed 2026-08-25 (no
+  per-project BU, no External Access Account). All `src/` paths in both docs re-verified to exist.
 
 ---
 
 ## Session history + detail (below this line is the prior record)
+
+
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
 
@@ -290,6 +1401,202 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 6 | Execute **076** | 🔄 **IN PROGRESS — not blocked** | Server half complete incl. the record-LESS route (`756e089cb`). Remaining = client cutover (steps 4–11). |
 | 7 | Q4 widening + association map | ✅ **DONE** `f85796f70` | See the item-7 row in the status table below — the note was wrong twice. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
+
+### ▶ PROJECT SYNOPSIS — read this before deciding scope
+
+[`SYNOPSIS.md`](SYNOPSIS.md) (written 2026-09-03) states the objectives, the deliverables by phase,
+what changes for USERS, and the UI/UX implications — reconciled from `spec.md` against the 92 POMLs
+and the shipped code. Two things in it bear directly on planning:
+
+- 🔴 **Task 061 is the single most important open item.** Task 021 shipped Secure Project
+  *isolation* (named BU + memberless owner team) but NOT the explicit share. Until per-record access
+  teams land, **a secure project is isolated but unshared — no human can reach it at all.** Any cut
+  line that defers 061 ships a locked box.
+- **4 of the 9 success criteria require LIVE-environment verification**, not a green suite
+  (criteria 5, 6, 8 are live dev tests; 7 is UAT). This project cannot be closed from CI alone, which
+  is why task **047** should not be treated as optional. Criterion 9 is gated entirely on Phase 5
+  (086–089) — if attestation is spun out, say so explicitly rather than claiming nine-of-nine.
+
+### ▶ HANDOFF 2026-09-03 — PR #950 open, and the COMPLETION PLAN
+
+**PR #950** — 39 commits. `mergeStateStatus=BLOCKED`. 24 pass / **1 fail (Trivy)** / 2 pending at handoff.
+
+- ✅ The Tier 1 blocker is FIXED. `ChatEndpointsTests.GetHistory_ReturnsMessages_WhenAuthenticated`
+  no longer appears in the failure list.
+- 🔴 **`Trivy` DIAGNOSED 2026-09-03 — it was a REAL finding, and I dismissed it twice** (first as
+  "transient", then as "infrastructure"). Both wrong. `Trivy` is a **GitHub Advanced Security
+  code-scanning** check, not a CI job — which is why `SDAP CI` itself reports success while the
+  check reads red, and why `gh run view --job` 404s on its id (it is a check-run id).
+  **Two independent causes:**
+  1. **This PR introduces `uuid@10.0.0` → CVE-2026-41907 (GHAS: high).** Verified NEW, not a
+     size-attribution artefact: `uuid` is **absent** from `origin/master`'s copy of
+     `src/solutions/LegalWorkspace/package-lock.json` and **present** on this branch, added by
+     `9edbb011c` ("repair a build that had been RED for two months" — the install regenerated the
+     lockfile). **Transitive** via `@tiptap/extension-unique-id` (`^10.0.0`).
+     **NOT REACHABLE**: the CVE is an out-of-bounds write in uuid's `v3`/`v5`/`v6` external-buffer
+     handling; `@tiptap/extension-unique-id/dist/index.js` imports **`v4`** and nothing else.
+     **NOT SIMPLY PATCHABLE**: fixes are 11.1.1/12.0.1/13.0.1/14.0.0, all excluded by Tiptap's
+     `^10.0.0` — it needs an npm `overrides` across a major boundary plus a LegalWorkspace
+     build+smoke. Recommendation posted on the PR: **accept with documented rationale, file the
+     override as a follow-up.** OWNER'S CALL — not assumed.
+  2. **"1 configuration not found"** — `.github/workflows/build-provisioning-sidecar.yml:build-scan-push`
+     is configured on master but did not report for this PR. A coverage gap that would make this
+     check red **even with zero alerts**.
+  🔴 **THE GATE GAP THAT LET THIS THROUGH**: CLAUDE.md §10 bullet 5 specifies
+  `dotnet list package --vulnerable --include-transitive` — **NuGet only**. There is no npm
+  equivalent in that rule, so a clean §10 CVE check says nothing about JS dependencies. The PR body's
+  "CVEs: none" was true and incomplete; corrected in a PR comment. **Worth amending §10.**
+- **Two checks were still pending at handoff.** Do NOT judge the PR from the numbers above —
+  re-run `gh pr checks 950` and confirm `grep -c pending` is `0` first.
+
+**The chat-flake fix took two attempts, and the first was wrong about WHERE.** Recorded because the
+mechanism is easy to re-misdiagnose: `ChatSessionManager.GetSessionAsync` consults the `ITenantCache`
+hot path BEFORE the Dataverse mock (ADR-009 Redis-first), and this fixture registers a REAL in-memory
+cache shared for the class. A `POST …/{id}/messages` write-through left a 4-message session in that
+cache, so the history read got a CACHE HIT and never consulted the mock at all — which is why
+reseeding the mock (`be8663d27`) changed nothing and CI returned the identical "found 4". The cure
+(`6a5547c49`) gives the history test its own session id that **nothing writes**, so the cache is never
+populated for it. Guarantee is structural (one `GetAsync`, no POST/PATCH/DELETE anywhere), because I
+could not reproduce the race locally in either direction.
+
+---
+
+### ▶ COMPLETION PLAN — built from the dependency graph, 2026-09-03
+
+**37 open · ~188 h · ~23 working days of task time.**
+
+🔴 **The reason this project has felt endless: 27 of the 37 remaining tasks are
+`parallel-safe=false`.** Parallelism cannot rescue it. The 5-task wave that worked earlier
+(`30dd5f397`) is not available for most of what is left, because these tasks touch the same
+authorization surfaces and concurrent agents on one evaluator produce silent lost writes. 9 tasks
+also require opus/fable tier. **Plan for serial execution.**
+
+**Effort is concentrated in late-added scope:**
+
+| Phase | Tasks | Hours |
+|---|---|---|
+| Upload-path decomposition (**093/094/095**) | 3 | **48** ⟵ 26% of all remaining work |
+| Phase 4 — Secure Project / Manage Access / wizard | 10 | 32 |
+| Phase 0 enforcement remediation | 6 | 28 |
+| **083** container-selection sweep | 1 | 20 |
+| Phase 3 child inheritance | 5 | 16 |
+| Phases 1–2 evaluator | 5 | 16 |
+| Phase 5 attestation | 4 | 12 |
+| **082** caller-identity census | 1 | 8 |
+| 0b live validation + wrap-up | 2 | 6 |
+
+**THE LEVER — task 090's own `<deps>` are the project's declared definition-of-done**, and they are
+narrower than the open set: **Phase 3 + Phase 4 + 082 + 083 only**. 090 does NOT depend on Phase 0
+remediation, Phases 1–2, Phase 5 attestation, or 093–095. So the declared contract is **~96 h ≈ 12
+days**, not 188 h; the other ~92 h accreted past it.
+
+**Recommended cut (~106 h ≈ 13 days)** = 090's declared blockers + the three real correctness gaps:
+- **023** — expiring grants never write `sprk_expiresdate` (a grant that cannot expire)
+- **024** — SPE honesty: Graph paging + `/revoke` status parity
+- **047** — live validation of secure-project provisioning
+Rationale: shipping a *secure access* project with grants that cannot expire is not defensible, and
+those three cost ~10 h combined.
+
+**Spin out (~82 h)**: 093/094/095 (upload + wizard decomposition — late scope, no live hole),
+086–089 (Phase 5 attestation — needs a new Dataverse table), 025 (test-integrity), 026 (doc repair),
+028, 029. ⚠️ **The owner has NOT chosen a cut line** — I proposed this and the question was
+withdrawn. Do not treat it as approved; re-raise it.
+
+**Serial order once the cut is chosen:**
+`083` → `082` → `035`→`036` → `042`→`043`→`044` → `054`→`055`→`056`→`057`/`058` →
+`060`→{`061`,`063`}→`064`→{`065`,`066`,`067`,`068`,`069`} → `090`
+
+Only 10 tasks are parallel-safe; the branch points above (`061`/`063`, and the `065`–`069` fan) are
+the only genuine concurrency available.
+
+### ▶ FULL STATUS AUDIT — 2026-09-03 (POML-vs-index reconciled; this is the number to trust)
+
+Built from primary sources: every POML's own `<status>`, cross-checked against `TASK-INDEX.md` markers and
+against git completion evidence. **17 disagreements found; all 17 resolved.**
+
+| | Count |
+|---|---|
+| **Complete** | **53** |
+| Complete with accepted residue (**012** anonymous-share-link revocation) | 1 |
+| `blocked-shipped` (**034** impersonation-inertness canary) | 1 |
+| **Genuinely OPEN** | **37** |
+| **Total tasks** | **92** |
+
+**What the 17 disagreements were, and which side was wrong:**
+
+- **14 tasks were DONE but their POML still said `pending`** — 011, 013, 015, 018, 020, 038, 039, 041,
+  051, 053, 070, 074, 080, 081. Root cause: root CLAUDE.md §7 step 1 ("update the task `.poml` status") is
+  a separate write that nothing enforces, while the index is updated during execution. **It was skipped 14
+  times.** Fixed 2026-09-03; each POML now carries its completion evidence inline. Two independent signals
+  were required before flipping (git evidence AND the index marker) — no status was changed on one alone.
+- **1 task was DONE but the INDEX said `🔄`** — **075**. The stale side was the index this time
+  (git: `893557380 "075 gates CLOSED — PASS at 3289844; all three worktrees mergeable"`). Corrected.
+- **2 were vocabulary, not conflicts** — 012 (`completed-with-escalation` ↔ ⚠️) and 034
+  (`blocked-shipped` ↔ 🟡). Both correct as-is; leave them.
+
+**Forcing-function candidate**: a status drift of 14 is not a discipline problem, it is a missing check.
+A trivial guard — parse each POML `<status>` and each index marker, fail on disagreement — would have
+caught all 17 the day they appeared. Worth filing.
+
+### ▶ CODE HEALTH — verified 2026-09-03, not inferred
+
+| Gate | Result |
+|---|---|
+| `dotnet build Spaarke.sln` | **clean** — 0 errors, 5 warnings |
+| `Spaarke.ArchTests` | **191 / 191** (was 182 — 9 guards added since) |
+| BFF unit + contract suite | **12,158 passed / 0 failed** / 58 skipped |
+| `@spaarke/ui-components` jest | **3,245 passed / 13 failed / 8 suites** — ⚠️ the recorded baseline of "9 suites / 14 tests" is now STALE by one; use **8 / 13**. Run it from INSIDE the package (`cd` first) — invoking jest with `--rootDir` from the repo root breaks module resolution and reports 232 failed suites / 0 tests, which is the instrument failing, not a regression |
+| 083 provenance allow-list | **2** ClientSupplied / 17 ServerDerivedRecord / 1 ServerDerivedActingUser / 5 ServerDerivedConfig / 3 AdministrativeRoleScoped / 1 Dead |
+
+The 2 surviving `ClientSupplied` sinks are 083's own rows 4 and 5, both in `Api/DocumentsEndpoints.cs`:
+`PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it — a LIVE hole) and
+its sibling `DeleteFileAsync`. 083's brief says it does these rows FIRST.
+
+**Item 5 (file tasks 093–096) is 3/4 done**: 093, 094, 095 exist; **096 was never filed**.
+Note 094 — "upload collision: ask BEFORE the bytes move (pre-flight probe), and add 'Use existing'" — is
+the follow-on to the shipped collision dialog.
+
+### ▶ STATUS AS OF 2026-09-03 (authoritative — supersedes every status block below)
+
+**Branch state**: `work/unified-access-control-r2` @ `7d02f0b36` · **33 ahead** of `origin/master`
+(`379c221e0`) · **0 behind** · **0 unpushed** · tree clean · **NO OPEN PR** ⟵ the problem.
+
+| Landed since the 2026-09-02 checkpoint | Evidence |
+|---|---|
+| **N-1 COMPLETE** — U2 deleted | `services/document-upload/SdapApiClient.ts` no longer exists; `httpFailure.ts` is now the only definition of the failure copy |
+| **Task 076 contract landed** — `UploadTarget` | `document-upload/types.ts:187`; a batch now names its OWNING RECORD (`kind:'record'`, `entityLogicalName`, `recordId`), never a container. The shape change was made deliberately breaking so every un-migrated call site fails to compile |
+| **083 sinks 7 → 2** | Provenance allow-list now: **2** ClientSupplied / 17 ServerDerivedRecord / 1 ServerDerivedActingUser / 5 ServerDerivedConfig / 3 AdministrativeRoleScoped / 1 Dead. The OBO row and the whole Compose REPLACE trio converted |
+| Task 039 + FR-23 deny veto; `sprk_document` record-link vocabulary | commits `800b82af4`, `6db37ef95`, `30dd5f397`, `392fc251b` |
+
+**The 2 remaining `ClientSupplied` sinks are 083's rows 4 and 5**, both in `Api/DocumentsEndpoints.cs`:
+`PUT /api/drives/{driveId}/upload` (app-only **MI**, so no container ACL constrains it — a LIVE hole,
+gated by the `canwritefiles` policy only, and `ResourceAccessHandler.ExtractResourceId` accepts
+driveId/containerId/documentId interchangeably so the policy authorizes a DRIVE id against DOCUMENT
+rights) and the sibling `DeleteFileAsync`. **083 is still `pending` — correctly.**
+
+✅ **CORRECTION 2026-09-03 — the previous handoff's claim that `TASK-INDEX.md` "reads as BINARY to grep / is mojibake" was WRONG, and I wrote it.** The file is valid UTF-8: 0 NUL bytes, 0 double-encoded sequences, 311 clean em-dashes. **The instrument was at fault, not the file** — multi-byte emoji inside `grep -E` patterns and bracket classes are unreliable under this shell's locale, which is why `grep -cE '^\| *🔲'` returned 0 while the file actually contains **37** such rows (U+1F532). **Use Python with `encoding='utf-8'` for any status count over these files; do not use grep with emoji patterns.** Left in place deliberately as an instance of FAILURE-MODES AP-12 that I authored myself: a confident-sounding measurement, taken with a broken instrument, written into the recovery file where the next session would have wasted time "repairing" a file that was never damaged.
+
+### Office add-in implications — CHECKED 2026-09-03, no breakage
+
+Asked by the owner; answered from code, not inference. Keep this — it is the kind of claim that rots.
+
+1. **`SaveRequest.ContainerId` deletion (task 085) does NOT affect the add-in.** The `containerId` at
+   `useSaveFlow.ts:62` is on `JobResultArtifact` — a **response** field where the server reports the
+   container it chose. That is the direction 085 wanted: returning the chosen drive is required,
+   *accepting* one was the vulnerability. `FolderPath` likewise — the add-in never sent it.
+2. **Word "Save" still replaces in place.** `OfficeStorageUploader.cs:62` calls the **4-arg**
+   `UploadSmallAsync`, which delegates `ConflictBehavior.Replace`. This is why the collision control was
+   added as an OVERLOAD rather than a signature change — flipping the default would make every re-save
+   of an existing document 409. **Do not "tidy" that overload away.**
+3. **The add-in has its OWN auth and its OWN upload client, on purpose.** `ApiClient.ts` uses
+   `OfficeNaaStrategy` + `authService.getAccessToken()` and only *mirrors* `authenticatedFetch`'s
+   401-retry shape, because Office NAA cannot call it directly. So the ADR-028 rewiring inside
+   `@spaarke/sdap-client` does not reach it. Its `uploadFile()` has **zero production callers**.
+   ⚠️ **The "three upload implementations" census was short by one** — this is a fourth, dormant. It
+   should NOT be consolidated blindly (the NAA constraint is a real reason for it), but it must be known.
+4. ⚠️ **Coordination**: `work/spaarkeai-word-add-in-r1` is active and carries task
+   **016-office-save-contract-coverage**, directly on this contract. Run `/conflict-check` before either
+   branch merges.
 
 ### ▶ STATUS AFTER 2026-09-02 SESSION 2 (authoritative — supersedes the N-x rows above)
 
@@ -553,7 +1860,11 @@ unassociated**. Plural forms attested in live Web API URLs: `sprk_workassignment
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+### 🗄️ HISTORICAL — superseded Quick Recovery (kept for provenance, NOT current)
+
+> ⚠️ **Do not act on anything below this line without checking it against the CURRENT Quick
+> Recovery at the top of this file.** Known-stale content in these blocks includes: "PR #887
+> still DRAFT", "ArchTests 176/176", and task-status counts that predate the 2026-09-03 audit.
 
 | Field | Value |
 |---|---|
@@ -1314,7 +2625,11 @@ to exist afterwards.
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+### 🗄️ HISTORICAL — superseded Quick Recovery (kept for provenance, NOT current)
+
+> ⚠️ **Do not act on anything below this line without checking it against the CURRENT Quick
+> Recovery at the top of this file.** Known-stale content in these blocks includes: "PR #887
+> still DRAFT", "ArchTests 176/176", and task-status counts that predate the 2026-09-03 audit.
 
 | Field | Value |
 |---|---|

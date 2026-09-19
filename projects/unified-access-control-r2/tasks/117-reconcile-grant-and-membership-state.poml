@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117" project="unified-access-control-r2">
+  <metadata>
+    <title>Make a row's own state the truth — ONE scheduled reconciliation job over external grants and org memberships (D-1 option B + ISS-026 write half + ISS-020 part 4)</title>
+    <phase>Register-driven (authored 2026-09-19 after the 2026-09-18/19 owner decisions)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .cs on the authorization data path; tags bff-api/auth/dataverse. It WRITES rows that decide who has access.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive (tags auth) and it REMOVES live access; three reconciliation rules with inverted fail directions relative to the read path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure/ExternalAccess/** and Api/ExternalAccess/** are parallel-unsafe in this project (project CLAUDE.md); also edits ExternalAccessModule.cs, a hot DI file.</parallel-reason>
+    <deps>103</deps>
+    <tags>bff-api, background, scheduling, auth, dataverse, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <origin>Owner decisions 2026-09-18/19. D-1 option B (plugins ruled out repo-wide, so the undated-grant repair needs a non-Dataverse mechanism), ISS-026/#1006 write half ("check statecode and deactivate if org is inactive"), and ISS-020/#999 part 4 (the deactivation writer). Consolidated into ONE task because all three need the identical mechanism; authoring three overlapping jobs is the duplication CLAUDE.md §11 forbids. Recorded in notes/owner-decision-brief-2026-09-18.md § "Nothing is blocked".</origin>
+  </metadata>
+
+  <prompt>Three separate defects share one root: a row's own columns are not the truth about whether it confers access, so something must re-derive it from a parent or a date on every read — and nothing ever does. Deactivating an organization revokes nothing. A membership ended by date keeps conferring. A grant created outside the BFF has no expiry, so it is both unbounded and invisible to the expiry reminders. Build ONE scheduled job that writes the row so its own statecode / sprk_expiresdate IS the answer.</prompt>
+
+  <role>SPAARKE platform developer — the external-access evaluator, Dataverse writes, and the Spaarke.Scheduling framework. You are changing who has access to what; treat every write as an access-removal event.</role>
+
+  <goal>One IScheduledJob in the BFF, registered through AddScheduledJob&lt;TJob&gt;, that applies three reconciliation rules idempotently with real paging and transactional chunked writes, ships DISABLED with a report-only mode, and records a before-state for every row it would change.</goal>
+
+  <context>
+    <background>Owner ruled out Dataverse plugins repo-wide (D-1), which removed the only in-transaction mechanism task 107 had for stamping a default expiry. D-1's answer is A + B + C: A inverts the READ default (task 107, sibling), B is THIS job, C is the role/UI change (task 118). Separately ISS-026 found that NO query on the organization access path consults sprk_organization.statecode, so deactivating a firm is a silent no-op; and ISS-020 part 4 needs a writer for date-ended memberships because nothing in the repo writes the junction at all — those rows are maker-authored (verified: 13 hits for sprk_contactorganization under src/server are all reads, projections or comments).
+
+⚠️ THE ENVIRONMENT IS DEV AND ITS RECORDS ARE TEST RECORDS (owner, 2026-09-17). That changes urgency, not validity — every rule here becomes an access-removal event the moment a real customer environment exists.
+
+Verified facts you may rely on (each checked 2026-09-19 against source, not inherited from a comment):
+- DataverseWebApiClient.QueryAsync&lt;T&gt; (src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs:227-246) issues ONE GET and returns result?.Value; its ODataCollectionResponse declares @odata.nextLink at :296-297 and NEVER READS IT. Its UpdateAsync (:204-214) is one PATCH per row with no transaction. So that client can serve neither an unbounded scan nor a batched write.
+- IGenericEntityService.BulkUpdateAsync (src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs:65) is ONE ExecuteTransactionRequest, all-or-nothing (task 096), and it CANNOT set a field to DBNull (DataverseServiceClientImpl.cs:2397). That is fine here: every write sets a value, none clears one.
+- Deactivation in this codebase writes BOTH fields together: ["statecode"]=1, ["statuscode"]=2 (Api/ExternalAccess/ProjectClosureEndpoint.cs:405-406). statecode alone leaves an inconsistent status reason.
+- A NULL statecode counts as ACTIVE: ExternalGrantLifecycle.IsActive =&gt; StateCode is null or 0 (:121). The scan must treat null as active.
+- The junction schema was live-verified by Dataverse MCP describe on 2026-08-26 and is recorded at Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:659-665 — collection sprk_contactorganizations; lookups projected as _sprk_contact_value / _sprk_organization_value; statecode Active(0)/Inactive(1). There is NO entity-schema.md for sprk_contactorganization or sprk_organization (only 7 entities have one), so that comment is the best offline source.
+- The server's default expiry already exists as a named constant: ExternalGrantLifecycle.DefaultExpiryDays = 90 (:160) with DefaultExpiry(DateOnly today) (:171) and TodayUtc(TimeProvider) (:167), from task 097's "server fills +90". REUSE IT. Do not write another 90.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/GrantExpiryReminderJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="reference">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-036 A1">Scope: the job contract. Implement IScheduledJob and stay host-neutral — no dependency on ScheduledJobHost, IBackgroundJobStore, ScheduledJobRegistry or IScheduledJobLease. One dispatch per schedule is the HOST's lease (task 103); write nothing for it.</constraint>
+    <constraint source="ADR-036 A1">Scope: every unit of work. Take an ATOMIC claim before the side effect and write a completion marker after it. IIdempotencyService as built is check-then-set and fails open (#984), so re-check under the claim exactly as GrantExpiryReminderJob does.</constraint>
+    <constraint source="ADR-036 A1">Scope: failure. THROW from ExecuteAsync only when a retry this tick could complete work the tick would otherwise lose; otherwise count the failure and complete. Emit ONE structured heartbeat per attempt including an attempt with nothing to do, carrying context.Attempt.</constraint>
+    <constraint source="ADR-036 A1.1">Scope: lease-store outage. A tick not dispatched must be caught up by the next tick. Reconciliation is naturally catch-up-safe because it is idempotent by construction — state that in the notes rather than adding a catch-up mechanism.</constraint>
+    <constraint source="ADR-052">Scope: placement. This runs IN the BFF on the in-process Spaarke.Scheduling host (BFF domain code, BFF identity, low volume), registered in ExternalAccessModule beside GrantExpiryReminderJob. State the Placement Justification in the PR.</constraint>
+    <constraint source="ADR-010">Scope: lifetime. AddScheduledJob registers the job Singleton. Resolve Scoped dependencies through IServiceScopeFactory.CreateScope() once per ExecuteAsync, mirroring GrantExpiryReminderJob — do not invent a new lifetime pattern.</constraint>
+    <constraint source="ADR-003">Scope: fail direction. A read that FAILS must never be recorded as "nothing to reconcile". Note the inversion deliberately: for this WRITER an empty-on-fault read is fail-SAFE (it writes nothing), which is the opposite of the read path's ISS-019 hazard — so the requirement here is that the run is recorded FAILED, not that it writes something.</constraint>
+    <constraint source="owner 2026-09-18 (D-2 part 3)">Scope: deployment. Rules R2 and R3 REMOVE access that exists today. Ship the job DISABLED, provide a report-only mode that counts and lists affected rows without writing, and record the before-state. Enabling it is an owner action, not part of this task.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: machinery. Reuse IGenericEntityService for paged reads and BulkUpdateAsync for writes, ExternalGrantLifecycle for dates, IIdempotencyService for claims, and the existing scheduling host. No new package, client, store, scheduler or date constant.</constraint>
+    <constraint source="CLAUDE.md §11.5">Scope: cohesion. Three rules in one job is ONE responsibility — "make the row's own state the truth". Do not split it into three jobs, and do not accrete unrelated reconciliation into it later.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification; publish size measured against a FRESH master worktree from a SHORT path with file counts compared on both sides (hazards 3 and 4); no new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Scope: tests. KEEP path is tests/integration/auth/** for the authorization behaviour; the scheduling framework itself is already covered once in tests/unit/Spaarke.Scheduling.Tests — do not re-test the lease, slot guard or registration per job.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/remediation-and-sequencing-plan-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+    </files>
+    <patterns>
+      <pattern name="Scheduled job in the BFF" location=".claude/patterns/api/scheduled-jobs.md">Read these files first; mirror GrantExpiryReminderJob's ExecuteAsync skeleton (:157-234) exactly — one scope per run, one paged query, per-row try/catch that continues, ok/partial/error/cancelled status, a problems list, and ExceptionDispatchInfo rethrow ONLY when the run made no progress.</pattern>
+      <pattern name="Discovery-driven Dataverse reconciliation" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs">The recon SHAPE to follow: scan parents paginated via IGenericEntityService with PagingInfo, honour the token between pages, count per-rule outcomes into ResultJson, and let one bad row log-and-continue. Note it reconciles a DIFFERENT junction (sprk_userentityassociation) against different sources — copy the shape, not the domain.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify live metadata before designing R3: sprk_enddate's type and behaviour, and whether sprk_startdate exists. The Dataverse MCP server was DOWN when this task was authored, so these are UNVERIFIED. If sprk_enddate is not Date-Only, fire the escalation below rather than choosing a comparison.</step>
+    <step order="1">Measure the before-state with a report-only pass: how many rows each of R1, R2, R3 would change, and list them. This is the owner's D-2 part 3 precondition and it gates any write.</step>
+    <step order="2">Implement the job: paged reads via IGenericEntityService, the three rules, chunked BulkUpdateAsync writes with an atomic claim and completion marker per chunk, ResultJson per-rule breakdown, one heartbeat per attempt.</step>
+    <step order="3">Register it in ExternalAccessModule beside GrantExpiryReminderJob via AddScheduledJob&lt;TJob&gt;, DISABLED, mirroring that call's ADR-032 unconditional-registration reasoning at :349-352.</step>
+    <step order="4">Tests per the closed set below; perturbations; build, full suite, ArchTests, publish size vs a fresh master; notes; TASK-INDEX row.</step>
+  </steps>
+
+  <escalation>
+    <trigger>sprk_enddate's type/behaviour is UNVERIFIED (MCP was down at authoring). If it is DateTime/UserLocal rather than Date-Only, a read-time date comparison is the wrong instrument and rule R3 MUST NOT ship as specified — owner decision D-2 names exactly this as the thing that would change the answer. STOP and escalate; do not pick a comparison.</trigger>
+    <trigger>If sprk_startdate exists, a not-yet-STARTED membership is a second fail direction this task never scoped. STOP and escalate rather than extending scope silently.</trigger>
+    <trigger>If the Step 1 report shows R2 or R3 would deactivate more than a handful of rows, that is an access-removal event requiring owner sign-off before any write — not an implementation detail. STOP and report the counts and the list.</trigger>
+    <trigger>If any row would need a field CLEARED rather than set, BulkUpdateAsync cannot express it (DataverseServiceClientImpl.cs:2397). STOP rather than switching to per-row PATCH, which would silently drop the all-or-nothing guarantee.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Four neighbours, each checked: GrantExpiryReminderJob.cs (same module, same grant entity, daily paged scan — but it only READS and notifies, and its window is today..+30 so it cannot see an undated or a stale row); MembershipReconciliationJob.cs (the recon shape, but a different junction, sprk_userentityassociation, against different sources of truth); ExternalOrganizationMembership (RevokeExternalAccessEndpoint.cs:667-734, org to members) and ExternalParticipationService.QueryActiveOrgIdsAsync (contact to orgs, private, its own app-only token flow) — both org-scoped readers on DataverseWebApiClient.</existing>
+    <extension>No, and the reason is mechanical rather than aesthetic: both junction readers sit on DataverseWebApiClient.QueryAsync, verified at :227-246 to issue one GET and never read the @odata.nextLink it declares at :296-297, with a 200-row bound (MaxMembersPerSweep); a reconciliation scan is unbounded by nature, so that client cannot serve it, and its UpdateAsync (:204-214) is one untransacted PATCH per row. GrantExpiryReminderJob has no write path and the wrong window. What IS reused rather than rebuilt: IGenericEntityService paging, BulkUpdateAsync, ExternalGrantLifecycle's date rule, IIdempotencyService, and the AddScheduledJob host.</extension>
+    <cost-of-doing-nothing>Three concrete, named failures. (1) Deactivating an organization record — the obvious operator gesture for "this firm is no longer engaged" — is a silent no-op: its grant rows stay active, its membership rows stay active, and every member keeps inherited access to every record the firm held, with no error and no surface that shows it. (2) A membership ended by date keeps conferring access indefinitely, because nothing in the repo writes the junction; live org grants existed (notes/task-020-org-grant-spe-cleanup.md:18). (3) An externally-created grant row with no sprk_expiresdate is both unbounded AND invisible to task 100's reminders, which select only today..+30 — so it never expires and nobody is ever told it did not.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ (KEEP path, security-auth) — the reconciliation behaviour</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-117-reconcile-grant-and-membership-state.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">R1 positive: an ACTIVE sprk_externalrecordaccess row with no sprk_expiresdate is stamped with ExternalGrantLifecycle.DefaultExpiry(TodayUtc) — the same value the endpoint writes, not a re-derived 90.</criterion>
+    <criterion testable="true">R1 negative: a row that already carries any sprk_expiresdate — past, today or future — is left byte-for-byte unchanged.</criterion>
+    <criterion testable="true">R2 positive: an ACTIVE grant row whose _sprk_organization_value references an INACTIVE sprk_organization is deactivated with BOTH statecode=1 and statuscode=2.</criterion>
+    <criterion testable="true">R2 negative: a grant row whose organization is active, and a grant row with no organization lookup at all (a contact-keyed grant), are both left unchanged.</criterion>
+    <criterion testable="true">R3 positive: an ACTIVE sprk_contactorganization row whose sprk_enddate has passed is deactivated with BOTH statecode=1 and statuscode=2.</criterion>
+    <criterion testable="true">R3 negative: a junction row with a null sprk_enddate, and one whose sprk_enddate is today or in the future, are both left unchanged. Access holds THROUGH the end date, matching ExpiryPredicate's boundary.</criterion>
+    <criterion testable="true">A row whose statecode is NULL is treated as ACTIVE by every rule (ExternalGrantLifecycle.IsActive semantics), not skipped.</criterion>
+    <criterion testable="true">Report-only mode counts and lists every row each rule would change and writes NOTHING; it is the default until an owner enables writes.</criterion>
+    <criterion testable="true">The job is registered via AddScheduledJob&lt;TJob&gt; with enabled:false, and no per-job bootstrap class is added.</criterion>
+    <criterion testable="true">Idempotent: a second run immediately after a successful first run finds nothing to change and reports zero changes.</criterion>
+    <criterion testable="true">A run with nothing to do emits its heartbeat (carrying context.Attempt) and returns Success with ProcessedItems 0 — distinguishable in the logs from a run that died.</criterion>
+    <criterion testable="true">A read failure records the run as FAILED and writes nothing; it is never reported as "nothing to reconcile".</criterion>
+    <criterion testable="true">A chunk whose BulkUpdateAsync transaction fails leaves every row in that chunk unchanged, is counted, and does not prevent later chunks from being applied.</criterion>
+    <criterion testable="true">A scan that exceeds the page ceiling reports the run TRUNCATED rather than silently reconciling a prefix.</criterion>
+    <criterion testable="true">Cancellation returns promptly, performs no further writes, and does not throw.</criterion>
+    <criterion testable="true">ResultJson carries a per-rule breakdown (scanned / changed / failed / truncated) and Skipped is never set by the job.</criterion>
+    <criterion testable="true">A repo-wide grep shows exactly one definition of the 90-day default (ExternalGrantLifecycle.DefaultExpiryDays); this task adds none.</criterion>
+    <criterion testable="true">Perturbation: removing the per-chunk claim, or replacing BulkUpdateAsync with per-row PATCH, or dropping statuscode from the deactivation, each fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; ArchTests green; publish size reported against a fresh master with equal file counts on both sides and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in the task notes. Do not add near-identical happy-path variants.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-19 (session 17) via /task-create, consolidating three owner decisions into one mechanism.
+
+SIBLINGS, not dependencies. Task 107 is D-1 option A — it inverts the READ default so a null sprk_expiresdate confers NOTHING. That closes the exposure immediately; THIS job cleans the data. They are complementary and neither blocks the other. Task 118 is D-1 option C (the role + UI-gate change). Tasks 109+110 own the READ guard for the junction (one read, two named sets: ConferringOrganizationIds date-bounded, WallSubjectOrganizationIds statecode-active) — this job is the WRITER half named in D-2 part 4. Once R3 has run, statecode alone is the truth and the read-time date comparison becomes belt-and-braces rather than load-bearing.
+
+⚠️ ISS-026's READ guard is deliberately NOT in this task. It touches the same ExternalParticipationService query that 109+110 are already rewriting as a single snapshot; splitting one query's correctness across two tasks would re-introduce the two-snapshot hazard task 043 removed. Scoping judgment recorded 2026-09-19.
+
+⚠️ THIS PROJECT HAS 19 PRIOR INSTANCES OF PREMISE ROT (`notes/task-accuracy-audit-2026-09-18.md:9`). Every load-bearing claim in the background section above was verified against source on 2026-09-19 with the file and line recorded so you can re-check it cheaply — but verify anyway, because the code has won every time. The two claims deliberately left UNVERIFIED are named in the escalation triggers, and they are unverified because the Dataverse MCP server was down (CONNECTION_CLOSED), not because nobody looked.
+
+Register: notes/defer-issues.md § ISS-026 (#1006) and § ISS-020 (#999). Decisions: notes/owner-decision-brief-2026-09-18.md § Outcomes rows D-1, D-2, D-9/ISS-026.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. Follow task-execute; this task is FULL rigor, so code-review + adr-check run at Step 9.5 unconditionally.</protocol>
+  </execution>
+</task>

@@ -318,7 +318,7 @@ Asynchronously, when Dataverse mutates, the sync pipeline keeps the substrate fr
 | | New for the Engine | Reused from existing Spaarke |
 |---|---|---|
 | **Code** | `InsightsResolverService`, `Insights Agent`, `IInsightGraph` + `CosmosNoSqlInsightGraph`, `LiveFactResolverService`, `IInsightArtifactStore`, Sync/Reconciliation/Extraction Functions | `IChatClient`, `UseFunctionInvocation` pipeline, `IAiToolHandler` + `IToolHandlerRegistry`, `RagIndexingPipeline`, `ReferenceIndexingService` patterns, `EmbeddingCache`, `SemanticDocumentChunker`, `IOpenAiClient`, `PlaybookExecutionEngine`, `DataverseService`, `DeliverToIndexNodeExecutor` |
-| **Azure** | Cosmos NoSQL account (new), Function App (new — narrowed ADR-001 permits), Service Bus topic for Dataverse changes (new), `insight-*` indexes in existing AI Search service | AI Search service, Azure OpenAI account, Redis, Key Vault, App Insights, Log Analytics, Managed Identity |
+| **Azure** | Cosmos NoSQL account (new), Function App (new — placement per ADR-052), Service Bus topic for Dataverse changes (new), `insight-*` indexes in existing AI Search service | AI Search service, Azure OpenAI account, Redis, Key Vault, App Insights, Log Analytics, Managed Identity |
 | **Schema** | `InsightArtifact` envelope (C# types), 4 new AI Search index schemas, Cosmos graph schema (vertex types + edge types), question catalog with evidence-sufficiency rules | JPS playbook schema (existing) — closure-extraction is a JPS playbook |
 
 The Engine is intentionally additive. It does not replace any existing AI subsystem; it sits beside them and consumes their primitives.
@@ -595,7 +595,7 @@ The Engine spans the BFF API, a new Function App, and three substrate stores. Th
 
 ### 5.2 Function App components (new)
 
-A new Function App, permitted by the narrowed ADR-001 (commit `84cec9f9` permits Functions for narrow out-of-band integration). Hosted on Flex Consumption per D-17 and the Microsoft ISV pattern.
+A new Function App. Its placement is governed by [ADR-052](../adr/ADR-052-workload-placement.md) (first permitted by the 2026-05 ADR-001 narrowing, D-38 — see §11.1). Hosted on Flex Consumption per D-17 and the Microsoft ISV pattern.
 
 | Function | Trigger | Responsibility |
 |---|---|---|
@@ -1089,15 +1089,19 @@ These are cheap to design now and expensive to retrofit later.
 
 (Most details consolidated in §6; this section captures the implementation specifics and ADR-001 rationale.)
 
-### 11.1 Why Functions (ADR-001 narrowed)
+### 11.1 Why Functions (placement — ADR-052)
 
-The original ADR-001 said "no Azure Functions" — that constraint was kept to prevent fragmenting the BFF runtime. The narrowed ADR-001 (commit `84cec9f9`, D-38) permits Functions for **narrow out-of-band integration**:
+Where this work runs is decided under [ADR-052](../adr/ADR-052-workload-placement.md). The sync/extraction pipeline is event intake that should not depend on the BFF's availability and scales independently of API load (ADR-052 §3 signals F1 and F2; §9 worked example), so it runs in Azure Functions.
+
+<!-- adr052-drift:allow reason="records the 2026-05 ADR-001 narrowing (D-38) that first permitted these Functions; superseded by ADR-052 on 2026-09-12" -->
+**History (2026-05).** The original ADR-001 said "no Azure Functions" — that constraint was kept to prevent fragmenting the BFF runtime. The narrowed ADR-001 (commit `84cec9f9`, D-38) permits Functions for **narrow out-of-band integration**:
 
 > ADR-001 narrowed: BFF endpoints MUST be Minimal API (no Functions hosting BFF endpoints); Azure Functions permitted for narrow out-of-band integration; Durable Functions still rejected.
 
 The Engine's sync/extraction Functions fit this exactly — they are out-of-band integration with Dataverse (event-driven, can't be hosted in a BFF that doesn't accept Dataverse webhooks directly).
+<!-- /adr052-drift:allow -->
 
-**Durable Functions remain rejected** (D-20). Multi-step orchestration uses Service Bus + state machine, not Durable.
+**Orchestration.** D-20 chose Service Bus + a state machine for multi-step orchestration; [ADR-052 §7](../adr/ADR-052-workload-placement.md) now also permits Durable Task in its own host.
 
 ### 11.2 Flex Consumption (D-17)
 
@@ -1550,7 +1554,7 @@ These curated knowledge documents informed the Engine's design and are reference
 
 | ADR | Relevance |
 |---|---|
-| [ADR-001](../adr/ADR-001-minimal-api-and-workers.md) | BFF runtime + narrowed Functions permission (commit `84cec9f9`) |
+| [ADR-001](../adr/ADR-001-minimal-api-and-workers.md) | BFF runtime (Minimal API endpoints); Functions placement is now [ADR-052](../adr/ADR-052-workload-placement.md) |
 | [ADR-008](../adr/ADR-008-endpoint-filter-authorization.md) | Endpoint filter authorization on `POST /api/insights/ask` |
 | [ADR-009](../adr/ADR-009-redis-first-caching.md) | Redis-first caching applied to two-tier memory and per-question TTL |
 | [ADR-010](../adr/ADR-010-di-minimalism.md) | DI minimalism; `InsightsModule.cs` follows the registration-audit pattern |
@@ -1676,6 +1680,7 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 
 ### 19.5 Sync architecture
 
+<!-- adr052-drift:allow reason="decision log D-17..D-21 as recorded 2026-05 under the narrowed ADR-001; current placement is ADR-052, see the note below the table" -->
 | Decision | Choice | Rationale | ADR |
 |---|---|---|---|
 | Compute | Azure Functions on Flex Consumption — D-17 | MS current default; Bicep-deployable per tenant with UAMI; permitted by narrowed ADR-001. | ADR-001 |
@@ -1683,6 +1688,9 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 | No plugins / no Power Automate | D-19 | Plugins have same SAS limitation; Power Automate adds complexity without solving auth. Webhook registration via plugin registration tool is acceptable. | — |
 | No Durable Functions | D-20 | ADR-001. Orchestration via Service Bus + state machine. | ADR-001 |
 | Closure-extraction | JPS playbook ending in `DeliverToIndexNodeExecutor`; Function triggers via BFF API endpoint — D-21 | Single playbook execution path; no duplicate orchestration in Function. | — |
+<!-- /adr052-drift:allow -->
+
+> **2026-09-12**: compute placement (D-17) is now governed by [ADR-052](../adr/ADR-052-workload-placement.md), including its §6 identity guardrail (reuse the stamp's managed identity). D-20 chose Service Bus + a state machine; ADR-052 §7 now also permits Durable Task in its own host.
 
 ### 19.6 Auth (CRITICAL)
 
@@ -1712,9 +1720,13 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 
 ### 19.8 Repo governance
 
+<!-- adr052-drift:allow reason="decision log D-38 records the 2026-05 ADR-001 narrowing as decided at the time; superseded by ADR-052 on 2026-09-12" -->
 | Decision | Choice | Rationale | ADR |
 |---|---|---|---|
 | ADR-001 narrowed | BFF endpoints MUST be Minimal API; Functions permitted for narrow out-of-band integration; Durable Functions still rejected — D-38 | Original concern (don't fragment BFF runtime) preserved; new scope unblocks Insights Engine sync. | ADR-001 |
+<!-- /adr052-drift:allow -->
+
+> **2026-09-12**: D-38 is superseded by [ADR-052](../adr/ADR-052-workload-placement.md) (workload placement), which keeps the BFF-endpoint rule and permits Durable Task in its own host.
 
 ### 19.9 r2 additions — data, evaluation, surfacing, MCP, refinements
 
@@ -1744,7 +1756,7 @@ These six decisions are responses to the LAVERN analysis (`projects/ai-advanced-
 ### 19.11 Explicit "do not do"
 
 - Do not host the Insights Agent in Foundry (D-13).
-- Do not use Durable Functions (D-20).
+- <!-- adr052-drift:allow reason="Insights Engine project decision D-20: this project's own choice, not a platform rule (ADR-052 §7)" -->Do not use Durable Functions<!-- /adr052-drift:allow --> (D-20 — this project's choice of Service Bus + a state machine; ADR-052 §7 no longer forbids Durable Task in its own host, so revisiting D-20 is a design decision, not an ADR exception).
 - Do not use Dataverse plugin assemblies or Power Automate flows for sync integration (D-19).
 - Do not put SAS keys on Service Bus (D-22, D-24).
 - Do not use `ClientSecretCredential` in new Function code (D-27).
@@ -1813,7 +1825,7 @@ This section lists the MUST / MUST NOT rules that govern modifications to the En
 - **MUST NOT** use SAS keys anywhere in the production sync pipeline (D-22, D-24). The transitional `clientState` is the only allowed shared secret and is gone post Phase C #044.
 - **MUST NOT** introduce `ClientSecretCredential` in new Function code (D-27).
 - **MUST NOT** use Dataverse plugin assemblies or Power Automate flows for sync integration (D-19) — webhook registration via the plugin registration tool is acceptable; custom plugin code is not.
-- **MUST NOT** use Durable Functions (D-20).
+- <!-- adr052-drift:allow reason="Insights Engine project decision D-20: this project's own choice, not a platform rule (ADR-052 §7)" -->**MUST NOT** use Durable Functions<!-- /adr052-drift:allow --> (D-20 — a project decision; ADR-052 §7 now permits Durable Task in its own host, so revisit D-20 rather than treat it as ADR-mandated).
 - **MUST NOT** host the Insights Agent in Foundry (D-13).
 - **MUST NOT** use `@spaarke/auth` for server-side inbound validation — it's client-side TypeScript only (D-25).
 - **MUST NOT** call a separate "auth service" for JWT validation (D-28).
@@ -2197,7 +2209,8 @@ This requires the production metrics infrastructure to be running and the corpus
 
 ### 23.3 ADRs
 
-- [ADR-001 — Minimal API and Workers](../adr/ADR-001-minimal-api-and-workers.md) (narrowed in commit `84cec9f9` — permits Functions for narrow out-of-band integration)
+- [ADR-001 — Minimal API and Workers](../adr/ADR-001-minimal-api-and-workers.md) (BFF endpoints; its Functions provisions are superseded by ADR-052)
+- [ADR-052 — Workload placement](../adr/ADR-052-workload-placement.md) (where this engine's Functions and any Durable Task orchestration run)
 - [ADR-008 — Endpoint Filter Authorization](../adr/ADR-008-endpoint-filter-authorization.md)
 - [ADR-009 — Redis-First Caching](../adr/ADR-009-redis-first-caching.md)
 - [ADR-010 — DI Minimalism](../adr/ADR-010-di-minimalism.md)

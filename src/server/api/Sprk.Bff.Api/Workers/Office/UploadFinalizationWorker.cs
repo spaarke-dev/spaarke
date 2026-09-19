@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Workers.Office;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Per ADR-001, this worker uses BackgroundService pattern (not Azure Functions).
+/// Runs in the BFF as a BackgroundService, governed by ADR-052 (ADR-004 A1 §6 named non-conforming consumer).
 /// Per ADR-004, handlers are idempotent using IdempotencyKey for duplicate detection.
 /// Per ADR-007, all SPE operations go through SpeFileStore facade.
 /// </para>

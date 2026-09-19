@@ -2,7 +2,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
 /// Background service that resets sprk_sendstoday to 0 for all communication accounts
-/// at midnight UTC each day. Implements ADR-001 BackgroundService pattern.
+/// at midnight UTC each day. A hand-rolled timer BackgroundService (existing debt — migrates to an IScheduledJob when next touched, ADR-052 §1).
 ///
 /// Uses a simple loop with delay-until-midnight approach rather than PeriodicTimer,
 /// since the interval is exactly once per day at a specific wall-clock time.

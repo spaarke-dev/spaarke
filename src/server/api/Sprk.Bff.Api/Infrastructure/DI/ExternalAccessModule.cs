@@ -1,5 +1,9 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -39,6 +43,12 @@ public static class ExternalAccessModule
     /// </summary>
     public static IServiceCollection AddExternalAccess(this IServiceCollection services)
     {
+        // Clock for grant expiry (spec FR-33, task 097): /grant and /invite-and-grant reject a past expiry and
+        // default an absent one from "today". TryAdd, matching the idempotent convention in DocumentsModule /
+        // MembershipModule / CommunicationModule — whichever module loads first wins, the rest no-op.
+        // Registered HERE so the grant routes do not depend on an unrelated module having been added.
+        services.TryAddSingleton(TimeProvider.System);
+
         // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL).
         // Resolves Contact by email and loads their project access grants.
         services.AddHttpClient<ExternalParticipationService>((sp, client) =>
@@ -125,7 +135,35 @@ public static class ExternalAccessModule
         // FLS-secured contact.sprk_standinggrant boolean app-only via the already-registered
         // IDataverseService; gates a contact principal's standing-grant runtime membership term.
         // Interface is the ADR-010 testing seam. Singleton is safe (IDataverseService is a singleton).
-        services.AddSingleton<IContactStandingGrantReader, ContactStandingGrantReader>();
+        services.AddSingleton<ISubjectStandingGrantReader, SubjectStandingGrantReader>();
+
+        // Deny-list reader (unified-access-control-r2 task 038, FR-23) — the fail-closed reader
+        // over sprk_noaccessentry (the ethical-wall / per-child-revocation VETO store; store +
+        // reader only, task 039 wires the veto into AccessibleRecordSetService.ApplyVetoPipeline).
+        // Typed HttpClient with its own app-only token management, matching the established
+        // QUERY-shaped-reader style of this module (ExternalParticipationService,
+        // ModuleEntitlementResolver) rather than SubjectStandingGrantReader's single
+        // retrieve-by-id via the shared IDataverseService broker (no batched/filtered query
+        // capability). Interface is the ADR-010 testing seam for task 039's future consumer; the
+        // concrete type additionally exposes an internal-virtual query seam
+        // (InternalsVisibleTo("Sprk.Bff.Api.Tests"), matching ExternalParticipationService's own
+        // convention) for THIS task's unit tests to exercise the real chunking/matching/
+        // fail-closed orchestration without mocking HttpMessageHandler (banned, testing.md B1).
+        // Transient (AddHttpClient default) — safe to inject into the Scoped
+        // AccessibleRecordSetService; no shared mutable state crosses requests.
+        services.AddHttpClient<NoAccessListReader>((sp, client) =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var dataverseUrl = config["Dataverse:ServiceUrl"];
+            if (!string.IsNullOrEmpty(dataverseUrl))
+            {
+                client.BaseAddress = new Uri($"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/");
+                client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+                client.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            }
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddTransient<INoAccessListReader>(sp => sp.GetRequiredService<NoAccessListReader>());
 
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
@@ -139,6 +177,25 @@ public static class ExternalAccessModule
         services.AddScoped<ICallerPrincipalStrategy, CiamContactPrincipalStrategy>();
         services.AddScoped<ICallerPrincipalStrategy, WorkforcePrincipalStrategy>();
         services.AddScoped<ICallerPrincipalResolver, CallerPrincipalResolver>();
+
+        // FR-20 / task 035 — the impersonated root-set source. Asks Dataverse which root records a
+        // systemuser can actually read (one impersonated id-only query per root type) instead of
+        // pattern-matching its rules in C#, which gets it wrong in BOTH directions: a business-unit
+        // column match over-grants past the user's role depth, and it misses records reachable only
+        // through a POA share.
+        //
+        // ADR-010: ONE interface, and it is a genuine seam — task 036 swaps this source into the
+        // evaluator behind a flag, so the swap point must be substitutable. It deliberately does NOT
+        // introduce a second impersonated-query interface: IImpersonatedCommunicationQuery
+        // (CommunicationModule, registered UNCONDITIONALLY per ADR-032) already wraps
+        // RetrieveMultipleImpersonatedAsync with a fully generic (entitySet, odataQuery, callerId)
+        // contract — communication-specific in NAME only. Declaring an identical second interface is
+        // the duplication CLAUDE.md §11 exists to prevent.
+        //
+        // ⚠️ NOT consumed by AccessibleRecordSetService yet — that swap is task 036's obligation, and
+        // it is gated on the NFR-04 negative canary (task 034). Registering it here is inert until then.
+        // Scoped: it reads the caller's tenant claim off IHttpContextAccessor for the cache key.
+        services.AddScoped<IImpersonatedRootSetSource, ImpersonatedRootSetSource>();
 
         // Module-host registration framework (spaarke-SPA-external-access-platform-r2 task 015 · FR-22 ·
         // ADR-028 A3). Generalizes the resolver seam into a per-module registry: each module registers a
@@ -286,6 +343,14 @@ public static class ExternalAccessModule
         // Admin-initiated CIAM user provisioner (task 025). Creates CIAM local accounts via the
         // cross-tenant client above; reuses PasswordGenerator (RegistrationModule). Singleton per ADR-010.
         services.AddSingleton<CiamUserProvisioningService>();
+
+        // FR-33 (d), task 100 — reminders 30/14/7/3/1 days before an external grant expires, to the granter
+        // (else the record's owner, else its creator), never the grantee. A job on the in-process
+        // Spaarke.Scheduling host, registered through AddScheduledJob (ADR-036 A1 rule 6). UNCONDITIONAL: its
+        // dependencies (NotificationService, IIdempotencyService, IGenericEntityService, TimeProvider) are all
+        // unconditional, so ADR-032 needs no Null-Object here. There is no durable pause: the admin disable applies
+        // to the one instance that served it and a restart re-enables the job (ADR-036 A1 §2).
+        services.AddScheduledJob<GrantExpiryReminderJob>(GrantExpiryReminderJob.DefaultCronSchedule);
 
         return services;
     }

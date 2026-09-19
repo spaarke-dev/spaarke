@@ -21,6 +21,24 @@ public sealed class ScheduledJobRegistry
 {
     private readonly ConcurrentDictionary<string, IScheduledJob> _jobs = new(StringComparer.Ordinal);
 
+    /// <summary>An empty registry; add jobs with <see cref="Register"/>.</summary>
+    public ScheduledJobRegistry()
+    {
+    }
+
+    /// <summary>
+    /// A registry holding every job registered with <c>AddScheduledJob</c> — the constructor dependency injection
+    /// uses (ADR-036 A1 rule 6). A duplicate <see cref="IScheduledJob.JobId"/> throws, failing startup.
+    /// </summary>
+    public ScheduledJobRegistry(IEnumerable<ScheduledJobRegistration> registrations)
+    {
+        ArgumentNullException.ThrowIfNull(registrations);
+        foreach (var registration in registrations)
+        {
+            Register(registration.Job);
+        }
+    }
+
     /// <summary>Register a job instance. Throws if another job with the same <see cref="IScheduledJob.JobId"/> is already registered.</summary>
     public void Register(IScheduledJob job)
     {

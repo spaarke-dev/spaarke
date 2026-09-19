@@ -73,6 +73,7 @@
   </steps>
 
   <escalation>
+    <trigger>If this task is started before it has been re-scoped per the 2026-09-15 amendment in notes (owner answer to ISS-003's product question), STOP — as written it would make service requests externally grantable, which the owner ruled out (task 028).</trigger>
     <trigger>If sprk_servicerequest grants are not representable in sprk_externalrecordaccess (e.g. the grant table's entity-type field/choice lacks a service-request value), STOP and escalate — the fix is a Phase-2 registry/schema decision, not an improvised column.</trigger>
   </escalation>
 
@@ -91,7 +92,12 @@
     <criterion testable="true">Build green; publish size ≤ 60 MB reported; per-request Dataverse round-trip count stated and within NFR-02.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-27; 06 §F1. Tasks 055/056 consume the fourth root set.</notes>
+  <notes>spec.md FR-27; 06 §F1. Tasks 055/056 consume the fourth root set.
+
+AMENDED 2026-09-15 (register triage) — PREMISE SUPERSEDED; DO NOT EXECUTE AS WRITTEN.
+- The goal's CIAM half — a service-request set filled from sprk_externalrecordaccess grants, with the grant allow-list extended to sprk_servicerequest — contradicts the owner's 2026-09-09 ruling (task 028): service requests are NEVER externally grantable, and CallerPrincipal must not carry an accessible-service-request set (project CLAUDE.md; notes/task-028-service-request-root.md §5).
+- The in-scope work that remains is ISS-003 (#964): the workforce user who submitted a service request is denied PATCH /api/v1/external/todos/{id} on to-dos parented to it.
+- Before executing: (1) the owner answers ISS-003's product question — what may a requester DO to their own service request's to-dos; (2) re-scope this POML's goal, steps and criteria to that answer; (3) re-check tasks 055 and 056, which were written to consume the fourth root set.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

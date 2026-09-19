@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="109" project="unified-access-control-r2">
+  <metadata>
+    <title>ONE junction read, two named sets, and a fault that cannot be mistaken for absence — ISS-019 (#998) + ISS-020 (#999) + ISS-026's read guard, as ONE change</title>
+    <phase>Register-driven (authored 2026-09-19 after owner decision D-2)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Evaluator membership path (.cs); tags bff-api/auth. It changes who has access today and it changes a VETO's fail direction.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>One read serving an additive term and a veto subject with OPPOSITE safe-failure directions, a live access-narrowing, and three artifacts that currently assert the retired rule.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project; this edits the junction query both the additive term and the FR-23 veto read.</parallel-reason>
+    <deps>043</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <origin>Register ISS-019 (#998) + ISS-020 (#999), plus ISS-026 (#1006)'s READ half. Owner decision D-2 (2026-09-18/19): part 1 YES — bound the additive path; part 2 NO — the ethical wall keeps binding a former member; part 3 count before deploy; part 4 the writer is task 117. Consolidated because 109 and 110 are ONE change: a SECOND query for the veto path would re-introduce the two-snapshot hazard task 043 deliberately removed.</origin>
+  </metadata>
+
+  <prompt>One junction read feeds two consumers whose safe failure directions are opposite. Today a query-level fault is swallowed into an empty list, which the additive term reads correctly as "grant nothing" and the FR-23 deny-veto reads WRONGLY as "belongs to no organization" — so the wall silently stops matching. The same read also ignores `sprk_enddate`, so a membership ended by date still confers access. Fix both in one read that projects what both consumers need and reports when it could not be completed.</prompt>
+
+  <role>SPAARKE platform developer — the external-access evaluator's membership path. You are changing who has access today AND a veto's fail direction; treat the narrowing as an access-removal event and the veto as fail-closed-or-nothing.</role>
+
+  <goal>One junction read returns an outcome carrying `Unreadable` plus TWO named sets — a date-bounded conferring set and a statecode-only wall-subject set — so the additive term cannot over-grant, the veto cannot stop matching on a fault, a date-ended membership stops conferring, and an inactive organization confers nothing. Task 043's single-snapshot invariant and the NFR-02 one-read budget both survive.</goal>
+
+  <context>
+    <background>🟢 THE DILEMMA DISSOLVES — AND MOST OF THE MACHINERY ALREADY EXISTS. The recorded framing was "one query serves an additive term (over-inclusion = over-GRANT) and the deny-veto subject (over-inclusion = a stricter wall), so one filter shape cannot be right for both." That is true only because the query projects BARE IDS. It is one READ, not one FILTER: add `sprk_enddate` to the `$select` and one read serves both consumers with different IN-MEMORY predicates.
+
+⚠️ DO NOT INVENT AN OUTCOME TYPE. `ActiveOrgMemberships(IReadOnlyList&lt;Guid&gt; OrganizationIds, bool Unreadable)` ALREADY EXISTS at `AccessibleRecordSetService.cs:457`, and its remarks (`:429-455`) already state this exact two-opposite-fail-directions problem. Extend it; do not build a parallel record. CLAUDE.md §11.
+
+🔴 THE HOLE, NAMED BY THE CODE ITSELF (`AccessibleRecordSetService.cs:443-455`, a task-043 code-review correction): "`Unreadable` is set only for faults that reach `ReadActiveOrgMembershipsAsync` as an EXCEPTION, which in practice means token/API-url acquisition. A junction QUERY failure (HTTP 500/403, timeout, any non-success status) is swallowed inside `ExternalParticipationService`'s private query, which returns an empty list — so it arrives here as `Unreadable: false` and the deny veto's ORGANIZATION axis silently stops matching for that subject. Contact-keyed deny rows still apply, so the wall narrows rather than vanishes. That hole PRE-DATES task 043 … fixing it properly has to happen ONE LAYER DOWN, in the junction query itself." That sentence is your specification. ISS-019's own suggested fix (a second `QueryActiveOrgIdsOutcomeAsync`) is REJECTED — it would restore the two-snapshot hazard.
+
+⚠️ THE ASYMMETRY IS DELIBERATE — PRESERVE IT. `ExternalParticipationService.cs:1060-1069` says so in as many words: token/API-url acquisition is deliberately NOT guarded so it propagates to `ResolveDenyVetoAsync`'s catch-all (veto denies every candidate — correct for a veto), while a query-level fault fails toward an empty list (correct for the ADDITIVE caller — a fault must not GRANT). "Both are deliberate for their respective callers, not an inconsistency to 'fix' by unifying them." Your change closes only the query-level-fault-for-the-VETO hole. It must not make the additive term grant on a fault, and it must not make the veto's existing fail-closed path weaker.
+
+🔴 A TRAP — TWO COLUMNS, OPPOSITE NULL SEMANTICS. `ExpiryPredicate` (`:99-100`) is `(sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})`, and its remarks explain that in OData `field ge X` EXCLUDES nulls, so the `eq null` branch is load-bearing, and `ge` not `gt` because `sprk_expiresdate` is Date Only and access holds THROUGH the expiry date. Mirror the `ge`/null MECHANICS for `sprk_enddate` — a null end date means the membership has no end and STILL CONFERS. ⚠️ Task 107 (sibling) INVERTS the null branch for `sprk_expiresdate` so an undated GRANT confers nothing. Do NOT propagate that inversion to `sprk_enddate`: a grant with no expiry is an unbounded grant, a membership with no end date is an ordinary current membership. An executor "being consistent" across both columns would silently revoke every open-ended membership in the system.
+
+THE THREE TERMS, AND WHICH ONE IS ALREADY GATED (my exposure claim was FALSE once — verify, do not inherit): the org-EXPANSION term IS standing-gated (`:1209-1221`), but the older org-GRANT term is NOT — `QueryOrganizationGrantRowsAsync` (`:1011-1051`) gates on active + unexpired GRANT ROWS only, with no `sprk_standinggrant` check. Live org grants existed (`notes/task-020-org-grant-spe-cleanup.md:18`). Real exposure is bounded only by dev being a test environment.
+
+THREE ARTIFACTS CURRENTLY ASSERT THE RETIRED RULE — fix them in this change or they pin it (task 114's lesson):
+1. `ExternalParticipationService.cs:1081-1082` — "a former member is a deactivated row and is excluded, so leaving a firm drops inherited access." FALSE under D-2 part 1: a date-ended but state-active row still confers.
+2. `ExternalParticipationService.cs:1083-1085` — an undeleted caveat ("confirm against the created junction schema") that TASK-INDEX claims task 020 removed. The schema WAS live-verified on 2026-08-26; the record is at `Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:659-665` (collection `sprk_contactorganizations`; `_sprk_contact_value` / `_sprk_organization_value`; `statecode` Active(0)/Inactive(1)).
+3. `tests/Spaarke.ArchTests/ExternalAccessQueryIntegrityGuardTests.cs:54-57` — a GUARD TEST justifying its scope with "a correct query that rightly has no expiry predicate, because a membership row has no expiry. Expiry is a property of a GRANT." Now false, and load-bearing: it teaches the next reader the junction query needs no date predicate. Its cited line `:1068` is also stale — the junction query is at `:1092-1094`.
+
+CONTRACT CHANGE, NOT A DEVIATION. The junction's original design contract (sibling project, `notes/task-073-org-grant-design.md:83, 90-92`) made `statecode` the SOLE active/former gate and never listed `sprk_enddate` as access-bearing. D-2 CHANGES that contract deliberately — which is why it was the owner's call and not an implementer's.
+
+⚠️ ENVIRONMENT: the connected system is DEV and its records are TEST records (owner, 2026-09-17). That changes urgency, not validity.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/ExternalAccessQueryIntegrityGuardTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner D-2 part 1">Scope: the additive path. A membership whose `sprk_enddate` has passed STOPS conferring access. Access must be re-granted explicitly; there is no grace period to invent.</constraint>
+    <constraint source="owner D-2 part 2">Scope: the veto subject. The FR-23 deny-veto subject stays on `statecode` ALONE and deliberately OVER-matches — an org-keyed ethical wall KEEPS binding a former member. Documented support: FR-23 (`spec.md:86`) and `AccessibleRecordSetService.cs:550-554` "Denial deliberately OVER-matches." Do NOT date-bound the veto; that would be a fail-OPEN change to a veto.</constraint>
+    <constraint source="owner D-2 part 3">Scope: deployment. COUNT and LIST the date-ended-but-active rows, and the active grants under inactive organizations, BEFORE any behaviour ships. This change REMOVES live access.</constraint>
+    <constraint source="task 043 / NFR-02">Scope: the read budget. ONE junction read per resolution, projecting everything both consumers need. A second query re-introduces the two-snapshot hazard task 043 removed and is not an acceptable implementation.</constraint>
+    <constraint source="ADR-003">Scope: fail direction, per consumer. A fault must never GRANT (additive term contributes nothing) and must never silently UN-WALL (veto denies every candidate). Both must remain true simultaneously — that is the whole point of carrying an outcome rather than a list.</constraint>
+    <constraint source="ExternalParticipationService.cs:1060-1069">Scope: the existing asymmetry. Preserve it. Close only the query-level-fault-for-the-veto hole; do not unify the two fail directions, and do not weaken the token-acquisition path that already denies.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: machinery. EXTEND `ActiveOrgMemberships` (`AccessibleRecordSetService.cs:457`) and the existing private junction query. No new service, no new outcome record, no second reader. Note that `ExternalOrganizationMembership` (`RevokeExternalAccessEndpoint.cs:667`) reads this junction in the INVERSE direction on a different client and is deliberately NOT merged (`:641-650`).</constraint>
+    <constraint source="task 020">Scope: borrowed shapes. "Do not inherit the revoke's shape by default, because its fail direction is inverted relative to yours."</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification; publish size vs a FRESH master worktree from a SHORT path with file counts compared on both sides; no new HIGH CVE; tests updated.</constraint>
+    <constraint source="ADR-038">Scope: tests. KEEP path is `tests/integration/auth/**` (security-auth). The ArchTest guard correction belongs in `tests/Spaarke.ArchTests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/adr/ADR-034-access-conferring-lookups.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+      <file>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/task-020-org-grant-spe-cleanup.md</file>
+    </files>
+    <patterns>
+      <pattern name="The outcome-not-a-list pattern" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">Read `ActiveOrgMemberships` (`:457`) and its remarks (`:429-455`) FIRST — they specify this task, including the precise scope of the guarantee the type does NOT currently deliver.</pattern>
+      <pattern name="Null-and-ge date mechanics" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">`ExpiryPredicate` (`:99-100`) plus its remarks (`:74-98`) — why `eq null` is load-bearing in OData and why `ge` not `gt` for a Date Only column. Mirror the MECHANICS for `sprk_enddate`; do NOT mirror task 107's inversion of the null branch.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify live metadata for `sprk_enddate` — its type and behaviour — and whether `sprk_startdate` exists. The Dataverse MCP server was DOWN (CONNECTION_CLOSED) when this task was authored, so both are UNVERIFIED. If `sprk_enddate` is not Date Only, fire the escalation rather than choosing a comparison.</step>
+    <step order="1">Measure the before-state and LIST it: date-ended-but-still-active junction rows, and active grants whose organization is inactive. This is D-2 part 3 and it gates any behaviour change.</step>
+    <step order="2">In the private junction query (`ExternalParticipationService.cs:1087`), project `sprk_enddate` alongside the org lookup and stop swallowing a non-success status into an empty list — report that the read could not be completed, while keeping the additive caller's empty-on-fault contribution.</step>
+    <step order="3">Extend `ActiveOrgMemberships` to carry the two named sets — a date-bounded conferring set and a statecode-only wall-subject set — and wire each consumer to the one it needs. Add the ISS-026 read guard so an inactive `sprk_organization` confers nothing, WITHOUT breaking the single-read invariant (if it cannot be expressed in one read, escalate rather than adding a second).</step>
+    <step order="4">Correct the three retired-rule artifacts: the false comment (`:1081-1082`), the stale caveat (`:1083-1085`), and the guard test's justification plus its stale line reference (`ExternalAccessQueryIntegrityGuardTests.cs:54-57`).</step>
+    <step order="5">Tests per the closed set; perturbations; build, full suite, ArchTests, publish size vs a fresh master; notes; TASK-INDEX rows for BOTH 109 and 110.</step>
+  </steps>
+
+  <escalation>
+    <trigger>`sprk_enddate`'s type/behaviour is UNVERIFIED. If it is DateTime/UserLocal rather than Date Only, a read-time date comparison is the wrong instrument and this belongs in a Dataverse-side deactivation instead (task 117) — owner decision D-2 names exactly this as the thing that would change the answer. STOP; do not pick a comparison.</trigger>
+    <trigger>If `sprk_startdate` exists, a not-yet-STARTED membership is a second fail direction this task never scoped. STOP rather than widening scope silently.</trigger>
+    <trigger>If the Step 1 count shows more than a handful of rows losing access, that is an access-removal event needing owner sign-off before anything ships — not an implementation detail. STOP and report the counts and the list.</trigger>
+    <trigger>If the ISS-026 organization-statecode guard cannot be satisfied within ONE read (e.g. it needs an expand Dataverse will not serve), that is a decision about task 043's single-snapshot invariant, not a free choice. STOP and present the options with a recommendation.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ (KEEP path) and tests/Spaarke.ArchTests/ExternalAccessQueryIntegrityGuardTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-109-junction-read-two-named-sets.md (incl. the Step 1 before-state)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ADDITIVE, positive: a membership with a null `sprk_enddate`, or one whose `sprk_enddate` is today or later, still confers inherited access — access holds THROUGH the end date, mirroring `ExpiryPredicate`'s boundary.</criterion>
+    <criterion testable="true">ADDITIVE, negative: a membership whose `sprk_enddate` has passed confers NOTHING, even though its `statecode` is still active.</criterion>
+    <criterion testable="true">VETO, unchanged: an org-keyed deny row still matches a subject whose membership has ENDED by date — the wall over-matches by design, and a test asserts the over-match explicitly so a later "consistency" fix cannot silently date-bound it.</criterion>
+    <criterion testable="true">🔴 VETO on a query fault: an HTTP 500/403/timeout on the junction query now denies every queried candidate instead of reading as "belongs to no organization". This is the ISS-019 fix and the single most important assertion in this task.</criterion>
+    <criterion testable="true">ADDITIVE on the same fault: the additive term contributes NOTHING — the fault must not grant. Both fail directions hold simultaneously, from one read.</criterion>
+    <criterion testable="true">The pre-existing token/API-url-acquisition fail-closed path still denies (it must not be weakened by the new fault reporting).</criterion>
+    <criterion testable="true">ISS-026 read guard: an active grant and an active membership whose parent `sprk_organization` is INACTIVE confer nothing; an active organization is unaffected; a contact-keyed grant with no organization lookup is unaffected.</criterion>
+    <criterion testable="true">Exactly ONE junction read per resolution — asserted, not assumed (count the reads in a test). Task 043's single-snapshot invariant and the NFR-02 budget hold.</criterion>
+    <criterion testable="true">A row whose `statecode` is NULL is treated as ACTIVE, matching `ExternalGrantLifecycle.IsActive` (`:121`) semantics.</criterion>
+    <criterion testable="true">`ActiveOrgMemberships` was EXTENDED — no second outcome record and no second junction reader was introduced anywhere (verified by grep).</criterion>
+    <criterion testable="true">The false comment at `:1081-1082` and the stale caveat at `:1083-1085` are corrected, and the guard test's justification at `ExternalAccessQueryIntegrityGuardTests.cs:54-57` no longer says a membership row has no expiry; its stale `:1068` reference points at the real junction query.</criterion>
+    <criterion testable="true">The Step 1 before-state (counts plus the row list, both categories) is recorded in the task notes before any behaviour change is merged.</criterion>
+    <criterion testable="true">Perturbation: reverting the fault reporting makes the veto-on-fault test go green again; removing the date bound makes the ended-membership test go green again; date-bounding the VETO subject reddens the over-match test. All three reverted before completion.</criterion>
+    <criterion testable="true">Build green; full suite green; ArchTests green; publish size reported against a fresh master with equal file counts on both sides and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in the task notes. Do not add near-identical happy-path variants.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-19 (session 17) via /task-create, consolidating ISS-019 + ISS-020 + ISS-026's read half.
+
+⚠️ THIS TASK SUBSUMES TASK 110. They are ONE change (plan §3, owner brief D-2): one read, projecting what both consumers need, returning an outcome plus two named sets. Task 110's POML records that it is executed here. Completing this task closes **#998** and **#999**, and the READ half of **#1006** — whose WRITE half is task 117.
+
+SCOPING JUDGMENT, recorded 2026-09-19: ISS-026's READ guard lives here rather than in task 117 because it touches the same query this task is already rewriting as a single snapshot. Putting it in the scheduled job would split one query's correctness across two tasks and re-introduce the hazard task 043 removed. 117 owns only the WRITE (deactivating the rows so `statecode` becomes the truth). Once 117 has run, this read-time guard becomes belt-and-braces rather than load-bearing — keep it anyway; it is the fail-closed half.
+
+⚠️ THIS PROJECT HAS 19 PRIOR INSTANCES OF PREMISE ROT (`notes/task-accuracy-audit-2026-09-18.md:9`). Every load-bearing claim above was checked against source on 2026-09-19 with file and line recorded so you can re-check cheaply — verify anyway, because the code has won every time. The two deliberately UNVERIFIED claims are named in the escalation triggers, and they are unverified because the Dataverse MCP server was down, not because nobody looked. One claim in the earlier record was outright FALSE and is corrected in the background above: "exposure is nil" covered only the standing-gated org-EXPANSION term, not the org-GRANT term.
+
+Register: `notes/defer-issues.md` § ISS-019, § ISS-020, § ISS-026. Related: tasks 020, 042, 043, 107, 117.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. FULL rigor — code-review + adr-check run at Step 9.5 unconditionally. Read `ActiveOrgMemberships`' remarks before writing any code; they are the specification.</protocol>
+  </execution>
+</task>

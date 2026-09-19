@@ -42,7 +42,7 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 | **PCF Control** | `*.tsx` in pcf/, `ControlManifest.Input.xml` | ADR-006, ADR-011, ADR-012, ADR-021, **ADR-028** (for any PCF calling BFF) |
 | **Webresource** | `*.js` in webresources/ | ADR-006 |
 | **DI Registration** | `Program.cs` DI section, `Add*` extension methods | ADR-010 |
-| **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService` | ADR-001, ADR-004 |
+| **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService`; `IJobHandler`; `IScheduledJob`; a Functions project | ADR-052 (where it runs), ADR-004 (queue), ADR-036 (schedule) |
 | **Job Status/Persistence** | `*JobStatus*`, `JobOutcome`, `JobContract` | ADR-004, ADR-017, ADR-020 |
 | **Feature Flags / Kill Switches** | `*Feature*`, `FeatureFlag`, `IOptions*` gates | ADR-018 |
 | **API Errors / ProblemDetails** | `ProblemDetails`, `Results.Problem`, `IResult` error helpers | ADR-019 |
@@ -94,7 +94,7 @@ BEFORE writing any code:
 | Auth/OAuth | `.claude/constraints/auth.md` | `.claude/patterns/auth/` (incl. `spaarke-sso-binding.md`) | ADR-003, 008, **028** (canonical) |
 | Caching | `.claude/constraints/data.md` | `.claude/patterns/caching/` | ADR-009 |
 | AI Features | `.claude/constraints/ai.md` | `.claude/patterns/ai/` | ADR-013, 014, 015, 016 |
-| Background Jobs | `.claude/constraints/jobs.md` | — | ADR-001, 004, 017 |
+| Background Jobs | `.claude/constraints/jobs.md` | — | ADR-052, 004, 036, 017 |
 | Testing | `.claude/constraints/testing.md` | `.claude/patterns/testing/` | ADR-022 |
 
 ### Rule 3: ADR Constraint Comments
@@ -147,7 +147,7 @@ Reference this table for common constraints. The source of truth is:
 
 | ADR | Title | Key Constraint | Violation Pattern |
 |-----|-------|----------------|-------------------|
-| ADR-001 | Minimal API + Workers (BFF runtime) | BFF endpoints in Minimal API; Functions OK only for out-of-band integration; no Durable Functions | `[FunctionName]`/`[HttpTrigger]` inside `Sprk.Bff.Api`; `DurableTask` packages |
+| ADR-001 | Minimal API (BFF runtime) | BFF endpoints in Minimal API; no Functions / Durable Task inside the BFF. Where background work runs → **ADR-052** (inside the BFF: queue → ADR-004, schedule → ADR-036) | `[Function]`/`[FunctionName]`/`[HttpTrigger]` inside `Sprk.Bff.Api`; Functions or `DurableTask` packages in the BFF csproj |
 | ADR-002 | Thin Plugins | No HTTP in plugins; <50ms | `HttpClient` in Plugin class |
 | ADR-003 | Authorization Seams | Two seams only: UAC + Storage | Multiple `IAuthorizationXxx` interfaces |
 | ADR-004 | Async Job Contract | Uniform job processing | Ad-hoc `Task.Run` for async work |
