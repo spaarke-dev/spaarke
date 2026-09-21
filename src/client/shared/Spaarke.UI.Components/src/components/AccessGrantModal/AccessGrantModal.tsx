@@ -85,8 +85,15 @@
  * now behind `DelegationRuleFilter` (group-level on `ExternalAccessEndpoints.
  * MapInternalManagementEndpoints`), which requires the CALLER (OBO, not
  * app-only) to hold Write on the target record. This modal MUST NOT try to
- * predict that outcome client-side (no privilege pre-check, no hiding the
- * button) — server truth only. A 403 with a `sdap.access.deny.delegation_*`
+ * PREDICT that outcome client-side — no privilege pre-check, no re-derivation
+ * of the rule from Dataverse privileges. Server truth only.
+ *
+ * Task 118 sharpened that rule rather than relaxing it: the host may now ASK
+ * the server the same question ahead of time (`GET /api/v1/external-access/
+ * can-manage-access`, whose 200/403 IS this filter's verdict) and pass the
+ * answer down as `canGrantAccess`. Asking is server truth; guessing from a
+ * table-level `hasEntityPrivilege` — which is what the host did until
+ * v1.0.31 — was not. A 403 with a `sdap.access.deny.delegation_*`
  * reason code is rendered as a persistent, dismissable-only-by-reopening
  * banner (`accessDenyState` below) that disables every write action (+User,
  * +Contact, +Organization, Add, Revoke) — never a toast, never a raw error.
@@ -498,7 +505,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   onClose,
   recordId,
   recordType = 'project',
-  canGrantAccess = true,
+  // 🔴 Fail CLOSED (task 118). Was `= true`; an omitted prop now renders the not-authorized
+  // state rather than the full grant UI. See the prop's doc in ./types.ts.
+  canGrantAccess = false,
   authenticatedFetch,
   fetchCandidates,
   fetchExistingGrants,

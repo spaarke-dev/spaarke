@@ -667,7 +667,24 @@ public class RouteAuthorizationGuardTests
     //            AddDelegationRuleFilter() (Write on the record, evaluated as the CALLER over OBO), and
     //            DelegationRuleFilter's target map gained one case per request type in the same change —
     //            ShareRecordWithUserRequest, UnshareRecordWithUserRequest and the GET's RecordUserSharesQuery.
-    private const int ExpectedEndpointFileCount = 119;
+    // 119 -> 120 (2026-09-21, unified-access-control-r2 task 118):
+    //
+    //   118  +1  Api/ExternalAccess/RecordAccessGateEndpoint.cs ADDED — GET /can-manage-access, which answers
+    //            the delegation question for ONE record so the Manage Access affordance can gate on the rule
+    //            the server enforces instead of on a table-level Create privilege that asked a different
+    //            question with the opposite fail direction (spec FR-07 / owner decision D-1 option C).
+    //            Classified per the maintenance procedure: it serves NEITHER document metadata nor file bytes —
+    //            it returns one boolean about a root record — so there is no GovernedFiles entry to add; the
+    //            count alone moves. Same shape as 061, 098 and 063.
+    //
+    //            Worth stating because this file is unlike its neighbours: it is the first route whose ENTIRE
+    //            PURPOSE is to be gated. It carries no rights logic, and its 200 means only "AddDelegationRuleFilter()
+    //            let me through" — so for this one file, being inside the group is not merely how it is protected,
+    //            it is how it is CORRECT. DelegationRuleFilter's target map gained the matching
+    //            RecordAccessGateQuery case in the same change; without it the route would default-deny and the
+    //            affordance would vanish for every user. Both directions are pinned by
+    //            tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs.
+    private const int ExpectedEndpointFileCount = 120;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

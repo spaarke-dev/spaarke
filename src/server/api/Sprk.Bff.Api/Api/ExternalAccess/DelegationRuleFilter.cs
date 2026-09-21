@@ -17,8 +17,10 @@ public static class DelegationRuleFilterExtensions
     /// </summary>
     /// <remarks>
     /// Applied at the GROUP rather than per route, deliberately. The group is a closed
-    /// access-management surface — mutations, plus one read (task 063's share list, which discloses who
-    /// can reach a record) — and <see cref="DelegationRuleFilter"/> denies any request whose target
+    /// access-management surface — mutations, plus two reads: task 063's share list (which discloses who can
+    /// reach a record) and task 118's <c>/can-manage-access</c> (which reports THIS filter's verdict to the
+    /// client, so the Manage Access affordance gates on the server's rule rather than on a table-level proxy
+    /// for it) — and <see cref="DelegationRuleFilter"/> denies any request whose target
     /// it cannot identify — so a seventh route added tomorrow is gated from its first request
     /// instead of inheriting a hole. That failure is loud and immediate (the author hits 403 on the
     /// first call) rather than silent, which is the correct direction for an authorization default.
@@ -267,6 +269,16 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
 
                 case RecordUserSharesQuery userShares:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(userShares.RecordType, userShares.RecordId));
+
+                // ── /can-manage-access (task 118, FR-07 / D-1 option C) ───────────
+                // The one route on this group whose PURPOSE is to be gated. It reports this filter's own verdict
+                // to the client so the Manage Access affordance asks the server's question instead of guessing at
+                // it from a table-level privilege. Mapping it here is what makes the answer true: without this
+                // case the default branch would deny every caller, and the client — which reads any non-200 as
+                // "no" — would hide the affordance from everyone, which is precisely the failure the task's
+                // code-before-config ordering exists to prevent.
+                case RecordAccessGateQuery gate:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(gate.RecordType, gate.RecordId));
             }
         }
 

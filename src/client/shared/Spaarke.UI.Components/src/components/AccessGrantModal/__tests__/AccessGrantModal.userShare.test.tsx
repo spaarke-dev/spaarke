@@ -106,6 +106,9 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
     fetchExistingGrants,
     searchContacts,
     isInternalContact,
+    // Stated EXPLICITLY since task 118 inverted the default to `false` (fail closed). The "+ User" share
+    // flow is only reachable once the host has a "yes" from the server, so these tests say so.
+    canGrantAccess: true,
     ...overrides,
   };
 }

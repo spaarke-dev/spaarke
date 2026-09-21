@@ -172,14 +172,30 @@ export interface IAccessGrantModalProps {
    * writing project grants unchanged (the BFF also accepts the legacy `projectId`
    * shorthand, but this modal always sends the explicit `recordType`). */
   recordType?: ExternalGrantRootType;
-  /** Gates the modal's functional UI. Mirrors `TrackingFieldTrio`'s
-   * `canGrantAccess` gate on the person icon (task 040) — this is a SECOND,
-   * defense-in-depth check inside the modal itself, so a direct component
-   * mount (bypassing the icon's disabled state) still cannot grant/revoke.
-   * When `false`, the modal renders an explanatory not-authorized state
-   * instead of the candidate list / picker / grants list. Default `true`
-   * (fail-open only when the caller hasn't wired an access decision at all —
-   * matches `TrackingFieldTrio`'s own default). */
+  /** Gates the modal's functional UI. When not `true`, the modal renders an
+   * explanatory not-authorized state instead of the candidate list / picker /
+   * grants list.
+   *
+   * 🔴 WHAT THIS IS NOT (corrected in task 118, unified-access-control-r2).
+   * This doc used to call the check "a SECOND, defense-in-depth check inside
+   * the modal itself". It is not, and describing it that way is what let a
+   * fail-open default survive review: this check and `TrackingFieldTrio`'s
+   * person-icon check read THE SAME VALUE, from the same host, so they cannot
+   * disagree and neither can catch the other being wrong. Two gates reading
+   * one value are one gate. What it DOES buy is narrower and worth stating
+   * honestly: a direct component mount that bypasses the icon's disabled state
+   * still renders the not-authorized surface rather than the grant UI.
+   *
+   * THE REAL BACKSTOP IS THE SERVER. `DelegationRuleFilter`, group-level on
+   * `/api/v1/external-access`, refuses every grant, revoke, share and expiry
+   * change from a caller without Write on the target record — evaluated as the
+   * caller over OBO, and denying what it cannot evaluate. No client-side value
+   * can bypass it.
+   *
+   * Default `false` — INVERTED in task 118. It was `true`, so a host that had
+   * not wired an access decision got the full grant UI. An unanswered access
+   * question is now a denial, matching both `TrackingFieldTrio`'s default and
+   * the server's fail direction. */
   canGrantAccess?: boolean;
   /** Host-supplied `authenticatedFetch` (ADR-028 function-dependency contract
    * — never a raw token). Used for the three built BFF calls: `/grant`,

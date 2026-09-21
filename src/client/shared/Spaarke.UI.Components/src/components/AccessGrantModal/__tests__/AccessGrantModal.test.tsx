@@ -107,6 +107,11 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
     fetchExistingGrants,
     searchContacts,
     isInternalContact,
+    // Stated EXPLICITLY since task 118 inverted the default to `false` (fail closed). These tests are
+    // about the grant UI, so they must say that the host got a "yes" from the server — inheriting it from
+    // a default was exactly what let the retired fail-open go unnoticed. The default itself is asserted
+    // by its own test below, which is the only place that omits this prop deliberately.
+    canGrantAccess: true,
     ...overrides,
   };
 }
@@ -386,9 +391,26 @@ describe('AccessGrantModal (v1.0.26)', () => {
     });
   });
 
-  describe('canGrantAccess=false — defense in depth', () => {
-    it('renders a not-authorized state and never fetches candidate/grant data', () => {
+  // Renamed in task 118: this was "defense in depth", which described a guarantee this check does not
+  // provide. It reads the SAME value the person icon reads, from the same host, so it cannot catch that
+  // value being wrong. What it does provide is the narrower property asserted here — a direct mount that
+  // bypasses the icon still renders the not-authorized surface. The real backstop is DelegationRuleFilter.
+  describe('canGrantAccess gate — a direct mount cannot reach the grant UI', () => {
+    it('renders a not-authorized state and never fetches candidate/grant data when canGrantAccess is false', () => {
       const props = makeProps({ canGrantAccess: false });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      expect(screen.getByText(/do not have permission to grant or revoke access/i)).toBeInTheDocument();
+      expect(props.fetchCandidates).not.toHaveBeenCalled();
+      expect(props.fetchExistingGrants).not.toHaveBeenCalled();
+    });
+
+    // 🔴 THE INVERSION (task 118, D-1 option C). Until v1.0.31 an omitted `canGrantAccess` defaulted to
+    // `true` and this mount rendered the full grant UI. `canGrantAccess: undefined` is spelled out rather
+    // than left off the object, so the test states the case it is about and cannot be read as an
+    // oversight by the next person to touch `makeProps`.
+    it('renders the not-authorized state when canGrantAccess is omitted (fail closed)', () => {
+      const props = makeProps({ canGrantAccess: undefined });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       expect(screen.getByText(/do not have permission to grant or revoke access/i)).toBeInTheDocument();
