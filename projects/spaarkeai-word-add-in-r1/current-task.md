@@ -6,7 +6,15 @@
 
 ## 🔴 HANDOFF 2026-09-19 — READ THIS BLOCK FIRST
 
-**Branch `work/spaarkeai-word-add-in-r1` @ `cca9c221e` (this checkpoint), clean, level with origin, PR #960 (draft).** Prior commits today: `23fd17991` (task 055 close-out) → `a71a381fa` (task 056) → `090784afb` (tasks 057–060 + plan).
+**Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). HEAD = the newest commit on the branch — get it with `git log -1 --format='%H %s'`; do NOT trust a SHA written here.**
+
+> **Why this reads that way.** A literal SHA in this block self-invalidates: the very commit that writes it
+> moves HEAD past it. It went stale twice on 2026-09-19 and I "fixed" it the first time by writing a fresh
+> SHA — which re-armed the same trap for the next commit. The `/context-handoff` read-back caught it both
+> times. Landmark commits (stable, safe to cite): `23fd17991` task 055 close-out · `a71a381fa` task 056 ·
+> `090784afb` tasks 057–060 + plan · `2f808ce81` machine-switch notes.
+
+**On arrival**: `git fetch origin && git checkout work/spaarkeai-word-add-in-r1 && git pull` — expect a clean tree, level with origin, nothing stashed of mine.
 
 ### 💻 MACHINE SWITCH — laptop → desktop (2026-09-19/20). Read before blaming the environment.
 
