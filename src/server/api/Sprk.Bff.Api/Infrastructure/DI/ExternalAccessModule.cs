@@ -352,6 +352,25 @@ public static class ExternalAccessModule
         // to the one instance that served it and a restart re-enables the job (ADR-036 A1 §2).
         services.AddScheduledJob<GrantExpiryReminderJob>(GrantExpiryReminderJob.DefaultCronSchedule);
 
+        // Owner decision D-1 option B + D-2 part 3, task 117 — the reconciliation pass that makes a row's own
+        // statecode / sprk_expiresdate the truth (stamp an undated grant, deactivate a grant whose organization
+        // is inactive, deactivate a membership whose end date has passed). Same host, same registration seam as
+        // the reminder job above (ADR-036 A1 rule 6); ADR-052 places it in the BFF.
+        //
+        // ⚠️ enabled: false IS THE SHIPPING STATE, not an oversight. Rules R2 and R3 REMOVE access that exists
+        // today, and R1 turns a row that (since task 107) confers nothing into one that confers access for 90
+        // more days. Enabling it is an owner action. It is belt AND braces: even a manual admin trigger of the
+        // disabled job writes nothing, because writes are separately gated on
+        // ExternalAccessReconciliationJob.WritesEnabledConfigKey, which defaults to report-only.
+        //
+        // UNCONDITIONAL registration (ADR-032): every dependency — IServiceScopeFactory, TimeProvider,
+        // IConfiguration, IGenericEntityService, IIdempotencyService — is itself registered unconditionally, so
+        // there is no feature flag around this line and no Null-Object is needed. The job's OWN disabled state
+        // is carried by the scheduler's registration data, not by an `if` around the registration, which is
+        // exactly what § F.1's asymmetric-registration anti-pattern asks for.
+        services.AddScheduledJob<ExternalAccessReconciliationJob>(
+            ExternalAccessReconciliationJob.DefaultCronSchedule, enabled: false);
+
         return services;
     }
 
