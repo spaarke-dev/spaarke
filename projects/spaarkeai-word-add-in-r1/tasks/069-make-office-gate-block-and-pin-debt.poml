@@ -37,6 +37,16 @@
       printed, not checked, and the 111 exists solely in comments (`:295`, `:312`). 111 → 112 passes
       silently, so new test-file debt accrues invisibly. This is the AP-12 shape.
 
+      > ⚠️ **THE 111 IS ALREADY STALE — DO NOT PIN IT.** Task 071 repaired the ten red jest suites and
+      > removed **37 lines** of test-file debt in doing so. CI run `35643050671` at commit `c564a4e81`
+      > reports: `Production typecheck clean: 0 production error(s); 74 total line(s) are accepted
+      > test-file debt.` The number to pin is **74**, not 111 — and **re-derive it from a fresh CI run at
+      > the commit you are pinning at**, because tasks 072 and 075 may move it again before this task runs.
+      > Pinning a number copied from a document rather than measured at the moment of pinning is the same
+      > stale-baseline error CLAUDE.md §10 documents for publish size, where a three-week-old figure led a
+      > project to overstate its own contribution 46×. The local figure differs too (80 local vs 74 CI at
+      > the same commit) — **pin the CI number**, since CI is what enforces it.
+
       **(c) A false claim in a comment.** `:252-254` says the suite-count assertion protects against a
       dropped trailing newline. It does not: both sides of the comparison derive from the same `while read`
       array (`:193-199` → `:218-219`), so a missing last line shrinks both numbers equally and the assertion
