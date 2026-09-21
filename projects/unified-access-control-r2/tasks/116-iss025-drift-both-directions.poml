@@ -3,7 +3,7 @@
   <metadata>
     <title>The status-drift check compares POMLs and TASK-INDEX rows as SETS — an unpaired entry on EITHER side is drift (ISS-025 / #1004)</title>
     <phase>Register-driven — queued 2026-09-18 (wave 0, bookkeeping)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One repo tooling script; no product code, no new surface, no ADR question. Verification is behavioural — recreate the condition, then perturb the new assertion — not a code-review judgment call.</rigor-reason>
     <model-tier>sonnet</model-tier>
