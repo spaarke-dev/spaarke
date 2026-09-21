@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-009 (#974) option A — invert the read default: a grant with NO sprk_expiresdate confers NOTHING</title>
     <phase>FR-33 External grant expiry (register-driven, owner rule 2026-09-15)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs in Infrastructure/ExternalAccess — this changes what every external caller can reach, in the fail-CLOSED direction. Two definitions of "expired" (the OData predicate and its in-memory mirror) must move together or /grant reports an outcome the reader contradicts.</rigor-reason>
     <model-tier>sonnet</model-tier>
