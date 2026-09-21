@@ -8,6 +8,52 @@
 
 **Branch `work/spaarkeai-word-add-in-r1` @ `cca9c221e` (this checkpoint), clean, level with origin, PR #960 (draft).** Prior commits today: `23fd17991` (task 055 close-out) → `a71a381fa` (task 056) → `090784afb` (tasks 057–060 + plan).
 
+### 💻 MACHINE SWITCH — laptop → desktop (2026-09-19/20). Read before blaming the environment.
+
+**Nothing is stranded.** Everything is committed and pushed; `0534a382c` is on origin, SHA-verified. The
+desktop needs only `git fetch && git checkout work/spaarkeai-word-add-in-r1 && git pull`. No uncommitted work,
+no untracked files, no stash of mine.
+
+**⚠️ DO NOT inherit "the network is flaky" as a project fact — it was THIS LAPTOP.** Four failures on
+2026-09-19 were local network faults, not Azure or GitHub problems: a `git push` that reset mid-transfer (then
+printed `Everything up-to-date`), an aborted `gh run watch` (`graphql: connection aborted`), and **two BFF
+deploys that died on `getaddrinfo failed` / `ConnectionResetError` at the Kudu upload**. The third deploy
+attempt succeeded unchanged. If the desktop hits a failure, **diagnose it — do not write it off as known
+noise.** That misattribution is the risk this note exists to prevent.
+
+**Rebuild required before tasks 058 / 060.** `deploy/` is gitignored (`.gitignore:133`), so these exist only on
+the laptop and must be regenerated on the desktop before any publish-size measurement or deploy:
+`deploy/api-publish/`, `deploy/api-publish.zip` (45.43 MB), `src/client/office-addins/node_modules/`,
+`src/client/office-addins/dist/`.
+
+**Toolchain actually used here — match or note the difference:**
+
+| Tool | Laptop | Why it matters |
+|---|---|---|
+| `pwsh` | `C:\Program Files\PowerShell\7\pwsh.exe` | **Deploy-BffApi.ps1 MUST run under `pwsh`, not `powershell`** — Windows PowerShell 5.x lacks `Get-FileHash`, which silently disables the SHA-256 hash-verify that is the only defence against a deploy reporting success without replacing DLLs |
+| dotnet SDK | **10.0.401** | BFF targets net10.0 |
+| node / npm | **v20.20.2 / 10.8.2** | Node 20 matches CI; a mismatch makes the gate and the nightly baseline disagree for toolchain reasons |
+| `gh` | 2.100.0 | — |
+| `git` | 2.53.0.windows.2 | — |
+| `actionlint` | **ABSENT** | Task 056 fell back to a js-yaml parse. **If the desktop has it, run it** — it would likely have caught the `-e` gate defect before CI did |
+| `python` | present (WindowsApps shim) | — |
+| `jq` | **ABSENT** | Use `gh --jq` (built in), not piped `jq` |
+
+**Auth to re-establish on the desktop** (both are per-machine):
+- `az login` — laptop was `ralph.schroeder@spaarke.com` / subscription **"Spaarke Devlopment Environment"**. Needed for any BFF deploy and for the Kudu hash-verify.
+- `gh auth` — laptop token scopes were `gist, read:org, repo, workflow`. **`read:project` is MISSING**, which is why `/devops-project-sync` failed all session. Same gap will recur unless the desktop token has it.
+
+**Deploy state is server-side and travels with you** — the BFF and SWA deploys are live regardless of machine.
+No redeploy is needed just because you switched.
+
+**Worktree hygiene**: my temporary scratchpad worktrees (`wt-master`, `wt-branch`, used for publish-size
+comparison) were removed — `git worktree list` is clean. The laptop's shared stash stack holds **2 entries,
+neither mine** (a `master` pre-deploy stash and a WIP on `spaarke-ai-platform-unification-r2`) — those are
+laptop-local and will not appear on the desktop, but **the never-bare-`git stash` rule still applies there**,
+since the desktop has its own parallel worktrees.
+
+---
+
 ### ⛔ FIRST: task 056's CI gate is BROKEN and I broke it — one-line fix, owner decision pending
 
 `Production typecheck (office-addins)` **failed on its first real CI run** (run `35468805634`, 36 s). The log's
