@@ -3,6 +3,9 @@
 > **Result**: all 10 suites repaired. 56/56 office-addins jest suites pass (750/750 tests) and all 56
 > are now in `ci-gated-suites.txt`. No shipped behaviour was changed. Two of the ten "inferred"
 > diagnoses in the Fable review were **wrong** (not just incomplete) — see §2.
+> **PROVEN ON CI** (2026-09-21, after the coordinator pushed commit `c564a4e81`): run
+> [`35643050671`](https://github.com/spaarke-dev/spaarke/actions/runs/35643050671) — 56/56 suites,
+> 750/750 tests, suite-count assertion OK, zero divergence from the local numbers below. See §7.
 
 ---
 
@@ -100,22 +103,58 @@ The suite-count assertion (`office-addins-tests.yml:258-263`, `numTotalTestSuite
 was verified locally by running the exact `--runTestsByPath` invocation the gate uses: it reports 56 ran
 against a 56-line manifest, so the assertion passes.
 
-## 7. What was NOT done — stated explicitly
+## 7. PROVEN ON CI — closed 2026-09-21
 
-- **PROVEN ON CI acceptance criterion — NOT met.** Per the dispatching instruction for this run
-  ("COMMIT on the current branch... Do NOT push"), this change was committed but **not pushed**, so no
-  CI run exists to cite a URL for. The POML's own step 5 ("push and prove the gated job green... record
-  the run URL") is explicitly overridden by that instruction. Everything CI would check was verified
-  locally instead: the exact gated `--runTestsByPath` invocation (56/56, §5), the suite-count assertion's
-  inputs (§6), and `npm run typecheck` (0 production errors — see §8). This is the one acceptance
-  criterion this run did not satisfy; it needs a push + a real CI run to close.
+Originally left unmet: the dispatching instruction for the repair run said "COMMIT... Do NOT push," which
+directly conflicts with this criterion — a real CI run needs a remote push. That contradiction belonged to
+the dispatch, not to the repair work (task 073 hit the identical conflict independently). Recorded as
+explicitly unmet rather than implied, per the run's own closing instructions.
+
+The coordinator pushed commit `c564a4e81` to `work/spaarkeai-word-add-in-r1` (PR #960) separately. This
+section records the resulting CI verification, pulled from the run's own log — not re-asserted from the
+local numbers above.
+
+**Run**: [`35643050671`](https://github.com/spaarke-dev/spaarke/actions/runs/35643050671) — workflow
+"Office Add-ins Tests (Gate)", triggered by `pull_request` on PR #960, `headSha` verified as `c564a4e81`
+(`gh run view 35643050671 --json headSha` before trusting any result). Conclusion: **success**.
+
+**"Gated jest suites (office-addins)" job** (`106476769746`, 1m27s):
+
+```
+Gated suites (56):
+...
+Test Suites: 56 passed, 56 total
+Tests:       750 passed, 750 total
+Suite-count assertion OK: jest ran 56 suite(s), manifest declares 56.
+```
+
+The manifest-resolution step independently counted 56 entries from `ci-gated-suites.txt` (matching §6),
+jest ran and passed all 56 with 750/750 tests (matching §5 exactly), and the no-vacuous-green
+suite-count assertion (`numTotalTestSuites` vs the manifest's declared count, `office-addins-tests.yml:258-263`)
+passed: 56 == 56. This is the mechanism that proves the manifest and reality agree on CI, per the
+coordinator's framing — not merely that the local run and the manifest agree, which could both be wrong
+the same way (e.g. a stale local `node_modules` masking a `roots`/`testMatch` gap that would show up only
+on a clean CI checkout — exactly the class of defect task 056 hit twice).
+
+**"Production typecheck (office-addins)" job** (`106476770292`, 59s): `Production typecheck clean: 0
+production error(s); 74 total line(s) are accepted test-file debt.` (Local count was 80 lines; the
+difference is unpinned test-file debt drift, not a production regression — ADR-038's own reading rule for
+this counter is that it is an observation, never a gate, and a few lines of drift either way is expected.)
+
+**Zero divergence between local and CI.** Every number CI reported — 56 gated, 56 ran, 750 tests, 0
+production errors — matches the local run in §5/§6/§9 exactly (test-file debt total aside, which is
+explicitly non-gating and expected to drift). No suite passed locally and failed on CI, or vice versa.
+This criterion is now met.
+
+## 8. What was NOT done — stated explicitly
+
 - No new happy-path test cases were added beyond what each repair required. The only genuinely new
   assertions are: one negation test in `SaveFlow.test.tsx` (confirms the AI-processing toggles stay gone,
   replacing four tests of behaviour that no longer exists) and the `SaveView.test.tsx` rewrite's tests,
   each of which maps directly onto an original test's intent retargeted at the current `hostAdapter`
   contract (justified inline in the file's own header comment).
 
-## 8. Typecheck hygiene (not gating, but checked)
+## 9. Typecheck hygiene (not gating, but checked)
 
 `npm run typecheck` after all repairs: **0 production errors** (all `error TS` lines are under
 `__tests__/`, the accepted-debt pattern the CI classifier already excludes). Two type errors introduced

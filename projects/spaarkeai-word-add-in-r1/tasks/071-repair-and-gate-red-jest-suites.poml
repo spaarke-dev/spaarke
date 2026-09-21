@@ -123,13 +123,15 @@
 
   <notes>
     Completed 2026-09-21. All 10 suites repaired; full run 56/56 suites, 750/750 tests. Gated set
-    (ci-gated-suites.txt) taken 46 -&gt; 56, verified locally against the exact `--runTestsByPath`
-    invocation the CI gate uses (56 ran / 56 declared, suite-count assertion inputs match). Two of
-    the review's "inferred" diagnoses (SaveView.test.tsx, EntityPicker.test.tsx) were WRONG, not just
-    approximately right, and SaveFlow.test.tsx's was half-wrong -- full confirmed-vs-corrected table
-    in notes/071-jest-repair.md. NOT pushed and NOT proven on a real CI run: the dispatching
-    instruction for this execution said commit-only, no push, which overrides the POML's own step 5 /
-    the "PROVEN ON CI" acceptance criterion. That criterion is explicitly UNMET -- see
-    notes/071-jest-repair.md section 7.
+    (ci-gated-suites.txt) taken 46 -&gt; 56. Two of the review's "inferred" diagnoses (SaveView.test.tsx,
+    EntityPicker.test.tsx) were WRONG, not just approximately right, and SaveFlow.test.tsx's was
+    half-wrong -- full confirmed-vs-corrected table in notes/071-jest-repair.md.
+
+    PROVEN ON CI (closed 2026-09-21, after the coordinator pushed commit c564a4e81 to PR #960): run
+    35643050671 (https://github.com/spaarke-dev/spaarke/actions/runs/35643050671), headSha verified
+    against c564a4e81. Gated jest suites job: 56 gated / 56 ran / 750 tests passed / suite-count
+    assertion OK (56 == 56). Production typecheck job: 0 production errors. Zero divergence from the
+    local run -- see notes/071-jest-repair.md section 7 for the full record, pulled from the CI log
+    itself rather than re-asserted from local numbers.
   </notes>
 </task>
