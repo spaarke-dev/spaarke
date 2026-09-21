@@ -1508,8 +1508,14 @@ public static class OfficeEndpoints
 
         // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
         // (email-communication-intelligence-r2 #3). Regarding = the record the email was filed to.
-        // Authorization: OfficeAuthFilter validates user authentication.
-        // Rate Limit: reuses the QuickCreate category (both are low-frequency inline creates).
+        // Authorization: OfficeAuthFilter validates user authentication, then TodoSourceAccessFilter
+        // (word-add-in-r1 task 064, ADR-008) read-gates ALL FOUR caller-supplied record ids —
+        // regardingRecordId, documentId, communicationId, assignedToContactId — before the handler runs.
+        // Every one of them is written onto a row the CALLER owns, and the regarding target is read
+        // app-only by CoreAncestorResolver to stamp its parent matter/project onto that row, so an
+        // ungated id let a caller both attach a To Do to a record they cannot read and harvest that
+        // record's core ancestor. The filter's single constant deny body is also what closes the
+        // 403-vs-201 record-existence oracle — see TodoSourceAccessFilter's remarks.
         group.MapPost("/todo", CreateTodoAsync)
             .WithName("OfficeCreateTodo")
             .WithSummary("Create a To Do (sprk_todo)")
@@ -1517,6 +1523,7 @@ public static class OfficeEndpoints
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter()
             .AddOfficeAuthFilter()
+            .AddTodoSourceAccessFilter() // word-add-in-r1 task 064 - caller must hold Read on every source id
             .Accepts<CreateTodoRequest>("application/json")
             .Produces<CreateTodoResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)

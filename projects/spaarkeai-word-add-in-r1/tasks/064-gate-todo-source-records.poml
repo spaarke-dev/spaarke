@@ -4,7 +4,7 @@
     <title>F3 — `/office/todo` writes caller-supplied regarding, document and communication GUIDs app-only with no access check, and leaks record existence</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security fix on a route whose carriers this project added (task 035). Tags include bff-api + auth + security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -123,6 +123,31 @@
     <file>tests/integration/contract/Api/Office/OfficeTodoSourceAuthorizationContractTests.cs</file>
     <file>projects/spaarkeai-word-add-in-r1/notes/064-todo-source-gate.md</file>
   </outputs>
+
+  <notes>
+    Completed 2026-09-21. Full record: `projects/spaarkeai-word-add-in-r1/notes/064-todo-source-gate.md`.
+
+    **Shipped**: `src/server/api/Sprk.Bff.Api/Api/Filters/TodoSourceAccessFilter.cs` (new) read-gates all
+    four caller-supplied ids; `.AddTodoSourceAccessFilter()` on `POST /office/todo` after
+    `AddOfficeAuthFilter()`; `OfficeService._todoRegardingMap` → `internal TodoRegardingMap` so the filter
+    gates off the same table that decides what is written (the anti-drift forcing function);
+    `tests/integration/contract/Api/Office/OfficeTodoSourceAuthorizationContractTests.cs` (8 tests).
+
+    **Mirrored, not extended** (justification `extension` element): `QuickCreateSourceAccessFilter` binds one
+    caller-named id to `QuickCreateRequest` and emits three reason codes — the latter is precisely what this
+    route must not do, because a reason code that varies with the record IS the oracle.
+
+    **Oracle closed by construction**: `Deny()` takes no reason and no record; every refusal returns one
+    identical 403 (`OFFICE_009` / `source_record_inaccessible`).
+
+    **Escalation trigger did NOT fire** (checked, not assumed): `App.tsx:403-405` returns
+    `Create failed (${res.status})` for any non-ok and never reads the body, so no shipped client behaviour
+    depends on the 403-vs-201 split. No client change.
+
+    **NOT met — stated rather than implied**: criterion 7 (task 061's guard) is unreachable while 061 is
+    deferred; and there is no live-Dataverse verification of `RetrievePrincipalAccess` against
+    `sprk_documents` / `sprk_communications` under OBO. Failure direction is fail-closed (403). See note §8.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

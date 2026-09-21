@@ -2570,8 +2570,14 @@ public class OfficeService : IOfficeService
     /// (FR-14, task 035) are the pane's independent "carrying" regarding — looked up via
     /// <see cref="CreateTodoRequest.DocumentId"/> / <see cref="CreateTodoRequest.CommunicationId"/>, NOT via
     /// <c>RegardingEntityType</c> — because both a carrier and a record may be set on the same call. See
-    /// <c>notes/035-todo-regarding-decision.md</c>.</summary>
-    private static readonly IReadOnlyDictionary<string, (string LookupAttribute, string LogicalName)> _todoRegardingMap =
+    /// <c>notes/035-todo-regarding-decision.md</c>.
+    ///
+    /// <para><b>Internal, not private (task 064).</b> <see cref="Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter"/>
+    /// read-gates exactly the ids this table causes to be WRITTEN, and it drives off this table rather than
+    /// declaring its own copy. That is the forcing function: adding a row here automatically gates the new
+    /// type, and a row that disappears un-gates a write that also stops happening. Two tables would have
+    /// drifted, and the drift's failure direction is an ungated write.</para></summary>
+    internal static readonly IReadOnlyDictionary<string, (string LookupAttribute, string LogicalName)> TodoRegardingMap =
         new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
         {
             ["Matter"] = ("sprk_regardingmatter", "sprk_matter"),
@@ -2634,7 +2640,7 @@ public class OfficeService : IOfficeService
         // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.
         if (!string.IsNullOrWhiteSpace(request.RegardingEntityType)
             && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
-            && _todoRegardingMap.TryGetValue(request.RegardingEntityType!, out var reg))
+            && TodoRegardingMap.TryGetValue(request.RegardingEntityType!, out var reg))
         {
             entity[reg.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(reg.LogicalName, regardingId);
             entity["sprk_regardingrecordid"] = regardingId.ToString();
@@ -2681,14 +2687,14 @@ public class OfficeService : IOfficeService
         // unchanged by this task — a document/communication carrier alone needs no stamp of its own).
         if (request.DocumentId is { } documentId
             && documentId != Guid.Empty
-            && _todoRegardingMap.TryGetValue("Document", out var docCarrier))
+            && TodoRegardingMap.TryGetValue("Document", out var docCarrier))
         {
             entity[docCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(docCarrier.LogicalName, documentId);
         }
 
         if (request.CommunicationId is { } communicationId
             && communicationId != Guid.Empty
-            && _todoRegardingMap.TryGetValue("Communication", out var commCarrier))
+            && TodoRegardingMap.TryGetValue("Communication", out var commCarrier))
         {
             entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
         }
