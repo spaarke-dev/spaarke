@@ -4,7 +4,7 @@
     <title>Node is split three ways — the gate tests on 20, the nightly baseline uses 20, and what actually ships is built on 18</title>
     <phase>5 Remediation — verification</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a deployment workflow. Tags include ci-cd + deploy. A toolchain mismatch is the same class of error that produced task 056's first gate defect.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,4 +103,31 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes-completion>
+Matrix independently re-verified 2026-09-21 — matches the task's stated table exactly (gate 20, nightly 20,
+deploy 18, desktop 22.14.0, engines &gt;=18.0.0, no .nvmrc/.node-version repo-wide). Chose Node 20: two of three
+CI surfaces already tested on it, deploy is the outlier, and moving the gate down would touch task 069's
+owned file for no reason. Added .nvmrc="20"; narrowed package.json engines to "&gt;=20.0.0 &lt;21.0.0" (verified
+this actually produces npm's EBADENGINE warning on this desktop's Node 22.14.0 via a read-only
+`npm install --dry-run`); changed deploy-office-addins.yml:34 node-version '18' -&gt; '20' only.
+office-addins-tests.yml NOT touched (already correct, owned by 069). actionlint run locally (downloaded via
+CI's own installer script, v1.7.7) against the changed file and the full workflow set: exit 0, no findings.
+
+Stale-node_modules hazard recorded per the task's explicit acceptance criterion in
+notes/073-node-alignment.md §5, including the task-043 consequence and an honest caveat that this desktop's
+install now appears fresh (likely refreshed by the concurrently-active test-file agent in this same wave) —
+which does not retroactively validate task 043's historically recorded runs.
+
+BLOCKED ON PUSH COORDINATION, surfaced to and resolved with `main` rather than improvised: the deploy-run
+verification acceptance criterion (workflow_dispatch against the real Node-20 config, run URL, output
+equivalence check) requires this commit to be on origin, but this task's instructions also say do not push.
+Raised the conflict to main (task-062 and task-071 are committing to the same branch concurrently; main is
+centralizing push authority). Agreed sequence: this task commits locally and stops; main pushes; main notifies
+this task; this task then runs `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`,
+records the run URL + result, verifies output equivalence, and closes out notes/073-node-alignment.md §4.
+
+Status intentionally left at in-progress (not completed) and TASK-INDEX row 073 intentionally left at 🔄 (not
+✅) until that verification step closes — acceptance criteria 4 and 5 are not yet met.
+  </notes-completion>
 </task>
