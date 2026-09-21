@@ -377,3 +377,45 @@ identity. Its second unmet criterion (task 061's guard) is unchanged and remains
 **Carry forward to other environments**: this was verified in **dev only**. A different environment may
 assign these app users differently, and `spaarke-bff-api-prod` (`92ecc702-…`) was **not** checked. Re-verify
 before the first production deploy that depends on impersonation — do not port this result.
+
+### ⚠️ §N.1 CORRECTION (2026-09-21) — §N cleared the WRONG precondition. A second one is NOT satisfied.
+
+§N above verified that the **BFF application user** can impersonate (`prvActOnBehalfOfAnotherUser`). That is
+true and unchanged. **It is not sufficient**, and reading §N alone would leave a reader over-confident.
+
+Impersonation has **two** preconditions. §N checked one:
+
+| # | Precondition | Status |
+|---|---|---|
+| 1 | The BFF app user may act on behalf of another user | ✅ verified §N |
+| 2 | **The impersonated END USER may read the tables being queried** | ❌ **NOT satisfied for the add-in's own role** |
+
+Found by task 066's investigation (not by 062's own work) and re-verified independently here against dev:
+
+- **`Spaarke Office Add In User` grants NO `prvReadsprk_Matter` at any depth.** A query for
+  `prvReadsprk_Matter` on that role returns **zero rows**.
+- Only **`Spaarke Basic User`** grants it, at depth mask **4**.
+- Role assignments in dev: `Test User 1` holds **both** roles; `Ralph Schroeder` holds `Spaarke Basic User`.
+  **No user in dev holds `Spaarke Office Add In User` alone.**
+
+**Why this is invisible in dev and dangerous outside it**: the one add-in test account happens to carry the
+second role. A tenant that provisions add-in users with only `Spaarke Office Add In User` — which is what the
+role's *name* implies is its purpose — gets an end user who can read none of the five searched tables.
+
+**Failure shape**: every per-type query fails for that caller, which trips the deliberate
+all-types-failed rule task 062 added (the rule exists so a permissions problem does not masquerade as
+"no results" — correct reasoning). The result is **HTTP 500 on the entity picker**, not an empty list.
+Fail-closed and loud, as designed, but a **visible outage** on a shipped surface for that user population.
+
+**This is the live verification 062 recorded as its own unmet acceptance criterion.** The criterion was right
+to be left open; §N closed a different question than the one that mattered most.
+
+**Owner decision required before any deploy that ships 062.** Options, not mutually exclusive:
+
+| | Option | Cost |
+|---|---|---|
+| **1** | Grant `Spaarke Office Add In User` read on the five searched tables (Matter, Project, Invoice, Account, Contact) at an appropriate depth | A security-role change; needs the depth decided deliberately, since depth IS the trim |
+| **2** | Soften 062's all-types-failed rule so a **permission-denied** outcome yields an explicit "you do not have access to search these records" state rather than a 500 | Code change in 062's file; keeps other failure causes loud |
+| **3** | Both — 1 makes the picker work, 2 makes the failure legible if a role is ever misconfigured again | Recommended |
+
+Do NOT resolve this by reverting 062. The untrimmed enumeration it replaced is the HIGH finding F1.
