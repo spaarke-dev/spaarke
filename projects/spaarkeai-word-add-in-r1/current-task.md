@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-19 (by `/context-handoff`) — **055 COMPLETE + LIVE on both halves; 056 merged but ITS CI GATE IS BROKEN (one-line fix, undecided); tasks 057–060 authored, validated, NOT started.**
+> **Last Updated**: 2026-09-21 — **056's gate is GREEN (two defects, both proven on real CI runs). Task 058 conflict-check DONE (soft warn, proceed). 057/059/060 still not started.**
 
 ---
 
@@ -62,6 +62,37 @@ since the desktop has its own parallel worktrees.
 
 ---
 
+### ✅ RESOLVED 2026-09-21 — task 056's gate is GREEN, and it took TWO fixes, not one
+
+> Operator approved the fix 2026-09-21. Both defects are fixed, pushed, and **proven by real CI runs** —
+> not by local validation, which is what caused the first defect.
+>
+> | | Commit | Run | Result |
+> |---|---|---|---|
+> | **Defect 1 — errexit** | `32aa6aec9` | `35551978911` | `set +e` added. Gate stopped dying at exit 2 and **reached the classifier for the first time**. |
+> | **Defect 2 — the one defect 1 was hiding** | `be18d7d0e` | `35552142104` | Classifier then failed honestly: `1 PRODUCTION error — AuthService.ts(2,71) TS2307 Cannot find module '@spaarke/auth'`. |
+>
+> **Defect 2's root cause — a false parity claim in the job's own comment.** It asserted *"tsc --noEmit does
+> not need @spaarke/auth compiled — tsconfig paths resolve it from source, same as jest.config.js does."*
+> False, and exactly so: `jest.config.js:48` maps `^@spaarke/auth$` → `../shared/Spaarke.Auth/src/index.ts`;
+> **`tsconfig.json` maps `@shared/*`, `@outlook/*`, `@word/*` and one deep `@spaarke/communication-components`
+> path — never `@spaarke/auth`.** So tsc fell through to `node_modules` → the `file:` link →
+> `types: dist/index.d.ts` → a `dist/` that is gitignored (`Spaarke.Auth/.gitignore:5`) and unbuilt on a
+> fresh checkout. Two configs were assumed to agree and never did. Invisible locally because a dev machine
+> has `dist/` from an earlier build. Fix: build `@spaarke/auth` first, mirroring `deploy-office-addins.yml:47-51`.
+>
+> **Final state — non-vacuous, and it reconciles:**
+> `Production typecheck clean: 0 production error(s); 111 total line(s) are accepted test-file debt.`
+> 111 total proves tsc ran (the no-vacuous-green guard trips at `total -eq 0`); 0 production proves the
+> classifier partitioned; **111 matches the recorded client baseline exactly.** `Gated jest` pass (1m8s),
+> `actionlint` pass. Task 056's one criterion recorded as *pending, not claimed* is now genuinely satisfied.
+>
+> **The lesson, stated so it is not re-learned:** the first defect *masked* the second. A gate that dies
+> early cannot report what it would have found. Fixing a broken check is not done when it stops being red —
+> it is done when it has been seen to make a real decision on real input.
+
+<details><summary>Historical — the original blocker text (kept for provenance)</summary>
+
 ### ⛔ FIRST: task 056's CI gate is BROKEN and I broke it — one-line fix, owner decision pending
 
 `Production typecheck (office-addins)` **failed on its first real CI run** (run `35468805634`, 36 s). The log's
@@ -86,6 +117,8 @@ run — local validation is what produced this defect.
 **Why it happened, so it isn't repeated**: I verified the classifier in my own shell and never in the runner's.
 That is the same "a mock passing proves nothing about the real thing" failure this session flagged twice
 elsewhere (the `sprk_contact` lesson; the fixture-vs-live gap in 055).
+
+</details>
 
 ✅ **`actionlint` PASSED** on `a71a381fa` — task 056's one criterion recorded as *pending, not claimed*, is now
 genuinely satisfied.
