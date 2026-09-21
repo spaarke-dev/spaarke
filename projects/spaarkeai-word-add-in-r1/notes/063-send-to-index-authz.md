@@ -304,6 +304,30 @@ Passed!  - Failed:     0, Passed:    12, Skipped:     0, Total:    12, Duration:
 > earlier failure in this task was exactly that and vanished on re-run. Both directions occur: a false RED
 > and a false GREEN.
 
+### 5a. Four concurrency hazards in a shared worktree, and the one that matters most
+
+Recorded because this task and task 064 hit all four within an hour, each one produced a commit that
+misdescribed its own contents, and none of them is obvious from the tooling. Task 064's note §7.1 carries the
+same list from the other side.
+
+1. **The `.git/index` is shared, not just the working tree.** `git add` then `git commit` is **not atomic
+   between agents**: whichever agent calls `commit` first commits whatever is in the index, including another
+   agent's staged files. Both of us built careful single-line blobs for `TASK-INDEX.md` and both were defeated
+   by simply not being the one who called `commit`.
+2. **`.husky/pre-commit` runs `npx lint-staged`**, which stashes and restores unstaged changes around the
+   formatters. This is the likeliest route by which files that were *not* in the index at `commit` time still
+   appeared in the commit — the index race alone does not account for untracked files arriving.
+3. **`git commit --only -- <paths>` and `git commit -- <paths>` commit the WORKTREE content of those paths,
+   not the staged content.** This is right for files only one agent touches and wrong for a shared file: an
+   amend intended to remove another agent's `TASK-INDEX.md` row put it straight back, because the worktree had
+   both rows. The `--stat` line said `2 +-` and looked correct.
+4. **`git commit --allow-empty` with no pathspec is not empty** — it commits the shared index.
+
+**The lesson that generalises**: `--stat` and `--name-only` tell you *which files* a commit touched, not
+*whose content* is in them. The check that actually caught hazard 3 was comparing the length of the specific
+line against `HEAD~1`. On a shared file, verify the content you did **not** intend to change is identical to
+its parent, rather than confirming that the file you did intend to change appears.
+
 ---
 
 ## 6. What changed
