@@ -6,9 +6,20 @@
 > the **116** task POMLs and the shipped code.
 > **Audience**: the owner, and anyone deciding what this project must still deliver.
 >
-> **Status 2026-09-21**: **74 completed · 4 completed-with-escalation · 1 blocked-shipped · 37 open ·
-> 116 total.** Drift gate green (116 POMLs = 116 index rows) · build 0W/0E · ArchTests **323/323** ·
-> BFF suite **12,507 passed / 0 failed**.
+> **Status 2026-09-21 (session 21, end)**: **79 completed · 4 completed-with-escalation ·
+> 1 blocked-shipped · 32 open · 116 total.** Drift gate green (116 POMLs = 116 index rows, compared as
+> SETS since task 116) · build 0W/0E · `--filter ExternalAccess` **417/417** · broad access sweep
+> **1165/1165** · `Spaarke.UI.Components` tsc clean.
+>
+> Closed in session 21: **115** (nine task files repaired), **116** (the drift check's set blind spot),
+> **044** (evaluator seam contract), **065** (user picker + M8 + M2), **119** (ISS-027 to-do uploads).
+> **107** was rescoped to owner decision D-1 rather than executed as written.
+>
+> 🔢 **HOW TO COUNT THIS, because I got it wrong once today.** Count with the **same two rules task 116
+> put in `check-task-status-drift.ps1`** — exactly one task id in the row's first cell, and the row at
+> least as wide as the status table. A naive `^\| <marker> \[open\] <id> \|` regex **undercounts**: it
+> misses bold-id rows and returned 27 where the answer is 32. The instrument that undercounted was a
+> weaker version of the parser hardened hours earlier in this same project. Re-measure; do not quote.
 >
 > ⚠️ **Every number in the 2026-09-03 version of this file was stale** ("53 of 92 … 37 open ~188 h").
 > It was not wrong when written; the project grew underneath it. Re-measure before quoting this file.
@@ -17,11 +28,17 @@
 
 ## 0. The single fact that explains this project's shape
 
-**On 2026-09-07 this project was 92 tasks with 37 open. On 2026-09-21 it is 116 tasks with 37 open.**
+**On 2026-09-07 this project was 92 tasks with 37 open. On 2026-09-21 it was 116 tasks — still with
+37 open. By the end of that day it was 116 tasks with 32 open.**
 
-26 tasks were completed in those two weeks, and **24 new ones were filed**. The open count has not
-moved. Almost every addition is register-driven — `ISS-001` … `ISS-029`, twenty-nine issues found *by*
-executing the work, each one a real defect in a real authorization path.
+26 tasks were completed in those two weeks, and **24 new ones were filed**, so for a fortnight the open
+count did not move at all. Almost every addition is register-driven — `ISS-001` … `ISS-029`, twenty-nine
+issues found *by* executing the work, each one a real defect in a real authorization path.
+
+**The consequence for planning is unchanged, and it is the point of this section**: completion is NOT
+predictable from the open count, because that count measures discovery as much as remaining work. Judge
+by *phase closure* instead — Phase 0 is 28/28, and phases only move forwards. The five tasks closed on
+2026-09-21 moved the number for the first time; that is a data point, not yet a trend.
 
 **This is expected and correct, by owner decision (2026-09-21):** *"the added scope that is discovered
 as part of execution is expected — we should not defer or push off new work; if it is important then we
