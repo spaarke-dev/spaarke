@@ -1,9 +1,36 @@
 # Unified Access Control R2 — Objectives, Deliverables, and User Impact
 
-> **Written**: 2026-09-03 · **Source**: `spec.md` (Executive Summary, Scope, FR-01…FR-32, Success
-> Criteria) reconciled against the 92 task POMLs and the shipped code.
+> **Written**: 2026-09-03 · **Refreshed**: **2026-09-21** (numbers re-measured from the POMLs with
+> python — never `grep`, see G-16 — and from the live code, not from this file's prior claims).
+> **Source**: `spec.md` (Executive Summary, Scope, FR-01…FR-32, Success Criteria) reconciled against
+> the **116** task POMLs and the shipped code.
 > **Audience**: the owner, and anyone deciding what this project must still deliver.
-> **Status at writing**: 53 of 92 tasks complete · 37 open (~188 h) · 1 escalated · 1 blocked-shipped.
+>
+> **Status 2026-09-21**: **74 completed · 4 completed-with-escalation · 1 blocked-shipped · 37 open ·
+> 116 total.** Drift gate green (116 POMLs = 116 index rows) · build 0W/0E · ArchTests **323/323** ·
+> BFF suite **12,507 passed / 0 failed**.
+>
+> ⚠️ **Every number in the 2026-09-03 version of this file was stale** ("53 of 92 … 37 open ~188 h").
+> It was not wrong when written; the project grew underneath it. Re-measure before quoting this file.
+
+---
+
+## 0. The single fact that explains this project's shape
+
+**On 2026-09-07 this project was 92 tasks with 37 open. On 2026-09-21 it is 116 tasks with 37 open.**
+
+26 tasks were completed in those two weeks, and **24 new ones were filed**. The open count has not
+moved. Almost every addition is register-driven — `ISS-001` … `ISS-029`, twenty-nine issues found *by*
+executing the work, each one a real defect in a real authorization path.
+
+**This is expected and correct, by owner decision (2026-09-21):** *"the added scope that is discovered
+as part of execution is expected — we should not defer or push off new work; if it is important then we
+need to include it in this project."* Discovery is not slippage here; an authorization sweep that
+stopped finding things would be the alarming outcome.
+
+The consequence to plan around: **completion is not predictable from the open count**, because the open
+count measures discovery as much as remaining work. Judge progress by *phase closure* (§3) instead —
+Phase 0 is 28/28, Phase 1 is 10-of-11, and those numbers only move forwards.
 
 ---
 
@@ -52,15 +79,24 @@ grant rows, AI-search security trimming for contacts.
 
 ## 3. Deliverables by phase
 
-| Phase | Deliverable | State |
-|---|---|---|
-| **0 — Enforcement remediation** | 22 confirmed findings closed, one regression test each | Mostly shipped; **6 tasks open** (023 expiry, 024 SPE honesty, 025 test-integrity, 026 doc repair, 028 service-request core type, 029 external To Do parity) |
-| **0b/0c — Secure Documents** | Server-derived storage containers; authorization before any byte moves; external document surface | **083 CLOSED 2026-09-07 — the `ClientSupplied` sink count is 0.** No code path lets a caller name the container its bytes land in. **082** census open; **093/094/095** filed late |
-| **1 — One evaluator** | Single evaluator; impersonated Dataverse reads replace column pattern-matching (FR-20) | **2 open** (035, 036) |
-| **2 — One definition of member** | Access-conferring allow-list for contact- **and** org-typed lookups (FR-24); standing grants carry a baseline level (FR-25) | **3 open** (042, 043, 044) |
-| **3 — Child inheritance** | Core-ancestor denormalization, re-stamped on reparent (FR-26); children inherit parent rights (FR-27) | **5 open** (054–058) |
-| **4 — Secure Project + Manage Access + wizard** | BU restructure, share-only access, Manage Access PCF rework, Create Project wizard Secure step (FR-28…FR-31) | **10 open** (060–069) — *the visible half* |
-| **5 — Attestation** | Append-only access-event log; point-in-time replay (FR-32) | **4 open** (086–089) |
+Counted from the POMLs 2026-09-21. **Done** includes `completed`, `completed-with-escalation` and
+`blocked-shipped` — terminal states, not all of them clean.
+
+| Phase | Deliverable | Done | Open | State |
+|---|---|---:|---:|---|
+| **0 — Enforcement remediation** | 22 confirmed findings closed, one regression test each | **28** | **0** | ✅ **COMPLETE.** Every catalogued gap is closed |
+| **Governance** | ADR amendments (003, 028 A2, 034, 052) | **2** | **0** | ✅ **COMPLETE** |
+| **0b — Review remediation** | Post-review repairs | 3 | 1 | 🟡 |
+| **0c — Secure Documents** | Server-derived containers; authorization before any byte moves | **17** | 4 | 🟡 **083 closed — `ClientSupplied` sink count is 0.** No path lets a caller name its container. Open: 082 census, 093/094/095 |
+| **1 — One evaluator** | Single evaluator; impersonated Dataverse reads replace column pattern-matching (FR-20) | **10** | **1** | 🟡 **Only 036 remains — the critical path.** Carries a manual canary gate (§6) |
+| **2 — One definition of member** | Access-conferring allow-list incl. org-typed lookups (FR-24); standing grants carry a level (FR-25) | 4 | 1 | 🟡 043 ✅; 044 closure suite open |
+| **FR-33 — External grant expiry** | Mandatory expiry, atomic bulk set, reminder job | 4 | 2 | 🟡 096/097/098/100 ✅ → 099, 101 |
+| **3 — Child inheritance** | Core-ancestor denormalization (FR-26); children inherit parent rights (FR-27) | 4 | 5 | 🔴 **Entirely blocked behind 036** |
+| **3 — Secure Project lifecycle** | Unsecure/reverse path correctness | 0 | 1 | 🟡 108 code-complete, 2 verification items left |
+| **4 — Secure Project + Manage Access** | Share-only access, Manage Access rework, wizard Secure step (FR-28…FR-31) | 5 | 5 | 🔴 **The visible half.** 060/061/062/063/068 ✅ |
+| **5 — Attestation** | Append-only access-event log; point-in-time replay (FR-32) | 1 | 3 | 🔴 Barely started |
+| **Register-driven (`ISS-xxx`)** | 29 issues found *by* the work | 1 | **12** | 🔴 New in the last two weeks; see §0 |
+| **Wave 0 / Wrap-up** | 082 caller-identity census · 090 close-out + `/test-diet` | 0 | 2 | 🔴 090 is last by construction |
 
 ---
 
@@ -119,10 +155,19 @@ Two consequences a user notices:
   Users were previously told a one-way door was being closed. That copy described behaviour that
   should not have existed, and it made people avoid a feature they needed.
 
-⚠️ **Currently in an in-between state**: task 021 shipped the isolation (the BU + memberless owner
-team) but **not the explicit share** (task 061). A secure project today is *isolated but not shared*
-— so **no human can reach it**. This is why 061 is not optional; isolation without sharing is a
-locked box.
+✅ **RESOLVED 2026-09-08 — the locked box is open.** This paragraph used to read: *"task 021 shipped
+the isolation but not the explicit share (task 061); a secure project today is isolated but not shared
+— so no human can reach it."* That was true for roughly three weeks and is now false. **Task 060**
+consolidated the two POA share clients into one principal-parameterized seam with revoke, and **task
+061** reworked secure-project provisioning onto it: service-account owner, all human access by explicit
+share, no per-project BU, fail-closed when the environment is not configured. Tasks **062**, **063**
+(the three share endpoints) and **068** followed.
+
+⚠️ **Still gated on the environment, and this is a real caveat**, not a formality: the code fails
+closed when `SecureProjects:ServiceAccountId` / `BusinessUnitId` are unset, and the **BU restructure is
+UAT/operator work, deliberately out of scope** (spec § UAT and Environment Setup). So secure projects
+are *shareable in code* and *not yet proven end-to-end in a live environment* — that proof is task
+**047**, which is blocked on an operator deploy (§6, criterion 5/6).
 
 ### 4.5 Upload and document experience (shipped this wave)
 
@@ -183,19 +228,32 @@ future access surface.
 
 From `spec.md` §Success Criteria — nine criteria, each with a named verification:
 
-1. All 22 Phase 0 findings closed *(regression test per finding)*
-2. One evaluator; no caller-scoped path passes `userAccessToken: null`
-3. Negative canary green *(NFR-04 in CI)*
-4. Role-depth assertion green *(NFR-05 in CI)*
-5. **A user in the Operations subtree cannot read a `Secure Project`-owned record** *(live dev)*
-6. **A shared user reads a secure project in both MDA and SPA** *(live dev)*
-7. **Manage Access answers "who can see this and why" with provenance per row** *(UAT)*
-8. **A contact with Project access sees its invoices, events, communications and To Dos** *(live dev)*
-9. **Point-in-time attestation answerable** *(replay a historical date)*
+Status re-derived 2026-09-21:
+
+| # | Criterion | Verified by | Status |
+|---|---|---|---|
+| 1 | All 22 Phase 0 findings closed | regression test per finding | ✅ **MET** — Phase 0 is 28/28 |
+| 2 | One evaluator; no caller-scoped path passes `userAccessToken: null` | code + ArchTest | 🟡 gated on **036** |
+| 3 | Negative canary green (NFR-04) | 🔴 **MANUAL pre-merge gate, NOT CI** | 🔴 **never measured** |
+| 4 | Role-depth assertion green (NFR-05) | CI | ✅ in the blocking suite |
+| 5 | Operations-subtree user **cannot** read a `Secure Project` record | live dev | 🔴 blocked on operator deploy (047) |
+| 6 | A shared user reads a secure project in **both** MDA and SPA | live dev | 🔴 blocked on operator deploy (047) |
+| 7 | Manage Access answers "who can see this and why", provenance per row | UAT | 🔴 needs 064 → 066/067 |
+| 8 | A contact with Project access sees its invoices, events, communications, To Dos | live dev | 🔴 blocked behind **036** → Phase 3 |
+| 9 | Point-in-time attestation answerable | replay a historical date | 🔴 Phase 5, barely started |
+
+⚠️ **Criterion 3 was WRONG in the 2026-09-03 version of this file**, which said *"NFR-04 in CI"*. The
+owner decided **2026-09-10: no Dataverse test in CI.** The canary is run **by hand before 036 merges**.
+This matters because a criterion believed to be automated is a criterion nobody runs — and this is the
+one whose failure mode is a *false green* (see §7).
 
 **Four of the nine require live-environment verification, not a green test suite.** Criteria 5, 6,
 and 8 are live dev tests; 7 is UAT. That is the honest reason this project cannot be closed from CI
 alone — and why task **047** (live provisioning validation) should not be treated as optional.
+
+**Only one of nine is fully met today.** That is not a contradiction of the 74-completed figure: the
+criteria are end-to-end outcomes, and most of them bottom out in either **036** or an **operator
+deploy** — which is precisely where the remaining risk sits.
 
 Criterion 9 is the only one gated entirely on Phase 5 (086–089). If attestation is spun out, **say
 so explicitly** rather than declaring nine-of-nine met.
@@ -204,13 +262,39 @@ so explicitly** rather than declaring nine-of-nine met.
 
 ## 7. The single most important open item
 
-**Task 061 — the explicit share for Secure Projects.**
+> ✅ **The previous two answers are both CLOSED.** This section named **061** (the explicit share) and,
+> before it, **083** (the container-selection sweep). 083 closed 2026-09-07; 061 closed 2026-09-08. The
+> answer below is the third holder of this title — which is itself the argument for re-deriving it
+> rather than quoting this file.
 
-Everything else on the list improves or completes the model. 061 is the difference between a feature
-that is *isolated* and one that is *usable*: task 021 delivered the memberless owner team and BU
-isolation, but until per-record access teams land, **no human can reach a secure project at all**.
+**Task 036 — the flag-gated swap to Dataverse's own answer (FR-20).**
 
-Runner-up **083 is now CLOSED** (2026-09-07) — the project's founding defect class is finished. Its
+Two reasons it outranks everything else:
+
+**1. It is the only thing blocking the longest chain.** `036 → 054 → 055 → 056 → 057/058` — five
+downstream tasks, the whole of Phase 3 (child inheritance), sit behind it. Nothing else unblocks them,
+and no amount of parallelism routes around it.
+
+**2. Its gate can fail in the direction of looking like success.** 036 carries a **manual** pre-merge
+canary (NFR-04; owner decision 2026-09-10 — no Dataverse test in CI). The rule: the impersonated result
+set must be **strictly smaller** than the app-only set. **Equality means impersonation is inert** — the
+query silently returns org-wide rows that are indistinguishable from a correct answer. And it has
+**never been measured on the fixed environment**: root-BU users inherited System Administrator until
+2026-09-09, so 036's run is the *first real measurement*, not a re-confirmation.
+
+That combination — longest chain, plus a gate whose failure mode is a false green — is why it is first.
+
+**Runner-up: task 100's hard date — 2026-11-10.** Task 097 shipped a server-filled **+90-day expiry on
+every new external grant**. Spec FR-33 says *do not ship (a) before (d)* — (a) shipped, so a clock is
+now running on live grants. Task **100** (the reminder job) is `completed`, but the owner item stands:
+**097 must never reach a non-dev environment without 100 deployed**. This is the only item in the
+project with a calendar deadline rather than a dependency.
+
+---
+
+### Previously the runner-up — **083, CLOSED 2026-09-07** (kept: the calibration note is the value)
+
+The project's founding defect class is finished. Its
 last two sinks (`PUT /api/drives/{driveId}/upload` and `DELETE /api/drives/{driveId}/items/{itemId}`,
 both app-only managed-identity) were **deleted**, along with the `canwritefiles` policy behind them.
 The deliverable is an argument from **absence**, not an inventory:

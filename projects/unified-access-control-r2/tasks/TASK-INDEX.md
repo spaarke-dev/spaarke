@@ -15,8 +15,16 @@ Number gaps (020–029, 045–049, 059, 070–079) are intentional insertion roo
 > to be filed at 086, which would have been the third.
 >
 > **2026-08-30**: `085` (Office save), `091` (SPE Admin container items) and `092` (SPE Admin client route
-> mismatches) are all **taken**. **Free from `093`.** `ls tasks/` before assigning a number, every time;
+> mismatches) are all **taken**. ~~**Free from `093`.**~~ `ls tasks/` before assigning a number, every time;
 > this file's own "insertion room" line has now been wrong twice.
+>
+> **2026-09-21 — FREE FROM `120`.** `093`–`119` are ALL taken (093–095 wizard/upload, 096–101 FR-33,
+> 102–108 placement + register, 109–119 the register-driven block authored 2026-09-18/19). The
+> "free from 093" line above was correct for 22 days and then silently wrong — which is the *fourth* time
+> this line has aged into a collision hazard. **The line itself is the defect**: a hand-maintained "next
+> free number" cannot stay true in a project that files tasks continuously (24 filed in the last two
+> weeks). Do not trust it. Run `ls projects/unified-access-control-r2/tasks/ | sort | tail -3` and take
+> the next integer — that answer cannot go stale.
 
 > 🔴 **2026-08-30 — PR #806 IS MERGED. Every "behind PR #806" / "blocked on #806" note in this project is
 > STALE**, here and in seven other files. `#858` (Compose container selection, row 6 of the 083 census) is
