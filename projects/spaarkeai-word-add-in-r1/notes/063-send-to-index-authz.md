@@ -331,13 +331,23 @@ confirming that the file you did intend to change appears.
 > **Corrected after the fact, because the first correction was itself wrong.** This section originally
 > prescribed *"compare the byte length of the specific line against `HEAD~1`"* as the check that beats a
 > `--stat` line. That check then failed on its very first use: task 064 and this task measured the same two
-> rows and got four different numbers — 3,386/3,062, 3,397/3,088 and 3,437/3,113. Nothing had changed. Two
-> independent measurement bugs: `awk -F'|' '{print length($3)}'` returns the third **pipe-delimited field**,
-> and these rows contain eight internal `|` characters, so it truncated at the first inline table or code
-> span; and PowerShell's `$line.Length` counts **characters**, while the other figures counted **bytes** —
-> these rows carry 21 and 13 non-ASCII characters (`—`, `✅`, `🔴`, `⚠️`), worth 39 and 24 extra UTF-8 bytes.
-> A first attempt to explain the gap blamed CRLF conversion, which cannot be right: line-ending conversion
-> moves a line by exactly one byte, and the observed deltas were 11 and 26 and differed from each other.
+> unchanged rows and produced **three different figures, of which two were wrong** — and it took two rounds
+> of correction between the agents to establish which.
+>
+> | Figure (063 / 064) | Whose | Verdict |
+> |---|---|---|
+> | 3,386 / 3,062 | task 064 | ❌ `awk -F'\|' '{print length($3)}'` returns the third **pipe-delimited field**; these rows contain eight internal `\|` characters, so it truncated at the first inline table or code span |
+> | 3,397 / 3,088 | task 063 | ✅ correct — as a **character** count |
+> | 3,437 / 3,113 | task 064 | ❌ `wc -c` **including the trailing newline** |
+> | **3,436 / 3,112** | both, independently | ✅ the actual **UTF-8 byte** lengths |
+>
+> Characters and bytes diverge here because the rows carry 21 and 13 non-ASCII characters (`—`, `✅`, `🔴`,
+> `⚠️`), worth 39 and 24 extra bytes. **Nothing had changed in the content at any point.**
+>
+> A first attempt to explain the gap blamed CRLF conversion. That cannot be right, and the refutation needed
+> no tooling: line-ending conversion moves a line by exactly **one** byte, while the observed deltas were 11
+> and 26 **and differed from each other**. Accepting a mechanism without checking whether its magnitude was
+> even the right order is the actual error, and it is a cheaper one to catch than any of the three above.
 >
 > **So the durable rule is about the KIND of check, not the units.** A derived scalar — a count, a length, a
 > `--stat` figure — fails silently and plausibly, and produces a number that still looks like evidence. A
