@@ -336,6 +336,33 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/client/office-addins/package-lock.json
 
+      # `@spaarke/auth` MUST be built before tsc runs. It is a
+      # `file:../shared/Spaarke.Auth` dependency whose package.json points `types`
+      # at `dist/`, and `dist/` is gitignored (Spaarke.Auth/.gitignore:5). On a
+      # developer machine it exists from an earlier build, so this is invisible
+      # locally; on a fresh CI checkout `npm install` links a package with no
+      # built output and tsc reports
+      #   shared/services/AuthService.ts(2,71): error TS2307:
+      #     Cannot find module '@spaarke/auth' or its corresponding type declarations.
+      #
+      # This step's previous comment claimed no build was needed because "tsconfig
+      # paths resolve it from source, same as jest.config.js does". That was FALSE
+      # and is the second defect this gate hid: jest.config.js:48 DOES map
+      # `^@spaarke/auth$` to `../shared/Spaarke.Auth/src/index.ts`, but tsconfig.json
+      # maps only @shared/*, @outlook/*, @word/* and one deep
+      # @spaarke/communication-components path — never @spaarke/auth. The two
+      # configs were assumed to agree and do not, which is why `gated-jest` passes
+      # while this job failed. It surfaced only once the errexit defect below was
+      # fixed and the classifier could finally run.
+      #
+      # Mirrors deploy-office-addins.yml:47-51, the established pattern. Must stay
+      # AHEAD of the add-in install: npm resolves the file: link at install time.
+      - name: "Build @spaarke/auth (file: dependency — dist/ is gitignored)"
+        working-directory: src/client/shared/Spaarke.Auth
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
       - name: Install dependencies
         working-directory: src/client/office-addins
         # NOT `npm ci` (root CLAUDE.md §12); a bare `npm install` also fails here
@@ -343,8 +370,6 @@ jobs:
         # package is on React 19).
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
-      # No build step. `tsc --noEmit` does not need @spaarke/auth compiled —
-      # tsconfig paths resolve it from source, same as jest.config.js does.
       - name: Typecheck — fail on PRODUCTION errors only
         working-directory: src/client/office-addins
         shell: bash
