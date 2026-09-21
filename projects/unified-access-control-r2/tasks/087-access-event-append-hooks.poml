@@ -34,9 +34,9 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (per-hook tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="086" status="pending">Table + vocabulary.</dependency>
-      <dependency task="060" status="pending">POA seam choke point.</dependency>
-      <dependency task="063" status="pending">Share endpoints (hooked via the seam).</dependency>
+      <dependency task="086" status="completed">Table + vocabulary.</dependency>
+      <dependency task="060" status="completed">POA seam choke point.</dependency>
+      <dependency task="063" status="completed">Share endpoints (hooked via the seam).</dependency>
       <dependency task="064" status="pending">Deny endpoints.</dependency>
     </dependencies>
   </context>

@@ -32,9 +32,9 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (endpoint tests incl. delegation negatives)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="060" status="pending">Consolidated POA seam (grant/revoke/read for systemuser principals).</dependency>
-      <dependency task="008" status="pending">FR-07 delegation filter (Write-on-record OBO) — HARD prerequisite; do not ship these routes ungated.</dependency>
-      <dependency task="010" status="pending">FR-09 idempotency conventions (grant twice / revoke once semantics) these endpoints mirror.</dependency>
+      <dependency task="060" status="completed">Consolidated POA seam (grant/revoke/read for systemuser principals).</dependency>
+      <dependency task="008" status="completed">FR-07 delegation filter (Write-on-record OBO) — HARD prerequisite; do not ship these routes ungated.</dependency>
+      <dependency task="010" status="completed">FR-09 idempotency conventions (grant twice / revoke once semantics) these endpoints mirror.</dependency>
     </dependencies>
   </context>
 

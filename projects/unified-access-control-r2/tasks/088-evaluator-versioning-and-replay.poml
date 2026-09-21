@@ -32,7 +32,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="087" status="pending">Event backbone + coverage boundary.</dependency>
-      <dependency task="032" status="pending">FR-19 evaluator — the component being versioned/seamed.</dependency>
+      <dependency task="032" status="completed">FR-19 evaluator — the component being versioned/seamed.</dependency>
     </dependencies>
   </context>
 

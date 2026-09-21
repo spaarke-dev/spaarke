@@ -32,7 +32,7 @@
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/</file>
     </relevant-files>
     <dependencies>
-      <dependency task="061" status="pending">The provisioning contract + reversibility the copy must describe.</dependency>
+      <dependency task="061" status="completed">The provisioning contract + reversibility the copy must describe.</dependency>
     </dependencies>
   </context>
 

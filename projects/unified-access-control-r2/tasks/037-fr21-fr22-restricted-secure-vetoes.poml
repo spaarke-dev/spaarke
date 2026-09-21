@@ -33,7 +33,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">The rights-map evaluator with named pre-max suppression hook + ordered post-max veto slots.</dependency>
+      <dependency task="032" status="completed">The rights-map evaluator with named pre-max suppression hook + ordered post-max veto slots.</dependency>
     </dependencies>
   </context>
 

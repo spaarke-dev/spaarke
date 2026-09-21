@@ -30,7 +30,7 @@
       <file role="canonical-reference">projects/unified-access-control-r2/design.md (§5.2 role table + root-cause)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="034" status="pending">FR-20/NFR-04 negative-canary merge gate — the live-gated CI wiring pattern this assertion reuses.</dependency>
+      <dependency task="034" status="blocked-shipped">FR-20/NFR-04 negative-canary merge gate — the live-gated CI wiring pattern this assertion reuses.</dependency>
     </dependencies>
   </context>
 

@@ -32,9 +32,9 @@
     </relevant-files>
     <dependencies>
       <dependency task="054" status="pending">Service-request access / ISS-003. ⚠️ NOT a "fourth root set" — that premise was retired by the owner's 2026-09-09 ruling (task 028). The inheritance term covers the THREE externally-grantable roots; 054 settles how (and whether) a service-request-parented child resolves at all.</dependency>
-      <dependency task="032" status="pending">FR-19 evaluator returning (recordId -> rights) with additive-then-veto structure.</dependency>
-      <dependency task="037" status="pending">FR-21/FR-22 Restricted + Secure vetoes the inheritance term must interplay with.</dependency>
-      <dependency task="038" status="pending">FR-23 deny-list store + veto (per-child revocation reuses it).</dependency>
+      <dependency task="032" status="completed">FR-19 evaluator returning (recordId -> rights) with additive-then-veto structure.</dependency>
+      <dependency task="037" status="completed">FR-21/FR-22 Restricted + Secure vetoes the inheritance term must interplay with.</dependency>
+      <dependency task="038" status="completed">FR-23 deny-list store + veto (per-child revocation reuses it).</dependency>
     </dependencies>
   </context>
 

@@ -32,11 +32,11 @@
       <file role="canonical-reference">projects/unified-access-control-r2/design.md (§4.5 terms, §6 provenance table)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">FR-19 evaluator terms the report inverts.</dependency>
-      <dependency task="038" status="pending">FR-23 deny-list store.</dependency>
-      <dependency task="041" status="pending">FR-24 explicit column allow-list — the ONLY source for derived-from-field rows.</dependency>
-      <dependency task="042" status="pending">FR-25 standing-grant baseline levels shown per row.</dependency>
-      <dependency task="063" status="pending">Exclusive-zone ordering + shared route-group conventions.</dependency>
+      <dependency task="032" status="completed">FR-19 evaluator terms the report inverts.</dependency>
+      <dependency task="038" status="completed">FR-23 deny-list store.</dependency>
+      <dependency task="041" status="completed">FR-24 explicit column allow-list — the ONLY source for derived-from-field rows.</dependency>
+      <dependency task="042" status="completed">FR-25 standing-grant baseline levels shown per row.</dependency>
+      <dependency task="063" status="completed">Exclusive-zone ordering + shared route-group conventions.</dependency>
     </dependencies>
   </context>
 

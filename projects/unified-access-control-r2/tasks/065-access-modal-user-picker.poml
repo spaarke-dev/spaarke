@@ -32,7 +32,7 @@
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/ (component tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="063" status="pending">Share grant/revoke/list endpoints, delegation-gated — HARD prerequisite.</dependency>
+      <dependency task="063" status="completed">Share grant/revoke/list endpoints, delegation-gated — HARD prerequisite.</dependency>
     </dependencies>
   </context>
 

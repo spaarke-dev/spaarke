@@ -35,7 +35,7 @@
       <file role="modify">projects/unified-access-control-r2/tasks/TASK-INDEX.md + current-task.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="083" status="pending">Last phase task; all phases complete before closure.</dependency>
+      <dependency task="083" status="completed">Last phase task; all phases complete before closure.</dependency>
     </dependencies>
   </context>
 

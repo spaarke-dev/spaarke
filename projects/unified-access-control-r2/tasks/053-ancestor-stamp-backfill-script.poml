@@ -40,8 +40,8 @@ status was changed on the index alone.</status-note>
       <file role="canonical-reference">scripts/ (survey existing Dataverse batch scripts first per script-aware skill; reuse auth/batch helpers if present)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="050" status="pending">Derivation rules (client contract).</dependency>
-      <dependency task="052" status="pending">C# derivation semantics + writer inventory (which entities/columns actually exist).</dependency>
+      <dependency task="050" status="completed">Derivation rules (client contract).</dependency>
+      <dependency task="052" status="completed">C# derivation semantics + writer inventory (which entities/columns actually exist).</dependency>
     </dependencies>
   </context>
 

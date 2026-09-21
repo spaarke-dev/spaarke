@@ -46,8 +46,8 @@ NOTE: Phase 1/2 will have reshaped these files (evaluator returns recordId-&gt;r
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (root-set composition tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">FR-19 evaluator returning (recordId -> rights) — the shape this root set feeds.</dependency>
-      <dependency task="035" status="pending">FR-20 ImpersonatedRootSetSource — the systemuser term for the new root uses it, same 3-round-trip budget rule.</dependency>
+      <dependency task="032" status="completed">FR-19 evaluator returning (recordId -> rights) — the shape this root set feeds.</dependency>
+      <dependency task="035" status="completed">FR-20 ImpersonatedRootSetSource — the systemuser term for the new root uses it, same 3-round-trip budget rule.</dependency>
       <dependency task="036" status="pending">FR-20 flag-gated swap live (impersonated derivation is the active policy).</dependency>
     </dependencies>
   </context>

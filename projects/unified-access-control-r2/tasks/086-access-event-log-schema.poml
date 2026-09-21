@@ -30,8 +30,8 @@
       <file role="canonical-reference">docs/data-model/ (existing entity docs as format reference)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">FR-19 evaluator — the version-string anchor for replay.</dependency>
-      <dependency task="038" status="pending">FR-23 deny-list store shape (deny events mirror it).</dependency>
+      <dependency task="032" status="completed">FR-19 evaluator — the version-string anchor for replay.</dependency>
+      <dependency task="038" status="completed">FR-23 deny-list store shape (deny events mirror it).</dependency>
     </dependencies>
   </context>
 

@@ -30,7 +30,7 @@
       <file role="canonical-reference">docs/procedures/test-fixture-contracts.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="052" status="pending">Server writers stamp (fixtures can create via service paths).</dependency>
+      <dependency task="052" status="completed">Server writers stamp (fixtures can create via service paths).</dependency>
       <dependency task="055" status="pending">Inheritance term.</dependency>
       <dependency task="056" status="pending">Child modules registered.</dependency>
     </dependencies>

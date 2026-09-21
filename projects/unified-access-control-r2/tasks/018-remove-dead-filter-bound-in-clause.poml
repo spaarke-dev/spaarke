@@ -41,7 +41,7 @@ status was changed on the index alone.</status-note>
       <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ScopeInjectorBoundTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test pinning the current behavior (dead filter present; unbounded in-clause), flipped/added here.</dependency>
+      <dependency task="001" status="completed">Characterization test pinning the current behavior (dead filter present; unbounded in-clause), flipped/added here.</dependency>
     </dependencies>
   </context>
 

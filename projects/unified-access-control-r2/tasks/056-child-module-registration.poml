@@ -33,8 +33,8 @@
     </relevant-files>
     <dependencies>
       <dependency task="055" status="pending">Inheritance term so scoped rows carry correct rights.</dependency>
-      <dependency task="009" status="pending">FR-08 scoped todo PATCH — todos must not become a child module while an unscoped write exists.</dependency>
-      <dependency task="018" status="pending">FR-17 bounded in-clause in Tier2ScopeFilterInjector (06 §F3) — without it the new modules break for high-membership users.</dependency>
+      <dependency task="009" status="completed">FR-08 scoped todo PATCH — todos must not become a child module while an unscoped write exists.</dependency>
+      <dependency task="018" status="completed">FR-17 bounded in-clause in Tier2ScopeFilterInjector (06 §F3) — without it the new modules break for high-membership users.</dependency>
     </dependencies>
   </context>
 

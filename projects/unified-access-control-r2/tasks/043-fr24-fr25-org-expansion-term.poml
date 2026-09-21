@@ -33,9 +33,9 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="037" status="pending">Secure suppression hook the new term must route through.</dependency>
-      <dependency task="041" status="pending">The column registry + AccessConferringOnly option.</dependency>
-      <dependency task="042" status="pending">Org standing-grant baseline reader.</dependency>
+      <dependency task="037" status="completed">Secure suppression hook the new term must route through.</dependency>
+      <dependency task="041" status="completed">The column registry + AccessConferringOnly option.</dependency>
+      <dependency task="042" status="completed">Org standing-grant baseline reader.</dependency>
     </dependencies>
   </context>
 

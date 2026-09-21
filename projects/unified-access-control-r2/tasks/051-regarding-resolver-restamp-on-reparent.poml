@@ -44,7 +44,7 @@ status was changed on the index alone.</status-note>
       <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (task 050 output — the contract to consume)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="050" status="pending">Ancestor-derivation contract + combined payload (stamps survive pre-clear).</dependency>
+      <dependency task="050" status="completed">Ancestor-derivation contract + combined payload (stamps survive pre-clear).</dependency>
     </dependencies>
   </context>
 

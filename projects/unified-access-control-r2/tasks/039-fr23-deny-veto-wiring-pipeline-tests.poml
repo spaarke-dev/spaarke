@@ -41,9 +41,9 @@ status was changed on the index alone.</status-note>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">Veto slots on the evaluator.</dependency>
-      <dependency task="037" status="pending">Restricted veto + Secure suppression occupying their slots (ordering is tested against them).</dependency>
-      <dependency task="038" status="pending">INoAccessListReader + the sprk_noaccessentry store.</dependency>
+      <dependency task="032" status="completed">Veto slots on the evaluator.</dependency>
+      <dependency task="037" status="completed">Restricted veto + Secure suppression occupying their slots (ordering is tested against them).</dependency>
+      <dependency task="038" status="completed">INoAccessListReader + the sprk_noaccessentry store.</dependency>
     </dependencies>
   </context>
 

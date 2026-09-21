@@ -43,7 +43,7 @@ status was changed on the index alone.</status-note>
       <file role="canonical-reference">.claude/adr/ADR-034-user-record-membership.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="040" status="pending">ADR-034 amendment sanctioning the registry + per-surface policy (cite in PR).</dependency>
+      <dependency task="040" status="completed">ADR-034 amendment sanctioning the registry + per-surface policy (cite in PR).</dependency>
       <dependency task="039 (soft)" status="pending">The org-typed column inventory recorded in notes/ — if 039 has not landed, derive the inventory from live metadata directly and record it.</dependency>
     </dependencies>
   </context>

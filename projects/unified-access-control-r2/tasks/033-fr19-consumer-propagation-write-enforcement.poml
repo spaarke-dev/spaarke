@@ -33,7 +33,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">The rights map on AccessibleRecordSet + level→rights mapping.</dependency>
+      <dependency task="032" status="completed">The rights map on AccessibleRecordSet + level→rights mapping.</dependency>
       <dependency task="Phase 0 FR-08 task (see TASK-INDEX)" status="pending">The record-scope check on PATCH /api/v1/external/todos/{id} that this task upgrades to rights-aware. If it has not landed, implement the rights-aware check directly (it subsumes the scope check) and note it.</dependency>
     </dependencies>
   </context>
