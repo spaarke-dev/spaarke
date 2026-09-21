@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>This project modified an e2e spec that no workflow runs</title>
+    <phase>5 Remediation — verification</phase>
+    <gate>blocked — requires 069</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override (CLAUDE.md §8): touches `tests/**` and carries `e2e-test`. Also modifies a CI workflow.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an existing spec into a workflow; the harness already exists.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>e2e specs are disjoint from the unit suites 071 repairs — but shares the workflow with 069/070/072, so sequence after them.</parallel-reason>
+    <deps>069</deps>
+    <tags>testing, e2e-test, ci-cd, frontend</tags>
+    <estimated-effort>3-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`tests/e2e/specs/word-addins/save-flow.spec.ts` was modified by this project and no workflow runs `tests/e2e`. Either run it on PR or state honestly why it cannot be run.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>The e2e specs this project touched either execute in CI or are documented as requiring a live host, with no ambiguity about which.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable verification review (`notes/fable-review-2026-09-21.md` §8, finding 8).
+
+      `tests/e2e/specs/word-addins/save-flow.spec.ts` was modified on this branch. **No workflow runs
+      `tests/e2e`.** A modified test that never executes is indistinguishable from a deleted one, except that
+      it still reads as coverage.
+
+      Task 058 also deletes e2e page-object mocks (`tests/e2e/pages/addins/OutlookTaskPanePage.ts:305-331`),
+      so this task and 058 both touch the e2e tree — coordinate.
+
+      **The honest possibility that must be tested, not assumed**: some of these specs may genuinely require
+      a live Office host and therefore cannot run in CI. If so, say that explicitly and mark them, rather
+      than leaving them in a state where a reader assumes they run.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Determine empirically which specs CAN run headless and which genuinely need a live host. Do not assume either way.</constraint>
+    <constraint source="this task">Specs that cannot run in CI must be explicitly marked as live-host-only in the file itself, so a reader cannot mistake them for executing coverage.</constraint>
+    <constraint source="project">The tiered workflows are FROZEN. Wire into `office-addins-tests.yml`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every spec under `tests/e2e/specs/word-addins/` and `outlook-addins/` is classified: runs-in-CI or live-host-only, with the basis for each classification recorded.</criterion>
+    <criterion testable="true">Every runs-in-CI spec executes in `office-addins-tests.yml` on PR.</criterion>
+    <criterion testable="true">PROVEN ON CI IN BOTH DIRECTIONS: break an assertion in a running spec, show red; revert, show green. Record both run URLs.</criterion>
+    <criterion testable="true">Every live-host-only spec carries an in-file marker saying so, and is listed in `notes/parity-checklist.md` alongside the other 042 live items.</criterion>
+    <criterion testable="true">The specs this project modified are green (or explicitly classified live-host-only).</criterion>
+    <criterion testable="true">`actionlint` passes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If running the e2e specs in CI requires standing up infrastructure this project does not own (a hosted add-in, a test tenant), STOP and escalate per CLAUDE.md §6 with the cost — do not build a parallel harness inside this task.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Inventory and classify every Office e2e spec.</step>
+    <step>Wire the runnable ones into the workflow; mark the rest in-file.</step>
+    <step>Prove red and green on CI; record both run URLs.</step>
+    <step>Coordinate with 058 on the page-object deletions.</step>
+    <step>Write `notes/074-e2e.md`. Update TASK-INDEX.md: 074 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">.github/workflows/office-addins-tests.yml</file>
+    <file role="edit">tests/e2e/specs/word-addins/save-flow.spec.ts</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/074-e2e.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>.github/workflows/office-addins-tests.yml</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/074-e2e.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Coordinate with 058 on `tests/e2e/pages/`.</protocol>
+  </execution>
+</task>

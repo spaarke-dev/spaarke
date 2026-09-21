@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Two success criteria marked PASS on evidence that does not exist, fourteen ✅ tasks with unsupported claims, seven POML statuses contradicting the index, and ten POMLs that do not parse</title>
+    <phase>5 Remediation — spec integrity</phase>
+    <gate>blocked — requires 076, 077, 078 (their outcomes are what gets reconciled)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Post-compaction-class recovery work across the whole project record, and it gates 090's escalation triggers. Modifies spec.md, the task index and 10 POMLs.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires judging, task by task, whether a completion claim is actually supported — the same judgment the review made, applied to 14 specific cases with the authority to reopen a task.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits spec.md and TASK-INDEX.md — the project's shared record. Must be serial.</parallel-reason>
+    <deps>076,077,078</deps>
+    <tags>documentation, refactoring</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The project's own record is wrong in four specific ways. Reconcile the spec with what shipped, correct the false PASS evidence, re-verify the fourteen questionable completion claims, and repair the ten POMLs that do not parse.</prompt>
+
+  <role>SPAARKE platform developer. The deliverable is an honest record — where a claim cannot be supported, reopening the task is a correct outcome, not a failure of this one.</role>
+
+  <goal>Every completion claim in the project record is supported by evidence that says what the claim says.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable review (`notes/fable-review-2026-09-21.md` §5, §7, §9).
+
+      **(a) False PASS evidence in the 042 tally.**
+      - **SC-6** cites an integration test asserting *"no new collision logic was introduced"*. Grep returns
+        **0 hits**, and new collision logic demonstrably exists (`ResolveNameCollisionAsync`,
+        `OfficeService.cs:1101-1244`).
+      - **SC-8** cites an integration test for the Matter number. The only test on that path is
+        `OfficeQuickCreateContractTests.cs:512 AssertNoMatterNumberSent` — the **opposite** assertion.
+      - SC-9 is correctly PARTIAL; leave it.
+
+      **(b) Spec drift, unamended.** FR-12 says *"Do not rebuild any of this"* while the rebuild is the
+      shipped fix (#1005 forced the same-record guard at `:1217-1222`); the claimed §6.5 path-A deviation has
+      **no row in spec.md's ADR Tensions table**. FR-15 lists Send Email in the both-hosts set but it is
+      hidden in Word by owner decision (09-15). FR-10's ADR-050 tension row describes the Office Dialog API;
+      the shipped mechanism is `Office.context.ui.openBrowserWindow`. FR-05/13/16 are handled by 078/076/077
+      — fold their outcomes in here.
+
+      **(c) Fourteen ✅ tasks with claims the review found unsupported**: 011, 030, 031, 025, 033, 034, 040
+      (AC1's grep is 9, not 0), 056, 010 (host auto-detection 🔴 "must be verified live"), and 013, 021, 026,
+      027, 036, 037 (all ui-tests deferred to 042).
+
+      **(d) Seven POMLs read a not-started status element while ✅ in the index** — 014, 025, 031, 037, 050,
+      051, 054. Root CLAUDE.md §7 step 1 was not done.
+
+      **(e) Ten POMLs do not parse** (`Validate-TaskPoml.ps1`: 61 scanned, 39 clean, 10 errors). All ten are
+      recorded as completed:
+      - Malformed XML: `005` (167:5, `rigor-reason` start tag at 166:26 ≠ end tag `notes-completion`),
+        `010` (172:41, name cannot begin with ' '), `018` (115:7, `div` start at 91:42 ≠ end tag `completed`),
+        `028` (63:216, name cannot begin with '&gt;'), `053` (105:216, `relevant-files` start at 101:61 ≠ end
+        tag `notes`)
+      - Missing `&lt;steps&gt;`: `009`, `017`, `019`, `043`, `044`
+
+      **`090-project-wrap-up.poml` PARSES CLEANLY** — the earlier handoff claim that it was broken and
+      blocking was wrong, verified twice independently. It carries one WARN for a missing
+      `&lt;justification&gt;`.
+
+      **Why this task gates 090**: the wrap-up's escalation trigger 2 fires on "deferred entries that
+      describe unfinished spec requirements". On an honest run today it would fire immediately.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Where a completion claim cannot be supported, REOPEN the task (✅ → 🔄) rather than softening the claim. An honest reopen is the point of this task.</constraint>
+    <constraint source="this task">Amending a spec FR is an owner decision (CLAUDE.md §6.5). Prepare each amendment with its evidence and get sign-off; do not self-approve.</constraint>
+    <constraint source="this task">Repairing the 10 POMLs means making them PARSE while preserving their recorded content. Do not rewrite their history to make it tidier — they are the audit trail for completed work.</constraint>
+    <constraint source="this task">Do not mark the ui-tests-deferred tasks (013, 021, 026, 027, 036, 037) as unsupported merely because 042 has not run — their deferral was explicit and legitimate. Distinguish "waiting on a live host" from "claimed without evidence".</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`pwsh scripts/Validate-TaskPoml.ps1 projects/spaarkeai-word-add-in-r1/tasks` reports **0 errors** across all tasks. Record the before (10 errors) and after counts.</criterion>
+    <criterion testable="true">The seven POML status values match the index.</criterion>
+    <criterion testable="true">SC-6 and SC-8's evidence in the 042 tally is corrected to cite tests that assert what the criteria claim — or the criteria are marked FAIL/PARTIAL honestly.</criterion>
+    <criterion testable="true">spec.md carries an ADR Tensions row for FR-12's path-A deviation, and FR-12/15/16 plus FR-10's ADR-050 row are amended to describe what shipped, each with owner sign-off recorded.</criterion>
+    <criterion testable="true">Each of the 14 questionable ✅ tasks is individually adjudicated in a table: claim, evidence found, verdict (supported / reopened / legitimately-deferred-to-042), with the reason. Reopened tasks are 🔄 in the index.</criterion>
+    <criterion testable="true">Task 040's AC1 is reconciled: the grep is 9, not 0. Either the 9 are classified as data reads (as `parity-checklist.md` §6 argues) and AC1 is reworded, or they are fixed.</criterion>
+    <criterion testable="true">`notes/defer-issues.md` lists every genuinely-deferred item with an owner, so 090's trigger 2 has a clean surface to run against.</criterion>
+    <criterion testable="true">The project's task count and status totals are recomputed from task rows only (not from the goal-eligibility table's wave flags, which is what produced the earlier 58-of-64 error) and the board is synced.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If re-verifying a ✅ task uncovers that shipped behaviour does not match its acceptance criteria — a real defect rather than a paperwork gap — STOP and escalate per CLAUDE.md §6. That is a new finding, not something to absorb into a reconciliation task.</trigger>
+    <trigger>Every spec amendment needs owner sign-off before it is written. Do not batch-amend and report afterwards.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Run the validator; record the 10 failures with their exact parse errors.</step>
+    <step>Repair the 5 malformed POMLs and add `&lt;steps&gt;` to the 5 missing them, preserving recorded content.</step>
+    <step>Sync the 7 contradicting statuses.</step>
+    <step>Adjudicate the 14 claims one by one; build the table; reopen what cannot be supported.</step>
+    <step>Correct SC-6 and SC-8; prepare the spec amendments with evidence and get sign-off.</step>
+    <step>Reconcile 040's AC1; refresh `defer-issues.md`.</step>
+    <step>Recompute the counts from task rows only; sync the board.</step>
+    <step>Re-run the validator to 0 errors. Write `notes/079-record-integrity.md`. Update TASK-INDEX.md: 079 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/079-record-integrity.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/remediation-plan-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file>projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/079-record-integrity.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Tasks 076, 077 and 078 must be ✅ first — their outcomes are part of what gets reconciled. This task gates 057 → 042 → 090.</protocol>
+  </execution>
+</task>

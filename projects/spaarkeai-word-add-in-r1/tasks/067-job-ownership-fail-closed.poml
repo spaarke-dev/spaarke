@@ -31,7 +31,7 @@
       See `notes/fable-review-2026-09-21.md` §3, where the two severity ratings are reconciled.
 
       **The fail-open.** `JobOwnershipFilter.cs:157` guards with
-      `if (!string.IsNullOrEmpty(jobStatus.CreatedBy) && ...)` — so an **empty** `CreatedBy` **passes the
+      `if (!string.IsNullOrEmpty(jobStatus.CreatedBy) AND ...)` — so an **empty** `CreatedBy` **passes the
       check**. `OfficeService.cs:1543-1586`, the Dataverse fallback used after a restart or on a second
       instance, maps no `CreatedBy` at all, because the column set at
       `DataverseServiceClientImpl.cs:1773-1774` has no owner field and the `ProcessingJob` create at

@@ -9,10 +9,32 @@
 **Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Clean tree, 0 behind / 221 ahead, LOCAL == REMOTE (SHA-verified).**
 HEAD moves — get it with `git log -1 --format='%H %s'`; do NOT trust a SHA written here.
 
-### ⛳ NEXT ACTION — operator decision on the re-plan in [`notes/fable-review-2026-09-21.md`](notes/fable-review-2026-09-21.md) §10
+### ⛳ NEXT ACTION — execute **task 061** (the route census), then 062
+
+**Owner decision 2026-09-21**: *"we need to address both of these issues fully… all of which appear important
+and that MUST be addressed in this project, not deferred or only added to GitHub issues."*
+
+**Plan**: [`notes/remediation-plan-2026-09-21.md`](notes/remediation-plan-2026-09-21.md) — **19 new tasks
+(061–079)** authored, **3 re-scoped (058, 059, 060)**. Project is now **80 rows: 55 ✅ / 1 🔄 / 24 🔲**
+(counted from `^| NNN |` rows only).
+
+**061 is first and is a hard prerequisite for 062–067.** It governs the Office route surface in
+`RouteAuthorizationGuardTests` **and** fixes the `FilterMarker` regex in the same change — without the regex
+fix, governing the file false-flags the routes that are correctly gated, which is how a governance test gets
+waived wholesale.
+
+**Then 062 — F1, the only HIGH with a live consequence.** `/office/search/entities` is an app-only,
+security-untrimmed enumeration of every Matter/Project/Invoice/Account/Contact, and it is the keystone: F2/F3/F4
+all need record GUIDs and this route hands them out.
+
+**Do not execute 058 as written** — it is re-scoped. Read the review's §10 and each POML's
+`RE-SCOPED 2026-09-21` block before starting.
+
+**Two things this plan deliberately does NOT claim to close**, stated so silence is not later read as success:
+the GitHub **ruleset** (whether a red check blocks a merge is a repo setting, not a file, and `ci-router.yml`
+is frozen) and **live-host verification** (task 042).
 
 **The Fable review HAS RUN (2026-09-21, four reviewers).** It did re-scope what remains, exactly as anticipated.
-**Do not execute 058 as written.** Read the review's §10 before starting any task.
 
 **Its three headline conclusions:**
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>Live Office endpoints serve fabricated data with NO per-document authorization — delete the unused stub surface</title>
     <phase>4 Parity, deploy, close</phase>
-    <gate>startable — no dependencies; findings confirmed against the deployed build 2026-09-19</gate>
+    <gate>startable — no dependencies; findings confirmed against the deployed build 2026-09-19. RE-SCOPED 2026-09-21 per notes/fable-review-2026-09-21.md §2 — see the RE-SCOPE block in background.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: removes an authorization gap on a LIVE deployed route. Also a breaking contract change to `IOfficeService` (9 consumers). Tags include bff-api + security.</rigor-reason>
@@ -26,6 +26,41 @@
 
   <context>
     <background>
+      ## 🔴 RE-SCOPED 2026-09-21 — READ THIS BEFORE THE ORIGINAL TEXT BELOW
+
+      The Fable security review (`notes/fable-review-2026-09-21.md` §2) **confirmed every factual claim below
+      and corrected the severity**. The four routes **read nothing**:
+
+      - metadata is synthesized from the GUID (`OfficeService.cs:2200-2213`)
+      - the share link is the hard-coded string `https://spaarke.app/doc/{id}` (`:2218-2223`)
+      - attach returns fabricated names/sizes (`:2995-3004`) and literal `"Stub content for {id}"` (`:3043-3044`)
+      - its `downloadUrl` points at `/office/share/attach/{token}` — **a route that is never mapped**
+
+      So minting a link "for any document" works exactly as well for a GUID that does not exist. **There is no
+      disclosure and no access grant today.** The original framing of this task as *the* live authorization
+      gap was wrong, and the phrase "the serious one" below is superseded.
+
+      **Deletion is still correct** — as removal of a latent hazard. If anyone later implements
+      `GetDocumentMetadataForLinkAsync` with a real read and no filter, it becomes a genuine cross-user
+      document leak. But this is cleanup, not an incident.
+
+      **The live authorization gaps are elsewhere and have their own tasks**: 062 (F1 —
+      `/office/search/entities` untrimmed enumeration, the real HIGH), 063 (F2), 064 (F3), 065 (F4),
+      066 (F9), 067 (F5). This task does not close any of them.
+
+      **Three changes to the scope below:**
+      1. The reproduce-first criterion now uses a **RANDOM GUID**, to demonstrate that nothing is behind the
+         route. The original criterion would have documented a 200 that proves less than it appears to.
+      2. Two files are added to the deletion inventory, both missing from the list below:
+         `src/client/office-addins/shared/taskpane/hooks/useShareFlow.ts` (a dead hook whose only references
+         are to itself, calling two `ApiClient` methods that do not exist) and
+         `tests/e2e/pages/addins/OutlookTaskPanePage.ts:305-331`.
+      3. Coordinate the e2e deletions with task 074, which wires the e2e specs into CI.
+
+      ---
+
+      ## Original background (2026-09-19) — factually confirmed; severity superseded above
+
       Found 2026-09-19 during this project's pre-wrap-up `/code-review`. All of it verified against the tree
       deployed to `spaarke-bff-dev` that same day.
 
@@ -86,7 +121,7 @@
   </constraints>
 
   <acceptance-criteria>
-    <criterion>REPRODUCE-FIRST: before deleting, write a temporary probe proving `/office/share/links` returns 200 for a document the caller has no access to. Record the observed response verbatim in the task note, then remove the probe. This is the evidence the gap was real.</criterion>
+    <criterion>REPRODUCE-FIRST (RE-SCOPED 2026-09-21): before deleting, probe `/office/share/links` with a **randomly generated GUID that corresponds to no document at all**, and record the response verbatim. A 200 with synthesized metadata for a nonexistent document is the evidence that matters — it proves the route reads nothing, which is precisely why deleting rather than authorizing it is correct. Also probe with a real document the caller cannot access, and record that the two responses are indistinguishable. Remove the probe afterwards.</criterion>
     <criterion>`/office/share/links`, `/office/share/attach`, `/office/recent` and `/office/search/documents` are removed from `OfficeEndpoints.cs`, including `MapShareEndpoints` and the `share` MapGroup.</criterion>
     <criterion>These `OfficeService` members are removed: `CreateShareLinksAsync`, `SimulateSharePermissionCheckAsync`, `GetDocumentMetadataForLinkAsync`, `GenerateShareLinkUrl`, `GetDocumentIconUrl`, `ProcessShareInvitationsAsync`, `GetAttachmentsAsync`, `PackageAttachmentAsync`, `GetRecentDocumentsAsync`, `GenerateStubRecentAssociations`, `GenerateStubRecentDocuments`, `GenerateStubFavorites`, `SearchDocumentsAsync`, `GenerateStubDocumentResults`.</criterion>
     <criterion>The corresponding members are removed from `IOfficeService`, and all 9 consumers still compile.</criterion>
@@ -97,6 +132,9 @@
     <criterion>ArchTests 191/191. Publish size measured against a fresh master build and reported (expected: a reduction).</criterion>
     <criterion>GitHub #229 is updated with what was deleted and what genuinely remains; if nothing remains, propose closing it.</criterion>
     <criterion>A grep proves zero references to the deleted routes remain anywhere under `src/` and `tests/`.</criterion>
+    <criterion>ADDED 2026-09-21: `src/client/office-addins/shared/taskpane/hooks/useShareFlow.ts` is deleted. It is dead — its only in-repo references are to itself, and it calls `apiClient.searchDocuments` / `apiClient.generateShareLinks`, neither of which exists in `ApiClient.ts`. Confirm both facts by grep before deleting.</criterion>
+    <criterion>ADDED 2026-09-21: the share mocks at `tests/e2e/pages/addins/OutlookTaskPanePage.ts:305-331` are deleted. Coordinate with task 074, which wires the e2e specs into CI.</criterion>
+    <criterion>ADDED 2026-09-21: the task note states explicitly that this task closed a LATENT hazard, not a live disclosure, and names tasks 062-067 as the ones that close the live gaps. This prevents the deletion being later cited as having fixed the authorization findings.</criterion>
   </acceptance-criteria>
 
   <escalation>
@@ -120,6 +158,8 @@
     <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/IOfficeService.cs</file>
     <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/OfficeRateLimitFilter.cs</file>
     <file role="edit">src/server/api/Sprk.Bff.Api/Configuration/OfficeRateLimitOptions.cs</file>
+    <file role="delete">src/client/office-addins/shared/taskpane/hooks/useShareFlow.ts</file>
+    <file role="edit">tests/e2e/pages/addins/OutlookTaskPanePage.ts</file>
     <file role="new">projects/spaarkeai-word-add-in-r1/notes/058-delete-unauthorized-stub-surface.md</file>
   </relevant-files>
 
