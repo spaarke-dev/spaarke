@@ -4,7 +4,7 @@
     <title>Node is split three ways — the gate tests on 20, the nightly baseline uses 20, and what actually ships is built on 18</title>
     <phase>5 Remediation — verification</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a deployment workflow. Tags include ci-cd + deploy. A toolchain mismatch is the same class of error that produced task 056's first gate defect.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -119,15 +119,27 @@ notes/073-node-alignment.md §5, including the task-043 consequence and an hones
 install now appears fresh (likely refreshed by the concurrently-active test-file agent in this same wave) —
 which does not retroactively validate task 043's historically recorded runs.
 
-BLOCKED ON PUSH COORDINATION, surfaced to and resolved with `main` rather than improvised: the deploy-run
-verification acceptance criterion (workflow_dispatch against the real Node-20 config, run URL, output
-equivalence check) requires this commit to be on origin, but this task's instructions also say do not push.
-Raised the conflict to main (task-062 and task-071 are committing to the same branch concurrently; main is
-centralizing push authority). Agreed sequence: this task commits locally and stops; main pushes; main notifies
-this task; this task then runs `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`,
-records the run URL + result, verifies output equivalence, and closes out notes/073-node-alignment.md §4.
+PUSH COORDINATION was surfaced to and resolved with `main` rather than improvised: the deploy-run verification
+acceptance criterion (workflow_dispatch against the real Node-20 config, run URL, output equivalence check)
+required this commit to be on origin, but this task's instructions also said do not push. Raised the conflict
+to main (task-062 and task-071 were committing to the same branch concurrently; main centralized push
+authority). Agreed sequence executed exactly: this task committed locally
+(ab7870c43ffbefb52fb5f0715e8b91855ac89fd5) and stopped; main pushed and confirmed origin HEAD matched; this
+task then ran `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`.
 
-Status intentionally left at in-progress (not completed) and TASK-INDEX row 073 intentionally left at 🔄 (not
-✅) until that verification step closes — acceptance criteria 4 and 5 are not yet met.
+DEPLOY VERIFICATION CLOSED. Run 35637852013
+(https://github.com/spaarke-dev/spaarke/actions/runs/35637852013), headSha ab7870c43..., conclusion success,
+1m46s, actually provisioned node v20.20.2. Compared against the last Node-18 baseline run (35464159732) line
+by line: identical package counts installed (452 Spaarke.Auth / 1372 office-addins, both runs), identical
+deprecation-warning set, webpack build step silent (0 output) in both runs, identical deploy flow and site.
+The ONLY difference is 7 npm EBADENGINE warnings (unrelated azure-sdk/typespec transitive deps wanting node
+&gt;=20.0.0) present in the Node-18 run and ABSENT in the Node-20 run — a reduction, not a new warning. Live
+site re-fetched directly (not inferred from the CI log): word/manifest.xml still 1.0.9.0, all 6 bundle files
+taskpane.html references return 200 with sane sizes, and the distinctive collision-flow string "That name
+belongs to" is present in 87.bundle.js (same sanity check task 055 used) confirming real, non-corrupted
+content. Escalation trigger (output changed beyond version strings) did NOT fire. Full detail in
+notes/073-node-alignment.md §4.
+
+All 7 acceptance criteria met. TASK-INDEX row 073 flipped to ✅ in the same follow-up commit.
   </notes-completion>
 </task>

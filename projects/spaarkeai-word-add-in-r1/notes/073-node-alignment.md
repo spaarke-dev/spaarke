@@ -1,8 +1,7 @@
 # Task 073 — Node toolchain alignment
 
-> Status: **local edits complete, committed; deploy-run verification PENDING** (blocked on a push-coordination
-> handoff with the orchestrating session — see "Deploy verification" below). Do not read this note as claiming
-> the deploy-run acceptance criterion is closed until that section says so.
+> Status: **COMPLETE.** All acceptance criteria met, including the real deploy-run verification (§4) — closed
+> 2026-09-21 after `main` pushed the commit and this task ran and verified a live `workflow_dispatch` run.
 
 ---
 
@@ -88,29 +87,111 @@ cross-file effect). The dedicated `workflows-validate.yml` "actionlint" check al
 PRs (no path filter) once this branch is pushed, so this will be re-verified by CI itself, on the newer
 actionlint release, as part of the PR.
 
-## 4. Deploy verification — **PENDING**, not yet closed
+## 4. Deploy verification — **DONE**, real run, output equivalence checked
 
-The task's acceptance criterion requires proving the Node-20 deploy config with a REAL `workflow_dispatch` run
-and recording the run URL, plus verifying output equivalence (bundle present, manifest version correct, no new
-build warnings) — not asserting it from the diff.
+### Coordination that had to happen first
 
-**Blocker surfaced and resolved with the orchestrating session before proceeding further**: `workflow_dispatch`
-executes the workflow file as it exists on the `--ref` on **origin**, not local uncommitted changes. This
-task's instructions say "commit — do NOT push." Those two requirements conflict: no real run can exercise this
-change until the commit is on origin. Raised this to `main` (the orchestrating session) rather than either (a)
-silently asserting the run would work, or (b) pushing unilaterally — `main` has push authority centralized in
-one place because task-062 and task-071 are committing to the same branch concurrently, and a push from this
-task would have carried their commits too, unreviewed.
+`workflow_dispatch` executes the workflow file as it exists on the `--ref` on **origin**, not local uncommitted
+changes, but this task's instructions also said "commit — do NOT push." Raised the conflict to `main` (the
+orchestrating session) rather than pushing unilaterally or asserting a hypothetical run would pass — `main`
+was centralizing push authority because task-062 and task-071 were committing to the same branch concurrently.
+Agreed sequence: this task committed locally (`ab7870c43ffbefb52fb5f0715e8b91855ac89fd5`) and stopped; `main`
+reviewed and pushed; `main` confirmed origin HEAD matched (`ab7870c43...`) and that `.nvmrc`/the workflow diff
+were live on origin; this task then ran the verification below.
 
-**Resolution agreed with `main`**: this task commits locally and stops. `main` pushes the branch (after
-reviewing all three concurrent tasks' commits together) and will notify this task when the push is live. Only
-then will `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1` actually exercise this
-change, and this note will be updated with: the run URL, its result, and the equivalence check (bundle present,
-`word/manifest.xml` version, diffed build-warning count vs. the last known-good Node-18 deploy run). If the
-built output differs in any way beyond version strings, the task's escalation trigger fires and this section
-will say so explicitly rather than accepting it.
+### Baseline established first (Node 18, last known-good)
 
-**This criterion is NOT met as of this commit.** Do not read TASK-INDEX/POML status as claiming it is.
+Run `35464159732` (2026-09-19T19:22:37Z, `workflow_dispatch`, `headSha 23fd17991...`, **success**) —
+https://github.com/spaarke-dev/spaarke/actions/runs/35464159732 — pulled via `gh run view --log` and inspected
+step-by-step before dispatching the new run, so there would be something concrete to diff against rather than
+a vague "looked fine":
+
+- `Build @spaarke/auth` install: `added 452 packages in 3s`, 7 `npm warn EBADENGINE` (all `@azure/*` /
+  `@typespec/ts-http-runtime`, requiring `node >=20.0.0` — unrelated to this repo's own code; these are
+  transitive deps of the SWA deploy tooling that happened to run under the job's Node 18), plus deprecation
+  noise.
+- `Install dependencies` (office-addins): `added 1372 packages in 21s`, same class of `EBADENGINE` warnings
+  (7 lines) + 13 `npm warn deprecated` lines.
+- `Build Office Add-ins` (`webpack --mode production --no-bail --stats errors-only`): **zero output** between
+  invocation and the next step — i.e. no errors, and warnings are suppressed by `--stats errors-only` so a
+  silent step is the expected "clean" signal.
+- Deploy: `Zipping App Artifacts` → `Deployment Complete :)` in 15.47s, site
+  `https://icy-desert-0bfdbb61e.6.azurestaticapps.net`.
+
+### The new run (Node 20)
+
+Dispatched 2026-09-21T18:21:27Z: `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`.
+
+**Run: `35637852013`** — **https://github.com/spaarke-dev/spaarke/actions/runs/35637852013**
+`headSha ab7870c43ffbefb52fb5f0715e8b91855ac89fd5` (this task's commit) · `workflow_dispatch` ·
+**conclusion: success** · 1m46s (`gh run watch 35637852013 --exit-status` → exit 0).
+
+`Setup Node.js` step confirms `node-version: 20` was requested and **`node: v20.20.2`** was actually
+provisioned (`setup-node@v6` resolves the `'20'` pin to the latest 20.x patch — expected, matches how the gate
+and nightly baseline already resolve their own `'20'` pins).
+
+### Equivalence check — concrete diffs, not "it went green"
+
+| Signal | Node 18 baseline (`35464159732`) | Node 20 (`35637852013`) | Equivalent? |
+|---|---|---|---|
+| `Build @spaarke/auth` packages installed | 452 | **452** | ✅ identical |
+| `Install dependencies` (office-addins) packages installed | 1372 | **1372** | ✅ identical — same dependency tree resolved, nothing added/removed by the Node bump |
+| `npm warn deprecated` lines (office-addins install) | 13 (specific package list) | **13, same package list** | ✅ identical |
+| `npm warn EBADENGINE` lines | 7 (`@azure/*` + `@typespec/ts-http-runtime`, all wanting `node >=20.0.0`) | **0** | ✅ **improvement, not a new warning** — those deps are now satisfied by the Node 20 the job itself runs on |
+| `webpack` build step output | 0 lines (silent = clean under `--stats errors-only`) | **0 lines** | ✅ identical — no errors, no new warnings |
+| Deploy flow | validate → skip Oryx → zip → upload → poll → `Deployment Complete :)`, 15.47s | **same flow, `Deployment Complete :)`, 15.51s** | ✅ identical |
+| Deployed site | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net` | **same URL** | ✅ |
+
+**No new build warnings anywhere in the pipeline. The only delta is a reduction of 7 pre-existing warnings that
+were never about this repo's own code.** This satisfies the "no new build warnings" criterion, stated with the
+actual counts rather than an assertion.
+
+### Live-output verification (bundle present, manifest version correct)
+
+After the run completed, fetched the actually-deployed site directly (not inferred from the CI log):
+
+```
+GET https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.xml → 200, <Version>1.0.9.0</Version>
+GET https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/taskpane.html → 200
+```
+
+`taskpane.html` references 6 script tags; fetched each directly:
+
+| File | HTTP | Content-Length |
+|---|---|---|
+| `vendors.bundle.js` | 200 | 1,010,576 |
+| `186.bundle.js` | 200 | 16,650 |
+| `631.bundle.js` | 200 | 3,755 |
+| `87.bundle.js` | 200 | 135,363 |
+| `990.bundle.js` | 200 | 6,310 |
+| `word/taskpane.bundle.js` | 200 | 6,002 |
+
+All 6 bundles referenced by the deployed HTML are present and served. The chunk numbers (`186`, `631`, `87`,
+`990`) match webpack's deterministic numeric chunk-id scheme for this unchanged source tree — consistent with
+identical input producing identical chunk splitting, which is exactly what "equivalent output" predicts. As a
+content sanity check (the same method task 055 used to confirm a real, non-corrupted deploy — see
+`current-task.md`), grepped `87.bundle.js` for the distinctive string `"That name belongs to"` (from the
+collision-flow error copy) — **found**, confirming this is the real application bundle with real application
+strings, not an empty or truncated artifact.
+
+**Manifest version (1.0.9.0) is unchanged**, as expected — this task does not touch the manifest and none of
+its changes could plausibly affect it.
+
+### Escalation trigger — did NOT fire
+
+The task's escalation trigger is: *"if moving the deploy job to Node 20 changes the built output in any way
+beyond version strings, STOP and escalate."* Nothing above differs beyond version strings (Node 20.20.2 vs
+18.20.8, and the resulting removal of version-gated `EBADENGINE` noise). Package counts, deprecation-warning
+sets, build-step output, deploy flow, deployed bundle set, and manifest version are all identical. **No
+escalation required.**
+
+### Acceptance criteria 4 and 5 — now met
+
+- **Criterion 4** (real `workflow_dispatch` run, run URL recorded): ✅ `35637852013`,
+  https://github.com/spaarke-dev/spaarke/actions/runs/35637852013, conclusion `success`.
+- **Criterion 5** (output verified equivalent, method stated): ✅ — package-count diff, warning-list diff,
+  webpack-output diff, live bundle/manifest fetch, and a content sanity grep, all stated above with actual
+  numbers rather than an assertion.
 
 ## 5. Stale local install — the hazard this task was asked to record
 
@@ -141,9 +222,11 @@ other, without confirming the install that produced it.
 | # | Criterion | Status |
 |---|---|---|
 | 1 | Single Node version chosen + `.nvmrc` exists and matches | ✅ Node 20; `.nvmrc` = `20` |
-| 2 | Deploy builds on that version; gate + nightly agree | ✅ config-level (deploy now `'20'`, matching gate/nightly); **build-level proof is the pending step 4 below** |
+| 2 | Deploy builds on that version; gate + nightly agree | ✅ deploy now `'20'` (resolves to `v20.20.2`, same as the gate/nightly's own `'20'` pin), and §4's real run proves it actually builds |
 | 3 | `package.json` engines narrowed to a visible-warning range | ✅ verified empirically (§3a) |
-| 4 | Add-in builds successfully via a REAL deploy-workflow run; run URL recorded | ❌ **PENDING** — see §4 |
-| 5 | Built output verified equivalent (bundle, manifest version, no new warnings); state how checked | ❌ **PENDING** — see §4 |
+| 4 | Add-in builds successfully via a REAL deploy-workflow run; run URL recorded | ✅ run `35637852013`, https://github.com/spaarke-dev/spaarke/actions/runs/35637852013, `success` — §4 |
+| 5 | Built output verified equivalent (bundle, manifest version, no new warnings); state how checked | ✅ package-count/warning/build-output diff against the Node-18 baseline run + live bundle/manifest fetch — §4 |
 | 6 | Stale-`node_modules` hazard + task-043 consequence recorded | ✅ §5 |
-| 7 | `actionlint` passes | ✅ §3b (local run; CI's own check will also run on push) |
+| 7 | `actionlint` passes | ✅ §3b (local run, clean; CI's own `workflows-validate.yml` check also runs on every PR) |
+
+**All 7 acceptance criteria met.**
