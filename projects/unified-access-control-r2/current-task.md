@@ -1,6 +1,10 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-20, session 19 — LAPTOP → DESKTOP HANDOFF.** Task 108 code complete, committed `d0845724d`, pushed, tree clean, 0 unpushed; three verification items remain open. 📖 **Read the 30-SECOND SUMMARY and its 🖥️ MACHINE SWITCH row below — they supersede this stamp.** Prior stamp: **2026-09-19, session 17 — POML AUTHORING COMPLETE (109–119), COMMITTED AND PUSHED to PR #950.** ⚠️ **CI is running and UNVERIFIED** on the pushed head; the merge gate is `Router` **green, probed BY NAME via the check-runs API, once, at the merge decision** (`gh pr checks` never lists it), and a push cancels the prior run only if it was still in flight. `/merge-to-master` remains a separate, unmade decision. ✅ Verified after authoring: `Validate-TaskPoml.ps1` on the tasks dir is **110 clean / 0 errors / 6 pre-existing warnings → PASS** (it had been **exiting 1 since session 15**, on six stubs missing `&lt;steps&gt;` — the validator is manual and is NOT wired into `/push-to-github`, whose Step 1.65 gates only on the drift script); drift **116 POMLs / 116 index rows, rc=0**; **zero** `PREMISES NOT YET VERIFIED` markers; **zero** `not-started` (37 `pending`). 🔴 **Eight false claims corrected this session, five of them mine**: "seventeen wrong task files" is **19** per the audit's own `:9`; ISS-021's "N is currently 0" conflated memberships with standing grants (reads are paid per membership, `:1197`/`:1200`/`:1218-1221`; live data = 2 memberships/2 orgs); ISS-024 cited the reason-code **constant** (`:80`) not the refusal (`:677-680`) and wrongly cited `SystemUserIdentityResolver.cs:57`, and has **TWO** asserting tests not one (the second asserts through the constant, invisible to a string grep); task 063's `share-user` "downgrade at risk" is false of this code path (`InternalShareEndpoints.cs:25-26`); #1007 cited `matterService.ts:243-248` (wrong lines — real sequence `:357`/`:375`/`:394`). **New: ISS-029 → #1009** (the drift parser keeps the WRONG line for eight ids — green by luck). ⚠️ **I also shipped malformed XML in task 110 and the validator passed it** — that linter is regex-based and deliberately does not parse XML (`:55`), and **20 pre-existing POMLs are invalid XML** under the same convention. Prior stamp: session 16 handoff, 13 owner decisions. Head = **the commit that carries this file**; read it with `git log -1 --format=%h`. (The session-16 range `cb9ec2ea2..d8c139697..8496e929d` is historical; session 17 added commits from `7c75728bc` onward — read the current endpoint with `git log -1 --format=%h` rather than trusting any SHA written here.) **0 unpushed**, tree **clean**. ⚠️ This row deliberately names no literal head SHA: committing a handoff advances the head, so any SHA written here is stale the instant it is committed (session 16 shipped `8496e929d` in this row while the real head was `7c75728bc`). PR **#950**, no second PR. 📖 **Read `notes/owner-decision-brief-2026-09-18.md` (the 13 decisions) + `notes/remediation-and-sequencing-plan-2026-09-18.md` (the sequencing) FIRST — they supersede this row.** ⚠️ **(SESSION-16 CI NOTE — SUPERSEDED)**: "Tier 1 running, `Router` not started" described `8496e929d`. For session 17, CI on the pushed head is **running and UNVERIFIED** — see the head of this stamp; the mechanism notes (1)–(5) below remain correct and load-bearing. 🔴 **SIX corrected claims — read before judging CI**: (1) `Router` DID report on `3b409bfc1`/`597882f7c`, as a **failure**; (2) cause is **cancellation** — a push cancels an **in-flight** run and `alls-green` treats cancelled as a hard fail; (3) ⚠️ **a red on a superseded SHA is expected ONLY IF that run was still in flight** — `cb9ec2ea2` COMPLETED and kept a genuine **success**, so never dismiss a superseded red without checking it completed; (4) `gh pr checks` **NEVER lists `Router`** — probe **by name** via the check-runs API on the head SHA; (5) 🔴 **"docs-only pushes skip Tier 1" is FALSE ON THIS PR** — `d8c139697` touched only `projects/**` yet **both tier jobs dispatched**; they gate on `if docs_only != 'true'`, the run event is `pull_request`, and paths-filter classifies against the **PR BASE** (`ci-router.yml:140-142`), and #950 touches BFF throughout — so **Tier 1 ALWAYS runs here**; (6) ⚠️ that session's split — "75 done / 32 open / 3 escalated + 1 blocked = 111" — is **SUPERSEDED**; see the Task status row (**116** POMLs after session 17's eleven). **Merge gate: Tier 1 green AND `Router` green on the head SHA, probed by name, once, at the decision point.**
+> **Last Updated**: **2026-09-21, session 20 — FULL PROJECT REVIEW + SYNOPSIS REFRESH.** No code
+> changed. Worktree synced to master, SYNOPSIS corrected (4 false claims), TASK-INDEX insertion-room
+> line repaired, health re-measured green, and the parallel-execution plan below is NEW and binding.
+> **📖 READ § SESSION 20 first — it supersedes the session-19 rows beneath it.** Prior stamp:
+> **2026-09-20, session 19 — LAPTOP → DESKTOP HANDOFF.** Task 108 code complete, committed `d0845724d`, pushed, tree clean, 0 unpushed; three verification items remain open. 📖 **Read the 30-SECOND SUMMARY and its 🖥️ MACHINE SWITCH row below — they supersede this stamp.** Prior stamp: **2026-09-19, session 17 — POML AUTHORING COMPLETE (109–119), COMMITTED AND PUSHED to PR #950.** ⚠️ **CI is running and UNVERIFIED** on the pushed head; the merge gate is `Router` **green, probed BY NAME via the check-runs API, once, at the merge decision** (`gh pr checks` never lists it), and a push cancels the prior run only if it was still in flight. `/merge-to-master` remains a separate, unmade decision. ✅ Verified after authoring: `Validate-TaskPoml.ps1` on the tasks dir is **110 clean / 0 errors / 6 pre-existing warnings → PASS** (it had been **exiting 1 since session 15**, on six stubs missing `&lt;steps&gt;` — the validator is manual and is NOT wired into `/push-to-github`, whose Step 1.65 gates only on the drift script); drift **116 POMLs / 116 index rows, rc=0**; **zero** `PREMISES NOT YET VERIFIED` markers; **zero** `not-started` (37 `pending`). 🔴 **Eight false claims corrected this session, five of them mine**: "seventeen wrong task files" is **19** per the audit's own `:9`; ISS-021's "N is currently 0" conflated memberships with standing grants (reads are paid per membership, `:1197`/`:1200`/`:1218-1221`; live data = 2 memberships/2 orgs); ISS-024 cited the reason-code **constant** (`:80`) not the refusal (`:677-680`) and wrongly cited `SystemUserIdentityResolver.cs:57`, and has **TWO** asserting tests not one (the second asserts through the constant, invisible to a string grep); task 063's `share-user` "downgrade at risk" is false of this code path (`InternalShareEndpoints.cs:25-26`); #1007 cited `matterService.ts:243-248` (wrong lines — real sequence `:357`/`:375`/`:394`). **New: ISS-029 → #1009** (the drift parser keeps the WRONG line for eight ids — green by luck). ⚠️ **I also shipped malformed XML in task 110 and the validator passed it** — that linter is regex-based and deliberately does not parse XML (`:55`), and **20 pre-existing POMLs are invalid XML** under the same convention. Prior stamp: session 16 handoff, 13 owner decisions. Head = **the commit that carries this file**; read it with `git log -1 --format=%h`. (The session-16 range `cb9ec2ea2..d8c139697..8496e929d` is historical; session 17 added commits from `7c75728bc` onward — read the current endpoint with `git log -1 --format=%h` rather than trusting any SHA written here.) **0 unpushed**, tree **clean**. ⚠️ This row deliberately names no literal head SHA: committing a handoff advances the head, so any SHA written here is stale the instant it is committed (session 16 shipped `8496e929d` in this row while the real head was `7c75728bc`). PR **#950**, no second PR. 📖 **Read `notes/owner-decision-brief-2026-09-18.md` (the 13 decisions) + `notes/remediation-and-sequencing-plan-2026-09-18.md` (the sequencing) FIRST — they supersede this row.** ⚠️ **(SESSION-16 CI NOTE — SUPERSEDED)**: "Tier 1 running, `Router` not started" described `8496e929d`. For session 17, CI on the pushed head is **running and UNVERIFIED** — see the head of this stamp; the mechanism notes (1)–(5) below remain correct and load-bearing. 🔴 **SIX corrected claims — read before judging CI**: (1) `Router` DID report on `3b409bfc1`/`597882f7c`, as a **failure**; (2) cause is **cancellation** — a push cancels an **in-flight** run and `alls-green` treats cancelled as a hard fail; (3) ⚠️ **a red on a superseded SHA is expected ONLY IF that run was still in flight** — `cb9ec2ea2` COMPLETED and kept a genuine **success**, so never dismiss a superseded red without checking it completed; (4) `gh pr checks` **NEVER lists `Router`** — probe **by name** via the check-runs API on the head SHA; (5) 🔴 **"docs-only pushes skip Tier 1" is FALSE ON THIS PR** — `d8c139697` touched only `projects/**` yet **both tier jobs dispatched**; they gate on `if docs_only != 'true'`, the run event is `pull_request`, and paths-filter classifies against the **PR BASE** (`ci-router.yml:140-142`), and #950 touches BFF throughout — so **Tier 1 ALWAYS runs here**; (6) ⚠️ that session's split — "75 done / 32 open / 3 escalated + 1 blocked = 111" — is **SUPERSEDED**; see the Task status row (**116** POMLs after session 17's eleven). **Merge gate: Tier 1 green AND `Router` green on the head SHA, probed by name, once, at the decision point.**
 > **Sessions 9–13 ALL PUSHED — 0 unpushed.** Sessions 9–12 on 2026-09-15 (`c3e85a6dc..fe67eb1c2`, 17 commits); session 13 on 2026-09-17 (`7e60089e2..7a6f1c43d`, **14 commits**). Both to PR **#950**, whose description now carries a session-13 section (tasks 104 + 063, the owner decisions, the before-merge checks, #994/#995, task 108). CI: **Tier 1 fully GREEN at `7a6f1c43d`** — all 8 blocking jobs pass (Classify, Compile, Arch Tests full suite, Auth Smoke, Tenant Isolation, Eval Gate, Compose Fidelity, Changed-Surface Integration Smoke). Required `Router` context: **completed / success** on `7a6f1c43d`, verified via the check-runs API (the master ruleset confirms the required context is literally `Router`). The 5 `cancelled` runs on that SHA are the two advisory/legacy jobs still pending when the handoff commit was pushed seconds later. Head is now `597882f7c` (docs-only) with its own run in flight — docs-only pushes skip Tier 1 and `Router` still reports success on that shape, but **confirm `Router` on the head SHA before merging**. Two NON-blocking jobs were still running at handoff (Tier 2 Full Unit Tests, legacy Build & Test Debug) — Tier 2 is advisory by design, so a red there is not a merge blocker. **Trivy is red and NOT a required check**: 15 of its 16 alerts are pre-existing on master (→ #992, handed off) and 1 is TipTap 2.x from the session-8 LegalWorkspace build repair (→ #991, Compose owns it). Re-check with `gh pr checks 950`.
 > ⚠️ Refresh this stamp every time you write here. A gap between it and
 > `git log -1 --format=%ci current-task.md` means the handoff was incomplete.
@@ -18,6 +22,92 @@
 > own doc promised that Dataverse treats a revoke with no share as a no-op — Microsoft Learn documents no such thing,
 > and the promise is now removed; session 7: a test helper calls `ServiceClient`
 > *sealed*; it is not — `Execute` is `virtual final`).
+
+---
+
+## § SESSION 20 (2026-09-21) — READ THIS BEFORE THE QUICK RECOVERY BELOW
+
+**No code changed this session.** Worktree review + doc truth-repair only.
+
+### 🟢 Health, re-measured — all green
+
+| Check | Result |
+|---|---|
+| Worktree | clean · **0 unpushed** · **0 behind master** · 171 ahead · merged `origin/master` (4 doc files, `email-communication-intelligence-r3`) |
+| Build | 0 warnings / 0 errors |
+| **ArchTests** | **323 / 323** ← this **closes task 108 verification item (a)**, which predicted exactly 323 |
+| BFF unit + regression | **12,507 passed / 0 failed** / 58 skipped |
+| Drift gate | 116 POMLs = 116 index rows, rc=0 |
+| POML validator | 110 clean / **0 errors** / 6 warnings (3 frontend tasks lack `<ui-tests>`: 093, 094, 099) |
+
+### 🔴 TWO NEW BINDING OWNER DIRECTIVES (2026-09-21) — do not re-litigate
+
+1. **Scope discovered during execution is EXPECTED and is NEVER deferred.**
+   *"the added scope that is discovered as part of execution is expected — we should not defer or push
+   off new work; if it is important then we need to include it in this project."*
+   → Do **not** propose spinning work out, filing it for another project, or trimming the register.
+   92→116 tasks while open stayed flat at 37 is the *designed* behaviour, not drift.
+2. **Work in parallel and autonomously wherever possible.** *"we need to work in parallel and
+   autonomous wherever possible so we can get through it."*
+   → This is standing authorisation to use the **Agent tool** for parallel task execution. Use the
+   wave plan below; do not serialise work that the plan marks safe.
+
+### ▶ THE PARALLEL PLAN (derived this session from `<parallel-safe>` + declared-output overlap)
+
+**Only 4 of the 18 ready tasks are `parallel-safe=true`.** The other 14 are false for a *real* reason —
+`Api/ExternalAccess/**` and `Infrastructure/ExternalAccess/**` are this project's exclusive zone
+(project CLAUDE.md), and 112/113/114 explicitly say "never concurrently". That is an architectural
+constraint, not bureaucracy; do not override it to gain parallelism.
+
+**WAVE 1 — dispatch these 4 together (verified: no declared-output overlap among them):**
+
+| Task | Tier | What |
+|---|---|---|
+| **044** | sonnet/high | Phases 1–2 closure — unified-evaluator seam suite ⚠️ declares **0** modify/create files; confirm its outputs before dispatch |
+| **065** | sonnet/high | `AccessGrantModal` "+ User" system-user picker (FR-29) |
+| **107** | sonnet/high | ISS-009 (#974) — expiry for grant rows written outside the BFF |
+| **119** | sonnet/high | ISS-027 — Create To Do wizard actually uploads its files |
+
+🔴 **Do NOT add 118 to this wave.** It collides with **065** on
+`AccessGrantModal/types.ts` + `TrackingFieldTrio/index.ts`, and with **107** on
+`sprk_externalrecordaccess/entity-schema.md`. 118 is `parallel-safe=false` anyway.
+
+**SERIAL, AND BEST DONE FIRST — two meta-tasks that make everything after safer:**
+- **115** — repairs **nine open task files carrying a wrong load-bearing sentence.** Until this runs, a
+  parallel agent can load a half-true premise as its instructions. This is the highest-leverage task
+  for directive #2 above, because it protects every wave that follows.
+- **116** — the drift check compares POMLs and index rows as **sets**, so an index row with no POML is
+  invisible (ISS-025/ISS-029). Fixes the instrument this project gates on.
+
+**Then the ExternalAccess cluster, strictly serial:** 108 → 109 → 111 → 112 → 113 → 114 → 117 → 118.
+
+**Separately and alone: 036** — it is `opus/xhigh`, on the orchestrator hot-file list, and carries the
+manual canary. Never put it in a wave.
+
+### 🔔 OPEN QUESTIONS — these need owner answers to proceed cleanly
+
+| # | Question | Why it blocks | My recommendation |
+|---|---|---|---|
+| **Q1** | **Who runs 036's NFR-04 canary, and against which environment?** It is a manual pre-merge gate; PASS = impersonated set **strictly smaller** than app-only; **equality = STOP**. Never measured on the fixed environment. | Blocks 036 → 054 → 055 → 056 → 057/058 — five tasks and all of Phase 3. | I can script + run it read-only if you name the environment and two users (one root-BU, one restricted). |
+| **Q2** | **Do we land PR #950 (477 files, +54,936/−7,596) as one merge, or stage it?** | It is `BLOCKED`/large; 171 commits of authorization work landing atomically. | Stage it. At minimum, merge master into it and land Phase 0 + governance separately from the open phases. |
+| **Q3** | **Operator deploy for task 047** — `Deploy BFF API` is `disabled_manually`. | 047 is the *only* proof of success criteria 5 and 6 (secure project unreachable by Operations subtree / reachable by a shared user). Without it those two criteria cannot be met at all. | Re-enable for one run; 047 also settles SPE paging and is the first live exercise of 096/097. |
+| **Q4** | **Task 101's two Dataverse views + #974's schema-side expiry guard** — both operator steps under your 2026-09-04 "code + docs only" rule. | 101 cannot complete; #974 is the precondition for 107. | Batch them with Q3 into one operator session. |
+| **Q5** | **`gh auth refresh -s read:project,project`** — token holds only `gist, read:org, repo, workflow`. | Portfolio sync degrades to a warning on every checkpoint. | One command, unblocks the DevOps hooks. |
+| **Q6** | **Trivy red on #950** — pre-existing (red since `0a592b7a7`), another surface, formally unowned. | Only red check on the PR. | Record it as accepted-not-ours on the PR, or assign an owner. Do **not** let it gate Q2. |
+
+**Already answered — do not re-ask:** scope is never cut · no Dataverse test in CI · schema work is
+code+docs only, live changes are operator steps · a failed revoke gives a message not a bare 500 ·
+"server fills +90" for absent grant expiry · don't relocate users (test users are in the right BU).
+
+### 📄 Docs corrected this session
+
+- **`SYNOPSIS.md`** — refreshed (commit `d68e88599`). Four false claims fixed: the counts; *"no human
+  can reach a secure project"* (**false since 061 closed 2026-09-08**); success criterion 3 claiming the
+  NFR-04 canary runs *"in CI"* (it is **manual**, per your 2026-09-10 directive); and "the single most
+  important open item" still naming 061. It now names **036** and says it is the title's *third* holder.
+- **`TASK-INDEX.md`** — the "free from `093`" insertion-room line was stale by 22 days (093–119 all
+  taken). Marked as the recurring defect it is — that line has aged into a collision hazard **four**
+  times. **Free from `120`**; use `ls tasks/ | sort | tail -3`, which cannot go stale.
 
 ---
 
