@@ -96,17 +96,23 @@
  * directive 2026-09-10). `postJson`/`getJson` below now check `res.ok` before
  * parsing the body as success (M8 — previously `(await res.json()) as T` read
  * a failed response's ProblemDetails as if it were the success shape). Revoke
- * additionally reads the EXISTING `RevokeAccessResponse.SpeContainerOutcome` +
- * `DeactivatedCount` fields (no server change needed — both already exist) to
- * render one of three distinct outcomes: fully revoked, grant revoked but SPE
+ * renders one of three distinct outcomes: fully revoked, grant revoked but SPE
  * removal could not be confirmed (the person may retain file access — retry/
- * escalate), or nothing was revoked. M2 itself (aligning `/revoke`'s HTTP
- * status with `/close-project`'s for an SPE failure) is a `RevokeExternalAccessEndpoint.cs`
- * change — OUT OF THIS TASK'S FILE LANE (concurrent-agent boundary; this task
- * touches only `AccessGrantModal/**` + `TrackingFieldTrio/**`) — NOT
- * implemented here; reported as an escalation in the task's final report. The
- * owner's message requirement is fully satisfied without it, since the
- * distinguishing fields are already present in today's 200 response body.
+ * escalate), or nothing was revoked — built by {@link buildRevokeNotice}.
+ *
+ * M2 landed alongside M8 (binding order — see the task-024 constraint: flipping
+ * `/revoke`'s status to 500 without M8's `res.ok` check would have traded one
+ * silent wrong answer for a runtime throw). `RevokeExternalAccessEndpoint.cs`
+ * now returns 500 + ProblemDetails (`sdap.revoke.incomplete.container_not_cleared`,
+ * aligned with `/close-project`'s `ClosureIncomplete`) for the
+ * `SpeContainerOutcome.Failed` case ONLY — `NotAttempted`/`PermissionRemoved`/
+ * `NoPermissionFound` are unchanged 200s. `AccessGrantModalApiError` carries the
+ * ProblemDetails' `deactivatedCount`/`speContainerOutcome` extensions (see
+ * {@link AccessGrantModalApiError.fromResponse}), and `confirmRevoke`'s catch
+ * block recognizes this ONE reason code and routes it through the SAME
+ * {@link buildRevokeNotice} the 200 path uses — so a 500 still produces the
+ * owner's three-outcome message, never a generic "please try again" that
+ * silently drops `deactivatedCount`.
  */
 
 import * as React from 'react';
@@ -282,6 +288,23 @@ function formatGrantDate(iso: string | undefined): string {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/** Mirrors the BFF's `SpeContainerRevokeOutcome` enum (camelCase-serialized
+ * PascalCase member names via `JsonStringEnumConverter`, no naming policy).
+ * Shared by {@link AccessGrantModalApiError} and {@link IRevokeAccessResponseBody}
+ * so both read the SAME set of values regardless of which HTTP status carried
+ * them (task 065 M2). */
+type SpeContainerRevokeOutcome = 'NotAttempted' | 'PermissionRemoved' | 'NoPermissionFound' | 'Failed';
+
+/** M2 (task 024 → task 065): the one reason code `/revoke` uses for its single
+ * incomplete shape — the Dataverse grant WAS deactivated, but the SPE
+ * container permission could not be confirmed removed. MUST match
+ * `RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason` exactly;
+ * deliberately its OWN leaf on the `sdap.*.incomplete.*` family
+ * `/close-project` established, not closure's literal code — a single-grant
+ * revoke and a project closure must stay distinguishable to a caller
+ * switching on the code. */
+const REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE = 'sdap.revoke.incomplete.container_not_cleared';
+
 /**
  * Thrown by {@link postJson}/{@link getJson} for a non-OK BFF response (task-024
  * finding M8, transferred to task 065). Carries the parsed RFC 7807
@@ -292,13 +315,27 @@ class AccessGrantModalApiError extends Error {
   readonly status: number;
   readonly reasonCode?: string;
   readonly detail: string;
+  /** M2 (task 024 → task 065): present ONLY when the ProblemDetails carried it
+   * (currently: the `/revoke` SPE-cleanup-incomplete 500). Never discarded —
+   * owner directive 2026-09-10 — so `confirmRevoke`'s catch block can still
+   * build the three-outcome notice via {@link buildRevokeNotice}. */
+  readonly deactivatedCount?: number;
+  readonly speContainerOutcome?: SpeContainerRevokeOutcome;
 
-  constructor(status: number, detail: string, reasonCode?: string) {
+  constructor(
+    status: number,
+    detail: string,
+    reasonCode?: string,
+    deactivatedCount?: number,
+    speContainerOutcome?: SpeContainerRevokeOutcome
+  ) {
     super(`AccessGrantModal request failed (${status}): ${detail}`);
     this.name = 'AccessGrantModalApiError';
     this.status = status;
     this.detail = detail;
     this.reasonCode = reasonCode;
+    this.deactivatedCount = deactivatedCount;
+    this.speContainerOutcome = speContainerOutcome;
     // Restore the prototype chain (extending built-ins across ES5/ts-jest
     // transpilation targets can otherwise break `instanceof` checks) — same
     // fix as communicationApi.ts's SendCommunicationError.
@@ -309,10 +346,23 @@ class AccessGrantModalApiError extends Error {
   static async fromResponse(response: Response): Promise<AccessGrantModalApiError> {
     const status = response.status;
     try {
-      const body = (await response.json()) as { reasonCode?: string; detail?: string; title?: string };
+      const body = (await response.json()) as {
+        reasonCode?: string;
+        detail?: string;
+        title?: string;
+        // M2 (task 024 → task 065): only `/revoke`'s incomplete-SPE-cleanup 500
+        // carries these today; every other ProblemDetails leaves them undefined.
+        deactivatedCount?: number;
+        speContainerOutcome?: string;
+      };
       const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
       const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
-      return new AccessGrantModalApiError(status, detail, reasonCode);
+      const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
+      const speContainerOutcome =
+        typeof body?.speContainerOutcome === 'string'
+          ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
+          : undefined;
+      return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
     } catch {
       return new AccessGrantModalApiError(status, `HTTP ${status}`);
     }
@@ -353,7 +403,7 @@ function classifyAccessFailure(err: unknown): { kind: 'delegation' | 'unauthenti
  * a per-contact/org revoke from THIS modal can produce are named (an
  * organization-member breakdown is `speOrgMemberCleanup`, unused here). */
 interface IRevokeAccessResponseBody {
-  speContainerOutcome?: 'NotAttempted' | 'PermissionRemoved' | 'NoPermissionFound' | 'Failed';
+  speContainerOutcome?: SpeContainerRevokeOutcome;
   deactivatedCount?: number;
 }
 
@@ -976,6 +1026,27 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       if (deny) {
         setAccessDenyState(deny);
         setPendingRevoke(null);
+      } else if (
+        pendingRevoke.kind === 'grant' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode === REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE
+      ) {
+        // M2 (task 024 -> task 065): /revoke now returns 500 + ProblemDetails for this exact
+        // shape (aligned with /close-project) instead of 200 + Failed-in-body. The Dataverse
+        // grant WAS deactivated server-side even though the SPE half failed, so the SAME
+        // three-outcome message + deactivatedCount the 200 path renders must still reach the
+        // person — a 500 must never regress into a generic "please try again" that drops
+        // deactivatedCount (owner directive 2026-09-10: "the status code is for the client,
+        // the MESSAGE is for the person").
+        const fullName = pendingRevoke.fullName;
+        setPendingRevoke(null);
+        await loadData();
+        setNotice(
+          buildRevokeNotice(fullName, {
+            speContainerOutcome: err.speContainerOutcome ?? 'Failed',
+            deactivatedCount: err.deactivatedCount,
+          })
+        );
       } else {
         setNotice({
           intent: 'error',

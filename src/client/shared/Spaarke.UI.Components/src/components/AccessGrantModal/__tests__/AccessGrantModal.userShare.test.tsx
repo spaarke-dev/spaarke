@@ -433,6 +433,48 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(screen.getByText(/may still be able to open files/)).toBeInTheDocument();
     });
 
+    it('M2: a Failed SPE outcome now arrives as a 500 ProblemDetails and STILL warns that file access may remain, without discarding deactivatedCount', async () => {
+      // Server-side M2 (task 024 -> task 065): /revoke aligns with /close-project for this exact
+      // shape and now returns 500 + ProblemDetails (reasonCode
+      // sdap.revoke.incomplete.container_not_cleared, deactivatedCount + speContainerOutcome in
+      // extensions) instead of the 200 + Failed-in-body the test above exercises. The SAME
+      // three-outcome message must still reach the person — this is the regression M8 alone would
+      // have caused (a 500 read via res.ok would throw and fall into a generic error) if M2 had
+      // shipped without the catch-block routing added alongside it.
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/revoke')
+          ? jsonResponse(
+              {
+                title: 'External access revoke incomplete',
+                detail:
+                  'Deactivated 1 Dataverse access grant(s), but the SPE container permission could not ' +
+                  'be confirmed removed. The grantee may RETAIN file access. Retry the revoke.',
+                reasonCode: 'sdap.revoke.incomplete.container_not_cleared',
+                deactivatedCount: 1,
+                speContainerOutcome: 'Failed',
+              },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Prior Grantee');
+      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+      await screen.findByText('Revoke access?');
+      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
+      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+
+      // The SAME message text the 200-Failed path renders — never a generic "please try again".
+      expect(await screen.findByText(/file access could not be confirmed removed/)).toBeInTheDocument();
+      expect(screen.getByText(/may still be able to open files/)).toBeInTheDocument();
+      expect(screen.queryByText(/Failed to revoke access/)).not.toBeInTheDocument();
+    });
+
     it('deactivatedCount 0 reports "already had no active access record" rather than a plain success', async () => {
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/revoke')
