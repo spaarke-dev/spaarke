@@ -4,7 +4,67 @@
 
 ---
 
-## 🔴 HANDOFF 2026-09-19 — READ THIS BLOCK FIRST
+## 🟢 HANDOFF 2026-09-21 — READ THIS FIRST (supersedes the 09-19 block below, which stays valid for its lessons + machine notes)
+
+**Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Clean tree, 0 behind / 221 ahead, LOCAL == REMOTE (SHA-verified).**
+HEAD moves — get it with `git log -1 --format='%H %s'`; do NOT trust a SHA written here.
+
+### ⛳ NEXT ACTION — a **Fable model-level project review**, NOT task 058
+
+The operator's stated next step after this compaction. Do **not** start 058 until that review has run — it may re-order or re-scope what remains.
+
+**Why now**: **55 of 61 tasks are ✅** (counted from task rows only — a naive grep also catches the ✅ in TASK-INDEX's goal-eligibility table and overstates it) and every implementation task is done. What remains is 4 codeable tasks, 1 operator task, and a wrap-up. This is the right moment to look for what the task list has *missed* rather than to keep executing it.
+
+**Concrete agenda for that review — the open, unresolved items, each with its evidence already gathered:**
+
+| # | Item | Where the evidence is |
+|---|---|---|
+| 1 | **058 — LIVE authorization gap, still open.** `/office/share/links` + `/office/share/attach` have no per-document authz; the only gate is `SimulateSharePermissionCheckAsync` → `return Task.FromResult(true)`. Any authenticated caller can mint a share link for ANY document GUID. `/office/recent` + `/office/search/documents` are 100% stubs. Decision recorded = **DELETE** (~800 lines). | `tasks/058-delete-unauthorized-stub-surface.poml` |
+| 2 | **060 — job status is a `private static ConcurrentDictionary`** (`OfficeService.cs:74`); lost on restart/scale-out. Proven live: 3 restarts on 2026-09-19 discarded in-flight state. | `tasks/060-*.poml` |
+| 3 | **059 — `OfficeService.cs` is 3,479 lines with 18 ctor params** vs ADR-010's >7. | `tasks/059-*.poml` |
+| 4 | **057 — ADR-038 Amendment A2** (owner-approved Path B): `tests/unit/Sprk.Bff.Api.Tests/**` as the 9th KEEP path; 6 files enumerate KEEP paths and **2 are already stale after A1**. | `tasks/057-*.poml` |
+| 5 | **ISS-001 — `sprk_event` is written to `sprk_document` but the column does not exist.** `EntityAccessFilter` authorizes it, `DataverseServiceClientImpl.cs:916` writes it. Owned by `unified-access-control-r2`, NOT fixed here. | `notes/defer-issues.md` ISS-001 |
+| 6 | **ISS-002 residual — the shadow-window latch was never repaired.** `-Since` was advanced (Option 1) which sidestepped #934; `$falseGreens` is still computed unfiltered, so the NEXT false green latches identically. Needs a cutover-owner decision: hard stop or reset. | `notes/defer-issues.md` ISS-002 |
+| 7 | **Six POMLs fail XML validation**, including `090-project-wrap-up.poml` — `task-execute` cannot load it, and it sits on the path to closing the project. Pre-existing. | run `Validate-TaskPoml.ps1` |
+| 8 | **10 failing jest suites (84 tests)** — genuine mock/assertion defects, unowned by any task. | `ci-gated-suites.txt` header |
+| 9 | **W-5** `identity-obj-proxy` mapped in `jest.config.js:48` but never installed (verified INERT — no stylesheet imports exist); **`npm run lint` is broken** (points at a non-existent `src/`). Both small, unowned → ours. | 09-19 block, "Open findings" |
+| 10 | **`sprk_matternumber` is `sprk_matter`'s PRIMARY NAME column** — a pane-created Matter shows a blank name in lookups until the separate numbering project ships. Not a regression; raises that project's urgency. | `notes/030-numbering-handoff.md` |
+| 11 | **042 🔄 + 090 🔲** — 13 live acceptance criteria + 14 parity rows need a live Office host (operator's); 090 blocked on 042. | `notes/parity-checklist.md` |
+
+### ✅ What this session did (2026-09-21)
+
+**Task 056's CI gate is GREEN. It took TWO fixes, not the one the 09-19 block predicted.** Full detail in the "✅ RESOLVED" block below. Short version:
+
+1. `32aa6aec9` — `set +e`. `shell: bash` expands to `bash … -e -o pipefail`, so Actions **injects** errexit; omitting `set -e` ≠ not having it. Gate had been dying at exit 2 before the classifier ran.
+2. `be18d7d0e` — build `@spaarke/auth` first. Fixing (1) let the classifier run, and it **immediately caught a second defect (1) had been masking**: the job's comment claimed *"tsconfig paths resolve it from source, same as jest.config.js does"* — false. `jest.config.js:48` maps `@spaarke/auth`; **`tsconfig.json` never does**. tsc fell through to the `file:` link → `types: dist/index.d.ts` → gitignored, unbuilt `dist/`.
+3. `3fc94ebad` — recorded both in this file.
+
+Proof (real CI, run `35552142104`): `Production typecheck clean: 0 production error(s); 111 total line(s) are accepted test-file debt.` **Non-vacuous** — 111 total proves tsc ran (the guard trips at 0), and 111 **matches the recorded client baseline exactly**. `Gated jest` pass, `actionlint` pass.
+
+**Task 058 conflict-check: DONE → soft warn, clear to proceed.** No open PR touches the 3 files; all 21 worktrees clean (UAC-r2's previously-flagged unpushed edits are gone). UAC-r2 *does* have committed changes to the same two files, but hunks are disjoint (`OfficeEndpoints` 347-357, `OfficeService` 1699-1833 vs 058's ~1029/~1931-2645) **and it adds ZERO references to any of the 14 members 058 deletes** — the symbol test, which is the one that matters for a deletion. Re-run if either branch moves.
+
+**Merged `origin/master`** (3 commits, docs-only for `email-communication-intelligence-r3`, zero overlap).
+
+### CI state — terminal, and honest
+
+`gh pr checks 960` → **0 pending, 1 fail**. The fail is `Tier 2 (Advisory) / Full Unit Tests` at **30m19s** — the known 30-minute cap against a ~12,400-test suite, in `ci-tier2-advisory.yml`, a **frozen file this project does not own**. **`Router` — the ONLY required check — PASSES**, and all 8 Tier 1 blocking checks pass. Not a merge blocker; do not "fix" it by making Tier 2 blocking.
+
+### 💻 Desktop environment (differs from the laptop the 09-19 block describes)
+
+| Tool | Laptop | **This desktop** | Consequence |
+|---|---|---|---|
+| node | v20.20.2 | **v22.14.0** | ⚠️ **CI pins Node 20** (`office-addins-tests.yml:162,332`). Treat local gate runs as advisory — a toolchain mismatch is the same class of error that produced defect 1. |
+| dotnet | 10.0.401 | 10.0.101 | both net10 |
+| `gh` scopes | no `read:project` | **has `project`** ✅ | the laptop's `/devops-project-sync` gap is closed |
+| actionlint | absent | **still absent** | CI's own actionlint check passes, so covered |
+| `deploy/api-publish` + `.zip` | present | **MISSING** | gitignored. **Rebuild before any publish-size measurement** — and per CLAUDE.md §10 measure against a FRESH master build, never the recorded number. |
+| `node_modules`, `dist` (office-addins) | present | **present** ✅ | add-in side ready |
+
+`az login` / `gh auth` are per-machine — re-establish if a deploy is needed.
+
+---
+
+## 🔴 HANDOFF 2026-09-19 — still valid for its LESSONS and MACHINE NOTES
 
 **Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). HEAD = the newest commit on the branch — get it with `git log -1 --format='%H %s'`; do NOT trust a SHA written here.**
 
@@ -164,11 +224,16 @@ Run them with `task-execute`. **058 first** (security), then 059/060 in parallel
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+## Quick Recovery — ⚠️ SUPERSEDED, historical detail only
 
-> ⚠️ **This block (2026-09-17 handoff) is authoritative and supersedes the table further down**, whose
-> "Next Action" row accreted across the session and contains stale, duplicate-numbered entries. Read this;
-> treat the table below as historical detail only.
+> 🛑 **Do not act from this block.** The authoritative state is the **🟢 HANDOFF 2026-09-21** block at the top
+> of this file. This section is the 2026-09-17 handoff, kept because its task-055 provenance, deploy runbook,
+> build-trap warnings and owner decisions are still the best record of how those were settled.
+>
+> **What is stale here**: the "Task" row says **055** (completed 2026-09-19); the "Progress" row says
+> **53 of 55** (now **55 ✅ / 1 🔄 / 5 🔲 = 61** — see `tasks/TASK-INDEX.md`, which is authoritative);
+> the "Next Action (055)" row describes work that is finished. The "Next Action" row also accreted across a
+> long session and contains duplicate-numbered entries.
 
 | Field | Value |
 |---|---|
