@@ -196,7 +196,17 @@ those processes cannot be attributed to this worktree and other sessions may own
 
 ## 10. Follow-ups
 
-- Re-run ArchTests, the perturbation, and the publish measurement once the build host is healthy (§8).
+- Re-run ArchTests (expect **323**), the criterion-4 perturbation (expect **Failed 2 / Passed 17 /
+  Total 19**, §8) and the publish measurement. ⚠️ **These are NOT blocked on anything.** The unhealthy
+  build host described in §8 was a **laptop-local pathology** (ten orphaned `dotnet.exe` processes,
+  since self-resolved back to one), and the work moved to a different machine on **2026-09-20** — do
+  not wait on it, and do not run `dotnet build-server shutdown` hunting for it on a fresh machine.
+  The publish A/B is also **simpler now than what §8 describes**: because the task code is committed,
+  it is two plain fresh short-path worktrees — `b42d6471e` (pre-task) vs `d0845724d` (post-task) —
+  with no "apply 2 files on top of a baseline" trick; the scratch worktrees §8 used were removed with
+  the laptop. Absolute MB figures in §8's table are **sanity checks only, not a reusable baseline**
+  (they move with machine, SDK patch and zip tool — root CLAUDE.md §10 hazards 2–4), so measure BOTH
+  sides fresh and confirm the file counts match. See the 🖥️ MACHINE SWITCH row in `current-task.md`.
 - Hoist one log-capture provider into `tests/integration/Shared/` and delete the duplicates (§5).
 - ADR-019 partial-success guidance (200 + body flag) — path B candidate (§4 W2-adr).
 - No test asserts `sweepComplete` on the 500 flag-not-cleared ProblemDetails; that extension member is
