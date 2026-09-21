@@ -461,13 +461,25 @@ landed. A stat line is not verification of a co-edited file.
 > from each other**, so its magnitude was never the right order. A plausible mechanism was accepted without
 > checking whether it could produce the observed size.
 >
-> The lesson is not "measure more carefully" — three attempts were all careful. It is that a **derived
-> scalar** (a count, a length, a `--stat` figure) fails silently, still looks like evidence, and **has units
-> to get wrong**, whereas a **content diff** either matches or does not: it is path-independent, cannot be
-> truncated by the data it measures, and has no units at all. The qualitative checks used here — each row
-> appears **exactly once**, each status cell is **✅**, and `git diff a66e37f03 HEAD -- <path>` touches
-> **exactly the expected rows** — agreed from both agents' machines on the first attempt, which no scalar
-> ever did.
+> The lesson is not "measure more carefully" — all three attempts were careful — and it is not the tally of
+> who erred, which is noise. It is that a **derived scalar** (a count, a length, a `--stat` figure) carries
+> **three independent things that can be wrong while the number still looks like evidence**, and the three
+> bugs above are exactly one of each:
+>
+> | | Got it wrong | Which bug |
+> |---|---|---|
+> | **a parser** | `awk -F'\|'` split the row at data it contained | figure 1 |
+> | **units** | characters vs UTF-8 bytes | figure 2 vs 4 |
+> | **a framing convention** | is the trailing newline part of the line? | figure 3 |
+>
+> A **content diff** has none of the three: no units, no parser over the payload, nothing to frame. It either
+> matches or it does not. The qualitative checks used here — each row appears **exactly once**, each status
+> cell is **✅**, and `git diff a66e37f03 HEAD -- <path>` touches **exactly the expected rows** — agreed from
+> both agents' machines on the first attempt, which no scalar ever did.
+>
+> And the cheapest check of all was the one both agents skipped: **ask whether a proposed mechanism's
+> magnitude is even the right order** before accepting it. CRLF moves a line by one byte; the deltas were 11
+> and 26. That refutation needed no tooling, no measurement and no second opinion.
 
 **The second hazard, found by task-063 and worth more than the first**: `.husky/pre-commit` runs
 `npx lint-staged`, which **stashes and restores unstaged changes** around the formatters. That is an
