@@ -327,3 +327,53 @@ its own contribution is a few hundred bytes of IL.
 endpoint filter to satisfy ADR-008's default form — is the shape that cannot work here (a filter has no rows
 to authorize) and that fails **open** if the result shape later changes. ADR-008's own text sanctions the
 in-query alternative provided the reason is documented in code, which it is.
+
+---
+
+## §N (appended 2026-09-21 by main session) — the Delegate-privilege risk is CLEARED
+
+The executing agent closed this task with one acceptance criterion explicitly unmet: it could not verify that
+the BFF's Dataverse application user holds **`prvActOnBehalfOfAnotherUser`**. Without it, the impersonated
+read fails and the entity picker returns 500 — fail-closed and loud, but a **visible outage** on a shipped
+surface. It flagged this as needing confirmation before deploy rather than assuming, which was correct.
+
+**Verified live against the dev environment via the Dataverse MCP connection. The privilege is present.**
+
+### The privilege → role mapping (queried, not assumed)
+
+`prvActOnBehalfOfAnotherUser` = `ae5c41f0-e823-4cb9-b25a-8ef020201973`. Roles granting it include:
+
+| Role | roleid |
+|---|---|
+| **System Administrator** | `10fbf21c-1872-f011-b4cb-7c1e52671ad0` |
+| **Delegate** | `75fef21c-1872-f011-b4cb-7c1e52671ad0` |
+
+> ⚠️ **The load-bearing fact, and it is counter-intuitive**: in this environment **System Administrator
+> itself grants `prvActOnBehalfOfAnotherUser`**. The common assumption — that impersonation always requires
+> the separate **Delegate** role because sysadmin does not imply it — does **not** hold here. That assumption
+> is why this was recorded as an open risk in the first place. It was checked rather than reasoned about.
+
+### Both candidate BFF application users hold it
+
+| App user | applicationid | systemuserid | Roles | Has privilege |
+|---|---|---|---|---|
+| `SDAP-BFF-SPE-API` | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | `bb5a90e5-4ca8-f011-bbd3-7c1e5215b8b5` | System Administrator **+ Delegate** | ✅ twice over |
+| `# mi-bff-api-dev` (managed identity) | `5967251e-171c-46fe-a6c2-ef843c90309d` | `8793f4b0-01db-f011-8406-7c1e520aa4df` | System Administrator | ✅ via sysadmin |
+
+Both are `isdisabled: false`.
+
+**Why both were checked rather than one**: the BFF's Dataverse identity in dev could be either the
+client-secret app registration or the newer managed identity, and the environment has both as enabled
+application users. Resolving which one is actually configured would have been the harder question — and it
+turned out not to matter, because **either identity has the privilege**. Had only `SDAP-BFF-SPE-API` carried
+it (the Delegate-role assumption), identifying the configured identity would have been mandatory before
+deploy.
+
+### Consequence
+
+**Task 062 no longer has a pre-deploy blocker.** The impersonated read will work in dev under either
+identity. Its second unmet criterion (task 061's guard) is unchanged and remains tied to 061.
+
+**Carry forward to other environments**: this was verified in **dev only**. A different environment may
+assign these app users differently, and `spaarke-bff-api-prod` (`92ecc702-…`) was **not** checked. Re-verify
+before the first production deploy that depends on impersonation — do not port this result.
