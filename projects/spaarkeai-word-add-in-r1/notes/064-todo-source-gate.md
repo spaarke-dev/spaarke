@@ -428,7 +428,21 @@ happened, recorded because the next agent here will otherwise rediscover it:
 `git commit -m … -- <paths>` and never bare `git add` + `git commit`. Pathspec mode commits the **working
 tree** content of exactly the named paths and ignores the index entirely, so a sibling's staged work cannot
 ride along. Its one sharp edge is a file BOTH agents edit (here `TASK-INDEX.md`): pathspec mode would commit
-the worktree copy carrying both rows, so that file has to be coordinated, not automated.
+the worktree copy carrying both rows, so that file has to be coordinated, not automated — which is why this
+task's index row is its own commit (`8c8ac92c3`), taken while the worktree differed from HEAD by one line.
+
+**Four distinct hazards, reconciled with task-063 who hit the other two:**
+
+| # | Hazard | Why it is not obvious |
+|---|---|---|
+| 1 | A worktree shares one `.git/index`, so stage-then-commit is **not atomic between agents** | Care in building the staged blob buys nothing — you can simply not be the one who calls `commit` |
+| 2 | `.husky/pre-commit` → `npx lint-staged` **stashes and restores unstaged changes** around the formatters | An independent route for files that are NOT in the index to enter a commit; the index race alone does not explain everything observed |
+| 3 | `--only` / pathspec commits the **worktree** content, not the **staged** content | Reads as "commit just these paths"; it silently picks up a co-edited file's other rows. task-063's first amend swept this task's row back in through exactly this |
+| 4 | `git commit --allow-empty` **with no pathspec** commits whatever is in the shared index | "Empty" describes the intent, not the command — it is empty only if the index is |
+
+**And the tell that catches #3**: `git show --stat` said `TASK-INDEX.md | 2 +-` and looked correct in both
+the good and the bad case. Only **diffing the row's content (or its byte length) against `HEAD~1`** showed
+which row had actually landed. A stat line is not verification of a co-edited file.
 
 **The second hazard, found by task-063 and worth more than the first**: `.husky/pre-commit` runs
 `npx lint-staged`, which **stashes and restores unstaged changes** around the formatters. That is an
