@@ -4,7 +4,7 @@
     <title>ISS-027 — the Create To Do wizard must actually upload the files it asks for (owner-decided: "Fix; To Do needs files")</title>
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts in the shared component library and adds a Dataverse write plus an SPE upload to a user-facing create path. Tags include frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>

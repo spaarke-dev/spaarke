@@ -4,7 +4,7 @@
     <title>Phases 1-2 closure — unified-evaluator seam suite: one closed behavioral contract for terms, max, vetoes and member definition</title>
     <phase>2 One definition of member</phase>
     <gate>after-039-041-042-043</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (tests/**, tags testing/integration-test) — code-review + adr-check unconditional; pins the authorization contract.</rigor-reason>
     <model-tier>sonnet</model-tier>
