@@ -216,7 +216,13 @@ describe('AccessGrantModal (v1.0.26)', () => {
       fireEvent.click(addButton());
 
       expect(await screen.findByText(/Pick an access level for: Jane Outside/)).toBeInTheDocument();
-      expect(props.authenticatedFetch).not.toHaveBeenCalled();
+      // "does not write" — scoped to POST (the guard blocks a WRITE). The modal
+      // now also issues a GET to /user-shares on open (task 065, FR-29), which
+      // is unrelated to this guard and must not make this assertion flaky.
+      const postCalls = (props.authenticatedFetch as jest.Mock).mock.calls.filter(
+        (c: [string, RequestInit]) => c[1]?.method === 'POST'
+      );
+      expect(postCalls).toHaveLength(0);
     });
 
     it('sends {recordType, recordId} for a Matter root', async () => {

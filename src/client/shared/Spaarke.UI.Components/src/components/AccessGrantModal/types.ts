@@ -54,8 +54,14 @@ export interface IAccessGrantRecord {
   grantedDate?: string;
   /** Display-only provenance label — NOT sent to the BFF (the endpoint has no
    * provenance field; this is a client-side annotation of HOW the grant was
-   * created, inferred by the caller or defaulted by this modal's own writes). */
-  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown';
+   * created, inferred by the caller or defaulted by this modal's own writes).
+   * `'share'` (task 065, FR-29) is an internal system-user POA share, read
+   * from `GET /api/v1/external-access/user-shares` — NOT a
+   * `sprk_externalrecordaccess` row, so it carries no `accessRecordId`; see
+   * {@link IAccessGrantModalProps.pickUser}. Full provenance rendering for
+   * every row kind is task 066 — this modal only needs the row to exist, be
+   * labeled, and be revocable. */
+  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share';
 }
 
 /** A single Dataverse Contact search result (named-contact person-picker). */
@@ -75,6 +81,32 @@ export interface IContactSearchResult {
 export interface IOrganizationPick {
   id: string;
   name: string;
+}
+
+/** An internal system user picked via the side-pane Advanced Lookup (task 065,
+ * FR-29) — a Dataverse `systemuser` record. `id` is the `systemuserid` GUID
+ * (already `cleanGuid`-normalized by the navigation adapter). Sent to the BFF
+ * as `systemUserId` on `POST /api/v1/external-access/share-user`. The shared
+ * modal never reads `systemuser` itself — the host supplies this via the
+ * injected {@link IAccessGrantModalProps.pickUser} callback, mirroring
+ * {@link IOrganizationPick} / {@link pickOrganization} (ADR-012). */
+export interface IUserPick {
+  id: string;
+  name: string;
+}
+
+/** The secure-project owner + business-unit alignment read-only display (task
+ * 065, design.md §6). Per design §5.1a a secure record is owned by an OWNER
+ * TEAM, not a service account — `ownerName` is whatever Dataverse's polymorphic
+ * `ownerid` resolves to (team or user display name), and `businessUnitName` is
+ * `owningbusinessunit`'s display name. The host resolves both via a
+ * host-context read (`ownerid`/`owningbusinessunit`, entity-agnostic column
+ * names on every one of the three grant-root entities) and returns `null` when
+ * the record is not secure (`sprk_issecure` is not `true`) or the read failed —
+ * the modal renders nothing in that case (fail-soft, never a hard error). */
+export interface ISecureOwnerInfo {
+  ownerName: string;
+  businessUnitName: string;
 }
 
 /** The polymorphic root type a grant is held at (task 070/071). Mirrors the
@@ -200,6 +232,16 @@ export interface IAccessGrantModalProps {
    * mechanism, mirroring {@link pickContact}. Omit → the "+ Organization" button
    * is hidden. */
   pickOrganization?: () => Promise<IOrganizationPick | null>;
+  /** Opens the host's NATIVE advanced-lookup side pane for a single
+   * `systemuser` (task 065, FR-29) — the PRIMARY "+ User" mechanism, mirroring
+   * {@link pickContact} / {@link pickOrganization}. The picked user is staged
+   * into the SAME "Add Access Permissions" list (its own per-row access-level
+   * dropdown) and committed by `Add (N)` via `POST
+   * /api/v1/external-access/share-user` — an internal Dataverse POA share, NOT
+   * a `sprk_externalrecordaccess` row (distinct write path from
+   * pickContact/pickOrganization's `/grant` | `/invite-and-grant`). Omit → the
+   * "+ User" button is hidden. */
+  pickUser?: () => Promise<IUserPick | null>;
   /** Opens the Contact record (task 073 UAT v1.0.24 #6) — wired by the host to
    * `Xrm.Navigation.navigateTo` (entityrecord, modal target) so a user with write
    * access to the Contact can view/edit it. When supplied, each contact name in
@@ -245,6 +287,13 @@ export interface IAccessGrantModalProps {
    * 041's unmodified baseline. See {@link AccessPermissionState} for the
    * full mapping and the `sprk_accesslevel` independence guarantee. */
   accessPermissionState?: AccessPermissionState;
+  /** Resolves the current record's secure-project owner + business-unit
+   * alignment (task 065, design.md §6) for read-only display. Called once
+   * when the modal opens, alongside the other loaders. Returns `null` for a
+   * non-secure record, or when the host cannot resolve it — the modal simply
+   * renders no owner/BU row in that case. Omit → the row never renders (a
+   * host that hasn't wired the read yet; zero-regression default). */
+  fetchSecureOwnerInfo?: () => Promise<ISecureOwnerInfo | null>;
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

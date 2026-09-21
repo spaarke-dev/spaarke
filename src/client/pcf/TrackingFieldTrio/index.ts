@@ -65,6 +65,21 @@
  * never sees the raw Dataverse values (ADR-012). Distinct from, and does
  * not touch, the per-grant `sprk_accesslevel` wiring below.
  *
+ * v1.0.30 (task 065, unified-access-control-r2, FR-29) — wires two new
+ * `AccessGrantModal` props: `pickUser` opens the host's NATIVE advanced-lookup
+ * side pane for a `systemuser` (mirrors `pickContact`/`pickOrganization`
+ * exactly — `INavigationService.openLookup` already accepts any Dataverse
+ * entity type, so no new navigation-adapter code was needed) for the "+ User"
+ * internal system-user share picker; `fetchSecureOwnerInfo` reads the bound
+ * record's `ownerid`/`owningbusinessunit`/`sprk_issecure` (host-context,
+ * single-entity) and returns the owner + business-unit display names for a
+ * secure record, or `null` otherwise — design.md §5.1a's correction applies
+ * (`ownerid` resolves to the `Secure Project` OWNER TEAM, not a service
+ * account; this file reads whatever Dataverse's polymorphic Owner field
+ * resolves to, generically). Both props are entity-agnostic reads/writes at
+ * the modal boundary — this file remains the ONLY place that knows the raw
+ * Dataverse field names (ADR-012), same discipline as every prior wiring pass.
+ *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
@@ -100,6 +115,8 @@ import {
   type IAccessGrantRecord,
   type IContactSearchResult,
   type IOrganizationPick,
+  type IUserPick,
+  type ISecureOwnerInfo,
   type ExternalGrantRootType,
   type AccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
@@ -708,6 +725,57 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return picked ? { id: picked.id, name: picked.name } : null;
   };
 
+  /** Opens the SHARED side-pane Advanced Lookup for a single `systemuser`
+   * (task 065, FR-29) — the "+ User" internal system-user share picker,
+   * mirroring {@link pickContact}/{@link pickOrganization} exactly.
+   * `INavigationService.openLookup` (task 071) wraps `Xrm.Utility.lookupObjects`
+   * generically by `entityType`/`entityTypes` with no per-entity allow-list, so
+   * `systemuser` works with no adapter change — verified against
+   * `xrmNavigationServiceAdapter.ts`'s `openLookup`, which passes
+   * `entityTypes` straight through. Returns `null` when the user cancels. */
+  private pickUser = async (): Promise<IUserPick | null> => {
+    const results = await this.getNavService().openLookup({
+      entityType: 'systemuser',
+      entityTypes: ['systemuser'],
+      allowMultiSelect: false,
+    });
+    const picked = results[0];
+    return picked ? { id: picked.id, name: picked.name } : null;
+  };
+
+  /** Reads the bound record's secure-project owner + business-unit alignment
+   * (task 065, design.md §6) for the modal's read-only display. Host-context,
+   * single-entity read of `ownerid`/`owningbusinessunit`/`sprk_issecure` —
+   * the SAME three standard Dataverse columns on all three grant-root
+   * entities (project/matter/workassignment; verified against task 046's
+   * live metadata pass, `notes/task-046-secure-project-owner-role.md` §7b).
+   * Returns `null` for a non-secure record (`sprk_issecure` is not `true`)
+   * or when the read fails — this is a read-only convenience display, never
+   * a blocking concern, so it fails soft rather than surfacing an error. Per
+   * design §5.1a's correction, `ownerid` is whatever Dataverse's polymorphic
+   * Owner field resolves to (the `Secure Project` OWNER TEAM today, not a
+   * service account) — this method reads the display name generically and
+   * does not assume which principal kind it is. */
+  private fetchSecureOwnerInfo = async (): Promise<ISecureOwnerInfo | null> => {
+    const recordId = this.getRecordId();
+    if (!recordId) return null;
+    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
+    try {
+      const record = (await this.context.webAPI.retrieveRecord(
+        this.getHostEntity(),
+        recordId,
+        '?$select=sprk_issecure,_ownerid_value,_owningbusinessunit_value'
+      )) as unknown as Record<string, unknown>;
+      if (record['sprk_issecure'] !== true) return null;
+      return {
+        ownerName: (record[`_ownerid_value${FORMATTED}`] as string) ?? '(unknown owner)',
+        businessUnitName: (record[`_owningbusinessunit_value${FORMATTED}`] as string) ?? '(unknown business unit)',
+      };
+    } catch {
+      return null;
+    }
+  };
+
   /** Classifies a contact internal-workforce (has a linked `systemuser` via
    * `sprk_primarycontact`) vs external — drives `AccessGrantModal`'s
    * invite-and-grant vs grant-only routing decision. */
@@ -823,7 +891,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.29 • Built 2026-08-12',
+      versionText: 'v1.0.30 • Built 2026-09-21',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -936,6 +1004,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     // nonBlocking so the lookup pane isn't covered by a backdrop.
                     pickContact: this.pickContact,
                     pickOrganization: this.pickOrganization,
+                    // "+ User" native picker (task 065, FR-29) — mirrors pickContact/pickOrganization.
+                    pickUser: this.pickUser,
                     // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
                     onOpenContact: this.openContactRecord,
                     isInternalContact: this.isInternalContact,
@@ -944,6 +1014,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     // mapped from the bound field's raw OptionSet value; see
                     // mapAccessPermissionToState()'s doc comment.
                     accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
+                    // Secure-record owner/BU read-only display (task 065, design.md §6).
+                    fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the
