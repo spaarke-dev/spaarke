@@ -241,11 +241,24 @@ public sealed class RagSendToIndexFixture : WebApplicationFactory<Program>
     public Mock<IFileIndexingService> FileIndexingMock { get; } = new(MockBehavior.Loose);
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new(MockBehavior.Loose);
 
+    /// <summary>
+    /// What Dataverse answers about this caller's rights. Added by task 063 (finding F2): the route
+    /// now authorizes every document for <c>Write</c> before it stamps the row, so a fixture that
+    /// grants nothing gets a correct 403 and these index-name tests never reach their subject. This
+    /// file's subject is index-name resolution, not authorization — the authorization contract is
+    /// pinned by <c>SendToIndexAuthorizationContractTests</c> — so the grant below is explicit and
+    /// narrow rather than a blanket allow: only <c>DocumentId</c>, only the rights the route needs.
+    /// </summary>
+    public ProgrammableRecordAccessSource Access { get; } = new();
+
     public void ResetBoundaries()
     {
         DataverseMock.Reset();
         FileIndexingMock.Reset();
         EntityServiceMock.Reset();
+
+        Access.Reset();
+        Access.Grant(Guid.Parse("55555555-0000-0000-0000-000000000001"), AccessRights.Read | AccessRights.Write);
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -367,6 +380,11 @@ public sealed class RagSendToIndexFixture : WebApplicationFactory<Program>
             // read underneath it is substituted, so the resolver's actual chain logic is exercised.
             services.RemoveAll<IGenericEntityService>();
             services.AddSingleton(EntityServiceMock.Object);
+
+            // Task 063: the per-document Write check runs through the REAL AuthorizationService over
+            // this deny-by-default source. See the remarks on the Access property.
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Access);
         });
     }
 

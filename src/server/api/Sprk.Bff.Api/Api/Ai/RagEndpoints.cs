@@ -116,6 +116,11 @@ public static class RagEndpoints
         // POST /api/ai/rag/send-to-index - Index documents by ID (for Dataverse ribbon button)
         // Uses user OBO authentication to access files
         // Updates Dataverse sprk_searchindexed fields after successful indexing
+        //
+        // Authorization is a PAIR (task 063, finding F2 — see the remarks on SendToIndex):
+        //   - the tenant binding is route-level, in AddTenantAuthorizationFilter (ADR-008), and
+        //   - the per-document Write check is in the handler, because this route's contract is a
+        //     per-document result list and a filter can only allow or deny the whole request.
         group.MapPost("/send-to-index", SendToIndex)
             .AddTenantAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
@@ -125,6 +130,7 @@ public static class RagEndpoints
             .Produces<SendToIndexResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
         // POST /api/ai/rag/enqueue-indexing - Enqueue a file for background RAG indexing
@@ -586,21 +592,80 @@ public static class RagEndpoints
         }
     }
 
+    /// <summary>The Dataverse entity set the documents on this route live in.</summary>
+    private const string DocumentEntitySetName = "sprk_documents";
+
     /// <summary>
     /// Index documents by DocumentId for semantic search.
     /// Designed for Dataverse ribbon button integration.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// - Gets document details from Dataverse (including parent entity lookups)
     /// - Indexes file via OBO authentication
     /// - Updates Dataverse with search index tracking fields (sprk_searchindexed, etc.)
     /// - Returns results for each document processed
+    /// </para>
+    /// <para>
+    /// <b>Authorization (spaarkeai-word-add-in-r1 task 063, Fable finding F2).</b> Two things are
+    /// checked here that were not checked before, and the tests that pin them are
+    /// <c>tests/integration/contract/Api/Ai/SendToIndexAuthorizationContractTests.cs</c>.
+    /// </para>
+    /// <para>
+    /// (1) <b>The tenant partition is the token's, not the body's.</b> It is resolved through
+    /// <see cref="TenantResolution.ResolveTenantId"/> — the BFF's single answer to "which tenant is
+    /// this caller in?" — and a body <c>TenantId</c> that disagrees is REJECTED with 403 rather than
+    /// silently overridden. Silently correcting it would tell a caller their chunks landed in the
+    /// partition they named when they landed somewhere else. The field is retained in the request
+    /// contract because both in-repo callers send it (the Dataverse ribbon in
+    /// <c>sprk_DocumentOperations.js</c> and the Word add-in's Find view), and both source it from
+    /// their MSAL account's tenant — i.e. the same value as <c>tid</c>, so neither breaks.
+    /// </para>
+    /// <para>
+    /// (2) <b>Every document is authorized for Write before its row is stamped</b>, evaluated AS THE
+    /// CALLER through <see cref="Spaarke.Core.Auth.AuthorizationService.GetCallerRecordAccessAsync"/>
+    /// — the entity-generic caller-evaluated evaluator the record- and semantic-search surfaces
+    /// already use, which fails closed without the caller's bearer token. <b>Write</b>, not Read:
+    /// this route MUTATES the row (<c>sprk_searchindexed</c>, <c>sprk_searchindexedon</c>,
+    /// <c>sprk_searchindexcompletedon</c>, <c>sprk_searchindexname</c>) app-only, and read access is
+    /// not consent to be written to. Before this, the effective gate was "can you read the file's SPE
+    /// container", which the row-level Dataverse rights need not agree with.
+    /// </para>
+    /// <para>
+    /// <b>Why the per-document check is here and not in a filter</b> (ADR-008's default shape). A
+    /// filter can only allow or deny the WHOLE request, and this route's contract is a per-document
+    /// result list. The partial-permission behaviour below — index the permitted, refuse the denied
+    /// in place — is only expressible in the handler. The tenant binding, which IS a whole-request
+    /// decision, does live in the filter (<see cref="TenantAuthorizationFilter"/>); the duplicate
+    /// check here is the forcing function that keeps detaching that filter from re-opening the hole.
+    /// </para>
+    /// <para>
+    /// <b>Partial permission, stated exactly.</b> Authorization for every requested id is decided
+    /// FIRST, in one pass, before any Dataverse read or file download. If the caller may write none
+    /// of them the whole request is refused with 403 and no row is read — a 200 reporting "0 of N
+    /// succeeded" is indistinguishable from an indexing outage, and both in-repo callers render that
+    /// as "try again". If the caller may write at least one, the response is 200 and each denied
+    /// document appears as its own failed result (<c>Success=false</c>, a denial message, and
+    /// <b>no</b> <c>ParentEntityType</c>/<c>ParentEntityId</c> — that parent identifier is one of the
+    /// things F2 says a caller should not learn); its row is never read, never indexed and never
+    /// stamped. One unauthorized id must not deny service to the rest of a legitimate batch.
+    /// </para>
+    /// <para>
+    /// <b>Cost.</b> One extra Dataverse round trip per DISTINCT requested id, memoized within the
+    /// request and absorbed across requests by <c>CachedAccessDataSource</c>'s 60 s key. This route
+    /// already spends, per document, one Dataverse read + an SPE download + extraction + embedding +
+    /// an index write + a Dataverse write, so the check is a small fraction of existing per-document
+    /// cost — unlike a keystroke-driven typeahead, where task 062 rejected exactly this mechanism for
+    /// exactly that reason. Sequential, because <c>DataverseAccessDataSource</c> mutates a shared
+    /// request-scoped <c>HttpClient</c>'s auth header per call.
+    /// </para>
     /// </remarks>
     private static async Task<IResult> SendToIndex(
         [FromBody] SendToIndexRequest request,
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        Spaarke.Core.Auth.AuthorizationService authorizationService,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -628,10 +693,118 @@ public static class RagEndpoints
             });
         }
 
+        // ── The tenant partition comes from the token (task 063 / F2). ──
+        var callerTenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(callerTenantId))
+        {
+            logger.LogWarning(
+                "send-to-index refused: the caller is authenticated but carries no tenant claim, so "
+                + "the index partition cannot be established. A tenant that cannot be established is "
+                + "not one that can be guessed.");
+
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Tenant identity not found in authentication token.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_NO_TENANT_CLAIM" });
+        }
+
+        if (!string.Equals(request.TenantId, callerTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Rejected, never silently corrected. See the remarks on this method.
+            logger.LogWarning(
+                "send-to-index refused: body TenantId does not match the caller's tenant claim. "
+                + "DocumentCount={DocumentCount}",
+                request.DocumentIds.Count);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "The requested tenant does not match your authenticated tenant.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_TENANT_MISMATCH" });
+        }
+
+        // ── Every document is authorized for Write, as the caller, before anything is read. ──
+        var callerObjectId = CallerResolution.ResolveObjectId(httpContext.User);
+        var callerToken = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+
+        if (string.IsNullOrEmpty(callerObjectId) || string.IsNullOrEmpty(callerToken))
+        {
+            // Without both, access can only be evaluated app-only — which on this surface answers
+            // "yes" for every caller. Refusing is the only alternative to reopening the finding.
+            logger.LogWarning(
+                "send-to-index refused: no caller object id or no bearer token, so per-document "
+                + "access cannot be evaluated as the caller. Refusing rather than evaluating app-only.");
+
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "A caller identity and bearer token are required to authorize this operation.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_NO_CALLER_CONTEXT" });
+        }
+
+        // One verdict per REQUESTED POSITION, memoized by the PARSED record id. Keying the memo on
+        // the parsed id rather than on the raw string means "{ABC-…}" and "abc-…" share one decision
+        // instead of costing two round trips, and it keeps a null or malformed entry out of the map
+        // entirely — such an entry is denied below without ever being used as a key.
+        var writePermitted = new bool[request.DocumentIds.Count];
+        var decisions = new Dictionary<Guid, bool>();
+
+        for (var i = 0; i < request.DocumentIds.Count; i++)
+        {
+            // An id that is not a usable record id is denied rather than probed: there is no record
+            // to evaluate, and "no answer" must not resolve to "proceed".
+            if (!Guid.TryParse(request.DocumentIds[i], out var recordId) || recordId == Guid.Empty)
+            {
+                writePermitted[i] = false;
+                continue;
+            }
+
+            if (!decisions.TryGetValue(recordId, out var permitted))
+            {
+                var snapshot = await authorizationService.GetCallerRecordAccessAsync(
+                    callerObjectId, DocumentEntitySetName, recordId, callerToken, cancellationToken);
+
+                permitted = snapshot.AccessRights.HasFlag(AccessRights.Write);
+                decisions[recordId] = permitted;
+            }
+
+            writePermitted[i] = permitted;
+        }
+
+        if (!writePermitted.Any(p => p))
+        {
+            logger.LogWarning(
+                "send-to-index refused: the caller may write none of the {DocumentCount} requested "
+                + "documents. No row was read.",
+                request.DocumentIds.Count);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to index any of the requested documents.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_FORBIDDEN" });
+        }
+
         var results = new List<SendToIndexDocumentResult>();
 
-        foreach (var documentId in request.DocumentIds)
+        for (var i = 0; i < request.DocumentIds.Count; i++)
         {
+            var documentId = request.DocumentIds[i];
+
+            if (!writePermitted[i])
+            {
+                // Refused in place. The row is not read, not indexed, not stamped, and nothing about
+                // it — including its parent entity — is disclosed.
+                results.Add(new SendToIndexDocumentResult
+                {
+                    DocumentId = documentId,
+                    Success = false,
+                    ErrorMessage = "Access denied: indexing updates this document's record, which requires Write permission."
+                });
+                continue;
+            }
+
             try
             {
                 // Step 1: Get document from Dataverse
@@ -702,7 +875,10 @@ public static class RagEndpoints
                 // Step 4: Build file index request
                 var indexRequest = new FileIndexRequest
                 {
-                    TenantId = request.TenantId,
+                    // Task 063 / F2: the partition key is the TOKEN's tenant. The body's TenantId was
+                    // proven equal to it above and is deliberately not read here — a value the caller
+                    // supplies must not reach the partition key even when it happens to be correct.
+                    TenantId = callerTenantId,
                     DriveId = document.GraphDriveId,
                     ItemId = document.GraphItemId,
                     FileName = document.FileName ?? document.Name,

@@ -112,10 +112,23 @@ public sealed class RagSendToIndexReplaceStaleChunksFixture : WebApplicationFact
     public Mock<IDocumentDataverseService> DataverseMock { get; } = new(MockBehavior.Loose);
     public Mock<IFileIndexingService> FileIndexingMock { get; } = new(MockBehavior.Loose);
 
+    /// <summary>
+    /// What Dataverse answers about this caller's rights. Added by task 063 (finding F2): the route
+    /// now authorizes every document for <c>Write</c> before it stamps the row, so a fixture that
+    /// grants nothing gets a correct 403 and this file's stale-chunk assertions never reach their
+    /// subject. The authorization contract itself is pinned by
+    /// <c>SendToIndexAuthorizationContractTests</c>; the grant below is narrow rather than a blanket
+    /// allow — only this file's document, only the rights the route needs.
+    /// </summary>
+    public ProgrammableRecordAccessSource Access { get; } = new();
+
     public void ResetBoundaries()
     {
         DataverseMock.Reset();
         FileIndexingMock.Reset();
+
+        Access.Reset();
+        Access.Grant(Guid.Parse("55555555-0000-0000-0000-000000000048"), AccessRights.Read | AccessRights.Write);
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -229,6 +242,11 @@ public sealed class RagSendToIndexReplaceStaleChunksFixture : WebApplicationFact
 
             services.RemoveAll<IFileIndexingService>();
             services.AddSingleton(FileIndexingMock.Object);
+
+            // Task 063: the per-document Write check runs through the REAL AuthorizationService over
+            // this deny-by-default source. See the remarks on the Access property.
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Access);
         });
     }
 

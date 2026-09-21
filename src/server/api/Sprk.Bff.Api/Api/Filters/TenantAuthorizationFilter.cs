@@ -125,6 +125,23 @@ public class TenantAuthorizationFilter : IEndpointFilter
                         return firstTenantId;
                     break;
 
+                // Send-to-index (the Dataverse ribbon button and the Word add-in's Find "Run Index").
+                //
+                // Added by spaarkeai-word-add-in-r1 task 063, finding F2. This type was MISSING from
+                // the match list, and an unmatched body is indistinguishable here from "the caller
+                // named no tenant": ExtractTenantId returns null and InvokeAsync's pass-through at the
+                // top of this file lets the request run unexamined. The handler then used the body's
+                // TenantId verbatim as the AI Search partition key, so any authenticated caller could
+                // write chunks into any tenant partition string they chose.
+                //
+                // The handler no longer reads this field for the partition either — it derives it from
+                // the 'tid' claim via TenantResolution and rejects a mismatch itself. Both halves are
+                // deliberate: this case gives the rejection its canonical home (ADR-008: resource
+                // authorization belongs in an endpoint filter), and the handler's own check means
+                // detaching AddTenantAuthorizationFilter cannot re-open a caller-chosen partition.
+                case SendToIndexRequest sendToIndex when !string.IsNullOrEmpty(sendToIndex.TenantId):
+                    return sendToIndex.TenantId;
+
                 // Embedding request doesn't have tenant - no isolation needed
                 case EmbeddingRequest:
                     return null;

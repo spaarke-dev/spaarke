@@ -615,3 +615,57 @@ this package imports a stylesheet today — confirmed on a clean tree. The first
 the test graph will fail with a "could not locate module" error that says nothing about CSS.
 
 Detail: `notes/043-office-addins-ci-gate.md` §8 F-4.
+
+---
+
+### D-063-1 — the three sibling RAG index routes authorize no document before writing to the tenant partition
+
+**Found by** task 063 while closing F2 on `/send-to-index`.
+**Owner**: whoever next hardens `Api/Ai/RagEndpoints.cs`. Not this project's finding.
+
+`POST /api/ai/rag/index`, `/index/batch` and `/index-file` are all bound by
+`AddTenantAuthorizationFilter()` — and unlike `send-to-index` they always were, because their request
+types (`KnowledgeDocument`, `IEnumerable<KnowledgeDocument>`, and the query string) ARE matched by
+`TenantAuthorizationFilter.ExtractTenantId`. So the tenant half of F2 does not apply to them.
+
+**What does apply**: none of the three authorizes a *document* before writing chunks into the tenant's
+search partition. `/index-file` is the sharpest case — it takes a caller-supplied `DriveId` + `ItemId`
+and indexes whatever those name. The content is downloaded OBO, so SPE container permissions are a
+real gate; but that is container-level, and it is the same coarse gate task 063 replaced on
+`send-to-index` with a per-document Dataverse check.
+
+**Not fixed in task 063, deliberately**: F2 names `send-to-index` and only `send-to-index`. Widening a
+security fix to three adjacent routes without their own reproduce-first evidence is exactly what root
+CLAUDE.md §11 forbids, and each of the three has different callers whose breakage would have to be
+sized separately. Recorded rather than silently accepted.
+
+**Explicitly NOT in scope of this item**: `POST /api/ai/rag/enqueue-indexing`. It authenticates under
+the `RagApiKey` scheme, carries no `tid`, and takes its tenant from the body **by design** —
+`TenantResolution`'s own remarks name it as the one principal in the system with no tenant claim.
+Applying a token-derived binding there would break it.
+
+Detail: `notes/063-send-to-index-authz.md` §8.4 and §8.5.
+
+---
+
+### D-063-2 — `.claude/constraints/auth.md` states two things about `RetrievePrincipalAccess` that are no longer true
+
+**Found by** task 063, which depends on the corrected behaviour.
+**Owner**: main session (sub-agents cannot write to `.claude/`). One paragraph.
+
+The "Authorization Check Pattern" section carries a ⚠️ correction dated **2026-08-20** claiming that
+`RetrievePrincipalAccess` **"has zero call sites in the repository"** and that both modes **"grant at
+most `AccessRights.Read`"**.
+
+Both statements are now false. `DataverseAccessDataSource.TryRetrievePrincipalAccessAsync` is live on
+**both** access paths — `GetUserAccessAsync` (`:662`) and `GetRecordAccessAsync` (`:433`) — and returns
+Dataverse's real rights, including `Write`. The retrieval probe that grants at most `Read` is now only
+the **fallback** taken when RPA gives no answer (`:436-449`).
+
+**Why it matters rather than being pedantry**: task 063's gate is `AccessRights.Write` on
+`sprk_document`. A reader who trusted this file would conclude that check can never pass and that the
+route is dead — or, worse, would "fix" it back to `Read` and silently reopen the finding. The stale
+text is also the reason the file's own header block argues that stale review metadata is itself a
+control.
+
+Detail: `notes/063-send-to-index-authz.md` §3b.

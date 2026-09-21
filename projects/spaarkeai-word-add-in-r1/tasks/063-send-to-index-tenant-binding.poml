@@ -4,7 +4,17 @@
     <title>F2 — `send-to-index` lets the caller choose the tenant partition and stamps a document row with no write check</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>
+      Done 2026-09-21 — `notes/063-send-to-index-authz.md`. Tenant partition now derives from the `tid`
+      claim (body mismatch ⇒ 403, never silently corrected); every DocumentId is authorized for `Write`
+      as the caller before the app-only stamp; partial permission defined and tested. 8 new contract
+      tests; reproduce-first 6/2 RED, seed A 2/6 RED, seed B 5/3 RED, restored 12/0 GREEN.
+      **Two criteria NOT met, recorded in note §8**: (1) criterion 8 — 061's guard does not govern
+      `Api/Ai/RagEndpoints.cs` at all, so there is nothing to un-flag while 061 is deferred; (2) no
+      live verification that add-in users hold Dataverse `Write` on `sprk_document` — if they do not,
+      Run Index 403s (fail-closed and loud). Must be confirmed before deploy.
+    </completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Security fix touching a tenant-isolation filter and an app-only Dataverse write. Tags include auth + security + ai.</rigor-reason>
     <model-tier>opus</model-tier>
