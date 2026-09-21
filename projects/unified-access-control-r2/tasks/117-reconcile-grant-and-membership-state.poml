@@ -4,7 +4,7 @@
     <title>Make a row's own state the truth — ONE scheduled reconciliation job over external grants and org memberships (D-1 option B + ISS-026 write half + ISS-020 part 4)</title>
     <phase>Register-driven (authored 2026-09-19 after the 2026-09-18/19 owner decisions)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New .cs on the authorization data path; tags bff-api/auth/dataverse. It WRITES rows that decide who has access.</rigor-reason>
     <model-tier>opus</model-tier>
