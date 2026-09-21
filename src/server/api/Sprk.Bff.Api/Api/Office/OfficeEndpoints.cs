@@ -994,17 +994,25 @@ public static class OfficeEndpoints
         var search = group.MapGroup("/search");
 
         // GET /office/search/entities - Search for association targets
-        // Authorization: OfficeAuthFilter validates user authentication
+        // Authorization: OfficeAuthFilter validates user authentication; per-RECORD authorization is
+        // enforced INSIDE the query by Dataverse row-level security, because the handler resolves the
+        // caller's systemuserid and OfficeService issues the search IMPERSONATED as that user
+        // (task 062, finding F1). Per ADR-008 a per-resource check belongs in a filter — but a filter
+        // runs before the handler and there are no rows yet to authorize, and the subject here is a
+        // whole result set rather than one route-addressed resource. The trim therefore lives in the
+        // query itself, which is the case ADR-008's own constraint carves out ("where trimming must
+        // happen inside the query, document why in the code"). See OfficeService.QuerySearchEntityAsync.
         // Rate Limit: 30 requests/minute/user (per spec.md)
         search.MapGet("/entities", SearchEntitiesAsync)
             .WithName("SearchOfficeEntities")
             .WithSummary("Search for association target entities")
-            .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts. Supports typeahead (min 2 chars). Returns results within 500ms.")
+            .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts the CALLER may read (impersonated Dataverse read). Supports typeahead (min 2 chars). Returns results within 500ms.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
             .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Produces<EntitySearchResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // GET /office/search/matter-types - List active Matter Type reference values (task 038)
@@ -1051,12 +1059,21 @@ public static class OfficeEndpoints
     /// - Support pagination via 'skip' and 'top' parameters
     /// - Only return entities the user has access to (Dataverse security roles)
     /// </para>
+    /// <para>
+    /// The last of those was a comment rather than a behaviour until task 062 (finding F1): the search
+    /// ran app-only, so any authenticated caller could enumerate every Matter, Project, Invoice,
+    /// Account and Contact in the tenant from a two-character substring. The handler now resolves the
+    /// caller's Dataverse <c>systemuserid</c> and the service issues the query IMPERSONATED as that
+    /// user, so Dataverse applies row-level security inside the query. A caller who cannot be resolved
+    /// to a Dataverse user is refused (403) — there is no app-only fallback.
+    /// </para>
     /// </remarks>
     /// <param name="q">Search query string (min 2 chars).</param>
     /// <param name="type">Comma-separated entity types to filter (Matter, Project, Invoice, Account, Contact).</param>
     /// <param name="skip">Number of results to skip for pagination (default: 0).</param>
     /// <param name="top">Maximum results to return (default: 20, max: 50).</param>
     /// <param name="officeService">Office service for search operations.</param>
+    /// <param name="callerResolver">Resolves the caller's Dataverse systemuserid for the impersonated read (task 062).</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="context">HTTP context for user claims.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1067,6 +1084,7 @@ public static class OfficeEndpoints
         int? skip,
         int? top,
         IOfficeService officeService,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1125,6 +1143,32 @@ public static class OfficeEndpoints
         var skipValue = Math.Max(skip ?? 0, 0);
         var topValue = Math.Clamp(top ?? 20, 1, 50);
 
+        // Task 062 / finding F1 — the caller identity the search runs AS. Fail-closed: a caller with
+        // no Dataverse systemuser cross-reference has no row-level security context, so there is no
+        // trimmed answer to give them. Refusing is the only alternative to the app-only enumeration
+        // this task closes, and a caller with no Dataverse user has no Dataverse rights to lose.
+        var callerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
+        if (!callerResolution.IsResolved
+            || !Guid.TryParse(callerResolution.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "Entity search refused: caller {UserId} has no resolvable Dataverse systemuserid ({Reason}) — "
+                + "refusing rather than serving a security-untrimmed app-only search (fail closed).",
+                userId,
+                callerResolution.UnresolvedReason ?? "unresolved");
+
+            return Results.Problem(
+                title: "Forbidden",
+                detail: "The caller could not be resolved to a Dataverse user, so search results cannot be scoped to their access.",
+                statusCode: StatusCodes.Status403Forbidden,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_SEARCH_FORBIDDEN",
+                    ["correlationId"] = traceId
+                });
+        }
+
         var request = new EntitySearchRequest
         {
             Query = q,
@@ -1143,7 +1187,8 @@ public static class OfficeEndpoints
 
         try
         {
-            var response = await officeService.SearchEntitiesAsync(request, userId, cancellationToken);
+            var response = await officeService.SearchEntitiesAsync(
+                request, userId, callerSystemUserId, cancellationToken);
 
             // Add correlation ID to response
             response = response with { CorrelationId = traceId };

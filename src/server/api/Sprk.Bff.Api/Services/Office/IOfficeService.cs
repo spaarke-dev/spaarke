@@ -70,13 +70,22 @@ public interface IOfficeService
     /// Searches for association target entities (Matters, Projects, Invoices, Accounts, Contacts).
     /// </summary>
     /// <param name="request">Search request with query, entity types, and pagination.</param>
-    /// <param name="userId">Authenticated user ID for permission filtering.</param>
+    /// <param name="userId">The caller's Entra object id (<c>oid</c>), for logging and correlation.</param>
+    /// <param name="callerSystemUserId">
+    /// The caller's Dataverse <c>systemuserid</c>, resolved by the endpoint via
+    /// <c>ICallerSystemUserResolver</c>. REQUIRED and non-empty: the search query is issued
+    /// IMPERSONATED as this user (<c>MSCRMCallerID</c>) so Dataverse applies row-level security
+    /// natively. Deliberately a required positional parameter with no default — omitting it must be a
+    /// compile error, not a silent reversion to the tenant-wide app-only enumeration that finding F1
+    /// closed (task 062). <see cref="System.Guid.Empty"/> is refused by the implementation.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Search response with matched entities.</returns>
     /// <remarks>
     /// <para>
     /// Searches across multiple Dataverse tables based on the requested entity types.
-    /// Results are filtered to only include entities the user has access to.
+    /// Results are filtered to only include entities the user has access to — by Dataverse itself,
+    /// inside the query, for every entity type and every page.
     /// </para>
     /// <para>
     /// Search is performed against primary name fields and optionally email fields:
@@ -90,6 +99,7 @@ public interface IOfficeService
     Task<EntitySearchResponse> SearchEntitiesAsync(
         EntitySearchRequest request,
         string userId,
+        Guid callerSystemUserId,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -52,9 +52,19 @@ public class OfficeService : IOfficeService
     // bare test constructions) keep working; null → the capture step is a guarded no-op (best-effort, NFR-04).
     private readonly EmailUploadCaptureService? _emailUploadCapture;
     // Real Dataverse entity search for the add-in "File to" picker (task 026 / #229 — replaces the
-    // GenerateStubResults hardcoded fixtures). App-only read (ADR-028); singleton REST client.
+    // GenerateStubResults hardcoded fixtures). Retained for the matter-type reference list, which is a
+    // small non-customer lookup table and stays app-only; the ENTITY search no longer uses it (task 062).
     // Optional/null-tolerant so bare test constructions keep compiling; null → stub fallback.
     private readonly DataverseWebApiClient? _dataverseClient;
+    // F1 / task 062: the caller-scoped read seam for /office/search/entities. Runs the search query
+    // AS the calling user (MSCRMCallerID impersonation), so Dataverse applies row-level security
+    // natively and the picker returns only records the caller may read. Reused rather than
+    // reinvented (CLAUDE.md §11): this is the same unconditionally-registered singleton seam the
+    // Communication read path uses — its QueryAsync takes an entity set + an OData query string and
+    // is entity-agnostic despite the Communication-specific interface name. Optional/null-tolerant so
+    // bare test constructions keep compiling; null is refused at the call site, never degraded to an
+    // app-only read (see SearchEntitiesAsync's forcing function).
+    private readonly IImpersonatedCommunicationQuery? _impersonatedQuery;
     // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Matter/Project).
     // Registered singleton (→ IDataverseService, GraphModule.cs); optional/null-tolerant so bare test
     // ctors keep compiling; null → quick-create returns null (endpoint 403s).
@@ -91,7 +101,8 @@ public class OfficeService : IOfficeService
         IGenericEntityService? genericEntityService = null,
         IServiceScopeFactory? scopeFactory = null,
         IDocumentProfileAi? documentProfileAi = null,
-        IHostApplicationLifetime? appLifetime = null)
+        IHostApplicationLifetime? appLifetime = null,
+        IImpersonatedCommunicationQuery? impersonatedQuery = null)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -111,6 +122,7 @@ public class OfficeService : IOfficeService
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
         _dataverseClient = dataverseClient;
+        _impersonatedQuery = impersonatedQuery;
         _genericEntityService = genericEntityService;
         _logger = logger;
         _profileDispatcher = new OfficeProfileDispatcher(scopeFactory, documentProfileAi, appLifetime, logger);
@@ -1620,6 +1632,7 @@ public class OfficeService : IOfficeService
     public async Task<EntitySearchResponse> SearchEntitiesAsync(
         EntitySearchRequest request,
         string userId,
+        Guid callerSystemUserId,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -1635,6 +1648,8 @@ public class OfficeService : IOfficeService
 
         // Real Dataverse search (task 026 / #229). When no client is injected (bare test
         // constructions), fall back to the legacy stub so those tests keep their shape.
+        // The stub returns hardcoded fixtures, never tenant data, so it discloses nothing; task 059
+        // owns its removal.
         if (_dataverseClient is null)
         {
             var stub = GenerateStubResults(request.Query, typesToSearch, request.Top);
@@ -1647,22 +1662,68 @@ public class OfficeService : IOfficeService
             };
         }
 
-        // Query each requested entity type with a name/number 'contains' filter. Each type is
-        // best-effort — one entity's failure (missing table, transient 4xx) is logged and skipped,
-        // never fails the whole picker. NOTE: app-only read (no per-user security trimming yet) —
-        // tracked as a follow-up on #919.
+        // FORCING FUNCTION (task 062 / finding F1). Every row this method can return comes from an
+        // IMPERSONATED query keyed by these two values. Absent either one, there is no identity for
+        // Dataverse to filter by and the only query we could issue is the tenant-wide app-only
+        // enumeration this task exists to close — so refuse loudly rather than serve it. The endpoint
+        // resolves and validates both before calling; reaching here without them means the pipeline
+        // changed underneath us.
+        if (_impersonatedQuery is null || callerSystemUserId == Guid.Empty)
+        {
+            _logger.LogError(
+                "Entity search reached OfficeService without an impersonation seam ({SeamPresent}) or a "
+                + "caller systemuserid ({CallerSystemUserId}) — refusing rather than falling back to the "
+                + "app-only enumeration (fail closed).",
+                _impersonatedQuery is not null, callerSystemUserId);
+
+            throw new InvalidOperationException(
+                "Entity search requires an impersonated Dataverse read as the calling user; "
+                + "refusing to issue an app-only, security-untrimmed query.");
+        }
+
+        // Query each requested entity type with a name/number 'contains' filter, IMPERSONATED as the
+        // caller (MSCRMCallerID = their systemuserid) so Dataverse itself applies row-level security —
+        // ownership, role depth, business unit, teams, sharing, hierarchy — inside the query. The rows
+        // that come back ARE what this caller may read, for every entity type, on every page, at the
+        // cost of the same one round trip per type the app-only query took. See the remarks on
+        // QuerySearchEntityAsync for why this mechanism was chosen over post-trimming each row.
+        //
+        // Each type stays best-effort — one entity's failure (missing table, transient 4xx) is logged
+        // and skipped, never fails the whole picker — EXCEPT that a run in which every attempted type
+        // threw is reported as a failure rather than as "no results": an impersonation privilege that
+        // is not configured must not look like an empty tenant.
         var combined = new List<EntitySearchResult>();
         var perTypeTop = Math.Clamp(request.Top, 5, 50);
+        var typeFailures = 0;
+        var typesAttempted = 0;
         foreach (var type in typesToSearch)
         {
+            typesAttempted++;
             try
             {
-                combined.AddRange(await QuerySearchEntityAsync(type, request.Query, perTypeTop, cancellationToken));
+                combined.AddRange(await QuerySearchEntityAsync(
+                    type, request.Query, perTypeTop, callerSystemUserId, cancellationToken));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
+                typeFailures++;
                 _logger.LogWarning(ex, "Entity search failed for type {EntityType}; skipping", type);
             }
+        }
+
+        if (typesAttempted > 0 && typeFailures == typesAttempted)
+        {
+            // The single most likely cause is the go-live prerequisite: the BFF application user does
+            // not hold prvActOnBehalfOfAnotherUser, so every impersonated read is rejected. Surfacing
+            // that as an empty picker would be a lie that reads as "you have access to nothing".
+            throw new InvalidOperationException(
+                $"Entity search failed for all {typesAttempted} requested entity type(s). The impersonated "
+                + "read may be rejected because the BFF application user lacks the Dataverse Delegate "
+                + "privilege prvActOnBehalfOfAnotherUser.");
         }
 
         // Rank: prefix matches first, then most-recently-modified.
@@ -1693,13 +1754,49 @@ public class OfficeService : IOfficeService
         };
 
     /// <summary>
-    /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API and
-    /// maps rows to <see cref="EntitySearchResult"/>. App-only read.
+    /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API
+    /// IMPERSONATED as <paramref name="callerSystemUserId"/>, and maps the rows to
+    /// <see cref="EntitySearchResult"/>. The rows returned are exactly those the caller may read.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why trim INSIDE the query rather than post-trim each row</b> (task 062, finding F1 — the
+    /// mechanism choice the acceptance criteria ask to be stated). The alternative, and the one the
+    /// sibling record/visualization search surfaces use, is to run the app-only query and then call
+    /// <c>AuthorizationService.GetCallerRecordAccessAsync</c> per returned row. Both are correct; they
+    /// differ on cost and on coverage:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description><b>Cost.</b> This is a keystroke-driven typeahead with a 500 ms contract,
+    ///   and the picker asks for up to 50 rows per type across five types. Post-trimming buys one
+    ///   Dataverse round trip PER DISTINCT ROW — up to 250 sequential calls for one keystroke.
+    ///   Impersonation adds none: Dataverse filters inside the same single query per type. The only
+    ///   added round trip on the whole request is the one oid→systemuserid lookup the endpoint already
+    ///   performs for quick-create.</description></item>
+    ///   <item><description><b>Coverage.</b> Post-trimming can only trim rows it has already fetched,
+    ///   so a caller entitled to few records receives a short page indistinguishable from "nothing
+    ///   matched" once ranking pushes their matches past the fetched window — the limitation
+    ///   <c>RecordSearchEndpoints.AuthorizeRowsAsync</c> documents as follow-up F-4. Filtering inside
+    ///   the query has no such window: page N is drawn from the caller's own rows.</description></item>
+    ///   <item><description><b>Uniformity.</b> Post-trimming needs an entity-set allow-list, and the
+    ///   shared one (<c>SemanticSearchAuthorizationFilter.AuthorizableEntitySets</c>) covers matter,
+    ///   project, invoice and work assignment — but NOT account or contact, two of this route's five
+    ///   types. Impersonation is entity-agnostic, so all five are covered by the same
+    ///   mechanism.</description></item>
+    /// </list>
+    /// <para>
+    /// This is the seam <c>.claude/constraints/auth.md</c> names as genuinely caller-scoped, and the
+    /// one the Communication read path already ships on. <b>Operational prerequisite</b>: the BFF
+    /// application user must hold the Dataverse Delegate privilege
+    /// <c>prvActOnBehalfOfAnotherUser</c>. Without it Dataverse rejects the call — which fails closed,
+    /// and which <see cref="SearchEntitiesAsync"/> reports as an error rather than as an empty picker.
+    /// </para>
+    /// </remarks>
     private async Task<List<EntitySearchResult>> QuerySearchEntityAsync(
         AssociationEntityType type,
         string query,
         int top,
+        Guid callerSystemUserId,
         CancellationToken cancellationToken)
     {
         var meta = _searchMeta[type];
@@ -1716,12 +1813,14 @@ public class OfficeService : IOfficeService
         if (meta.RefField is not null) selectFields.Add(meta.RefField);
         if (meta.DescField is not null) selectFields.Add(meta.DescField);
 
-        var rows = await _dataverseClient!.QueryAsync<Dictionary<string, JsonElement>>(
+        var odataQuery =
+            $"$filter={filter}&$select={string.Join(",", selectFields)}&$top={top}";
+
+        var rows = await _impersonatedQuery!.QueryAsync(
             meta.EntitySet,
-            filter: filter,
-            select: string.Join(",", selectFields),
-            top: top,
-            cancellationToken: cancellationToken);
+            odataQuery,
+            callerSystemUserId,
+            cancellationToken);
 
         var results = new List<EntitySearchResult>(rows.Count);
         foreach (var row in rows)

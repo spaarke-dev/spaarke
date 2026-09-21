@@ -4,7 +4,18 @@
     <title>F1 — `/office/search/entities` is a live app-only enumeration of every Matter, Project, Invoice, Account and Contact with no security trimming</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061 (the census must govern this route before it is changed)</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion date="2026-09-21" note="projects/spaarkeai-word-add-in-r1/notes/062-entity-search-trim.md">
+      Mechanism: impersonated Dataverse read (MSCRMCallerID) via the existing IImpersonatedCommunicationQuery
+      seam + ICallerSystemUserResolver — Dataverse trims inside the query, so all five entity types and every
+      page are covered with zero added round trips. Post-trim per row (task 032's mechanism) was considered
+      and rejected on latency (up to 250 round trips on a 500 ms typeahead) and coverage (its shared
+      allow-list has no account/contact entry). Reproduce-first RED recorded verbatim; the 8-test contract
+      suite seeded RED 7/1 and restored GREEN 8/0. NOT MET, recorded rather than implied: criterion
+      "task 061's guard no longer flags this route" (061 deferred; the guard governs no Office route today),
+      and no live-Dataverse verification — the BFF app user's prvActOnBehalfOfAnotherUser Delegate privilege
+      must be confirmed before deploy.
+    </completion>
     <rigor>FULL</rigor>
     <rigor-reason>Security fix on a LIVE route that the add-in pane depends on. Tags include bff-api + auth + security. Changing the identity a Dataverse query runs under is a behaviour change for every caller.</rigor-reason>
     <model-tier>opus</model-tier>
