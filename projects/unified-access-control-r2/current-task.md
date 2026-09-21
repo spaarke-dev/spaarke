@@ -40,10 +40,50 @@ below is still true *of session 20* — it is not true of the project as of now.
 | `ffa329fbb` | **Wave 1** — tasks **044, 065, 119** executed as three concurrent subagents |
 | `ceefca1f4` | Wave 1 bookkeeping — 044 + 119 complete; **065 deliberately left OPEN** |
 
-### 🔴 Open right now — the ONE thing in flight
+### ✅ SESSION 21 CLOSED OUT — 8 tasks done, nothing in flight
 
-**Finding M2 is being implemented by a subagent** (last open item of task 065). If that agent did not
-report, re-dispatch it. The brief is in this session's transcript; the essentials:
+**Tasks closed**: 115 · 116 · 044 · 065 (incl. M8 + M2) · 119 · 107 · 117 · 118.
+**093 RESCOPED, not closed** — deliberately. It still has real residue, and closing it without that
+work would be the silent scope drop the owner ruled out. **Executing 093 is what unblocks 047.**
+
+**Counts (measured with task 116's two rules — a naive regex undercounts, see SYNOPSIS header):
+29 open · 83 done · 116 total.** Ready set: **12 of 29**.
+
+**Owner decision D-1 is COMPLETE** — all three options shipped 2026-09-21:
+107 (A, undated grant confers nothing) · 117 (B, reconciliation job, ships disabled) ·
+118 (C, Manage Access gated on the server's real rule).
+
+### ▶ NEXT — recommended, not started
+
+**093 + 108 in parallel.** Genuinely disjoint: 093 is the wizard/`EntityCreationService` surface,
+108 is `Api/ExternalAccess`. That is the real 2-wide ceiling. ⚠️ **094 is NOT safe alongside 093** —
+both touch the upload client. After that the queue is opus/xhigh single-file work inside the
+ExternalAccess exclusive zone (109, 112, 113, 082, 095), which is serial regardless of agent count.
+
+### 🔔 NEEDS THE OWNER — carried, not dropped
+
+1. **`sprk_startdate`** — a membership with a FUTURE start date and `statecode=0` **confers access
+   today**. Live-verified; **zero** server-side consumers (all 8 refs are client-side fixtures/UI).
+   The mirror of 117's R3. Likely belongs in **109/110**'s junction guard, not a writer. This is the
+   only live ACCESS GAP in the list.
+2. **Q1 still open** — who runs 036's NFR-04 canary, against which environment. Gates 5 tasks and all
+   of Phase 3, and 036 is now the largest ready item.
+3. **Deploy-side obligations from 2026-09-21** — (a) `npm run build:prod` for `TrackingFieldTrio`
+   BEFORE deploy: the shipped `bundle.js` still contains the **old fail-open code**, and the PCF host
+   file was reviewed but **never compiled** (no node_modules; 290 errors across every control, failing
+   identically on untouched files); (b) the `Create`-privilege removal runs **AFTER** v1.0.31 deploys —
+   code before config, or Manage Access vanishes for everyone; (c) **§10 publish size unmeasured for
+   117 and 118** — a fresh worktree needs a COMMIT and the work was uncommitted, so measuring would
+   have been hazard 3. Run it pre-merge; (d) **107's pre-deploy COUNT gate is UNMET** — every
+   Active+undated grant loses access on deploy; query is in `EXTERNAL-ACCESS-ADMIN-SETUP.md` §4.2a.
+4. **Recorded, not fixed**: `entity-schema.md`'s `sprk_name` rule prescribes a **pre-create plugin**
+   (banned repo-wide by D-1) and **nothing composes the column at all** — `NVARCHAR(850) NOT NULL`,
+   doc claims 200. Cosmetic today; no code reads it.
+
+### Superseded — M2 is DONE (shipped in a0cf3c92c)
+
+Kept only because the reasoning generalizes: M8 made M2 dangerous, which is why they shipped
+together. The essentials were:
 
 - `/revoke` returns 200 with the failure in the body; `/close-project` returns 500 for the identical
   shape. Align them — **only `SpeContainerRevokeOutcome.Failed` becomes 500**; the other three stay 200.
