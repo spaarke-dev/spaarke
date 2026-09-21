@@ -579,8 +579,11 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
             "containerId parameter <- OfficeService.ResolveContainerAsync <- RecordContainerResolver "
-            + "keyed on SaveRequest.TargetEntity (the record AddEntityAccessFilter authorized), "
-            + "falling back to EmailProcessing:DefaultContainerId only when no target entity is named",
+            + "keyed on SaveRequest.TargetEntity (the record AddEntityAccessFilter authorized); with NO "
+            + "target entity, RecordContainerResolver.ResolveForActingUserAsync (the acting user's "
+            + "business-unit container — task 076's owner-sanctioned no-record shape), falling back to "
+            + "EmailProcessing:DefaultContainerId only when that cannot answer "
+            + "(word-add-in-r1 task 065, 2026-09-21)",
             "CLOSED BY TASK 085. SaveRequest.ContainerId was DELETED from the contract and the container is "
             + "now derived from the SAME record the caller was authorized against, through task 076's "
             + "RecordContainerResolver — so the authorization key and the write destination are one value "

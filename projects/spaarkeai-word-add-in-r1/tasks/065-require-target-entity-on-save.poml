@@ -4,7 +4,35 @@
     <title>F4 — a save with no TargetEntity bypasses EntityAccessFilter entirely, lands in the shared container, and is then profiled and RAG-indexed</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061</gate>
-    <status>not-started</status>
+    <status>escalated — partially shipped; awaiting owner decision (see notes/065-require-target-entity.md §6)</status>
+    <status-note>
+      Executed 2026-09-21. F4 is REPRODUCED and PROVEN (note §2: accepted → tenant-wide container → queued
+      for profiling + RAG indexing, with CallerRecordAccessProbe never consulted — verbatim ProcessingJob
+      payload recorded). SHIPPED: the false premise at OfficeService.cs:143-145 and :341-343 is CORRECTED
+      (plus two further stale claims it had seeded in OfficeSaveContainerProvenanceTests and
+      SpeWriteSinkContainerProvenanceGuardTests); the record-less branch now derives the ACTING USER's
+      business-unit container (RecordContainerResolver.ResolveForActingUserAsync — task 076's owner-sanctioned
+      no-record shape) before falling back to EmailProcessing:DefaultContainerId, narrowing placement from
+      per-tenant to per-business-unit; the account/contact case is defined and pinned by test.
+
+      NOT SHIPPED — making TargetEntity required. BOTH &lt;escalation&gt;&lt;trigger&gt;s fired, plus a third
+      condition: (1) there is no target for the Word ribbon to send — a Word ribbon click carries no Spaarke
+      context and there is no document-side association prediction, so giving it one needs a new predictor or
+      the removal of FR-17's one-click behaviour; (2) two more shipped paths legitimately send no target, and
+      the decisive one — the FR-11 version save — must not, by owner decision D-4/D-5, PRECISELY because a
+      target would add an EntityAccessFilter check that could refuse a legitimate version save (seeded and
+      measured: 4 pane version-save wire tests break); (3) VERIFIED LIVE against dev Dataverse — no Spaarke
+      end-user role grants prvAppendTo on sprk_matter / sprk_project / sprk_invoice / sprk_workassignment /
+      sprk_event (only System Administrator, System Customizer and Service Writer do, all depth 8), and
+      EntityAccessFilter demands exactly AccessRights.AppendTo. So the targeted path ALREADY refuses ordinary
+      users on shipped code, the no-target bypass is currently the only save path a non-admin has, and
+      requiring the target would convert a silent bypass into a TOTAL SAVE OUTAGE. Same systemic gap as
+      notes/role-grant-gap-2026-09-21.md, one face further on.
+
+      Criteria 2 and 8 are NOT met, and 3 is half met — enumerated in note §8. Sequencing proposed in §6.5:
+      grant the AppendTo rights first (needed for the pane's EXISTING Matter filing regardless), decide the
+      Word ribbon's behaviour second, require TargetEntity third with an IsVersionSave carve-out.
+    </status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the contract of the project's primary save path. Tags include bff-api + auth + security. The Word ribbon quick-save currently depends on the bypassed branch.</rigor-reason>
     <model-tier>opus</model-tier>

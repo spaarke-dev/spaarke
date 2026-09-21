@@ -5,6 +5,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
@@ -152,12 +153,63 @@ public class OfficeService : IOfficeService
     /// what reads like a misconfiguration.
     /// </para>
     /// <para>
-    /// Without a <c>TargetEntity</c> there is no record, so the configured default applies. It is
-    /// fail-closed when unset. Every shipped add-in path sends a <c>TargetEntity</c>, so this branch
-    /// exists for the contract rather than for traffic.
+    /// <b>Without a <c>TargetEntity</c> there is no record</b>, so the container is derived from the
+    /// ACTING USER's business unit — task 076's
+    /// <see cref="RecordContainerResolver.ResolveForActingUserAsync"/>, the owner-sanctioned answer for
+    /// content that exists before its owning record does. The configured
+    /// <c>EmailProcessing:DefaultContainerId</c> is the LAST resort, and is still fail-closed when unset.
     /// </para>
+    ///
+    /// <para><b>⚠️ CORRECTED 2026-09-21 (spaarkeai-word-add-in-r1 task 065).</b> This paragraph used to
+    /// read <i>"Every shipped add-in path sends a <c>TargetEntity</c>, so this branch exists for the
+    /// contract rather than for traffic."</i> <b>That was false, and had been since task 037.</b> Three
+    /// shipped paths send no target, and together they are the save spine's mainline rather than an edge:
+    /// <list type="number">
+    /// <item>the <b>Word ribbon quick-save</b> (FR-17, task 037) — <c>buildDocumentSaveRequest</c> in
+    /// <c>quickSaveHelpers.ts</c> sends no <c>targetEntity</c> at all, because a Word ribbon click carries
+    /// no Spaarke context and there is no document-side association prediction to stand in for one;</item>
+    /// <item>every <b>FR-11 version save</b> (task 023) — <c>useSaveFlow.ts</c> sets
+    /// <c>sentEntity = versionTarget ? null : selectedEntity</c> BY OWNER DECISION (D-4/D-5): a version
+    /// save re-associates nothing, and sending a target would add an unrelated
+    /// <see cref="Api.Filters.EntityAccessFilter"/> check that could refuse a legitimate version save.
+    /// That one is authorized instead by <c>OfficeVersionSaveAuthorizationFilter</c>, on the document;</item>
+    /// <item>every <b>pane save with no "Related to" selected</b> — <c>useSaveFlow.ts</c> attaches
+    /// <c>targetEntity</c> only <c>if (sentEntity?.id)</c>.</item>
+    /// </list>
+    /// Roughly 80 of the ~85 <c>POST /office/save</c> bodies in the test corpus are in this shape too.
+    /// <b>So this branch is the traffic, not the contract</b>, and anything that makes it fail closed is a
+    /// save outage rather than a tightening.
+    /// </para>
+    ///
+    /// <para><b>What this does NOT do.</b> Deriving a container is a PLACEMENT decision, not an
+    /// authorization one. A save with no target still passes <see cref="Api.Filters.EntityAccessFilter"/>
+    /// untouched and no per-record check runs anywhere in the path (finding F4). Narrowing the destination
+    /// from one tenant-wide container to one per business unit reduces the blast radius; it does not close
+    /// F4. Closing F4 means requiring <c>TargetEntity</c>, which task 065 ESCALATED rather than shipped —
+    /// see <c>projects/spaarkeai-word-add-in-r1/notes/065-require-target-entity.md</c>.</para>
+    ///
+    /// <para><b>Why a fallback and not a refusal when the acting user cannot be resolved.</b>
+    /// <see cref="RecordContainerResolver.ResolveForActingUserAsync"/> throws
+    /// <see cref="SdapProblemException"/> for a caller who maps to no Dataverse user, or to more than one,
+    /// or to one with no business unit. Those are CALLER-IDENTITY failures, not isolation failures: this
+    /// branch is only reached when there is no record, and <c>ResolveForActingUserAsync</c>'s own contract
+    /// states that <c>FailClosed</c> is unreachable here by construction because nothing on this path
+    /// CAN be secure. Letting such a caller fall through to the configured default is therefore exactly
+    /// today's behaviour for that caller — strictly non-regressive — whereas refusing would convert an
+    /// unprovisioned or duplicated user record into a total quick-save outage. The RECORD branch above
+    /// keeps its no-catch posture, for the opposite reason: there a refusal IS the isolation guarantee.</para>
     /// </remarks>
-    private async Task<string> ResolveContainerAsync(SaveRequest request, CancellationToken ct)
+    /// <param name="request">The save being placed.</param>
+    /// <param name="actingUserObjectId">
+    /// The caller's Entra <c>oid</c>, as <c>OfficeAuthFilter</c> resolved it. Used only on the no-record
+    /// branch, and only as a LOOKUP KEY into <c>systemuser.azureactivedirectoryobjectid</c> — never
+    /// compared against a <c>systemuserid</c>.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<string> ResolveContainerAsync(
+        SaveRequest request,
+        string? actingUserObjectId,
+        CancellationToken ct)
     {
         if (request.TargetEntity is { } target && target.EntityId != Guid.Empty)
         {
@@ -194,14 +246,58 @@ public class OfficeService : IOfficeService
                 + "configured default.",
                 target.EntityType, target.EntityId, decision.Outcome);
         }
+        else
+        {
+            // ══ NO RECORD (task 065) ══════════════════════════════════════════════════════════════
+            // The Word ribbon quick-save and every pane save with no "Related to" selected arrive here.
+            // (An FR-11 VERSION save does not: it writes to the target document's own drive and never
+            // calls this method at all — see the call site.) Ask for the acting user's business-unit
+            // container BEFORE reaching for the tenant-wide default. Deliberately NOT reached for a
+            // target-bearing save: see the remarks — a record's container follows the RECORD, and letting
+            // the uploader's business unit win there is the isolation failure task 076 closed.
+            try
+            {
+                var actingUserDecision = await _containerResolver
+                    .ResolveForActingUserAsync(actingUserObjectId, ct)
+                    .ConfigureAwait(false);
+
+                if (!string.IsNullOrWhiteSpace(actingUserDecision.ContainerId))
+                {
+                    _logger.LogDebug(
+                        "Office save has no target entity; container derived from the acting user's "
+                        + "business unit (outcome: {Outcome}).",
+                        actingUserDecision.Outcome);
+
+                    return actingUserDecision.ContainerId!;
+                }
+
+                // A business unit with no sprk_containerid stamped is a legitimate configuration state
+                // (3 of 6 live units, verified 2026-08-27), not an error. Fall through.
+                _logger.LogInformation(
+                    "Office save has no target entity and the acting user's business unit has no "
+                    + "container stamped; using the configured default.");
+            }
+            catch (SdapProblemException ex)
+            {
+                // Caller identity, not isolation — see the remarks. Logged at Warning rather than
+                // swallowed silently, because a tenant where this fires for everyone has an unprovisioned
+                // -user problem worth seeing, and the fallback hides it from the user by design.
+                _logger.LogWarning(
+                    "Office save has no target entity and the acting user's container could not be "
+                    + "derived ({Code}); using the configured default. This is not an isolation decision "
+                    + "— nothing on the no-record branch can be secure.",
+                    ex.Code);
+            }
+        }
 
         var configured = _emailProcessingOptions.DefaultContainerId;
         if (string.IsNullOrWhiteSpace(configured))
         {
             throw new InvalidOperationException(
-                "No storage container could be determined for this save. The request names no target "
-                + "entity to derive one from, and EmailProcessing:DefaultContainerId is not configured. "
-                + "Refusing rather than guessing a container.");
+                "No storage container could be determined for this save. Neither the target record (if "
+                + "one was named) nor the acting user's business unit yielded one, and "
+                + "EmailProcessing:DefaultContainerId is not configured. Refusing rather than guessing "
+                + "a container.");
         }
 
         return configured;
@@ -339,26 +435,34 @@ public class OfficeService : IOfficeService
             // is also secure-aware — a secure record's own container wins over any business-unit
             // default, which is the isolation guarantee a client-supplied id could always defeat.
             //
-            // Without a TargetEntity there is no record to derive from, so the configured
-            // EmailProcessing:DefaultContainerId applies — server-side, and already fail-closed when
-            // unset (below). This is the sanctioned ServerDerivedConfig shape for content with no
-            // owning record.
+            // Without a TargetEntity there is no record to derive from, so the ACTING USER's
+            // business-unit container applies (RecordContainerResolver.ResolveForActingUserAsync),
+            // with EmailProcessing:DefaultContainerId as the last resort — server-side either way, and
+            // still fail-closed when both are unavailable. See ResolveContainerAsync's remarks.
             //
-            // ⚠️ Deliberately NOT the acting user's business unit. That was this task's brief, and the
-            // resolver's own contract argues against it (RecordContainerResolver §"Why the RECORD's
-            // business unit and not the ACTING USER's"): users sit in the Operations subtree while
-            // secure records are owned in Secure Projects, so acting-user resolution writes a secure
-            // record's content into the general Operations container — the exact isolation failure this
-            // project exists to close. The owner's Q1 answer sanctioned acting-user BU for the three
-            // upload-before-a-record-exists client paths in task 076, which are a different surface;
-            // Office save always carries a TargetEntity from the shipped add-in, so its no-record
-            // branch is contract-only and needs no new derivation component (CLAUDE.md §11).
+            // ⚠️ CORRECTED 2026-09-21 (task 065). This comment used to end: "Office save always carries
+            // a TargetEntity from the shipped add-in, so its no-record branch is contract-only". THAT
+            // WAS FALSE, and had been since task 037 — the Word ribbon quick-save, every FR-11 version
+            // save's sibling create, and every pane save with no "Related to" selected all send no
+            // target. The no-record branch is this route's MAINLINE traffic. The corrected claim, and
+            // the enumeration behind it, are in ResolveContainerAsync's remarks.
+            //
+            // What did NOT change: acting-user resolution is still deliberately kept AWAY from a save
+            // that names a record. RecordContainerResolver §"Why the RECORD's business unit and not the
+            // ACTING USER's" is right about that case — users sit in the Operations subtree while secure
+            // records are owned in Secure Projects, so acting-user resolution applied to a RECORD writes
+            // a secure record's content into the general Operations container. Task 076's owner sanction
+            // covers exactly the no-record shape, which is the one the branch below now uses, and it is
+            // the same call OBOEndpoints and ComposeService already make — no new component (CLAUDE.md §11).
+            //
+            // ⚠️ And it is a PLACEMENT change, not an authorization one: a no-target save still passes
+            // EntityAccessFilter untouched (finding F4). See notes/065-require-target-entity.md.
             //
             // FR-11 (task 023): a VERSION save writes to the target document's OWN drive — the destination is
             // an item that already exists, so a container derived from TargetEntity could only disagree with it.
             var derivedContainerId = versionTarget is not null
                 ? versionTarget.DriveId!
-                : await ResolveContainerAsync(request, cancellationToken);
+                : await ResolveContainerAsync(request, userId, cancellationToken);
 
             // Serialize the request payload for storage
             var payload = System.Text.Json.JsonSerializer.Serialize(new
