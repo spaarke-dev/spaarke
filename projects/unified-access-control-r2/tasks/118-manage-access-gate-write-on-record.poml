@@ -4,7 +4,7 @@
     <title>Ask the server's question — re-point the Manage Access gate off table-level Create onto Write-on-record, fail CLOSED, then retire Create from human roles (D-1 option C)</title>
     <phase>Register-driven (authored 2026-09-19 after the 2026-09-19 owner decision)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts on an authorization gate and adds a BFF endpoint; tags pcf/auth/bff-api. It changes who can open Manage Access.</rigor-reason>
     <model-tier>opus</model-tier>
