@@ -4,7 +4,7 @@
     <title>AccessGrantModal "+ User": system-user picker writing Dataverse shares (FR-29 client half)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 063 (share endpoints, delegation-gated) merged. HARD RULE: this button must never ship against ungated endpoints.</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend on an authorization surface (grants Full Access to records); tags pcf/frontend + auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
