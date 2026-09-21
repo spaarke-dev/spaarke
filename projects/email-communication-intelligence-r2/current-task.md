@@ -1,7 +1,43 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-09-03 (context-handoff — **triage category fix DONE + DEPLOYED**; matching intelligence layer verified live; G4/G5 scoped. Awaiting owner UAT + build go-aheads).
-> **Recovery**: Read "Quick Recovery" first, then the **go-forward plan** (`notes/email-matching-and-triage-go-forward-plan.md` → "Session closeout"), then "FRESH-SESSION PRIORITIES".
+> **Last Updated**: 2026-09-07 (task-execute — **ACTIVE TASK 064** started; the 2026-09-04 NEXT SESSION PLAN is DONE).
+> **Recovery**: Read "🔨 ACTIVE TASK" first (below), then "Quick Recovery".
+
+---
+
+## 🔨 ACTIVE TASK — 064 (E1b create-new-via-Quick-Start + E1c .eml wizard pre-load)
+
+| Field | Value |
+|-------|-------|
+| **Task** | 064 — `tasks/064-createnew-quickstart-eml-preload.poml` (FULL rigor, opus·high, directional) |
+| **What** | E1b: "New record" in reconciliation Related-to → QuickStartModal create → filed as confirmed regarding via `applyRegardingSelection` (NFR-10). E1c: net-new BFF endpoint materializes the row's archived `.eml` (sprk_document) into a chat-session document → wizard AI-prepopulate pre-seeded. |
+| **Constraints** | Deploys PAUSED (build+merge behind gate, do NOT deploy); §10 BFF (Placement Justification, ≤60 MB, CVE, seam test); ADR-013 (AI via PublicContracts only); ADR-012 (shared lib host-injected, QuickStartModal stays SpaarkeAi); NFR-04 (best-effort pre-load, never blocks); NFR-10 (single write path); back-compat (new props additive/optional). |
+| **Status** | ✅ **VERIFIED ALREADY COMPLETE** — task-execute Step 1 investigation (2 Explore sweeps + git) found 064 shipped as "Option C" (`309e7f674`, on master): all 4 layers + `ChatDocumentEndpointsContractTests` + E1b RTL. Escalation trigger did NOT fire (raw `.eml` is the correct format). The 🔲 was a stale marker → reconciled to ✅. **No build work.** |
+| **Now** | Project conclusion (case 2b — all r2 tasks effectively complete): `/test-diet` → `/code-review` → `/devops-project-archive` → README→Complete. |
+
+> The 2026-09-04 NEXT SESSION PLAN below is **DONE**: R3-CARD-2 shipped (PR #951, merged); email-communication-intelligence-r3 created (branch `work/email-communication-intelligence-r3`, charter written); worktree set up. r2 conclusion (code-review/test-diet/devops-project-archive) follows 064.
+
+---
+
+## 🟢 NEXT SESSION PLAN (2026-09-04 handoff — ✅ DONE 2026-09-07)
+
+> Owner directed (option **b**): finish the pure-shared-lib card work here; the rest → a new **email-communication-intelligence-r3** project. R3-CARD-1 is DONE + committed (`2de7a006d`, on branch `work/email-communication-intelligence-r2`). Three tasks remain:
+
+**1. R3-CARD-2 — "See all" candidates modal (pure shared-lib; the real fix for top-3 truncation)**
+- **Problem**: the reconciliation "Related to" strip shows only the top-3 candidates; a genuine 4th (e.g. PAT-942404 at 96.5%) is hidden. Owner: add a "See all (N)" link → modal listing ALL candidates.
+- **Data**: `flattenPrimaryCandidates(doc)` (in `src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts`) already returns the FULL ranked `PrimaryCandidate[]`. No new data plumbing.
+- **Where**: `EmailConnectionsReview.tsx` (the "Related to" section) — add a "See all (N)" trigger (Fluent v9 `Link`/`Button`) shown only when total candidates > displayed. Open a modal — reuse `SprkModal` (`@spaarke/ui-components`, per ADR-050 / MODAL-DESIGN-SYSTEM) — and render each candidate with the SAME `CandidateCard` row from `EmailConnectionsReviewRows.tsx` (`readOnly` view; identity now GUID-safe via R3-CARD-1). Wire select→`applyRegardingSelection` (the existing single write path) so a reviewer can file any candidate, not just the top-3.
+- **Tests**: add to `EmailAssociationsAndTracking/__tests__/` — modal opens, lists all N (incl. the hidden 4th), select fires the write. ALSO add the R3-CARD-1 unit test still owed: `looksLikeGuid()` truthy/falsey + `deriveConnections` name-fallback + a render test that a GUID-only candidate shows type+reason not the GUID.
+- **Build/verify**: `cd src/client/shared/Spaarke.Communication.Components && npx tsc --noEmit && npx jest logic/connections EmailAssociationsAndTracking`. NOTE 3 pre-existing `EmailTrackingPanel` radio failures are UNRELATED (fail without our changes). Rebuild consumers (dual): the `CommunicationReconciliation` code page + the SpaarkeAi `communications-reconciliation` widget both consume this lib → `/code-page-deploy` awareness (see the dual-deploy warning). `/conflict-check` before the PR (contended `Spaarke.Communication.Components`; note: `email-communication-solution-r5` is CLOSED per memory, so contention is low). Then `/code-review` + `/merge-to-master`.
+
+**2. Create the `email-communication-intelligence-r3` project + `design.md`**
+- No such project exists yet (verified). Build it from the THREE r2 notes that hold the agreed scope + rejections:
+  - `notes/email-r3-candidate-backlog.md` — R3-CARD-1 (DONE here), **R3-CARD-2** (being done here), **R3-SIGNAL-1** ("related to" ranks high — split suggest-rank from auto-file-safety; ADR-045/FR-12), + **host `resolveDisplayName` wiring** for real names on thread/attachment cards (the R3-CARD-1 deferral).
+  - `notes/G4-G5-matching-enhancements-scope.md` — **G4** eval harness (golden set + per-rung precision/recall + invariant test), **G5** party graph + learned scorer (facade + suggest-tier; NO ADR amendment needed).
+  - `notes/email-matching-and-triage-go-forward-plan.md` — the P1/P2/G1–G5 tracker + the "email-metadata facets" optional enhancement (owner decision).
+- **Agreed r3 scope** = R3-SIGNAL-1 + host resolveDisplayName real-names + G4 + G5 + (decision) email-metadata facets. **Rejected/superseded** (record in design): the 5-tier "matching ladder" (already built as the 13-rung engine), `IEmailFilterService` (does not exist — do not build). Prefer `/design-to-spec` (or write `design.md` directly, mirroring the shape of `projects/spaarkeai-word-add-in-r1/design.md`).
+
+**3. `/worktree-setup`** for `email-communication-intelligence-r3` (after design.md exists).
 
 ---
 

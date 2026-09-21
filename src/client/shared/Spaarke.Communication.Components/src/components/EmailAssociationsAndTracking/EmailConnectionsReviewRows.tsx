@@ -22,7 +22,7 @@
 import * as React from 'react';
 import { mergeClasses, Text, Button, Tooltip } from '@fluentui/react-components';
 import { Checkmark16Filled, Dismiss12Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
-import { entityLabel, type PrimaryCandidate } from '../../logic/connections';
+import { entityLabel, looksLikeGuid, type PrimaryCandidate } from '../../logic/connections';
 import type { ConnectionsReviewStyles } from './EmailConnectionsReview.styles';
 
 function pct(confidence: number): string {
@@ -71,6 +71,15 @@ export function CandidateCard({
 }): React.ReactElement {
   const selectedClass = tone === 'primary' ? s.cardPrimary : s.cardSelected;
 
+  // R3-CARD-1: the engine records only a target GUID for thread/attachment matches (no embedded name),
+  // so `targetName` falls back to that GUID. Show the match reason + entity type instead of an opaque
+  // GUID. (Real names on those cards need host `resolveDisplayName` wiring — deferred to email-r3.)
+  const nameIsGuid = looksLikeGuid(candidate.targetName);
+  const displayName = nameIsGuid
+    ? (candidate.matchReason ?? (candidate.entity ? entityLabel(candidate.entity) : 'Record'))
+    : candidate.targetName;
+  const displayNumber = nameIsGuid ? undefined : candidate.recordNumber;
+
   // ── Compact (reconcile) — one row: meta on the left, inline Confirm on the right ──
   if (compact) {
     const type = candidate.entity ? entityLabel(candidate.entity) : 'Record';
@@ -78,11 +87,11 @@ export function CandidateCard({
       <div className={s.cardCell}>
         <div
           className={mergeClasses(s.candCompact, selected && selectedClass)}
-          aria-label={`${candidate.recordNumber ? candidate.recordNumber + ' ' : ''}${candidate.targetName}`}
+          aria-label={`${displayNumber ? displayNumber + ' ' : ''}${displayName}`}
         >
           <div className={s.compactMeta} onClick={() => !readOnly && onSelect()}>
-            <Text className={s.compactName} title={candidate.targetName}>
-              {candidate.recordNumber ? `${candidate.recordNumber} : ${candidate.targetName}` : candidate.targetName}
+            <Text className={s.compactName} title={displayName}>
+              {displayNumber ? `${displayNumber} : ${displayName}` : displayName}
             </Text>
             <Text className={s.compactScore}>
               {type} · {pct(candidate.confidence)} match
@@ -124,7 +133,7 @@ export function CandidateCard({
       <div
         role="radio"
         aria-checked={selected}
-        aria-label={`${candidate.recordNumber ? candidate.recordNumber + ' ' : ''}${candidate.targetName}`}
+        aria-label={`${displayNumber ? displayNumber + ' ' : ''}${displayName}`}
         tabIndex={readOnly ? -1 : 0}
         className={mergeClasses(s.card, selected && selectedClass)}
         onClick={() => !readOnly && onSelect()}
@@ -138,18 +147,18 @@ export function CandidateCard({
       >
         <div className={s.cardHeadRow}>
           <Text className={s.cardIdentity}>
-            {candidate.recordNumber ? (
+            {displayNumber ? (
               <>
-                <span className={s.recNum}>{candidate.recordNumber}</span>
-                <span className={s.cardName}> : {candidate.targetName}</span>
+                <span className={s.recNum}>{displayNumber}</span>
+                <span className={s.cardName}> : {displayName}</span>
               </>
             ) : (
-              <span className={s.recNum}>{candidate.targetName}</span>
+              <span className={s.recNum}>{displayName}</span>
             )}
           </Text>
           <span className={s.pctTag}>{pct(candidate.confidence)}</span>
         </div>
-        {candidate.matchReason ? <Text className={s.cardReason}>{candidate.matchReason}</Text> : null}
+        {!nameIsGuid && candidate.matchReason ? <Text className={s.cardReason}>{candidate.matchReason}</Text> : null}
       </div>
       {showConfirm && !readOnly ? (
         <div className={s.confirmSlot}>
