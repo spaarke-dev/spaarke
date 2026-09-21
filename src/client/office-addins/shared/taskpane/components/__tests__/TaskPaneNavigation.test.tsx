@@ -52,8 +52,10 @@ describe('TaskPaneNavigation', () => {
   it('disables tabs when disabled prop is true', () => {
     renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} disabled={true} />);
 
-    const tablist = screen.getByRole('tablist');
-    expect(tablist).toHaveAttribute('aria-disabled', 'true');
+    // Fluent v9's TabList spreads `disabled` onto each rendered `<button role="tab">` (a real HTML
+    // `disabled=""` attribute), not onto the `role="tablist"` container as `aria-disabled` — verified
+    // by inspecting the rendered DOM (task 071).
+    expect(screen.getByRole('tab', { name: /save/i })).toBeDisabled();
   });
 
   it('renders smaller tabs in compact mode', () => {

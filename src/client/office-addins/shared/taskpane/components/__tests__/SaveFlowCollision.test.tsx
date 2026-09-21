@@ -25,14 +25,8 @@ jest.mock('../../services/SseClient', () => ({
   createSseConnection: jest.fn(() => ({ close: jest.fn() })),
 }));
 
-// jsdom has no ResizeObserver; Fluent's Dropdown/MessageBar need one to render (matches the sibling
-// quick-create suite's stub).
-class ResizeObserverStub {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverStub });
+// ResizeObserver (Fluent v9 Dropdown/MessageBar reflow) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 // Mock crypto.subtle for idempotency key computation (useSaveFlow.ts computeIdempotencyKey).
 Object.defineProperty(global.crypto, 'subtle', {

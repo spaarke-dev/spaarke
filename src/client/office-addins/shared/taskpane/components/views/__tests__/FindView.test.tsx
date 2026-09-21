@@ -31,20 +31,8 @@ import { FindView, resolveFindState, type FindState } from '../FindView';
 import { apiClient, ApiClientError } from '@shared/services';
 import type { DocumentIdentityState } from '../../../services/documentIdentityService';
 
-// Fluent v9 MessageBar uses ResizeObserver for reflow detection; jsdom doesn't provide one.
-class ResizeObserverMock {
-  observe(): void {
-    /* no-op */
-  }
-  unobserve(): void {
-    /* no-op */
-  }
-  disconnect(): void {
-    /* no-op */
-  }
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverMock;
+// ResizeObserver (Fluent v9 MessageBar reflow detection) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 // jsdom doesn't implement IntersectionObserver either — FindResultsList's useLazyResults uses one for
 // its sentinel-driven, NEVER-refetching reveal (task 034, Path 2). This mock captures every

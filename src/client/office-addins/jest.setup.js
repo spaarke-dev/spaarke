@@ -26,6 +26,31 @@ if (typeof global.TextDecoder === 'undefined') {
   global.TextDecoder = TextDecoder;
 }
 
+// jsdom has no ResizeObserver; Fluent v9 components that use auto layout (MessageBar reflow,
+// Dropdown popup positioning, etc.) need one to render without throwing. Previously polyfilled
+// per-file in 11 suites (SaveFlow.* variants, RelatedToPicker.*, DocumentProfileSection,
+// LinkedTodosBanner, FindView) with copy-pasted stub classes; `ShareView.test.tsx` had no copy and
+// failed 16/20 with "ResizeObserver is not a constructor" as a result (task 071). Defined once,
+// globally, here instead — the per-file copies were removed in the same change.
+class ResizeObserverStub {
+  observe() {
+    /* no-op: layout is irrelevant to test assertions */
+  }
+  unobserve() {
+    /* no-op */
+  }
+  disconnect() {
+    /* no-op */
+  }
+}
+if (typeof global.ResizeObserver === 'undefined') {
+  Object.defineProperty(window, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: ResizeObserverStub,
+  });
+}
+
 // Mock Office.js global object
 global.Office = {
   context: {
@@ -106,6 +131,10 @@ global.Office = {
     AttachmentType: { File: 'file', Item: 'item', Cloud: 'cloud' },
     RecipientType: { DistributionList: 'distributionList', ExternalUser: 'externalUser', Other: 'other', User: 'user' },
     BodyType: { Html: 'html', Text: 'text' },
+    // Task 071: `OutlookAdapter.test.ts` reads `Office.MailboxEnums.AttachmentContentFormat.Base64`
+    // (getAttachmentContent, Mailbox 1.8) — absent here, same class of gap as the other MailboxEnums
+    // members above (undefined.Base64 threw before the assertion ever ran).
+    AttachmentContentFormat: { Base64: 'base64', Url: 'url', Eml: 'eml', ICalendar: 'iCalendar' },
   },
 };
 

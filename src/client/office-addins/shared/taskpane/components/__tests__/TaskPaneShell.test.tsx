@@ -16,18 +16,32 @@ describe('TaskPaneShell', () => {
       </TaskPaneShell>
     );
 
-    expect(screen.getByText('Spaarke')).toBeInTheDocument();
+    // TaskPaneShell's default `appName` is `'Spaarke DMS'` (TaskPaneShell.tsx:138), rendered verbatim
+    // as one text node by TaskPaneFooter (`<span>{appName}</span>`, TaskPaneFooter.tsx:127) — an
+    // exact-match `getByText('Spaarke')` never matches it (task 071).
+    expect(screen.getByText('Spaarke DMS')).toBeInTheDocument();
     expect(screen.getByTestId('content')).toBeInTheDocument();
   });
 
-  it('renders with custom title', () => {
+  it('accepts a title prop without breaking rendering (prop is currently unused — see note)', () => {
+    // FINDING (task 071, confirms the review's "partly inferred" TaskPaneShell diagnosis): `title` is
+    // still declared on `TaskPaneShellProps` (TaskPaneShell.tsx:58) but the component body never reads
+    // it — task 015's toolbar consolidation ("what used to be two stacked rows... consolidated",
+    // TaskPaneShell.tsx:16-18 / TaskPaneToolbar.tsx:32-36) replaced the old `TaskPaneHeader` (whose
+    // default title WAS 'Spaarke', TaskPaneHeader.tsx:125) with `TaskPaneToolbar`, which renders no
+    // title text at all (its `logo` style class, TaskPaneToolbar.tsx:53, is declared but never applied
+    // to any element). This is dead-prop drift from that consolidation, not a live behavioral defect —
+    // nothing reads or displays `title` today in Word or Outlook, so there is no user-facing regression
+    // to escalate. Repairing the test to assert invisible text would be worse than deleting the
+    // assertion, so this now pins the honest contract: passing `title` is accepted and harmless.
     renderWithProvider(
       <TaskPaneShell title="Custom Title">
-        <div>Content</div>
+        <div data-testid="content">Content</div>
       </TaskPaneShell>
     );
 
-    expect(screen.getByText('Custom Title')).toBeInTheDocument();
+    expect(screen.queryByText('Custom Title')).not.toBeInTheDocument();
+    expect(screen.getByTestId('content')).toBeInTheDocument();
   });
 
   it('shows loading skeleton when isLoading is true', () => {
@@ -52,7 +66,10 @@ describe('TaskPaneShell', () => {
 
     expect(screen.getByRole('tablist')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /share/i })).toBeInTheDocument();
+    // Share is a hidden V1 placeholder (TaskPaneNavigation.tsx TAB_CONFIGS — commented out); the r1
+    // shell renders Save, Find and Create To Do instead (task 071 — matches TaskPaneNavigation.test.tsx).
+    expect(screen.getByRole('tab', { name: /find/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /create to do/i })).toBeInTheDocument();
   });
 
   it('hides navigation when not authenticated', () => {
@@ -74,8 +91,8 @@ describe('TaskPaneShell', () => {
       </TaskPaneShell>
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: /share/i }));
-    expect(handleTabChange).toHaveBeenCalledWith('share');
+    fireEvent.click(screen.getByRole('tab', { name: /find/i }));
+    expect(handleTabChange).toHaveBeenCalledWith('find');
   });
 
   it('renders footer with version', () => {
@@ -107,9 +124,13 @@ describe('TaskPaneShell', () => {
       </TaskPaneShell>
     );
 
-    // User button should be present
-    const userButton = screen.getByLabelText(/signed in as john doe/i);
-    expect(userButton).toBeInTheDocument();
+    // TaskPaneToolbar (the live renderer since the task 015 consolidation) has no standalone
+    // "signed in as {name}" button — user identity + Sign out live inside the "More options" overflow
+    // menu (TaskPaneToolbar.tsx:153-217), closed by default. Open it first (task 071).
+    fireEvent.click(screen.getByRole('button', { name: /more options/i }));
+
+    expect(screen.getByText('John Doe')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /sign out/i })).toBeInTheDocument();
   });
 
   it('renders content inside error boundary', () => {

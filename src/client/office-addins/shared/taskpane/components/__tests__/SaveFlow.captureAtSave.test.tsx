@@ -42,19 +42,8 @@ Object.defineProperty(global.crypto, 'subtle', {
   value: { digest: jest.fn(async () => new Uint8Array(32).buffer) },
 });
 
-// jsdom has no ResizeObserver; Fluent's MessageBar (auto layout — the pane's error bar) needs one to render.
-class ResizeObserverStub {
-  observe(): void {
-    /* no-op */
-  }
-  unobserve(): void {
-    /* no-op */
-  }
-  disconnect(): void {
-    /* no-op */
-  }
-}
-Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverStub });
+// ResizeObserver (Fluent v9 MessageBar reflow detection) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 type FakeResponse = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<unknown> };
 const json = (ok: boolean, status: number, body: unknown): FakeResponse => ({

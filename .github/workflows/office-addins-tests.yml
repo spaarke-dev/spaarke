@@ -272,7 +272,7 @@ jobs:
           {
             echo "# Office Add-ins gated jest suites"
             echo
-            echo "**Reports, does not block.** ${GATED_COUNT:-0} suite(s) gated, of 22 in the package."
+            echo "**Reports, does not block.** ${GATED_COUNT:-0} suite(s) gated, of 56 in the package."
             echo
             echo "The ungated suites are not skipped — they run nightly, unchanged, in"
             echo "client-tests.yml. When the nightly baseline shows one of them green, add"

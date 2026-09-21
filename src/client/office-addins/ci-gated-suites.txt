@@ -11,11 +11,15 @@
 #
 # WHY AN ALLOW-LIST AND NOT THE WHOLE SUITE
 # -----------------------------------------
-# As of 2026-09-10 this package is 12 of 22 suites green (164 of 380 tests).
-# The other 10 fail on pre-existing mock/assertion defects that predate this
-# gate and are nobody's PR to fix. Gating the whole suite would have been red
-# on the day it was created, which trains people to ignore it — strictly worse
-# than no gate. So the gate starts at the green line and ratchets upward.
+# As of 2026-09-10 this package was 12 of 22 suites green (164 of 380 tests);
+# by 2026-09-21 the ratchet in the section below had grown that to 46 of 56.
+# Task 071 (2026-09-21) repaired the remaining 10 red suites (84 of 223 tests
+# in just those 10, all stale-test/harness defects, none a shipped code bug —
+# see notes/071-jest-repair.md) and gated all of them in the same change, so
+# this package is now 56 of 56 suites green and gated. Gating the whole suite
+# would have been red on the day it was created, which trains people to
+# ignore it — strictly worse than no gate. So the gate started at the green
+# line and ratcheted upward; it has now reached full coverage.
 #
 # NOTHING IS SKIPPED OR DELETED TO ACHIEVE THIS. The 10 red suites
 # still run, unchanged, every night in `.github/workflows/client-tests.yml`,
@@ -199,14 +203,24 @@ shared/taskpane/services/__tests__/documentIdentityService.stampPrecedence.test.
 # key while a real edit does not.
 word/commands/__tests__/commands.test.ts
 shared/taskpane/services/__tests__/shareLinkService.test.ts
-# --- NOT gated yet (red as of 2026-09-10) — promote as they are fixed -------
-# shared/adapters/__tests__/OutlookAdapter.test.ts               14/32 (2026-09-11)
-# shared/services/__tests__/ApiClient.test.ts                    19/20
-# shared/taskpane/components/__tests__/EntityPicker.test.tsx      28/32
-# shared/taskpane/components/__tests__/SaveFlow.test.tsx          16/25
-# shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx 6/7
-# shared/taskpane/components/__tests__/TaskPaneShell.test.tsx      5/10
-# shared/taskpane/components/views/__tests__/SaveView.test.tsx     4/26
-# shared/taskpane/components/views/__tests__/ShareView.test.tsx    4/20
-# shared/taskpane/hooks/__tests__/useEntitySearch.test.ts         20/21
-# shared/taskpane/hooks/__tests__/useSaveFlow.test.ts             19/26
+# --- the final 10 (task 071, 2026-09-21) — repaired and gated in one change --
+# Every one of these was a stale test or a harness gap, never a shipped code
+# bug (full diagnosis table: notes/071-jest-repair.md). Representative causes:
+# a mock missing a real Office.js field (OutlookAdapter's `itemType`), a
+# suite-global `jest.useFakeTimers()` deadlocking every user-event interaction
+# once ResizeObserver stopped masking it (ShareView), an assertion that
+# predated `isValid` being hard-coded true by design (useSaveFlow), a Fluent
+# v9 API detail (`disabled` lands on each `<button role="tab">`, not
+# `aria-disabled` on the tablist — TaskPaneNavigation), and prop-shape drift
+# after the SaveView `hostContext` -> `hostAdapter` rewrite and the SaveFlow
+# AI-processing-toggle removal (UI feedback 2026-09-02).
+shared/adapters/__tests__/OutlookAdapter.test.ts
+shared/services/__tests__/ApiClient.test.ts
+shared/taskpane/components/__tests__/EntityPicker.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.test.tsx
+shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx
+shared/taskpane/components/__tests__/TaskPaneShell.test.tsx
+shared/taskpane/components/views/__tests__/SaveView.test.tsx
+shared/taskpane/components/views/__tests__/ShareView.test.tsx
+shared/taskpane/hooks/__tests__/useEntitySearch.test.ts
+shared/taskpane/hooks/__tests__/useSaveFlow.test.ts

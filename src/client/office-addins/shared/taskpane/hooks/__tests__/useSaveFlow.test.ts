@@ -79,7 +79,10 @@ describe('useSaveFlow', () => {
       expect(result.current.flowState).toBe('idle');
       expect(result.current.selectedEntity).toBeNull();
       expect(result.current.isSaving).toBe(false);
-      expect(result.current.isValid).toBe(false);
+      // `isValid` is hard-coded `true` by design (useSaveFlow.ts:509 — "Association is optional, user
+      // can save without selecting an entity"), confirmed by this same suite's own "allows saving
+      // without entity selection (document-only save)" test below. This assertion was stale (task 071).
+      expect(result.current.isValid).toBe(true);
     });
 
     it('has default processing options enabled', () => {
@@ -141,7 +144,8 @@ describe('useSaveFlow', () => {
       });
 
       expect(result.current.selectedEntity).toBeNull();
-      expect(result.current.isValid).toBe(false);
+      // isValid stays true — see the "starts with idle flow state" test above for why (task 071).
+      expect(result.current.isValid).toBe(true);
     });
   });
 
@@ -231,10 +235,13 @@ describe('useSaveFlow', () => {
 
   describe('Save Operation', () => {
     it('allows saving without entity selection (document-only save)', async () => {
+      // startSave reads the save response via `.text()` then JSON.parses it (useSaveFlow.ts:1124),
+      // never `.json()`, for every status — a mock exposing only `.json()` throws "response.text is
+      // not a function" before any assertion runs (task 071; matches the working 401-retry mock below).
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
       const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
@@ -253,7 +260,7 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
       const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
@@ -275,7 +282,7 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
       const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
@@ -285,8 +292,22 @@ describe('useSaveFlow', () => {
         result.current.setSelectedAttachmentIds(new Set(['att-1']));
       });
 
+      // Wire body assertions below target `serverRequest` (useSaveFlow.ts:957-975, :1001-1016) — the
+      // object actually JSON.stringify'd into the fetch body. The old assertions
+      // (associationType/associationId/content.attachmentIds/processing.profileSummary) named a
+      // DIFFERENT internal object built further down purely for idempotency-key hashing
+      // (`SaveRequest` at :1060-1077) that is never sent on the wire — a stale test (task 071). Also
+      // needs a matching `context.attachments` entry: `selectedAttachmentFileNames` (:994-999) maps
+      // selected ids through `context.attachments`, which the shared `mockContext` leaves empty.
+      const contextWithAttachment = {
+        ...mockContext,
+        attachments: [
+          { id: 'att-1', name: 'contract.pdf', contentType: 'application/pdf', size: 1024, isInline: false },
+        ],
+      };
+
       await act(async () => {
-        await result.current.startSave(mockContext);
+        await result.current.startSave(contextWithAttachment);
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
@@ -303,17 +324,17 @@ describe('useSaveFlow', () => {
       );
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.associationType).toBe('Matter');
-      expect(body.associationId).toBe('entity-123');
-      expect(body.content.attachmentIds).toEqual(['att-1']);
-      expect(body.processing.profileSummary).toBe(true);
+      expect(body.targetEntity.entityType).toBe('Matter');
+      expect(body.targetEntity.entityId).toBe('entity-123');
+      expect(body.email.selectedAttachmentFileNames).toEqual(['contract.pdf']);
+      expect(body.aiOptions.profileSummary).toBe(true);
     });
 
     it('includes idempotency key header', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
       const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
@@ -401,7 +422,7 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => duplicateResponse,
+        text: async () => JSON.stringify(duplicateResponse),
       });
 
       const onDuplicate = jest.fn();
@@ -441,7 +462,7 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 400,
-        json: async () => problemDetails,
+        text: async () => JSON.stringify(problemDetails),
       });
 
       const onError = jest.fn();
@@ -490,12 +511,22 @@ describe('useSaveFlow', () => {
       expect(result.current.error?.message).toContain('Network error');
     });
 
-    it('clears error', () => {
+    it('clears error', async () => {
+      // The original premise — "trigger an error by trying to save without entity" — no longer holds:
+      // isValid is true unconditionally and a document-only save is explicitly allowed (see "allows
+      // saving without entity selection" above). It also never awaited startSave, so even a genuine
+      // error would land after this synchronous act() checked for it. Reworked to trigger a real,
+      // awaited failure the same way "handles network error" above does (task 071).
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
       const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
 
       act(() => {
-        // Trigger an error by trying to save without entity
-        result.current.startSave(mockContext);
+        result.current.setSelectedEntity(mockEntity);
+      });
+
+      await act(async () => {
+        await result.current.startSave(mockContext);
       });
 
       expect(result.current.error).not.toBeNull();
@@ -513,7 +544,7 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
       const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
@@ -559,7 +590,7 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
       await act(async () => {
@@ -578,10 +609,11 @@ describe('useSaveFlow', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 202,
-        json: async () => mockSaveResponse,
+        text: async () => JSON.stringify(mockSaveResponse),
       });
 
-      // Mock job status response (completed)
+      // Mock job status response (completed) — this one IS read via `.json()` (useSaveFlow.ts:708's
+      // polling path), unlike the save response above.
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({

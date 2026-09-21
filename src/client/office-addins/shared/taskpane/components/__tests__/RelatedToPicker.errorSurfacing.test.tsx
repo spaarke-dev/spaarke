@@ -23,13 +23,8 @@ const MATTER_TYPES: MatterTypeChoice[] = [
   { id: '11aed095-30da-f011-8406-7ced8d1dc988', name: 'Litigation', code: 'LITG' },
 ];
 
-// jsdom has no ResizeObserver; Fluent's MessageBar/Dropdown need one to render.
-class ResizeObserverStub {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverStub });
+// ResizeObserver (Fluent v9 MessageBar/Dropdown reflow) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 // Same budget rationale as RelatedToPicker.matterType.test.tsx: real-timer userEvent typing under
 // parallel-worker load can approach the package's default 10s testTimeout. Every dependency here is

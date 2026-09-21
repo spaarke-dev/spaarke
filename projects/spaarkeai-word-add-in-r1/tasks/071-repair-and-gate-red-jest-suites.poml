@@ -4,7 +4,7 @@
     <title>Ten red jest suites, 84 failing tests, none of them a shipped bug — repair them and put them inside the gate</title>
     <phase>5 Remediation — verification</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (CLAUDE.md §8): modifies `tests/**` and carries the `testing` tag, so quality gates run unconditionally. Also modifies `.tsx`/`.ts`.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -120,4 +120,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run `npm install` before any diagnosis.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-09-21. All 10 suites repaired; full run 56/56 suites, 750/750 tests. Gated set
+    (ci-gated-suites.txt) taken 46 -&gt; 56, verified locally against the exact `--runTestsByPath`
+    invocation the CI gate uses (56 ran / 56 declared, suite-count assertion inputs match). Two of
+    the review's "inferred" diagnoses (SaveView.test.tsx, EntityPicker.test.tsx) were WRONG, not just
+    approximately right, and SaveFlow.test.tsx's was half-wrong -- full confirmed-vs-corrected table
+    in notes/071-jest-repair.md. NOT pushed and NOT proven on a real CI run: the dispatching
+    instruction for this execution said commit-only, no push, which overrides the POML's own step 5 /
+    the "PROVEN ON CI" acceptance criterion. That criterion is explicitly UNMET -- see
+    notes/071-jest-repair.md section 7.
+  </notes>
 </task>

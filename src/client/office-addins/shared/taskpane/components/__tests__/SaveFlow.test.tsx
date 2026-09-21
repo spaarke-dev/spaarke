@@ -1,6 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SaveFlow } from '../SaveFlow';
 import type { AttachmentInfo } from '@shared/adapters/types';
@@ -108,13 +107,15 @@ describe('SaveFlow', () => {
             itemId="email-123"
             itemName="Test Email Subject"
             attachments={mockAttachments}
-            emailSender="sender@example.com"
+            senderEmail="sender@example.com"
             getAccessToken={mockGetAccessToken}
           />
         </TestWrapper>
       );
 
-      expect(screen.getByText('Associate With')).toBeInTheDocument();
+      // RelatedToPicker renders its own "Related to" header (UI feedback 2026-09-02) — "Associate
+      // With" was the pre-rename label (task 071).
+      expect(screen.getByText('Related to')).toBeInTheDocument();
       expect(screen.getByRole('form', { name: /save to spaarke/i })).toBeInTheDocument();
     });
 
@@ -125,7 +126,9 @@ describe('SaveFlow', () => {
             hostType="outlook"
             itemId="email-123"
             itemName="Test Email Subject"
-            emailSender="sender@example.com"
+            // Prop is `senderEmail` on the current SaveFlowProps — `emailSender` was never a real
+            // prop name (a silently-ignored extra prop), so the "From:" row never rendered (task 071).
+            senderEmail="sender@example.com"
             getAccessToken={mockGetAccessToken}
           />
         </TestWrapper>
@@ -186,17 +189,24 @@ describe('SaveFlow', () => {
       expect(screen.queryByText('Attachments')).not.toBeInTheDocument();
     });
 
-    it('renders processing options', () => {
+    // FINDING (task 071, confirms the review's "inferred" SaveFlow diagnosis): the AI-processing
+    // toggle UI this test looked for (an "AI Processing" section with Profile Summary / Search
+    // Index / Deep Analysis switches) was intentionally REMOVED — SaveFlow.tsx:1450-1452's own
+    // comment: "AI processing (Profile Summary + Search Index) is mandatory for all content saved to
+    // Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles (UI feedback 2026-09-02)." This is
+    // a deliberate, documented product decision, not a shipped-code defect — repairing the test to
+    // "find" switches that no longer exist is not possible, so this replaces the four toggle/label
+    // tests below with the direct negation: confirms the controls stay gone rather than silently
+    // reappearing.
+    it('does not render AI-processing toggles — mandatory, no UI (UI feedback 2026-09-02)', () => {
       render(
         <TestWrapper>
           <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
-      expect(screen.getByText('AI Processing')).toBeInTheDocument();
-      expect(screen.getByText('Profile Summary')).toBeInTheDocument();
-      expect(screen.getByText('Search Index')).toBeInTheDocument();
-      expect(screen.getByText('Deep Analysis')).toBeInTheDocument();
+      expect(screen.queryByText('AI Processing')).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     });
 
     it('renders save button', () => {
@@ -206,75 +216,29 @@ describe('SaveFlow', () => {
         </TestWrapper>
       );
 
-      expect(screen.getByRole('button', { name: /save to spaarke/i })).toBeInTheDocument();
+      // The button's own text is just "Save" (Save to Spaarke is the FORM's aria-label, asserted
+      // elsewhere via `getByRole('form', ...)`) — task 071.
+      expect(screen.getByRole('button', { name: /^save$/i })).toBeInTheDocument();
     });
   });
 
   describe('Form Validation', () => {
-    it('disables save button when no entity is selected', () => {
+    it('does NOT disable the save button for a missing entity — association is optional by design (matches useSaveFlow.ts:509)', () => {
+      // The original premise here predates the same "isValid hard-coded true" design confirmed in
+      // useSaveFlow.test.ts (task 071): the save button's disabled condition
+      // (`isSaving || !isValid || !saveMode.target`, SaveFlow.tsx:1471) has no entity-selection term
+      // at all, and with no `documentIdentity` supplied `saveMode.target` resolves to CREATE
+      // (SaveModeSection.tsx's `resolveSaveMode`, `identity === undefined` branch) — so the button is
+      // enabled with no entity chosen. A document-only save is a supported, tested path
+      // (useSaveFlow.test.ts "allows saving without entity selection").
       render(
         <TestWrapper>
           <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
         </TestWrapper>
       );
 
-      const saveButton = screen.getByRole('button', {
-        name: /save to spaarke/i,
-      });
-      expect(saveButton).toBeDisabled();
-    });
-  });
-
-  describe('Processing Options', () => {
-    it('toggles profile summary option', async () => {
-      const user = userEvent.setup();
-      render(
-        <TestWrapper>
-          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
-        </TestWrapper>
-      );
-
-      const profileSwitch = screen.getByRole('switch', {
-        name: /enable profile summary/i,
-      });
-      expect(profileSwitch).toBeChecked();
-
-      await user.click(profileSwitch);
-      expect(profileSwitch).not.toBeChecked();
-    });
-
-    it('toggles search index option', async () => {
-      const user = userEvent.setup();
-      render(
-        <TestWrapper>
-          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
-        </TestWrapper>
-      );
-
-      const indexSwitch = screen.getByRole('switch', {
-        name: /enable rag indexing/i,
-      });
-      expect(indexSwitch).toBeChecked();
-
-      await user.click(indexSwitch);
-      expect(indexSwitch).not.toBeChecked();
-    });
-
-    it('toggles deep analysis option', async () => {
-      const user = userEvent.setup();
-      render(
-        <TestWrapper>
-          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
-        </TestWrapper>
-      );
-
-      const analysisSwitch = screen.getByRole('switch', {
-        name: /enable deep ai analysis/i,
-      });
-      expect(analysisSwitch).not.toBeChecked();
-
-      await user.click(analysisSwitch);
-      expect(analysisSwitch).toBeChecked();
+      const saveButton = screen.getByRole('button', { name: /^save$/i });
+      expect(saveButton).not.toBeDisabled();
     });
   });
 
@@ -361,17 +325,9 @@ describe('SaveFlow', () => {
       expect(screen.getByRole('form', { name: /save to spaarke/i })).toBeInTheDocument();
     });
 
-    it('has proper labels for processing options', () => {
-      render(
-        <TestWrapper>
-          <SaveFlow hostType="outlook" itemId="email-123" itemName="Test Email" getAccessToken={mockGetAccessToken} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByRole('switch', { name: /enable profile summary/i })).toBeInTheDocument();
-      expect(screen.getByRole('switch', { name: /enable rag indexing/i })).toBeInTheDocument();
-      expect(screen.getByRole('switch', { name: /enable deep ai analysis/i })).toBeInTheDocument();
-    });
+    // Superseded by the "Processing Options" describe block's own finding above (task 071): these
+    // switches were intentionally removed. Duplicating the same negation here would be padding, not
+    // repair — the "does not render AI-processing toggles" test already covers this.
   });
 
   describe('Duplicate Detection', () => {

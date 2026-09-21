@@ -14,21 +14,8 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { LinkedTodosBanner } from '../LinkedTodosBanner';
 
-// Fluent v9 MessageBar uses ResizeObserver for reflow detection; jsdom doesn't
-// provide one. Stub a no-op implementation so render() doesn't throw.
-class ResizeObserverMock {
-  observe(): void {
-    /* no-op */
-  }
-  unobserve(): void {
-    /* no-op */
-  }
-  disconnect(): void {
-    /* no-op */
-  }
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver ?? ResizeObserverMock;
+// ResizeObserver (Fluent v9 MessageBar reflow detection) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 /**
  * @testing-library/jest-dom is not configured in this workspace's jest setup.

@@ -33,13 +33,8 @@ jest.mock('../../services/SseClient', () => ({
 const TEST_TIMEOUT_MS = 60000;
 const WAIT = { timeout: 10000 };
 
-// jsdom has no ResizeObserver; Fluent's MessageBar needs one to render.
-class ResizeObserverStub {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverStub });
+// ResizeObserver (Fluent v9 MessageBar reflow detection) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 type FakeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
 const json = (ok: boolean, status: number, body: unknown): FakeResponse => ({ ok, status, json: async () => body });

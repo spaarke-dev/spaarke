@@ -9,6 +9,12 @@ import type { HostAdapterError, HostCapabilities } from '../types';
 
 // Mock data
 const mockReadItem = {
+  // Real Outlook read/compose items always carry `itemType` (Office.js base `Item` interface;
+  // @types/office-js `index.d.ts` documents it on every Message/Appointment read & compose variant).
+  // OutlookAdapter.determineMode() (`OutlookAdapter.ts:193`) gates its ENTIRE read/compose detection
+  // on `'itemType' in item`; without it every mode-dependent call degraded to 'unknown' — a stale mock
+  // gap, not an adapter defect (task 071).
+  itemType: Office.MailboxEnums.ItemType.Message,
   itemId: 'test-item-123',
   subject: 'Test Email Subject',
   from: { emailAddress: 'sender@example.com', displayName: 'Test Sender' },
@@ -61,6 +67,8 @@ const mockReadItem = {
 };
 
 const mockComposeItem = {
+  // See mockReadItem above — same real-API field, same detection gate (task 071).
+  itemType: Office.MailboxEnums.ItemType.Message,
   itemId: '',
   subject: {
     getAsync: jest.fn((callback: (result: Office.AsyncResult<string>) => void) => {

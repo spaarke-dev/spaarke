@@ -20,13 +20,8 @@ const MATTER_TYPES: MatterTypeChoice[] = [
   { id: '46c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Patent', code: 'PAT' },
 ];
 
-// jsdom has no ResizeObserver; Fluent's Dropdown popup needs one to render its listbox.
-class ResizeObserverStub {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverStub });
+// ResizeObserver (Fluent v9 Dropdown popup positioning) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 // Real-timer userEvent typing + a Dropdown popup interaction runs close to the package's default 10s
 // testTimeout, especially under parallel-worker load (documented package characteristic — CLAUDE.md

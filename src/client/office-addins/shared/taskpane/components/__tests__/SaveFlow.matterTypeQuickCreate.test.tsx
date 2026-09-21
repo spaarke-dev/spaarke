@@ -28,13 +28,8 @@ jest.mock('../../services/SseClient', () => ({
 const TEST_TIMEOUT_MS = 60000;
 const WAIT = { timeout: 10000 };
 
-// jsdom has no ResizeObserver; Fluent's Dropdown/MessageBar need one to render.
-class ResizeObserverStub {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-Object.defineProperty(window, 'ResizeObserver', { configurable: true, writable: true, value: ResizeObserverStub });
+// ResizeObserver (Fluent v9 Dropdown/MessageBar reflow) is polyfilled globally in jest.setup.js
+// (task 071) — removed the per-file copy that used to live here.
 
 const MATTER_TYPES_RESPONSE = {
   results: [
