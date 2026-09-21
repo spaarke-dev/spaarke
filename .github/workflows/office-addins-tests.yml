@@ -304,7 +304,10 @@ jobs:
   # moment it landed — and this file already records what happens then (:92-100):
   # "a check that is always red is a check everyone learns to ignore, which is
   # worse than no check." So the decision is made from the PRODUCTION error count,
-  # never from the exit status. `set -e` is deliberately NOT used here.
+  # never from the exit status. The step therefore runs under an EXPLICIT `set +e`
+  # — not merely "without `set -e`", which is what this comment used to say and is
+  # what broke it: `shell: bash` injects `-e` into the interpreter, so errexit is
+  # ON unless actively turned off. See the step body for the full account.
   #
   # Measured at 23fd17991 — total 111 error lines, production 0, across 9 files.
   # Both directions were verified by seeding, not by argument:
@@ -346,8 +349,24 @@ jobs:
         working-directory: src/client/office-addins
         shell: bash
         run: |
-          # NOTE: no `set -e`. tsc exits 2 on the accepted test-file debt; that is
+          # 🔴 `set +e` IS LOAD-BEARING — DO NOT REMOVE IT.
+          #
+          # `shell: bash` does NOT give a bare bash. GitHub Actions expands it to
+          #   /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+          # so errexit is injected into the interpreter itself. Omitting `set -e`
+          # here is not the same as not having it — this step ran for one real CI
+          # cycle believing otherwise (run 35468805634, and again 35550824422):
+          # `npm run typecheck` exits 2 on the accepted debt, `-e` killed the step
+          # on that line ~7s in, and the classifier, the no-vacuous-green guard and
+          # the summary below never executed. The gate built specifically so it
+          # would never trust the exit code was killed by the exit code.
+          #
+          # `set +e` turns errexit back off, exactly where the note below claims it
+          # is off. `-u` and `-o pipefail` are kept deliberately.
+          #
+          # NOTE: no errexit. tsc exits 2 on the accepted test-file debt; that is
           # expected and must not fail the job. See the header block above.
+          set +e
           set -uo pipefail
 
           npm run typecheck > "$RUNNER_TEMP/tsc.txt" 2>&1
