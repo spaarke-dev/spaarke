@@ -4,7 +4,23 @@
     <title>F9 — the three `/api/office/communications/*` routes carry only group RequireAuthorization and look up communications app-only by caller-supplied id</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061</gate>
-    <status>not-started</status>
+    <status>escalated — awaiting owner decision (see notes/066-communications-gate.md §6)</status>
+    <status-note>
+      Executed 2026-09-21. The disclosure is CONFIRMED on all three routes and is LARGER than the review
+      stated (route 2 also performs a second, app-only retrieve of every candidate record's DISPLAY NAME —
+      `ResolveCandidateNamesAsync` :344-370 — which the review could not see). No code change was shipped:
+      the &lt;escalation&gt;&lt;trigger&gt; below FIRED. Verified live against dev Dataverse: 100% of
+      `sprk_communication` rows are owned by a BFF application user (no `ownerid` is ever set at create), the
+      `Spaarke Office Add In User` role grants NO read on `sprk_communication` or `sprk_todo` at any depth,
+      and `Spaarke Basic User` grants only depth-1 (own-records) — of which the user owns none. A per-record
+      Dataverse read check therefore CANNOT discriminate between callers: at depth 1/2/4 it denies every
+      legitimate pane user (total outage), at depth 8 it permits everyone (no-op). Authorizing against the
+      REGARDING record instead lands on this trigger's literal example (route 1 answers "was this captured?"
+      BEFORE any association exists). Three options with costs are in the note §6; recommendation is C (trim
+      route 2's candidate names — small, no outage risk, no client change) now, then B (wire
+      CommunicationParticipantIndexer into EmailUploadCaptureService and gate on participation) as its own
+      task. Criteria 3, 5, 6 and half of 2 and 4 are NOT met — enumerated in note §8.
+    </status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Security fix adding per-resource filters to three live routes. Tags include bff-api + auth + security.</rigor-reason>
     <model-tier>opus</model-tier>
