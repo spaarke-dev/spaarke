@@ -9,9 +9,48 @@
 **Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Clean tree, 0 behind / 221 ahead, LOCAL == REMOTE (SHA-verified).**
 HEAD moves — get it with `git log -1 --format='%H %s'`; do NOT trust a SHA written here.
 
-### ⛳ NEXT ACTION — a **Fable model-level project review**, NOT task 058
+### ⛳ NEXT ACTION — operator decision on the re-plan in [`notes/fable-review-2026-09-21.md`](notes/fable-review-2026-09-21.md) §10
 
-The operator's stated next step after this compaction. Do **not** start 058 until that review has run — it may re-order or re-scope what remains.
+**The Fable review HAS RUN (2026-09-21, four reviewers).** It did re-scope what remains, exactly as anticipated.
+**Do not execute 058 as written.** Read the review's §10 before starting any task.
+
+**Its three headline conclusions:**
+
+1. **No merge-blocking check runs any of this project's tests.** `Router` is the only required check; the
+   office-addins gate is `"Reports, does not block"` (`office-addins-tests.yml:275`, `:427`); Tier 1 runs
+   `Sprk.Bff.Api.Tests` only under two category filters this project doesn't use; Tier 2 was **cancelled in
+   6 of 6** runs at its 30-min cap. The only completing runner is legacy `sdap-ci.yml`, **which task 077 of
+   another project deletes** — after which the `POST /api/office/save` contract tests run nowhere on a PR.
+2. **058 deletes the wrong things.** The four stub routes **read nothing** (hard-coded link string,
+   `"Stub content for {id}"`, a `downloadUrl` pointing at an unmapped route) — no disclosure, no access grant.
+   The live defect is **F1: `/office/search/entities` is an app-only, security-untrimmed enumeration** of every
+   Matter/Project/Invoice/Account/Contact, which the pane depends on. It is the keystone: every other finding
+   needs a GUID and F1 hands them out. F2–F5 + `/communications/*` also survive 058 untouched.
+   **Root cause of the blind spot**: `RouteAuthorizationGuardTests.GovernedFiles` has **no `Api/Office/*` entry**,
+   so the whole Office surface is classified "serves no Dataverse content" — false for `/save`, `/todo`,
+   `/search/entities`, `/generate-profile`.
+3. **059 is mis-cut and 060 is under-scoped.** 059 targets search (one param, ~300 cohesive lines) with a
+   `line count drops by 250` criterion — the metric §11.5 forbids; the real bloat is six optional ctor params
+   justified by tests that **do not exist** (`grep "new OfficeService(" tests/` → nothing). 060's store swap
+   misses `CreatedBy` (needs a schema column) and `Result.Artifact` (the silent pane stall).
+
+### 🔧 THREE CORRECTIONS to the claims previously in this block
+
+| # | Claim I wrote | Truth (verified twice, independently) |
+|---|---|---|
+| 1 | *"Six POMLs fail XML validation, **including `090-project-wrap-up.poml`** — `task-execute` cannot load it, and it sits on the path to closing the project."* | **Wrong in count and in headline.** `Validate-TaskPoml.ps1` → 61 scanned, 39 clean, **10 errors**. **`090` PARSES CLEANLY** (9 steps, one WARN for a missing `<justification>`) — never a blocker. The 10 that fail are **all `<status>completed</status>`**: malformed XML in `005`, `010`, `018`, `028`, `053`; missing `<steps>` in `009`, `017`, `019`, `043`, `044`. Per-file parse errors in the review §7. |
+| 2 | Agenda item 1 framed 058's stub routes as the live security gap. | **Overstated.** They leak nothing — delete them as a *latent* hazard, and use a **random GUID** in the reproduce-first criterion to demonstrate that. The live gap is F1 (above). |
+| 3 | Discovery finding **F-b** (visualization per-row authz) carried forward as current. | **Closed on this branch by task 032** — per-row trim, fail-closed forcing function, POST filter, countOnly shortcut, tokenless refusal, **and the census entry** (`RouteAuthorizationGuardTests.cs:174-186`), with 11 contract tests. F-b describes `origin/master`. It was true when written; I never re-checked that our own task had closed it. |
+
+### ⚠️ Before trusting ANY local test/typecheck result on this desktop
+
+`src/client/office-addins/node_modules` is **stale** (mtime 2026-09-04; `@testing-library/jest-dom` and
+`user-event`, added 09-09 in `cc318390f`, are **absent**). Locally *every* suite fails at `jest.setup.js:12`,
+and `npm run typecheck` emits a path-less `TS2688` the classifier counts as **production**. **Run `npm install`
+first.** Also: Node is split **three** ways, not two — gate 20, nightly 20, **deploy of what ships: 18**
+(`deploy-office-addins.yml:34`), this desktop 22.14.0, and there is **no `.nvmrc` anywhere**.
+
+### 📋 Original agenda (superseded by the review, kept for provenance)
 
 **Why now**: **55 of 61 tasks are ✅** (counted from task rows only — a naive grep also catches the ✅ in TASK-INDEX's goal-eligibility table and overstates it) and every implementation task is done. What remains is 4 codeable tasks, 1 operator task, and a wrap-up. This is the right moment to look for what the task list has *missed* rather than to keep executing it.
 
