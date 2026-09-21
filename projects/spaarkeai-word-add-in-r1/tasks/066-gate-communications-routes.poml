@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F9 — the three `/api/office/communications/*` routes carry only group RequireAuthorization and look up communications app-only by caller-supplied id</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>blocked — requires 061</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security fix adding per-resource filters to three live routes. Tags include bff-api + auth + security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive; the pane calls all three, so the refusal shape has to be designed against real client handling.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>`CommunicationsEndpoints.cs` is disjoint from `OfficeEndpoints.cs`/`OfficeService.cs` and from 063's Rag files.</parallel-reason>
+    <deps>061</deps>
+    <tags>bff-api, api, auth, authorization, security, office, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The three communications routes have no per-resource authorization — they look up communications app-only by a caller-supplied `internetMessageId` or GUID. Add a per-resource read check to each.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Each communications route authorizes the caller against the communication it is about to disclose.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable review (`notes/fable-review-2026-09-21.md` §2, finding F9). Rated
+      LOW-MEDIUM, and flagged as **disclosure stated from the route registrations — the handler bodies were
+      not read.** Confirm the actual disclosure before sizing the fix.
+
+      `CommunicationsEndpoints.cs:62-64` registers the group with only `RequireAuthorization()`. Routes at
+      `:72`, `:93`, `:108` carry no per-resource filter. Lookups are app-only by caller-supplied
+      `internetMessageId` or communication GUID.
+
+      **What a caller plausibly gets**: whether a given email was captured and its subject; the Association
+      Engine's predicted record and its alternates; the linked To Dos. An `internetMessageId` is known to
+      every participant in a mail thread, including external ones.
+
+      **The pane calls all three on this branch** — `communicationLookupService.ts:63`,
+      `communicationSuggestionsService.ts:110`, `useLinkedTodosForCommunication.ts:98` — so a refusal shape
+      that the pane mishandles is a visible regression.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">FIRST read the three handler bodies and record what each actually returns. Size and shape the fix against observed disclosure, not against the route description. The review explicitly did not verify this.</constraint>
+    <constraint source="ADR-008">Add per-resource checks as endpoint filters, consistent with the rest of the Office surface.</constraint>
+    <constraint source="this task">Check how the pane's three callers handle a refusal before choosing the status and body.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The three handler bodies are read and what each discloses is recorded verbatim in the task note, with the review's unverified claim either confirmed or corrected.</criterion>
+    <criterion testable="true">REPRODUCE-FIRST: prove a caller with no rights on a communication can retrieve it (or its suggestions, or its linked To Dos) via each affected route. If a route turns out NOT to disclose, record that and leave it alone.</criterion>
+    <criterion testable="true">Each genuinely-disclosing route carries a per-resource read check before disclosure.</criterion>
+    <criterion testable="true">The pane's three callers still work for an authorized user, and handle the refusal without a broken UI state.</criterion>
+    <criterion testable="true">SEED BOTH DIRECTIONS: remove a filter, show the negative test RED; restore, show GREEN. Record both.</criterion>
+    <criterion testable="true">Task 061's guard no longer flags `CommunicationsEndpoints.cs`.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the per-route read check, the refusal handling in the pane, and the seed directions. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a route turns out to be genuinely un-authorizable — e.g. it exists to answer "was this message captured?" BEFORE any record association exists, so there is nothing to authorize against — STOP and escalate per CLAUDE.md §6 rather than inventing a check that does not fit the route's purpose.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Read all three handler bodies. Record actual disclosure. Correct or confirm the review's claim.</step>
+    <step>Reproduce per route; record. Drop any route that does not actually disclose.</step>
+    <step>Check the pane's refusal handling in the three client services.</step>
+    <step>Add the filters; seed both directions.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/066-communications-gate.md`. Update TASK-INDEX.md: 066 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs</file>
+    <file role="new">tests/integration/contract/Api/Office/CommunicationsAuthorizationContractTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/066-communications-gate.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/066-communications-gate.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 061 must be ✅ first.</protocol>
+  </execution>
+</task>

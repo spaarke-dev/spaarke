@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>`npm run lint` points at a directory that does not exist and no workflow calls it — CI passes because lint never runs</title>
+    <phase>5 Remediation — verification</phase>
+    <gate>blocked — requires 069 (adds to the same gate)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a CI workflow and will change `.ts`/`.tsx` files to satisfy newly-running rules. Tags include ci-cd.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical: point the script at the real directories, fix what it reports, wire it in. The reference (the PCF ESLint jobs) already exists.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Disjoint from 071's test files and 073's Node config — but shares the workflow with 069/070, so sequence after those.</parallel-reason>
+    <deps>069</deps>
+    <tags>ci-cd, devops, typescript, frontend</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`package.json:13` runs `eslint src` in a package that has no `src/` directory, and no workflow invokes it. Point it at the real source, fix what it finds, and wire it into the gate.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Lint runs over the office-addins source on every PR and can fail the build.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable verification review (`notes/fable-review-2026-09-21.md` §8).
+
+      `src/client/office-addins/package.json:13` is `eslint src`. There is no `src/` directory in that
+      package — the sources live under `shared/`, `word/` and `outlook/`. Running it produces
+      *"No files matching the pattern src"*.
+
+      No workflow calls it. The repo's ESLint jobs run in `src/client/pcf`
+      (`ci-tier2-advisory.yml:183-194`, `sdap-ci.yml:404-427`), not here.
+
+      **CI passes because lint never runs, not because lint passes.** Nobody knows how many violations exist
+      in this package, because the script has never successfully executed against it.
+
+      Expect the first real run to report a backlog. That backlog is the finding; sizing it is part of this
+      task.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Do NOT weaken rules to get a green run. If the backlog is large, fix it or scope the initial gate to a rule subset with the remainder tracked explicitly — silently disabling rules recreates the "control exists but decides nothing" pattern this whole wave is fixing.</constraint>
+    <constraint source="project">`ci-tier2-advisory.yml` and the other tiered workflows are FROZEN. Wire lint into `office-addins-tests.yml`.</constraint>
+    <constraint source="this task">Apply task 069's lesson: prove the new lint job can fail, on CI, by seeding a violation.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm run lint` executes against the real source directories and reports a result. Record the raw violation count from the FIRST successful run — that number is the finding.</criterion>
+    <criterion testable="true">The violation backlog is driven to zero, OR the initial gate is scoped to a stated rule subset with the remainder recorded in the task note as named, counted follow-up. State which, and why.</criterion>
+    <criterion testable="true">Lint runs in `office-addins-tests.yml` on every PR touching the package.</criterion>
+    <criterion testable="true">PROVEN ON CI IN BOTH DIRECTIONS: seed a lint violation, show the job red; remove it, show green. Record both run URLs.</criterion>
+    <criterion testable="true">No ESLint rule is disabled or downgraded to achieve green without an explicit one-line justification per rule in the task note.</criterion>
+    <criterion testable="true">`actionlint` passes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the first real lint run reports a backlog large enough that fixing it would dominate this task (say, hundreds of violations), STOP and escalate per CLAUDE.md §6 with the counts by rule and the options — do not silently disable rules, and do not silently leave lint unwired.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>`npm install` first (this desktop's install is stale — see 073).</step>
+    <step>Point the script at the real directories; run it; record the raw backlog by rule.</step>
+    <step>Decide: fix all, or gate a subset with the remainder named. Record the reasoning.</step>
+    <step>Wire it into `office-addins-tests.yml`.</step>
+    <step>Prove red and green on CI; record both run URLs.</step>
+    <step>Write `notes/072-lint.md` with the backlog table. Update TASK-INDEX.md: 072 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/package.json</file>
+    <file role="edit">.github/workflows/office-addins-tests.yml</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/072-lint.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/package.json</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/072-lint.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 069 must be ✅ first — same workflow file.</protocol>
+  </execution>
+</task>

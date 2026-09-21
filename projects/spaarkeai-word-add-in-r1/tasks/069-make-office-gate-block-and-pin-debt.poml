@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-18 says "CI gates"; the job says "Reports, does not block" — make the gate bind, pin the test-debt total, and delete a comment that claims a protection the code does not have</title>
+    <phase>5 Remediation — verification</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a CI workflow that decides merges. Tags include ci-cd. Task 056 proved this file's failure modes are non-obvious.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>This exact file has already produced two defects where a gate looked correct and could not fail. Errexit semantics under `shell: bash` are the specific trap.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`.github/workflows/**` is a hot path; only one project should own CI changes at a time.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-cd, devops, testing, ci-workflows</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The office-addins typecheck and jest jobs make real decisions and then discard them — both are marked "Reports, does not block". Make them fail the workflow, pin the 111-line test-debt total so new debt cannot accrue silently, and fix the trailing-newline comment that claims a protection the code does not provide.</prompt>
+
+  <role>SPAARKE platform developer. The lesson from task 056 governs this task: a check is not done when it stops being red, only when it has been seen to make a real decision on real input.</role>
+
+  <goal>The office-addins jobs fail the workflow when they should, the accepted test-file debt is a pinned baseline rather than an observation, and no comment in the file claims a protection that is not implemented.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable verification review (`notes/fable-review-2026-09-21.md` §1, §8).
+
+      **(a) The gate does not bind.** `office-addins-tests.yml:275` and `:427` mark both jobs
+      *"Reports, does not block"*. Spec FR-18 (as amended) says CI **gates** the typecheck. A non-blocking
+      job is a report. This session proved the classifier works — run `35552142104`,
+      `0 production error(s); 111 total` — and nothing consumes that result.
+
+      **(b) The 111 is unpinned.** `:400`, `:423`, `:437` assert only the production count. The total is
+      printed, not checked, and the 111 exists solely in comments (`:295`, `:312`). 111 → 112 passes
+      silently, so new test-file debt accrues invisibly. This is the AP-12 shape.
+
+      **(c) A false claim in a comment.** `:252-254` says the suite-count assertion protects against a
+      dropped trailing newline. It does not: both sides of the comparison derive from the same `while read`
+      array (`:193-199` → `:218-219`), so a missing last line shrinks both numbers equally and the assertion
+      still passes. Currently harmless — the file ends in `0x0a` and its last real entry is followed by
+      comment lines — but the comment asserts a protection that is not there, which is how the `@spaarke/auth`
+      defect happened (a comment claimed tsconfig parity that never existed).
+
+      **The residual this task CANNOT close**: whether a red check blocks a merge is a GitHub **ruleset**
+      setting, not a file. `Router` is the only required check and `ci-router.yml` is frozen. Task 070 adds
+      the C# runner; the ruleset change is an owner action surfaced at wrap-up. Say so in the task note —
+      do not imply the file change alone closed FR-18.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Every change here is proven ON CI, not locally. Task 056's first defect existed precisely because local validation cannot reproduce `shell: bash` errexit injection. This desktop additionally has stale `node_modules` (see task 073), so local runs are doubly untrustworthy.</constraint>
+    <constraint source="project">`ci-router.yml`, `ci-tier1-blocking.yml` and `ci-tier2-advisory.yml` are FROZEN under the shadow-comparison window. Do not edit them. `office-addins-tests.yml` is this project's to change.</constraint>
+    <constraint source="this task">If the trailing-newline check cannot be made real cheaply, DELETE the claim rather than leaving a comment that overstates the protection. A wrong comment is worse than no comment.</constraint>
+    <constraint source="this task">Pinning the debt total means a deliberate baseline with a documented update procedure — not a magic number. Say how a legitimate increase gets re-baselined.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both office-addins jobs fail the workflow run when their check fails. Proven ON CI in BOTH directions: a deliberate production type error turns the run red; removing it turns it green. Record both run URLs.</criterion>
+    <criterion testable="true">The accepted test-file debt total is pinned. Proven ON CI: introduce one extra accepted test-file line, show the job fails; revert, show it passes. Record both run URLs.</criterion>
+    <criterion testable="true">The re-baselining procedure is documented in the workflow itself, so a future legitimate increase is a deliberate edit rather than a silent drift.</criterion>
+    <criterion testable="true">The trailing-newline claim at `:252-254` is either implemented for real (proven by seeding a file without a trailing newline and showing the job fails) or deleted. State which and why.</criterion>
+    <criterion testable="true">The `set +e` block and its explanatory comment from task 056 are preserved intact. Do not "tidy" them — they are load-bearing and the comment explains why.</criterion>
+    <criterion testable="true">`actionlint` passes on the PR.</criterion>
+    <criterion testable="true">The task note states plainly what this task did NOT close: the repo ruleset still requires only `Router`, so a red office-addins check does not yet block a merge. Name it as an owner action.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If making the jobs blocking turns the PR red for a pre-existing failure this project does not own, STOP and escalate per CLAUDE.md §6 with the specific failure. Do NOT restore "does not block" to get green, and do NOT waive the failing case — either fix it or surface it as a decision.</trigger>
+  </escalation>
+
+  <steps mode="prescriptive">
+    <step order="1">Read the whole of `office-addins-tests.yml`, including task 056's `set +e` block and its comment.</step>
+    <step order="2">Make the jobs blocking. Push. Prove BOTH directions on CI with a deliberate error. Record both run URLs.</step>
+    <step order="3">Pin the debt total. Push. Prove BOTH directions on CI. Record both run URLs.</step>
+    <step order="4">Resolve the trailing-newline claim — implement and prove, or delete. Push and confirm.</step>
+    <step order="5">Confirm `actionlint` passes and the gate's final output is still non-vacuous (a non-zero total proves tsc ran).</step>
+    <step order="6">Write `notes/069-gate-binds.md` with all four run URLs and the explicit statement of what remains open (the ruleset).</step>
+    <step order="7">Update TASK-INDEX.md: 069 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">.github/workflows/office-addins-tests.yml</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/069-gate-binds.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/056-office-addins-typecheck-ci-gate.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+    <patterns>
+      <pattern name="A gate must be seen to decide" location="projects/spaarkeai-word-add-in-r1/notes/056-office-addins-typecheck-ci-gate.md">
+        Task 056's two defects: `shell: bash` injects errexit so the step died before the classifier ran; and fixing that revealed a false parity claim in the job's own comment. Both were only visible on CI.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <outputs>
+    <file>.github/workflows/office-addins-tests.yml</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/069-gate-binds.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. `steps mode="prescriptive"` — the order matters because each proof must be isolated to one change.</protocol>
+  </execution>
+</task>

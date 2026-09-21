@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F1 — `/office/search/entities` is a live app-only enumeration of every Matter, Project, Invoice, Account and Contact with no security trimming</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>blocked — requires 061 (the census must govern this route before it is changed)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security fix on a LIVE route that the add-in pane depends on. Tags include bff-api + auth + security. Changing the identity a Dataverse query runs under is a behaviour change for every caller.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive, and the correct mechanism (run OBO vs post-trim through AuthorizationService) is a genuine design judgment with different performance and correctness profiles. The pane depends on this route, so a wrong choice breaks a shipped surface.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `OfficeService.cs` — hot path shared with 058/059/063/064/065 and with unified-access-control-r2.</parallel-reason>
+    <deps>061</deps>
+    <tags>bff-api, api, auth, authorization, security, office, dataverse, testing</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`GET /office/search/entities` runs an app-only Dataverse query with no per-user security trimming, returning every Matter, Project, Invoice, Account and Contact to any authenticated caller. Make the results reflect what the caller is actually allowed to see.</prompt>
+
+  <role>SPAARKE platform developer. This is the highest-severity live finding in the project — treat it as a security fix, not a feature change.</role>
+
+  <goal>`/office/search/entities` returns only records the calling user is authorized to read, proven by a negative test in which a user without rights on a matter cannot see that matter in results.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable model-level review (`notes/fable-review-2026-09-21.md` §2, finding F1).
+      **Rated HIGH — the only finding with a live, exploitable consequence today.**
+
+      Route mapped at `OfficeEndpoints.cs:999-1008`. Filter chain is `AddOfficeRateLimitFilter` +
+      `AddOfficeAuthFilter` **only** — no per-resource check of any kind. Handler `:1064-1177` passes the
+      caller's `q` straight through.
+
+      The service confirms it in its own comment, `OfficeService.cs:1652-1653`:
+
+          app-only read (no per-user security trimming yet)
+
+      The query at `:1699-1735` runs over the singleton app-only `DataverseWebApiClient` (`:54-57`).
+
+      **What a caller gets**: names, numbers, descriptions, GUIDs and `modifiedon` for **all** records of five
+      types — Matter, Project, Invoice, Account, Contact — including secure matters they have no rights to,
+      50 per type per page, with `skip` paging to walk the whole table.
+
+      **What they need**: a valid token and a two-character substring.
+
+      **Why it is the keystone.** Findings F2 (`send-to-index`), F3 (`/office/todo`) and F4 (unassociated
+      `/save`) all require a record GUID to act on. This route hands them out in bulk. Fixing F1 does not fix
+      those — they have their own tasks — but leaving F1 open makes each of them materially easier to exploit.
+
+      **Pre-existing on master**, not introduced by this project. We own it because we found it, the pane is a
+      caller (`matterTypeLookupService.ts:9` and the "Related to" picker), and the owner has directed that
+      review findings be fixed in this project rather than deferred.
+
+      **The pane depends on this route.** A fix that returns nothing, or that is materially slower, breaks the
+      entity picker — a shipped surface. Verify the picker still works.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">MUST NOT close the gap by removing the route. The pane uses it. This is a trim, not a deletion.</constraint>
+    <constraint source="ADR-008">Where a per-resource check belongs in a filter, put it in a filter. Where trimming must happen inside the query, document why in the code.</constraint>
+    <constraint source="this task">Every result path added or modified in this task applies the same trim — including the paging path. A trim that only covers page 1 is not a trim.</constraint>
+    <constraint source="ADR-038">Add the negative authorization test at a KEEP path. Follow the shape of `VisualizationRowAuthorizationContractTests.cs`, which task 032 wrote for exactly this class of defect.</constraint>
+    <constraint source="CLAUDE.md §10">Report publish-size delta against a FRESH `origin/master` build. Run the CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: before changing behaviour, write a probe proving a user WITHOUT rights on a specific matter receives that matter from `/office/search/entities`. Record the observed response verbatim in the task note. This is the evidence the gap was real.</criterion>
+    <criterion testable="true">Results are trimmed to the caller's rights — either by running the query as the caller (OBO / `MSCRMCallerID`) or by post-trimming each row through `AuthorizationService`. State which mechanism was chosen and why in the task note and in a code comment.</criterion>
+    <criterion testable="true">NEGATIVE TEST (the gate): given a user with no read rights on matter X, when they search a substring matching X, then X is absent from the response — while a permitted neighbour record IS present, and the returned count matches the trimmed row set. Copy the assertion shape from `VisualizationRowAuthorizationContractTests.cs`.</criterion>
+    <criterion testable="true">SEED THE NEGATIVE TEST: disable the trim and show the test goes RED; restore and show GREEN. Record both outputs. A test that has not been seen to fail proves nothing — this is the lesson from task 056's gate.</criterion>
+    <criterion testable="true">The paging path is trimmed too: a `skip` beyond page 1 returns no unauthorized row. Cover this explicitly.</criterion>
+    <criterion testable="true">All five entity types are covered — Matter, Project, Invoice, Account, Contact. A trim applied to four of five is a gap.</criterion>
+    <criterion testable="true">The false comment at `OfficeService.cs:1652-1653` is removed or replaced with one that describes what the code now does.</criterion>
+    <criterion testable="true">Task 061's guard no longer flags this route.</criterion>
+    <criterion testable="true">The pane's entity picker still works: the "Related to" picker and `matterTypeLookupService.ts` both return results for an authorized user. Verify and record.</criterion>
+    <criterion testable="true">Full BFF suite green; report the count and reconcile against 12,379 passed / 0 failed. ArchTests green. Publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: cover the trim contract, the negative case, the paging case, the five entity types and the seed directions named above. Anything beyond that needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If per-caller trimming makes the picker unusably slow (a p95 materially worse than today's), STOP and escalate per CLAUDE.md §6 with the measured numbers and the options. Do NOT silently ship a slow picker, and do NOT silently keep the untrimmed query because trimming was inconvenient.</trigger>
+    <trigger>If Dataverse cannot express the trim for one of the five entity types, STOP and escalate rather than shipping a partial trim that looks complete.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Reproduce the gap and record the evidence verbatim.</step>
+    <step>Read `VisualizationRowAuthorizationContractTests.cs` and `notes/032-authorization-hardening.md` — task 032 solved this exact class of problem on another route; copy its mechanism where it fits.</step>
+    <step>Choose the trim mechanism, write down why, implement it across all five types and the paging path.</step>
+    <step>Write the negative test. Seed it both directions and record the outputs.</step>
+    <step>Verify the pane's picker still works.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/062-entity-search-trim.md`. Update TASK-INDEX.md: 062 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="new">tests/integration/contract/Api/Office/OfficeEntitySearchAuthorizationContractTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/062-entity-search-trim.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-row authorization trim + negative contract test" location="tests/integration/contract/Api/Ai/VisualizationRowAuthorizationContractTests.cs">
+        Task 032's 11-Fact suite for the same class of defect on the visualization route. The assertion shape — denied record absent, permitted neighbour present, count matches — is the one to copy.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>No existing per-caller trim on this route — `OfficeService.cs:1699-1735` queries app-only. The closest existing mechanism is `AuthorizeRowsAsync` used by `RecordSearchAuthorizationFilter` and by task 032's visualization trim.</existing>
+    <extension>Yes — extend the existing authorization mechanism onto this route rather than inventing a new one. A new contract-test file is new surface only because no authorization test exists for this route today.</extension>
+    <cost-of-doing-nothing>Any authenticated user enumerates every Matter, Project, Invoice, Account and Contact in the tenant, including secure matters, and harvests the GUIDs that findings F2, F3 and F4 act on.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file>tests/integration/contract/Api/Office/OfficeEntitySearchAuthorizationContractTests.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/062-entity-search-trim.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 061 must be ✅ first.</protocol>
+  </execution>
+</task>

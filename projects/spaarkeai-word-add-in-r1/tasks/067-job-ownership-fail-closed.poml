@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F5 — JobOwnershipFilter fails OPEN on a missing CreatedBy, the creator is never persisted, and a hard-coded test job serves fabricated status in production</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>blocked — requires 061. MUST precede 060 (they share the schema change).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security fix plus a Dataverse schema addition. Tags include bff-api + auth + security + dataverse.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-017 violation on an authorization filter, and it introduces a Dataverse column that task 060 then depends on. Getting the column shape wrong forces rework in 060.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Introduces a schema change that 060 consumes; sequence 067 → 060 so the column lands once.</parallel-reason>
+    <deps>061</deps>
+    <tags>bff-api, api, auth, authorization, security, dataverse, job, testing</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`JobOwnershipFilter` skips its check entirely when `CreatedBy` is empty — which is exactly what the Dataverse fallback path produces — so after a restart any authenticated caller can poll any job. Persist the creator, make the filter fail closed, and delete the hard-coded test job.</prompt>
+
+  <role>SPAARKE platform developer. An authorization filter that fails open is worse than no filter, because it reads as protection.</role>
+
+  <goal>Job status is disclosed only to the job's creator, on every code path including the Dataverse fallback, and no route serves fabricated job data in production.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 independently by TWO Fable reviewers — the security review (finding F5) and the
+      architecture review (finding 1), which reached it from the durability side. **Confirmed, not plausible.**
+      See `notes/fable-review-2026-09-21.md` §3, where the two severity ratings are reconciled.
+
+      **The fail-open.** `JobOwnershipFilter.cs:157` guards with
+      `if (!string.IsNullOrEmpty(jobStatus.CreatedBy) && ...)` — so an **empty** `CreatedBy` **passes the
+      check**. `OfficeService.cs:1543-1586`, the Dataverse fallback used after a restart or on a second
+      instance, maps no `CreatedBy` at all, because the column set at
+      `DataverseServiceClientImpl.cs:1773-1774` has no owner field and the `ProcessingJob` create at
+      `OfficeService.cs:366-378` records no creator OID.
+
+      Net effect: while the in-memory entry lives, ownership is enforced; once it is evicted — or on any
+      other instance — **any authenticated caller can poll any job GUID**. ADR-017 states MUST NOT expose
+      status without authorization checks.
+
+      **The test-job backdoor.** `OfficeService.cs:1511-1541` returns a fabricated `Running` status for job id
+      `00000000-0000-0000-0000-000000000001` to any authenticated caller, in production. Pre-existing on
+      master (`:664`).
+
+      **Sequencing.** Task 060 needs the same creator-OID column to make the durable store enforce ownership.
+      This task lands the schema change; 060 consumes it. Doing them in the other order means adding the
+      column twice or reworking 060.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-017">Status MUST NOT be exposed without an authorization check. A filter that skips its check on missing data does not satisfy this.</constraint>
+    <constraint source="this task">The filter MUST fail CLOSED: absent or unreadable ownership data means refuse, not allow. This is the whole point of the task.</constraint>
+    <constraint source="this task">The creator OID is persisted at job CREATE time (`OfficeService.cs:366-378`), not inferred later. A job created before this change has no creator — define and test that legacy case explicitly rather than letting it fall through the open branch.</constraint>
+    <constraint source="ADR-044">Use typed `Guid` / `QueryExpression` for the new column, consistent with the surrounding Dataverse code.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: prove that with an empty `CreatedBy` — the Dataverse fallback state — a non-owner receives another user's job status. Record verbatim.</criterion>
+    <criterion testable="true">A creator-OID field exists on the job record and is written at create time. State the column/mechanism in the task note; task 060 depends on this decision.</criterion>
+    <criterion testable="true">`JobOwnershipFilter.cs:157` fails CLOSED: missing or empty ownership data refuses the request.</criterion>
+    <criterion testable="true">The Dataverse fallback path (`OfficeService.cs:1543-1586`) maps the creator, so ownership is enforced after a restart and on a second instance.</criterion>
+    <criterion testable="true">LEGACY CASE: a job row created before this change (no creator recorded) is handled by an explicitly stated rule — refuse — and that rule is tested.</criterion>
+    <criterion testable="true">The hard-coded test job `00000000-0000-0000-0000-000000000001` (`OfficeService.cs:1511-1541`) is deleted, and a grep proves nothing depends on it.</criterion>
+    <criterion testable="true">SEED BOTH DIRECTIONS: restore the fail-open guard, show the negative test RED; fix it, show GREEN. Record both.</criterion>
+    <criterion testable="true">The pane's own job polling and SSE stream still work for the owning user in both hosts — this is the shipped save-progress surface.</criterion>
+    <criterion testable="true">Task 061's guard no longer flags the job routes.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the fail-closed contract, the fallback path, the legacy-row case, the deleted test job and the seed directions. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If adding a creator column to the job entity requires a solution change that cannot be made from this branch, STOP and escalate per CLAUDE.md §6 with the options — do NOT ship a filter that fails closed against data that is never populated, because that breaks every legitimate poll.</trigger>
+    <trigger>If failing closed would break an existing operator or worker path that polls jobs without a user identity, STOP and escalate rather than re-opening the branch for it.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Reproduce the fail-open; record verbatim.</step>
+    <step>Decide and record the creator-OID mechanism — 060 depends on this choice.</step>
+    <step>Persist the creator at create time; map it on the fallback path.</step>
+    <step>Make the filter fail closed; define and test the legacy-row rule.</step>
+    <step>Delete the test-job backdoor; grep for dependents first.</step>
+    <step>Tests; seed both directions; verify the pane's polling and SSE still work.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/067-job-ownership.md`, recording the schema decision for 060. Update TASK-INDEX.md: 067 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/JobOwnershipFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+    <file role="edit">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+    <file role="new">tests/integration/contract/Api/Office/OfficeJobOwnershipContractTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/067-job-ownership.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-044-dataverse-query-safety.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/JobOwnershipFilter.cs</file>
+    <file>tests/integration/contract/Api/Office/OfficeJobOwnershipContractTests.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/067-job-ownership.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 061 must be ✅ first. This task MUST complete before 060 begins.</protocol>
+  </execution>
+</task>

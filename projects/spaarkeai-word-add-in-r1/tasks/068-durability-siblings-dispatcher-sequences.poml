@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Two more pieces of in-process state that assume a single long-lived instance — the profile dispatcher's fire-and-forget and per-instance SSE sequence numbers</title>
+    <phase>5 Remediation — durability</phase>
+    <gate>blocked — requires 060 (same durability surface; 060 defines the store)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Removes a service and re-routes work onto the job queue. Tags include bff-api + job + worker. Modifies `.cs`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Re-routing profile generation onto the job spine touches the idempotency-key design that task 029 settled; getting it wrong resurrects the collision that made the dispatcher exist.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares the job spine with 060 and removes ctor params that 059 also touches.</parallel-reason>
+    <deps>060</deps>
+    <tags>bff-api, job, worker, background, ai, testing</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Two siblings of the job-store defect survive task 060: the profile dispatcher runs `Task.Run` behind a 202 with nothing persisted, and SSE sequence numbers are per-instance. Fix both on the durable spine 060 establishes.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>No Office background work is lost on an app restart, and SSE reconnect is correct across instances.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable architecture review (`notes/fable-review-2026-09-21.md` §4, finding 2 and
+      the 060 sibling list).
+
+      **(a) `OfficeProfileDispatcher.cs:125` — `_ = Task.Run(() =&gt; RunAsync(...))`.** The endpoint returns
+      202 (`OfficeEndpoints.cs:1663`) and nothing survives a restart; `RunAsync` is cancelled by
+      `ApplicationStopping` (`:143`) mid-OBO and the profile is simply lost. **Added by this project, task 022.**
+
+      Its stated reason for not using the Service Bus path is the
+      `analysis-{documentId}-documentprofile` idempotency-key collision (`:15-24`). **Task 029 already solved
+      exactly that** — `UploadFinalizationWorker.cs:790-792` uses a per-save discriminator
+      (`...-version-{jobId:N}`). The dispatcher's design note predates 029 and was never revisited. ADR-001
+      (heavy processing delegated to background workers, quoted at `OfficeService.cs:31`) and ADR-017 both
+      point at the queue.
+
+      The dispatcher also exists to justify three of `OfficeService`'s optional ctor params (`:67-70`), which
+      is why task 059 waits on this one.
+
+      **(b) `JobStatusService.cs:46` — `private readonly Dictionary&lt;Guid,long&gt; _jobSequences`** on a
+      singleton. On scale-out, two instances number the same job's events independently, so the
+      `Last-Event-ID` reconnect at `OfficeService.cs:3097-3107` can skip or replay events. Pre-existing, and
+      outside a `_jobStore` grep — which is why 060 would miss it.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Heavy processing is delegated to background workers, not to fire-and-forget tasks behind a 202.</constraint>
+    <constraint source="ADR-017">Every job's status transitions are persisted.</constraint>
+    <constraint source="this task">Use task 029's existing per-save discriminator mechanism for the idempotency key. Do NOT invent a second scheme — the whole point is that the collision is already solved.</constraint>
+    <constraint source="this task">Deleting `OfficeProfileDispatcher` removes three `OfficeService` ctor params. Coordinate with 059, which removes six more; whichever runs second reconciles the constructor.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST (a): trigger a profile generation, restart the app mid-flight, and show the profile is lost with no status recorded. Record verbatim.</criterion>
+    <criterion testable="true">REPRODUCE-FIRST (b): show that two instances assign overlapping sequence numbers to the same job's events, or — if a true two-instance test is not available — demonstrate the defect by instantiating two `JobStatusService` instances and recording the sequence collision. State which was done.</criterion>
+    <criterion testable="true">Profile generation is enqueued through the existing job path using task 029's per-save discriminator; `OfficeProfileDispatcher` and the three ctor params it required are deleted.</criterion>
+    <criterion testable="true">After the change, a profile generation survives an app restart: the work completes or is retried, and its status is readable afterwards.</criterion>
+    <criterion testable="true">The idempotency collision that originally motivated the dispatcher does NOT reappear: two profile generations for the same document in the same session both run. Test this explicitly — it is the regression the dispatcher existed to prevent.</criterion>
+    <criterion testable="true">SSE sequence numbers are correct across instances; `Last-Event-ID` reconnect neither skips nor replays.</criterion>
+    <criterion testable="true">The 202 contract at `OfficeEndpoints.cs:1663` still behaves correctly for the pane's Generate Profile button (FR-08) — verify the shipped surface end to end.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: restart survival, the idempotency non-regression, SSE sequencing across instances, and the unchanged 202 contract. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If routing profile generation through the job queue changes the user-visible latency of FR-08's Generate Profile button materially, STOP and escalate per CLAUDE.md §6 with the measured numbers — the pane's UX for that button was an owner decision.</trigger>
+    <trigger>If task 029's discriminator does not in fact generalise to the profile key, STOP — do not invent a second idempotency scheme without surfacing it.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Read `UploadFinalizationWorker.cs:790-792` and task 029's notes before touching the key design.</step>
+    <step>Reproduce both defects; record verbatim.</step>
+    <step>Re-route profile generation onto the job path; delete the dispatcher and its ctor params.</step>
+    <step>Fix the SSE sequence source so it is not per-instance.</step>
+    <step>Test restart survival, the idempotency non-regression, and reconnect correctness.</step>
+    <step>Verify FR-08's Generate Profile button end to end.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/068-durability-siblings.md`. Update TASK-INDEX.md: 068 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="delete">src/server/api/Sprk.Bff.Api/Services/Office/OfficeProfileDispatcher.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Jobs/JobStatusService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/068-durability-siblings.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-save idempotency discriminator" location="src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs">
+        Lines 790-792 — task 029's solution to the same idempotency-key collision the dispatcher cites as its reason to exist.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobStatusService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/068-durability-siblings.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 060 must be ✅ first.</protocol>
+  </execution>
+</task>

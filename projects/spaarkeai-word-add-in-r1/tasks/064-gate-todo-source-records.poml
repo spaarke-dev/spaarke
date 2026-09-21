@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F3 — `/office/todo` writes caller-supplied regarding, document and communication GUIDs app-only with no access check, and leaks record existence</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>blocked — requires 061</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security fix on a route whose carriers this project added (task 035). Tags include bff-api + auth + security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive, and closing the 403-vs-201 existence oracle requires care: the obvious fix (return 403 on denied) IS the oracle. The response shape needs deliberate design.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches the `/todo` handler + a new filter — disjoint from 063/065/066. NOTE: shares `OfficeService.cs` with 062/065; if those are in flight, run serially.</parallel-reason>
+    <deps>061</deps>
+    <tags>bff-api, api, auth, authorization, security, office, dataverse, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`POST /office/todo` accepts regarding, document, communication and contact GUIDs from the caller and writes them onto a To Do app-only, with no check that the caller may read any of them — and its 403-vs-201 split confirms whether a GUID exists. Gate the source records and close the oracle.</prompt>
+
+  <role>SPAARKE platform developer. This one is ours outright — the carriers were added by this project's task 035.</role>
+
+  <goal>A To Do can only be created against source records the caller can read, and a failed creation does not reveal whether the GUID exists.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable review (`notes/fable-review-2026-09-21.md` §2, finding F3).
+
+      Route `OfficeEndpoints.cs:1468-1481`: rate-limit + idempotency + `AddOfficeAuthFilter`, **no resource
+      filter**. `OfficeService.cs:2536-2601` sets `sprk_regarding*`, `sprk_regardingdocument`,
+      `sprk_regardingcommunication` and `sprk_assignedto` straight from the body.
+
+      `CoreAncestorResolver.cs:242-244` then reads the child target (invoice / document / communication)
+      **app-only** and stamps its parent matter or project onto the caller-owned To Do. A missing row →
+      `Failed` (`:246-259`) → `null` → **403** (`OfficeService.cs:2565-2574`,
+      `OfficeEndpoints.cs:1530-1544`), while a present row → **201**.
+
+      **What a caller gets**: existence confirmation for any invoice / document / communication GUID; the
+      target's parent matter or project GUID copied onto a row they own and can read back through
+      `Xrm.WebApi`; and the ability to hang a To Do they authored onto records they cannot read — which
+      FR-26 inheritance then surfaces to that record's members.
+
+      **What they need**: a valid token and a GUID. Finding F1 supplies GUIDs in bulk.
+
+      **`CreateTodoAsync` pre-exists on master, but the `DocumentId` and `CommunicationId` carriers were added
+      by THIS PROJECT** — task 035, `Models/Office/CreateTodoRequest.cs:66-83`. We own this.
+
+      **The oracle is the subtle half.** Returning 403 for "denied" and 201 for "created" is itself the
+      information leak: the caller learns the row exists. The fix must make the denied and not-found
+      responses indistinguishable.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Every caller-supplied record id on this route is gated: `RegardingRecordId`, `DocumentId`, `CommunicationId`, `AssignedToContactId`. Gating three of four is a gap.</constraint>
+    <constraint source="this task">The denied response and the not-found response MUST be indistinguishable to the caller — same status, same body, same timing class. Closing the write gap while leaving the oracle open only half-fixes this.</constraint>
+    <constraint source="ADR-008">Implement the gate as an endpoint filter shaped like the existing `QuickCreateSourceAccessFilter`, which already solves this exact problem for the quick-create route.</constraint>
+    <constraint source="ADR-024">Preserve the resolver-field semantics on `sprk_todo`; this task changes who may create, not what is written.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: prove (a) a To Do can be created against a document the caller cannot read, and (b) the 403-vs-201 split reveals existence. Record both verbatim, then fix.</criterion>
+    <criterion testable="true">A new filter shaped like `QuickCreateSourceAccessFilter` read-checks all four caller-supplied ids before the handler runs.</criterion>
+    <criterion testable="true">Denied and not-found are indistinguishable: identical status and body. State the chosen response in the task note and justify it in one line.</criterion>
+    <criterion testable="true">The happy path is unchanged — an authorized user creates a To Do against a permitted record, with the resolver fields still stamped correctly per ADR-024. The pane's Create To Do tab still works in both hosts.</criterion>
+    <criterion testable="true">SEED BOTH DIRECTIONS: disable the filter, show the negative test RED; restore, show GREEN. Record both.</criterion>
+    <criterion testable="true">Task 061's guard no longer flags this route.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the four gated ids, the indistinguishability of denied vs not-found, the unchanged happy path, and the seed directions. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If making denied and not-found indistinguishable would break a shipped client behaviour that depends on the 403 (check the pane's error handling before assuming it does not), STOP and escalate per CLAUDE.md §6 with the options rather than choosing between security and a working pane on your own.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Reproduce both halves; record verbatim.</step>
+    <step>Read `QuickCreateSourceAccessFilter.cs` — it already solves this for quick-create. Mirror it.</step>
+    <step>Check how the pane handles the current 403 before changing the response shape.</step>
+    <step>Implement the filter; unify the denied/not-found response.</step>
+    <step>Tests; seed both directions; verify the Create To Do tab in both hosts.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/064-todo-source-gate.md`. Update TASK-INDEX.md: 064 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="new">src/server/api/Sprk.Bff.Api/Api/Filters/TodoSourceAccessFilter.cs</file>
+    <file role="new">tests/integration/contract/Api/Office/OfficeTodoSourceAuthorizationContractTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/064-todo-source-gate.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-024-regarding-polymorphic.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+    <patterns>
+      <pattern name="Source-record read gate as an endpoint filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/QuickCreateSourceAccessFilter.cs">
+        The quick-create route already gates its caller-supplied source id this way. Mirror the shape rather than inventing a second mechanism.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>`QuickCreateSourceAccessFilter.cs` — the same gate for the quick-create route.</existing>
+    <extension>The existing filter is bound to quick-create's request shape and single source id; `/todo` has four ids across three carrier types. Extend if the existing filter generalises cleanly; otherwise mirror it. Decide by reading it, and record which was done.</extension>
+    <cost-of-doing-nothing>Any authenticated user confirms the existence of arbitrary invoice, document and communication GUIDs, harvests their parent matter ids, and attaches their own To Dos to records they cannot read — which FR-26 inheritance then shows to that record's members.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/TodoSourceAccessFilter.cs</file>
+    <file>tests/integration/contract/Api/Office/OfficeTodoSourceAuthorizationContractTests.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/064-todo-source-gate.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 061 must be ✅ first.</protocol>
+  </execution>
+</task>

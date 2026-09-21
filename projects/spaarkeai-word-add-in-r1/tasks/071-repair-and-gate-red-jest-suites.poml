@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Ten red jest suites, 84 failing tests, none of them a shipped bug — repair them and put them inside the gate</title>
+    <phase>5 Remediation — verification</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override (CLAUDE.md §8): modifies `tests/**` and carries the `testing` tag, so quality gates run unconditionally. Also modifies `.tsx`/`.ts`.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified brownfield repair with every root cause already diagnosed to a file and line. Follow-the-diagnosis work, not architectural judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client test files only — disjoint from the server tasks and from 072/073.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, unit-test, frontend, react, typescript</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Ten jest suites fail with 84 failing tests. Every one is a stale test or a harness gap, not a shipped code bug. Repair them and add all ten to the gated manifest so they cannot rot again.</prompt>
+
+  <role>SPAARKE platform developer. Fix the tests to match the shipped behaviour — do NOT change shipped behaviour to match stale tests.</role>
+
+  <goal>All 56 office-addins suites pass and all 56 are gated.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable verification review (`notes/fable-review-2026-09-21.md` §8), which
+      observed 84 failed / 139 passed / 223 total and diagnosed each suite. **No failure points at a shipped
+      code bug.** Root causes, with the review's confidence marked:
+
+      | Suite | Fail | Cause | Confidence |
+      |---|---|---|---|
+      | `OutlookAdapter.test.ts` | 18/34 | `mockReadItem` (`:11-37`) lacks `itemType`; the adapter keys on `'itemType' in item` (`OutlookAdapter.ts:193`) → `unknown` → every mode-dependent call degrades | observed |
+      | `ShareView.test.tsx` | 16/20 | `win.ResizeObserver is not a constructor` — no polyfill in `jest.setup.js`; 10 green suites polyfill per-file, this one does not. Dies inside Fluent `MessageBar`. Plus one 10s timeout | observed |
+      | `useSaveFlow.test.ts` | 7/26 | Test `:82` expects `isValid` false; it is hard-coded true by design (`useSaveFlow.ts:508-509`) and the suite's own `:248` asserts document-only save works. Plus a fetch mock lacking `text()` (`ApiClient.ts:133`) | observed |
+      | `TaskPaneNavigation.test.tsx` | 1/7 | Fluent `Tab` emits `disabled`, not `aria-disabled` | observed |
+      | `TaskPaneShell.test.tsx` | 5/10 | Exact-match `Spaarke` vs `appName = 'Spaarke DMS'` (`TaskPaneShell.tsx:138`); expects a Share tab the Save\|Find shell no longer has | partly inferred |
+      | `SaveView` 22/26 · `SaveFlow` 9/27 · `EntityPicker` 4/32 | 35 | Stale label strings superseded by tasks 015/020/024/038 | inferred |
+      | `ApiClient.test.ts` | 1/20 | Mock at `:100-104` has no `headers`, which task 040's 401-retry wrapper reads | inferred |
+      | `useEntitySearch.test.ts` | 1/21 | `searchNow` awaited under `jest.useFakeTimers()` (`:35`) | inferred |
+
+      **Four of these were modified by this project and left ungated** — `SaveFlow.test.tsx`,
+      `useSaveFlow.test.ts`, `OutlookAdapter.test.ts`, `TaskPaneNavigation.test.tsx`.
+
+      Gated set today = the 46 uncommented paths in `ci-gated-suites.txt`; these 10 are the remainder
+      (46 + 10 = 56).
+
+      ⚠️ **This desktop's `node_modules` is stale** (task 073 covers it): `@testing-library/jest-dom` and
+      `user-event`, added 09-09 in `cc318390f`, are absent, so locally EVERY suite fails at
+      `jest.setup.js:12`. Run `npm install` before diagnosing anything, or you will chase phantom failures.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Fix the TEST, not the shipped behaviour — unless the investigation shows the review's diagnosis was wrong and the code IS defective. If that happens for any suite, say so explicitly and treat it as a finding, not a quiet code edit.</constraint>
+    <constraint source="this task">`ResizeObserver` goes into `jest.setup.js` ONCE. Do not add an eleventh per-file polyfill; remove the 10 per-file copies if the shared one makes them redundant.</constraint>
+    <constraint source="ADR-038">These are existing KEEP-path suites being repaired. Do not pad them with new happy-path variants — the ban on scaffolding applies to repairs too.</constraint>
+    <constraint source="this task">Stale prose fixed in the same pass: `ci-gated-suites.txt:14` says "12 of 22" against 46 gated, and the workflow summary (`office-addins-tests.yml:275`) says "of 22 in the package" against 56 test files.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm install` is run FIRST and the local baseline is re-established; record the observed pass/fail counts before any repair, so the starting point is real rather than an artifact of the stale install.</criterion>
+    <criterion testable="true">All 10 suites pass. Report the final counts and reconcile against the starting 84 failed / 139 passed / 223 total.</criterion>
+    <criterion testable="true">For each of the 6 suites the review marked "inferred", the actual root cause is confirmed or corrected in the task note. An inferred diagnosis that turns out wrong is a finding worth recording.</criterion>
+    <criterion testable="true">`ResizeObserver` is polyfilled once in `jest.setup.js`; redundant per-file polyfills are removed.</criterion>
+    <criterion testable="true">All 10 suites are added to `ci-gated-suites.txt`, taking the gated set to 56, and the suite-count assertion still passes.</criterion>
+    <criterion testable="true">PROVEN ON CI: the gated job runs all 56 and passes. Record the run URL.</criterion>
+    <criterion testable="true">The two stale counts in prose are corrected.</criterion>
+    <criterion testable="true">NO shipped behaviour changed — or, if any was, each change is named and justified in the task note with the evidence that the code was genuinely wrong.</criterion>
+    <criterion testable="true">Test scope: repair the existing assertions to match shipped behaviour. Do not add new cases beyond what a repair requires; anything added needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any of the 10 suites turns out to be failing because the SHIPPED CODE is wrong, STOP and escalate per CLAUDE.md §6 rather than "repairing" the test to match a defect. The review's claim that none is a code bug is the specific thing this trigger exists to catch being wrong.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>`npm install` in `src/client/office-addins`. Re-establish the real local baseline and record it.</step>
+    <step>Add the `ResizeObserver` polyfill to `jest.setup.js` and re-measure — it may clear `ShareView` wholesale.</step>
+    <step>Repair the observed-cause suites first (`OutlookAdapter`, `useSaveFlow`, `TaskPaneNavigation`), then the inferred ones, confirming or correcting each diagnosis.</step>
+    <step>Add all 10 to `ci-gated-suites.txt`; fix the stale counts in prose.</step>
+    <step>Push and prove the gated job green on CI at 56 suites. Record the run URL.</step>
+    <step>Write `notes/071-jest-repair.md` with the before/after counts and the confirmed-vs-corrected diagnosis table.</step>
+    <step>Update TASK-INDEX.md: 071 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/jest.setup.js</file>
+    <file role="edit">src/client/office-addins/ci-gated-suites.txt</file>
+    <file role="edit">src/client/office-addins/outlook/__tests__/OutlookAdapter.test.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/__tests__/useSaveFlow.test.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/ShareView.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/TaskPaneShell.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/TaskPaneNavigation.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/SaveView.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/EntityPicker.test.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/__tests__/ApiClient.test.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/071-jest-repair.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/jest.setup.js</file>
+    <file>src/client/office-addins/ci-gated-suites.txt</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/071-jest-repair.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run `npm install` before any diagnosis.</protocol>
+  </execution>
+</task>
