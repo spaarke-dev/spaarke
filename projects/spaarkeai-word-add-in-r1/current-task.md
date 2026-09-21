@@ -9,7 +9,28 @@
 **Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Clean tree, 0 behind / 221 ahead, LOCAL == REMOTE (SHA-verified).**
 HEAD moves — get it with `git log -1 --format='%H %s'`; do NOT trust a SHA written here.
 
-### ⛳ NEXT ACTION — execute **task 061** (the route census), then 062
+### 🔴 061 IS BLOCKED ON ANOTHER PROJECT — conflict-check result 2026-09-21, read before touching the census
+
+`/conflict-check` on task 061 returned a **HARD WARN**. `unified-access-control-r2` is **173 commits ahead of
+master**, was worked **2026-09-21**, has **open PR #950**, and makes **145 insertions / 34 deletions** to
+`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` — 061's target file. Both sides move the same
+**arithmetic ledger**: our HEAD is census **117**; UAC-r2 moved it **117 → 116** (their task 083 deleted a
+governed file) and a later commit reads **census 118**. 061 would add 3 governed files on top of that.
+
+**Decision: 061 runs AFTER #950 merges.** Resolving two concurrent amendments to a counted governance ledger
+at merge time is how a recount error gets introduced — that file's own comment says *"an unnamed exemption is
+how this shape survived four recounts."* The wave is re-ordered; 061's enforcement arrives after the fixes
+rather than before, and it will seed against already-fixed routes.
+
+**⚠️ A correction worth keeping**: UAC-r2's `OfficeService.cs` hunks at **1696-1842** look like they collide
+with 062's search region. **They do not** — every one is inside the **stub generators**
+(`GenerateStubRecentAssociations` / `RecentDocuments` / `Favorites`), removing `account` sample rows. So:
+**062 is clear**, and **058's conflict is benign and self-resolving** (058 deletes the very block they edited).
+Only 061 genuinely collides. Do not re-derive this from line numbers alone — check which function they fall in.
+
+### ⛳ NEXT ACTION — wave in flight: **062, 071, 073** (dispatched 2026-09-21); then 063-067, then 061
+
+**Superseded ordering (kept for the reasoning):** execute **task 061** (the route census), then 062
 
 **Owner decision 2026-09-21**: *"we need to address both of these issues fully… all of which appear important
 and that MUST be addressed in this project, not deferred or only added to GitHub issues."*
