@@ -72,18 +72,27 @@ public class ExternalParticipationService
     }
 
     /// <summary>
-    /// Excludes grants whose expiry has passed — finding A-5 (spec FR-06).
+    /// Excludes grants whose expiry has passed, AND excludes grants with NO expiry at all — finding
+    /// A-5 (spec FR-06); the null-exclusion half is ISS-009 (#974) option A, owner decision D-1
+    /// (2026-09-19, <c>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</c>).
     /// </summary>
     /// <remarks>
-    /// <para><b>What was wrong.</b> <c>sprk_expiresdate</c> was written at grant time and read
+    /// <para><b>What was wrong (task 007).</b> <c>sprk_expiresdate</c> was written at grant time and read
     /// <i>nowhere</i>: it appeared in no <c>$filter</c> and no <c>$select</c> on any path, and there is
     /// no sweep job. A grant whose expiry had passed conferred full access forever, while the Manage
     /// Access UI presented expiry as a working control. A promise-shaped no-op.</para>
     ///
-    /// <para><b>The null branch is load-bearing.</b> In OData, <c>field ge X</c> excludes nulls — so
-    /// without <c>eq null</c> this predicate would silently revoke every grant that has NO expiry,
-    /// which is most of them. That failure would look like a total outage of external access rather
-    /// than an expiry bug.</para>
+    /// <para><b>The null branch is now EXCLUSIONARY — inverted from task 007 (ISS-009 / D-1).</b> Task
+    /// 007 added an explicit <c>eq null</c> branch because, at the time, the BFF was every writer of this
+    /// column and always supplied a date only later (the branch existed to avoid a false outage on
+    /// existing undated rows during that transition). Since task 097 the BFF itself never writes a grant
+    /// without <c>sprk_expiresdate</c> — but the column is optional in Dataverse and users hold Create on
+    /// <c>sprk_externalrecordaccess</c>, so a row created outside the BFF (a form, the Web API, a flow or
+    /// an import) can still omit it, and the old rule let that row confer access FOREVER. The owner
+    /// ruled out every Dataverse-side fix (D-1: "we do not use Dataverse plugins") and closed the gap
+    /// from the read side instead: a null <c>sprk_expiresdate</c> now confers NOTHING. Undated moves from
+    /// fail-OPEN to fail-CLOSED (ADR-003) — in OData, <c>field ge X</c> already excludes nulls, so
+    /// dropping the <c>eq null</c> disjunct is the entire change.</para>
     ///
     /// <para><b>Why <c>ge</c> and not <c>gt</c>.</b> <c>sprk_expiresdate</c> is <b>Date Only</b>
     /// (verified against live Dataverse metadata, 2026-08-23 — the task's own escalation trigger
@@ -97,7 +106,7 @@ public class ExternalParticipationService
     /// belongs where the set is defined.</para>
     /// </remarks>
     internal static string ExpiryPredicate(DateOnly today)
-        => $"(sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})";
+        => $"sprk_expiresdate ge {today:yyyy-MM-dd}";
 
     /// <summary>
     /// The IN-MEMORY mirror of <see cref="ExpiryPredicate"/>: does a grant carrying
@@ -110,9 +119,9 @@ public class ExternalParticipationService
     /// <c>$filter</c>, so it cannot reuse the string. Two independent definitions of "expired" is
     /// precisely the drift that would let <c>/grant</c> report an outcome the reader contradicts, which is
     /// finding A-5's shape. So this sits next to the predicate it mirrors, and
-    /// <c>GrantExpiryCharacterizationTests</c> pins it to the same two semantics: <c>null</c> never
-    /// expires, and the expiry date ITSELF still confers (<c>ge</c>, not <c>gt</c> — task 007's Date Only
-    /// rule).</para>
+    /// <c>GrantExpiryCharacterizationTests</c> pins it to the same semantics: <c>null</c> confers NOTHING
+    /// (task 107, ISS-009 / D-1, inverted from task 007's original "null never expires"), and the expiry
+    /// date ITSELF still confers (<c>ge</c>, not <c>gt</c> — task 007's Date Only rule).</para>
     ///
     /// <para>Review finding F3/W8 found the original "the only in-memory copy" claim was false:
     /// <c>SetRecordShareExpiryEndpoint</c> already compared expiry in memory for a log count. Rather than
@@ -122,7 +131,7 @@ public class ExternalParticipationService
     /// row can use it; the grant path itself always passes a resolved value.</para>
     /// </remarks>
     internal static bool ConfersAccessOn(DateOnly? expiresDate, DateOnly today)
-        => expiresDate is null || expiresDate.Value >= today;
+        => expiresDate is not null && expiresDate.Value >= today;
 
     /// <summary>Today in UTC — the reference date every expiry comparison uses.</summary>
     private static DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);

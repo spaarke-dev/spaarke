@@ -951,8 +951,15 @@ public class GrantLifecycleCharacterizationTests
     }
 
     /// <summary>
-    /// The same case with a NULL-expiry duplicate — null is never-expiring on the read path
-    /// (<c>ExpiryPredicate</c>'s <c>eq null</c> branch), so that row confers access too.
+    /// The same case with a NULL-expiry duplicate. UPDATED task 107 (ISS-009 / D-1, 2026-09-21):
+    /// <c>ExpiryPredicate</c>'s <c>eq null</c> branch is retired — a bare null no longer confers access
+    /// on the read path. This test still passes for a DIFFERENT reason: <c>ConferralRank</c> ranks the
+    /// unbounded row at <c>today + DefaultExpiryDays</c> (never at <c>null</c> itself, per
+    /// <c>ExternalGrantLifecycle.ConferralRank</c>'s own doc comment), so it outranks the expired row and
+    /// is elected the survivor; FR-33's <c>EffectiveExpiry</c> then bounds it to that same
+    /// today+90 value BEFORE <c>ConfersAccessOn</c> is ever asked about the row — so the row this test
+    /// exercises never actually presents a null to the (now exclusionary) mirror. The outcome is
+    /// unchanged; the reasoning is not "null never expires" any more.
     /// </summary>
     [Fact]
     public async Task Upsert_OverAnExpiredRowWithAnUnboundedDuplicateOnTheSameKey_DoesNotReportNoAccess()
