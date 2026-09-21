@@ -445,19 +445,29 @@ the good and the bad case. Only **diffing the row's content against `HEAD~1`** s
 landed. A stat line is not verification of a co-edited file.
 
 > ⚠️ **Do NOT substitute "the row is N bytes" for that diff** — this note nearly did, and the shortcut failed
-> on its first use. Two agents measured the same two committed rows and got different numbers (3,386/3,062
-> here; 3,397/3,088 from task-063). The tempting explanation is CRLF-vs-LF, and it is **wrong**: line-ending
-> conversion changes a single line by one byte, not by 11 and 26. The real cause was the measuring command —
-> `awk -F'|' '{print length($3)}'` returns the first pipe-delimited FIELD, and these rows contain **8 internal
-> `|` characters** (inline tables and code spans), so `$3` was truncated at the first one and was never the
-> row length at all. The whole lines are 3,437 and 3,113 bytes; neither agent's figure was either.
+> on its first use. Two agents produced **three** different figures for the same two committed rows, and
+> chased a fourth wrong explanation for the disagreement. **All three figures came from the same, unchanged
+> bytes.**
 >
-> The lesson is not "measure more carefully". It is that a **derived scalar** (a count, a length, a stat
-> line) fails silently and plausibly, while a **content diff** either matches or does not. `git diff <base>
-> HEAD -- <path>` is path-independent and cannot be truncated by the data it is measuring. The durable
-> qualitative checks used here — each row appears **exactly once**, each status cell is **✅**, and the diff
-> against the pre-task tip touches **exactly the expected rows** — agreed from both agents' machines, which
-> the byte counts never did.
+> | Figure | Row 063 / 064 | What it actually was |
+> |---|---|---|
+> | this note's first | 3,386 / 3,062 | 🔴 **bug.** `awk -F'|' '{print length($3)}'` returns the first pipe-delimited FIELD; these rows carry **8 internal `\|`** (inline tables, code spans), so `$3` was truncated at the first one. Never a row length |
+> | task-063's | 3,397 / 3,088 | ✅ **correct — in CHARACTERS.** PowerShell `.Length` counts chars |
+> | this note's second | 3,437 / 3,113 | 🟡 **off by one.** `wc -c` counts bytes **including the trailing newline** |
+> | the rows themselves | **3,436 / 3,112 bytes**, **3,397 / 3,088 chars** | the +39 / +24 is **21 and 13 non-ASCII characters** (`—`, `✅`, `🔴`, `⚠️`) under UTF-8 |
+>
+> And the explanation first reached for — **CRLF-vs-LF — was wrong**, which is the most instructive part:
+> line-ending conversion moves a single line by **one** byte, but the deltas were **11 and 26 and differed
+> from each other**, so its magnitude was never the right order. A plausible mechanism was accepted without
+> checking whether it could produce the observed size.
+>
+> The lesson is not "measure more carefully" — three attempts were all careful. It is that a **derived
+> scalar** (a count, a length, a `--stat` figure) fails silently, still looks like evidence, and **has units
+> to get wrong**, whereas a **content diff** either matches or does not: it is path-independent, cannot be
+> truncated by the data it measures, and has no units at all. The qualitative checks used here — each row
+> appears **exactly once**, each status cell is **✅**, and `git diff a66e37f03 HEAD -- <path>` touches
+> **exactly the expected rows** — agreed from both agents' machines on the first attempt, which no scalar
+> ever did.
 
 **The second hazard, found by task-063 and worth more than the first**: `.husky/pre-commit` runs
 `npx lint-staged`, which **stashes and restores unstaged changes** around the formatters. That is an
