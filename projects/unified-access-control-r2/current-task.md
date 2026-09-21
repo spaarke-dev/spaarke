@@ -25,7 +25,75 @@
 
 ---
 
-## § SESSION 20 (2026-09-21) — READ THIS BEFORE THE QUICK RECOVERY BELOW
+## § SESSION 21 (2026-09-21) — READ THIS FIRST; IT SUPERSEDES SESSION 20 BELOW
+
+**Three tasks closed, one rescoped, one wave run in parallel.** Session 20's "no code changed" line
+below is still true *of session 20* — it is not true of the project as of now.
+
+### What landed, in order
+
+| Commit | What |
+|---|---|
+| `2d0b0dae1` | **Task 115** — repaired the nine task files carrying a wrong load-bearing sentence |
+| `a26d007a8` | **Task 116** — the drift check now compares POMLs and index rows as **SETS** (ISS-025 #1004 + ISS-029 #1009) |
+| `d886d6a47` | **Task 107 RESCOPED** to owner decision D-1 — option A, *not* a plugin (a **tenth** premise-rot file) |
+| `ffa329fbb` | **Wave 1** — tasks **044, 065, 119** executed as three concurrent subagents |
+| `ceefca1f4` | Wave 1 bookkeeping — 044 + 119 complete; **065 deliberately left OPEN** |
+
+### 🔴 Open right now — the ONE thing in flight
+
+**Finding M2 is being implemented by a subagent** (last open item of task 065). If that agent did not
+report, re-dispatch it. The brief is in this session's transcript; the essentials:
+
+- `/revoke` returns 200 with the failure in the body; `/close-project` returns 500 for the identical
+  shape. Align them — **only `SpeContainerRevokeOutcome.Failed` becomes 500**; the other three stay 200.
+- Mirror `ClosureIncomplete(...)` (`ProjectClosureEndpoint.cs` ~:269). Reason code
+  **`sdap.revoke.incomplete.container_not_cleared`** — same family as `:326-328`, correct operation;
+  do NOT reuse the literal `closure` code for a revoke.
+- 🔴 **THE TRAP**: task 065 already shipped **M8**, so `postJson` now *throws* on `!res.ok`. Changing the
+  server to 500 without changing the client means the throw fires BEFORE `buildRevokeNotice`, and the
+  user gets a generic error instead of *"3 grants revoked; file access could not be confirmed removed."*
+  That **regresses the owner's binding 2026-09-10 directive** (*"the status code is for the client, the
+  MESSAGE is for the person"*). Server extensions must carry `deactivatedCount` + `speContainerOutcome`,
+  and the client must route the 500 back through the three-outcome message.
+- Blast radius, measured: `SpeRevokeMatcherTests.cs` — 31 tests, **11** assert `Failed`; its `Body()`
+  helper (~:239) asserts `BeOfType<Ok<RevokeAccessResponse>>`, so all 11 break on a 500. Invert them
+  deliberately; do NOT weaken `Body()` to accept either shape.
+
+### 🟡 Next, after M2
+
+**107** — now correctly scoped to option A and **no longer parallel-safe** (the rescope moved it into
+the ExternalAccess exclusive zone). It runs ALONE. Its own load-bearing detail: `ConfersAccessOn`
+(`ExternalParticipationService.cs:124-125`) is the in-memory mirror of `ExpiryPredicate` (`:99-100`) and
+must change with it, or `/grant` reports a grant live while the reader denies it.
+
+Then **117** (option B job) and **118** (option C, code-before-config). **036** still waits on Q1.
+
+### Health, re-measured this session
+
+| Check | Result |
+|---|---|
+| Worktree | clean · 0 uncommitted at each commit point |
+| Drift | **116 = 116, rc=0** — now via the set comparison 116 added |
+| Validator | 116 scanned / 110 clean / **0 errors** / 6 pre-existing warnings |
+| .NET | build 0W/0E · `--filter ExternalAccess` **417/417** |
+| TS | `Spaarke.UI.Components` tsc rc=0 · touched components **68/68** |
+| Full TS suite | 8 suites / 13 tests fail — **pre-existing**, proven identical at clean HEAD in a throwaway worktree. Wave delta **+26 passing, +0 failing** |
+
+### Environment gotchas earned this session — do not re-learn these
+
+1. **`src/client/pcf` had no `node_modules`**, so the pre-commit ESLint hook died on
+   `Cannot find package '@eslint/js'` and lint-staged **reverted the whole staged tree**. Fixed by
+   `npm install --legacy-peer-deps --no-audit --no-fund` in `src/client/pcf`. Never `--no-verify`.
+2. **The hook reformats files** (prettier on TS, `dotnet format` on C#) *during* the commit — so what you
+   verified is not what got committed. **Re-run the suites after the hook succeeds.**
+3. **A `node_modules` junction into a throwaway worktree must be removed with `cmd /c rmdir` BEFORE
+   `git worktree remove`**, or the remove follows the junction and deletes the real `node_modules`.
+4. `PYTHONIOENCODING=utf-8` is still required for any python touching these files (cp1252 console).
+
+---
+
+## § SESSION 20 (2026-09-21) — superseded by session 21 above
 
 **No code changed this session.** Worktree review + doc truth-repair only.
 
