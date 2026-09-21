@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="054" project="unified-access-control-r2">
   <metadata>
-    <title>Generalize the accessible-root-set model: sprk_servicerequest as a first-class core root (FR-27)</title>
+    <title>Service-request access: close the ISS-003 to-do over-denial — explicitly NOT a fourth accessible root set (FR-27)</title>
     <phase>3 Child inheritance</phase>
     <gate>blocked — requires Phase 1 (FR-19 evaluator, FR-20 impersonated root sets) merged</gate>
     <status>pending</status>
@@ -18,18 +18,31 @@
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
 
-  <prompt>The spec's core taxonomy has FOUR core entities (project, matter, work assignment, service request) but the caller principal carries only THREE accessible-root-id sets. Add sprk_servicerequest as a first-class root set on both principal strategies and in the accessible-record-set gate, so child-module scope dimensions (task 056) and the inheritance term (task 055) can express service-request-rooted children. This is the honest generalization the adversarial critique (06 §F1) demands BEFORE registering child modules.</prompt>
+  <prompt>🔴 THIS TASK'S ORIGINAL PREMISE IS RETIRED — DO NOT BUILD A FOURTH ROOT SET. The owner ruled on 2026-09-09 (task 028) that a service request IS core but is NEVER externally grantable. `CallerPrincipal` composes exactly THREE externally-grantable root sets, and that is correct, not a gap. Adding `AccessibleServiceRequestIds` was considered and REFUSED: it would be composed from `sprk_externalrecordaccess` rows that cannot exist, producing an always-empty set that encodes the false claim into the principal surface.
+
+WHAT REMAINS IN SCOPE is the genuine over-denial filed as ISS-003 (#964): `GetTodoRootAsync` has no service-request arm, so a to-do parented to a service request resolves to `None` and is denied for EVERYONE — including the workforce user who submitted that very service request and can see it in their own widget. 🔴 The SHAPE of the fix is an OPEN OWNER DECISION (what may a requester DO to their own service request's to-dos — read? write? create?). Do not improvise it. Re-scope this POML to the owner's answer before writing code.</prompt>
   <role>SPAARKE platform developer. BFF authorization internals: CallerPrincipalResolver strategies, AccessibleRecordSetService, evaluator. Follow ADRs strictly.</role>
-  <goal>CallerPrincipal exposes an accessible-service-request set filled by BOTH the workforce and CIAM strategies (workforce: Phase-1 impersonated Dataverse answer union contact grants; CIAM: grants only, matching the shipped pattern for the other three roots); AccessibleRecordSetService composes it (grant allow-list extended to include sprk_servicerequest); all existing consumers unaffected; tests cover the fourth root for both principal kinds.</goal>
+  <goal>The ISS-003 over-denial is closed by the mechanism the owner selects, WITHOUT making service requests externally grantable: `CallerPrincipal` still composes exactly THREE externally-grantable root sets, `GrantSupportedRootEntities` still contains exactly { sprk_project, sprk_matter, sprk_workassignment }, and no `AccessibleServiceRequestIds` set exists anywhere. Service-request scoping continues to run through the EXISTING `service-requests` ExternalModuleDescriptor (`ExternalAccessModule.cs`), which scopes by `sprk_requestedby` and is fail-closed on the plane — a CIAM partner gets an empty set server-side. Tests pin both the fix and the three negatives.</goal>
 
   <context>
-    <background>spec.md FR-27 + Owner Clarifications ("Core: project, matter, work assignment, service request"). Investigation 01 §3: GrantSupportedRootEntities = { sprk_project, sprk_matter, sprk_workassignment } (AccessibleRecordSetService.cs:99-104); both strategies fill exactly 3 root sets (CallerPrincipalResolver.cs:91,97,102); the existing service-requests module scopes by sprk_requestedby only. 06 §F1: a ScopeDimension can only point at a set that exists on the principal — this task creates the missing fourth set. NOTE: Phase 1/2 will have reshaped these files (evaluator returns recordId->rights; FR-20 impersonated source) — extend the AS-MERGED shapes, using the three existing roots as the literal reference.</background>
+    <background>🔴 **"CORE" AND "EXTERNALLY GRANTABLE" ARE TWO DIFFERENT LISTS.** The spec's Owner Clarifications say "Core: project, matter, work assignment, service request", and that sentence is what produced this task's retired premise: it reads as though all four are grantable to externals. They are not. A service request is core in the sense that nothing else confers access to it (it is not a child that inherits via an ancestor) — and is NEVER grantable to an external contact. The doc was the thing that was wrong; the code was already right in both halves. See notes/task-028-service-request-root.md §3 and the project CLAUDE.md.
+
+**The decisive evidence, and it cost one metadata query**: `sprk_externalrecordaccess` carries lookups for `sprk_project`, `sprk_matter`, `sprk_workassignment`, `sprk_invoice`, `sprk_organization` and `sprk_contact` — and NO service request. A child can *point at* a service request (seven ways), but no external grant can ever *name* one. When a task says "add the fourth X", check first whether the data model has a place to put it.
+
+**Ground truth at HEAD** (unchanged by this correction): `GrantSupportedRootEntities` = { sprk_project, sprk_matter, sprk_workassignment } (AccessibleRecordSetService.cs:99-104); both strategies fill exactly 3 root sets (CallerPrincipalResolver.cs:91,97,102). **This is the correct shape — it is not a gap to close.**
+
+**Service-request scoping ALREADY EXISTS by the correct, different mechanism**: the `service-requests` ExternalModuleDescriptor in `ExternalAccessModule.cs`, shipped 2026-08-10 by the sibling project `spaarke-SPA-external-access-platform-r2`. It scopes by **requester** (`sprk_requestedby`), which is the right model for an internally-submitted record, and it is fail-closed on the plane: a CIAM partner gets an empty set server-side, so "internal-only" does not depend on the client hiding a tab. 06 §F1's rule ("a ScopeDimension can only point at a set that exists on the principal") is satisfied by the module, which is the same mechanism.
+
+**What is genuinely broken — ISS-003 (#964)**: `/api/v1/external/todos/{id}` serves BOTH planes, and `GetTodoRootAsync` has no service-request arm, so a to-do parented to a service request resolves to `None` and is denied for everyone, including its own submitter. It needs a DIFFERENT rights shape from the other three roots: they answer "is this id in my set?" synchronously from `CallerPrincipal`; a service request answers "is `sprk_requestedby` me?", which is a Dataverse read the to-do path does not currently make. Bolting that into `RightsForRoot` would put an I/O call behind a signature that is pure everywhere else — which is why the shape is an owner/design decision, not a patch. Currently unexercised: zero service requests exist in dev.
+
+NOTE: Phase 1/2 will have reshaped these files (evaluator returns recordId-&gt;rights; FR-20 impersonated source) — read the AS-MERGED shapes before editing.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (grant reads for the fourth root, if entity-filtered)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (the SHIPPED `service-requests` module — sprk_requestedby scoping, plane-gated; read it, do NOT change its descriptor)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/task-028-service-request-root.md (the owner ruling this task must stay inside)</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (root-set composition tests)</file>
     </relevant-files>
     <dependencies>
@@ -41,9 +54,10 @@
 
   <constraints>
     <constraint source="ADR-003">Fail closed: an error composing the service-request set denies (empty set), never throws into a permissive path. Scope: the new compose branch.</constraint>
-    <constraint source="NFR-02">No regression in request cost — adding the fourth root MUST NOT add unconditional per-request Dataverse round trips beyond the existing composition budget; compose lazily or batch alongside the existing three. State the measured round-trip count in the PR. Scope: strategy composition.</constraint>
+    <constraint source="NFR-02">No regression in request cost — the ISS-003 fix MUST NOT add unconditional per-request Dataverse round trips beyond the existing composition budget. ⚠️ This constraint is under real pressure here: the service-request check is inherently a READ ("is sprk_requestedby me?"), unlike the other three roots which answer from an already-composed set. Make it conditional (only on the service-request-parented path), not unconditional, and state the measured round-trip count in the PR. Scope: the ISS-003 resolution path.</constraint>
     <constraint source="CLAUDE.md-§10">BFF-touching: placement decision cited from .claude/constraints/bff-extensions.md in the PR; publish size measured and reported (ceiling 60 MB). Scope: PR description.</constraint>
     <constraint source="ADR-034">Root sets remain roots-only — do NOT add child-entity accessible sets (AccessibleCommunicationIds etc.); FR-26 stamps make them unnecessary and 06 §F1 shows they would be 2-hop. Scope: whole task; adding a child-entity set is an escalation, not a decision.</constraint>
+    <constraint source="owner 2026-09-09 (task 028)">🔴 BINDING, DO NOT RE-LITIGATE. "Service requests are internally submitted records; they are sent via the SPA by internal workforce users; the service request is not accessible by external users (e.g., law firms)." Scope: the whole task. Therefore `CallerPrincipal` composes exactly THREE externally-grantable root sets and MUST NOT gain a fourth; `GrantSupportedRootEntities` MUST NOT gain `sprk_servicerequest`; no service-request lookup may be added to `sprk_externalrecordaccess`. ⚠️ Do NOT overcorrect into "a service request is not core" — that is a different false claim. It IS core (nothing else confers access to it); it is simply never externally grantable, and the grant table's deliberate omission is the evidence for the distinction.</constraint>
     <constraint source="ADR-038">Tests at KEEP paths (tests/unit/Sprk.Bff.Api.Tests + seam tests where the suite already covers root composition); no Mock of HttpMessageHandler. Scope: new tests.</constraint>
   </constraints>
 
@@ -63,41 +77,45 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Context + rigor declaration. Read the AS-MERGED Phase 1/2 shapes of the five target files before editing.</step>
-    <step order="1">Extend the principal contract with the service-request root set, mirroring exactly how AccessibleMatterIds is declared, filled and consumed.</step>
-    <step order="2">Extend AccessibleRecordSetService: add sprk_servicerequest to the grant-supported root entities; compose the systemuser term via the Phase-1 impersonated source and the contact term via grants (+ standing membership if the shipped pattern includes it for the other roots — match, do not innovate).</step>
-    <step order="3">Fill the set in BOTH strategies (workforce + CIAM), matching each strategy's shipped pattern for the other three roots. Verify the existing service-requests module (sprk_requestedby dimension) still behaves identically — do not change its descriptor here.</step>
-    <step order="4">Tests: systemuser with an accessible service request resolves it in the set; contact with a service-request grant resolves it; contact without resolves empty; composition error yields empty set (fail-closed); existing three roots unchanged (regression pins).</step>
+    <step order="0">🔴 GATE — DO NOT SKIP. Confirm the owner has answered ISS-003's product question (what may a requester DO to their own service request's to-dos). If it is still unanswered, STOP and escalate per the trigger below; this task cannot be correctly scoped without it. Then read the AS-MERGED Phase 1/2 shapes and notes/task-028-service-request-root.md before editing anything.</step>
+    <step order="1">Re-scope this POML's goal, steps and acceptance criteria to the owner's answer, and record the re-scope in notes/ before writing code. The three negatives in the acceptance criteria are NOT re-scopable — they hold whatever the answer is.</step>
+    <step order="2">Implement the ISS-003 fix by the owner-selected mechanism, honoring the rights-shape constraint: the service-request check is a Dataverse read ("is sprk_requestedby me?"), not a set-membership test. If it needs to sit behind a signature that is pure everywhere else, surface that design choice rather than silently making `RightsForRoot` impure.</step>
+    <step order="3">Verify the existing service-requests module (sprk_requestedby dimension, plane-gated) still behaves identically — do NOT change its descriptor here, and do NOT duplicate its scoping logic.</step>
+    <step order="4">Tests: the ISS-003 case (a workforce submitter reaches a to-do parented to their own service request, at the level the owner specified) PLUS the three standing negatives — no AccessibleServiceRequestIds set, GrantSupportedRootEntities still exactly three, a CIAM partner still gets an empty service-request set server-side.</step>
     <step order="5">dotnet build + test green; publish size + round-trip count reported.</step>
     <step order="6">Update TASK-INDEX.md; note decisions in projects/unified-access-control-r2/notes/.</step>
   </steps>
 
   <escalation>
-    <trigger>If this task is started before it has been re-scoped per the 2026-09-15 amendment in notes (owner answer to ISS-003's product question), STOP — as written it would make service requests externally grantable, which the owner ruled out (task 028).</trigger>
-    <trigger>If sprk_servicerequest grants are not representable in sprk_externalrecordaccess (e.g. the grant table's entity-type field/choice lacks a service-request value), STOP and escalate — the fix is a Phase-2 registry/schema decision, not an improvised column.</trigger>
+    <trigger>If the owner has not answered ISS-003's product question (what may a requester DO to their own service request's to-dos — read? write? create?), STOP at step 0. Inventing a verb set to close the task is exactly how the level asymmetry got into task 009.</trigger>
+    <trigger>If any proposed implementation would add a service-request lookup to `sprk_externalrecordaccess`, add an accessible-service-request set to `CallerPrincipal`, or extend `GrantSupportedRootEntities`, STOP — all three are forbidden by the owner's 2026-09-09 ruling and none may be re-litigated at implementation time. An always-empty set that looks like a fix is worse than the gap: the next reader "completes" the model by adding the missing grant lookup.</trigger>
+    <trigger>If closing ISS-003 cannot be done without making `RightsForRoot` (or its as-merged successor) perform I/O where it is pure for the other three roots, STOP and escalate the design rather than changing that signature's contract silently.</trigger>
   </escalation>
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (fourth-root composition tests)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (ISS-003 fix + the three standing negatives)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given a workforce systemuser whom Dataverse says can read service request SR1, the principal's service-request set contains SR1.</criterion>
-    <criterion testable="true">Given a CIAM contact holding an active sprk_externalrecordaccess grant on SR2, the principal's service-request set contains SR2.</criterion>
-    <criterion testable="true">Negative: a contact with no service-request grant has an EMPTY service-request set (not null, not throwing), and a compose error also yields empty (fail-closed).</criterion>
+    <criterion testable="true">The ISS-003 over-denial is closed at the level the owner specified: a workforce user who submitted service request SR1 is no longer denied on a to-do parented to SR1. (The exact verb set is fixed by the owner's ISS-003 answer and MUST be transcribed into this criterion during step 1, not invented at implementation time.)</criterion>
+    <criterion testable="true">Negative — THE LOAD-BEARING ONE: no `AccessibleServiceRequestIds` (or equivalently-named) set exists on CallerPrincipal after this task; grep is clean. A service request is core but NEVER externally grantable (owner ruling 2026-09-09, task 028).</criterion>
+    <criterion testable="true">Negative: `GrantSupportedRootEntities` still contains EXACTLY { sprk_project, sprk_matter, sprk_workassignment } — the grant allow-list was NOT extended to sprk_servicerequest, and no lookup was added to sprk_externalrecordaccess.</criterion>
+    <criterion testable="true">Negative: a CIAM partner caller still resolves an EMPTY service-request set server-side (the existing module's plane gate), so internal-only never depends on the client hiding a tab.</criterion>
     <criterion testable="true">Negative: no AccessibleCommunicationIds / AccessibleEventIds / AccessibleInvoiceIds set exists anywhere after this task (grep clean) — child sets stay banned.</criterion>
     <criterion testable="true">Regression: existing project/matter/workassignment composition tests pass unmodified.</criterion>
     <criterion testable="true">Build green; publish size ≤ 60 MB reported; per-request Dataverse round-trip count stated and within NFR-02.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-27; 06 §F1. Tasks 055/056 consume the fourth root set.
+  <notes>spec.md FR-27; 06 §F1.
 
-AMENDED 2026-09-15 (register triage) — PREMISE SUPERSEDED; DO NOT EXECUTE AS WRITTEN.
-- The goal's CIAM half — a service-request set filled from sprk_externalrecordaccess grants, with the grant allow-list extended to sprk_servicerequest — contradicts the owner's 2026-09-09 ruling (task 028): service requests are NEVER externally grantable, and CallerPrincipal must not carry an accessible-service-request set (project CLAUDE.md; notes/task-028-service-request-root.md §5).
-- The in-scope work that remains is ISS-003 (#964): the workforce user who submitted a service request is denied PATCH /api/v1/external/todos/{id} on to-dos parented to it.
-- Before executing: (1) the owner answers ISS-003's product question — what may a requester DO to their own service request's to-dos; (2) re-scope this POML's goal, steps and criteria to that answer; (3) re-check tasks 055 and 056, which were written to consume the fourth root set.</notes>
+AMENDED 2026-09-15 (register triage); the amendment was PROMOTED OUT OF THIS NOTES BLOCK into every binding element by task 115 on 2026-09-21. Until then the title, prompt, goal, steps and acceptance criteria all still asserted the retired premise, so an executor reading the file top-down would have built the refused thing and only met the correction at the bottom. That is the defect class task 115 exists to remove — a note cannot bind when the binding elements contradict it.
+
+- RETIRED: a service-request set filled from sprk_externalrecordaccess grants, with the grant allow-list extended to sprk_servicerequest. It contradicts the owner's 2026-09-09 ruling (task 028): service requests are NEVER externally grantable, and CallerPrincipal must not carry an accessible-service-request set (project CLAUDE.md; notes/task-028-service-request-root.md §5).
+- REMAINING IN-SCOPE WORK: ISS-003 (#964) — the workforce user who submitted a service request is denied PATCH /api/v1/external/todos/{id} on to-dos parented to it.
+- STILL BLOCKED ON THE OWNER: (1) the ISS-003 product question — what may a requester DO to their own service request's to-dos; (2) re-scope this POML's goal, steps and criteria to that answer.
+- Tasks 055 and 056 were written to consume the retired fourth root set; both were repaired by task 115 at the same time. Re-read them as repaired, not as remembered.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -27,7 +27,7 @@
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (⚠️ there is NO appsettings.json in this repo — verified at HEAD 2026-09-21. The five files that exist are appsettings.template.json, appsettings.Testing.json, appsettings.Development.json.template, appsettings.Production.json.template and appsettings.tokens.md. The template already carries an "ExternalAccess" section at :66 and documents it with the "_ExternalAccess_comment" sibling-key convention at :65 — extend that section, do not create a new file.)</file>
       <file role="modify">docs/guides/auth-deployment-setup.md</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
@@ -66,7 +66,7 @@
 
   <steps mode="prescriptive">
     <step order="0" name="Context + rigor declaration">Declare rigor FULL. Verify tasks 032/035 merged and task 034's canary is green in the gate. Read ComposeForSystemUserAsync as it stands post-032.</step>
-    <step order="1">Add the ExternalAccess:ImpersonatedRootSets:Enabled option (default false) with an options class; document both states in appsettings.json comments.</step>
+    <step order="1">Add the ExternalAccess:ImpersonatedRootSets:Enabled option (default false) with an options class; document both states under the existing "ExternalAccess" section of appsettings.template.json, using the file's "_ExternalAccess_comment" sibling-key convention (JSON has no comment syntax — that convention is how this repo documents a setting).</step>
     <step order="2">Implement the flag-on branch: root ids for the three root types from ImpersonatedRootSetSource; contribute as the Dataverse-answer term (design §4.5 term 1) into the additive max; membership term omitted on this plane under flag-on; contact-grants union untouched.</step>
     <step order="3">Implement failure handling per the NFR-01 constraint (throw → gate denies; log with the [WF-AUTHZ] prefix and the active source).</step>
     <step order="4">Propagate Truncated from the source onto AccessibleRecordSet and out through the external module data response; verify the field reaches the client payload.</step>

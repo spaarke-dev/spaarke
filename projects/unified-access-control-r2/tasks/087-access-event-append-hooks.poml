@@ -3,7 +3,7 @@
   <metadata>
     <title>Append access events from every grant/deny state-change path (FR-32 write half)</title>
     <phase>5 Attestation</phase>
-    <gate>blocked — requires 080 (table) + 060/063/064 (the write paths to hook) merged</gate>
+    <gate>blocked — requires 086 (table) + 060/063/064 (the write paths to hook) merged</gate>
     <status>pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-adjacent .cs across grant/revoke/share/deny endpoints; a missed hook is a silent attestation gap.</rigor-reason>
@@ -20,10 +20,10 @@
 
   <prompt>Instrument every grant/deny STATE-CHANGE path with an append-only sprk_accessevent write: contact/org grant + revoke endpoints, the consolidated POA seam (share/unshare), deny-list add/remove, secure-designation + reverse (061), restricted-flag and standing-grant changes where they pass through BFF writers. One small appender service; hooks at choke points, not scattered inline payload building.</prompt>
   <role>SPAARKE platform developer. Minimal API, DI, Dataverse writes. Follow ADRs strictly.</role>
-  <goal>An AccessEventAppender (single writer, create-only) invoked from each enumerated choke point with the 080 vocabulary; every event carries evaluator-version + correlation id; hook failures are LOGGED-AND-SURFACED per the policy decided in step 1 (see escalation) — never silently swallowed; tests prove one event per state change and zero events on read paths.</goal>
+  <goal>An AccessEventAppender (single writer, create-only) invoked from each enumerated choke point with the 086 vocabulary; every event carries evaluator-version + correlation id; hook failures are LOGGED-AND-SURFACED per the policy decided in step 1 (see escalation) — never silently swallowed; tests prove one event per state change and zero events on read paths.</goal>
 
   <context>
-    <background>spec.md FR-32 ("append-only access event log records grant and deny state changes"); design.md §7. The hook-site inventory: GrantExternalAccessEndpoint, RevokeExternalAccessEndpoint, InviteAndGrant (its grant core), ProjectClosureEndpoint (cascade deactivations = revoke events), the 060 seam (share/unshare — covers 063 and 061's provisioning shares), 064 deny endpoints, 061 secure/reverse. Flag flips made directly in the MDA (sprk_issecure via forms) are covered by Dataverse FIELD AUDIT, not BFF hooks — record that boundary explicitly in the doc so replay (082) knows which source covers which change.</background>
+    <background>spec.md FR-32 ("append-only access event log records grant and deny state changes"); design.md §7. The hook-site inventory: GrantExternalAccessEndpoint, RevokeExternalAccessEndpoint, InviteAndGrant (its grant core), ProjectClosureEndpoint (cascade deactivations = revoke events), the 060 seam (share/unshare — covers 063 and 061's provisioning shares), 064 deny endpoints, 061 secure/reverse. Flag flips made directly in the MDA (sprk_issecure via forms) are covered by Dataverse FIELD AUDIT, not BFF hooks — record that boundary explicitly in the doc so replay (088) knows which source covers which change.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/ (AccessEventAppender — placement decision stated in PR)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
@@ -34,7 +34,7 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (per-hook tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="080" status="pending">Table + vocabulary.</dependency>
+      <dependency task="086" status="pending">Table + vocabulary.</dependency>
       <dependency task="060" status="pending">POA seam choke point.</dependency>
       <dependency task="063" status="pending">Share endpoints (hooked via the seam).</dependency>
       <dependency task="064" status="pending">Deny endpoints.</dependency>
@@ -55,7 +55,7 @@
       <file>.claude/constraints/bff-extensions.md</file>
       <file>docs/adr/ADR-038-testing-strategy.md</file>
       <file>projects/unified-access-control-r2/design.md</file>
-      <file>docs/data-model/ (sprk_accessevent doc from 080)</file>
+      <file>docs/data-model/ (sprk_accessevent doc from 086)</file>
     </files>
     <patterns>
       <pattern name="service-registration" location=".claude/patterns/api/service-registration.md">DI conventions.</pattern>
@@ -66,7 +66,7 @@
     <step order="0">Context + rigor declaration. Confirm the failure policy (strict vs log-and-continue) — if the owner has not ruled, raise the escalation BEFORE implementing.</step>
     <step order="1">Implement AccessEventAppender (create-only; evaluator-version + correlation id enrichment).</step>
     <step order="2">Hook the enumerated sites; verify via grep that no other grant/deny writer exists unhooked (cite the grep in notes).</step>
-    <step order="3">Document the BFF-hooks vs Dataverse-field-audit coverage boundary in the 080 data-model doc.</step>
+    <step order="3">Document the BFF-hooks vs Dataverse-field-audit coverage boundary in the 086 data-model doc.</step>
     <step order="4">Tests: one event per state change per site (kind, principal, record, level, version populated); revoke-all cascades write one event per deactivated grant; read paths write zero events; appender failure follows the decided policy.</step>
     <step order="5">Build + tests green; publish size reported. Update TASK-INDEX.md.</step>
   </steps>
@@ -76,9 +76,9 @@
   </escalation>
 
   <justification>
-    <existing>No event appender exists (grep sprk_accessevent: only 080's schema). Closest neighbor: AuditEnrichmentMiddleware (request-level enrichment — reuse its correlation-id source, not its surface).</existing>
+    <existing>No event appender exists (grep sprk_accessevent: only 086's schema). Closest neighbor: AuditEnrichmentMiddleware (request-level enrichment — reuse its correlation-id source, not its surface).</existing>
     <extension>No — middleware sees requests, not domain state changes; the appender is called with domain facts at the choke points.</extension>
-    <cost-of-doing-nothing>The 080 table stays empty: FR-32's acceptance ("who could see record X on date D" for grant/deny changes) fails; 082's replay has no explicit-event backbone.</cost-of-doing-nothing>
+    <cost-of-doing-nothing>The 086 table stays empty: FR-32's acceptance ("who could see record X on date D" for grant/deny changes) fails; 088's replay has no explicit-event backbone.</cost-of-doing-nothing>
   </justification>
 
   <outputs>
@@ -96,7 +96,7 @@
     <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-32; design.md §7. The coverage-boundary doc line (BFF hooks vs field audit) is load-bearing for 082.</notes>
+  <notes>spec.md FR-32; design.md §7. The coverage-boundary doc line (BFF hooks vs field audit) is load-bearing for 088.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

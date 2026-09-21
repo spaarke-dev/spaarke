@@ -3,7 +3,7 @@
   <metadata>
     <title>Evaluator inheritance term: child records take their core ancestor's rights (FR-27)</title>
     <phase>3 Child inheritance</phase>
-    <gate>blocked — requires 054 (fourth root set) + Phase 1 tasks 032/037/038 (evaluator with vetoes + deny store) merged</gate>
+    <gate>blocked — requires 054 (service-request access / ISS-003) + Phase 1 tasks 032/037/038 (evaluator with vetoes + deny store) merged</gate>
     <status>pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core authorization evaluator change (.cs, auth tags); the inheritance term IS the access decision for six entity classes.</rigor-reason>
@@ -31,7 +31,7 @@
       <file role="modify">tests/integration/seam/ (evaluator seam tests if the Phase-1 suite established them)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="054" status="pending">Fourth root set (service request) so inheritance covers all four core classes.</dependency>
+      <dependency task="054" status="pending">Service-request access / ISS-003. ⚠️ NOT a "fourth root set" — that premise was retired by the owner's 2026-09-09 ruling (task 028). The inheritance term covers the THREE externally-grantable roots; 054 settles how (and whether) a service-request-parented child resolves at all.</dependency>
       <dependency task="032" status="pending">FR-19 evaluator returning (recordId -> rights) with additive-then-veto structure.</dependency>
       <dependency task="037" status="pending">FR-21/FR-22 Restricted + Secure vetoes the inheritance term must interplay with.</dependency>
       <dependency task="038" status="pending">FR-23 deny-list store + veto (per-child revocation reuses it).</dependency>
@@ -63,7 +63,7 @@
 
   <steps mode="directional">
     <step order="0">Context + rigor declaration. Read the as-merged Phase-1 evaluator before editing; map where terms 1-4 and vetoes 6-8 live.</step>
-    <step order="1">Implement the inheritance term: for a child-entity evaluation, read the stamp columns (project/matter/workassignment/servicerequest), look up the ancestor's already-computed rights from the same evaluation pass, apply as an additive term (highest wins).</step>
+    <step order="1">Implement the inheritance term: for a child-entity evaluation, read the stamp columns for the THREE externally-grantable roots (project / matter / workassignment), look up the ancestor's already-computed rights from the same evaluation pass, apply as an additive term (highest wins). ⚠️ A `sprk_regardingservicerequest` / `sprk_relatedservicerequest` stamp column DOES exist on several child entities, but there is no accessible-service-request set on `CallerPrincipal` to resolve it against (owner ruling, task 028) — so a child parented ONLY to a service request has no inherited term and is denied. That over-denial is real, it is tracked as ISS-003 (#964), and it belongs to task 054. Do NOT close it here by inventing a service-request root set.</step>
     <step order="2">Verify veto interplay: child-level deny entry vetoes the child only; Restricted on the child denies all contacts on the child; Secure on the ANCESTOR suppresses derived/org terms feeding the ancestor's rights (per design §4.5 note 8) and therefore the inherited term — write this as a test before relying on it.</step>
     <step order="3">Guard the non-edge: a matter with an associated project must show NO inherited term (test).</step>
     <step order="4">Closed-set tests per acceptance criteria; run full evaluator suite for regressions.</step>

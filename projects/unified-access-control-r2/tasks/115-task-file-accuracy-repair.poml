@@ -3,7 +3,7 @@
   <metadata>
     <title>Repair the nine open task files that carry a wrong load-bearing sentence (036, 054, 055, 056, 087, 088, 089, 094, 095)</title>
     <phase>Wave 0 — bookkeeping, before any execution</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Edits .poml instruction text only — no .cs / .ts / .tsx, no production surface, no schema. The blast radius is what a LATER executor is told to build, which is why the closed set is per-file and verification is grep-count-based rather than test-based.</rigor-reason>
     <model-tier>sonnet</model-tier>

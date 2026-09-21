@@ -51,8 +51,26 @@
    250 MB, so "ask after the upload" can mean a very long wait before a question.
 
    The container is SERVER-resolved, so the client cannot look inside it — it must ask the server.
-   ⚠️ **Check `DriveItemOperations.ListChildrenAsync` for reuse BEFORE adding an endpoint** (CLAUDE.md
-   §11). A new endpoint needs the three-question justification.
+
+   🔴 **THE PROBE MUST BE RECORD-KEYED `(entity, recordId, name)`, WITH THE CONTAINER RESOLVED
+   SERVER-SIDE.** This is a hard requirement, not a preference — added by task 115 on 2026-09-21
+   after verification at HEAD.
+
+   ⚠️ **`ListChildrenAsync` CANNOT BE REUSED AS-IS**, and the earlier "check it for reuse" note read
+   as though it could. Verified signature:
+   `DriveItemOperations.ListChildrenAsync(string driveId, string? itemId = null, CancellationToken ct = default)`
+   (`Infrastructure/Graph/DriveItemOperations.cs:40-43`, surfaced via `SpeFileStore.cs:104-108`) — it is
+   **DRIVE-KEYED**. Exposing it to a client probe would mean the client naming the container, which is
+   precisely the `ClientSupplied` shape task 083 DELETED. `SpeWriteSinkContainerProvenanceGuardTests`
+   now pins the `ClientSupplied` allow-list at **ZERO** entries (machine-verified 2026-09-21:
+   `grep -c "^            Provenance.ClientSupplied," tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`
+   → `0`), on the stated invariant that *no SPE write sink in this codebase takes its container or drive
+   from client input*. A drive-keyed probe would fail that guard — correctly.
+
+   So the §11 answer is constrained before you start: reuse `ListChildrenAsync` **internally, behind a
+   record-keyed seam** that resolves `(entity, recordId)` → container server-side exactly as tasks
+   076/083 established. What still needs the three-question justification is only the SEAM (new endpoint
+   vs extending an existing record-keyed one) — never the keying, which is settled.
 
    ⚠️ The probe is an OPTIMISATION, not the guarantee. The 409 path MUST remain — two users can race
    between probe and upload. Do not let the probe become the only check.
@@ -80,7 +98,7 @@ see `requestOrThrow`. Any new probe call must go through it, or its failures wil
 
   <steps mode="directional">
     <step order="0">🔴 RE-SCOPE. Verify at current HEAD exactly which of the above is already shipped, and narrow this task to what remains. Record the narrowed scope before writing code.</step>
-    <step order="1">Decide probe vs reuse: can `ListChildrenAsync` answer "does this name exist in this container" without a new endpoint? Answer the §11 three questions either way.</step>
+    <step order="1">Decide the SEAM only — the keying is already settled as record-keyed `(entity, recordId, name)`. `ListChildrenAsync` is drive-keyed and may be reused only INTERNALLY behind a server-side container resolution; it must not become the client-facing shape. Answer the §11 three questions for whichever seam you choose, and state explicitly that the `ClientSupplied` allow-list stays at zero.</step>
     <step order="2">Wire the probe ahead of the byte transfer, reusing the EXISTING dialog and its two options. Do not author a second dialog.</step>
     <step order="3">Keep the 409 path fully intact as the race-safe backstop; add a test proving a collision discovered ONLY at upload time still reaches the dialog.</step>
     <step order="4">"Use existing" — only if 095 has landed. Otherwise leave it out and say so.</step>
@@ -107,6 +125,8 @@ see `requestOrThrow`. Any new probe call must go through it, or its failures wil
     <criterion>The 409 path still works and still reaches the same dialog (race backstop) — asserted by test.</criterion>
     <criterion>No second collision dialog is authored; the shipped one is reused.</criterion>
     <criterion>Any new endpoint carries the §11 three-question justification, or none was added.</criterion>
+    <criterion>The probe is record-keyed `(entity, recordId, name)` with the container resolved server-side; no client-facing surface accepts a driveId or containerId.</criterion>
+    <criterion>`SpeWriteSinkContainerProvenanceGuardTests` still pins the `ClientSupplied` allow-list at ZERO entries after this task — asserted by running the guard, not by inspection.</criterion>
     <criterion>"Use existing" is implemented only if 095 landed; otherwise its absence is recorded.</criterion>
   </acceptance-criteria>
 
