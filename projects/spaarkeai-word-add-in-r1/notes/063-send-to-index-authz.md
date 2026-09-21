@@ -324,9 +324,27 @@ same list from the other side.
 4. **`git commit --allow-empty` with no pathspec is not empty** — it commits the shared index.
 
 **The lesson that generalises**: `--stat` and `--name-only` tell you *which files* a commit touched, not
-*whose content* is in them. The check that actually caught hazard 3 was comparing the length of the specific
-line against `HEAD~1`. On a shared file, verify the content you did **not** intend to change is identical to
-its parent, rather than confirming that the file you did intend to change appears.
+*whose content* is in them. On a shared file, verify that the content you did **not** intend to change is
+identical to its parent — `git diff <parent> HEAD -- <path>` should touch only your own lines — rather than
+confirming that the file you did intend to change appears.
+
+> **Corrected after the fact, because the first correction was itself wrong.** This section originally
+> prescribed *"compare the byte length of the specific line against `HEAD~1`"* as the check that beats a
+> `--stat` line. That check then failed on its very first use: task 064 and this task measured the same two
+> rows and got four different numbers — 3,386/3,062, 3,397/3,088 and 3,437/3,113. Nothing had changed. Two
+> independent measurement bugs: `awk -F'|' '{print length($3)}'` returns the third **pipe-delimited field**,
+> and these rows contain eight internal `|` characters, so it truncated at the first inline table or code
+> span; and PowerShell's `$line.Length` counts **characters**, while the other figures counted **bytes** —
+> these rows carry 21 and 13 non-ASCII characters (`—`, `✅`, `🔴`, `⚠️`), worth 39 and 24 extra UTF-8 bytes.
+> A first attempt to explain the gap blamed CRLF conversion, which cannot be right: line-ending conversion
+> moves a line by exactly one byte, and the observed deltas were 11 and 26 and differed from each other.
+>
+> **So the durable rule is about the KIND of check, not the units.** A derived scalar — a count, a length, a
+> `--stat` figure — fails silently and plausibly, and produces a number that still looks like evidence. A
+> content diff either matches or it does not, cannot be truncated by the data it is measuring, and has no
+> units to get wrong. The uncomfortable part is the symmetry: having replaced the `--stat` trap with a
+> scalar, both agents then reached for a plausible-sounding cause (CRLF) instead of testing it — the same
+> failure mode one layer up, and the reason this paragraph exists rather than a quiet edit.
 
 ---
 
