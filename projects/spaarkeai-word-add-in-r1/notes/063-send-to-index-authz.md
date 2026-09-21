@@ -349,12 +349,27 @@ confirming that the file you did intend to change appears.
 > and 26 **and differed from each other**. Accepting a mechanism without checking whether its magnitude was
 > even the right order is the actual error, and it is a cheaper one to catch than any of the three above.
 >
-> **So the durable rule is about the KIND of check, not the units.** A derived scalar — a count, a length, a
-> `--stat` figure — fails silently and plausibly, and produces a number that still looks like evidence. A
-> content diff either matches or it does not, cannot be truncated by the data it is measuring, and has no
-> units to get wrong. The uncomfortable part is the symmetry: having replaced the `--stat` trap with a
-> scalar, both agents then reached for a plausible-sounding cause (CRLF) instead of testing it — the same
-> failure mode one layer up, and the reason this paragraph exists rather than a quiet edit.
+> **Check the magnitude first — it dominates everything below it.** One byte versus eleven-and-twenty-six
+> was checkable the instant the discrepancy appeared, with no tooling, no second measurement and no second
+> opinion, and it would have invalidated the CRLF theory before any of the three measurement bugs mattered.
+> It was the cheapest check available and both agents skipped it first.
+>
+> **Then: the durable rule is about the KIND of check, not the units.** A derived scalar carries three
+> independent ways to be wrong, and the three bugs above are exactly one of each:
+>
+> | Failure mode | What went wrong here |
+> |---|---|
+> | a **parser** over the payload | `awk -F'\|'` split the row at data the row itself contained |
+> | **units** | characters vs UTF-8 bytes |
+> | a **framing convention** | is the trailing newline part of the line? |
+>
+> A content diff has none of the three — nothing to parse, no units, nothing to frame — and it either matches
+> or it does not. That is the whole of the rule; the distribution of the bugs between the two agents is noise
+> and is deliberately not recorded.
+>
+> The uncomfortable part is the symmetry: having replaced the `--stat` trap with a scalar, both agents then
+> reached for a plausible-sounding cause (CRLF) instead of testing it — the same failure mode one layer up,
+> and the reason this paragraph exists rather than a quiet edit.
 
 ---
 
