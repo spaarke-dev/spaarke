@@ -1141,3 +1141,54 @@ render the second as the first.
 **Not yet verified**: whether an actual non-admin user is currently affected in dev (would need a test
 user in a child BU with Deep depth on this table). The ownership data and the code path are confirmed;
 the end-user symptom is inferred from Dataverse depth semantics and has NOT been reproduced.
+
+---
+
+#### 🔴 Amendment 2026-09-22 — the "`sprk_matter` precedent" is RETIRED, the ADR citation is WRONG, and both candidate conventions are broken in different ways
+
+**(1) Fix direction 1 above cited a precedent that may not exist.** The `spaarkeai-word-add-in-r1`
+session, which supplied it, retracted it the same day: *"I said `sprk_matter` is the precedent to copy…
+That was an inference from LIVE DATA. I had not found the code that does it, and going looking just
+now, I still haven't."* Matter rows do **look** team-owned, but no BFF code has been found that makes
+them so — it may be a plugin, the model-driven UI, or manual assignment. **Do not conform to it.**
+
+**(2) What IS in code is the OPPOSITE shape — caller-ownership.** Verified here independently:
+`OfficeService.cs:1464` and `:1593` set `entity["ownerid"] = new EntityReference("systemuser", ownerGuid)`,
+and `IOfficeService.cs:175` documents the parameter as *"Caller's resolved `systemuserid` for `ownerid`
+attribution (ADR-024); null → app-owned."*
+
+**(3) 🔴 That code comment MISCITES ITS ADR, and we would both have propagated it.** **ADR-024 is the
+Polymorphic Resolver Pattern and contains ZERO mentions of `ownerid`, ownership, or business unit**
+(grep-verified). The citation is simply wrong. The ADR that actually governs record ownership is
+**ADR-034**, and specifically **amendment A1.1 — authored by THIS PROJECT** (task 043, owner-approved
+2026-09-17, CLAUDE.md §6.5 path B), which makes `ownerid` / `owningteam` / `owningbusinessunit`
+**structurally conferring on the authorization surface without a registry entry**.
+
+**(4) So the decision is ours to get right, and BOTH candidates have a named failure mode:**
+
+| Convention | Failure mode |
+|---|---|
+| **Caller-ownership** (`ownerid` = acting user) — what the code does today elsewhere | Each grant row is owned by whoever created it. Grants are records **a team must see and manage**; this gives each user their own island. Wrong shape for this table. |
+| **Team / BU ownership** | 🔴 **ADR-034:76 says this breaks our own membership resolution**: *"discovery binds the FIRST matching target and `IncludedIdentityTables` starts at `systemuser`, so a polymorphic Owner column always resolves to SystemUser and binds the caller's own id — on a team-owned record `ownerid` holds the TEAM's id and never matches."* |
+
+ADR-034:76 also records that omitting owner-based membership **caused a production outage once
+already** — R7 W12 task 130 (2026-06-30): *"`sprk_matter` resolved rows=0 for a user who owns 44
+matters via `ownerid` … verified via raw SQL."* This is not a theoretical axis.
+
+**Consequence for this issue**: fix direction 1 is **not** a matter of copying a convention; it is a
+real design decision with an owner-level tension, and it should not be taken by inheriting either
+project's shape. Recorded as blocked pending `spaarkeai-word-add-in-r1` task 080 establishing which
+convention is real — with the ADR-034:76 hazard passed to them, since their 080 is about to choose.
+
+#### ✅ SPLIT OUT — the silent `catch` is a SEPARATE defect and must not wait on ownership
+
+Per the same exchange, and correct: **fixing ownership does NOT close the `catch { return [] }`.**
+Correct ownership removes the common *trigger*; the catch still converts **any** transient failure —
+throttling, a network blip, a token refresh — into *"nobody has access to this record"*, indistinguishable
+from a true empty result.
+
+It is also the more dangerous half of this issue. A 403 fails loudly; a confident empty list does not.
+
+**Therefore**: fix direction **3** is severable, has no dependency on the ownership decision, and should
+be scheduled on its own. If ownership is fixed first and the symptom disappears, the silent catch
+becomes much harder to justify prioritising later — and it will still be lying.
