@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-018 (#995) — unsecure-project must not report a failed share read as "0 shares revoked"</title>
     <phase>3 Secure Project lifecycle — register-driven (owner rule 2026-09-15)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies an access-control write path (.cs) plus its tests; tags auth/bff-api/testing.</rigor-reason>
     <model-tier>sonnet</model-tier>

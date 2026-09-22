@@ -1,7 +1,8 @@
 # Task 108 — ISS-018 (#995): an unsecure must not report a failed share read as a clean sweep
 
-> **Status**: code complete and reviewed; **verification partially blocked** by a degraded build
-> environment (§8). Task deliberately NOT marked `completed` — see §8 before changing its status.
+> **Status**: code complete and reviewed at `d0845724d`; **verification now complete** — ArchTests,
+> the criterion-4 perturbation, and the publish-size A/B were all re-run against the committed code on
+> 2026-09-21 and passed (§8). The POML's `<status>` element is left for the owning session to flip.
 > **Diff**: 5 files, +477 / −42. No production behaviour outside `/unsecure-project` is touched.
 
 ---
@@ -140,11 +141,11 @@ endpoint's coverage across two KEEP paths fragments it. Surfaced rather than lef
 
 | Check | Result | Scope |
 |---|---|---|
-| Build (5 projects) | 0 warnings / 0 errors | **post-review code** (`b9a57aecf`) |
-| Affected suite | **19 / 19 passed** | **post-review code** (`b9a57aecf`) |
-| ArchTests | 323 / 323 | ⚠️ **pre-review code only** |
-| Perturbation P1 (criterion 4) | 1 failure, exactly the predicted test | ⚠️ **pre-review draft only** |
-| Publish size | branch 45.46 MB vs fresh master 45.35 MB; **task's own delta 0.00 MB**; 214 files all three sides; PDBs included; `Compress-Archive -CompressionLevel Optimal` | ⚠️ **pre-review code only** |
+| Build (5 projects) | 0 warnings / 0 errors | **post-review code** (`d0845724d`) |
+| Affected suite | **19 / 19 passed** | **post-review code** (`d0845724d`) |
+| ArchTests | **323 / 323 passed** | ✅ **post-review code** (`d0845724d`), re-run 2026-09-21 |
+| Perturbation P1 (criterion 4) | GREEN 19/19 → RED **Failed 2 / Passed 17 / Total 19**, exactly `Unsecure_WhenTheShareReadCannotBeCompleted_ReportsAnIncompleteSweep` + `Unsecure_RetriedAfterAnIncompleteSweep_DoesNotThenClaimACleanSweep` → restored byte-identical (`git diff --stat` empty) → re-confirmed 19/19 | ✅ **post-review code** (`d0845724d`), re-run 2026-09-21 |
+| Publish size | pre-task `b42d6471e` 45.56 MB vs post-task `d0845724d` 45.56 MB (47,774,597 vs 47,775,951 bytes); **delta +1,354 bytes (+0.0013 MB)**; 215 files both sides; PDBs included (4 each); `Compress-Archive -CompressionLevel Optimal`, fresh short-path worktrees (`C:\wt108a`, `C:\wt108b`), zipped into the worktree root (not `C:\` itself, which refused the zip write) | ✅ **post-review code**, measured 2026-09-21 |
 | CVE (`--vulnerable --include-transitive`) | no vulnerable packages | current |
 | Conflict sync (Step 10.6) | master 0 commits since merge-base; touched none of my files | current |
 | Drift baseline | 116 POMLs / 116 rows, rc=0 | current |
@@ -152,26 +153,39 @@ endpoint's coverage across two KEEP paths fragments it. Surfaced rather than lef
 **Publish-size attribution correction.** The naive branch-vs-master figure is **+0.10 MB**, but that is
 the *whole project's* divergence across ~476 files. Re-publishing `wt108b` at the same commit with the
 two source files reverted isolates this task at **0.00 MB**. Reporting +0.10 as task 108's contribution
-would have repeated the 2026-09-02 attribution error in miniature.
+would have repeated the 2026-09-02 attribution error in miniature. The 2026-09-21 pre-task-vs-post-task
+A/B (`b42d6471e` vs `d0845724d`, §10) directly re-confirms this: **+0.0013 MB**, effectively zero.
 
-## 8. What is NOT verified, and why the task is not marked complete
+## 8. Verification status (updated 2026-09-21 — all three gaps closed)
 
-ArchTests, the perturbation re-run, and the publish delta were all measured against the **pre-review**
-draft. The post-review restructure (`EnumerateSharesAsync` extracted, both cancellation filters removed,
-`bool?` introduced, 2 tests added) is covered by the build and the 19/19 suite, but **not** by those
-three. They are re-confirmations on low-risk surfaces — no route added (so the `RouteAuthorizationGuardTests`
-census stays 118), no DI change, no package change, ~60 lines — but they are real gaps.
+All three measurements this section previously flagged as pre-review-only have now been re-run against
+the **committed, post-review code** at `d0845724d` (parent `b42d6471e`), from a healthy machine, per the
+§10 follow-up:
 
-**Criterion 4 is therefore partially met and must be reported as such.** If re-run, expect
-**Failed 2 / Passed 17 / Total 19** (`Unsecure_WhenTheShareReadCannotBeCompleted_ReportsAnIncompleteSweep`
-+ `Unsecure_RetriedAfterAnIncompleteSweep_DoesNotThenClaimACleanSweep`).
+- **ArchTests**: 323/323 passed, matching the prediction exactly. No route was added (unsecure-project
+  already existed), no DI change, no package change — the number held.
+- **Criterion-4 perturbation**: run GREEN (19/19) on the committed code, then `UnsecureProjectEndpoint.cs`'s
+  `EnumerateSharesAsync` had its strict call (`GetPrincipalAccessOrThrowAsync`) swapped for the soft call
+  (`GetPrincipalAccessAsync`) at the single call site — the minimal revert to "soft enumeration". Re-run:
+  **Failed 2 / Passed 17 / Total 19**, and the two failures were exactly the two predicted tests, not two
+  others (the "no shares can be enumerated at all" test and every other test in the suite still passed,
+  because they either fail the soft read too via `SoftShareReadSucceeds=false` — same outcome either way
+  — or exercise the happy path, unaffected by which read is called). The file was then restored from a
+  pre-edit byte copy; `git diff --stat` on the file showed **zero changes**; the suite was re-run and
+  confirmed **19/19** again.
+- **Publish size**: two fresh worktrees at short paths (`C:\wt108a` = `b42d6471e`, `C:\wt108b` =
+  `d0845724d`), published and zipped identically. 215 files both sides (equal — trustworthy). Delta
+  **+1,354 bytes (+0.0013 MB)**, essentially zero, consistent with §7's earlier finding. Both worktrees
+  removed via `git worktree remove` after the measurement (no node_modules junction was present — the
+  worktrees only ever ran `dotnet publish`, no npm install).
 
-**Why it could not be completed:** ten consecutive failed builds across six error codes (`CS0016`,
-`CS0246` ×802, `CS0006` ×4, `MSB3030`), builds going 31s → 10m, and eventually a sub-second `git diff`
-exceeding 120s. **Root cause found at the end: ten orphaned `dotnet.exe` processes (~1.2 GB) accumulated
-from the failed builds**, contending over the same `obj` directories — where there had been one.
-Remedy: `dotnet build-server shutdown` or terminating the orphans, then re-run. Not done here because
-those processes cannot be attributed to this worktree and other sessions may own some.
+Criterion 4 (build green; affected suites and ArchTests green; publish size reported against a fresh
+master and ≤60 MB) and criterion 5's build/test wording are now **fully met** against the committed code.
+This task can be marked verified. The corrected SHA label: the notes previously cited a post-review
+commit `b9a57aecf`, which **does not exist in this repository** (`git cat-file -t b9a57aecf` returns "Not
+a valid object name") — it was a laptop working SHA that never survived past the laptop described in the
+old §8. The real, committed post-review commit is **`d0845724d`** (parent `b42d6471e`), used throughout
+this section and §7.
 
 ## 9. Lessons
 
@@ -196,17 +210,11 @@ those processes cannot be attributed to this worktree and other sessions may own
 
 ## 10. Follow-ups
 
-- Re-run ArchTests (expect **323**), the criterion-4 perturbation (expect **Failed 2 / Passed 17 /
-  Total 19**, §8) and the publish measurement. ⚠️ **These are NOT blocked on anything.** The unhealthy
-  build host described in §8 was a **laptop-local pathology** (ten orphaned `dotnet.exe` processes,
-  since self-resolved back to one), and the work moved to a different machine on **2026-09-20** — do
-  not wait on it, and do not run `dotnet build-server shutdown` hunting for it on a fresh machine.
-  The publish A/B is also **simpler now than what §8 describes**: because the task code is committed,
-  it is two plain fresh short-path worktrees — `b42d6471e` (pre-task) vs `d0845724d` (post-task) —
-  with no "apply 2 files on top of a baseline" trick; the scratch worktrees §8 used were removed with
-  the laptop. Absolute MB figures in §8's table are **sanity checks only, not a reusable baseline**
-  (they move with machine, SDK patch and zip tool — root CLAUDE.md §10 hazards 2–4), so measure BOTH
-  sides fresh and confirm the file counts match. See the 🖥️ MACHINE SWITCH row in `current-task.md`.
+- ~~Re-run ArchTests, the criterion-4 perturbation, and the publish measurement~~ **DONE 2026-09-21**,
+  against the committed code `d0845724d` (parent `b42d6471e`), from a healthy machine. Results in §8:
+  ArchTests 323/323; perturbation GREEN 19/19 → RED Failed 2/Passed 17/Total 19 (exactly the two
+  predicted tests) → restored byte-identical → 19/19 again; publish delta +0.0013 MB, 215 files both
+  sides. All three measurements this row used to gate are closed; no outstanding re-run remains.
 - Hoist one log-capture provider into `tests/integration/Shared/` and delete the duplicates (§5).
 - ADR-019 partial-success guidance (200 + body flag) — path B candidate (§4 W2-adr).
 - No test asserts `sweepComplete` on the 500 flag-not-cleared ProblemDetails; that extension member is
