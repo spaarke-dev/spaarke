@@ -1,22 +1,30 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## 🔵 ACTIVE TASK — 067 (in-progress, started 2026-09-21) — supersedes the NEXT ACTION line below
+## 🔵 ACTIVE TASK — **080** (not started) — supersedes the NEXT ACTION line below
 
 | Field | Value |
 |---|---|
-| **Task** | 067 — job-ownership fail-closed (F5) |
-| **File** | `tasks/067-job-ownership-fail-closed.poml` |
-| **Rigor / tier** | FULL · opus @ xhigh · steps directional |
-| **Status** | implementation complete — awaiting full-suite count, then Step 9.5 gates |
-| **Next Action** | Record the full-suite count in `notes/067-job-ownership.md` §8, run `/code-review` + `/adr-check`, commit, then **task 080** |
+| **Task** | 080 — record-ownership assignment pattern (**the real blocker**) |
+| **File** | `tasks/080-record-ownership-assignment-pattern.poml` |
+| **Rigor / tier** | FULL · opus @ xhigh · steps directional · **run ALONE** |
+| **Status** | not-started |
+| **Next Action** | Begin step 1: reproduce the unreadability as an ordinary user and record it verbatim |
 
-**Shipped**: filter fails closed · the SECOND fail-open in `OfficeService.GetJobStatusAsync` closed (the POML
-named only the filter) · creator persisted to `sprk_initiatedby` at create · fallback LEFT OUTER joins
-`systemuser` and returns the OID · production test-job backdoor deleted.
-**Gates so far**: build 0/0 · ArchTests 191/191 · CVE clean · publish 45.54 vs fresh-master 45.46 at the SAME
-commit `99cdfe2ea` = **+0.08 MB** cumulative for the branch (this task's marginal contribution ~0.00).
-**Seeds**: fail-open → RED 2/6 · backdoor → RED 1/7 (returned **403 not 200** — the two fixes are
-independently effective) · restored **GREEN 11/0** incl. SSE.
+**Why 080 and not the next 🔲 in number order**: it blocks the real closure of 063, 064 and 066, and it now
+also gates getting dev back (see the deploy block below). 057/058/059/060/068+ can all wait behind it.
+Note 060 is *unblocked* by 067's schema decision whenever it is picked up — but 058 gates it.
+
+### ✅ 067 COMPLETE (2026-09-21, commit `d24a1c975`)
+
+Filter + a SECOND fail-open in `OfficeService.GetJobStatusAsync` (the POML named only the filter) both fail
+closed · creator persisted to the **already-existing, never-written** `sprk_initiatedby` · fallback LEFT OUTER
+joins `systemuser` so both sides of the comparison are the Entra OID by construction · production test-job
+backdoor deleted, and the two contract tests that were *pinning it as the contract* rewritten.
+Gates: build 0/0 · ArchTests 191/191 · **full suite 12,415/0/56** (reconciled: 12,403 + 8 task-065 + 4 mine) ·
+CVE clean · publish +0.08 MB cumulative (this task ~0.00). Full detail: `notes/067-job-ownership.md`.
+**One criterion unmet** — 061's guard, unreachable while 061 is deferred. Same as 062/063/064.
+
+### 🚩 DEV ENVIRONMENT — read before any deploy or live verification (2026-09-21/22)
 
 ### 🚩 DEV ENVIRONMENT — read before any deploy or live verification (2026-09-21/22)
 
