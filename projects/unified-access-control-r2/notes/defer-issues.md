@@ -1074,3 +1074,70 @@ status-row-vs-reference-row decision before it can diff sets. If 116 ships first
 ## Closed
 
 *(none yet)*
+### ISS-030 — the Manage Access modal's existing-grants list is invisible to non-root users, and the failure looks like "no grants"
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **in project** |
+| **Urgency** | next-round (access-control UI correctness; not a data-loss or privilege-escalation path) |
+| **Filed** | 2026-09-22 |
+| **Source** | Tip from the `spaarkeai-word-add-in-r1` session during BFF deploy coordination; **verified independently here against code AND live dev data** |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1010 |
+
+**Two defects that compound.**
+
+**(a) Grant rows are created app-only and never own themselves into a child BU.**
+`GrantExternalAccessEndpoint`'s create payload (`:666-700`) sets the root bind, `sprk_accesslevel`,
+`sprk_granteddate`, optionally `sprk_Contact` / `sprk_GrantedBy` / `sprk_expiresdate` /
+`sprk_Organization` — and **never `ownerid`**. The BFF writes app-only, so ownership defaults to the
+BFF application user, which sits in the **root** business unit.
+
+**Live confirmation (dev, 2026-09-22)** — not inferred:
+
+| Owning BU | Active grants |
+|---|---|
+| **Spaarke** (the ROOT — every other BU lists it as `parentbusinessunitid`) | **28** |
+| Spaarke Demo (a child) | 1 |
+
+**(b) The modal reads those rows in USER context, and swallows the failure.**
+`src/client/pcf/TrackingFieldTrio/index.ts:805` —
+`this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options)` — is a host-context
+`Xrm.WebApi` read, not a BFF call. A user in a child BU whose role grants **Deep** depth on
+`sprk_externalrecordaccess` traverses **downward only** and therefore cannot see a row owned by the
+root BU. The read is wrapped in:
+
+```ts
+} catch { return []; }
+```
+
+so a permission failure returns an **empty list**, which the UI renders identically to "nobody has
+access to this record."
+
+**Why nobody has hit it**: the people testing hold System Administrator (root BU / Organization
+depth), so they see all 28 rows. The defect is invisible to exactly the population most likely to test.
+
+**Consequence**: a non-admin with legitimate Manage Access rights opens the modal on a record that HAS
+external grants and is told it has none. They may re-grant access that already exists, or conclude
+nobody has access and fail to revoke someone who does. The access is real and conferring throughout —
+only the UI's view of it is empty.
+
+🔴 **This is task 108's defect shape in the client**: an access read whose failure is indistinguishable
+from an empty result. 108 fixed exactly this on the server (`GetPrincipalAccessAsync` returning an
+empty list on failure → strict read + `SweepComplete`). The same reasoning applies here and the fix
+should follow the same principle — **distinguish "no grants" from "could not read grants"**, and never
+render the second as the first.
+
+**Fix directions (not decided — needs its own task):**
+1. **Stamp `ownerid` on create** — the precedent is `sprk_matter`, which is assigned to a child BU's
+   default Owner team. This is the same root-BU ownership defect the `spaarkeai-word-add-in-r1`
+   project is fixing in its task **080** for `sprk_document` / `sprk_communication` / `sprk_todo`.
+   ⚠️ Coordinate: a shared ownership convention is better than two projects inventing one each.
+2. **Or read the grants through the BFF** (app-only, already authorization-gated by
+   `DelegationRuleFilter`) instead of host-context `Xrm.WebApi` — consistent with v1.0.31's own
+   direction of travel, which moved the *gate* server-side for exactly this class of reason.
+3. **Independently of 1 and 2**, the bare `catch { return [] }` must stop reporting a failed read as an
+   empty one. That part is a defect on its own terms whatever the ownership decision.
+
+**Not yet verified**: whether an actual non-admin user is currently affected in dev (would need a test
+user in a child BU with Deep depth on this table). The ownership data and the code path are confirmed;
+the end-user symptom is inferred from Dataverse depth semantics and has NOT been reproduced.
