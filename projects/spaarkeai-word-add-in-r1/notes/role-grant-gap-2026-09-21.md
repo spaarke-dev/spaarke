@@ -147,3 +147,62 @@ does not help rows that already exist.
 Dev only. Production roles were not examined, and `spaarke-bff-api-prod` was not checked. The end-to-end
 behaviour of 062/063/064 under the new grants has **not** been exercised against a live host — that is task
 042's UAT, and it should now be expected to pass rather than 403/500.
+
+---
+
+## 9. 🔴 CORRECTION TO §8 — the grant unblocked **062 only**. This is systemic, not a communications quirk.
+
+§8 said the role grant cleared 062, 063 and 064's document carrier, with only communications structurally
+unresolved. **That was wrong.** Owner observation, verified immediately: *"this needs to be the same pattern
+for all record entities — otherwise we will have the same issue in other record type entities."*
+
+Queried live. **Every record the BFF creates app-only lands in the ROOT business unit:**
+
+| Entity | `ownerid` | `owningbusinessunit` | Created by | Gate affected |
+|---|---|---|---|---|
+| `sprk_matter` | **default Owner team** of a child BU (`isdefault: true`) | *Spaarke Business Unit 1* ✅ | — | **062 works** |
+| `sprk_document` | BFF app user (`bb5a90e5…`) / a root-BU human | **root `Spaarke`** ❌ | `OfficeService` / `OfficeDocumentPersistence` — **ours** | 063 Write ❌ · 064 doc-source ❌ |
+| `sprk_communication` | BFF app user | **root** ❌ | `EmailUploadCaptureService` — Communication project | 064 comm-source ❌ · 066 ❌ |
+| `sprk_todo` | BFF app user | **root** ❌ | `OfficeService.CreateTodoAsync` — **ours** | same shape |
+
+Users sit in **child** BUs; Deep traverses **downward**; so a child-BU user reaches **none** of these rows at
+any depth below Global. `sprk_matter` is the only entity that behaves, because something assigns it to the
+BU's **default Owner team** rather than letting the owner default.
+
+### 9.1 What this actually means
+
+- **063's Run Index and 064's document-source To Do still 403 for every ordinary user** — the role grant did
+  not fix them, because the grant was never the binding constraint. Ownership placement is.
+- **064 is a live regression**: Outlook's create-To-Do-from-email worked before the gate and 403s after it.
+- **The `AppendTo` grants from §8 have the same limitation** wherever the target entity is root-owned.
+- The gates are still correct. What is wrong is that **records are created with no owner, so Dataverse
+  defaults ownership to the calling identity — a BFF application user, which lives in the root BU by
+  Dataverse default.** Three defaults chained; nobody decided this.
+
+### 9.2 The fix, and it already has a precedent in this repo
+
+Set `ownerid` at create time on every BFF-created record — to the acting user, or to their BU's **default
+Owner team**, which is exactly what `sprk_matter` already does. Then `owningbusinessunit` follows the *user*
+rather than the app identity, and depth-based security starts discriminating for the first time.
+
+**Ownership of the work splits:**
+
+| Entity | Owner of the fix |
+|---|---|
+| `sprk_document`, `sprk_todo` | **This project** — `OfficeService` / `OfficeDocumentPersistence` create them |
+| `sprk_communication` | **Communication project** — `EmailUploadCaptureService.BuildCommunicationEntity` |
+| Any other app-only create across the BFF | Needs a sweep — this is a **repo-wide pattern**, per the owner's instruction |
+
+**A backfill is required either way.** Existing rows stay root-owned and invisible until reassigned: 262
+communications, and all current documents and To Dos.
+
+### 9.3 Sequencing consequence
+
+Until ownership is fixed, tasks 063 and 064 ship gates that refuse everyone. Two honest options:
+
+1. **Land the ownership fix first**, then 063/064 work as designed. Correct, and larger.
+2. **Interim carve-out** — exempt the root-owned carriers from the new gates, documented, so the shipped
+   flows keep working while the data model is fixed. Restores Outlook's To Do flow and Run Index; leaves
+   those carriers ungated on purpose, with a named task to close them.
+
+Do **not** resolve this by granting Global depth. That re-opens F1 and F9 in one move.
