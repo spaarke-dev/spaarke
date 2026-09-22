@@ -612,3 +612,73 @@ inactive organization. Same discipline D-2 part 3 required: count and list **bef
   steps 0/1/2/3 amended.
 - `tasks/110-…poml` — a D-10 verification criterion, since 110 is where the date-bounding contract is
   checked end to end and the bound is now two-sided.
+
+---
+
+## D-11 — record ownership convention: the acting user's BU DEFAULT OWNER TEAM
+
+> **Decided** 2026-09-22 by the owner, directly to this session.
+> **Owner's words**: *"records are owned/assigned to the acting user's BU default owner team — not the
+> individual user."*
+
+### The convention
+
+`ownerid` = the **default Owner team of the acting user's business unit**. Not the acting user, and not
+the application user. `owningbusinessunit` **derives** from that and is never set directly.
+
+Resolution chain (verified live end-to-end by the `spaarkeai-word-add-in-r1` session against the
+owner's own example): `systemuser` → `businessunitid` → the `team` where
+`businessunitid` matches **AND `isdefault = true` AND `teamtype = 0`** → `ownerid =
+EntityReference("team", teamId)`.
+
+**In-repo precedent for the shape**: `CommunicationEnrichmentService.cs:712` —
+`fields["ownerid"] = new EntityReference("team", teamId.Value)`.
+
+### Why this supersedes what ISS-030 amendment (1) was about to do
+
+ISS-030 had recorded two candidate conventions and, at one point, a plan to conform to the other
+project's answer. That plan was **reversed** on the grounds that caller-ownership makes each grant an
+island owned by its creator — wrong for records several people must see and manage. **That objection is
+now moot**: the decision is team-ownership, which is exactly the shape a shared grant row needs. The
+conclusion and the convention now agree, reached independently.
+
+### 🔴 The reframing that matters more than the convention
+
+The Owner-binding hazard (ADR-034 A1.1; call site `MembershipFieldDiscoveryService.cs:94-95 / :288-300 /
+:531-534`) was being treated as an argument **against** team ownership. That was reasoning backwards.
+
+**The hazard is a DEFECT IN THE MEMBERSHIP RESOLVER** — it cannot bind a team-owned Owner column —
+**not evidence about what ownership should be.** Team ownership is how Dataverse does BU-scoped access
+and is the normal answer for records a team works. Picking per-user ownership to dodge a resolver
+limitation would have let a tool defect dictate the security model.
+
+So the hazard converts from *"team-ownership is dangerous"* into *"the resolver must learn to bind
+`owningteam`"* — filed separately. ADR-034 A1.1 remains the right home for it; its framing changes.
+
+### Two traps this project will hit (measured, not inherited)
+
+1. **Both team predicates are required.** Dev contains non-default Owner teams (`teamtype 0,
+   isdefault false`, GUID-ish names) **and** Access teams (`teamtype 1`). Filtering on `isdefault`
+   alone, or `teamtype` alone, selects the wrong team.
+2. **It only changes behaviour for callers in CHILD business units.** Measured live 2026-09-22:
+
+   | Business unit | Enabled users |
+   |---|---|
+   | **Spaarke** (ROOT) | **172** |
+   | Spaarke Demo (child) | 13 |
+   | Spaarke Business Unit 1 (child) | 1 |
+
+   For a **root** caller the convention correctly resolves to root's own default team — which is still
+   root, so nothing improves. ⚠️ This is an **implementation/verification note, NOT a request to
+   relocate users**: owner direction 2026-09-09 (*"let's not focus on relocating users — we have test
+   users that are in the correct BU"*) is explicitly marked do-not-re-raise, and the data above
+   confirms suitable test users exist in child BUs. The practical consequence is only that
+   **verification must use a child-BU test user** — testing as a root-BU administrator will show no
+   change and would be mistaken for the fix not working.
+
+### Applicability to this project
+
+Directly implementable: `GrantExternalAccessEndpoint.cs:330` **already resolves the acting user**
+(`ResolveGrantedBySystemUserIdAsync` maps the caller's oid → `systemuserid`), so the acting identity is
+in hand at the create site. What is missing is only the BU → default-team resolution and the `ownerid`
+bind. Scope belongs to a task, not to this record.

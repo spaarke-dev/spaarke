@@ -1267,3 +1267,46 @@ unordered dictionary), **but removing `systemuser` from it entirely WOULD** make
 to `team`. That is not a workaround — it would break every user-owned membership resolution in the
 product — so the honest phrasing is **"the only configuration that touches it is disqualifying,"** not
 "no configuration touches it." The first closes the door; the second invites someone to try it.
+
+#### ✅ Amendment 2026-09-22 (4) — OWNERSHIP HALF **DECIDED** by owner decision D-11; the hazard is re-filed as a resolver defect
+
+**The owner settled the convention directly** (2026-09-22): *"records are owned/assigned to the acting
+user's BU default owner team — not the individual user."* Full record: `owner-decision-brief-2026-09-18.md`
+§ **D-11**.
+
+So fix direction **1 is decided**: `sprk_externalrecordaccess` rows get `ownerid` = the **default Owner
+team of the acting user's BU** (`isdefault = true` AND `teamtype = 0` — **both** predicates required).
+`owningbusinessunit` derives and is never set directly. Precedent: `CommunicationEnrichmentService.cs:712`.
+
+**Amendment (3)'s reversal is itself now moot, and both paths converged.** (3) reversed the plan to
+conform to `spaarkeai-word-add-in-r1` task 080, because caller-ownership would make each grant an island
+owned by its creator — wrong for records a team must manage. 080 then landed **team-ownership**, which
+is precisely the shape argued for here. Same answer, reached independently on this table's own
+semantics rather than inherited. The reversal was still correct at the time: it is why this entry
+records grant-specific reasoning instead of a borrowed convention.
+
+**Implementable directly**: `GrantExternalAccessEndpoint.cs:330` already resolves the acting user
+(`ResolveGrantedBySystemUserIdAsync`), so only the BU → default-team resolution and the `ownerid` bind
+are missing.
+
+#### 🔴 The Owner-binding hazard is NO LONGER an input to this decision — it is a separate defect
+
+Re-filed as **issue #1011**. The reasoning was backwards: the hazard is a **defect in the membership
+resolver** (it cannot bind a team-owned Owner column), not evidence about what ownership *should* be.
+Team ownership is how Dataverse does BU-scoped access; choosing per-user ownership to dodge a resolver
+limitation would have let a tool defect dictate the security model. Fix belongs in the resolver.
+
+**The unresolved structural-ownership question moved to #1011 with it, and matters MORE now**: if A1.1's
+without-a-registry-entry rule pulls non-registry entities' Owner columns into the surface, then
+team-owned grants **and** team-owned documents both go dark in membership queries — a shared defect with
+a shared fix.
+
+⚠️ **Verification note**: measured 2026-09-22, **172 of 186 enabled users sit in the ROOT BU**, where
+this convention resolves to root's own default team and nothing changes. **Verify with a child-BU test
+user** (Test User 1 is in "Spaarke Business Unit 1"); testing as a root-BU administrator will show no
+difference and would be misread as the fix failing. User relocation remains out of scope per owner
+direction 2026-09-09.
+
+**Unchanged and still severable**: fix direction **3**, the `catch { return [] }` at
+`TrackingFieldTrio/index.ts:805`. It has no dependency on any of the above and should be scheduled on
+its own.
