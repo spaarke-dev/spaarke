@@ -1,5 +1,79 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
+## 🟢 HANDOFF 2026-09-21 (evening) — READ THIS FIRST, it supersedes every block below
+
+**Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Tree clean.**
+HEAD moves — get it with `git log -1 --format='%H %s'`. Do **not** trust a SHA written here.
+
+**Project: 80 task rows — 60 ✅ · 17 🔲 · 1 🔄 (042) · 2 escalated (065, 066).**
+Counted from `^| NNN |` rows only; the ✅ in TASK-INDEX's goal-eligibility table are wave flags, not tasks.
+
+### ⛳ NEXT ACTION — **task 067**, then 060 → 068
+
+`067-job-ownership-fail-closed.poml`. Last of the authorization wave. It lands the creator-OID schema
+change that **060 consumes**, so the order 067 → 060 → 068 is load-bearing.
+
+**Run tasks ONE AT A TIME.** See "the git hazard" below — this is not a preference.
+
+### What this session did
+
+A **Fable model-level review** (4 parallel reviewers: security · spec-coverage · architecture ·
+verification-integrity) → [`notes/fable-review-2026-09-21.md`](notes/fable-review-2026-09-21.md).
+The owner then directed that **every finding be fixed in this project** — not deferred, not filed as issues.
+Plan: [`notes/remediation-plan-2026-09-21.md`](notes/remediation-plan-2026-09-21.md) — **19 new tasks
+(061–079), 3 re-scoped (058, 059, 060)**.
+
+| Task | Outcome |
+|---|---|
+| **071** | 10 red jest suites → **56 suites / 750 tests green**, all gated. Proven on CI run `35643050671`. |
+| **073** | Node 18→20 on the deploy job, `.nvmrc` added. Proven on real run `35637852013` (`node v20.20.2`). |
+| **062** | **F1 (HIGH)** — `/office/search/entities` now trims via impersonated Dataverse read. Fail-closed by construction. |
+| **063** | **F2** — `send-to-index` tenant-bound to `tid`; every document authorized for **Write**. |
+| **064** | **F3** — `/office/todo` gates all four caller-supplied ids; existence oracle closed by construction. |
+| **065** | ⚠️ **ESCALATED, partially shipped.** Container narrowing + false-premise corrections landed. `TargetEntity` **NOT** made required — **F4 remains open**. Three reasons in its status-note. |
+| **066** | ⚠️ **ESCALATED, nothing shipped.** Filter designed then rejected on evidence — see below. |
+| **061** | ⛔ **DEFERRED** — census-ledger conflict with `unified-access-control-r2` PR #950. |
+
+### 🔴 The three things that matter most for the next session
+
+**1. The role-grant gap — RESOLVED, but read §8.2 of its note.**
+[`notes/role-grant-gap-2026-09-21.md`](notes/role-grant-gap-2026-09-21.md). The new gates needed Dataverse
+rights **no end-user role granted**; `prvWritesprk_Document` was held by nobody outside admin roles, so 063's
+Run Index would have 403'd for every user. **Owner granted them to `Spaarke Core User` on 2026-09-21** and I
+re-verified live: all six present at depth 4, plus `AppendTo` across the regarding types (which also closed
+065's separate finding that filing to a Matter was admin-only).
+**⚠️ The communication grant does NOT unblock 064's communication carrier or 066** — communication rows are
+owned by BFF app users in the **root** BU, and Deep traverses **downward**, so a child-BU user never reaches
+them. Only Global would, which re-opens F9. That is structural, not a configuration slip.
+
+**2. The git hazard — run one agent at a time.**
+Two concurrent agents' commits **swallowed each other's changesets** via the shared `.git/index`. They
+recovered without rewriting history and the combined tree builds 0/0, but do not repeat it. Four hazards and
+the measurement lesson are in [`notes/064-todo-source-gate.md`](notes/064-todo-source-gate.md) §10 — chiefly:
+**verify a commit's contents with `git diff <base> HEAD -- <paths>`, never `git show --stat` or any derived
+count.** A scalar has a parser, units and a framing convention to get wrong; a content diff has none.
+
+**3. Task 069 must pin 74, not 111.** Task 071's repairs removed 37 lines of accepted test-file debt.
+**Re-derive the number from a fresh CI run at the commit being pinned** — 072 and 075 may move it again, and
+the local figure disagrees with CI (80 vs 74 at the same commit). Pin the CI number.
+
+### Other live facts
+
+- **Suite baseline is now 12,411 / 0 / 56** (was 12,379 at session start). ArchTests **191/191**.
+- **`.claude/constraints/auth.md` corrected** — its "RetrievePrincipalAccess has zero call sites" claim is
+  false (22 files), but was **true when written 2026-08-20** and went stale two days later when
+  `CallerRecordAccessProbe` landed. Correction is stacked, not rewritten. The paragraph below it about
+  `AuthorizationService` passing `userAccessToken: null` was **not** re-verified — still open.
+- **Every completed task left criteria explicitly unmet rather than implying completeness.** The recurring one:
+  *"task 061's guard no longer flags this route"* is unmeetable while 061 is deferred — the census governs **no
+  Office route at all**, so nothing would notice a filter being detached. 061 must classify `OfficeEndpoints.cs`
+  as *conditionally* gated and `/office/search/entities` as query-level trimming when it lands.
+- **New findings filed, not silently widened**: D-063-1 (`/index`, `/index/batch`, `/index-file` authorize no
+  document before writing to the tenant partition) and D-063-2.
+
+---
+
+
 > **Last Updated**: 2026-09-21 — **056's gate is GREEN (two defects, both proven on real CI runs). Task 058 conflict-check DONE (soft warn, proceed). 057/059/060 still not started.**
 
 ---
