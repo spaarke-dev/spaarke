@@ -120,7 +120,15 @@ before-state count.**
 
 ## 5. Operator actions — ordering is load-bearing
 
-### 5a. 🔴 Task 107 pre-deploy COUNT gate — **UNMET**
+### 5a. ✅ Task 107 pre-deploy COUNT gate — **MEASURED IN DEV 2026-09-21: 0 of 28. Still UNMET for production.**
+
+**Dev result**: **0** Active grants carry a null `sprk_expiresdate` (all **28** Active grants have one),
+and **0** are already past expiry. **Nothing loses access on a dev deploy.** Owner decision D-1's
+"blast radius zero" claim — recorded as never re-verified — is now verified against dev.
+Evidence: `notes/task-109-junction-read-two-named-sets.md`.
+
+⚠️ **A dev result does not discharge a production gate.** Re-run §4.2a against the target tenant
+before deploying there. The original wording follows, because it is what the production run must do:
 
 Task 107 inverted the grant-expiry read so that an **undated** grant confers **nothing**. Every
 `Active` grant with a null `sprk_expiresdate` **loses access on deploy**.
