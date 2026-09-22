@@ -54,6 +54,18 @@ public interface IRecordOwnershipResolver
     /// Returns <c>null</c> when the user, the business unit, or the team cannot be resolved.
     /// </summary>
     Task<Guid?> ResolveOwningTeamAsync(Guid callerSystemUserId, CancellationToken ct);
+
+    /// <summary>
+    /// Same resolution keyed by the caller's <b>Entra object id</b> instead of their Dataverse systemuserid.
+    /// </summary>
+    /// <remarks>
+    /// Background paths have an OID and nothing else: <c>UploadFinalizationWorker</c> runs from a queue
+    /// message carrying <c>payload.UserId</c> (an OID), with no <see cref="System.Security.Claims.ClaimsPrincipal"/>
+    /// to hand to <c>ICallerSystemUserResolver</c>. Rather than fabricate a principal at each such call site,
+    /// this overload does the same two-query chain from the other end — the cross-reference is
+    /// <c>systemuser.azureactivedirectoryobjectid</c> (ADR-028), the same key that resolver uses.
+    /// </remarks>
+    Task<Guid?> ResolveOwningTeamForObjectIdAsync(Guid callerObjectId, CancellationToken ct);
 }
 
 /// <inheritdoc cref="IRecordOwnershipResolver" />
@@ -80,13 +92,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <inheritdoc />
-    public async Task<Guid?> ResolveOwningTeamAsync(Guid callerSystemUserId, CancellationToken ct)
+    public Task<Guid?> ResolveOwningTeamAsync(Guid callerSystemUserId, CancellationToken ct)
+        => ResolveCoreAsync("systemuserid", callerSystemUserId, ct);
+
+    /// <inheritdoc />
+    public Task<Guid?> ResolveOwningTeamForObjectIdAsync(Guid callerObjectId, CancellationToken ct)
+        => ResolveCoreAsync("azureactivedirectoryobjectid", callerObjectId, ct);
+
+    /// <summary>
+    /// The shared two-query chain. <paramref name="userKeyColumn"/> selects which identity the caller is
+    /// known by — the Dataverse systemuserid, or the Entra object id cross-reference (ADR-028).
+    /// </summary>
+    private async Task<Guid?> ResolveCoreAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
     {
-        if (callerSystemUserId == Guid.Empty)
+        if (userKey == Guid.Empty)
         {
             _logger.LogWarning(
-                "Cannot resolve an owning team: no caller systemuserid was supplied. The record must be "
-                + "refused rather than created app-owned (task 080).");
+                "Cannot resolve an owning team: no caller identity was supplied ({UserKeyColumn}). The record "
+                + "must be refused rather than created app-owned (task 080).",
+                userKeyColumn);
             return null;
         }
 
@@ -99,7 +123,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 TopCount = 1,
                 NoLock = true
             };
-            userQuery.Criteria.AddCondition("systemuserid", ConditionOperator.Equal, callerSystemUserId);
+            userQuery.Criteria.AddCondition(userKeyColumn, ConditionOperator.Equal, userKey);
 
             var users = await _dataverse.RetrieveMultipleAsync(userQuery, ct).ConfigureAwait(false);
             var businessUnitId = users.Entities.FirstOrDefault()
@@ -108,8 +132,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (businessUnitId is null || businessUnitId == Guid.Empty)
             {
                 _logger.LogWarning(
-                    "Cannot resolve an owning team: systemuser {CallerSystemUserId} has no business unit.",
-                    callerSystemUserId);
+                    "Cannot resolve an owning team: no systemuser with {UserKeyColumn}={UserKey}, or that user "
+                    + "has no business unit.",
+                    userKeyColumn, userKey);
                 return null;
             }
 
@@ -137,8 +162,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
 
             _logger.LogDebug(
-                "Resolved owning team {TeamId} for systemuser {CallerSystemUserId} (business unit {BusinessUnitId}).",
-                teamId, callerSystemUserId, businessUnitId);
+                "Resolved owning team {TeamId} for caller {UserKeyColumn}={UserKey} (business unit {BusinessUnitId}).",
+                teamId, userKeyColumn, userKey, businessUnitId);
 
             return teamId;
         }
@@ -150,9 +175,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             // Fail-closed, never fail-open-to-app-ownership: an unresolved team is a refusal upstream.
             _logger.LogWarning(ex,
-                "Owning-team lookup failed for systemuser {CallerSystemUserId}; the record must be refused "
+                "Owning-team lookup failed for caller {UserKeyColumn}={UserKey}; the record must be refused "
                 + "rather than created app-owned.",
-                callerSystemUserId);
+                userKeyColumn, userKey);
             return null;
         }
     }

@@ -110,10 +110,11 @@ public class OfficeDocumentPersistence
         long fileSize,
         string userId,
         CancellationToken cancellationToken,
-        Guid? preAssignedDocumentId = null)
+        Guid? preAssignedDocumentId = null,
+        Guid? owningTeamId = null)
         => CreateDocumentWithSpePointersAsync(
             request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken,
-            preAssignedDocumentId);
+            preAssignedDocumentId, owningTeamId);
 
     /// <summary>
     /// Task 046 (b): the same create, with the name the document is SHOWN under (<paramref name="documentName"/>,
@@ -132,7 +133,8 @@ public class OfficeDocumentPersistence
         long fileSize,
         string userId,
         CancellationToken cancellationToken,
-        Guid? preAssignedDocumentId = null)
+        Guid? preAssignedDocumentId = null,
+        Guid? owningTeamId = null)
     {
         _logger.LogDebug(
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
@@ -247,6 +249,12 @@ public class OfficeDocumentPersistence
             // uploaded, the row MUST take that id as its key — otherwise the stored file names a record that
             // does not exist. Null for every other caller, and Dataverse mints the key exactly as before.
             Id = preAssignedDocumentId,
+            // Task 080 (owner decision 2026-09-22): the row is owned by the acting user's business-unit
+            // DEFAULT OWNER TEAM, resolved upstream by IRecordOwnershipResolver and passed in. Until this,
+            // nothing set an owner and Dataverse defaulted it to the calling application user in the ROOT
+            // business unit — which is why all 512 pre-existing sprk_document rows are unreachable by any
+            // child-BU user at Deep depth. owningbusinessunit derives from the team; it is never set here.
+            OwningTeamId = owningTeamId,
             Description = request.ContentType switch
             {
                 SaveContentType.Email => request.Email?.Subject,
