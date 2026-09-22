@@ -1224,11 +1224,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid recordId,
         CancellationToken ct = default)
     {
-        var objectTypeCode = await GetEntityObjectTypeCodeAsync(entityLogicalName, ct);
-        if (objectTypeCode == 0)
-            return Array.Empty<DataversePrincipalAccess>();
-
-        var response = await SendGetAsync(PrincipalAccessQuery(recordId, objectTypeCode), ct);
+        // No object-type-code lookup: POA's objecttypecode holds the LOGICAL NAME (see PrincipalAccessQuery),
+        // which the caller already supplied. This also removes a failure mode — the metadata read that
+        // returned 0 and silently produced an empty share list.
+        var response = await SendGetAsync(PrincipalAccessQuery(recordId, entityLogicalName), ct);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning(
@@ -1267,11 +1266,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid recordId,
         CancellationToken ct = default)
     {
-        var objectTypeCode = await GetEntityObjectTypeCodeAsync(entityLogicalName, ct);
-        if (objectTypeCode == 0)
-            throw ShareReadFailed(entityLogicalName, recordId, "the table's object type code could not be read");
-
-        using var response = await SendGetAsync(PrincipalAccessQuery(recordId, objectTypeCode), ct);
+        // No object-type-code lookup: POA's objecttypecode holds the LOGICAL NAME (see PrincipalAccessQuery),
+        // which the caller already supplied. The "object type code could not be read" refusal is retired with
+        // it — that metadata read is no longer on this path, so it can no longer fail it.
+        using var response = await SendGetAsync(PrincipalAccessQuery(recordId, entityLogicalName), ct);
         if (!response.IsSuccessStatusCode)
             throw ShareReadFailed(entityLogicalName, recordId,
                 $"Dataverse answered {(int)response.StatusCode} {response.StatusCode}");
@@ -1287,9 +1285,29 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <summary>The query both share reads issue: every POA row of one record.</summary>
-    private static string PrincipalAccessQuery(Guid recordId, int objectTypeCode)
-        => $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq {objectTypeCode}"
-            + "&$select=principalid,principaltypecode,accessrightsmask,modifiedon";
+    /// <remarks>
+    /// 🔴 <b>Three faults were fixed here on 2026-09-22, each masking the next</b> — found because
+    /// <c>GET /api/v1/external-access/user-shares</c> answered 500 for every caller, admin included, and
+    /// verified one at a time against live Dataverse:
+    /// <list type="number">
+    /// <item><c>modifiedon</c> <b>does not exist on POA</b> — the column is <c>changedon</c>. Dataverse answered
+    /// <c>400 "Could not find a property named 'modifiedon' on type Microsoft.Dynamics.CRM.principalobjectaccess"</c>.</item>
+    /// <item><c>objecttypecode</c> on POA is <b><c>Edm.String</c></b>, not an integer. An unquoted numeric operand gave
+    /// <c>400 "A binary operator with incompatible types … Found operand types 'Edm.String' and 'Edm.Int32'"</c>.</item>
+    /// <item>The string it holds is the <b>LOGICAL NAME</b>, not the numeric type code rendered as text. Quoting the
+    /// number gave <c>400 "The entity with a name = '10473' … was not found in the MetadataCache"</c>.</item>
+    /// </list>
+    /// <para>So the entity's numeric object-type code is <b>not an input to this query at all</b>; the logical name
+    /// the caller already holds is. Verified: the corrected query answers <c>200</c>.</para>
+    /// <para><b>Why this went unnoticed</b>: the SOFT read (<see cref="GetPrincipalAccessAsync"/>) shares this query
+    /// and turns any non-success into an EMPTY LIST, so every share read in this environment reported "no shares"
+    /// rather than failing. That is exactly the defect task 108 exists to remove, sitting inside the very query task
+    /// 108's strict read depends on — the strict read is what finally surfaced it, by refusing instead of inventing
+    /// an empty answer.</para>
+    /// </remarks>
+    private static string PrincipalAccessQuery(Guid recordId, string entityLogicalName)
+        => $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq '{entityLogicalName}'"
+            + "&$select=principalid,principaltypecode,accessrightsmask,changedon";
 
     /// <summary>
     /// Turns POA rows into typed shares. Rows naming a principal kind this seam does not model are skipped in both
@@ -1318,11 +1336,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             if (!TryReadInt(row, "accessrightsmask", out var mask) && strict)
                 throw ShareReadFailed(entityLogicalName, recordId, $"the share of {principalId} has no readable rights mask");
 
-            // modifiedon is in the $select, so a value that cannot be read means an anomalous response. The soft
+            // changedon is in the $select, so a value that cannot be read means an anomalous response. The soft
             // read keeps its long-standing fallback — its callers only display the value. The strict read refuses:
             // "incomplete counts as failed" must not carry an exception that reports a share as changed just now.
+            // 🔴 The column is changedon, NOT modifiedon: POA has no modifiedon (see PrincipalAccessQuery). While
+            // this read asked for modifiedon, the $select itself 400'd, so no row ever reached this branch.
             DateTimeOffset modifiedOn;
-            if (row.TryGetValue("modifiedon", out var modifiedElement)
+            if (row.TryGetValue("changedon", out var modifiedElement)
                 && modifiedElement.ValueKind == JsonValueKind.String
                 && DateTimeOffset.TryParse(modifiedElement.GetString(), out var parsedModified))
             {
@@ -1331,7 +1351,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             else if (strict)
             {
                 throw ShareReadFailed(
-                    entityLogicalName, recordId, $"the share of {principalId} has no readable modifiedon");
+                    entityLogicalName, recordId, $"the share of {principalId} has no readable changedon");
             }
             else
             {

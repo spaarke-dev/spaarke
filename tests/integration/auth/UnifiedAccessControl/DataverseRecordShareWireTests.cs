@@ -79,9 +79,9 @@ public class DataverseRecordShareWireTests
     {
         var handler = SharesHandler($$"""
             {"value":[
-              {"principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":23,"modifiedon":"2026-09-15T10:00:00Z"},
-              {"principalid":"{{TeamId}}","principaltypecode":9,"accessrightsmask":1,"modifiedon":"2026-09-15T11:00:00Z"},
-              {"principalid":"{{Guid.NewGuid()}}","principaltypecode":2,"accessrightsmask":1,"modifiedon":"2026-09-15T12:00:00Z"}
+              {"principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":23,"changedon":"2026-09-15T10:00:00Z"},
+              {"principalid":"{{TeamId}}","principaltypecode":9,"accessrightsmask":1,"changedon":"2026-09-15T11:00:00Z"},
+              {"principalid":"{{Guid.NewGuid()}}","principaltypecode":2,"accessrightsmask":1,"changedon":"2026-09-15T12:00:00Z"}
             ]}
             """);
 
@@ -91,7 +91,7 @@ public class DataverseRecordShareWireTests
             new DataversePrincipalAccess(DataversePrincipalRef.User(UserId), 23, new DateTimeOffset(2026, 9, 15, 10, 0, 0, TimeSpan.Zero)),
             new DataversePrincipalAccess(DataversePrincipalRef.Team(TeamId), 1, new DateTimeOffset(2026, 9, 15, 11, 0, 0, TimeSpan.Zero)));
         handler.Requests.Last().Url.Should().Contain(
-            $"objectid eq {MatterId} and objecttypecode eq {MatterObjectTypeCode}",
+            $"objectid eq {MatterId} and objecttypecode eq 'sprk_matter'",
             "the read must be scoped to this record of this table");
     }
 
@@ -108,13 +108,36 @@ public class DataverseRecordShareWireTests
             .Should().BeEmpty("the soft read's contract is unchanged for its existing callers");
     }
 
+    /// <summary>
+    /// 🔴 Regression pin for the 2026-09-22 three-fault fix. The previous test here asserted that an unreadable
+    /// OBJECT TYPE CODE made the strict read throw — a refusal that no longer exists, because POA's
+    /// <c>objecttypecode</c> holds the LOGICAL NAME and the metadata lookup is off this path entirely.
+    /// <para>That test passed for months against a query real Dataverse answers <b>400</b> to, because the double
+    /// echoed whatever the code asked for. This replacement pins the WIRE SHAPE instead: the three things Dataverse
+    /// actually rejected are each asserted, so reintroducing any one of them reddens rather than passing.</para>
+    /// </summary>
     [Fact]
-    public async Task GetPrincipalAccessOrThrowAsync_WhenTheTablesObjectTypeCodeCannotBeRead_Throws()
+    public async Task GetPrincipalAccessOrThrowAsync_IssuesTheWireShapeDataverseAccepts()
     {
-        var strict = () => new OfflineService(SharesHandler(typeCodeStatus: HttpStatusCode.NotFound))
-            .GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
+        var handler = SharesHandler();
+        await new OfflineService(handler).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
 
-        await strict.Should().ThrowAsync<InvalidOperationException>().WithMessage("*object type code*");
+        var url = handler.Requests
+            .Single(r => r.Url.Contains("principalobjectaccessset", StringComparison.Ordinal)).Url;
+
+        // Fault 1: POA has no `modifiedon` — 400 "Could not find a property named 'modifiedon'".
+        url.Should().Contain("changedon").And.NotContain("modifiedon");
+
+        // Faults 2 + 3: `objecttypecode` is Edm.String holding the LOGICAL NAME. An unquoted int gave
+        // 400 "incompatible types ... 'Edm.String' and 'Edm.Int32'"; a quoted NUMBER gave
+        // 400 "The entity with a name = '10473' ... was not found in the MetadataCache".
+        url.Should().Contain("objecttypecode eq 'sprk_matter'");
+        url.Should().NotContain($"objecttypecode eq {MatterObjectTypeCode}");
+
+        // The metadata read is off this path — it can no longer fail it.
+        handler.Requests.Should().NotContain(
+            r => r.Url.Contains("EntityDefinitions", StringComparison.Ordinal),
+            "POA's objecttypecode is the logical name, so no object-type-code lookup is issued");
     }
 
     /// <summary>A second page could hold the very principal a caller is about to change.</summary>
@@ -122,7 +145,7 @@ public class DataverseRecordShareWireTests
     public async Task GetPrincipalAccessOrThrowAsync_WhenTheSharesContinueOnAnotherPage_Throws()
     {
         var handler = SharesHandler($$"""
-            {"value":[{"principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":1,"modifiedon":"2026-09-15T10:00:00Z"}],
+            {"value":[{"principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":1,"changedon":"2026-09-15T10:00:00Z"}],
              "@odata.nextLink":"https://test.crm.dynamics.com/api/data/v9.2/principalobjectaccessset?$skiptoken=abc"}
             """);
 
@@ -138,7 +161,7 @@ public class DataverseRecordShareWireTests
     [Fact]
     public async Task GetPrincipalAccessOrThrowAsync_WhenARowHasNoReadableMask_Throws_WhileTheSoftReadReadsZero()
     {
-        var body = $$"""{"value":[{"principalid":"{{UserId}}","principaltypecode":8,"modifiedon":"2026-09-15T10:00:00Z"}]}""";
+        var body = $$"""{"value":[{"principalid":"{{UserId}}","principaltypecode":8,"changedon":"2026-09-15T10:00:00Z"}]}""";
 
         var strict = () => new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
 
@@ -150,7 +173,7 @@ public class DataverseRecordShareWireTests
     [Fact]
     public async Task GetPrincipalAccessOrThrowAsync_WhenARowHasNoReadablePrincipal_Throws()
     {
-        var body = """{"value":[{"principaltypecode":8,"accessrightsmask":1,"modifiedon":"2026-09-15T10:00:00Z"}]}""";
+        var body = """{"value":[{"principaltypecode":8,"accessrightsmask":1,"changedon":"2026-09-15T10:00:00Z"}]}""";
 
         var strict = () => new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
 
@@ -158,7 +181,7 @@ public class DataverseRecordShareWireTests
     }
 
     /// <summary>
-    /// <c>modifiedon</c> is in the <c>$select</c>, so a value that cannot be read means an anomalous response. The
+    /// <c>changedon</c> is in the <c>$select</c>, so a value that cannot be read means an anomalous response. The
     /// strict read refuses it for the same reason it refuses an unreadable mask: "incomplete counts as failed" must
     /// not carry an exception that quietly reports a share as changed just now. The soft read keeps its fallback,
     /// because its callers only display the value (Step 9.5 review finding 12).
@@ -170,7 +193,7 @@ public class DataverseRecordShareWireTests
 
         var strict = () => new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
 
-        await strict.Should().ThrowAsync<InvalidOperationException>().WithMessage("*modifiedon*");
+        await strict.Should().ThrowAsync<InvalidOperationException>().WithMessage("*changedon*");
         (await new OfflineService(SharesHandler(body)).GetPrincipalAccessAsync("sprk_matter", MatterId))
             .Should().ContainSingle().Which.AccessRightsMask.Should().Be(23,
                 "the soft read still answers, with its fallback timestamp");
