@@ -81,9 +81,15 @@ export class UploadOperation {
    * Upload content that has NO OWNING RECORD YET. The server resolves the container from the ACTING
    * USER's business unit.
    *
-   * For the three flows where the bytes genuinely move before any record exists — an EmailComposer
-   * local attachment, the Analysis wizard's standalone document, and DocumentUploadWizard's "skip
-   * associate". Per the owner's 2026-08-28 resolution order.
+   * For content that is legitimately PARENTLESS — there is no record for it to belong to yet, as
+   * with an attachment on an unsent email draft. Task 076 classifies such content as correct by
+   * design, not as debt. Per the owner's 2026-08-28 resolution order.
+   *
+   * ⚠️ This comment deliberately does NOT enumerate its callers. It previously claimed "the three
+   * flows", naming DocumentUploadWizard's "skip associate" — which task 076 had already cut over to
+   * the record-keyed route. A low-level client method cannot know its consumers' flow count, and
+   * pinning one here is what made this comment wrong. For the current, verified caller set, see
+   * `projects/unified-access-control-r2/notes/task-093-close-out.md`.
    *
    * ⚠️ This is NOT a general-purpose escape hatch, and it is not "upload without authorization". If
    * the content HAS an owning record, use {@link uploadSmallForRecord} — routing it here would place

@@ -761,15 +761,18 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           if (!authFetch || !bffBaseUrl || !webApiAdapter) {
             throw new Error('Document upload is not available right now. Please try again shortly.');
           }
-          // 🔴 PARENTLESS UPLOAD (2 of 3). Task 076: the `sprk_analysis` row does not exist yet —
-          // it is created further down, and the document it needs must exist first. So this uses
-          // the record-LESS route (`PUT /api/obo/me/files/{path}`) and the SERVER derives the
-          // container from the acting user's business unit.
+          // 🔴 PARENTLESS UPLOAD. Task 076: the `sprk_analysis` row does not exist yet — it is
+          // created further down, and the document it needs must exist first. So this uses the
+          // record-LESS route (`PUT /api/obo/me/files/{path}`) and the SERVER derives the container
+          // from the acting user's business unit. Task 076's classification (project notes
+          // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
+          // parentless, alongside EmailComposer's local-attachment flow — the only other caller of
+          // `uploadFilesWithoutRecord` at HEAD.
           //
           // The client-side `context.speContainerId` guard is GONE: the client no longer resolves a
           // container, so it is not in a position to report one missing. If none can be derived the
           // server refuses with its own explanation, which surfaces through `uploadResult.errors`
-          // below. Reordering this wizard to create the analysis first is task 093.
+          // below.
           //
           // Reuse the shared EntityCreationService — the SAME proven upload path every other
           // Create*Wizard uses (Matter/Project/Event/Invoice/WorkAssignment). See

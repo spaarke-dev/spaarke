@@ -3,7 +3,7 @@
   <metadata>
     <title>Create-first cutover CLOSE-OUT: retire the three stale task-093 comments, pin the ordering by test, re-home the residue</title>
     <phase>0c Secure Documents — upload path decomposition</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>RE-TIERED 2026-09-21 from FULL. The reorder this task was written to perform ALREADY SHIPPED (task 076) and is compiler-enforced. What remains is comment hygiene plus one regression test. No authorization path, no schema, no ordering change.</rigor-reason>
     <model-tier>sonnet</model-tier>
