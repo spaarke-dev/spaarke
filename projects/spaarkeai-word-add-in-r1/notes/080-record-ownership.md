@@ -107,6 +107,62 @@ and record why, so a later sweep does not "finish the job" and widen them.
 **Awaiting owner confirmation before touching anything in category C.** Work on category A proceeds meanwhile,
 since it does not depend on the answer.
 
+## 4b. 🔔 ESCALATION 2 — the BFF creates only 6 of the owner's 19 entities
+
+**Owner's list (2026-09-22), 19 entities**: `sprk_agreement`, `sprk_analysis`, `sprk_billingevent`,
+`sprk_budget`, `sprk_budgetbucket`, `sprk_document`, `sprk_event`, `sprk_invoice`, `sprk_invoicelineitem`,
+`sprk_kpiassessment`, `sprk_matter`, `sprk_memo`, `sprk_project`, `sprk_reportcard`, `sprk_servicerequest`,
+`sprk_spendsignal`, `sprk_timekeeper`, `sprk_todo`, `sprk_workassignment`.
+
+The owner also corrected the category-C recommendation: **`sprk_workassignment` IS a core record** and must be
+team-owned. Verified live — its rows are user-owned in root (`ownerid` = `owninguser` = `1d02f31c…`,
+`owningbusinessunit` = `06fbf21c…`), the same defect shape. Category C now keeps only the genuinely per-user
+artifacts: notifications, workspace layouts, and the two thread-ownership sites.
+
+**Swept for which of the 19 the BFF actually creates:**
+
+| Created by the BFF (6) | Site |
+|---|---|
+| `sprk_document` | `DataverseServiceClientImpl:276` |
+| `sprk_analysis` | `DataverseServiceClientImpl:422` |
+| `sprk_workassignment` | `WorkAssignmentEndpoints:71` |
+| `sprk_matter` | `RecordCreationService:249` (via `MatterEntity` const) |
+| `sprk_project` | `RecordCreationService:355` (via `ProjectEntity` const) |
+| `sprk_todo` | `OfficeService:2765` |
+
+**NOT created by the BFF (13)**: `agreement`, `billingevent`, `budget`, `budgetbucket`, `event`, `invoice`,
+`invoicelineitem`, `kpiassessment`, `memo`, `reportcard`, `servicerequest`, `spendsignal`, `timekeeper`.
+These are created client-side (`Xrm.WebApi` wizards/PCF) or in the model-driven UI.
+
+### 🔴 Therefore the BFF-side approach CANNOT satisfy the requirement
+
+Patching create paths in the BFF fixes **6 of 19 entities, and only for rows the BFF creates**. The *same*
+entity created from an MDA form, a wizard, or an import stays user-owned. Task 080 as originally scoped
+("set the owner at create time in the BFF") is structurally incapable of delivering "all record entities are
+owned by the acting user's BU default owner team."
+
+### The options
+
+| | Mechanism | Coverage | Cost |
+|---|---|---|---|
+| **A** | BFF create paths only (080 as scoped) | 6/19 entities, BFF-created rows only | Smallest; leaves the requirement unmet |
+| **B** | **Dataverse pre-operation Create plugin** on all 19 | **19/19, every creation path** — BFF, wizards, MDA, imports, future code | New plugin assembly + registration + deploy |
+| **C** | B, plus keep the BFF's explicit assignment where it already sets an owner | 19/19 with defence in depth | B + small |
+
+**Recommendation: B (or C).** A plugin is the only layer that sees every create regardless of client. Two
+supporting facts:
+- **No ownership plugin exists today** — the only plugin assembly is `Spaarke.CustomApiProxy` (3 files); the
+  `ownerid` hits under `src/dataverse/solutions/` are entity/form XML, not code. So this is net-new either way.
+- **It fits ADR-002's thin-plugin envelope.** `IPluginExecutionContext` exposes **`BusinessUnitId`** (the
+  initiating user's BU) directly, so the plugin needs **one** cacheable query — BU → default owner team
+  (`isdefault = true AND teamtype = 0`) — and one attribute set. No HTTP, no external calls, far below 50 ms.
+
+**This is a scope expansion beyond task 080's boundaries (CLAUDE.md §6) and an architectural addition, so it
+is the owner's call, not a task-local one.** Awaiting the decision.
+
+**Path-independent work that proceeds regardless**: the **backfill** fixes EXISTING rows whatever created
+them, so it is needed under every option and is not blocked by this decision.
+
 ## 5. Status
 
 | Criterion | Status |
