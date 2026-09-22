@@ -95,3 +95,55 @@ All against `roleprivileges` ⋈ `privilege` ⋈ `role`, and `systemuserroles` �
 - roles granting `prvReadsprk_communication` → +Service Reader, Support User (1), **Spaarke Basic User (1)**
 - `prvReadsprk_matter` / `prvReadsprk_document` on the two Spaarke roles → Basic User depth 4 only
 - users holding either Spaarke role → `Test User 1` (both), `Ralph Schroeder` (Basic User)
+
+---
+
+## 8. ✅ RESOLVED 2026-09-21 — owner granted the rights to `Spaarke Core User`
+
+Verified live via MCP **after** the change. All six gating privileges are present at **depth 4 (Deep)**:
+
+| Privilege | Depth | Unblocks |
+|---|---|---|
+| `prvReadsprk_Matter` / `_Project` / `_Invoice` | 4 | **062** entity picker |
+| `prvReadsprk_Document` | 4 | **064** document-source To Do |
+| **`prvWritesprk_Document`** | 4 | **063** Run Index — *was the hard blocker; no end-user role had it* |
+| `prvReadsprk_Communication` | 4 | 064 / 066 — **but see §8.2** |
+
+Also granted at depth 4: `prvAppendTosprk_Matter` / `_Project` / `_Invoice` / `_Document` / `_WorkAssignment`
+/ `_Event` / `_Communication`. **This closes task 065's separate finding** that no end-user role held
+`AppendTo`, which meant filing a document to a Matter was admin-only on shipped code.
+
+### 8.1 Depth 4 (Deep) rather than the recommended depth 2 (BU) — consequence, not a defect
+
+For a user in a **leaf** BU (e.g. `Test User 1` in *Spaarke Business Unit 1*, which owns the Matter rows)
+Deep and BU are **identical**, so the picker trims exactly as designed.
+
+For a user in the **root** BU *Spaarke* (e.g. the owner account), Deep spans **all child BUs including
+"Secure Project"**. If Secure Project is meant to be invisible to root-BU staff, depth 2 is the correct
+setting for the five searched tables. Flagged, not blocking — it is a deliberate owner choice and matters
+only for root-BU users.
+
+### 8.2 ⚠️ The communication grant does NOT unblock 064's communication carrier or task 066
+
+`prvReadsprk_Communication` at depth 4 **looks** like it resolves them. It does not, for a structural reason:
+
+- Every `sprk_communication` row is owned by a **BFF application user** (`bb5a90e5…` = SDAP-BFF-SPE-API,
+  `8793f4b0…` = mi-bff-api-dev) — confirmed again here.
+- Those rows sit in the **ROOT** business unit `06fbf21c…` (*Spaarke*).
+- **Deep traverses DOWNWARD** — own BU plus descendants. A user in a *child* BU does **not** reach rows owned
+  in the *parent*.
+
+So `Test User 1` still cannot read any communication row. Only **Global (8)** would reach them — which is
+precisely the tenant-wide disclosure task 066 escalated about, so granting it would re-open F9 rather than
+close it.
+
+**Unchanged conclusions**: task 066 stays escalated; 064's communication-sourced To Dos still 403; the real
+fix remains setting `ownerid` on communication rows at create time
+(`EmailUploadCaptureService.BuildCommunicationEntity`), which is a Communication-project data-model change and
+does not help rows that already exist.
+
+### 8.3 Still not verified
+
+Dev only. Production roles were not examined, and `spaarke-bff-api-prod` was not checked. The end-to-end
+behaviour of 062/063/064 under the new grants has **not** been exercised against a live host — that is task
+042's UAT, and it should now be expected to pass rather than 403/500.
