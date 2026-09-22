@@ -84,7 +84,57 @@ the two the same way just because both are new tables.
 
 ---
 
-## 2. BFF API — `Sprk.Bff.Api`
+## 2. ✅ BFF API — **DEPLOYED TO DEV 2026-09-21** (commit `e45627fde`)
+
+Deployed via `scripts/Deploy-BffApi.ps1 -Environment dev` (direct deploy; **dev has no staging slot**).
+Package **45.58 MB**, under the 60 MB ceiling. **SHA-256 file-replacement verification passed on all 4
+critical files** — that check is not optional: the skill records that `az webapp deploy --type zip` can
+return HTTP 200 + Kudu `status=4 success` while the running .NET host's file locks silently prevent the
+DLLs being replaced. Health green, both declared CORS origins present.
+
+**Verified by probe — all six branch routes went 404 → live:**
+
+| Route | Before | After |
+|---|---|---|
+| `can-manage-access` | 404 | **401** (exists, auth required) — this is the v1.0.31 PCF fix |
+| `user-shares` | 404 | 401 |
+| `set-record-share-expiry` · `share-user` · `unshare-user` · `unsecure-project` | 404 | 405 (POST-only) |
+
+### 🔴 What was overwritten, and the ONLY correct way to restore it
+
+Dev was running **`work/spaarkeai-word-add-in-r1`'s unmerged BFF code**, build dated 2026-09-19 14:04
+— established by pulling the deployed `wwwroot` via Kudu and finding `OfficeVersionSaveAuthorizationFilter`,
+`QuickCreateSourceAccessFilter`, `DocumentUrlIdentityFilter` and `SharingUrlToken` in the assembly
+(none exist on master), while `TodoSourceAccessFilter` — present at their branch tip — was absent.
+
+**Cleared with that project's session before deploying.** They confirmed no dependency: their work is
+local `dotnet build`/`test`, and live verification for their tasks 062/063/064/067 is recorded as
+pending and unscheduled.
+
+**Rollback artifact** (byte-exact, keep it):
+```
+C:\tmp\bff-dev-rollback\bff-dev-wwwroot-2026-09-21-preUACdeploy.zip
+51,022,445 bytes · sha256 35c8e161305d0a8a31f69c98d68063d397fde488d13be8e3592951731bc807a2
+```
+
+> 🔴 **If dev ever needs the add-in project's code back, restore THAT ZIP. Do NOT rebuild from their
+> branch tip.** Their tip is deliberately not deploy-ready: every record the BFF creates app-only lands
+> in the ROOT business unit (nothing sets `ownerid`), users sit in child BUs, and Deep depth traverses
+> downward only — so their tip would 403 Run Index for everyone and regress Outlook's
+> create-To-Do-from-email. That is their task **080**, unfinished. The snapshot is the **pre-gate**
+> build and has none of that problem. Rebuilding "helpfully" from their tip would be strictly worse
+> than what was overwritten.
+
+### ⚠️ Process gap found while doing this
+
+**The `Deploy BFF API` workflow has not succeeded since June 2026** — every run since is a failure, and
+all recent deploys were hand-pushed `OneDeploy` with **no author recorded**. That is why nobody could
+say what was running on dev without disassembling the deployed DLL. Worth fixing on its own.
+
+Also: **basic auth is disabled on the SCM site** (`allow: false`), so Kudu needs an **AAD bearer token**;
+publishing credentials return 401.
+
+### Original section
 
 98 changed files. Deploy is **operator-driven**: the `Deploy BFF API` workflow is `disabled_manually`.
 
