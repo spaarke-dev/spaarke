@@ -1192,3 +1192,39 @@ It is also the more dangerous half of this issue. A 403 fails loudly; a confiden
 **Therefore**: fix direction **3** is severable, has no dependency on the ownership decision, and should
 be scheduled on its own. If ownership is fixed first and the symptom disappears, the silent catch
 becomes much harder to justify prioritising later — and it will still be lying.
+
+#### 🔴 Amendment 2026-09-22 (2) — the team-ownership hazard is CONFIRMED at a call site, and our own ADR stated its mechanism WRONG
+
+The `spaarkeai-word-add-in-r1` session refused to accept the hazard on the strength of an ADR line it
+could not read, and asked for the call site. Correct of them on both counts — and tracing it falsified
+our own wording.
+
+**The hazard is REAL. Call site, three parts:**
+
+| Step | Location | What it does |
+|---|---|---|
+| 1 | `MembershipFieldDiscoveryService.cs:531-534` | an `AttributeTypeCode.Owner` attribute is given **synthetic** targets |
+| 2 | `:94-95` | those come from hardcoded `OwnerAttributeTargets = new[] { "systemuser", "team" }` — **`systemuser` first** |
+| 3 | `:288-300` | the scan walks `lookup.Targets` **in order** and `break`s on the first hit in `identityTypeByTable` |
+
+So a polymorphic Owner column binds **SystemUser**, compares against the caller's own `systemuserid`,
+and on a **team-owned** record — where `ownerid` holds the *team's* id — never matches.
+
+**🔴 What we got wrong.** A1.1 said the ordering came from *"`IncludedIdentityTables` starts at
+`systemuser`"*. **It does not.** The scan tests against `identityTypeByTable`, which is a **dictionary**
+and therefore unordered; operator configuration order is irrelevant. The determinant is the **hardcoded
+`OwnerAttributeTargets` array**.
+
+**This makes the hazard WORSE, not weaker**: it cannot be configured away. Reordering
+`Membership:IncludedIdentityTables` would change nothing. ADR-034 A1.1 corrected accordingly.
+
+**Status of the hazard for cross-project use**: now resting on a **code path plus** the R7 W12 task 130
+production symptom (`sprk_matter` rows=0 for a user owning 44 matters via `ownerid`, verified by raw
+SQL) — **not** on our ADR text. That matters because, per CLAUDE.md §6.5 path B, an amendment must merge
+before or alongside code that depends on it, and **A1.1 lives only on `work/unified-access-control-r2`,
+which is unmerged** (PR #950, 27 tasks still open). Nobody outside this branch can read it. Any other
+project must cite the **call site**, not A1.1.
+
+**Net effect on fix direction 1**: team/BU ownership now looks close to disqualified for any table whose
+rows must resolve through membership — but the decision still belongs to a task, not to this register
+entry.
