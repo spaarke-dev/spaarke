@@ -135,18 +135,45 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
     [Fact]
     public async Task Get_OfficeJobStatus_WithKnownJob_Returns200()
     {
-        // Arrange
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        // spaarkeai-word-add-in-r1 task 067: this test used to fetch the hard-coded job
+        // 00000000-0000-0000-0000-000000000001 and assert 200 Running — i.e. it pinned the production
+        // test-job BACKDOOR as the contract, which is exactly what that task deleted. A route that
+        // fabricates job data for any caller is not a "known job"; it is invented state.
+        //
+        // The coverage intent is preserved and made honest: a job that genuinely exists AND is owned by
+        // the caller returns 200 with its real status. The owner is the point — without it this asserts
+        // nothing about authorization.
+        var jobId = Guid.NewGuid();
+        using var factory = new OfficeJobOwnershipTestWebAppFactory();
+
+        var ownedJob = new JobStatusResponse
+        {
+            JobId = jobId,
+            Status = JobStatus.Running,
+            JobType = JobType.EmailSave,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = "test-user-oid"
+        };
+
+        // The filter reads the job through the no-caller overload; the handler through the caller one.
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ownedJob);
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ownedJob);
+
+        var client = factory.CreateClient();
 
         // Act
-        var response = await _client.GetAsync($"/api/office/jobs/{testJobId}");
+        var response = await client.GetAsync($"/api/office/jobs/{jobId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var result = await response.Content.ReadFromJsonAsync<JobStatusResponse>();
         result.Should().NotBeNull();
-        result!.JobId.Should().Be(testJobId);
+        result!.JobId.Should().Be(jobId);
         result.Status.Should().Be(JobStatus.Running);
     }
 
@@ -530,19 +557,56 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
     [Fact]
     public async Task Get_OfficeJobStream_ReturnsSSEContentType()
     {
-        // Arrange
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        // spaarkeai-word-add-in-r1 task 067: like the sibling status test, this used to stream the
+        // hard-coded test job — so it passed on fabricated data and would have kept passing if the SSE
+        // route had broken for every real job. It now streams a job that exists and is OWNED by the
+        // caller, which is the shipped save-progress surface the pane actually consumes.
+        var jobId = Guid.NewGuid();
+        using var factory = new OfficeJobOwnershipTestWebAppFactory();
+
+        var ownedJob = new JobStatusResponse
+        {
+            JobId = jobId,
+            Status = JobStatus.Running,
+            JobType = JobType.EmailSave,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = "test-user-oid"
+        };
+
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ownedJob);
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ownedJob);
+
+        // The handler enumerates the stream after writing the SSE headers. A loose mock yields null for
+        // an IAsyncEnumerable, and `await foreach` over null throws — which surfaced as a 500 and would
+        // have been easy to misread as an authorization failure. An empty stream closes cleanly, which is
+        // all this test needs: it asserts the response SHAPE (200 + text/event-stream), not the frames.
+        factory.OfficeServiceMock
+            .Setup(s => s.StreamJobStatusAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(EmptyEventStream());
+
+        var client = factory.CreateClient();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         // Act
-        var response = await _client.GetAsync(
-            $"/api/office/jobs/{testJobId}/stream",
+        var response = await client.GetAsync(
+            $"/api/office/jobs/{jobId}/stream",
             HttpCompletionOption.ResponseHeadersRead,
             cts.Token);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
+    }
+
+    /// <summary>An SSE stream that completes immediately — see the call site for why it is needed.</summary>
+    private static async IAsyncEnumerable<byte[]> EmptyEventStream()
+    {
+        await Task.CompletedTask;
+        yield break;
     }
 
     #endregion

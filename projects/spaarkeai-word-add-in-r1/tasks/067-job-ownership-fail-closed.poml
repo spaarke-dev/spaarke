@@ -4,7 +4,45 @@
     <title>F5 — JobOwnershipFilter fails OPEN on a missing CreatedBy, the creator is never persisted, and a hard-coded test job serves fabricated status in production</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061. MUST precede 060 (they share the schema change).</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>
+      Executed 2026-09-21. See notes/067-job-ownership.md.
+
+      REPRODUCED verbatim (note §2): with no recorded owner a non-owner received another user's job status —
+      200 OK for CreatedBy null AND empty; the retired test job served fabricated Running status. RED 3/5.
+      A nuance the finding did not state: whitespace ("   ") ALREADY refused, because IsNullOrEmpty is false
+      for it; only null and empty failed open. The fix uses IsNullOrWhiteSpace so one rule covers all three.
+
+      SHIPPED: (1) JobOwnershipFilter now fails CLOSED — ownership must be positively PROVEN, with two reason
+      codes (ownership_mismatch / ownership_unproven) behind ONE identical 403; (2) a SECOND fail-open the
+      POML did not name, OfficeService.GetJobStatusAsync's in-memory check, closed the same way — fixing only
+      the filter would have left the handler path open; (3) the creator is persisted at create time;
+      (4) the Dataverse fallback maps it back, which is what makes failing closed safe rather than a total
+      polling outage after a restart; (5) the production test-job backdoor DELETED.
+
+      SCHEMA DECISION — 060 consumes this. NO schema change, NO new column, NO solution edit.
+      sprk_processingjob.sprk_initiatedby (LOOKUP -> systemuser) ALREADY EXISTS (verified live via Dataverse
+      MCP) and Models/ProcessingJob.cs:62 already declares it; it was simply never written. Create resolves
+      caller OID -> systemuserid via the existing ICallerSystemUserResolver; the fallback read LEFT OUTER
+      joins systemuser and returns azureactivedirectoryobjectid, so BOTH sides of every ownership comparison
+      are the Entra OID by construction rather than by coincidence. GUIDs canonicalized per ADR-044.
+      Escalation trigger 1 did NOT fire. Legacy rows (no initiator) are REFUSED.
+
+      SEEDED BOTH DIRECTIONS: fail-open restored -> RED 2/6 (exactly the two fail-open cases); backdoor
+      restored -> RED 1/7, and notably it returned 403 not 200, because the fail-closed filter already
+      neutralizes it — the two fixes are independently effective, and the test binds to the DELETION because
+      it asserts 404 (absent) rather than merely "not 200". Restored GREEN 11/0 incl. the SSE stream tests.
+
+      Gates: build 0 warnings / 0 errors; ArchTests 191/191; CVE clean; publish branch 45.54 MB vs
+      fresh-master 45.46 MB at the SAME commit 99cdfe2ea = +0.08 MB cumulative for the branch, of which this
+      task's marginal contribution is ~0.00 (no new packages). Full suite 12,415/0/56 (total 12,471), reconciled: 12,403 after 063/064, +8 task 065, +4 mine.
+
+      ONE CRITERION NOT MET: "task 061's guard no longer flags the job routes" is UNREACHABLE while 061 is
+      deferred — RouteAuthorizationGuardTests.GovernedFiles contains no Api/Office/* entry, so nothing flags
+      these routes and nothing would notice a filter being detached. Same unmet criterion as 062/063/064, for
+      the same reason; it closes when 061 closes. Criterion 2 says "creator-OID field": the FIELD stores a
+      systemuserid (it is a lookup); the OID is what the read returns, via the join. Stated, not glossed.
+    </status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Security fix plus a Dataverse schema addition. Tags include bff-api + auth + security + dataverse.</rigor-reason>
     <model-tier>opus</model-tier>

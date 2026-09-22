@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
@@ -73,6 +74,14 @@ public class OfficeService : IOfficeService
     // FR-13 (spaarkeai-word-add-in-r1 task 030): the Matter quick-create path. Required (ADR-032): its registration
     // is unconditional, so an absent one is a startup fault, never a per-request 403.
     private readonly RecordCreationService _recordCreation;
+    // Task 067 (finding F5): resolves the calling user's Dataverse systemuserid so the job row can record
+    // WHO asked for it (sprk_initiatedby). Reused, not reinvented (CLAUDE.md §11) — this is the same
+    // ICallerSystemUserResolver the Communication read path and task 062's picker already depend on,
+    // TryAdd-registered inline by CommunicationModule, which Program.cs composes unconditionally.
+    // Optional/null-tolerant to match the six optional deps above (bare test ctors keep compiling). If it
+    // is absent the creator is simply not recorded — and an unrecorded creator is REFUSED by the ownership
+    // checks, so the degradation direction is closed, never open.
+    private readonly ICallerSystemUserResolver? _callerSystemUserResolver;
     private readonly ILogger<OfficeService> _logger;
 
     // FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" fire-and-forget dispatch, extracted —
@@ -103,7 +112,8 @@ public class OfficeService : IOfficeService
         IServiceScopeFactory? scopeFactory = null,
         IDocumentProfileAi? documentProfileAi = null,
         IHostApplicationLifetime? appLifetime = null,
-        IImpersonatedCommunicationQuery? impersonatedQuery = null)
+        IImpersonatedCommunicationQuery? impersonatedQuery = null,
+        ICallerSystemUserResolver? callerSystemUserResolver = null)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -125,6 +135,7 @@ public class OfficeService : IOfficeService
         _dataverseClient = dataverseClient;
         _impersonatedQuery = impersonatedQuery;
         _genericEntityService = genericEntityService;
+        _callerSystemUserResolver = callerSystemUserResolver;
         _logger = logger;
         _profileDispatcher = new OfficeProfileDispatcher(scopeFactory, documentProfileAi, appLifetime, logger);
     }
@@ -476,6 +487,40 @@ public class OfficeService : IOfficeService
                 TriggerAiProcessing = request.TriggerAiProcessing
             });
 
+            // Task 067 (finding F5): record WHO asked for this job, at CREATE time.
+            //
+            // Nothing persisted a creator before, so once the in-memory entry was evicted the durable row
+            // could not answer "whose job is this?" — and both ownership checks were written to wave that
+            // case through. Persisting it here is what makes failing closed safe: it is the difference
+            // between "we refuse because we cannot tell" on every job and on only the legacy ones.
+            //
+            // Resolved BEFORE the create and deliberately NOT inside its try/catch: that catch treats a
+            // failure as "Dataverse unavailable" and silently downgrades the job to in-memory-only, so
+            // letting a resolver hiccup reach it would quietly cost durability for an authorization field.
+            // An unresolved caller yields null, the property is skipped by the create mapper, and the row
+            // simply records no creator — which the ownership checks then REFUSE. Fail-closed by default.
+            Guid? initiatedBySystemUserId = null;
+            if (_callerSystemUserResolver is not null)
+            {
+                var callerResolution = await _callerSystemUserResolver
+                    .ResolveAsync(httpContext.User, cancellationToken);
+
+                if (callerResolution.IsResolved
+                    && Guid.TryParse(callerResolution.SystemUserId, out var resolvedSystemUserId)
+                    && resolvedSystemUserId != Guid.Empty)
+                {
+                    initiatedBySystemUserId = resolvedSystemUserId;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Could not resolve a Dataverse systemuser for the caller ({Reason}); this job will " +
+                        "record no creator and its status will therefore be refused after the in-memory " +
+                        "entry expires (task 067 fail-closed rule).",
+                        callerResolution.UnresolvedReason ?? "unknown");
+                }
+            }
+
             try
             {
                 // Create ProcessingJob in Dataverse using existing IDataverseService
@@ -490,7 +535,10 @@ public class OfficeService : IOfficeService
                     Progress = 0,
                     IdempotencyKey = idempotencyKey,
                     CorrelationId = Guid.NewGuid().ToString(),
-                    Payload = payload
+                    Payload = payload,
+                    // → sprk_initiatedby (systemuser lookup). Null is SKIPPED by the create mapper, so an
+                    // unresolved caller leaves the field unset rather than failing the save (task 067).
+                    InitiatedBy = initiatedBySystemUserId
                 }, cancellationToken);
 
                 _logger.LogInformation(
@@ -1609,14 +1657,24 @@ public class OfficeService : IOfficeService
                 job.Status,
                 job.Progress);
 
-            // Optionally verify ownership (if userId is provided)
-            if (userId is not null && job.CreatedBy is not null && job.CreatedBy != userId)
+            // Verify ownership when a caller is supplied. FAIL CLOSED (task 067, finding F5).
+            //
+            // This read `userId is not null && job.CreatedBy is not null && job.CreatedBy != userId`,
+            // which admitted any caller whenever the record carried no creator — the same fail-open
+            // shape as JobOwnershipFilter's, one layer down. Ownership must now be positively proven:
+            // an absent or blank creator is "not found", never "allowed".
+            //
+            // The internal pollers (WaitForJobCompletion paths below) call the (jobId, ct) overload,
+            // which passes userId: null and so does not enter this branch at all — they are unaffected.
+            if (userId is not null
+                && !string.Equals(job.CreatedBy, userId, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning(
-                    "Job {JobId} ownership mismatch: Expected {ExpectedUser}, Got {ActualUser}",
+                    "Job {JobId} ownership not proven for caller {ActualUser} (recorded creator: " +
+                    "{ExpectedUser}); treating as not found.",
                     jobId,
-                    job.CreatedBy,
-                    userId);
+                    userId,
+                    string.IsNullOrWhiteSpace(job.CreatedBy) ? "<none recorded>" : job.CreatedBy);
                 return null; // Treat as not found for security
             }
 
@@ -1624,37 +1682,11 @@ public class OfficeService : IOfficeService
             return job;
         }
 
-        // Also check for hardcoded test job ID for backwards compatibility
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        if (jobId == testJobId)
-        {
-            return new JobStatusResponse
-            {
-                JobId = jobId,
-                Status = JobStatus.Running,
-                JobType = JobType.EmailSave,
-                Progress = 50,
-                CurrentPhase = "FileUploaded",
-                CompletedPhases = new List<CompletedPhase>
-                {
-                    new CompletedPhase
-                    {
-                        Name = "RecordsCreated",
-                        CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-5),
-                        DurationMs = 250
-                    },
-                    new CompletedPhase
-                    {
-                        Name = "FileUploaded",
-                        CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-2),
-                        DurationMs = 1500
-                    }
-                },
-                CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
-                CreatedBy = userId,
-                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-8)
-            };
-        }
+        // Task 067: the hard-coded test job 00000000-0000-0000-0000-000000000001 used to be answered
+        // HERE with a fabricated "Running" status — in production, to any authenticated caller, and
+        // stamped CreatedBy = userId so the caller always appeared to own it. It has been DELETED. A
+        // production code path must not serve invented job data; the contract test
+        // Get_OfficeJobStatus_ForRetiredTestJobId_IsNotServedFabricatedStatus pins its absence.
 
         // Job not found in memory - query Dataverse
         _logger.LogDebug("Job {JobId} not found in memory store, querying Dataverse", jobId);
@@ -1681,6 +1713,19 @@ public class OfficeService : IOfficeService
                 };
 
                 var isCompleted = status == JobStatus.Completed;
+
+                // Task 067: carry the CREATOR through. Without this the fallback returned a record with
+                // no owner, which is exactly what both fail-open guards then waved through — so this
+                // mapping is the half of the fix that makes failing closed safe rather than merely
+                // strict. sprk_initiatedby stores the creator's Dataverse systemuserid; the query joins
+                // through to systemuser.azureactivedirectoryobjectid so what arrives here is the Entra
+                // OID — the SAME identity currency OfficeAuthFilter produces and both ownership checks
+                // compare. One namespace on both sides of the comparison, by construction.
+                //
+                // Null here means the row predates the creator being persisted. That is the legacy case,
+                // and it is deliberately left null so the ownership checks refuse it.
+                var initiatedByOid = (string?)dvJob.InitiatedByOid;
+
                 var response = new JobStatusResponse
                 {
                     JobId = jobId,
@@ -1689,7 +1734,8 @@ public class OfficeService : IOfficeService
                     Progress = isCompleted ? 100 : ((int?)dvJob.Progress ?? 0),
                     CurrentPhase = isCompleted ? "Complete" : "Processing",
                     CreatedAt = DateTimeOffset.UtcNow, // Not stored in Dataverse yet
-                    CompletedAt = isCompleted ? DateTimeOffset.UtcNow : null
+                    CompletedAt = isCompleted ? DateTimeOffset.UtcNow : null,
+                    CreatedBy = initiatedByOid
                 };
 
                 _logger.LogInformation(

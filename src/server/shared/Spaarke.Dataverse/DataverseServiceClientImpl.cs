@@ -1624,7 +1624,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 if (value is Guid guidValue)
                 {
-                    entity[fieldName] = guidValue;
+                    // Lookup fields require an EntityReference, not a bare Guid — the same shape of
+                    // special case the OptionSet fields below already need. sprk_initiatedby is the
+                    // creator lookup (spaarkeai-word-add-in-r1 task 067): it records WHICH Dataverse
+                    // user asked for this job, so job status can be authorized after the in-memory
+                    // entry is gone. Assigning a raw Guid to a lookup attribute throws, and the caller
+                    // catches and silently falls back to an in-memory-only job — so getting this wrong
+                    // would disable job durability rather than fail loudly.
+                    if (fieldName == "sprk_initiatedby")
+                    {
+                        entity[fieldName] = new EntityReference("systemuser", guidValue);
+                        _logger.LogDebug("Set {FieldName} = EntityReference(systemuser, {Value})", fieldName, guidValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = guidValue;
+                    }
                 }
                 else if (value is decimal decimalValue)
                 {
@@ -1765,14 +1780,47 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger.LogInformation("ProcessingJob {JobId} updated", id);
     }
 
+    /// <summary>
+    /// Reads a ProcessingJob, resolving the job's CREATOR to an Entra object id in the same round trip.
+    /// </summary>
+    /// <remarks>
+    /// spaarkeai-word-add-in-r1 task 067 (finding F5). This used a plain <c>RetrieveAsync</c> and returned
+    /// no creator at all, which is why the job-status authorization checks had nothing to compare a caller
+    /// against and (until this task) waved everyone through. It is now a <c>QueryExpression</c> with a
+    /// LEFT OUTER join onto <c>systemuser</c>, so the creator's <c>azureactivedirectoryobjectid</c> comes
+    /// back with the row rather than costing a second round trip on a polled path.
+    /// <para>
+    /// <b>Why the OID and not the systemuserid.</b> <c>sprk_initiatedby</c> necessarily stores a
+    /// systemuser reference, but every ownership comparison upstream is against the Entra OID that
+    /// <c>OfficeAuthFilter</c> extracts from the token. Resolving the join here means the two sides of that
+    /// comparison are the same identity currency by construction, instead of two namespaces that happen to
+    /// line up. Canonicalized bare-lowercase per ADR-044.
+    /// </para>
+    /// <para>
+    /// The join is LEFT OUTER on purpose: rows created before the creator was persisted still return, with
+    /// a null <c>InitiatedByOid</c>. The caller refuses those (the legacy-row rule) — that decision belongs
+    /// upstream, not in this reader, which reports honestly rather than filtering.
+    /// </para>
+    /// </remarks>
     public async Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _serviceClient.RetrieveAsync(
-            "sprk_processingjob",
-            id,
-            new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
-                           "sprk_idempotencykey", "sprk_correlationid"),
-            ct);
+        const string initiatorAlias = "initiator";
+
+        var query = new QueryExpression("sprk_processingjob")
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
+                                       "sprk_idempotencykey", "sprk_correlationid", "sprk_initiatedby"),
+            TopCount = 1,
+            NoLock = true
+        };
+        query.Criteria.AddCondition("sprk_processingjobid", ConditionOperator.Equal, id);
+
+        var initiator = query.AddLink("systemuser", "sprk_initiatedby", "systemuserid", JoinOperator.LeftOuter);
+        initiator.EntityAlias = initiatorAlias;
+        initiator.Columns = new ColumnSet("azureactivedirectoryobjectid");
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        var entity = results.Entities.FirstOrDefault();
 
         if (entity == null) return null;
 
@@ -1785,7 +1833,30 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
             Progress = entity.GetAttributeValue<int?>("sprk_progress"),
             IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
-            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
+            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid"),
+            InitiatedBy = entity.GetAttributeValue<EntityReference>("sprk_initiatedby")?.Id,
+            InitiatedByOid = ExtractAliasedGuid(entity, $"{initiatorAlias}.azureactivedirectoryobjectid")
+        };
+    }
+
+    /// <summary>
+    /// Reads an aliased join column as a canonical bare-lowercase GUID string (ADR-044), or null when the
+    /// join produced no row. Kept explicit because an aliased value arrives wrapped in
+    /// <see cref="AliasedValue"/> and silently reads as null if unwrapped.
+    /// </summary>
+    private static string? ExtractAliasedGuid(Entity entity, string aliasedAttributeName)
+    {
+        if (!entity.Contains(aliasedAttributeName))
+        {
+            return null;
+        }
+
+        var aliased = entity[aliasedAttributeName] as AliasedValue;
+        return aliased?.Value switch
+        {
+            Guid g when g != Guid.Empty => g.ToString("D"),
+            string s when Guid.TryParse(s, out var parsed) && parsed != Guid.Empty => parsed.ToString("D"),
+            _ => null
         };
     }
 

@@ -1,6 +1,93 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## 🟢 HANDOFF 2026-09-21 (evening) — READ THIS FIRST, it supersedes every block below
+## 🔵 ACTIVE TASK — 067 (in-progress, started 2026-09-21) — supersedes the NEXT ACTION line below
+
+| Field | Value |
+|---|---|
+| **Task** | 067 — job-ownership fail-closed (F5) |
+| **File** | `tasks/067-job-ownership-fail-closed.poml` |
+| **Rigor / tier** | FULL · opus @ xhigh · steps directional |
+| **Status** | implementation complete — awaiting full-suite count, then Step 9.5 gates |
+| **Next Action** | Record the full-suite count in `notes/067-job-ownership.md` §8, run `/code-review` + `/adr-check`, commit, then **task 080** |
+
+**Shipped**: filter fails closed · the SECOND fail-open in `OfficeService.GetJobStatusAsync` closed (the POML
+named only the filter) · creator persisted to `sprk_initiatedby` at create · fallback LEFT OUTER joins
+`systemuser` and returns the OID · production test-job backdoor deleted.
+**Gates so far**: build 0/0 · ArchTests 191/191 · CVE clean · publish 45.54 vs fresh-master 45.46 at the SAME
+commit `99cdfe2ea` = **+0.08 MB** cumulative for the branch (this task's marginal contribution ~0.00).
+**Seeds**: fail-open → RED 2/6 · backdoor → RED 1/7 (returned **403 not 200** — the two fixes are
+independently effective) · restored **GREEN 11/0** incl. SSE.
+
+### 🚩 DEV ENVIRONMENT — read before any deploy or live verification (2026-09-21/22)
+
+**The dev BFF is no longer running this branch.** `unified-access-control-r2` deployed over it
+(`e45627fde`) after checking with this session; our owner had pre-authorised it conditional on not clobbering
+another project. What was live was our branch at **~09-19**, i.e. **before** the whole authorization-gate wave
+(062/063/064/067) — confirmed from both sides: `TodoSourceAccessFilter.cs` first landed 09-21 16:44
+(`28f39c146`), 43 commits after the deployed build. Nothing of ours that was live depended on staying live,
+and no live verification was in flight.
+
+**⛔ DO NOT "just redeploy our branch tip" to get dev back.** The tip carries the gates but **not task 080**,
+so on dev it would 403 Find → Run Index for every ordinary user and regress Outlook's create-To-Do-from-email.
+The correct restore is their byte-exact **pre-gate** snapshot:
+
+```
+C:\tmp\bff-dev-rollback\bff-dev-wwwroot-2026-09-21-preUACdeploy.zip
+51,022,445 bytes · sha256 35c8e161305d0a8a31f69c98d68063d397fde488d13be8e3592951731bc807a2
+```
+
+They also recorded this warning in `projects/unified-access-control-r2/notes/DEPLOY-CHECKLIST.md`, in git.
+They have offered to hand dev back whenever we want it — **after 080**, not before.
+
+**🔴 `deploy-bff-api.yml` HAS BEEN BROKEN SINCE JUNE 2026 — verified here, not taken on trust.**
+`gh run list --workflow=deploy-bff-api.yml --limit 12` → **12 failures, 0 successes, newest 2026-06-05**.
+One of the failed runs is itself titled *"fix(ci): repair Deploy BFF API pipeline"*. So every BFF deploy for
+~3.5 months has been hand-pushed OneDeploy with no author recorded — which is why establishing what was live
+required disassembling the deployed DLL. **This blocks task 042 (deploy + UAT) and every deferred live
+verification**; budget for a manual deploy, or fix the workflow first. Not in this project's scope as written,
+but it is the kind of thing 070 exists to catch.
+
+Also: basic auth is **disabled** on the SCM site (`allow=false`), so Kudu needs an **AAD bearer token** —
+publishing credentials 401. And `az webapp deploy` can return 200 with Kudu `status=4` while the running
+host's file locks silently prevent the DLLs being replaced, so **a SHA-256 file-replacement check is the only
+real proof a deploy landed**.
+
+### 🔑 SCHEMA DECISION — task 060 consumes this
+
+**No schema change. No new column. No solution edit.** `sprk_processingjob.sprk_initiatedby`
+(LOOKUP → `systemuser`) **already exists** in dev Dataverse (verified live via MCP `describe`), and
+`Models/ProcessingJob.cs:62` + `CreateProcessingJobRequest.InitiatedBy:100` **already declare it**. It is simply
+never written. So this task populates a field the schema and the model already have — it does not add one.
+Escalation trigger 1 ("requires a solution change that cannot be made from this branch") therefore **does not fire**.
+
+**One identity namespace on the wire: the Entra OID.** `JobStatusResponse.CreatedBy` stays the OID everywhere,
+because that is what `OfficeAuthFilter.ExtractUserId` produces and what both comparison sites already use.
+- **Create**: resolve caller OID → `systemuserid` via the existing `ICallerSystemUserResolver`, write to `sprk_initiatedby`.
+- **Dataverse fallback read**: join `sprk_processingjob` → `systemuser` on `sprk_initiatedby` and select
+  `azureactivedirectoryobjectid`, so the fallback returns the **OID** — no second round trip, no second namespace.
+- **Legacy rows** (`sprk_initiatedby` null) → `CreatedBy` null → **refused** (criterion 5).
+
+Rejected: a new `sprk_createdbyoid` column (needs a solution change, and `sprk_initiatedby` is the field that
+already means this); storing the OID in `sprk_payload` (not queryable — 060 needs to query by owner).
+
+### ⚠️ Two fail-open sites, not one
+
+The POML names `JobOwnershipFilter.cs:157`. There is a **second** at `OfficeService.cs:1613`
+(`userId is not null && job.CreatedBy is not null && job.CreatedBy != userId`) — the service-level check the
+endpoint handler uses. Both must fail closed or the fix is cosmetic. The internal callers at `:3329`/`:3531`
+use the **no-userId** overload, so they are unaffected by the change.
+
+### ⚠️ Registration dependency
+
+Failing closed depends on `ICallerSystemUserResolver` being registered — `NullCallerSystemUserResolver`
+always returns Unresolved, which under fail-closed would 403 every poll. Verified: `CommunicationModule.cs:280`
+`TryAddScoped`s the real resolver inline (no feature flag) and `Program.cs:102` calls
+`AddCommunicationModule` unconditionally. `AnalysisServicesModule.cs:973` also registers it but sits in a
+transitively-conditional block — it is the *second* registrant, not the load-bearing one.
+
+---
+
+## 🟢 HANDOFF 2026-09-21 (evening) — the NEXT ACTION line below is superseded by the ACTIVE TASK block above
 
 **Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Tree clean.**
 HEAD moves — get it with `git log -1 --format='%H %s'`. Do **not** trust a SHA written here.
