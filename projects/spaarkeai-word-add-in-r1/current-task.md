@@ -7,8 +7,8 @@
 | **Task** | 080 — record-ownership assignment pattern (**the real blocker**) |
 | **File** | `tasks/080-record-ownership-assignment-pattern.poml` |
 | **Rigor / tier** | FULL · opus @ xhigh · steps directional · **run ALONE** |
-| **Status** | not-started |
-| **Next Action** | Begin step 1: reproduce the unreadability as an ordinary user and record it verbatim — then step 2, which has CHANGED (see below) |
+| **Status** | **in-progress** — steps 1-3 done (reproduce, precedent, inventory); ESCALATED on scope |
+| **Next Action** | Await owner answer on category-C scope (notes/080 §4); meanwhile implement category A — the BU-default-owner-team resolver + the 5 create sites |
 
 🔴 **CORRECTION before 080 starts (2026-09-22).** I had been saying *"`sprk_matter` is the precedent to copy — a child BU's default Owner team."* That was inferred from **live data**; I went looking for the code and **did not find it**. What IS in code is the opposite shape: **`ownerid` = the ACTING USER**, shipped and ADR-024-cited — `OfficeService` quick-create already does it (`:2625`, `:2853`; `IOfficeService.cs:207`), as do `NotificationService:81`, `OutboxService:135`, `DirectThreadAccessService:86`. So this project already owns a working caller-ownership implementation **in the very service whose document path lacks one**, and 067 wired `ICallerSystemUserResolver` into `OfficeService` already. 080 must establish which convention is real BEFORE mirroring anything. Full detail in the POML's background.
 
