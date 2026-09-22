@@ -662,7 +662,16 @@ So the hazard converts from *"team-ownership is dangerous"* into *"the resolver 
    alone, or `teamtype` alone, selects the wrong team.
 2. **It only changes behaviour for callers in CHILD business units.** Measured live 2026-09-22:
 
-   | Business unit | Enabled users |
+   ⚠️ **These are ALL `systemuser` rows, NOT enabled-only.** An earlier draft of this table said
+   "enabled users" — that qualifier was **wrong**. The `isdisabled = false` predicate was **rejected by
+   the query surface** (*"Condition not supported"*, the same refusal it gives for `isdefault = true` on
+   `team`), so the count was re-run **unfiltered** and the qualifier survived the retry. At least two
+   root rows are known-disabled (`SYSTEM`, `# Eyal Iffergan`). Corrected 2026-09-22 after the
+   `spaarkeai-word-add-in-r1` session reproduced the same figures and flagged the mismatch. The
+   conclusion is unaffected — root is ~92% of the directory on any filter — but a later reconciliation
+   against a properly filtered count would otherwise surface a discrepancy that is not real.
+
+   | Business unit | `systemuser` rows (unfiltered) |
    |---|---|
    | **Spaarke** (ROOT) | **172** |
    | Spaarke Demo (child) | 13 |

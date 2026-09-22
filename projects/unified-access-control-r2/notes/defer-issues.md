@@ -1301,10 +1301,18 @@ without-a-registry-entry rule pulls non-registry entities' Owner columns into th
 team-owned grants **and** team-owned documents both go dark in membership queries — a shared defect with
 a shared fix.
 
-⚠️ **Verification note**: measured 2026-09-22, **172 of 186 enabled users sit in the ROOT BU**, where
+⚠️ **Verification note**: measured 2026-09-22, **172 of 186 `systemuser` rows** (⚠️ **unfiltered — NOT
+enabled-only**; `isdisabled = false` is rejected by the query surface as *"Condition not supported"*, and
+an earlier draft's "enabled" qualifier was wrong. Corrected after `spaarkeai-word-add-in-r1` reproduced
+the figures and caught the mismatch. Conclusion unaffected: root is ~92% on any filter) sit in the ROOT BU**, where
 this convention resolves to root's own default team and nothing changes. **Verify with a child-BU test
 user** (Test User 1 is in "Spaarke Business Unit 1"); testing as a root-BU administrator will show no
-difference and would be misread as the fix failing. User relocation remains out of scope per owner
+difference and would be misread as the fix failing. 🔴 **The symmetric half matters equally: a root
+account cannot distinguish a working fix from a no-op, so a SUCCESS reported from root is as meaningless
+as a failure.** Testing from root proves nothing in either direction; `Test User 1` in `Spaarke Business
+Unit 1` is the only account that exercises the convention, and "no change from root" is the **expected**
+result rather than a defect to chase. (Symmetric framing credit: the `spaarkeai-word-add-in-r1` session.)
+User relocation remains out of scope per owner
 direction 2026-09-09.
 
 **Unchanged and still severable**: fix direction **3**, the `catch { return [] }` at
