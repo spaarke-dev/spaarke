@@ -91,16 +91,19 @@ grep -rn "^\s*//.*{" --include="*.cs"
 
 Note: For full ADR validation (including ADR-013+), use `/adr-check` which loads `.claude/skills/adr-check/references/adr-validation-rules.md` and the ADR index in `docs/adr/README-ADRs.md`.
 
-### ADR-001: BFF endpoints in Minimal API (Functions OK for out-of-band integration)
+### ADR-001 + ADR-052: BFF endpoints in Minimal API; background-work host chosen per workload
 ```
-# Violation: Functions inside the BFF project (BFF endpoints belong in Minimal API)
-grep -rn "\[FunctionName\|\[HttpTrigger" src/server/api/Sprk.Bff.Api/ --include="*.cs"
+# Violation: Functions or Durable Task inside the BFF project (BFF endpoints belong in Minimal API)
+grep -rn "\[Function(\|\[FunctionName\|\[HttpTrigger" src/server/api/Sprk.Bff.Api/ --include="*.cs"
+grep -n "Microsoft.Azure.Functions\|Microsoft.Azure.WebJobs\|DurableTask" src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj
 
-# Violation: Durable Functions (always)
-grep -rn "DurableTask" --include="*.csproj"
+# Violation: a NEW hand-rolled timer BackgroundService (ADR-052 §1) — scheduled work in the BFF is an IScheduledJob
+grep -rln "PeriodicTimer\|Task.Delay(" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 
-# Review: Functions outside the BFF (likely out-of-band integration — verify it's sync/indexer/webhook/extraction, Bicep-deployable, shares correlation)
-grep -rn "\[FunctionName" --include="*.cs" | grep -v "Sprk.Bff.Api"
+# Review: a Functions project (ADR-052 §5–§6) — lives under src/server/functions/<Name>/, never references
+# Sprk.Bff.Api, authenticates app-only as the stamp's managed identity (no MSAL confidential client, no OBO),
+# and the Placement Justification cites ADR-052's signals and costs
+grep -rln "Microsoft.Azure.Functions.Worker" --include="*.csproj" .
 ```
 
 ### ADR-002: Thin Plugins

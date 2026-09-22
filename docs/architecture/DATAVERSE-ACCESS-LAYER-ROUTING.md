@@ -53,7 +53,7 @@
 | **`IEventDataverseService`** | **WebApi** | SDK impl STUBS events |
 | **`IFieldMappingDataverseService`** | **WebApi** | SDK impl STUBS field-mapping |
 | `IImpersonatedCommunicationQuery` (concrete `DataverseWebApiService`) | **WebApi** | NFR-06 row-level security. Registered in **`CommunicationModule.cs`** (~`:272`), not `GraphModule` |
-| `IDataverseAccessGrantService` (concrete `DataverseWebApiService`) | **WebApi** | POA grants. Registered in **`CommunicationModule.cs`** (~`:648`), not `GraphModule` |
+| `IDataverseRecordShareService` (concrete `DataverseWebApiService`) | **WebApi** | POA record shares — grant, **revoke** and read, for `systemuser` **and** `team` principals. Registered in **`CommunicationModule.cs`** (~`:671`), not `GraphModule`. Renamed from `IDataverseAccessGrantService` and moved to `Services/Access/` by `unified-access-control-r2` task 060, which consolidated it with the private POA client that had lived inside `PlaybookSharingService`. **It is the only POA client — a build guard (`PoaShareClientSingletonGuardTests`) fails if a second one appears.** |
 
 > **`UpdateRecordFieldsAsync` is single-impl as of 2026-08-20** (trap 2a below): `IFieldMappingDataverseService`
 > → WebApi is the only live route. The SDK impl throws. Never call it through the composite.

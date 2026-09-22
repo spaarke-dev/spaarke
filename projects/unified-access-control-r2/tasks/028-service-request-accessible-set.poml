@@ -3,7 +3,7 @@
   <metadata>
     <title>Service request is a CORE record type with no accessible set -- add the fourth root</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on the caller-principal resolution path -- the source of every record-scope decision.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -92,7 +92,25 @@
     <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Filed 2026-08-24 from the task-009 To Do discussion. Completes the owner decision that non-project roots get parity.</notes>
+  <notes>✅ **CLOSED 2026-09-09 as a DOC CORRECTION — the main deliverable was deliberately NOT built.** Record: `notes/task-028-service-request-root.md`.
+
+🔴 **The escalation trigger fired and the owner's answer INVERTED this task.** Owner, 2026-09-09: *"service requests are internally submitted records; they are sent via the SPA by internal workforce users; the service request is not accessible by external users (e.g., law firms)."*
+
+**"Core" and "externally grantable" are two different lists, and the model doc conflated them.** Service request is core (nothing else confers access to it) but is NEVER grantable to an external contact. Live 2026-09-09: `sprk_externalrecordaccess` carries lookups for project, matter, work assignment, invoice and organization — and **no service request**. Zero service requests exist in dev. Seven child types can still be parented to one.
+
+**Criterion 1 was REFUSED, deliberately.** `AccessibleServiceRequestIds` would be composed from grants that cannot exist — an always-empty set that looks like a fix, denies exactly as much as today, and encodes into the principal surface the false claim that service requests are externally grantable. The next reader would then "complete" the model by adding the missing grant lookup — the exact outcome the owner decision forbids.
+
+**Criterion 2 was ALREADY SATISFIED before this task started.** `ExternalAccessModule.cs:270-279` registers a `service-requests` module scoped by REQUESTER (`sprk_requestedby == caller contact`), returning an empty set for any non-workforce plane — server-side fail-closed, not reliant on the client hiding the tab. Shipped by `spaarke-SPA-external-access-platform-r2` **#028** on 2026-08-10 (`b8abd51b5` server, `e5cc39cce` client). Same task number, different project, pure coincidence.
+
+**Delivered**: corrected the conflation at all three sources — project `CLAUDE.md`, `design.md` §4.3 (the single Core row is now split into *Core* and *Core, internal-only*), and `spec.md` (taxonomy row + FR-08's "fourth root" clause, which will NOT widen).
+
+**Residual filed, not fixed — ISS-003 / #964**: `/todos/{id}` serves both planes, so a WORKFORCE user cannot PATCH a to-do parented to their own service request. Needs a different rights shape (a Dataverse read, not a synchronous set lookup) and an unanswered product question (what may a requester do to their own service request's children). Latent — zero service requests exist.
+
+**No code changed. No tests, perturbation, publish-size or CVE run applies.**
+
+---
+
+Filed 2026-08-24 from the task-009 To Do discussion. Completes the owner decision that non-project roots get parity.
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -55,8 +55,15 @@ All findings independently confirmed; evidence at [`notes/investigation/10-findi
 5. **FR-05** (High): `PermissionsEndpoints` must return caller-scoped capabilities — Acceptance: a user without access receives `CanPreview=false`.
 6. **FR-06** (High): external grant expiry must be enforced — Acceptance: a grant with `sprk_expiresdate` in the past confers no access. If deferred, the expiry input must be removed from the UI (no promise-shaped no-op).
 7. **FR-07** (High): grant/revoke/invite/invite-and-grant/close-project/provision-project must enforce the delegation rule — Acceptance: a caller without **Write** on the target record receives 403 (see FR-20).
-8. **FR-08** (High): `PATCH /api/v1/external/todos/{id}` must scope-check the record — Acceptance: a caller with zero accessible roots cannot modify a To Do by GUID.
+8. **FR-08** (High): the external To Do surface must scope-check the record on **every** verb, and must reach the **same** set of accessible roots on all of them — Acceptance: (a) a caller with zero accessible roots cannot modify a To Do by GUID; (b) **read, create and update all reach the same three A-9 roots — project, matter, work assignment** — so no root can be written through one verb and refused by another; (c) for each of the three roots, a caller holding it can list and create against it and a caller who does not is DENIED — not served an empty collection, which is indistinguishable from "no to-dos" and hides the denial; (d) a create's parent flows from the route it was called on, carries that parent's own entity in all four ADR-024 resolver fields, and can never set more than one regarding lookup.
+
+   > ⚠️ **Criterion (b) exists because its absence caused the defect.** FR-08 originally named only the update path, so task 009 widened `PATCH /todos/{id}` to all three roots and left list and create project-only — leaving the plane's WRITE surface wider than its READ surface, which is precisely the shape that hides authorization defects. Task 029 closed it. This is the same lesson as FR-09's missing expiry criterion (task 023): **an acceptance criterion that names one verb licenses an asymmetry across the others.**
+   >
+   > ✅ **The "fourth root" clause is RESOLVED and this criterion will NOT widen** (owner, 2026-09-09, task 028). Service request is core but **never externally grantable** — internal-submitted, scoped by requester, no lookup on the grant table. Three roots is the complete set for this criterion. The residual over-denial (a *workforce* caller cannot PATCH a to-do parented to their own service request) is filed as ISS-003, not folded in here.
 9. **FR-09** (High, A-11): `/grant` must be idempotent and `/revoke` must deactivate **all** matching active rows — Acceptance: granting twice then revoking once leaves zero active grants; effective access is `None`.
+   - **Expiry on the upsert path (amended 2026-09-08, task 023 / finding H1).** Idempotent must not mean *inert*: when `/grant` matches an existing row it MUST also write `sprk_expiresdate`. Acceptance: (a) re-granting with a new expiry over an unbounded grant persists that expiry; (b) re-granting with a later expiry extends it; (c) an expiry change at an unchanged access level is **not** treated as a no-op; (d) re-granting over an already-EXPIRED row without supplying a new expiry does **not** report success (ADR-003), because task 007's read filter still excludes the row and the grantee still has nothing; (e) both `sprk_granteddate` and `sprk_expiresdate` are written as **DATE ONLY** values, matching the live column type and the `yyyy-MM-dd` literal FR-06's read filter compares against.
+   - **Why this is stated here and not only in code**: the original criteria never mentioned expiry at all, so the write path could drop it while every FR-09 test stayed green. Fixing only the code would have left the same hole open for the next change.
+   - ⚠️ **Clearing an expiry (date → null) is deliberately NOT part of this criterion** and is not currently possible through `/grant`. `GrantAccessRequest.ExpiryDate` is `DateOnly?`, so an omitted field and an explicit `null` are indistinguishable; treating `null` as "clear" would silently unbound an already-bounded grant whenever a caller re-granted without restating the date. Making clearing expressible is a **contract change** (an explicit field or a dedicated route) and is an open owner decision — see `notes/task-023-grant-upsert-expiry.md`.
 10. **FR-10** (High, A-17): the FetchXML guard must reject same-entity self-joins — Acceptance: a self-join projecting aliased columns of out-of-scope rows is rejected, not scoped.
 11. **FR-11** (High, A-14): anonymous share links must be tracked and revocable, or disabled — Acceptance: no code path mints a permanent, unrevocable anonymous link.
 12. **FR-12** (High, A-18): workforce contact-by-email resolution must apply the CIAM no-hijack `oid` check — Acceptance: an email matching a contact bound to a *different* `oid` is denied.
@@ -109,6 +116,14 @@ All findings independently confirmed; evidence at [`notes/investigation/10-findi
 ### Phase 5 — Attestation
 
 32. **FR-32**: an append-only access event log records grant and deny state changes; derived access is reconstructed by evaluator replay over Dataverse field audit — Acceptance: "who could see record X on date D" is answerable; derived access is **not** materialized into rows.
+33. **FR-33** (High, security control — **REDESIGNED + SCHEDULED 2026-09-10 as tasks 096–101**): **every external access grant is time-bounded.** Every grant row carries `sprk_expiresdate` — a request with no expiry is **defaulted server-side** (keep the grant's existing expiry, else today + 90; amended 2026-09-10 session 7, see below) — set through ONE record-wide **Expiration** date on the Manage Access toolbar that applies to every share on the record, with the granting internal user reminded at 30/14/7/3/1 days so access is renewed deliberately rather than expiring by surprise.
+    - 🔴 **REDESIGNED 2026-09-10 — the acceptance, sequencing and known-debt bullets below are SUPERSEDED where they conflict with this one.** The owner observed that a matter or project has a *status*, not a lifecycle end, so there is no reliable closure event to reap grants — the "calendar cap is the BACKSTOP" premise was false, and the cap was carrying the whole load. Replacement, all owner-decided: **no tenant cap**; one Expiration per record, chosen by a Write user, **stored by reusing `sprk_expiresdate` on each grant row** (no new column); the field is **required** and the picker **defaults to +90 days**; scope is **explicit shares on the record** — standing grants keep their own switch; reminders at **30/14/7/3/1** plus an **estate-wide expirations view**; renewal authority is **anyone with Write**; backfill is a **simple update** of existing grants (dev only). The atomic multi-grant write reuses `BulkUpdateAsync` once it is made genuinely transactional (task 096). **New acceptance**: (a) the grant-writing endpoints reject a **past** expiry, and **default a missing one server-side** — keep the grant's existing expiry, else today + 90 — so no grant is ever written unbounded; there is **no maximum**. 🔴 **Amended 2026-09-10 (session 7, owner decision "Server fills +90")**: this bullet originally said *"reject a missing or past expiry"*. Task 097 found that **no client sends an expiry** (`AccessGrantModal`, the `TrackingFieldTrio` PCF, the external SPA's `InviteUserDialog`), so rejecting a missing one would break every sharing UI while only the modal is scheduled to gain a picker (099). The field is required in the *stored data*, not in the request; (b) one atomic operation sets the expiry of every active share on a record, gated by Write on that record; (c) the Manage Access toolbar carries the Expiration picker; (d) the granting internal user — never the grantee — is reminded at 30/14/7/3/1 days, idempotently, with a heartbeat; (e) an estate-wide view lists shares by expiry. Full record: [`notes/decisions/external-grant-expiry-mandatory.md`](notes/decisions/external-grant-expiry-mandatory.md) §9–§12.
+    - **Rationale**: the grantee is outside our control boundary and their affiliation can change with no signal reaching us; the business reason for external access is inherently time-bound; and **nobody revokes**, because revocation requires acting on a non-event. Expiry converts that non-event into a scheduled one. Same reasoning as the Entra cap on app-registration secret/certificate lifetime, and stronger here.
+    - **Acceptance**: (a) `/grant` rejects a request with no expiry, and one exceeding the configured maximum; (b) the maximum is tenant configuration, not a compile-time constant; (c) a grant expires at **root closure OR the cap, whichever is first** — the closure cascade already deactivates a project's grants, so the calendar cap is the BACKSTOP, not the primary control; (d) the granting internal user / matter owner (**never** the external grantee, who cannot renew their own access) is notified before lapse; (e) renewal extends from **today**, not from the previous expiry, so repeated renewals do not drift.
+    - 🔴 **Sequencing constraint — the notification is a PRECONDITION, not an enhancement.** An expired app credential breaks a system: loud, monitored, fixed in minutes. An expired human grant breaks a *person*, silently, at a moment they did not choose, and they discover it through a channel they may no longer have. Shipping the mandate without the renewal path converts a silent over-permission problem into a silent lockout problem. **Do not ship (a) before (d).**
+    - ⚠️ **Known debt, accepted with eyes open**: renewal toil scales as (active grants × 1/cap), so the cap length is the debt dial; the notification job becomes load-bearing and **its failure mode is silence**, so it needs a heartbeat — "nothing due" and "the job died" must not look alike; one-click renewal degrades into rubber-stamping; and backfilling existing unbounded grants is a **mass-lockout event** needing a staged plan, not a migration script.
+    - **Supersedes the task-023 escalation**: with every grant bounded, an absent expiry means "keep the grant's existing expiry, else today + 90" (task 097) and there is no clear-operation to design — clearing would re-create an unbounded grant. Task 023 stays `completed-with-escalation` until FR-33 is scheduled rather than being closed with a contract patch that FR-33 would remove.
+    - Full reasoning, the maintenance-debt analysis and five open scoping questions: [`notes/decisions/external-grant-expiry-mandatory.md`](notes/decisions/external-grant-expiry-mandatory.md). Tracked as **DEF-001** / [issue #961](https://github.com/spaarke-dev/spaarke/issues/961).
 
 ### Non-Functional Requirements
 
@@ -183,17 +198,69 @@ No new NuGet packages. Publish-size delta expected ≈0.
 | ADR-034 | Resolver is canonical for membership; discovery admits all 6 identity tables | Discovery is correct for AI scoping and over-inclusive for authorization; the allow-list must become first-class and per-surface | **B** | Amend. The 1-hop cap needs no exception — FR-26 makes every chain one hop |
 | ADR-028 A2 | Workforce callers resolve to systemuser → ADR-034 membership | FR-20 replaces the derivation with Dataverse's real answer | **B** | Narrow amendment: the token stays workforce, only the derivation policy changes |
 
+### Path-A exceptions — ✅ ACCEPTED BY THE OWNER 2026-09-10
+
+CLAUDE.md §6.5 requires a path-A exception to be *documented at the point of decision* **and approved by
+the reviewer*. Three tasks shipped `completed-with-escalation` carrying deviations that had never received
+that explicit sign-off. The owner accepted all three on 2026-09-10 ("B2 yes agreed"). Recorded here so the
+exceptions are ratified rather than merely present.
+
+| Task | Requirement deviated from | What shipped instead | Why accepted |
+|---|---|---|---|
+| **012** | **FR-11** wanted anonymous share links either (a) tracked + revocable **or** (b) disabled | A defensible **third** thing: bounded expiry + explicit opt-in + capped + logged + config-gated (delivered by task **072**) | **Revocation is a PLATFORM property, not an oversight** — a minted SPE URL cannot be revoked through Dataverse; that needs a Graph permission-delete. Option (b) was rejected because SPE `organization` scope is tenant-wide, so disabling would have broken the external sharing this project exists to build. Neither (a) nor (b) was reachable; the shipped shape narrows the exposure on every axis that *is* reachable. |
+| **023** | FR-09 grant-expiry **write** path | Expiry is written; the escalation is a **contract** question left open — clearing an expiry (date → `null`): omitted field versus explicit null | Correctly escalated rather than guessed. It is an API-contract decision, and picking silently would have baked one reading into the wire format. The write path itself is complete and tested. |
+| **062** | NFR-05 role-depth standing assertion | The assertion exists but runs **by hand**, not in CI | 🔴 Its **primary finding was remediated by the owner on 2026-09-09 and re-verified** (root BU default team `roles=[]`; the previously-exposed user now gets 403). What remains is *automation*, which is blocked on the CI Dataverse credential (§ open decisions) — not on this project's code. |
+
+⚠️ **012 and 062 carry live residuals that acceptance does NOT close**: anonymous SPE links remain
+non-revocable by design, and NFR-05 remains a manual check until CI has a Dataverse credential. Accepting
+the exception ratifies the *decision*, not the disappearance of the risk.
+
 ## Success Criteria
 
 1. [ ] All 22 Phase 0 findings closed — Verify: regression test per finding
 2. [ ] One evaluator; `AuthorizationService` path repaired or retired — Verify: no caller-scoped path passes `userAccessToken: null`
-3. [ ] Negative canary green — Verify: NFR-04 test in CI
-4. [ ] Role-depth assertion green — Verify: NFR-05 test in CI
+3. [ ] Negative canary green — Verify: **NFR-04 test run BY HAND against dev, and re-run as a manual pre-merge gate on task 036** *(was "test in CI" — changed 2026-09-10 by owner decision, see below)*
+4. [ ] Role-depth assertion green — Verify: **NFR-05 test run BY HAND against dev** *(was "test in CI" — same decision)*
 5. [ ] A user in the Operations subtree cannot read a `Secure Project`-owned record — Verify: live dev test
 6. [ ] A shared user reads a secure project in both MDA and SPA — Verify: live dev test
 7. [ ] Manage Access answers "who can see this and why" with provenance per row — Verify: UAT
 8. [ ] Contact with Project access sees its invoices, events, communications and To Dos — Verify: live dev test
 9. [ ] Point-in-time attestation answerable — Verify: replay a historical date
+
+### 🔴 No Dataverse credential in CI — owner decision 2026-09-10
+
+> *"we do not need to have this dataverse test; this seems like overkill and introduce too much
+> complexity to the CI"*
+
+**Accepted.** The two live assertions — **NFR-04**'s impersonation canary (034) and **NFR-05**'s
+role-depth check (062) — will **not** run in CI. Success criteria 3 and 4 above were reworded because
+they said *"Verify: NFR-04/NFR-05 test in CI"*, which this decision makes permanently unmeetable; left
+as written, the project could never be marked complete.
+
+**The consequence, stated once and then managed by process rather than re-argued:**
+
+NFR-04 is not a regression test — it is the gate that proves impersonation is **not inert**. Its failure
+mode is that the impersonated read returns the *same* rows as app-only, i.e. **an org-wide disclosure
+that looks exactly like success**. `TASK-INDEX.md` calls 034 "a blocking merge gate for 036" for that
+reason. NFR-05 is the assertion that would have caught the root-BU `System Administrator` exposure
+automatically instead of it being found by hand on 2026-09-09.
+
+So both are now **point-in-time** checks: true when someone runs them, unknown afterwards.
+
+**Mitigation that respects the decision** (no CI, no credential, no new complexity):
+
+1. **Task 036 carries a MANUAL pre-merge gate.** Re-run the NFR-04 canary against dev and confirm the
+   impersonated set is *strictly smaller* than app-only **before** 036 merges. Equality = STOP. This is
+   recorded in 036's POML, not in anyone's memory — it is the one place the check cannot be skipped
+   without someone overriding a written gate.
+2. **Both assertions stay in the suite, runnable on demand.** They are not deleted — deleting them would
+   turn "unknown" into "unknowable". They are skipped by default and documented as operator checks.
+3. **Re-run both at UAT.** UAT is already where this project's live security topology is validated
+   (see below), so the natural home for a live assertion is the live validation phase.
+
+This is a legitimate trade: CI complexity and a standing credential, against two checks that run on a
+human cadence. The risk it accepts is that a *future* change silently re-inerts impersonation between
+manual runs. Point 1 is what keeps that from landing unnoticed on the one task where it matters most.
 
 ## UAT & Environment Setup
 
@@ -230,7 +297,7 @@ Phase 4 code ships and unit/integration-tests independently of this; its **live-
 | Derived access default | Default-on, or opt-in per contact? | **Default-on; Secure is the veto** | Standing Grant becomes a standing arrangement, not the enabling switch |
 | Level precedence | How do conflicting levels resolve? | **Highest wins** | Additive max, then vetoes |
 | SPA identity | Do licensed users reach the SPA as systemusers? | **Types 1 & 2 via workforce Entra; Type 3 via CIAM.** Licence is irrelevant to SPA access | Workforce plane retained; derivation policy changed instead |
-| Record taxonomy | Which records need direct grants? | **Core**: project, matter, work assignment, service request. **Child**: invoice, communication, document, event, to-do, analysis | Matter does NOT inherit from Project |
+| Record taxonomy | Which records need direct grants? | **Core**: project, matter, work assignment, service request. **Child**: invoice, communication, document, event, to-do, analysis | Matter does NOT inherit from Project. 🔴 **Core ≠ externally grantable** (owner, 2026-09-09): service request is core but is **never** grantable to an external contact — it is internal-submitted and scoped by requester. See design.md §4.3 |
 | Child revocation | Acceptable that Contact A sees an invoice via Project 1? | **Yes, and revocable at invoice level** | Requires the deny term (FR-23) |
 | Ethical wall | Is "No Access" a level? | Data model per owner: No Access List subgrid matched on organization | Implemented as a **veto**, not a level (FR-23) |
 | Standing grant scope | Who can hold one? | **Organizations, contacts, and internal workforce**, each with a baseline level | FR-25 |

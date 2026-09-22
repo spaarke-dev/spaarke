@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-024 — an external *licensed* system user is treated the same as an internal one (owner-decided)</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Share write path (.cs, Api/ExternalAccess); tags bff-api/auth; modifies tests. Removes a refusal, i.e. widens who can be granted access.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A localized removal with a clear owner ruling. Unchanged from the stub, and verification supports it: the change is three code sites plus two test sites, all identified. The one judgment point — that the owner's stated discriminator (licence) is not read anywhere in this path — is an escalation trigger rather than open-ended design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project.</parallel-reason>
+    <deps>063</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3–4 hours</estimated-effort>
+    <origin>Register ISS-024 / GitHub #1003. Found by task 063 (session 13) and raised as an open owner question in every handoff since. Owner decision received 2026-09-18; queued by the same directive. Authored 2026-09-19 with premises re-verified against HEAD — BOTH cited line numbers were wrong and a SECOND test site exists, see `&lt;notes&gt;`.</origin>
+  </metadata>
+
+  <owner-decision date="2026-09-18">"For task 063 an 'external' licensed user is treated the same as an internal licensed user." LICENCE, not the external flag, is the discriminator: a licensed system user is a Dataverse security principal and can hold a POA share, whether or not the directory marks them external.</owner-decision>
+
+  <prompt>`POST /api/v1/external-access/share-user` refuses a system user whose `sprk_isexternal` flag is not `false` with HTTP 422 `sdap.access.user_share.user_not_internal`. Per the owner's ruling that refusal goes.
+
+🔴 **The register's two citations are both wrong — use these instead.** The refusal is the third branch of `EligibilityRefusal`, at **`InternalShareEndpoints.cs:677-680`** (`if (user.IsExternal is not false) return Refused(…)`), inside the method at `:666-683`. `InternalShareEndpoints.cs:80` — which the register and the earlier stub both named — is only the reason-code CONSTANT declaration. And `SystemUserIdentityResolver.cs:57` does NOT justify this refusal: that doc comment (`:50-69`) is about internal-only MESSAGE exclusion feeding `CommunicationAccessContext.IsInternalUser` for notification fan-out and the timeline read path. It is a different feature, the share path does not use that resolver, and `sprk_isexternal` REMAINS load-bearing there. Do not touch the resolver or the flag itself.
+
+🔴 **Ship the test with the code, and there are TWO test sites, not one.** `tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs:80-95` asserts the 422 and the reason code; `tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs:430-441` is a `[Theory]` over `true` and `null` asserting `(422, UserNotInternalReasonCode)`. The register names only the first — a repo grep for the reason-code string misses the second because it asserts through the constant.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, the external access share path.</role>
+  <goal>A licensed system user can be granted a POA share regardless of the external flag; the test suite asserts the new rule rather than the retired one; and no prose left in the code or notes still states the retired rule.</goal>
+
+  <context>
+    <background>Task 063 built the internal share routes. Eligibility is decided by `EligibilityRefusal` (`InternalShareEndpoints.cs:666-683`) in three branches, in order: disabled (`:668-670`), not-a-person — an application id or an access mode outside 0–2 (`:672-675`) — and not-internal (`:677-680`). Only the third is retired. The first two are what actually keep a non-principal out, and they must keep working.
+
+**The `null` case is a real decision, not a detail.** The branch is `user.IsExternal is not false`, so an UNREADABLE or absent flag currently refuses — the ADR-003 fail-closed posture, and `InternalUserShareTests.cs:432` pins it with an explicit `[InlineData(null)]`. Deleting the branch makes `null` PASS. That is the correct consequence of the ruling (the flag becomes irrelevant to this decision), but it removes a fail-closed guard and must be stated deliberately rather than absorbed.
+
+**What `sprk_isexternal` is, answered from code so it need not be guessed.** It is Spaarke's own custom two-option column on `systemuser` (`SystemUserIdentityResolver.cs:82`, `InternalShareEndpoints.cs:744-746`), default 'No'/internal, read fail-closed to external when missing. It is NOT an AAD/directory guest marker. It is consumed by the communication fan-out to exclude external licensed users from internal-only content — pinned live at `tests/integration/seam/Communication/FanOutTargetingSecuritySeamTests.cs:249-255`. So the flag stays; only this path's use of it goes.
+
+**The discriminator the owner names is not read here.** `SystemUserSelect` (`:117`) is `systemuserid,isdisabled,accessmode,applicationid,sprk_isexternal` — no licence column, and a repo-wide search for `islicensed`/`caltype` finds nothing in `src/**` (one comment in `scripts/debug/list-app-users.ps1:24`). After the branch goes, eligibility is "exists, enabled, is a person", which is a PROXY for "licensed security principal", not a licence check. See the escalation.
+
+Contract check, already done: no client consumes the reason code — a search of `src/client/**` for `user_not_internal` returns nothing. Only the two tests reference it.
+
+Fixture note for the test edits: the fake systemuser table VALIDATES `$select` against a column allow-list and throws on an unknown column (`InternalUserShareTests.cs:893-900`, list at `:844`), and projects `IsExternal` only when selected (`:918`). Selecting FEWER columns is safe.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs (the refusal branch :677-680; the reason-code constant :79-80; `SystemUserSelect` :117; the class doc prose :44-48; `SystemUserRow.IsExternal` :744-746)</file>
+      <file role="modify">tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs (the 422 contract test :79-95; the `SystemUserRow` helper :156-157)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs (the [Theory] :430-441)</file>
+      <file role="modify">projects/unified-access-control-r2/notes/task-063-internal-user-share-endpoints.md (the reason-code list :133; the prose claim :355)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Identity/SystemUserIdentityResolver.cs:50-69 (what `sprk_isexternal` is FOR — a different feature; read it, do NOT change it)</file>
+      <file role="canonical-reference">tests/integration/seam/Communication/FanOutTargetingSecuritySeamTests.cs:249-255 (the flag's live consumer, which must stay green)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="audit 2026-09-18">Scope: the commit. 🔴 SHIP THE TESTS WITH THE CODE, in ONE commit, and there are TWO test sites (`InternalUserShareContractTests.cs:80-95` and `InternalUserShareTests.cs:430-441`). A green suite after changing only the endpoint would mean the tests never exercised the path; a green suite after changing only a test would mean nothing at all.</constraint>
+    <constraint source="verified 2026-09-19">Scope: the flag. `sprk_isexternal` and `ISystemUserIdentityResolver.IsExternalAsync` MUST NOT be removed, renamed or repurposed. They are the authoritative internal-vs-external source for internal-only communication exclusion, pinned by the Communication seam tests. This task removes ONE consumer of the flag, not the flag.</constraint>
+    <constraint source="project CLAUDE.md fact 4">Scope: the subject. ⚠️ A *contact* is still NOT a security principal: it cannot be a POA share target and cannot be impersonated (`projects/unified-access-control-r2/CLAUDE.md:23`). This decision covers licensed SYSTEM USERS only, and the contact plane must keep COMPUTING access rather than storing it.</constraint>
+    <constraint source="task 063">Scope: rights vocabulary. The share write path's rights vocabulary is Dataverse's, not Spaarke's — the two have same-named values with different bit layouts (Spaarke Delete = 4; Dataverse 4 = Append). Assert Dataverse's numbers as literals rather than deriving them from the table under test.</constraint>
+    <constraint source="project">Scope: the response contract. Removing a reasonCode is a contract change. No client consumes `user_not_internal` (verified — nothing in `src/client/**`), so state the change explicitly and decide deliberately whether the constant is deleted or retained as unused; do not leave a dead refusal path that can still be reached.</constraint>
+    <constraint source="ADR-003">Scope: the remaining guards. The disabled and not-a-person refusals stay, and both keep failing closed on an unreadable value. Only the external branch is retired — a user who cannot be confirmed to EXIST, or who is an application/support/delegated-admin account, is still refused.</constraint>
+    <constraint source="project">Scope: prose. Every sentence stating the retired rule must change in the same commit — the class doc (`:44-48`), the constant's summary (`:79`) if retained, and the task-063 notes (`:133`, `:355`). A file that reads consistently and describes the wrong rule is this project's signature failure mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/defer-issues.md</file>
+      <file>projects/unified-access-control-r2/notes/task-063-internal-user-share-endpoints.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ordered eligibility refusals" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs:662-683">
+        One method returning the first applicable refusal or null, each branch fail-closed on an unreadable value. Retire the third branch without disturbing the order or the fail direction of the first two.
+      </pattern>
+      <pattern name="Contract-vs-behaviour test split" location="tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs:1-9">
+        The contract tests assert routes, status codes, JSON names and reason codes as LITERALS; the behaviour lives in `tests/integration/auth/UnifiedAccessControl/InternalUserShareTests`. A rule change touches BOTH layers — the header at :1-9 says so explicitly.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read the three code sites and both test sites before editing, and settle the two decisions the ruling leaves open: what happens on `IsExternal == null` now that the flag is irrelevant here, and whether the reason-code constant is deleted or retained unused. Answer the escalation below if the licence question is not resolvable from the ruling.</step>
+    <step order="1">Remove the refusal branch (`:677-680`) and fix the prose in the same pass: the class doc (`:44-48`), the constant's summary (`:79`) if retained, and whether `sprk_isexternal` is still worth selecting at `:117` given its doc's own warning that every extra column is one whose absence or column-security would 400 the entire read.</step>
+    <step order="2">Change BOTH test sites to assert the new rule — an external licensed person now receives a share — and keep the negative cases that must still refuse. Do not simply delete the retired tests: invert them, so the new rule is pinned as explicitly as the old one was.</step>
+    <step order="3">Verify the flag's other consumer is untouched: the Communication fan-out seam tests stay green, and `ISystemUserIdentityResolver` is unchanged.</step>
+    <step order="4">Build, full suite, ArchTests, publish size versus a fresh master worktree; update the task-063 notes; write this task's notes; report. Leave TASK-INDEX to the main session.</step>
+  </steps>
+
+  <escalation>
+    <trigger>🔔 The owner's discriminator is LICENCE, and this path reads no licence signal at all — `SystemUserSelect` (`:117`) carries none, and nothing in `src/**` reads `islicensed` or `caltype`. After the branch is removed, eligibility is "exists + enabled + is a person (access mode 0–2, no application id)", which is a PROXY for "licensed security principal", not a licence check. Confirm that proxy satisfies the ruling before shipping. Do NOT invent a licence read — adding a column to this read is a new 400 risk and a wider change than the ruling authorises. If the owner intends an actual licence check, stop and escalate: that is a different task.</trigger>
+    <trigger>If `sprk_isexternal` turns out to carry a load-bearing distinction BEYOND the messaging use verified here — an unlicensed guest, an app user, a stub row — STOP. The ruling is about LICENSED users and does not authorise removing a guard that separates something else. The Dataverse MCP server is DOWN this session (`CONNECTION_CLOSED`), so live metadata cannot be consulted; the code-level answer (a custom Spaarke two-option column, default internal, consumed by the communication fan-out) is in `&lt;context&gt;`. If a live check is required to settle it, that is an escalation, not a guess.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs</output>
+    <output type="test">tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs and tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs (KEEP paths: endpoint-contract, security-auth)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-114-external-licensed-user-share.md, plus the corrections to notes/task-063-internal-user-share-endpoints.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A licensed, enabled, person-access-mode system user with `sprk_isexternal = true` receives a POA share at the requested level: 200, the level echoed, the stored rights mask read back, and outcome `created`.</criterion>
+    <criterion testable="true">Both retired test sites now assert the NEW rule rather than being deleted — the contract test at `InternalUserShareContractTests.cs:79-95` and the `[Theory]` at `InternalUserShareTests.cs:430-441`, including its `null` case.</criterion>
+    <criterion testable="true">The `IsExternal == null` outcome matches the decision recorded in step 0 and is pinned by a test, so the retirement of a fail-closed guard is explicit rather than incidental.</criterion>
+    <criterion testable="true">Negative case — still refused: a DISABLED user is 422 `user_disabled`, and nothing is written.</criterion>
+    <criterion testable="true">Negative case — still refused: an application, support or delegated-admin account (application id set, or access mode outside 0–2) is 422 `user_not_a_person`, and nothing is written — including when it is ALSO flagged external, so the removal of one branch does not let a non-person through.</criterion>
+    <criterion testable="true">Negative case — still refused: an unknown user is 404 `user_not_found`, and an unreadable systemuser read is 422/500 `read_failed` rather than a silent success.</criterion>
+    <criterion testable="true">Authorization unchanged: the caller still may grant only what they hold — a caller whose own rights do not cover the level gets 403 `caller_cannot_grant`, and the narrowing behaviour is unaffected by this change.</criterion>
+    <criterion testable="true">No refusal path remains reachable for the retired rule: if the reason-code constant is retained it is provably unused, and if deleted no reference survives in code or tests.</criterion>
+    <criterion testable="true">The flag's other consumer is intact: `ISystemUserIdentityResolver`/`IsExternalAsync` is unchanged, and the Communication fan-out seam tests — including the external-licensed-user exclusion at `FanOutTargetingSecuritySeamTests.cs:249-255` — stay green.</criterion>
+    <criterion testable="true">Unshare is unaffected: a share held by a disabled, external account is still removable (`InternalUserShareTests.cs:558-566` stays green), since the unshare path reads only existence.</criterion>
+    <criterion testable="true">No prose anywhere states the retired rule: the class doc (`:44-48`), the constant's summary (`:79`) if retained, and `notes/task-063-internal-user-share-endpoints.md` (`:133`, `:355`) all read consistently with the new rule.</criterion>
+    <criterion testable="true">Build green; full suite green; ArchTests green; publish size reported against a fresh master worktree and ≤60 MB.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-19. Premises re-verified against HEAD. The owner's ruling and the test hazard are confirmed; FOUR corrections to the register and the earlier stub.
+
+**VERIFIED TRUE** — the refusal exists and is reachable, and the contract test at `InternalUserShareContractTests.cs:94` does assert the retired reason code (test `PostShareUser_ForAnExternalUser_Returns422WithTheReasonCode` at `:80`, seeded `isExternal: true` at `:82`, status at `:93`). "Ship the test with the code" is correct and is the main hazard. No client consumes the reason code (`src/client/**` — nothing).
+
+**CORRECTION 1 — `InternalShareEndpoints.cs:80` is NOT the refusal.** It is the reason-code constant declaration. The refusal is `:677-680`, the third branch of `EligibilityRefusal` (`:666-683`). Both the register (`defer-issues.md:793`) and the earlier stub inherited the wrong line. This matters: deleting `:80` is not the change, and an executor at `:80` would find a `const` and improvise.
+
+**CORRECTION 2 — `SystemUserIdentityResolver.cs:57` does not justify this refusal.** `:50-69` is the doc comment on `IsExternalAsync`, and `:55-60` explains why internal-vs-external uses a FLAG rather than record-type inference for internal-only MESSAGE exclusion, feeding `CommunicationAccessContext.IsInternalUser` for notification fan-out and the timeline read path. Different feature; the share path never calls that resolver — it reads `sprk_isexternal` itself via `SystemUserSelect` (`:117`) into its own `SystemUserRow.IsExternal` (`:744-746`). The stub's phrasing ("a doc comment justifying the refusal") would have invited an executor to edit or delete a comment that documents a live, separate, seam-tested rule.
+
+**CORRECTION 3 — there is a SECOND test site.** `tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs:430-441`, `Share_WithAUserNotConfirmedInternal_Is422AndWritesNothing`, a `[Theory]` with `[InlineData(true)]` and `[InlineData(null)]` asserting `(422, InternalShareEndpoints.UserNotInternalReasonCode)` at `:439`. The register's "asserted by a contract test" is incomplete. A reason-code string grep misses it because it asserts through the constant — which is exactly how a "green suite" could be reached while one site still encodes the retired rule.
+
+**CORRECTION 4 — the owner's discriminator is not read on this path.** No licence column is selected (`:117`) and nothing in `src/**` reads `islicensed`/`caltype`. Post-change eligibility is a proxy, not a licence check. Raised as the first escalation trigger rather than silently accepted.
+
+Also verified and useful: the `null` case currently refuses (`user.IsExternal is not false`) and is explicitly pinned, so deleting the branch retires a fail-closed guard — a decision, not a side effect. The fake systemuser table validates `$select` against an allow-list and throws on unknown columns (`InternalUserShareTests.cs:893-900`, `:844`) but projects only what is selected (`:918`), so narrowing `SystemUserSelect` is test-safe.
+
+Related: tasks 060, 061, 063, 065 (the "+ User" picker consumes this surface), 069 (Phase-4 seam tests).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load every file in knowledge/files. Follow task-execute's mandatory pre-execution checklist. Step 9.5 (code-review + adr-check) is required at FULL rigor.</protocol>
+  </execution>
+</task>

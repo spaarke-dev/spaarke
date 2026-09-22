@@ -2,10 +2,18 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted, as amended** |
 | Date | 2025-09-27 |
-| Updated | 2025-12-04 |
+| Updated | 2026-09-04 (Amendment A1) |
 | Authors | Spaarke Engineering |
+
+> ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-04-two-surface-authorization-and-the-unified-evaluator) BEFORE APPLYING ANY RULE BELOW.**
+> A1 supersedes **four** of this ADR's rules — "two seams only", "new auth logic MUST be an
+> `IAuthorizationRule`", "MUST NOT create new service layers for auth", and "cache UAC snapshots
+> per-request only". The sections beneath still state them in their original 2025 form, deliberately:
+> this ADR records what was decided *and* what changed. **A1 wins on every point it addresses.**
+> Everything A1 does not address — fail-closed, machine-readable deny codes, authorize-before-storage,
+> never cache *decisions* — is unchanged and still binding.
 
 ## Context
 
@@ -89,6 +97,104 @@ Tenant-specific policies should be delivered as additional `IAuthorizationRule` 
 - Call authorization before invoking `SpeFileStore` operations.
 - Do not cache authorization decisions; cache only the data snapshots used to evaluate rules.
 - Treat UAC snapshots as **request/job scoped** only: do not store/reuse them beyond the current HTTP request or a single background job execution.
+
+---
+
+## Amendment A1 (2026-09-04): Two-surface authorization and the unified evaluator
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5).
+> **Driver project**: `unified-access-control-r2` (register item H-5; drift evidence register §G row 2).
+> **Rationale + model**: [`projects/unified-access-control-r2/design.md`](../../projects/unified-access-control-r2/design.md) §4.
+> **Sequencing**: this amendment merges **before** the evaluator it sanctions (task 032). The code
+> lands under an ADR that permits it — not in violation of one.
+
+### Why
+
+This ADR was written in 2025 for a single enforcement surface reached through one rule chain. Three
+things are now true that were not then, and each was verified in code before this amendment was
+written — not inferred from the docs, which had drifted:
+
+1. **There are two enforcement surfaces, not one.** Where a read goes through the BFF, the BFF filter
+   is the *entire* security boundary: BFF reads are app-only, so Dataverse row-level security is inert
+   on that path. Native MDA forms, grids and views *are* Dataverse-enforced. **The dividing line is
+   "does this read go through the BFF?", not "is this the MDA?"** — an MDA-hosted PCF that reads via
+   the BFF sits on the BFF surface. This was demonstrated, not theorised: a user denied Read on all
+   442 documents by Dataverse saw a matter's full document list, and opened and downloaded the files,
+   through an MDA form's embedded PCF.
+
+2. **A `HashSet<Guid>` cannot carry a right.** The existing external stack answers "which ids?" and
+   structurally cannot answer "with what rights?" — which is why matters and work assignments have no
+   level today. Adding rights is not a new abstraction layer; it is the missing return value.
+
+3. **The rules as written already do not describe the code.** `CachedAccessDataSource` caches access
+   data in `IDistributedCache` at 2-minute (roles, teams) and 60-second (per-resource) TTLs — that is
+   cross-request *and* cross-instance, in direct contradiction of "per-request only". The external
+   stack (`CallerPrincipalResolver` + `AccessibleRecordSetService`) is a service layer, not a rule.
+   A rule nobody follows is not a guardrail; it is a trap for the next reader.
+
+### Superseded rules (exactly four)
+
+| Retired rule | Replaced by |
+|---|---|
+| "Use **two seams only**" | **Two enforcement *surfaces***: Dataverse-native (MDA native forms/grids/views) and the BFF evaluator (SPA, Teams, **and MDA-embedded PCFs reading via the BFF**). The `IAccessDataSource` / `SpeFileStore` seams still exist; they are no longer the whole architecture. |
+| "**MUST** implement new auth logic as `IAuthorizationRule`" | New authorization logic MAY be a rule **or** a service participating in the evaluator. The rule chain is **retained and still sanctioned** — see "What A1 does not do" below. |
+| "**MUST NOT** create new service layers for auth (use rules)" | A service layer is permitted **where it is the evaluator or one of its terms**. This is not a general licence to add auth services: anything new still owes root CLAUDE.md §11's three-question justification. |
+| "**MUST** cache UAC snapshots per-request only" / "**MUST NOT** reuse UAC snapshots across requests" | Access **data** MAY be cached across requests under a short, explicit TTL with a key that includes the caller identity **and** the credential mode (SP vs OBO). **Caching a decision remains forbidden.** This ratifies existing, reviewed behaviour rather than licensing new caching. |
+
+### The evaluator contract (new, binding)
+
+The unified evaluator returns **`(recordId → rights)`** — a map, never a bare id set.
+
+```
+ADDITIVE TERMS — union, HIGHEST WINS (max)
+  1. Dataverse answer     (Type 1 only; impersonated read)
+  2. Explicit grant       (carries a level)
+  3. Derived member       (allow-listed lookups -> contact + org identities)
+  4. Org expansion        (org identity -> active contacts)
+  5. Inheritance          (child takes its core ancestor's rights, 1 hop)
+
+VETOES — applied AFTER the max, IN THIS ORDER
+  6. Deny list            (ethical wall + per-child revocation)  -> None
+  7. Restricted           (sprk_accesspermission = Restricted)   -> None for ALL contacts
+
+PRE-MAX SUPPRESSION
+  8. Secure               (sprk_issecure = true) suppresses terms 3 and 4
+                          BEFORE the max, for EVERY principal kind
+```
+
+Four properties of that contract are binding, and each exists because the obvious alternative fails:
+
+- **`"No Access"` is a VETO, never a level.** Modelled as a level, `max()` would simply ignore it, and
+  an ethical wall would fail silently in precisely the case it was built for.
+- **Secure suppresses *before* the max**, not after. After the max the suppressed term has already
+  won, and the suppression is a no-op on the only inputs that matter.
+- **Veto order is deny-list → Restricted**, and it is load-bearing, not stylistic.
+- **Allow-lists are first-class and cover org-typed lookups too**, not only contact-typed ones.
+  Unrestricted org expansion confers access from *any* organization named on a record — including
+  opposing counsel. (The allow-list's own promotion to a first-class per-surface concept is
+  **ADR-034**'s amendment, not this one.)
+
+### What A1 does NOT do
+
+- **It does not orphan `OperationAccessRule`.** That is the single live `IAuthorizationRule`
+  implementation (`Spaarke.Core/Auth/Rules/OperationAccessRule.cs`, registered at
+  `Infrastructure/DI/SpaarkeCore.cs:96`); it backs the granular operation-permission model and
+  **remains valid and registered**. A1 stops *mandating* the rule shape for all new auth logic; it
+  does not deprecate the chain or the rule in it. Verified before amending, because retiring a MUST
+  that a live consumer depends on would be an amendment that breaks running code.
+- **It does not weaken fail-closed anywhere.** Every error path still denies. The evaluator fails
+  closed on every term it cannot evaluate, and a secure record with no container of its own fails
+  closed rather than falling back.
+- **It does not touch deny codes** — machine-readable codes remain required on every denial.
+- **It does not touch authorize-before-`SpeFileStore`** — still required, unchanged.
+- **It does not permit caching decisions** — only data, as above.
+- **It does not license new auth services generally.** Root CLAUDE.md §11 still applies to each one.
+
+### Compliance
+
+The 2025 code-review checklist item "New auth logic implemented as `IAuthorizationRule`" is retired by
+this amendment; the remaining three checklist items stand. `ADR003_AuthorizationTests.cs` continues to
+validate the seam boundaries A1 preserves.
 
 ---
 

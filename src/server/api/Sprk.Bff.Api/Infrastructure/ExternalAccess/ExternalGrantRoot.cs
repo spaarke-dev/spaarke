@@ -56,6 +56,19 @@ internal static class ExternalGrantRoot
     };
 
     /// <summary>
+    /// The Dataverse LOGICAL name of a root's table (<c>sprk_project</c>) — what metadata lookups, the POA
+    /// <c>objecttypecode</c> resolution and <c>ImpersonatedRootSetSource</c>'s cache key address, as opposed to the
+    /// plural entity set in <see cref="BindFor"/> (task 063).
+    /// </summary>
+    public static string LogicalNameFor(ExternalGrantRootType type) => type switch
+    {
+        ExternalGrantRootType.Project => "sprk_project",
+        ExternalGrantRootType.Matter => "sprk_matter",
+        ExternalGrantRootType.WorkAssignment => "sprk_workassignment",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown external grant root type.")
+    };
+
+    /// <summary>
     /// Parses a wire <c>recordType</c> token (case-insensitive) into an <see cref="ExternalGrantRootType"/>.
     /// Accepts <c>project</c> | <c>matter</c> | <c>workassignment</c> (hyphen/underscore spellings of the
     /// last are also accepted). Returns <c>false</c> for null/empty/unknown so callers reject fail-closed.

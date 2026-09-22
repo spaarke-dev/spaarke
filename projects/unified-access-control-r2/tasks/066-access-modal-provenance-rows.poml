@@ -32,7 +32,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="064" status="pending">Report endpoint + frozen DTO.</dependency>
-      <dependency task="065" status="pending">User-share rows + 403 deny state already in the modal.</dependency>
+      <dependency task="065" status="completed">User-share rows + 403 deny state already in the modal.</dependency>
     </dependencies>
   </context>
 

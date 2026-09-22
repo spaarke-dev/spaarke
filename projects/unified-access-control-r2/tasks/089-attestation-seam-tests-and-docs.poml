@@ -3,7 +3,7 @@
   <metadata>
     <title>Attestation seam tests + architecture documentation (FR-32 closure)</title>
     <phase>5 Attestation</phase>
-    <gate>blocked — requires 081 + 082 merged</gate>
+    <gate>blocked — requires 087 + 088 merged</gate>
     <status>pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** — FULL unconditionally (TEST-MODIFYING override).</rigor-reason>
@@ -23,15 +23,15 @@
   <goal>Seam tests proving the project's success criterion 9 (point-in-time attestation answerable) through the public surfaces (endpoints/entry points, not internals); an attestation section in the canonical access-control architecture doc; both green/merged.</goal>
 
   <context>
-    <background>spec.md FR-32 + success criterion 9; design.md §7. The unit-level replay tests live in 082; this task proves the WHOLE chain at the seam: a real grant via the real endpoint produces an event, and replay over that history answers correctly — plus the documentation that makes the mechanism maintainable (the versioning policy is a behavioural contract future evaluator changes must honor).</background>
+    <background>spec.md FR-32 + success criterion 9; design.md §7. The unit-level replay tests live in 088; this task proves the WHOLE chain at the seam: a real grant via the real endpoint produces an event, and replay over that history answers correctly — plus the documentation that makes the mechanism maintainable (the versioning policy is a behavioural contract future evaluator changes must honor).</background>
     <relevant-files>
       <file role="modify">tests/integration/seam/ (extend the existing suite with attestation seam tests per suite convention)</file>
       <file role="modify">docs/architecture/uac-access-control.md (or canonical successor — the doc task 058 updated)</file>
       <file role="canonical-reference">projects/unified-access-control-r2/notes/phase5-evaluator-versioning.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="081" status="pending">Event hooks.</dependency>
-      <dependency task="082" status="pending">Replay + versioning.</dependency>
+      <dependency task="087" status="pending">Event hooks.</dependency>
+      <dependency task="088" status="pending">Replay + versioning.</dependency>
     </dependencies>
   </context>
 
@@ -61,7 +61,7 @@
   </steps>
 
   <escalation>
-    <trigger>If the seam test exposes an event kind 081 missed or a replay input 082 cannot reconstruct, STOP and file against that task per CLAUDE.md §6 — do not narrow the test.</trigger>
+    <trigger>If the seam test exposes an event kind 087 missed or a replay input 088 cannot reconstruct, STOP and file against that task per CLAUDE.md §6 — do not narrow the test.</trigger>
   </escalation>
 
   <outputs>

@@ -9,10 +9,17 @@
  *  - console-error-check: zero console.error/console.warn during render in
  *    both light and dark themes.
  *
- * Also covers the `canGrantAccess=false` no-dead-click case (acceptance
- * criterion 3) and a no-regression check that the toolbar is absent when
- * neither callback prop is supplied (backward compatibility for existing
- * consumers, per the "opt-in" design).
+ * Also covers the `canGrantAccess` no-dead-click case (acceptance criterion 3)
+ * and a no-regression check that the toolbar is absent when neither callback
+ * prop is supplied (backward compatibility for existing consumers, per the
+ * "opt-in" design).
+ *
+ * 🔴 Task 118 (unified-access-control-r2, FR-07 / owner decision D-1 option C)
+ * INVERTED the gate's default from enabled to disabled, so the prop is now
+ * stated explicitly wherever a test needs the icon live. The gate's own tests
+ * live in the "fail closed" describe below and are deliberately paired — a
+ * disabled-by-default assertion on its own would pass against a component that
+ * disabled the icon for everyone.
  */
 
 import * as React from 'react';
@@ -100,7 +107,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
     });
   });
 
-  describe('canGrantAccess=false — no dead click (acceptance criterion 3)', () => {
+  describe('the grant gate — fail closed, and no dead click (task 040 criterion 3; inverted by task 118)', () => {
     it('disables the person icon and never invokes onOpenGrantModal when clicked', () => {
       const onOpenGrantModal = jest.fn();
       renderWithTheme(<TrackingFieldTrio {...makeProps({ onOpenGrantModal, canGrantAccess: false })} />);
@@ -121,11 +128,43 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
       expect(screen.getByRole('button', { name: 'Email members' })).not.toBeDisabled();
     });
 
-    it('defaults the person icon to enabled when canGrantAccess is omitted', () => {
+    // 🔴 THE INVERSION (task 118, unified-access-control-r2, FR-07 / owner decision D-1 option C).
+    //
+    // This test asserted the OPPOSITE until v1.0.31 — "defaults the person icon to enabled when
+    // canGrantAccess is omitted" — and that default was the client half of the defect the task closed:
+    // the server denies an access question it cannot evaluate, while the client permitted one. An
+    // omitted prop means the host has no answer from the server, and no answer is not a yes.
+    //
+    // It is deliberately paired with the `canGrantAccess: true` case below rather than left alone. A
+    // disabled-by-default assertion passes just as well against a component that disables the icon
+    // unconditionally, which would be a total loss of the affordance rather than a fix.
+    it('disables the person icon when canGrantAccess is omitted (fail closed)', () => {
       const onOpenGrantModal = jest.fn();
       renderWithTheme(<TrackingFieldTrio {...makeProps({ onOpenGrantModal })} />);
 
+      const grantButton = screen.getByRole('button', { name: 'Grant access' });
+      expect(grantButton).toBeDisabled();
+
+      fireEvent.click(grantButton);
+      expect(onOpenGrantModal).not.toHaveBeenCalled();
+    });
+
+    it('enables the person icon only when canGrantAccess is explicitly true', () => {
+      const onOpenGrantModal = jest.fn();
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ onOpenGrantModal, canGrantAccess: true })} />);
+
       expect(screen.getByRole('button', { name: 'Grant access' })).not.toBeDisabled();
+    });
+
+    // The email icon is gated independently — it must not become collateral damage of a fail-closed
+    // grant gate. The existing `canGrantAccess: false` case asserts this; the OMITTED case is the new
+    // one, because that is the state every un-wired host and every harness now lands in.
+    it('leaves the email icon enabled when canGrantAccess is omitted', () => {
+      renderWithTheme(
+        <TrackingFieldTrio {...makeProps({ onOpenGrantModal: jest.fn(), onOpenEmailMembers: jest.fn() })} />
+      );
+
+      expect(screen.getByRole('button', { name: 'Email members' })).not.toBeDisabled();
     });
   });
 

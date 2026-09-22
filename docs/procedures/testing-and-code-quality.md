@@ -363,7 +363,7 @@ The adr-check skill validates code against Architecture Decision Records:
 
 | ADR | Constraint | Violation Example |
 |-----|------------|-------------------|
-| ADR-001 | No Azure Functions | Using `[FunctionName]` attribute |
+| ADR-001 | BFF endpoints in Minimal API; no Functions or Durable Task packages inside the BFF (placement of background work: ADR-052) | Using `[Function]` / `[FunctionName]` attribute in `Sprk.Bff.Api` |
 | ADR-002 | Thin plugins (<50ms, no HTTP) | HttpClient in plugin |
 | ADR-006 | PCF over webresources | Creating legacy .js webresource |
 | ADR-007 | Graph types isolated | GraphServiceClient in controller |
@@ -1290,7 +1290,7 @@ Architecture tests (`tests/Spaarke.ArchTests/`) use **NetArchTest.Rules** to enf
 
 | Test File | ADR | What It Enforces |
 |-----------|-----|-----------------|
-| `ADR001_MinimalApiTests.cs` | ADR-001 | No Azure Functions packages or attributes; Minimal API + BackgroundService only |
+| `ADR001_MinimalApiTests.cs` | ADR-001 | No Functions or Durable Task packages and no Function-attributed methods inside the BFF assembly |
 | `ADR002_PluginTests.cs` | ADR-002 | Plugin assembly has no HTTP/Graph dependencies; plugins stay thin |
 | `ADR007_GraphIsolationTests.cs` | ADR-007 | Graph SDK types do not leak above the SpeFileStore facade layer |
 | `ADR008_AuthorizationTests.cs` | ADR-008 | Authorization uses endpoint filters, not global middleware |

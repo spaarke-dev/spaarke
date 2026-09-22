@@ -191,6 +191,17 @@ Same columns as above, no filter.
 
 **Note**: External Contacts never read this table directly — the BFF reads it app-only on their behalf (broker-only, ADR-028 A1). The original "Power Pages table permissions (Contact scope)" model is RETIRED.
 
+### ⚠️ `SDAP User (Core)` → `Create` is NO LONGER REQUIRED BY ANY SPAARKE CODE *(task 118, 2026-09-21)*
+
+The table above records the CURRENT state of the roles, which is unchanged. What changed is that nothing in the product depends on the `Create` cell any more, so it is now a candidate for removal:
+
+- **What used to depend on it.** The Manage Access affordance in the `TrackingFieldTrio` PCF gated on `context.utils.hasEntityPrivilege('sprk_externalrecordaccess', Create, Global)` — a table-level privilege used as a proxy for "may this person grant access". Task 118 (owner decision D-1 option C) re-pointed it onto the rule the server actually enforces: **Write on the target record**, asked via `GET /api/v1/external-access/can-manage-access` and enforced by `DelegationRuleFilter`.
+- **What the privilege never did.** It never authorized a write. Every grant row is written by the BFF **app-only**, behind that delegation filter. Removing `Create` from a human role therefore removes no capability the product uses.
+- **Verified 2026-09-21** (task 118 escalation trigger 1): `hasEntityPrivilege` has **zero** call sites left in the repo; `src/dataverse/**` does not reference this table; no solution XML, ribbon rule or flow definition in the repo references it; and no client code calls `createRecord` on it. The only remaining client references are **reads**.
+- 🔴 **Ordering is binding, and the wrong order is silent.** The code above must be **DEPLOYED** before `Create` is removed from any human role. Reversed, the old client still gates on the privilege, `computeCanGrantAccess` returns `false` for every user, and Manage Access disappears for everybody — while the BFF's app-only writes keep succeeding, so nothing fails loudly.
+- **What removal DOES change** — deliberately, and see business rule 4: a person can no longer hand-create a grant row through a form, the Web API, a flow or an import. That is the path by which undated rows (which, post-task-107, confer nothing) got into the table in the first place.
+- **The operator step** is in [`projects/unified-access-control-r2/notes/task-118-manage-access-gate-write-on-record.md`](../../../../../projects/unified-access-control-r2/notes/task-118-manage-access-gate-write-on-record.md). Task 118 deliberately performs **no** role change: `SDAP User (Core)` exists only in Dataverse, not in any file in this repo.
+
 ---
 
 ## Power Pages Table Permission Configuration — ⚠️ RETIRED / NOT IMPLEMENTED
@@ -213,11 +224,20 @@ Level 0: sprk_externalrecordaccess
 
 1. **Unique participation grant**: Only one active record per (Contact, Project) pair. If a second grant is attempted, update the existing one instead.
 
-2. **Computed name**: Auto-generate `sprk_name` as `"{ContactFullName} → {ProjectName}"` via pre-create plugin (thin validation only, per ADR-002).
+2. **Computed name — ⚠️ THE PRESCRIPTION IS RETIRED AND NOTHING REPLACED IT** *(corrected 2026-09-21 by task 118)*.
+
+   This rule used to read: *"Auto-generate `sprk_name` as `{ContactFullName} → {ProjectName}` via pre-create plugin (thin validation only, per ADR-002)."* Two separate things are wrong with it.
+
+   - **The mechanism is banned.** Owner decision D-1 (2026-09-19) ruled Dataverse plugins out **repo-wide**; `src/dataverse/**` contains no code for this table and none may be added. This was the last doc in the repo still prescribing a plugin here — and a plugin is exactly the shape a reader reaches for on noticing a column that something must populate. (The same decision is why task 107 closed the undated-grant hole from the **read** side and task 117 with a **scheduled job**, rather than with a Dataverse-side default.)
+   - **Nothing composes the name.** Verified 2026-09-21: `GrantExternalAccessEndpoint.BuildGrantPayload` sets the root `@odata.bind`, `sprk_accesslevel`, `sprk_granteddate`, and optionally `sprk_Contact`, `sprk_GrantedBy` and `sprk_expiresdate` — **not `sprk_name`**. No other writer in the repo sets it either. So rows are created without a composed display name, and this rule has described an intention rather than a behaviour for as long as it has existed.
+
+   **Impact is cosmetic, which is why it survived**: `sprk_name` is the primary name column, so it is what an MDA grid, lookup or audit entry shows for a grant row. No code path reads it — the BFF resolves grants by lookup, never by name. Recorded rather than fixed because composing it is a write-path change outside task 118's scope; it belongs with whoever next touches `BuildGrantPayload`.
+
+   *(Also corrected from live metadata, 2026-09-21: `sprk_name` is `NVARCHAR(850)`, not the 200 this document states in its field table and index tables above.)*
 
 3. **Deactivation = revocation** *(corrected 2026-08-20 — the original "full three-plane revocation" was never built)*: Setting statecode = Inactive revokes the grant because the BFF's participation query only reads Active rows (`ExternalParticipationService.cs:406`). The revoke endpoint deactivates the row + invalidates the Redis participation cache, plus a defensive SPE permission cleanup only when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`). There is no web-role removal (Power Pages retired) and no search-filter exclusion (no external search plane exists).
 
-4. **Expiry enforcement — ⚠️ NOT IMPLEMENTED**: The originally promised scheduled BFF worker that checks `sprk_expiresdate` and deactivates expired records was never built. As of 2026-08-20 the expiry date is stored on grant (`GrantExternalAccessEndpoint.cs:321-326`) but enforced NOWHERE — the participation query filters on `statecode` only, so an expired but still-Active grant remains fully effective until someone deactivates it manually.
+4. **Expiry enforcement — IMPLEMENTED, read-side, fail-CLOSED on a missing date** *(corrected 2026-09-21 by task 107, ISS-009 / #974 — this entry was stale since task 007)*: There is still no scheduled worker that deactivates expired rows; `statecode` is untouched by expiry. Enforcement is instead server-side on every conferring read: `ExternalParticipationService.ExpiryPredicate` excludes any row whose `sprk_expiresdate` is in the past **or absent** (task 007 closed "in the past"; task 107 closed "absent", per owner decision D-1, 2026-09-19 — "we do not use Dataverse plugins", so the gap left by non-BFF writers omitting the column is closed from the read side, not by a Dataverse-side default). A row with no `sprk_expiresdate` therefore confers **NOTHING**, not "forever" — undated is fail-CLOSED. The BFF itself never writes an undated grant (task 097, FR-33: absent expiry defaults to today + 90 days), so this matters only for rows created outside the BFF (a form, the Web API, a flow, or an import — all reachable because users hold Create on this table). ⚠️ *Task 118 note (2026-09-21): that `Create` privilege is now a removal candidate — see the Security Roles section. Removing it closes this ingress rather than weakening the guard, so the read-side predicate stays exactly as task 107 left it; it simply has fewer undated rows to catch.* The in-memory mirror `ExternalParticipationService.ConfersAccessOn` answers the identical question for the write path (`/grant`, `/set-record-share-expiry`) and is pinned to agree with the read predicate by `GrantExpiryCharacterizationTests.ExpiryPredicateAndConfersAccessOn_AgreeOnTheNullCase`. See [`docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md` §4.2a](../../../../../docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md) for the pre-deploy operator COUNT this change requires.
 
 ---
 

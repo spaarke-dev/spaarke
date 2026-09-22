@@ -77,7 +77,7 @@ Plugins **MAY** be used *only* when all of the following are true:
 |---------|-------------------|
 | Business logic | BFF / Custom API |
 | Orchestration | API + async workers |
-| External services | BackgroundService / Azure Functions |
+| External services | A host chosen under ADR-052 (inside the BFF: ADR-004 queue / ADR-036 schedule) |
 | Long-running work | Job contracts + queues |
 | Observability | Application Insights |
 | Retries & idempotency | Worker infrastructure |

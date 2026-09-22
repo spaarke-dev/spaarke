@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-33 prerequisite — make IGenericEntityService.BulkUpdateAsync genuinely all-or-nothing (ExecuteTransactionRequest), system-wide</title>
+    <phase>FR-33 External grant expiry</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in the shared Spaarke.Dataverse layer consumed by the BFF; changes the failure semantics of a shared write helper.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Narrow, fully-specified mechanism swap with a known reference; the judgment boundary (testability) is an explicit escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches src/server/shared/Spaarke.Dataverse/** — a shared hot-path surface (conflict-check watchlist). Task 098 depends on it.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, bff-api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <origin>ISS-005 / GitHub #970, found 2026-09-10 while designing FR-33; promoted to FR-33's first task by owner challenge (notes/decisions/external-grant-expiry-mandatory.md §12.2)</origin>
+  </metadata>
+
+  <prompt>IGenericEntityService.BulkUpdateAsync (DataverseServiceClientImpl.cs ~:2311) sends N UpdateRequests in one ExecuteMultipleRequest with ContinueOnError=false and the comment "Stop on first error for transactional behavior". ExecuteMultiple is NOT transactional: stopping at the first failure leaves every earlier request committed, with no rollback. Switch it to ExecuteTransactionRequest so the guarantee the comment claims is actually true. This is needed system-wide (both existing callers want all-or-nothing) and FR-33 task 098 will REUSE this helper rather than building a parallel atomic write.</prompt>
+  <role>SPAARKE platform developer, C#/.NET + Dataverse SDK (Microsoft.Xrm.Sdk) request messages.</role>
+  <goal>BulkUpdateAsync applies all of its updates or none of them; its public signature is unchanged; its doc states the real guarantee and its limits; a failure names the request that caused it.</goal>
+
+  <context>
+    <background>Owner challenge 2026-09-10: FR-33 originally planned its own atomic changeset beside this helper; the owner flagged that as building a parallel mechanism instead of fixing the existing one (CLAUDE.md §11), and was right. Both current callers want atomicity: CommunicationAccountService.cs:239 resets sprk_sendstoday=0 across communication accounts; WorkspaceLayoutService.cs:946 clears sprk_isdefault on a user's other layouts — where today a partial run can leave a user with TWO default layouts. ExternalAccess already injects IDataverseService (which exposes IGenericEntityService) — see SubjectStandingGrantReader — so FR-33 can reach the fixed helper with no new dependency.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-10">Scope: mechanism only. Replace ExecuteMultipleRequest with ExecuteTransactionRequest inside BulkUpdateAsync. Do NOT change the method signature — both callers and task 098 depend on it. Do NOT add a second bulk method or a changeset helper anywhere; the point of this task is that there is ONE correct bulk-update path.</constraint>
+    <constraint source="CLAUDE.md §2">Scope: documentation. Delete the false "transactional" comment. The XML doc on BOTH the interface and the implementation MUST state the real guarantee (all-or-nothing) and the platform limits (max 1,000 requests per transaction; cannot be nested inside ExecuteMultiple). The same 1,000 ceiling applied to ExecuteMultiple, so neither caller regresses.</constraint>
+    <constraint source="NFR-01">Scope: failure reporting. On a fault the thrown exception MUST identify the failing request (ExecuteTransaction faults carry the faulted request index) and state that NOTHING was applied — the opposite of today's message, which implies nothing happened while earlier rows were in fact committed.</constraint>
+    <constraint source="ADR-038">Scope: tests. Put tests on a KEEP path. Assert at the service seam that exactly ONE ExecuteTransactionRequest is sent containing one UpdateRequest per input row. Mock&lt;HttpMessageHandler&gt; is banned (B1), as is reflection into privates (B8).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Run /conflict-check BEFORE starting (Spaarke.Dataverse is on the hot-path watchlist). Report publish size against a fresh master build, both sides from short paths with matching file counts (hazards 3 and 4). No new package.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. PERTURBATION IS MANDATORY: revert to ExecuteMultipleRequest and confirm at least one test fails. A perturbation that fails ZERO tests means the test is at the wrong level — fix the test, never drop the perturbation.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Run /conflict-check. Read BulkUpdateAsync and both callers; confirm neither depends on partial application.</step>
+    <step order="1">Determine how _serviceClient is typed and whether the request it receives can be captured at a seam without reflection or transport mocking. If it cannot, fire the escalation below.</step>
+    <step order="2">Swap to ExecuteTransactionRequest; rewrite the fault handling to name the failing index and state that nothing was applied.</step>
+    <step order="3">Update the XML docs on the interface and implementation.</step>
+    <step order="4">Tests per the closed set; perturbation; full suite; publish size.</step>
+    <step order="5">Update ISS-005 in notes/defer-issues.md and comment on GitHub #970 with the commit; close #970. Update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the request sent by BulkUpdateAsync cannot be observed at a substitutable seam without reflection (B8) or transport mocking (B1), STOP and escalate the test approach. Do NOT introduce a new interface or seam speculatively to make it testable — that is a design change to a shared surface and needs review.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>BulkUpdateAsync already exists and is the right primitive; this corrects its mechanism.</existing>
+    <extension>Modification only — no new surface.</extension>
+    <cost-of-doing-nothing>A partial failure leaves earlier rows committed behind a comment claiming it cannot happen: today, two default layouts for one user; under FR-33, some grants keep a LATER expiry after the record's expiry was shortened — fail-open on an access control.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</output>
+    <output type="code">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</output>
+    <output type="test">tests/ (KEEP path) — BulkUpdateAsync transaction tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BulkUpdateAsync sends exactly ONE ExecuteTransactionRequest containing one UpdateRequest per input row (asserted at the service seam).</criterion>
+    <criterion testable="true">No ExecuteMultipleRequest remains in BulkUpdateAsync, and the word "transactional" appears only in documentation that is true.</criterion>
+    <criterion testable="true">Negative: when the transaction faults, the thrown exception names the failing request index and states that no updates were applied.</criterion>
+    <criterion testable="true">Both existing callers (CommunicationAccountService, WorkspaceLayoutService) compile unchanged and their tests pass.</criterion>
+    <criterion testable="true">Perturbation: reverting to ExecuteMultipleRequest fails at least one test.</criterion>
+    <criterion testable="true">Build green; full BFF suite and ArchTests green; publish size reported vs a fresh master and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>ISS-005 / #970. Design: notes/decisions/external-grant-expiry-mandatory.md §12.2. Consumed by task 098.
+
+COMPLETED 2026-09-10 (session 7) — commits 3570d24e4 (fix) + 35dd301be (review follow-up). Full record:
+notes/task-096-bulkupdate-transactional.md.
+- ESCALATION FIRED at step 1 (no substitutable seam: the ServiceClient is built from config inside the
+  class; ServiceClient.Execute is virtual final). OWNER CHOSE "pure builder": public static
+  BuildBulkUpdateTransaction + DescribeBulkUpdateFailure tested under tests/unit/domain/Dataverse/
+  (StageAnalysisRegardingFields precedent). Criterion 1 ("asserted at the service seam") is met through
+  that owner-accepted alternative; the build → ExecuteAsync → describe wiring is covered by review.
+- Perturbation: wording revert → 2 tests fail; builder → ExecuteMultipleRequest → test build fails (CS1061).
+- Publish: master 45.35 MB vs branch 45.40 MB, 214 = 214 files, fresh short-path worktrees, Compress-Archive.
+- ⚠️ CORRECTION to this POML's own constraint: it says the transaction "cannot be nested inside
+  ExecuteMultiple". That is BACKWARDS (Microsoft Learn): an ExecuteMultiple MAY contain transactions; a
+  transaction may not CONTAIN ExecuteMultiple/ExecuteTransaction. Caught at review; the docs shipped correct.
+- The "fault ⇒ nothing applied" claim is made only for an ExecuteTransactionFault naming an in-range
+  request: the SDK throws the client-wide LastException, so with the singleton client another request's
+  fault can surface (filed #971 / ISS-006, system-wide). Atomicity does NOT stop WorkspaceLayoutService
+  writing a second default layout — it catches and proceeds (filed #972 / ISS-007).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -31,8 +31,8 @@
       <file role="modify">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization tests pinning the Read-ceiling denials, flipped here.</dependency>
-      <dependency task="004" status="pending">Caller token reaches the data source — real per-principal rights are queryable.</dependency>
+      <dependency task="001" status="completed">Characterization tests pinning the Read-ceiling denials, flipped here.</dependency>
+      <dependency task="004" status="completed">Caller token reaches the data source — real per-principal rights are queryable.</dependency>
     </dependencies>
   </context>
 

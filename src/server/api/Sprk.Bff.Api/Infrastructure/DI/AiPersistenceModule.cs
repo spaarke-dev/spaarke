@@ -261,7 +261,7 @@ public static class AiPersistenceModule
         //   - The generic cron framework (SchedulingModule's ScheduledJobHost / IScheduledJob) costs
         //     TWO registrations plus a seeded job definition, and stores run history in an explicitly
         //     interim InMemoryBackgroundJobStore. More surface, not less.
-        //   - ADR-001 says BackgroundService + PeriodicTimer for in-process periodic work, which is one
+        //   - A hand-rolled BackgroundService + PeriodicTimer (existing debt, ADR-052 §1) is one
         //     AddHostedService line and mirrors SessionFilesCleanupJob next door.
         //
         // UNCONDITIONAL (ADR-032 P1), like the two registrations above: the job's collaborators are a

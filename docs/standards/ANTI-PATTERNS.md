@@ -22,7 +22,7 @@
 
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
-| 1 | **Hosting BFF endpoints in Azure Functions** — moving Minimal API endpoints (chat, documents, AI analysis) to a Function App, or using Functions to duplicate BFF auth/correlation/ProblemDetails | Duplicates BFF cross-cutting concerns across two runtimes; fragments debugging and deployment; cold-start latency on user-facing requests | Keep BFF endpoints in `Sprk.Bff.Api` (Minimal API). Azure Functions ARE permitted for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers) — see ADR-001 criteria | [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) |
+| 1 | **Hosting BFF endpoints in Azure Functions** — moving Minimal API endpoints (chat, documents, AI analysis) to a Function App, or using Functions to duplicate BFF auth/correlation/ProblemDetails | Duplicates BFF cross-cutting concerns across two runtimes; fragments debugging and deployment; cold-start latency on user-facing requests | Keep BFF endpoints in `Sprk.Bff.Api` (Minimal API); BFF endpoints are never hosted in Azure Functions. Where background or event work runs is decided per workload — see [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) | [ADR-001](../../.claude/adr/ADR-001-minimal-api.md), [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) |
 | 2 | **Creating a separate AI microservice** — deploying AI endpoints in a standalone service outside the BFF | Adds network hops, separate auth, deployment complexity with no isolation benefit | Extend `Sprk.Bff.Api` with AI endpoints following Minimal API patterns | [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) |
 | 3 | **Global middleware for resource authorization** — `app.UseMiddleware<DocumentSecurityMiddleware>()` | Runs before routing completes; has no access to route values like `documentId` or request body | Use endpoint filters: `.AddEndpointFilter<DocumentAuthorizationFilter>()` | [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) |
 | 4 | **Injecting GraphServiceClient directly** — `public class Controller(GraphServiceClient graph)` | Graph SDK types leak above the facade; callers depend on Microsoft.Graph internals | Route all SPE operations through `SpeFileStore` facade; expose only SDAP DTOs | [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) |
@@ -95,7 +95,7 @@
 
 ## Related
 
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API + BackgroundService as BFF runtime; Azure Functions permitted for narrow out-of-band integration
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API for every BFF endpoint; where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md)
 - [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- Thin Dataverse plugins (no HTTP/Graph calls)
 - [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) -- Code Pages and PCF over legacy JS
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) -- SpeFileStore facade (no Graph SDK leaks)

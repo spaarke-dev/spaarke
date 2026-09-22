@@ -78,21 +78,29 @@ public class GrantExpiryCharacterizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // The null branch — the one that would take the whole feature down
+    // The null case — INVERTED task 107 (ISS-009 / #974, owner decision D-1, 2026-09-19)
     // ─────────────────────────────────────────────────────────────────────────────
+    //
+    // Task 007 added an explicit `eq null` branch so a grant with no expiry kept conferring access
+    // ("never expires"). D-1 retired that: "we do not use Dataverse plugins" ruled out every
+    // Dataverse-side default for rows created outside the BFF, so ISS-009 closes the gap from the READ
+    // side instead — a null sprk_expiresdate now confers NOTHING. Undated moved from fail-OPEN to
+    // fail-CLOSED (ADR-003). This test's ORIGINAL NAME asserted the retired rule; renamed + inverted
+    // rather than deleted (ADR-038 §7 — characterization tests pin behaviour, they are not scaffolding).
 
     /// <summary>
-    /// Most grants have NO expiry, and in OData <c>field ge X</c> excludes nulls. Without the explicit
-    /// null branch this predicate would revoke every open-ended grant in the system — an outage, not an
-    /// expiry bug, and one that would look nothing like the change that caused it.
+    /// Since task 097 the BFF never writes an undated grant, but the column is optional in Dataverse and
+    /// users hold Create on <c>sprk_externalrecordaccess</c>, so a row created outside the BFF (a form,
+    /// the Web API, a flow or an import) can still omit it. Without the explicit exclusion, that row
+    /// would confer access forever — the exact defect D-1 closed.
     /// </summary>
     [Fact]
-    public void ExpiryPredicate_TreatsAGrantWithNoExpiryAsNeverExpiring()
+    public void ExpiryPredicate_TreatsAGrantWithNoExpiryAsConferringNothing()
     {
         ExternalParticipationService.ExpiryPredicate(Today)
-            .Should().Contain("sprk_expiresdate eq null",
-                "a grant with no expiry date must keep conferring access — `ge` alone excludes nulls " +
-                "and would silently revoke every open-ended grant");
+            .Should().NotContain("eq null",
+                "task 107 / D-1: a grant with no expiry date must confer NOTHING — `ge` alone already " +
+                "excludes nulls in OData, so the retired `eq null` disjunct must be gone entirely");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -214,5 +222,64 @@ public class GrantExpiryCharacterizationTests
         ExternalParticipationService.GrantRowSelect.Should().Contain("_sprk_matter_value");
         ExternalParticipationService.GrantRowSelect.Should().Contain("_sprk_workassignment_value");
         ExternalParticipationService.GrantRowSelect.Should().Contain("sprk_accesslevel");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The IN-MEMORY mirror (task 106) — the write path must answer the SAME question
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>ConfersAccessOn</c> is the in-memory mirror of <see cref="ExternalParticipationService.ExpiryPredicate"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Task 106 needed it because the grant upsert must decide "does this row confer access" over
+    /// MATERIALIZED rows, where an OData <c>$filter</c> string cannot be reused. Two independent
+    /// definitions of "expired" is the drift that would let <c>/grant</c> report an outcome the reader
+    /// contradicts — A-5's shape — so there is exactly one in-memory copy, it lives next to the predicate
+    /// it mirrors, and this pins it to the same semantics the predicate itself is pinned to above:
+    /// <c>null</c> confers NOTHING (task 107 / ISS-009 / D-1, inverted 2026-09-21 from task 007's
+    /// original "null never expires"), and the expiry date ITSELF still confers (<c>ge</c>, never
+    /// <c>gt</c>).</para>
+    /// <para>Asserting the mirror separately matters because the OData tests assert the STRING. A mirror
+    /// that disagreed with the predicate on the null case would leave every one of them green while
+    /// <c>/grant</c> reported a null-expiry row as live — the exact drift this method's own doc comment
+    /// warns against.</para>
+    /// </remarks>
+    [Fact]
+    public void ConfersAccessOn_MirrorsTheReadFiltersExpirySemantics()
+    {
+        ExternalParticipationService.ConfersAccessOn(null, Today).Should().BeFalse(
+            "task 107 / D-1: a null sprk_expiresdate confers NOTHING — inverted from task 007's " +
+            "original `eq null` branch, which the OData predicate no longer carries either");
+        ExternalParticipationService.ConfersAccessOn(Today, Today).Should().BeTrue(
+            "`ge`, not `gt`: an expiry of 30 June means access still works ON 30 June (task 007, Date Only)");
+        ExternalParticipationService.ConfersAccessOn(Today.AddDays(1), Today).Should().BeTrue();
+        ExternalParticipationService.ConfersAccessOn(Today.AddDays(-1), Today).Should().BeFalse(
+            "a date in the past confers nothing — FR-06's acceptance case");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Agreement pin (task 107 acceptance criterion 2) — the two definitions cannot drift apart again
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>ExpiryPredicate</c> (the OData <c>$filter</c> string, the READ path) and
+    /// <c>ConfersAccessOn</c> (the in-memory mirror, the WRITE path) must answer the SAME question for
+    /// the null case — a row with no <c>sprk_expiresdate</c> — or <c>/grant</c> can report a grant as
+    /// live while the reader denies it (this method's own doc comment, and finding A-5's shape). This
+    /// test pins that agreement directly rather than relying on each definition's own test staying in
+    /// sync by coincidence.
+    /// </summary>
+    [Fact]
+    public void ExpiryPredicateAndConfersAccessOn_AgreeOnTheNullCase()
+    {
+        var predicateExcludesNull = !ExternalParticipationService.ExpiryPredicate(Today).Contains("eq null");
+        var mirrorExcludesNull = !ExternalParticipationService.ConfersAccessOn(null, Today);
+
+        predicateExcludesNull.Should().Be(mirrorExcludesNull,
+            "the OData filter and its in-memory mirror must treat a null expiry identically — task 107 " +
+            "made both exclude it; if either one drifts back to including it, this test must fail");
+        ExternalParticipationService.ConfersAccessOn(null, Today).Should().BeFalse(
+            "task 107 / D-1: the agreed answer is 'confers nothing'");
     }
 }

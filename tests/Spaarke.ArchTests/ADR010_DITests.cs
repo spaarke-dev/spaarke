@@ -222,7 +222,30 @@ public class ADR010_DITests
         // does end the access; the hazard is silent exposure until someone notices, not permanence.)
         // That is a contract, not indirection. Worth noting as the
         // ratchet behaving correctly: the count moved for a real reason and named the interface.
-        const int knownOneToOneCeiling = 156;
+        //
+        // ───────── Ceiling raised 156 → 157, 2026-09-09 (unified-access-control-r2) ─────────
+        // IImpersonatedRootSetSource -> ImpersonatedRootSetSource.
+        //
+        // ⚠️ ADDED BY TASK 035, WHICH DID NOT RAISE THE CEILING. Found by task 024 — the branch had
+        // been red here since e38548ce5. It survived CI because Tier 1 runs only the MUST-NOT subset
+        // of Arch Tests and Tier 2 is advisory by design, so nothing blocking ever executed this
+        // test. Worth knowing: this ratchet is effectively local-only enforcement today.
+        //
+        // The seam, assessed honestly rather than asserted:
+        //   FOR  — it mirrors IImpersonatedCommunicationQuery, which is a GENUINE seam (one impl,
+        //          and a real double, StubImpersonatedQuery, in ImpersonatedRootSetSourceTests).
+        //          Task 035's POML mandated the interface explicitly as the ADR-010 testing seam.
+        //   AGAINST — as of today it has ONE implementation, ZERO test doubles and ZERO consumers.
+        //          Its justification is a FUTURE substitution, and "future flexibility" is exactly
+        //          what CLAUDE.md §11 question 3 rejects. It is accepted on the strength of a NAMED
+        //          IMMINENT consumer, not on a general principle.
+        //
+        // 🔴 FALSIFIABLE CONDITION — this is the point of writing it down. Task 036's whole job is
+        // the flag-gated swap that substitutes this interface in the evaluator. If 036 lands and
+        // does NOT substitute it (no double, no second implementation), the interface has no seam,
+        // and the correct action is to register the concrete per ADR-010 and drop this ceiling back
+        // to 156 — NOT to leave it grandfathered because the number already moved.
+        const int knownOneToOneCeiling = 157;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

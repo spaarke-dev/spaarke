@@ -89,19 +89,17 @@ public class ComposeService : IComposeService
     internal const string CanonicalHashAttribute = "sprk_canonicalhash";
     internal const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
-    // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary (ADR-024 — the
-    // SAME closed set AttachmentDocumentAssociationRung follows, type-agnostic by design). A
-    // PDF-sourced create-on-save copies every non-empty lookup from the source PDF's record onto the
-    // new Word document's record so the two file side-by-side under the same matter/project/….
+    // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary. HOISTED to
+    // Spaarke.Dataverse.DocumentLinkFields (unified-access-control-r2, 2026-09-05) — this was one of
+    // TWO independently-drifting copies of the same closed set AttachmentDocumentAssociationRung
+    // follows (root CLAUDE.md §11 forbade a third). Both prior copies were INCOMPLETE — missing
+    // sprk_relatedinvoice / sprk_relatedworkassignment and six further columns; see the shared type
+    // for the full column table + the schema-name casing trap (the sprk_related* schema names are
+    // NOT uniformly cased — never derive one by convention). A PDF-sourced create-on-save copies
+    // every non-empty lookup from the source PDF's record onto the new Word document's record so the
+    // two file side-by-side under the same matter/project/….
     internal static readonly string[] DocumentAssociationLookupAttributes =
-    {
-        "sprk_matter",
-        "sprk_relatedmatter",
-        "sprk_project",
-        "sprk_relatedproject",
-        "sprk_invoice",
-        "sprk_workassignment",
-    };
+        DocumentLinkFields.LogicalNames.ToArray();
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).

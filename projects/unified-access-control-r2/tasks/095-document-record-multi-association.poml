@@ -28,9 +28,16 @@
   <context>
     <background>**Live metadata (owner screenshots, 2026-08-31)**: Document→Matter has **two**
 Many-to-one relationships (`sprk_matter_document`, `sprk_sprk_matter_sprk_document_sprk_relatedmatter`);
-Document→Project likewise (`sprk_Project_Document_1n`, `…_sprk_relatedproject`); Document→WorkAssignment
-has **one** (`sprk_WorkAssignment_Document_1n`). All **Many-to-one** — i.e. *two slots per type*, not a
-many-to-many.
+Document→Project likewise (`sprk_Project_Document_1n`, `…_sprk_relatedproject`). All **Many-to-one** —
+i.e. *two slots per type*, not a many-to-many.
+
+🔴 **CORRECTED 2026-09-21 by task 115**: this block previously said Document→WorkAssignment has **one**
+relationship. It is a **PAIR**, matching the same two-slots-per-type pattern as matter and project —
+`sprk_workassignment` (schema `sprk_WorkAssignment`) **and** `sprk_relatedworkassignment` (schema
+`sprk_RelatedWorkAssignment`), both targeting `sprk_workassignment`
+(`Models.cs:206-207`). The screenshot summary named relationship names and missed the second; the
+lookup-column enumeration is the ground truth and it was live-verified on 2026-09-05. ⚠️ Per step 0,
+re-verify live metadata anyway — but do not re-derive the "one" from the old screenshot.
 
 **Why NOT native N:N** (all three reasons, do not re-litigate):
   1. It breaks this project's access model — documents inherit **1 hop via a denormalized core
@@ -51,11 +58,32 @@ many-to-many.
 exactly what produces the owner's HTTP 412. Compose's transient-key dedup AND promote-idempotency both
 rest on that key.
 
-⚠️ Related context from item 7 (2026-09-03): `sprk_document` has real lookup columns for matter /
-project / invoice / workassignment / event — but **NOT** for `sprk_todo`, `account` or `contact`. If
-the target list is meant to include any of those, the intersection entity is the mechanism that makes
-it possible without adding five more lookup columns. That is an argument FOR this task's shape; state
-it in the design rather than adding lookups piecemeal.</background>
+⚠️ Related context from item 7 (2026-09-03) — 🔴 **CORRECTED 2026-09-21 by task 115; the original
+sentence was wrong on TWO of its three named absences, and it was the stated ARGUMENT FOR this task's
+shape.** It claimed `sprk_document` has lookups for matter / project / invoice / workassignment / event
+"but NOT for `sprk_todo`, `account` or `contact`". Verified against `DocumentLinkFields.All`
+(`src/server/shared/Spaarke.Dataverse/Models.cs:198-217`, itself live-metadata-verified against
+`spaarkedev1` on 2026-09-05):
+
+  - `sprk_relatedtodo` → `sprk_todo` **EXISTS**.
+  - `sprk_relatedcontact` → `contact` **EXISTS** (the OOB `contact` table).
+  - **`account` is the ONLY genuine absence** — corroborated by the `ContactLookup` doc comment at
+    `Models.cs:404-409`: *"`account` is REJECTED up front rather than accepted and silently dropped —
+    `sprk_document` has no account lookup in either family."*
+
+The full set is **16 lookups**, not five: four "primary" columns (`sprk_matter`, `sprk_project`,
+`sprk_invoice`, `sprk_workassignment`) plus twelve `sprk_related*` columns spanning agreement,
+communication, contact, event, invoice, matter, organization, project, servicerequest, todo, vendororg
+and workassignment.
+
+**The argument for this task survives, but it is a DIFFERENT argument** — and it is stronger. The case
+is no longer "several target types have no column" (only `account` does). It is that the lookup family
+has already grown to **16 columns across two naming families with non-uniform casing**, where three of
+the twelve `sprk_related*` schema names break the `$"sprk_Related{type}"` convention
+(`sprk_relatedmatter`, `sprk_relatedproject`, `sprk_relatedvendororg` are lowercase). Adding an
+association means adding a seventeenth column and remembering its casing. THAT is the argument for an
+intersection entity — state it that way in the design, and do not repeat the retired "no todo/contact
+lookup" claim.</background>
   </context>
 
   <knowledge>

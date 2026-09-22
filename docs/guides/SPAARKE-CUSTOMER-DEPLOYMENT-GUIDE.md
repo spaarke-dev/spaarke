@@ -338,7 +338,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **8 authoritative solutions** (§11.1a): SpaarkeCore, webresources, then 6 tier-3 parallel | All 8 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
 | **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s) | Container GET succeeds; container ID persisted to Dataverse + KV | `spe-{customerId}` |
-| **H9** | BFF deploy | `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (customerId-driven, no `spaarkedev1` hardcode) | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
+| **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
@@ -510,11 +510,19 @@ Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId
 
 ### 7.6 Phase 6 — BFF Deployment (H9)
 
-**H9** invokes `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (customerId-driven, no `spaarkedev1` hardcode per Gap 2).
+**H9** (`H9BffDeployHandler`) deploys the CI-published BFF artifact — nothing is built at provision time. In order:
+
+1. Scan the hardened `Deploy-Release.ps1` Phase 4 for a `spaarkedev1` hardcode (Gap 2) — blocks if found.
+2. Resolve and verify the artifact manifest (`latest.json`) — blocks on a missing or red gate result recorded by CI.
+3. Download the artifact zip (UAMI RBAC).
+4. **Scheduled-jobs slot guard** — set `Scheduling__RunScheduledJobs=false` on the staging slot and make it slot-sticky on the site (merge, never replace; a re-run writes nothing). Fails closed: if it cannot be set, nothing is deployed, because a slot without it runs the BFF's scheduled jobs against production data (ADR-036 A1 rule 2).
+5. Kudu zip-deploy to the staging slot.
+6. Staging `/healthz` probe, then the NFR-01 publish-size check.
+7. Swap staging → production, production `/healthz` smoke test, re-swap rollback on failure.
 
 **Blue-green** via staging slot in upgrade mode; rollback via re-swap.
 
-r3-era gates (all must pass):
+r3-era gates (all must pass — run in CI and recorded in the manifest):
 - Analyzers-as-errors
 - God-class ratchet (no NEW server `.cs` > 2,000 LOC; 13 frozen files respect +100 grace)
 - 5 new ArchTests (I1–I5 tenant-isolation invariants)
@@ -591,6 +599,7 @@ Cross-tenant data bleed is the single class of catastrophe r1 must make structur
 **Verification lifecycle**:
 
 - **At code time**: 5 ArchTests (CI Tier-1 blocking, coordinated PR with `ci-cd-unit-test-remediation-r1`)
+  - **Functions projects** live under `src/server/functions/` ([ADR-052](../adr/ADR-052-workload-placement.md) §5). The I2 and I3 ArchTests scan all of `src/server/**`, so a Model-1 shared Function carries those invariants automatically; I4 and I5 currently scan BFF paths only (`Sprk.Bff.Api/Services`, `Sprk.Bff.Api/Infrastructure/{Graph,Auth}`), so a Function's SPE-container and Graph-token code is covered by review until those scans are widened.
 - **At provisioning time**: H13 samples a query in each of the 5 classes
 - **At runtime**: OpenTelemetry span attributes include `tenantId`; log samples cross-referenced for anomaly detection
 

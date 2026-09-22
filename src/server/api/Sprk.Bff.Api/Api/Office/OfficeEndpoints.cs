@@ -344,9 +344,17 @@ public static class OfficeEndpoints
             // at both persistence sites. See Spaarke.Dataverse.DocumentAssociationMap.
             //
             // `workassignment` + `event` added 2026-09-03 — both DO have lookup columns.
+            // Every type here MUST have a real sprk_document lookup column in DocumentAssociationMap,
+            // or this endpoint authorizes a save that can only land unassociated — the user believes
+            // the file is filed and it is not.
+            //
+            // 2026-09-04 (unified-access-control-r2): "account" REMOVED — sprk_document has no account
+            // lookup in either column family, so every account-filed save was persisted unassociated.
+            // "todo" ADDED — sprk_relatedtodo exists and always did; the earlier record calling a
+            // to-do "unmappable" came from checking only the bare sprk_{type} family.
             var validEntityTypes = new[]
             {
-                "matter", "project", "invoice", "workassignment", "event", "account", "contact"
+                "matter", "project", "invoice", "workassignment", "event", "todo", "contact"
             };
             if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
             {

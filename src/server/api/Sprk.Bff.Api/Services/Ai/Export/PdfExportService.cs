@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.Export;
 
 /// <summary>
 /// PDF export service using QuestPDF for in-process PDF generation.
-/// Follows ADR-001 - no Azure Functions for core processing.
+/// Runs in-process within the BFF export request (ADR-001; placement per ADR-052).
 /// </summary>
 public partial class PdfExportService : IExportService
 {

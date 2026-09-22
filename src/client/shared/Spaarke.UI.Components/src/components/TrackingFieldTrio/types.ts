@@ -74,11 +74,20 @@ export interface ITrackingFieldTrioProps {
    * ADR-045 — this component MUST NOT implement ad hoc send logic). When
    * omitted, the email icon is NOT rendered. */
   onOpenEmailMembers?: () => void;
-  /** Gates the person icon's enabled state. Defaults to `true` (enabled)
-   * when `onOpenGrantModal` is supplied and this prop is omitted. Pass
-   * `false` when the current user lacks grant privilege — the icon then
-   * renders genuinely disabled (native Fluent `disabled`, no attached
-   * click handler), never merely dimmed with a live handler, so there is
-   * no dead click. */
+  /** Gates the person icon's enabled state: `true` enables it, anything else
+   * — `false`, or the prop omitted — disables it.
+   *
+   * 🔴 The default INVERTED in task 118 (unified-access-control-r2, FR-07 /
+   * owner decision D-1 option C). It was `true`, so a host that had not wired
+   * an access decision at all offered the affordance to everyone; it is now
+   * `false`, so an unanswered access question is a denial. The host's job is
+   * to pass the server's answer — see `TrackingFieldTrio`'s PCF `index.ts`
+   * `evaluateGrantGate()`, which asks `GET /api/v1/external-access/
+   * can-manage-access` (Write on THIS record, evaluated as the caller over
+   * OBO) and passes `false` on every path that does not produce that answer.
+   *
+   * A disabled icon is genuinely disabled — native Fluent `disabled`, with no
+   * click handler attached — never merely dimmed with a live handler, so
+   * there is no dead click. */
   canGrantAccess?: boolean;
 }

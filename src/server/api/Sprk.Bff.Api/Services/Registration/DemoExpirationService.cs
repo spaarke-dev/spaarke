@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Services.Registration;
 
 /// <summary>
 /// Background service that runs daily at midnight UTC to expire demo accounts.
-/// Implements ADR-001 BackgroundService pattern (same structure as DailySendCountResetService).
+/// A hand-rolled timer BackgroundService, same structure as DailySendCountResetService (existing debt, ADR-052 §1).
 ///
 /// Two responsibilities:
 ///   1. Expire: Provisioned records past their expiration date — disable Entra account,

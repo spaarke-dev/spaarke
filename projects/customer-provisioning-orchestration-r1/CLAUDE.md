@@ -120,7 +120,7 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 Declared in [spec.md § ADR Tensions](./spec.md#adr-tensions-per-claudemd-65--mandatory). 2 Path A (documented exception) + 5 Path C (comply). All rationale concrete. NO Path B (no ADR amendment needed).
 
 **Path A rows** — code-review at PR time expects PR description to cite these:
-- **ADR-004**: L2 orchestration is NEW component pattern (not Durable Functions / not single-shot). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
+- **ADR-004**: L2 orchestration is NEW component pattern — a custom state machine over Cosmos rather than Durable Task, and not single-shot (ADR-052 §7 now also permits Durable Task in its own host). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
 - **ADR-027**: Model 1 shared-tier is documented exception. Rationale: D3 (v3) rewrites tenancy to include both tiers; §4D invariants enforce logical isolation.
 
 ## Sub-Agent Write Boundary (root CLAUDE.md §3)

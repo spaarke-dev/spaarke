@@ -615,7 +615,7 @@ See: .claude/skills/code-review/references/review-checklist.md -> "AI Code Smell
 RUN subset of adr-check skill:
 
 CRITICAL ADRs to always check:
-  - ADR-001: BFF endpoints in Minimal API (no Functions hosting BFF endpoints; Functions OK for out-of-band integration)
+  - ADR-001 / ADR-052: BFF endpoints in Minimal API; no Functions or Durable Task inside the BFF; any background work's host chosen per workload under ADR-052 (inside the BFF: queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`)
   - ADR-002: Thin plugins (<50ms, no HTTP)
   - ADR-007: Graph types isolated
   - ADR-008: Endpoint filters for auth
@@ -680,8 +680,9 @@ APPLY Section C (New Endpoints) — only if MapPost/MapPut/MapGet added:
   - Results.Problem(...) for errors (RFC 7807)?
   - Registered via Map{Feature}Endpoints extension, NOT directly in Program.cs?
 
-APPLY Section D (New Background Work) — only if IHostedService/IJobHandler added:
-  - Uses IJobHandler<T> per ADR-004 (not free-form IHostedService)?
+APPLY Section D (New Background Work) — only if IHostedService/IJobHandler/IScheduledJob added:
+  - Host decided under ADR-052 and stated in the Placement Justification?
+  - Inside the BFF: queue → IJobHandler (ADR-004), schedule → IScheduledJob (ADR-036) — not a hand-rolled timer BackgroundService?
   - AI-coupled jobs in Services/Ai/Jobs/ (not Services/Jobs/Handlers/)?
 
 FLAG SEVERITIES:

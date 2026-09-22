@@ -43,6 +43,7 @@
 | 019 | `.claude/adr/ADR-019-problemdetails.md` | [docs/adr/ADR-019-api-errors-and-problemdetails.md](docs/adr/ADR-019-api-errors-and-problemdetails.md) | [api.md](.claude/constraints/api.md) | [api/error-handling.md](.claude/patterns/api/error-handling.md) |
 | 020 | `.claude/adr/ADR-020-versioning.md` | [docs/adr/ADR-020-versioning-strategy-apis-jobs-client-packages.md](docs/adr/ADR-020-versioning-strategy-apis-jobs-client-packages.md) | [api.md](.claude/constraints/api.md) | - |
 | 021 | `.claude/adr/ADR-021-fluent-design-system.md` | [docs/adr/ADR-021-fluent-ui-design-system.md](docs/adr/ADR-021-fluent-ui-design-system.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/theme-management.md](.claude/patterns/pcf/theme-management.md) |
+| 052 | `.claude/adr/ADR-052-workload-placement.md` | [docs/adr/ADR-052-workload-placement.md](docs/adr/ADR-052-workload-placement.md) | [jobs.md](.claude/constraints/jobs.md), [bff-extensions.md](.claude/constraints/bff-extensions.md) | [api/background-workers.md](.claude/patterns/api/background-workers.md) |
 
 ---
 

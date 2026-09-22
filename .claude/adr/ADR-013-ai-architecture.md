@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (amended 2026-07-05)
 > **Domain**: AI/ML Integration
-> **Last Updated**: 2026-07-05 (amendment: capability invocation replaces playbook invocation as the canonical facade verb)
+> **Last Updated**: 2026-09-12 (placement pointers → [ADR-052](ADR-052-workload-placement.md); no AI rule changed). Prior: 2026-07-05 (amendment: capability invocation replaces playbook invocation as the canonical facade verb)
 > **Updated By**:
 > - 2026-05-20 refinement — refined per [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md); categorical "no separate AI microservice" rule replaced with technical criteria; direct CRUD→AI injection prohibited (must use `Services/Ai/PublicContracts/` facades).
 > - 2026-07-01 amendment (Path B per CLAUDE.md §6.5) — `IInvokePlaybookAi` facade widened with optional `userContext` + `document` parameters. Motivating consumer: `spaarkeai-compose-r1`.
@@ -21,7 +21,7 @@
 4. Separating it does **not require duplicating** latency-sensitive components in both processes
 
 Workloads meeting all four:
-- Azure Functions for sync/extraction/scheduled work (already permitted by ADR-001; Insights Engine sync pipelines are the canonical example)
+- Background, scheduled and event-driven AI work that [ADR-052](ADR-052-workload-placement.md) places outside the BFF (e.g. the Insights Engine sync pipelines)
 - An MCP server (e.g., `Sprk.Insights.Mcp`) exposing AI capabilities to external consumers like M365 Copilot — DESIGN-TIME consideration, not pre-decided
 
 **Rationale**: The 2026-05-20 BFF AI extraction assessment found the codebase is structurally AI-dominant (69% LOC, 5.2× churn) but operationally well-justified for unified BFF: 100% of streaming endpoints are AI; routing/safety/session components require in-process coupling. Extracting existing AI code would force either latency degradation, component duplication, or both. Categorical rejection of separation, however, was too strong — specific narrow-scope deployables (Functions, MCP server) ARE permitted when the technical criteria above are met.
@@ -35,7 +35,7 @@ Workloads meeting all four:
 - **MUST** follow ADR-001 Minimal API patterns for AI endpoints
 - **MUST** use endpoint filters for AI authorization (ADR-008)
 - **MUST** use Redis caching for expensive AI results (ADR-009)
-- **MUST** use Job Contract for background AI work (ADR-004)
+- **MUST** use the in-BFF mechanism for background AI work that stays in the BFF: queue-driven → Job Contract (ADR-004); schedule-driven → `IScheduledJob` (ADR-036, e.g. `PlaybookSchedulerJob`); where it runs at all → ADR-052
 - **MUST** access files through SpeFileStore only (ADR-007)
 - **MUST** apply rate limiting to all AI endpoints
 - **MUST** flow ChatHostContext through the full chat pipeline when provided
@@ -49,7 +49,7 @@ Workloads meeting all four:
 
 - **MUST NOT** create a separate AI microservice **without documented evidence** that all four exception criteria are met AND a successor ADR amends this one
 - **MUST NOT** call Azure AI services directly from PCF
-- **MUST NOT** host AI BFF synthesis/streaming endpoints in Azure Functions (Functions are permitted only for out-of-band integration — see ADR-001)
+- **MUST NOT** host AI BFF synthesis/streaming endpoints in Azure Functions (where non-request AI work runs: ADR-052)
 - **MUST NOT** expose API keys to clients
 - **MUST NOT** add new direct CRUD→AI dependencies; new external consumers MUST go through `Services/Ai/PublicContracts/` facades
 
@@ -86,10 +86,11 @@ Before adding new AI functionality, ask:
 | Does it have a TTFB / latency budget against BFF state (<500ms)? | YES | NO |
 | Does it write to BFF-managed session/audit/safety state in the same request? | YES | NO |
 | Does it require retroactive annotation of streaming responses? | YES | NO |
-| Is it event-driven (timer, queue, webhook) with no synchronous user wait? | NO | YES |
+| Does ADR-052 place it outside the BFF (an F-signal outweighs the costs)? | NO | YES |
 | Is it a thin facade (e.g., MCP tools) over an existing well-bounded engine? | (consider) | (consider) |
 
 All four "BFF" answers → BFF. Three or four "Separate" answers + concrete justification → write a successor ADR.
+*A trigger type alone (timer, queue, webhook) never decides placement — [ADR-052](ADR-052-workload-placement.md).*
 
 ---
 
@@ -97,7 +98,8 @@ All four "BFF" answers → BFF. Three or four "Separate" answers + concrete just
 
 | ADR | Relationship |
 |-----|--------------|
-| [ADR-001](ADR-001-minimal-api.md) | Minimal API patterns; defines out-of-band Functions permitted scope |
+| [ADR-001](ADR-001-minimal-api.md) | Minimal API patterns for AI endpoints |
+| [ADR-052](ADR-052-workload-placement.md) | Where background, scheduled and event-driven AI work runs |
 | [ADR-004](ADR-004-job-contract.md) | Async job contract |
 | [ADR-007](ADR-007-spefilestore.md) | File access via facade |
 | [ADR-008](ADR-008-endpoint-filters.md) | Authorization filters |

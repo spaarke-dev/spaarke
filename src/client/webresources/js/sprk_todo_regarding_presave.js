@@ -42,11 +42,49 @@
  *     recordId: "00000000-0000-0000-0000-000000000000",
  *     recordName: "Smith v. Jones",
  *     recordUrl: "https://contoso.crm.dynamics.com/main.aspx?...",  // optional
- *     recordNumber: "MAT-2026-00042"     // optional; target's business-key number
+ *     recordNumber: "MAT-2026-00042",    // optional; target's business-key number
  *                                        //   from sprk_regardingrecordnumberfield
  *                                        //   (populated by SRFR-020/032)
+ *
+ *     // v1.3.0 (FR-26) — the access edge. See "Core-ancestor stamps" below.
+ *     clearLookups: ["sprk_regardingproject"],          // nulled BEFORE the sets
+ *     ancestorStamps: [                                  // set AFTER the clears
+ *       { entityType: "sprk_matter", entitySet: "sprk_matters",
+ *         lookupAttribute: "sprk_regardingmatter",
+ *         recordId: "00000000-0000-0000-0000-000000000000" }
+ *     ]
  *   };
  *   ```
+ *
+ * # Core-ancestor stamps (v1.3.0 — unified-access-control-r2 task 051 / FR-26)
+ *
+ * A CHILD record (to-do, event, document, communication…) does not get access
+ * from being *referenced* by a parent. It inherits through a DENORMALIZED
+ * core-record ancestor lookup that the child row itself carries — the evaluator
+ * tests `child.sprk_regarding{core} ∈ {accessible core ids}` in ONE hop and
+ * cannot walk a chain. That lookup IS the access boundary.
+ *
+ * On CREATE the stamp MUST ride the INSERT, which is why it is staged here
+ * rather than written afterwards: a crash between "row created" and "row
+ * stamped" leaves a child nobody can reach.
+ *
+ * `clearLookups` is the reparent half. A user can pick parent A and then parent
+ * B before ever saving; without staging A's clear the INSERT would carry both
+ * lookups (an FR-13 violation) and both ancestor stamps (the stale-stamp
+ * over-grant). **Clears are applied BEFORE sets** — the chosen lookup is often
+ * itself a core-ancestor column (picking a Matter directly), so the reverse
+ * order would null the very stamp it just wrote.
+ *
+ * ## Form-composition prerequisite (read this before blaming the code)
+ *
+ * `formContext.getAttribute(name)` returns null for a column that is not ON THE
+ * FORM — that is how `sprk_regardingrecordurl` came to be silently skipped for
+ * two releases (SRFR-043). Every core-ancestor lookup the host can carry must
+ * therefore be present on the CREATE form, hidden if you like. When one is
+ * missing this handler logs `console.error` naming the exact column: a stamp
+ * that cannot be staged is a silent under-grant, not a cosmetic gap, so it is
+ * deliberately noisier than the `console.warn` used for the cosmetic fields.
+ * There is NO post-create update fallback by design.
  *
  * If the seam is not populated (older PCF, or user cleared selection),
  * this handler is a no-op (the form save proceeds; on UPDATE mode the PCF has
@@ -78,6 +116,8 @@
  *
  * # Version
  *
+ * v1.3.0 — FR-26: core-ancestor stamp + reparent-clear staging (2026-09-04,
+ *          unified-access-control-r2 task 051)
  * v1.2.0 — SRFR-040: sprk_regardingrecordnumber support (2026-07-02)
  * v1.1.0 — R4-052: read-only / disabled form-type defensive skip (2026-06-11)
  * v1.0.0 — initial implementation (smart-todo-r4 task R4-051, 2026-06-10)
@@ -98,7 +138,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.2.0";
+    ns.VERSION = "1.3.0";
 
     /**
      * Resolver text/url fields written verbatim from the pending payload.
@@ -210,7 +250,29 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                 setAttributeIfPresent(formContext, fieldName, value === undefined ? null : value);
             }
 
-            // 2. Stage the chosen sprk_regarding<entity> lookup.
+            // 2. FR-26 (v1.3.0) — CLEAR staged lookups BEFORE any set.
+            //
+            //    Ordering is load-bearing and easy to get backwards: the chosen
+            //    lookup is frequently itself a core-ancestor column (the user
+            //    picked a Matter directly), so clearing after setting would null
+            //    the very stamp we just wrote. The shared payload builder applies
+            //    the same order server-side; this mirrors it on the form.
+            //
+            //    A cleared column that is not on the form is harmless — there is
+            //    nothing staged to clear — so this stays at warn level (inside
+            //    setLookupIfPresent), unlike the stamp SETS below.
+            var clearLookups = Array.isArray(pending.clearLookups) ? pending.clearLookups : [];
+            var clearedCount = 0;
+            for (var c = 0; c < clearLookups.length; c++) {
+                if (typeof clearLookups[c] !== "string" || !clearLookups[c]) {
+                    continue;
+                }
+                if (clearLookupIfPresent(formContext, clearLookups[c])) {
+                    clearedCount++;
+                }
+            }
+
+            // 3. Stage the chosen sprk_regarding<entity> lookup.
             //    The lookup attribute name comes from the catalog entry surfaced
             //    by the PCF as `lookupAttribute` (preferred) or is derived from
             //    `entityType` by convention (`sprk_regarding<entitysuffix>`).
@@ -230,12 +292,46 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                 );
             }
 
-            // 3. The sprk_regardingrecordtype lookup is already set by the PCF
+            // 4. FR-26 (v1.3.0) — stage the core-ancestor stamps LAST, so a stamp
+            //    can never be nulled by step 2.
+            //
+            //    This is the access edge. A stamp that cannot be staged (its
+            //    column is not an attribute on this form) means the child saves
+            //    looking perfectly correct while being invisible to everyone whose
+            //    access comes from that ancestor — so it is an ERROR, not a warn,
+            //    and there is deliberately NO post-create update fallback.
+            var stamps = Array.isArray(pending.ancestorStamps) ? pending.ancestorStamps : [];
+            var stampedCount = 0;
+            for (var s = 0; s < stamps.length; s++) {
+                var stamp = stamps[s];
+                if (!stamp || !stamp.lookupAttribute || !stamp.recordId) {
+                    continue;
+                }
+                if (setLookupIfPresent(formContext, stamp.lookupAttribute, stamp.recordId, "", stamp.entityType)) {
+                    stampedCount++;
+                } else {
+                    console.error(
+                        "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] FR-26: could not stage core-ancestor stamp \"" +
+                            stamp.lookupAttribute + "\" (" + stamp.entityType + " " + stamp.recordId + ") — the column " +
+                            "is not an attribute on this form, so it cannot ride the INSERT. Add the column to the " +
+                            "form (hidden is fine). This record will NOT inherit that ancestor's access."
+                    );
+                }
+            }
+
+            // 5. The sprk_regardingrecordtype lookup is already set by the PCF
             //    via notifyOutputChanged() (bound output). No staging needed here.
 
             console.log(
-                "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] Staged " + (TEXT_FIELDS.length + 1) + " resolver fields for INSERT",
-                { entityType: pending.entityType, recordId: pending.recordId }
+                "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] Staged resolver fields for INSERT",
+                {
+                    entityType: pending.entityType,
+                    recordId: pending.recordId,
+                    textFields: TEXT_FIELDS.length,
+                    chosenLookup: lookupAttr || null,
+                    ancestorStampsStaged: stampedCount + "/" + stamps.length,
+                    lookupsCleared: clearedCount + "/" + clearLookups.length
+                }
             );
 
             // 4. Clear the pending global so a subsequent re-save does not re-apply.
@@ -318,6 +414,11 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
     /**
      * Set a polymorphic-style lookup attribute (single-entity lookup) if it
      * exists on the form.
+     *
+     * @returns {boolean} true when the value was staged onto a real form
+     *   attribute; false when the attribute is absent or the set threw. The
+     *   caller decides how loud that is — cosmetic for the chosen lookup,
+     *   an FR-26 access hole for a core-ancestor stamp (v1.3.0).
      */
     function setLookupIfPresent(formContext, fieldName, recordId, recordName, entityType) {
         try {
@@ -326,12 +427,12 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                 console.warn(
                     "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] Lookup attribute not on form: " + fieldName
                 );
-                return;
+                return false;
             }
             var cleanId = String(recordId || "").replace(/[{}]/g, "");
             if (!cleanId) {
                 attr.setValue(null);
-                return;
+                return true;
             }
             attr.setValue([
                 {
@@ -340,11 +441,46 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                     entityType: entityType
                 }
             ]);
+            return true;
         } catch (err) {
             console.warn(
                 "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] Failed to set lookup " + fieldName + ":",
                 err
             );
+            return false;
+        }
+    }
+
+    /**
+     * v1.3.0 (FR-26) — null a lookup attribute if it exists on the form.
+     *
+     * Used for the reparent case on a CREATE form: pick parent A, then parent B
+     * before the first save. Without this the INSERT carries BOTH lookups and
+     * BOTH ancestor stamps — the stale-stamp over-grant, on a record that has
+     * never even been saved once.
+     *
+     * A column absent from the form has nothing staged to clear, so absence is a
+     * warn (diagnostic), not an error — the inverse of the stamp SET case.
+     *
+     * @returns {boolean} true when a null was staged.
+     */
+    function clearLookupIfPresent(formContext, fieldName) {
+        try {
+            var attr = formContext.getAttribute(fieldName);
+            if (!attr) {
+                console.warn(
+                    "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] Lookup attribute not on form (clear skipped): " + fieldName
+                );
+                return false;
+            }
+            attr.setValue(null);
+            return true;
+        } catch (err) {
+            console.warn(
+                "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] Failed to clear lookup " + fieldName + ":",
+                err
+            );
+            return false;
         }
     }
 
@@ -358,7 +494,9 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
             onSave: ns.onSave,
             _internals: {
                 textKeyForField: textKeyForField,
-                deriveLookupAttribute: deriveLookupAttribute
+                deriveLookupAttribute: deriveLookupAttribute,
+                setLookupIfPresent: setLookupIfPresent,
+                clearLookupIfPresent: clearLookupIfPresent
             },
             VERSION: ns.VERSION
         };

@@ -4,7 +4,7 @@
     <title>Secure Project provisioning rework: service-account owner + share-only, no per-project BU (FR-28)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>blocked — requires 060 (POA seam) + 008 (FR-07 delegation rule) merged. Live-dev ACCEPTANCE gated on UAT env setup (BU restructure) — code + tests ship independently.</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs: provisioning decides who owns and who can see secure records.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -32,8 +32,8 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (provisioning tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="060" status="pending">Consolidated POA seam (grant + revoke, systemuser principal).</dependency>
-      <dependency task="008" status="pending">FR-07 delegation rule on provision-project (Write-on-record OBO check) — this endpoint must already be delegation-gated.</dependency>
+      <dependency task="060" status="completed">✅ Completed 2026-09-08 (this session) — the seam exists; this attribute previously read "pending". Consolidated POA seam (grant + revoke, systemuser principal). ⚠️ GENUINELY still pending as of 2026-09-07 — verified, not inherited. This is the ONE thing blocking 061: the task's whole mechanism is "issue explicit shares via the 060 seam", and building 061 first would mean writing a share client, i.e. the THIRD POA client that both 060's constraints and root CLAUDE.md §11 forbid. 060's own dependency (010) is complete, so 060 is startable immediately.</dependency>
+      <dependency task="008" status="completed">FR-07 delegation rule on provision-project (Write-on-record OBO check) — this endpoint must already be delegation-gated. ✅ Status corrected 2026-09-07 — it read "pending" while 008 had been completed for weeks, which made 061 look blocked on two dependencies when only 060 remains. See the note on 060's `<dependency task="010">` for why these attributes are unreliable: they are a third hand-maintained copy of task state that `scripts/check-task-status-drift.ps1` does not reconcile.</dependency>
     </dependencies>
   </context>
 
@@ -90,7 +90,35 @@
     <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported. Live-dev verification items (Operations user cannot read; shared user reads in MDA + SPA) recorded as UAT acceptance, not claimed by this task.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-28 + § UAT and Environment Setup (BU restructure NOT a task). design.md §5.1-5.2.</notes>
+  <notes>spec.md FR-28 + § UAT and Environment Setup (BU restructure NOT a task). design.md §5.1-5.2.
+
+COMPLETED 2026-09-08 (session 4). The locked box is open: provisioning now issues the explicit
+POA share that design §5.1 requires ("All human access is by explicit Dataverse share, including
+the creating attorney's"). Task 021 had shipped the isolation and no share, so a provisioned
+secure project was owned by a memberless team and reachable by nobody.
+
+TWO POML PREMISES WERE STALE and were NOT followed - see notes/phase4-061-provisioning-inventory.md:
+(1) "creates each secure BU as a child of root" - already fixed by task 021; no BU is created and
+the one canonical BU is resolved BY NAME, fail-closed. (2) goal says "configured service account" -
+design §5.1a explicitly reversed that on 2026-08-25 ("an owner TEAM, not a service account"), so
+neither SecureProjects:ServiceAccountId nor :BusinessUnitId was added; they would be dead config
+contradicting the design.
+
+DELIVERED: creator share (fail-closed, identity from WhoAmI over OBO so it cannot be aimed at a
+third party) + optional named principals (best-effort) on /provision-project, ordered BEFORE
+container creation so a share failure orphans nothing; a new POST /unsecure-project reverse path
+(owner reassign with read-back, revoke all POA, clear the flag - in that order, idempotent);
+CallerRecordAccessProbe extended to expose the caller systemuserid it already resolved.
+
+NOT DELIVERED, deliberately: access teams (design §5.1b prefers them but they need an entity team
+template = environment setup; the seam takes a DataversePrincipalRef so the migration is one call
+site). Live-dev assertions are UAT items in notes/phase4-uat-acceptance.md - §5.1a-2 proves a child
+BU does not isolate from Deep depth, so "only the shared user can read it" is not observable until
+the §5.2 restructure lands.
+
+Verified: build 0 errors 0 warnings, ArchTests 194/194 (endpoint census 116 to 117, classified),
+BFF unit 12,191 pass / 0 fail / 58 skipped, 12 new tests perturbation-checked (removing the share
+step turns 8 of 13 red).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

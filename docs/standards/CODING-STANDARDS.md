@@ -19,7 +19,7 @@
 ### C# — Architecture
 
 4. **MUST** use Minimal API for all HTTP endpoints — no MVC controllers *(ADR-001)*
-5. **MUST** use `BackgroundService` + Service Bus for BFF-coupled async work; Azure Functions are permitted for narrow out-of-band integration (sync, extraction, webhook ingress, timer indexers) per ADR-001 criteria *(ADR-001)*
+5. **MUST** decide where background work runs per [ADR-052](../../.claude/adr/ADR-052-workload-placement.md); inside the BFF, queue work uses Service Bus + `IJobHandler` (ADR-004) and scheduled work uses `IScheduledJob` (ADR-036) *(ADR-052)*
 6. **MUST** use endpoint filters for resource authorization — no global auth middleware *(ADR-008)*
 7. **MUST** register concrete types unless a genuine seam exists *(ADR-010)*
 8. **MUST** keep DI registrations at 15 or fewer non-framework lines; use feature module extensions *(ADR-010)*
@@ -206,7 +206,7 @@ createRoot(document.getElementById("root")!).render(
 
 | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |-------------|---------------|-----------------|-----------|
-| Azure Functions hosting BFF endpoints | Duplicate cross-cutting concerns, split BFF runtime | Minimal API in `Sprk.Bff.Api` (Functions OK for out-of-band integration per ADR-001) | ADR-001 |
+| Azure Functions hosting BFF endpoints | Duplicate cross-cutting concerns, split BFF runtime | Minimal API in `Sprk.Bff.Api`; where background work runs is [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) | ADR-001 |
 | Global auth middleware | Runs before routing; no access to route values | Endpoint filters | ADR-008 |
 | Interface for single implementation | Adds indirection without value; DI sprawl | Register concrete type | ADR-010 |
 | `GraphServiceClient` injected into endpoints | Leaks Graph SDK types above facade boundary | Use `SpeFileStore` facade | ADR-007 |
@@ -224,7 +224,7 @@ createRoot(document.getElementById("root")!).render(
 
 ## Related
 
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API + BackgroundService as BFF runtime; Azure Functions permitted for narrow out-of-band integration
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API for every BFF endpoint; where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md)
 - [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) — Thin Dataverse plugins; no remote I/O
 - [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) — Code Pages as default UI surface; no legacy JS
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) — SpeFileStore facade; no Graph SDK leakage

@@ -68,7 +68,7 @@ reviews:
         - Use endpoint filters for auth (ADR-008), not global middleware
         - Use ProblemDetails for all error responses (ADR-019)
         - Keep DI registrations minimal (ADR-010)
-        - No Azure Functions (ADR-001)
+        - BFF endpoints are Minimal API, never hosted in Azure Functions (ADR-001); where background work runs is ADR-052
 
     - path: 'scripts/**'
       instructions: |

@@ -88,6 +88,10 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
     fetchExistingGrants,
     searchContacts,
     isInternalContact,
+    // Stated EXPLICITLY since task 118 inverted the default to `false` (fail closed). This file is about
+    // the Access-Permission sharing gate, which is a DIFFERENT gate from the delegation one — so it must
+    // say the delegation answer was "yes" in order to test the other gate at all.
+    canGrantAccess: true,
     pickContact,
     pickOrganization,
     ...overrides,

@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118" project="unified-access-control-r2">
+  <metadata>
+    <title>Ask the server's question — re-point the Manage Access gate off table-level Create onto Write-on-record, fail CLOSED, then retire Create from human roles (D-1 option C)</title>
+    <phase>Register-driven (authored 2026-09-19 after the 2026-09-19 owner decision)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts on an authorization gate and adds a BFF endpoint; tags pcf/auth/bff-api. It changes who can open Manage Access.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive (tags auth), a deliberate fail-direction inversion, a binding code-before-config ordering whose wrong order breaks the UI for every user, and a cross-project test collision to resolve.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Api/ExternalAccess/** is parallel-unsafe in this project; also edits the shared AccessGrantModal/TrackingFieldTrio surface in @spaarke/ui-components, which 065/066/067 serialize on.</parallel-reason>
+    <deps>none</deps>
+    <tags>pcf, frontend, react, bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <origin>Owner decision 2026-09-19 on D-1: "follow recommendation; for C if this is needed for the best solution then do not defer." Option C of the plugin-free answer to task 107. The prerequisite ordering was surfaced in notes/owner-decision-brief-2026-09-18.md § "Nothing is blocked" — re-point the UI gate BEFORE removing Create, or Manage Access vanishes for every user while the BFF's app-only write keeps working.</origin>
+  </metadata>
+
+  <prompt>The UI and the server ask DIFFERENT questions about the same action. The server asks "do you have Write on this record?" and denies when it cannot tell. The PCF asks "do you have Create on the sprk_externalrecordaccess TABLE, globally?" and allows when it cannot tell. Make the client ask the server's question, with the server's fail direction — then, and only then, take Create away from human roles.</prompt>
+
+  <role>SPAARKE platform developer — PCF controls, the external-access authorization path, and Dataverse security roles. You are narrowing who can open Manage Access; a wrong ordering removes the button from everyone.</role>
+
+  <goal>The Manage Access affordance is gated on the same rule the server enforces (Write on the target record, FR-07), it is DISABLED when that rule cannot be evaluated, its two comments no longer claim a defense-in-depth gate that does not exist, and the now-unnecessary Create privilege is recorded for removal in an operator step that runs AFTER the code ships.</goal>
+
+  <context>
+    <background>D-1 ruled out Dataverse plugins repo-wide. Option C of the replacement answer is to stop relying on a table-level Create privilege as the proxy for "may grant", because the real rule lives on the server and is per-record.
+
+🔴 THE BINDING ORDERING, AND WHY. `SDAP User (Core)` currently holds Create = Yes on `sprk_externalrecordaccess` (entity-schema.md:184-190). If that privilege is removed while the client still gates on it, `computeCanGrantAccess` returns false for every user, the person icon disables, and Manage Access disappears — while the BFF's app-only write path keeps working, so nothing fails loudly. Code first, config second. This is not a preference.
+
+VERIFIED FACTS (each checked 2026-09-19 against source; verify anyway — this project has 19 prior instances of premise rot per `notes/task-accuracy-audit-2026-09-18.md:9`, and the code has won every time):
+- THE CLIENT'S QUESTION. `src/client/pcf/TrackingFieldTrio/index.ts:462-473`: `computeCanGrantAccess()` calls `utils.hasEntityPrivilege(EXTERNAL_ACCESS_ENTITY, /* Create */ 1, /* Global */ 3)` inside a try, and on throw or missing API falls through to `return true` at `:472`. Called at `:255`; the entity constant is at `:159`; a back-reference comment sits at `:869`.
+- THE SERVER'S QUESTION. `DelegationRuleFilter` (`src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs:81`, an IEndpointFilter) is attached GROUP-level by `AddDelegationRuleFilter()` at `Api/ExternalAccess/ExternalAccessEndpoints.cs:126` — deliberately group-level, not per-route (`:116`), with a request-type to target-record map in its remarks (`:119`). The contract, per spec.md FR-07 (`:57`): "a caller without Write on the target record receives 403". `SetRecordShareExpiryEndpoint.cs:33` states it as "Write on THIS record".
+- THE ANSWER MACHINE, AND ITS FAIL DIRECTION. `Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs` asks Dataverse `GET systemusers({principal})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)` (`:414`) over OBO — NOT app-only (`DelegationRuleFilter.cs:77`) — and FAILS CLOSED on every degraded path: rejected exchange, WhoAmI unavailable, probe unavailable, probe throws (`:45`, `:52`, `:478` "Denying."). It is registered with `AddHttpClient&lt;CallerRecordAccessProbe&gt;` at `Infrastructure/DI/ExternalAccessModule.cs:120`.
+- NO CLIENT CAN REACH IT. Its consumers are four filters (`EntityAccessFilter`, `RecordRouteAccessAuthorizationFilter`, `DelegationRuleFilter`, and `ContainerDocumentAuthorizationFilter` which deliberately does not call it, `:91`) and three endpoints (`UnsecureProjectEndpoint`, `ProvisionProjectEndpoint`, `InternalShareEndpoints`). NO endpoint returns the caller's rights to a client. That is why this task adds surface — see the justification.
+- 🔴 THE FAIL-OPEN'S STATED REASON IS FALSE. `index.ts:459-460` and `AccessGrantModal/types.ts:144` both justify the fail-open by citing "a SECOND, defense-in-depth gate" in the modal. But `AccessGrantModal.tsx:232` defaults `canGrantAccess = true` and `:313`/`:630` read THE SAME PROP, and `TrackingFieldTrio.tsx:244` is `const grantEnabled = canGrantAccess !== false`, so `undefined` enables. Two gates reading one value are one gate. The CONCLUSION still holds — the BFF enforces regardless — but the stated reason does not, and a comment vouching for a guarantee its neighbour does not provide is how this defect survived review.
+- NO TEST PINS IT. `projects/code-quality-and-assurance-r3/workstreams/pcf-controls/design.md:242` records that five live controls have no tests at all, naming this gate (`index.ts:462`, `return true` at `:472`).
+
+⚠️ CROSS-PROJECT COLLISION — HANDLE IT, DO NOT DISCOVER IT. That same workstream's `design.md:180` says: "fail-open is the documented availability fallback with server-side BFF enforcement behind it. D7-01 TESTS the behavior; switching to fail-closed is an owner-input behavior change outside this workstream." THIS TASK IS THAT OWNER-INPUT CHANGE. That project is initialized but NOT executing (`projects/INDEX.md:53`, last commit 2026-08-06), so no such test exists yet. If it later writes D7-01 asserting fail-OPEN, it will pin the retired rule — exactly task 114's defect (`InternalUserShareContractTests.cs:94` asserts a 422 the owner retired). Note also that `src/client/pcf/**` is NOT on the `/conflict-check` hot-path watchlist (its columns are BFF / SpaarkeAi / CI / Skill-Directives), so no tooling will surface this for you.
+
+THE CREATE REMOVAL IS CONFIGURATION, NOT CODE. `SDAP User (Core)` appears in exactly ONE file in the entire repo — `entity-schema.md` — so there is no solution XML or role definition to edit. Removing Create is a Dataverse security-role change performed by an operator. This task delivers the code, the doc correction, and the runbook step; it does not and cannot perform the role edit.</background>
+    <relevant-files>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md</file>
+      <file role="new">an endpoint returning the caller's rights on one record (place it beside the external-access routes; name it in Step 1 after reading ExternalAccessEndpoints.cs)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.toolbar.test.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-19 (D-1 C)">Scope: ordering. PRESCRIPTIVE and binding: the client re-point and the probe endpoint ship and deploy BEFORE any Create privilege is removed from any human role. Reversing it hides Manage Access for every user while the BFF's app-only write keeps working — a silent, total loss of the affordance.</constraint>
+    <constraint source="ADR-003 / spec.md FR-07">Scope: fail direction. The new client gate FAILS CLOSED — an unanswerable access question is a denial, matching `CallerRecordAccessProbe` (`:478`). Do NOT preserve the current fail-open "availability fallback"; inverting it is the point of this task, not a side effect.</constraint>
+    <constraint source="ADR-008">Scope: the new endpoint. Resource authorization stays in an endpoint filter; the new route reports the caller's rights, it does not become a second enforcement point. The server's enforcement remains `DelegationRuleFilter` — this endpoint must never be the thing that permits a write.</constraint>
+    <constraint source="ADR-028">Scope: client auth. The probe call goes through `@spaarke/auth`'s `authenticatedFetch` (already bootstrapped in `init()` via `authInit.ts`), never a raw fetch with a hand-built Authorization header, and the endpoint runs OBO so it answers for the CALLER and not for the app.</constraint>
+    <constraint source="ADR-012">Scope: the shared modal. `AccessGrantModal` stays entity-agnostic — it keeps receiving a boolean prop. Do not push entity names, record ids or probe calls into the shared component.</constraint>
+    <constraint source="task 114 lesson">Scope: tests. Ship the test WITH the code. `TrackingFieldTrio.toolbar.test.tsx:124` currently asserts "defaults the person icon to enabled when canGrantAccess is omitted" — that pins the retired default and MUST be updated in the same change. A green suite after changing only one side proves nothing.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: the new endpoint. Reuse `CallerRecordAccessProbe` and `DataverseAccessRightsMapper`; do not write a second `RetrievePrincipalAccess` caller, and do not widen the endpoint into a general permissions API. One record, the caller, the rights.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification for the new endpoint citing `.claude/constraints/bff-extensions.md`; publish size measured against a FRESH master worktree from a SHORT path with file counts compared on both sides; no new HIGH CVE; tests updated per §10 bullet 6.</constraint>
+    <constraint source="project CLAUDE.md">Scope: PCF deployment. Bump the control version in all four locations and show it in the footer per `docs/guides/PCF-DEPLOYMENT-GUIDE.md`; build with `npm run build:prod`, never `npm run build`.</constraint>
+    <constraint source="cross-project">Scope: coordination. Run `/conflict-check` even though `src/client/pcf/**` is not on the hot-path watchlist, and record in the task notes that this change supersedes `code-quality-and-assurance-r3`'s pcf-controls D7-01 as written, so that project's test is authored against fail-CLOSED.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/unified-access-control-r2/notes/task-008-delegation-rule.md</file>
+      <file>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</file>
+    </files>
+    <patterns>
+      <pattern name="The rule to mirror" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs">Read its remarks for the request-type to target-record map — the client must ask about the SAME record the server would authorize. Task 008's note records a ready-made perturbation: detaching `.AddDelegationRuleFilter()` from the group makes 17 of 36 tests fail.</pattern>
+      <pattern name="Fail-closed probing" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs">Every degraded path denies (`:45`, `:52`, `:478`). Copy that posture into the client gate; note the probe deliberately conflates "record absent" with "no access" (`EntityAccessFilter.cs:361`) — do not try to un-conflate it here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Verify the premises above at HEAD, especially `computeCanGrantAccess` at `index.ts:462-473` and the group-level filter attachment at `ExternalAccessEndpoints.cs:126`. Confirm no client-callable rights endpoint has appeared since 2026-09-19; if one has, extend it instead of adding one.</step>
+    <step order="1">Add the caller-rights endpoint beside the external-access routes, reusing `CallerRecordAccessProbe` over OBO, returning the caller's rights on one (entity, recordId). State the Placement Justification.</step>
+    <step order="2">Re-point `computeCanGrantAccess` onto that endpoint — Write on THIS record — and make it FAIL CLOSED. Because the answer is now asynchronous while `updateView` is synchronous, resolve it into the control's state and re-render, mirroring `EmailProcessingMonitor`'s documented auth-init pattern rather than blocking.</step>
+    <step order="3">Delete the false "second, defense-in-depth gate" justification at `index.ts:459-460` and `AccessGrantModal/types.ts:144`, replacing it with what is actually true: the modal's check reads the same prop, and the real backstop is `DelegationRuleFilter`.</step>
+    <step order="4">Update `TrackingFieldTrio.toolbar.test.tsx:124` and add the first tests for the gate itself: Write present, Write absent, and probe-unavailable (must DISABLE). Run the UI tests below.</step>
+    <step order="5">Correct `entity-schema.md`: the role table (`:184-190`) records that Create is no longer required by the UI, business rule 2 (`:216`) no longer prescribes a pre-create plugin (D-1 banned plugins repo-wide), and business rule 4 (`:220`) no longer says expiry is "enforced NOWHERE" (tasks 097/107 retired that).</step>
+    <step order="6">Write the operator runbook step for removing Create from `SDAP User (Core)` and the other human roles, explicitly gated on steps 1-4 being DEPLOYED. Do not perform the role change. Then verify: build, full suite, ArchTests, publish size vs a fresh master, PCF version bump, notes, TASK-INDEX row.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If anything OTHER than this UI gate reads Create on `sprk_externalrecordaccess` — another control, a form script, a flow, a view — removing it is no longer safe in one step. STOP and report every reader before the runbook step is written.</trigger>
+    <trigger>If the PCF context cannot supply an OBO-authenticated call at gate-evaluation time (e.g. the gate must be computed before `authInit` resolves), STOP rather than reintroducing a fail-open to paper over the timing. The acceptable answers are "render disabled until the probe answers" or an owner decision — not a silent default to enabled.</trigger>
+    <trigger>If `code-quality-and-assurance-r3` has begun executing its pcf-controls workstream and D7-01 has landed a test asserting fail-open, coordinate before changing the behaviour: two projects asserting opposite rules on one gate is a merge conflict that a green suite will hide on each side separately.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`CallerRecordAccessProbe` already answers exactly this question server-side over OBO, and `DelegationRuleFilter` already enforces it. Its consumers are four endpoint filters and three endpoints — enumerated by grep on 2026-09-19 — and none of them returns the answer to a client. On the client side, `hasEntityPrivilege` is the only existing mechanism, and it can only see TABLE-level privileges, never per-record rights.</existing>
+    <extension>The probe itself is reused, not rebuilt — the new surface is one thin route that exposes an answer the server already computes. It cannot be avoided by extending an existing endpoint: every current external-access route is a WRITE gated by the group filter, so asking one of them "may I?" would mean performing the action. A host-context alternative (calling `RetrievePrincipalAccess` from `context.webAPI`) was considered and rejected — it would put an authorization derivation in the client, which is the pattern this project exists to remove, and the BFF already holds the OBO credential.</extension>
+    <cost-of-doing-nothing>Two concrete failures. (1) The gate answers the wrong question: a user with Create on the table but NO Write on a confidential matter is offered Manage Access, clicks through, and gets a 403 from the server — the affordance promises an action the caller cannot perform, on exactly the records where that matters most. (2) It fails OPEN: when `hasEntityPrivilege` is unavailable it returns `true` (`:472`), so the affordance appears for everyone, and the comment explaining why that is safe cites a second gate that reads the same value and therefore does not exist. Without this task, D-1 option C cannot be executed at all — removing Create would hide Manage Access for every user.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Manage Access is offered when the caller has Write on the record">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_project</url>
+      <steps>
+        <step>Open a project record the signed-in user has Write on</step>
+        <step>Verify the person (Manage Access) icon in the TrackingFieldTrio toolbar is ENABLED</step>
+        <step>Click it and verify AccessGrantModal opens</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Icon enabled, modal opens, no console errors</expected>
+    </test>
+    <test name="Manage Access is withheld when the caller lacks Write on the record">
+      <steps>
+        <step>Open a project record the signed-in user can Read but not Write</step>
+        <step>Verify the person icon is DISABLED and not a dead click</step>
+        <step>Verify the email icon is unaffected (it is gated independently)</step>
+      </steps>
+      <expected>Grant icon disabled; email icon still enabled; no dead click</expected>
+    </test>
+    <test name="Probe unavailable DISABLES the affordance (the fail-direction inversion)">
+      <steps>
+        <step>Block or fail the caller-rights endpoint for the session</step>
+        <step>Reload the form and verify the person icon is DISABLED</step>
+        <step>Verify a diagnostic is logged rather than failing silently</step>
+      </steps>
+      <expected>Icon disabled — the pre-change behaviour was ENABLED, and this assertion is the regression guard for that inversion</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify the disabled and enabled icon states both adapt (no hard-coded white/black)</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors resolve from Fluent UI v9 semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+    <output type="code">the new caller-rights endpoint under src/server/api/Sprk.Bff.Api/Api/ExternalAccess/</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/ and tests/integration/auth/UnifiedAccessControl/ (the endpoint's contract test)</output>
+    <output type="docs">src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-118-manage-access-gate-write-on-record.md (incl. the operator runbook step and the c-q-a-r3 coordination record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The new endpoint returns the CALLER's rights on one (entity, recordId) over OBO, reusing `CallerRecordAccessProbe`; it adds no second `RetrievePrincipalAccess` caller anywhere in the codebase (verified by grep).</criterion>
+    <criterion testable="true">A caller WITH Write on the target record sees the Manage Access affordance enabled.</criterion>
+    <criterion testable="true">A caller WITHOUT Write on the target record sees it disabled, and clicking is not a dead click.</criterion>
+    <criterion testable="true">🔴 When the rights answer cannot be obtained — endpoint unreachable, throws, auth not initialised, or the record is absent — the affordance is DISABLED. This is the inversion: the pre-change code returned `true` at `index.ts:472`.</criterion>
+    <criterion testable="true">`hasEntityPrivilege` is no longer consulted for the grant gate anywhere in `TrackingFieldTrio` (verified by grep), and the `Create`/`Global` privilege constants for that purpose are gone.</criterion>
+    <criterion testable="true">`TrackingFieldTrio.toolbar.test.tsx:124` ("defaults the person icon to enabled when canGrantAccess is omitted") is updated so no test asserts the retired fail-open default, and a test exists for the new fail-closed default.</criterion>
+    <criterion testable="true">The comments at `index.ts:459-460` and `AccessGrantModal/types.ts:144` no longer describe the modal's check as a SECOND, independent, defense-in-depth gate; they state that it reads the same prop and that `DelegationRuleFilter` is the real backstop.</criterion>
+    <criterion testable="true">`AccessGrantModal` still receives a boolean and remains entity-agnostic — no entity name, record id or probe call is introduced into the shared component (ADR-012).</criterion>
+    <criterion testable="true">Server enforcement is unchanged: `DelegationRuleFilter` still gates every external-access write, and the new endpoint is never the mechanism that permits a write. Detaching `.AddDelegationRuleFilter()` still reds the suite (task 008 recorded 17 of 36).</criterion>
+    <criterion testable="true">`entity-schema.md` is corrected on three points: the role table no longer implies the UI requires Create, business rule 2 no longer prescribes a pre-create plugin, and business rule 4 no longer claims expiry is enforced nowhere.</criterion>
+    <criterion testable="true">The operator runbook step for removing Create from `SDAP User (Core)` (and the other human roles) exists in the task notes, explicitly gated on the code being DEPLOYED, and the task itself performs NO role change.</criterion>
+    <criterion testable="true">Every reader of Create on `sprk_externalrecordaccess` has been enumerated and reported; if any reader other than this gate exists, the escalation fired rather than the runbook being written.</criterion>
+    <criterion testable="true">The PCF version is bumped in all four locations and shown in the footer; the control is built with `npm run build:prod`.</criterion>
+    <criterion testable="true">The four `ui-tests` above pass, including the dark-mode check.</criterion>
+    <criterion testable="true">Build green; full suite green; ArchTests green; publish size reported against a fresh master with equal file counts on both sides and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in the task notes. Do not add near-identical happy-path variants.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-19 (session 17) via /task-create. Option C of owner decision D-1; siblings are task 107 (option A, invert the read default) and task 117 (option B, the reconciliation job). None blocks another, but this one has an internal ordering that is binding.
+
+Why this is more than a privilege swap: the UI and the server have been asking different questions about the same action, with OPPOSITE fail directions — the server denies what it cannot evaluate, the client permits it. That asymmetry is the defect; removing `Create` is merely what becomes possible once it is fixed.
+
+⚠️ The fail-open's stated justification is false and was believed. Two files call the modal's check "a SECOND, defense-in-depth gate" while it reads the same prop. The conclusion it supports happens to be true for another reason (the BFF enforces regardless), which is exactly why nobody checked — a comment that vouches for a guarantee its neighbour does not provide teaches the next reader to discount its true neighbours too.
+
+Coordination: this supersedes `code-quality-and-assurance-r3`'s pcf-controls finding D7-01 as written (`workstreams/pcf-controls/design.md:180`), which names the fail-closed switch as owner input outside its scope and would otherwise TEST the fail-open. That project is initialized but not executing (`projects/INDEX.md:53`, last commit 2026-08-06). Note `src/client/pcf/**` is NOT on the `/conflict-check` hot-path watchlist, so this coordination is carried here rather than by tooling.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. FULL rigor — code-review + adr-check run at Step 9.5 unconditionally. Steps are PRESCRIPTIVE: the code-before-config ordering is binding, and deviating from it requires escalation, not improvisation.</protocol>
+  </execution>
+</task>

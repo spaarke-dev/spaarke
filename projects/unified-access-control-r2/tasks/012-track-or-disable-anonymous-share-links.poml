@@ -59,7 +59,7 @@ Governed by root CLAUDE.md §6.5 path **A** — documented exception with ration
       <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ShareLinkPolicyTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="002" status="pending">Download authorization already merged into FileAccessEndpoints.cs — rebase this change on it.</dependency>
+      <dependency task="002" status="completed">Download authorization already merged into FileAccessEndpoints.cs — rebase this change on it.</dependency>
     </dependencies>
   </context>
 
