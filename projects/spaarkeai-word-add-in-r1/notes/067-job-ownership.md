@@ -253,6 +253,32 @@ Attributing the whole +0.08 to this task would be the exact misattribution §10 
 
 ---
 
+## 8b. 🔴 PRE-DEPLOY REQUIREMENT — the new Dataverse query is NOT verified against real Dataverse
+
+`push-to-github` Step 1.7 (real-Dataverse smoke) **fires on this change** and the honest answer is
+**"exercised only against the mocked test host."** `GetProcessingJobAsync` was rewritten from a plain
+`RetrieveAsync` into a `QueryExpression` with a `LinkEntity` (`EntityAlias = "initiator"`) plus an
+`AliasedValue` unwrap. That is exactly the shape a mock cannot validate — the R4 `sprk_contact`-vs-OOB-`contact`
+regression is the precedent: a harness passing proves nothing about real Dataverse's schema.
+
+**What IS verified against real dev Dataverse (2026-09-22):**
+- `sprk_processingjob.sprk_initiatedby` exists and is selectable (MCP `describe` + a live `SELECT`).
+- `systemuser.azureactivedirectoryobjectid` exists and is selectable.
+- The join returns **zero rows** — and that is "nothing to join", NOT a broken join: live rows exist
+  (jobs dated 2026-09-18) and **`sprk_initiatedby` is null on every one of them**.
+
+**What is NOT verified**: the SDK `QueryExpression` + `LinkEntity` + `AliasedValue` path itself. MCP uses a
+different API surface, so it validates the *schema* half and not the *SDK* half. If `EntityAlias` handling or
+the relationship name is wrong at runtime, the join silently yields no aliased value, `CreatedBy` stays null,
+and **every post-restart poll 403s** — fail-closed, so it is safe, but it is an outage-shaped safety.
+
+**Before deploy**: save a document as a real user, restart (or force the Dataverse fallback), and confirm the
+owner can still poll the job. That single round trip exercises create → `sprk_initiatedby` → join → OID.
+
+**Also true and worth stating**: every EXISTING job row in dev has no initiator, so under fail-closed they are
+all refused. They date to 2026-09-18 and are mostly Failed/In Progress, so nothing of value is lost — but
+"all pre-existing jobs now 403" is the expected behaviour, not a regression to chase.
+
 ## 9. Follow-ups for other tasks
 
 - **Task 060** — consumes §3. The creator is now queryable (`sprk_initiatedby`), which is what a durable
