@@ -59,6 +59,43 @@
 
       **The role grants on `Spaarke Core User` are already in place and are NOT the problem.** They were
       necessary and are now sufficient *once ownership is correct*.
+
+      🔴 **CORRECTION 2026-09-22 — there are TWO candidate conventions, and the one in CODE is not the one
+      this task's title assumed.** Found while answering a cross-project query, before this task started:
+
+      - **Precedent A — `ownerid` = the ACTING USER. This is shipped, in-code, and ADR-024-cited.**
+        `OfficeService`'s quick-create already does it (`:2625` and `:2853` set the owner from
+        `ownerSystemUserId`; `IOfficeService.cs:207` documents it as *"Caller's resolved systemuserid for
+        ownerid attribution (ADR-024); null → app-owned"*). The same shape appears in `NotificationService`
+        (`:81`), `OutboxService` (`:135`) and `DirectThreadAccessService` (`:86`). **So this project already
+        owns a working implementation of caller-ownership — in the very service whose document path lacks it.**
+      - **Precedent B — a child BU's default Owner team.** This is what `sprk_matter` rows LOOK like in live
+        dev data. **The code that does it has NOT been found.** It may be a plugin, the model-driven UI, or
+        manual assignment rather than a BFF convention at all.
+
+      **Do not open this task by "mirroring `sprk_matter`" as if that were a code pattern.** Establish first
+      whether B exists in code anywhere. If it does not, then A is the repo's actual convention, the
+      `sprk_matter` rows are an artifact of a different creation path, and the honest fix for
+      `sprk_document` / `sprk_todo` is to pass the ALREADY-RESOLVED caller through the create — which task 067
+      made cheaper by wiring `ICallerSystemUserResolver` into `OfficeService` as `_callerSystemUserResolver`.
+
+      The two conventions have genuinely different consequences and that is why the constraint below demands a
+      stated choice: **A** gives each user their own records (fine for documents a user saves; wrong for
+      records a whole team must work, since only sharing or a higher depth would let a colleague see them);
+      **B** gives a BU-wide team ownership (better for shared matter work, worse for personal scoping).
+
+      **SECOND CONSUMER — this is no longer a one-project decision.** `unified-access-control-r2` verified the
+      same defect in `GrantExternalAccessEndpoint`: `sprk_externalrecordaccess` rows are created app-only with
+      no `ownerid`, and **28 of 29 active rows sit in the root BU** (their ISS-030 / issue #1010). They have
+      asked to CONFORM to whatever convention this task settles on rather than invent a parallel one. So the
+      choice made here becomes a cross-project convention — state it explicitly and tell them.
+
+      ⚠️ Their failure mode is worse than ours and is worth understanding before choosing: their client reads
+      those rows in USER context via `context.webAPI.retrieveMultipleRecords` wrapped in `catch { return [] }`
+      (`TrackingFieldTrio/index.ts:805`), so an access failure renders **identically to "nobody has access"**.
+      Ours fails loudly with a 403. **Fixing ownership does not fix that silent catch** — it only removes the
+      common trigger; any transient error still lies. Those are two independent defects and this task must not
+      let the ownership fix be mistaken for closing theirs.
     </background>
   </context>
 

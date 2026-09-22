@@ -8,7 +8,11 @@
 | **File** | `tasks/080-record-ownership-assignment-pattern.poml` |
 | **Rigor / tier** | FULL · opus @ xhigh · steps directional · **run ALONE** |
 | **Status** | not-started |
-| **Next Action** | Begin step 1: reproduce the unreadability as an ordinary user and record it verbatim |
+| **Next Action** | Begin step 1: reproduce the unreadability as an ordinary user and record it verbatim — then step 2, which has CHANGED (see below) |
+
+🔴 **CORRECTION before 080 starts (2026-09-22).** I had been saying *"`sprk_matter` is the precedent to copy — a child BU's default Owner team."* That was inferred from **live data**; I went looking for the code and **did not find it**. What IS in code is the opposite shape: **`ownerid` = the ACTING USER**, shipped and ADR-024-cited — `OfficeService` quick-create already does it (`:2625`, `:2853`; `IOfficeService.cs:207`), as do `NotificationService:81`, `OutboxService:135`, `DirectThreadAccessService:86`. So this project already owns a working caller-ownership implementation **in the very service whose document path lacks one**, and 067 wired `ICallerSystemUserResolver` into `OfficeService` already. 080 must establish which convention is real BEFORE mirroring anything. Full detail in the POML's background.
+
+🤝 **080 now has a SECOND consumer.** `unified-access-control-r2` verified the same defect in `GrantExternalAccessEndpoint` (**28 of 29** `sprk_externalrecordaccess` rows in the root BU; their ISS-030 / issue #1010, credited to this session) and asked to conform to whatever 080 settles on. I told them to hold until 080 verifies which convention is real. The choice is now cross-project — state it and tell them.
 
 **Why 080 and not the next 🔲 in number order**: it blocks the real closure of 063, 064 and 066, and it now
 also gates getting dev back (see the deploy block below). 057/058/059/060/068+ can all wait behind it.
