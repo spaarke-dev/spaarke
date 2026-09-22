@@ -84,16 +84,47 @@
       One default owner team exists per BU, named after it (verified: `Spaarke` (root), `Spaarke Business
       Unit 1`, `Spaarke Demo`, `Spaarke Dev 1`, `Spaarke Test 1`, `Secure Project`).
 
-      ⚠️ **DEPLOYMENT PREREQUISITE — this fix only helps where users actually sit in CHILD BUs.** Verified:
-      `Ralph Schroeder` (`a7cbf3bd-…`) is in the **root** BU `06fbf21c-…`, as are all the application users.
-      For a caller in root, this convention correctly assigns to root's default owner team (`Spaarke`,
-      `09fbf21c-…`) — which is still root, so nothing improves for them. **Placing users in the correct child
-      BUs is part of making this work** and must be stated in the task note; otherwise the code lands, the
-      tests pass, and the 403s persist for anyone left in root.
+      🔴 **DEPLOYMENT PREREQUISITE + VERIFICATION TRAP — read before testing, this WILL mislead you.**
+
+      This fix only helps where users actually sit in CHILD BUs, and **92.5% of the dev directory does not.**
+      Measured live 2026-09-22 (`GROUP BY businessunitid`, all users — the `isdisabled` filter is not supported
+      by the query surface, so this is not enabled-only; at least two root accounts are known disabled):
+
+      | Business unit | Users |
+      |---|---|
+      | **`Spaarke` (ROOT)** | **172** |
+      | `Spaarke Demo` | 13 |
+      | **`Spaarke Business Unit 1`** | **1** ← Test User 1, the only account that exercises this |
+
+      For a caller in root, this convention **correctly** assigns to root's own default owner team (`Spaarke`,
+      `09fbf21c-…`) — which is still root, so **nothing improves and no 403 is fixed**. That is the design
+      working as specified, not a bug.
+
+      **So the trap is**: verify with a normal account (92.5% chance it is in root), observe no change,
+      and conclude the fix does not work. **Verify with Test User 1 in `Spaarke Business Unit 1`
+      specifically.** Treat "no change" from a root account as the EXPECTED result and record it as such —
+      do not chase it as a defect, and do not report success on the basis of a root-account test either,
+      because a root account cannot distinguish a working fix from a no-op.
+
+      `Ralph Schroeder` (`a7cbf3bd-…`) and every application user are in root. **Placing users in the correct
+      child BUs is part of making this work**, not a precondition someone else owns — say so in the task note.
 
       ⚠️ **The one existing team-assignment precedent in the repo** is
       `CommunicationEnrichmentService.cs:712` — `fields["ownerid"] = new EntityReference("team", teamId.Value)`.
       Read it before writing a second one; it is the only in-repo example of the shape now being adopted.
+
+      📌 **The resolver gap is FILED ELSEWHERE — this task does not fix it.** `unified-access-control-r2`
+      raised it as **issue #1011** ("Membership resolver cannot bind a team-owned Owner column"), scoped as a
+      resolver fix (teach it to bind `owningteam`), with task 080 named as the co-affected consumer. Their
+      ADR-034 A1.1 keeps the hazard but is re-framed from *"team-ownership is dangerous"* to *"the resolver
+      must handle the ownership model we actually use."* **Do not absorb #1011 into this task** — but DO state
+      in the task note that team-owned records may not appear in membership queries until it lands, so the
+      limitation is on the record rather than discovered later as a regression.
+
+      Still untraced by either project, and #1011 says to settle it before sizing the fix: whether A1.1's
+      "structurally conferring WITHOUT a registry entry" rule reaches NON-registry entities' Owner columns. If
+      it does, team-owned documents AND team-owned grants both go dark in membership queries; if not, the
+      blast radius is the seven registered entities, none of which registers an Owner column.
 
       🔻 **The material below is the pre-decision analysis. Keep it for the reasoning trail, but the
       caller-vs-team question it agonises over is now ANSWERED above.** In particular the resolver hazard is
