@@ -287,6 +287,24 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (!string.IsNullOrEmpty(request.Description))
             document["sprk_documentdescription"] = request.Description;
 
+        // Ownership (spaarkeai-word-add-in-r1 task 080, owner decision 2026-09-22): assign the row to the
+        // acting user's business-unit DEFAULT OWNER TEAM. owningbusinessunit then DERIVES from the team and
+        // is never set directly.
+        //
+        // Until this, nothing set an owner here at all, so Dataverse defaulted it to the calling identity —
+        // an application user, which lives in the ROOT business unit. Measured 2026-09-22: ALL 512 existing
+        // sprk_document rows sit in root, with owningteam null on every one. Users sit in CHILD business
+        // units and Dataverse Deep depth traverses DOWNWARD (own BU plus descendants), so a child-BU user
+        // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
+        //
+        // Null is the pre-existing behaviour, preserved for callers outside the BFF. BFF callers resolve the
+        // team via IRecordOwnershipResolver and REFUSE when it is unresolved; they never fall through to
+        // app-only ownership, because that silently recreates the defect.
+        if (request.OwningTeamId is { } owningTeamId && owningTeamId != Guid.Empty)
+        {
+            document["ownerid"] = new EntityReference("team", owningTeamId);
+        }
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 

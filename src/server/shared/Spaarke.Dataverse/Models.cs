@@ -10,6 +10,25 @@ public class CreateDocumentRequest
     public string? Description { get; set; }
 
     /// <summary>
+    /// The team that will own the new <c>sprk_document</c> — the acting user's business-unit DEFAULT OWNER
+    /// TEAM (owner decision, spaarkeai-word-add-in-r1 task 080). When set, <c>ownerid</c> is assigned to this
+    /// team and <c>owningbusinessunit</c> DERIVES from it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the caller supplies it rather than this library resolving it.</b> Resolving "business unit
+    /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
+    /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
+    /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
+    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
+    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
+    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
+    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
+    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
+    /// unreachable by any child-BU user at Deep depth.</para>
+    /// </remarks>
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
     /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
     /// the Office document-create save path) Dataverse mints the id exactly as before.
     /// </summary>
