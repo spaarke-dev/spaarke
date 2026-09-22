@@ -1,6 +1,11 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-21, session 20 — FULL PROJECT REVIEW + SYNOPSIS REFRESH.** No code
+> **Last Updated**: **2026-09-21, session 22 — TASKS 093 + 108 CLOSED (the 2-wide wave session 21 recommended).**
+> Pushed `f389b369f..0c543e63a`, 0 unpushed, tree clean, PR **#950**.
+> **Measured: 85 done · 27 open · 3 escalated (⚠️) · 1 blocked (🟡 034) = 116** — reconciles with the drift gate.
+> ⚠️ A marker set of `✅|🔲|⚠️|🔄` **undercounts by one**: task 034 uses **🟡 [blocked]**. Include it.
+> 📖 **READ § SESSION 22 first.** Prior stamp:
+> **2026-09-21, session 20 — FULL PROJECT REVIEW + SYNOPSIS REFRESH.** No code
 > changed. Worktree synced to master, SYNOPSIS corrected (4 false claims), TASK-INDEX insertion-room
 > line repaired, health re-measured green, and the parallel-execution plan below is NEW and binding.
 > **📖 READ § SESSION 20 first — it supersedes the session-19 rows beneath it.** Prior stamp:
@@ -25,7 +30,50 @@
 
 ---
 
-## § SESSION 21 (2026-09-21) — READ THIS FIRST; IT SUPERSEDES SESSION 20 BELOW
+## § SESSION 22 (2026-09-21) — READ THIS FIRST; IT SUPERSEDES SESSION 21 BELOW
+
+**Session 21's recommended 2-wide wave was run and both halves closed.** Two subagents, strict
+disjoint lanes, verified afterwards that neither crossed into the other's tree.
+
+| Commit | What |
+|---|---|
+| `8ea2c5e14` | **Task 108 CLOSED** — the three stalled verification measurements re-run against the committed code |
+| `0c543e63a` | **Task 093 CLOSED** — stale create-first comments retired, shipped ordering pinned by test |
+
+**Closing 093 UNBLOCKS task 047**, which was its whole point.
+
+### The three things worth carrying forward
+
+1. 🔴 **A "fix" to a stale comment nearly shipped a NEW stale comment.** Task 093's agent flagged a
+   **fourth** file (`Spaarke.SdapClient/src/operations/UploadOperation.ts`) carrying the same retired
+   "three flows" claim. The obvious repair — rewrite "three" to "two" — **would have been wrong
+   again**: `uploadFileWithoutRecord` has a **THIRD** consumer, `document-upload/FileUploadService.ts:93`,
+   a **generic dispatcher** branching on `request.target.kind`. A flow count is **unknowable at that
+   layer**. Fix: the comment now asserts **no count at all** and points at the notes.
+   **Generalizes**: when a comment goes stale because it counts its consumers, replacing the count
+   resets the clock on the same defect. Remove the coupling, don't refresh it.
+2. **A type-level test pin was abandoned on EVIDENCE, not assumption.** `Spaarke.UI.Components` sets
+   `isolatedModules: true` (ts-jest transpile-only) **and** `tsconfig` `exclude`s `**/*.test.ts`, so
+   **no tool in this repo evaluates a type-only assertion in a test file** — proven by a probe where
+   an unused `@ts-expect-error` **passed** instead of raising TS2578. The agent shipped a behavioural
+   URL pin instead. Worth knowing before anyone tries `@ts-expect-error` in a test here again.
+3. **Task 108's notes cited a commit that does not exist** (`b9a57aecf` — `git cat-file` rejects it),
+   a laptop working SHA that never survived the machine switch. Real pair: `b42d6471e` → `d0845724d`.
+   **Check that a SHA resolves before building a measurement on it.**
+
+### ▶ NEXT — nothing is in flight
+
+The 2-wide ceiling is spent. What remains ready is **opus/xhigh single-file work inside the
+ExternalAccess exclusive zone** (109, 112, 113, 082, 095) plus **036**, which is the largest ready
+item and gated on Q1 below. ⚠️ **094 is still NOT safe alongside anything touching the upload client.**
+
+**047 is now unblocked** but is `opus`/live-environment work: it deploys and proves provisioning
+end-to-end. It asserts **INEQUALITY, not presence** — three projects already carry the ROOT BU's
+container id, so "a container id is set" is precisely the false positive.
+
+---
+
+## § SESSION 21 (2026-09-21) — SUPERSEDED BY SESSION 22 ABOVE
 
 **Three tasks closed, one rescoped, one wave run in parallel.** Session 20's "no code changed" line
 below is still true *of session 20* — it is not true of the project as of now.
@@ -46,17 +94,19 @@ below is still true *of session 20* — it is not true of the project as of now.
 **093 RESCOPED, not closed** — deliberately. It still has real residue, and closing it without that
 work would be the silent scope drop the owner ruled out. **Executing 093 is what unblocks 047.**
 
-**Counts (measured with task 116's two rules — a naive regex undercounts, see SYNOPSIS header):
-29 open · 83 done · 116 total.** Ready set: **12 of 29**.
+~~**Counts: 29 open · 83 done · 116 total.** Ready set: **12 of 29**.~~ ⚠️ **SUPERSEDED — see the
+session-22 stamp**: 85 done · 27 open · 3 escalated · **1 blocked (🟡 034)** = 116. That row's marker
+set omitted 🟡 and so never summed to 116.
 
 **Owner decision D-1 is COMPLETE** — all three options shipped 2026-09-21:
 107 (A, undated grant confers nothing) · 117 (B, reconciliation job, ships disabled) ·
 118 (C, Manage Access gated on the server's real rule).
 
-### ▶ NEXT — recommended, not started
+### ▶ ~~NEXT — recommended, not started~~ ✅ **DONE in session 22 — both closed. Do not re-run.**
 
-**093 + 108 in parallel.** Genuinely disjoint: 093 is the wizard/`EntityCreationService` surface,
-108 is `Api/ExternalAccess`. That is the real 2-wide ceiling. ⚠️ **094 is NOT safe alongside 093** —
+~~**093 + 108 in parallel.**~~ Genuinely disjoint: 093 is the wizard/`EntityCreationService` surface,
+108 is `Api/ExternalAccess`. That is the real 2-wide ceiling. **The prediction held** — two agents,
+zero lane crossings, verified by diff afterwards. ⚠️ **094 is NOT safe alongside 093** —
 both touch the upload client. After that the queue is opus/xhigh single-file work inside the
 ExternalAccess exclusive zone (109, 112, 113, 082, 095), which is serial regardless of agent count.
 
@@ -69,7 +119,12 @@ ExternalAccess exclusive zone (109, 112, 113, 082, 095), which is serial regardl
 2. **Q1 still open** — who runs 036's NFR-04 canary, against which environment. Gates 5 tasks and all
    of Phase 3, and 036 is now the largest ready item.
 3. **Deploy-side obligations from 2026-09-21** — (a) `npm run build:prod` for `TrackingFieldTrio`
-   BEFORE deploy: the shipped `bundle.js` still contains the **old fail-open code**, and the PCF host
+   BEFORE deploy. ⚠️ **Claim corrected 2026-09-21 (session 22)**: this said the shipped `bundle.js`
+   "still contains the **old fail-open code**". What is actually *verifiable* is narrower and enough —
+   the bundle's last commit is **2026-08-12 (v1.0.29)**, which **predates the v1.0.31 fail-closed
+   change entirely**, so the deployed artifact is a month behind source. How the deployed build
+   *behaves* cannot be read off a minified bundle by grep, and asserting it would be a guess. Source
+   is correctly fail-closed (`canGrantAccess === true`, host default `false`). The PCF host
    file was reviewed but **never compiled** (no node_modules; 290 errors across every control, failing
    identically on untouched files); (b) the `Create`-privilege removal runs **AFTER** v1.0.31 deploys —
    code before config, or Manage Access vanishes for everyone; (c) **§10 publish size unmeasured for
