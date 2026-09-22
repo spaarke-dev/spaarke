@@ -28,9 +28,40 @@ config switches that must stay OFF** (§4).
 
 ---
 
-## 1. 🔴 `sprk_noaccessentry` MUST exist before the BFF deploys
+## 1. ✅ `sprk_noaccessentry` ALREADY EXISTS — **this section's original claim was WRONG**
 
-**This is the one that takes the system down if missed.**
+> 🔴 **CORRECTION, 2026-09-21.** This section originally called `sprk_noaccessentry` a HARD BLOCKER
+> requiring operator creation. **That was wrong, and it was wrong for this project's signature reason:
+> I inferred "not created live" from the schema doc being NEW on the branch, and never checked against
+> live Dataverse.** `describe('tables/sprk_noaccessentry')` returns the table fully formed — every
+> column, the FR-23 description, `statecode`/`statuscode`. **Nothing needs creating.**
+
+### Verified live, 2026-09-21 — the complete schema answer
+
+| Schema item | Live? |
+|---|---|
+| `sprk_noaccessentry` (FR-23 deny-list table) | ✅ **exists**, all columns |
+| `sprk_contactorganization.sprk_startdate` / `.sprk_enddate` | ✅ exist, both **DATE ONLY** |
+| `sprk_externalrecordaccess` (all columns incl. `sprk_expiresdate`) | ✅ exists |
+| `sprk_project` → `sprk_issecure`, `sprk_securitybu`, `sprk_containerid`, `sprk_externalaccount` | ✅ all four exist |
+| `contact.sprk_standinggrant`, `contact.sprk_externalobjectid` | ✅ exist |
+| **`sprk_accessevent`** (task 086) | ❌ **does NOT exist** — see below |
+| `sprk_specontainerid` | n/a — a **name that was never real**; the field is `sprk_containerid` |
+
+**No schema work is required for this branch to deploy.**
+
+### The one missing table, and why it is not a blocker *yet*
+
+`sprk_accessevent` does not exist live. It has **zero code consumers** — its writer is task **087**,
+still open. It becomes a deploy dependency the moment 087 ships, and not before.
+
+### The reasoning that was worth keeping (it just applies to nothing today)
+
+`NoAccessListReader` **is** a VETO reader and **is** deliberately fail-CLOSED toward denial — its own
+doc comment says *"an unreadable deny list must DENY … cannot prove not-denied."* That is the correct
+direction for a veto. So the *mechanism* described here is real: a BFF whose deny-list table were
+missing would deny every candidate on the external path. The error was asserting that situation
+exists. It does not.
 
 The FR-23 deny-list table `sprk_noaccessentry` has **live server consumers at HEAD** —
 `Infrastructure/ExternalAccess/NoAccessListReader.cs` and `Infrastructure/DI/ExternalAccessModule.cs`.
@@ -69,7 +100,30 @@ A **404** here means the BFF is not yet deployed — that is the check §5 uses.
 
 ---
 
-## 3. 🔴 PCF `TrackingFieldTrio` — the bundle was never rebuilt
+## 3. ✅ PCF `TrackingFieldTrio` — **BUILT 2026-09-21. Ready to upload.**
+
+> **Artifact**: `src/client/pcf/TrackingFieldTrio/Solution/bin/TrackingFieldTrioSolution_v1.0.31.zip`
+> (280,941 bytes). **Live deployed version confirmed as 1.0.29** (installed 2026-06-30, read from the
+> `solution` table), so 1.0.31 is a clean increment and matches the footer task 118's operator step checks.
+>
+> **Building it found two defects only a compile could find:**
+> 1. `pack.ps1` was still `$version = "1.0.29"` — the 5th of the 5 version locations, and the only one
+>    missed. It would have emitted a zip named `_v1.0.29.zip` against 1.0.31 manifests.
+> 2. **TS2305 ×2** — the PCF host imports `IUserPick` and `ISecureOwnerInfo` from the
+>    `AccessGrantModal` barrel, which never re-exported them (both are plain `export interface` in
+>    `./types`, alongside seven siblings that *are* re-exported). Fixed by adding the two names.
+>
+> **Verified empirically, not by version string**: the new bundle **contains** `can-manage-access` (the
+> v1.0.31 server gate) and **does not contain** `hasEntityPrivilege` (the retired fail-open check).
+> 986,739 bytes vs the known-good 981,909 — consistent, so `build:prod` is correctly configured.
+>
+> Build note: the control had **no `node_modules`** in this worktree. `webpack.config.js` resolves via
+> `require.resolve('react/package.json', { paths: [process.cwd()] })` — i.e. from the **control**
+> directory — so it fails with *"Cannot find module 'react/package.json'"* even though `react` is
+> declared in the control's own `package.json`. Fix: `npm install --legacy-peer-deps --no-audit --no-fund`
+> in the control.
+
+### Original finding, kept for the record
 
 | | Value |
 |---|---|
