@@ -172,6 +172,45 @@ before-state count.**
 
 ---
 
+## 4a. 🔴 CONFIRMED IN THE FIELD 2026-09-21 — PCF v1.0.31 DEPLOYED AHEAD OF THE BFF
+
+**Symptom**: the Manage Access (grant) icon is disabled with the tooltip *"You do not have permission
+to grant access"* — for a **Dataverse System Administrator**.
+
+**This is not a permissions problem, and admin rights are irrelevant BY DESIGN.** v1.0.31 deliberately
+stopped asking Dataverse *"may you create rows in the `sprk_externalrecordaccess` table, anywhere?"*
+and now asks the BFF *"do you hold Write on THIS record?"* — the same question `DelegationRuleFilter`
+answers. The endpoint that answers it is **not deployed**, and the gate fails **CLOSED** on anything
+that is not a 200 (`index.ts` v1.0.31 header: *"anything other than a 200 naming this record disables
+the affordance"*). So the control correctly disabled itself.
+
+**Evidence** (unauthenticated probes against `https://spaarke-bff-dev.azurewebsites.net`):
+
+| Probe | Result | Reading |
+|---|---|---|
+| `/healthz` | **200** | the BFF is up |
+| `/api/v1/external-access/can-manage-access?...` | **404** | the route does not exist |
+| `/api/v1/external-access/revoke` (control) | **405** Method Not Allowed | external-access routes **are** served |
+
+The 405 control is what makes this conclusive: the BFF is serving that route area, so the 404 is
+specifically "this route is not deployed" — not an auth rejection, not a missing area, not a cold app.
+
+**Fix**: deploy the BFF. Both paths are operator-driven —
+`/bff-deploy` from this worktree (deploys the branch **without merging**), or `workflow_dispatch` on
+`Deploy BFF API` (currently `disabled_manually`, so it needs enabling first).
+
+**Rollback option if the BFF deploy is not imminent**: re-import PCF **v1.0.29**. That restores the
+old client-side privilege check and the button works again — but it is the *wrong rule* (fail-OPEN,
+table-wide rather than per-record), which is exactly what v1.0.31 exists to retire. Prefer deploying
+the BFF.
+
+> ⚠️ **Generalised**: §5b already said "code before config" for the privilege removal. This is a
+> THIRD ordering edge that section did not name — **BFF before PCF**. Deploying the PCF first does not
+> break anything permanently, but it disables Manage Access for **everyone**, including admins, until
+> the BFF catches up. Full order: **BFF → PCF → remove `Create` privilege.**
+
+---
+
 ## 5. Operator actions — ordering is load-bearing
 
 ### 5a. ✅ Task 107 pre-deploy COUNT gate — **MEASURED IN DEV 2026-09-21: 0 of 28. Still UNMET for production.**
