@@ -60,6 +60,47 @@
       **The role grants on `Spaarke Core User` are already in place and are NOT the problem.** They were
       necessary and are now sufficient *once ownership is correct*.
 
+      ✅ **OWNER DECISION 2026-09-22 — THE CONVENTION IS SETTLED. Assign `ownerid` to the ACTING USER'S
+      BUSINESS UNIT DEFAULT OWNER TEAM. Not to the user.**
+
+      Owner's words: *"the records should be owned by the acting user's BU default owner team. So if testuser1
+      is in spaarke business unit 1 team/business unit, then the record they create is assigned to that team
+      (not the user)."* This resolves the caller-vs-team question below — **precedent B wins**, and the
+      `sprk_matter` shape was the right instinct after all even though its code was never found.
+
+      **The lookup chain, verified live end-to-end against the owner's own example (dev, 2026-09-22):**
+
+      1. Caller OID → `systemuserid` — already available via `ICallerSystemUserResolver` (task 067 wired it
+         into `OfficeService` as `_callerSystemUserResolver`).
+      2. `systemuser.businessunitid` — e.g. Test User 1 (`testuser1@spaarke.com`,
+         `8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c`) → BU `cb15f587-baa0-f111-aaac-000d3a99d1d7`.
+      3. `team` WHERE `businessunitid` = that AND **`isdefault = true` AND `teamtype = 0` (Owner)** →
+         `cf15f587-baa0-f111-aaac-000d3a99d1d7` ("Spaarke Business Unit 1"). **BOTH predicates are required**:
+         dev also contains non-default Owner teams (`teamtype 0, isdefault false`, GUID-ish names) and Access
+         teams (`teamtype 1`). Filtering on `isdefault` alone, or `teamtype` alone, picks the wrong team.
+      4. `entity["ownerid"] = new EntityReference("team", teamId)`. `owningbusinessunit` then **derives**
+         to `cb15f587…` — it is never set directly.
+
+      One default owner team exists per BU, named after it (verified: `Spaarke` (root), `Spaarke Business
+      Unit 1`, `Spaarke Demo`, `Spaarke Dev 1`, `Spaarke Test 1`, `Secure Project`).
+
+      ⚠️ **DEPLOYMENT PREREQUISITE — this fix only helps where users actually sit in CHILD BUs.** Verified:
+      `Ralph Schroeder` (`a7cbf3bd-…`) is in the **root** BU `06fbf21c-…`, as are all the application users.
+      For a caller in root, this convention correctly assigns to root's default owner team (`Spaarke`,
+      `09fbf21c-…`) — which is still root, so nothing improves for them. **Placing users in the correct child
+      BUs is part of making this work** and must be stated in the task note; otherwise the code lands, the
+      tests pass, and the 403s persist for anyone left in root.
+
+      ⚠️ **The one existing team-assignment precedent in the repo** is
+      `CommunicationEnrichmentService.cs:712` — `fields["ownerid"] = new EntityReference("team", teamId.Value)`.
+      Read it before writing a second one; it is the only in-repo example of the shape now being adopted.
+
+      🔻 **The material below is the pre-decision analysis. Keep it for the reasoning trail, but the
+      caller-vs-team question it agonises over is now ANSWERED above.** In particular the resolver hazard is
+      NOT a reason to reconsider: it is a defect in the membership resolver (it cannot bind a team-owned Owner
+      column), not evidence about what ownership should be. Choosing per-user ownership to dodge a resolver
+      limitation would let a tool defect set the access model. File the resolver gap separately.
+
       🔴 **CORRECTION 2026-09-22 — there are TWO candidate conventions, and the one in CODE is not the one
       this task's title assumed.** Found while answering a cross-project query, before this task started:
 
@@ -166,7 +207,9 @@
 
   <constraints>
     <constraint source="owner instruction">The pattern is repo-wide. Do not fix `sprk_document` alone and leave the same defect in every other entity — sweep for every app-only create in the BFF and report the full inventory, even for entities this task does not change.</constraint>
-    <constraint source="this task">Mirror the existing `sprk_matter` precedent (assignment to the BU's default Owner team, or to the acting user) rather than inventing a third ownership convention. State which of the two you chose and why; they have different sharing consequences.</constraint>
+    <constraint source="OWNER DECISION 2026-09-22">Assign `ownerid` to the **acting user's business-unit DEFAULT OWNER TEAM** — `team` WHERE `businessunitid` = the caller's `systemuser.businessunitid` AND `isdefault = true` AND `teamtype = 0`. NOT to the acting user. `owningbusinessunit` is derived, never set directly. This is settled; do not re-open it, and do not let the membership-resolver hazard argue you back toward per-user ownership — that hazard is a resolver defect to file separately, not evidence about what ownership should be.</constraint>
+    <constraint source="OWNER DECISION 2026-09-22">Both `isdefault = true` AND `teamtype = 0` are required in the team lookup. Dev contains non-default Owner teams and Access teams; either predicate alone selects the wrong team.</constraint>
+    <constraint source="this task">If the caller's BU default owner team cannot be resolved, FAIL — do not silently fall back to app-user ownership, which is the defect this task exists to remove. An unassignable owner is a loud error, not a default.</constraint>
     <constraint source="this task">A wrong owner is worse than no owner — it moves records into a BU irreversibly without a second migration. The backfill MUST be reversible or dry-runnable, and MUST be verified on a sample before running wholesale.</constraint>
     <constraint source="this task">Cross-project boundary: `sprk_communication` is created by `EmailUploadCaptureService.BuildCommunicationEntity`, owned by the Communication project. Do NOT unilaterally change it — coordinate or hand off, and say which. `sprk_document` and `sprk_todo` are created by this project's `OfficeService` / `OfficeDocumentPersistence` and are ours.</constraint>
     <constraint source="CLAUDE.md §10">Publish-size delta against a FRESH origin/master build; CVE check.</constraint>
