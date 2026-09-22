@@ -167,30 +167,32 @@ Then **117** (option B job) and **118** (option C, code-before-config). **036** 
 (project CLAUDE.md), and 112/113/114 explicitly say "never concurrently". That is an architectural
 constraint, not bureaucracy; do not override it to gain parallelism.
 
-**WAVE 1 — dispatch these 4 together (verified: no declared-output overlap among them):**
+🔴 **THE WAVE PLAN BELOW IS SPENT — EVERY TASK IN IT SHIPPED ON 2026-09-21.** Kept only so the
+reasoning is auditable; do NOT dispatch from it. Wave 1 (044 · 065 · 107 · 119) ✅, the two serial
+meta-tasks (115 · 116) ✅, and 117 · 118 ✅. See "▶ NEXT" in the SESSION 21 block at the top of this
+file for what to actually run.
 
-| Task | Tier | What |
-|---|---|---|
-| **044** | sonnet/high | Phases 1–2 closure — unified-evaluator seam suite ⚠️ declares **0** modify/create files; confirm its outputs before dispatch |
-| **065** | sonnet/high | `AccessGrantModal` "+ User" system-user picker (FR-29) |
-| **107** | sonnet/high | ISS-009 (#974) — expiry for grant rows written outside the BFF |
-| **119** | sonnet/high | ISS-027 — Create To Do wizard actually uploads its files |
+> ~~**WAVE 1 — dispatch these 4 together:** 044 (⚠️ declares 0 modify/create files — this warning was
+> WRONG; it declares `UnifiedEvaluatorSeamTests.cs`) · 065 · 107 · 119. Do NOT add 118 — it collides
+> with 065 on `AccessGrantModal/types.ts` + `TrackingFieldTrio/index.ts` and with 107 on
+> `entity-schema.md`. Then serial: 115, 116. Then the ExternalAccess cluster:
+> 108 → 109 → 111 → 112 → 113 → 114 → 117 → 118.~~
 
-🔴 **Do NOT add 118 to this wave.** It collides with **065** on
-`AccessGrantModal/types.ts` + `TrackingFieldTrio/index.ts`, and with **107** on
-`sprk_externalrecordaccess/entity-schema.md`. 118 is `parallel-safe=false` anyway.
+**What actually happened, and the two places this plan was wrong — both worth carrying forward:**
 
-**SERIAL, AND BEST DONE FIRST — two meta-tasks that make everything after safer:**
-- **115** — repairs **nine open task files carrying a wrong load-bearing sentence.** Until this runs, a
-  parallel agent can load a half-true premise as its instructions. This is the highest-leverage task
-  for directive #2 above, because it protects every wave that follows.
-- **116** — the drift check compares POMLs and index rows as **sets**, so an index row with no POML is
-  invisible (ISS-025/ISS-029). Fixes the instrument this project gates on.
+1. **107 was NOT safely parallel.** It was dispatched into Wave 1 as `parallel-safe=true`, which was
+   true only while it was a *Dataverse-plugin* task. Owner decision D-1 had already rescoped it off
+   every Dataverse mechanism and into `Infrastructure/ExternalAccess/**` — the exclusive zone. It was
+   pulled from the wave, rescoped, and run alone. **Re-read a task's `parallel-safe` against its
+   CURRENT scope, never its filed scope.**
+2. **The wave's own collision analysis missed a shared BUILD.** 065 and 119 have disjoint source
+   directories but live in the same package (`Spaarke.UI.Components`) and therefore share `dist/`,
+   `node_modules` and the barrel — and agents share ONE worktree. Source-file disjointness is not
+   build disjointness. They were barred from `npm run build` and the package build was run centrally
+   once, afterwards.
 
-**Then the ExternalAccess cluster, strictly serial:** 108 → 109 → 111 → 112 → 113 → 114 → 117 → 118.
-
-**Separately and alone: 036** — it is `opus/xhigh`, on the orchestrator hot-file list, and carries the
-manual canary. Never put it in a wave.
+**Still true and still binding: 036 runs alone** — `opus/xhigh`, orchestrator hot-file list, manual
+canary. Never put it in a wave.
 
 ### 🔔 OPEN QUESTIONS — these need owner answers to proceed cleanly
 
@@ -221,7 +223,21 @@ code+docs only, live changes are operator steps · a failed revoke gives a messa
 
 ## Quick Recovery (READ THIS FIRST)
 
-> ### ⏱️ 30-SECOND SUMMARY — session 19, 2026-09-20 (laptop → desktop handoff). This supersedes every longer row below.
+> ### ⏱️ 30-SECOND SUMMARY — session 21, 2026-09-21 (end of session). **This is the current row.**
+>
+> | Field | Value |
+> |---|---|
+> | **Task** | **none in flight.** Session 21 closed 8 tasks and ended clean. |
+> | **Status** | 🟢 Tree clean · 0 uncommitted · drift **116 = 116** rc=0 · validator 0 errors · BFF suite **12,589 / 0 failed / 58 skipped** · ArchTests **323/323** · shared-lib `tsc` clean · jest **73/73** |
+> | **Counts** | **29 open · 83 done · 116 total.** ⚠️ Count with **task 116's two rules** (one id in cell 1, row at least as wide as the status table) — a naive `\| <marker> [open] <id> \|` regex misses **bold-id** rows and undercounts (it returned 27 for 32 earlier today). |
+> | **Closed this session** | 115 · 116 · 044 · 065 (incl. M8 + M2) · 119 · 107 · 117 · 118. **Owner decision D-1 COMPLETE** — options A (107), B (117), C (118) all shipped. |
+> | **Next Action** | **Recommended, NOT started: dispatch 093 + 108 in parallel** — genuinely disjoint (093 = wizard/`EntityCreationService`; 108 = `Api/ExternalAccess`). 🔴 **094 is NOT safe alongside 093** — both touch the upload client. Everything after that is opus/xhigh single-file work in the ExternalAccess exclusive zone (109, 112, 113, 082, 095) and is **serial regardless of agent count**. |
+> | **⚠️ 108 is NOT fresh work** | Its code is complete, committed (`d0845724d`) and reviewed; **both Step 9.5 gates already passed**. Only **2 verification items** remain — the criterion-4 perturbation and a real publish delta. (Item (a), ArchTests = **323**, was closed 2026-09-21.) **Read `notes/task-108-unsecure-share-read-fail-closed.md` and finish the verification — do NOT re-implement it.** |
+> | **🔔 Owner-gated** | See "NEEDS THE OWNER" in the SESSION 21 block above — 4 items. The only live ACCESS GAP is **`sprk_startdate`**. |
+>
+> ---
+>
+> ### ⏱️ Superseded — session 19, 2026-09-20 (laptop → desktop handoff). Retained for 108's detail only; its "supersedes every row below" claim no longer holds.
 >
 > | Field | Value |
 > |---|---|
