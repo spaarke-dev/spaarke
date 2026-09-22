@@ -112,10 +112,14 @@ ExternalAccess exclusive zone (109, 112, 113, 082, 095), which is serial regardl
 
 ### 🔔 NEEDS THE OWNER — carried, not dropped
 
-1. **`sprk_startdate`** — a membership with a FUTURE start date and `statecode=0` **confers access
-   today**. Live-verified; **zero** server-side consumers (all 8 refs are client-side fixtures/UI).
-   The mirror of 117's R3. Likely belongs in **109/110**'s junction guard, not a writer. This is the
-   only live ACCESS GAP in the list.
+1. ✅ ~~**`sprk_startdate`**~~ — **ANSWERED 2026-09-21 as owner decision D-10**: *"membership with
+   future start date confers as of the access date"* → a future-dated membership confers **NOTHING**
+   yet; access begins **on** the start date. Folded into **task 109** (its escalation trigger for
+   exactly this is now retired-as-answered), with a verification criterion added to **110**. The
+   deny-**veto** subject stays `statecode`-only at BOTH ends, per D-2 part 2. Full record:
+   `notes/owner-decision-brief-2026-09-18.md` § D-10. ⚠️ **This REMOVES live access** — 109's Step 1
+   before-state now counts and lists **three** removal categories, not two.
+   **No live ACCESS GAP remains outstanding.**
 2. **Q1 still open** — who runs 036's NFR-04 canary, against which environment. Gates 5 tasks and all
    of Phase 3, and 036 is now the largest ready item.
 3. **Deploy-side obligations from 2026-09-21** — (a) `npm run build:prod` for `TrackingFieldTrio`

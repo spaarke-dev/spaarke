@@ -545,3 +545,70 @@ notice.
 | Portfolio sync | Blocked: `gh auth refresh -s read:project,project` |
 | **`/merge-to-master`** | A **separate, unmade decision**. Pushing ≠ merging. |
 | `Router` on PR #950 | All 8 Tier 1 jobs **green**; `Router` pending on an advisory job **excluded from adjudication**. Probe once, by name, on the head SHA at the moment you decide to merge. |
+
+---
+
+## D-10 — `sprk_startdate`: does a not-yet-started membership confer access today?
+
+> **Asked** 2026-09-21 (session 22). **Answered** the same day.
+> **Owner's words**: *"membership with future start date confers as of the access date."*
+
+### The answer
+
+**NO — a membership whose `sprk_startdate` is in the FUTURE confers nothing yet.** Access begins **on**
+the start date. This is D-2 part 1's bound applied at the other end of the same range.
+
+### Why it was asked separately rather than inferred from D-2
+
+D-2 part 1 ruled that a **date-ENDED** membership stops conferring. The symmetry to a not-yet-STARTED
+one is obvious but it is **not** the same product statement: a future start date could plausibly be a
+scheduling commitment (access waits for it) **or** purely informational (access is already intended and
+the date is a record-keeping artifact). Inferring D-2 onto it would have been an implementer deciding a
+product question. Task 109 carried an explicit escalation trigger for exactly this, and it fired.
+
+### What was verified before asking (2026-09-21, at HEAD)
+
+| Fact | Evidence |
+|---|---|
+| `sprk_startdate` EXISTS on `sprk_contactorganization`, **DATE ONLY** | live-verified by task 117 — `notes/task-117-reconcile-grant-and-membership-state.md:42` |
+| The junction query bounds on `statecode` **ALONE** — no `sprk_enddate`, no `sprk_startdate` | `AccessibleRecordSetService.cs:478`, which says so in as many words |
+| **ZERO** server-side consumers of `sprk_startdate` | all 8 repo hits are client-side fixtures / a Calendar field-picker option |
+
+**Consequence at HEAD**: a `sprk_contactorganization` row with a future `sprk_startdate` and
+`statecode=0` **confers access today**. This was the only live ACCESS GAP outstanding on the list.
+
+### Where it is implemented — and where it deliberately is NOT
+
+**Task 109** owns it: the junction read is the single place both date bounds belong, and 109 is already
+rewriting that read as one snapshot. It is **not** a new task and **not** task 117's writer.
+
+| Path | Bound? | Why |
+|---|---|---|
+| **Additive / conferring set** | ✅ `(sprk_startdate eq null or sprk_startdate le {today})` | D-10 |
+| **FR-23 deny-veto subject** | ❌ `statecode` ONLY, both ends | Identical to D-2 part 2: the org-keyed ethical wall over-matches **by design**. Date-bounding a veto in either direction is a fail-OPEN change. |
+
+**Two mechanics that are load-bearing** (both mirror `ExpiryPredicate`'s documented reasoning):
+
+1. **The `eq null` branch is not optional.** OData `le` **excludes nulls**, and a membership with no
+   start date is an ordinary current membership that must still confer. Drop the branch and every
+   open-ended membership silently loses access.
+2. **`le`, not `lt`** — the column is Date Only and access holds **on** the start date.
+
+🔴 **Do NOT mirror task 107's inversion.** 107 inverted the null branch for a GRANT's
+`sprk_expiresdate` so an undated grant confers nothing. That is correct *for a grant* and wrong here:
+a grant with no expiry is unbounded; a membership with no start date is simply current. An executor
+"being consistent across the date columns" would revoke every open-ended membership in the system.
+
+### Deploy consequence — this REMOVES live access
+
+Folded into 109's Step 1 before-state, which now counts and lists **three** categories, all removals:
+date-ended-but-active rows · **future-start-but-active rows (this decision)** · active grants under an
+inactive organization. Same discipline D-2 part 3 required: count and list **before** anything ships.
+
+### Artifacts updated
+
+- `tasks/109-…poml` — escalation trigger **retired as answered**; two D-10 constraints (additive bound,
+  veto explicitly unbounded); four acceptance criteria incl. the null-start-date pin and a perturbation;
+  steps 0/1/2/3 amended.
+- `tasks/110-…poml` — a D-10 verification criterion, since 110 is where the date-bounding contract is
+  checked end to end and the bound is now two-sided.
