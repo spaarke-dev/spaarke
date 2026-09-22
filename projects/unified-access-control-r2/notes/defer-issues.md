@@ -1228,3 +1228,42 @@ project must cite the **call site**, not A1.1.
 **Net effect on fix direction 1**: team/BU ownership now looks close to disqualified for any table whose
 rows must resolve through membership — but the decision still belongs to a task, not to this register
 entry.
+
+#### Amendment 2026-09-22 (3) — SCOPING: the Owner hazard probably does NOT settle this table's ownership, so access semantics must
+
+The `spaarkeai-word-add-in-r1` session raised the right challenge: the Owner-binding hazard is confirmed
+**for the resolver**, but it only bites where an entity's Owner column is actually consumed by
+membership resolution — which is not automatic. Checked:
+
+**`CanonicalAccessConferringRegistry` (`MembershipOptions.cs:300-372`) holds SEVEN entities:**
+`sprk_matter` · `sprk_project` · `sprk_workassignment` · `sprk_event` · `sprk_invoice` · `sprk_todo` ·
+`sprk_analysis`.
+
+🔴 **`sprk_externalrecordaccess` is NOT among them.** Every registered column is a maker-authored
+`sprk_assigned*` Contact/Organization lookup; **no registry entry names an Owner column at all**.
+
+**Consequence for fix direction 1**: the team-ownership hazard most likely does **not** decide this
+table, which throws the choice back onto **access semantics** — and there, the two options invert:
+
+| Option | Fit for a GRANT row |
+|---|---|
+| **Caller-ownership** (what `OfficeService` does, and the likely answer for a document someone saves) | 🔴 **Poor.** Each grant becomes an island owned by whoever created it. Grants are records **several people must see and manage** — the modal's whole purpose. |
+| **Team / BU ownership** | Better matches "a team administers these grants" — *if* the resolver hazard genuinely does not reach this table. |
+
+⚠️ **So `spaarkeai-word-add-in-r1` task 080's answer may be RIGHT for documents and WRONG for grants.**
+ISS-030's ownership half must **not** simply adopt 080's convention; it must re-derive for this table.
+That reverses the earlier plan in amendment (1) to conform to 080.
+
+**🔴 NOT RESOLVED — the question a fix task must answer first.** ADR-034 **A1.1** makes the platform
+ownership columns *"structurally conferring on the authorization surface **WITHOUT a registry entry**"*.
+Whether that pulls a **non-registry** entity's Owner column into the surface — which would make the
+hazard bite `sprk_externalrecordaccess` after all — was **not** established here. Registry membership
+was checked; the structural-ownership path was not traced to its call site. **Do not treat "not in the
+registry" as "hazard does not apply" without tracing that path.**
+
+Also recorded, per the same session's refinement: *"the hazard cannot be configured away"* is very
+nearly true but overstated. Reordering `IncludedIdentityTables` is inert (it materialises to an
+unordered dictionary), **but removing `systemuser` from it entirely WOULD** make the scan fall through
+to `team`. That is not a workaround — it would break every user-owned membership resolution in the
+product — so the honest phrasing is **"the only configuration that touches it is disqualifying,"** not
+"no configuration touches it." The first closes the door; the second invites someone to try it.
