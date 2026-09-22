@@ -90,7 +90,41 @@
       asked to CONFORM to whatever convention this task settles on rather than invent a parallel one. So the
       choice made here becomes a cross-project convention — state it explicitly and tell them.
 
-      ⚠️ **TEAM-OWNERSHIP MAY BE RULED OUT BY A RESOLVER HAZARD — verify this FIRST, it is decision-critical.**
+      🔴 **RESOLVED 2026-09-22 — THE HAZARD IS CONFIRMED IN CODE ON THIS BRANCH. Team-ownership resolves to
+      nobody.** Verified directly in `MembershipFieldDiscoveryService.cs`, three parts:
+
+      1. `:94-95` — `OwnerAttributeTargets = new[] { "systemuser", "team" }`. **Hardcoded, systemuser FIRST.**
+      2. `:531-533` — `AttributeTypeCode.Owner => OwnerAttributeTargets` gives every Owner column those
+         synthetic targets, because the SDK exposes Owner without a `LookupAttributeMetadata` subclass.
+      3. `:288-300` — the scan is `foreach (var target in lookup.Targets)` with
+         `if (identityTypeByTable.TryGetValue(...)) { matchedTarget = …; break; }` — **ordered, breaks on the
+         first hit.**
+
+      So an Owner column's targets are always `["systemuser", "team"]` in that fixed order, the scan breaks on
+      `systemuser`, and **an Owner column can never bind as Team**. On a team-owned record `ownerid` holds the
+      TEAM's id, so it matches no user. Corroborated by an observed production symptom: R7 W12 task 130 —
+      *"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid, verified via raw SQL."*
+
+      **Precision on "it cannot be configured away"** (UAC-r2's framing, refined here): the ordering comes from
+      the hardcoded array, NOT from `Membership:IncludedIdentityTables` — that is materialized into a
+      *dictionary* (`:204`), which is unordered, so **reordering config changes nothing**. There is exactly one
+      configuration that would alter the outcome: **removing `systemuser` from `IncludedIdentityTables`
+      entirely**, which makes the dictionary lookup miss and lets the scan fall through to `team`. That is not a
+      workaround — it would break every user-owned membership resolution in the product. So: not
+      *reconfigurable*, and the one config that touches it is disqualifying.
+
+      **Consequence for this task**: this is a strong, branch-independent argument for **precedent A
+      (caller-ownership)**. Cite the CALL SITE above plus the task-130 symptom. Do **NOT** cite ADR-034 A1.1 —
+      it is on UAC-r2's unmerged branch (27 tasks open, PR #950 unmerged, no merge date), so per CLAUDE.md §6.5
+      path B it cannot be load-bearing here. Its earlier wording was also factually wrong (it attributed the
+      ordering to `IncludedIdentityTables`); they corrected it at `75e7db20e` after this trace.
+
+      ⚠️ **SCOPING QUESTION THIS TASK STILL MUST ANSWER**: the hazard bites only where an entity's Owner column
+      is actually consumed by membership resolution. Establish whether `sprk_document` / `sprk_todo` /
+      `sprk_communication` are in the membership surface at all before treating it as decisive for them — it is
+      confirmed for the resolver, not automatically for these three entities.
+
+      ⚠️ (superseded framing, kept for the trail) **TEAM-OWNERSHIP MAY BE RULED OUT BY A RESOLVER HAZARD — verify this FIRST, it is decision-critical.**
       Raised by `unified-access-control-r2` 2026-09-22. Their claim: membership discovery binds the FIRST
       matching target and `IncludedIdentityTables` starts at `systemuser`, so a polymorphic Owner column always
       resolves to SystemUser and binds the caller's own id — on a **team-owned** record `ownerid` holds the
