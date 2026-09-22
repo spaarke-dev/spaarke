@@ -90,6 +90,37 @@
       asked to CONFORM to whatever convention this task settles on rather than invent a parallel one. So the
       choice made here becomes a cross-project convention — state it explicitly and tell them.
 
+      ⚠️ **TEAM-OWNERSHIP MAY BE RULED OUT BY A RESOLVER HAZARD — verify this FIRST, it is decision-critical.**
+      Raised by `unified-access-control-r2` 2026-09-22. Their claim: membership discovery binds the FIRST
+      matching target and `IncludedIdentityTables` starts at `systemuser`, so a polymorphic Owner column always
+      resolves to SystemUser and binds the caller's own id — on a **team-owned** record `ownerid` holds the
+      TEAM's id and never matches. If true, landing team-ownership here produces rows that exist, are
+      correctly owned, and **resolve to nobody**. They cite a prior production outage (R7 W12 task 130:
+      *"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid, verified via raw SQL"*).
+
+      **What I verified on this branch, and what I did NOT:**
+      - ✅ `MembershipOptions.CanonicalIdentityTables` (`:241-249`) **does** start with `systemuser`, then
+        contact, team, businessunit, account, sprk_organization. Their ordering premise holds.
+      - ❌ **The ADR text they quote is NOT in this repo.** They cite "ADR-034 line 76" / amendment **A1.1**
+        (their task 043). Neither `.claude/adr/ADR-034-user-record-membership.md` nor the full
+        `docs/adr/` copy contains `A1.1`, the quoted sentence, or `rows=0` — grep-verified. Their branch
+        `work/unified-access-control-r2` is **unmerged** (master is `99cdfe2ea`). So the amendment exists only
+        on their branch.
+      - ⚠️ **The first-match-over-targets code path is UNVERIFIED.** `MembershipFieldDiscoveryService:204`
+        builds a dictionary keyed by table name, not an ordered scan over a polymorphic lookup's targets. The
+        hazard is plausible and consistent with the ordering, but I did not find the code that would produce it.
+
+      **Therefore**: treat the hazard as a serious input to verify, NOT as an established constraint, and do
+      not cite ADR-034 A1.1 — per CLAUDE.md §6.5 path B an ADR amendment must merge before or alongside the
+      code that depends on it, and this one has not merged. If the hazard IS real, it is a strong argument for
+      caller-ownership (precedent A) and should be stated as such with the verification evidence.
+
+      **Related citation defect, already FIXED 2026-09-22** (commit on this branch): four comments attributed
+      owner attribution to **ADR-024**, which is the Polymorphic Resolver Pattern and contains **zero**
+      mentions of ownerid/owningteam/owningbusinessunit (grep-verified, 0 hits). The three OTHER ADR-024
+      citations in the same files are correct — they refer to the denormalized resolver id/name fields, which
+      genuinely is ADR-024's subject. Corrected to ADR-034 so 080 does not inherit and propagate a wrong ADR.
+
       ⚠️ Their failure mode is worse than ours and is worth understanding before choosing: their client reads
       those rows in USER context via `context.webAPI.retrieveMultipleRecords` wrapped in `catch { return [] }`
       (`TrackingFieldTrio/index.ts:805`), so an access failure renders **identically to "nobody has access"**.

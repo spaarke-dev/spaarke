@@ -2564,7 +2564,7 @@ public class OfficeService : IOfficeService
     /// written); see <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
     /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
     /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name only. Ownership is attributed to the caller
-    /// when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-024 — best-effort;
+    /// when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-034 — best-effort;
     /// unresolved → app-owned, still created). There is no impersonated-create helper in the BFF, so ownership is
     /// set via the <c>ownerid</c> lookup rather than MSCRMCallerID.</para>
     /// </remarks>
@@ -2620,7 +2620,11 @@ public class OfficeService : IOfficeService
         var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
         entity["sprk_invoicename"] = name;
 
-        // Attribute ownership to the caller when resolved (ADR-024). Best-effort: an unresolved
+        // Attribute ownership to the caller when resolved (ADR-034 — ownership is what confers access.
+        // NOT ADR-024: that is the polymorphic RESOLVER pattern, it governs the denormalized id/name
+        // fields elsewhere in this file, and it contains zero mentions of ownerid/owningteam/BU. The
+        // miscitation was corrected 2026-09-22 before task 080 could make the wrong ADR load-bearing in
+        // two projects at once.) Best-effort: an unresolved
         // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
         if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
         {
@@ -2849,7 +2853,7 @@ public class OfficeService : IOfficeService
             entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
         }
 
-        // Owner attribution (ADR-024) — best-effort, same posture as QuickCreate.
+        // Owner attribution (ADR-034, not ADR-024 — see QuickCreate) — best-effort, same posture.
         if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
         {
             entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);

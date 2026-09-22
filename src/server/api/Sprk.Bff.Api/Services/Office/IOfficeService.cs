@@ -204,7 +204,7 @@ public interface IOfficeService
     /// </summary>
     /// <param name="request">Create-To-Do request (name, description, contact assignee, due date, priority/effort scores, regarding).</param>
     /// <param name="userId">Authenticated user id (OBO oid).</param>
-    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> for <c>ownerid</c> attribution (ADR-024); null → app-owned.</param>
+    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> for <c>ownerid</c> attribution (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER pattern and says nothing about ownership. The create-time convention itself — caller vs BU Owner team — is task 080's to settle); null → app-owned.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created To Do id + name, or null when creation is unavailable (no generic-create dep injected).</returns>
     /// <remarks>
