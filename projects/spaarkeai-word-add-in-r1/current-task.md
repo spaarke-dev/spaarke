@@ -5,15 +5,50 @@
 **Branch `work/spaarkeai-word-add-in-r1`, PR #960 (draft). Tree clean.**
 HEAD moves — get it with `git log -1 --format='%H %s'`. Do **not** trust a SHA written here.
 
-**Project: 80 task rows — 60 ✅ · 17 🔲 · 1 🔄 (042) · 2 escalated (065, 066).**
+**Project: 82 task rows — 60 ✅ · 19 🔲 · 1 🔄 (042) · 2 escalated (065, 066).**
 Counted from `^| NNN |` rows only; the ✅ in TASK-INDEX's goal-eligibility table are wave flags, not tasks.
 
-### ⛳ NEXT ACTION — **task 067**, then 060 → 068
+### ⛳ NEXT ACTION — **task 067**, then **080**
 
-`067-job-ownership-fail-closed.poml`. Last of the authorization wave. It lands the creator-OID schema
-change that **060 consumes**, so the order 067 → 060 → 068 is load-bearing.
+`067-job-ownership-fail-closed.poml` finishes the authorization wave and lands the creator-OID schema change
+**060 consumes**, so 067 → 060 → 068 is load-bearing.
+
+**Then 080 — it is the real blocker.** See the correction below.
 
 **Run tasks ONE AT A TIME.** See "the git hazard" below — this is not a preference.
+
+### 🔴 CORRECTION — the role grant unblocked **062 only**, not three tasks
+
+An earlier note in this file said the owner's grant to `Spaarke Core User` cleared 062, 063 and 064's
+document carrier. **That was wrong**, and the owner spotted the generalization first:
+*"this needs to be the same pattern for all record entities."*
+
+**Every record the BFF creates app-only lands in the ROOT business unit**, verified live — `sprk_document`,
+`sprk_communication`, `sprk_todo`. Nothing sets `ownerid`, so Dataverse defaults the owner to the calling
+identity (a BFF **application user**, which sits in root by default), and `owningbusinessunit` follows the
+owner. Users sit in **child** BUs; Deep traverses **downward**; so they reach none of these rows below
+Global — and Global re-opens F1 and F9.
+
+**`sprk_matter` is the only entity that behaves** — it is assigned to a child BU's **default Owner team**.
+That is the precedent to copy, and it means the fix is mirroring an existing in-repo pattern.
+
+**So the role grants were never the binding constraint. Ownership placement is.** Consequences:
+
+| Flow | State |
+|---|---|
+| 062 entity picker | ✅ works — matters are correctly owned |
+| 063 Run Index | ❌ 403 for every ordinary user |
+| 064 document-source To Do | ❌ 403 |
+| 064 communication-source To Do | ❌ 403 — **a regression**, it worked before the gate |
+| 066 | ❌ still escalated, same root cause |
+
+**New tasks**: **080** (the real fix — ownership assignment across all record entities + a reversible
+backfill; `sprk_communication` half belongs to the Communication project) and **081** (an interim carve-out
+with a forcing-function test, *only* needed if we deploy before 080 lands).
+
+**⚠️ Nothing is deployed with these gates yet** — the branch is an unmerged draft PR. So the 064 regression
+is **not live**; it would only materialize on deploy. That makes **080-before-deploy** the clean path, and
+081 unnecessary unless a deploy has to happen first.
 
 ### What this session did
 

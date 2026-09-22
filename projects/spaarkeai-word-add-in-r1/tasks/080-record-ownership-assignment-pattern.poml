@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Every BFF-created record lands in the root business unit because nothing sets an owner — establish the ownership-assignment pattern across all record entities</title>
+    <phase>5 Remediation — data model</phase>
+    <gate>startable. BLOCKS the real closure of 063, 064 and 066.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what every app-only Dataverse create writes, and requires a data backfill. Tags include bff-api + dataverse + security. Modifies `.cs`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A data-model change whose blast radius is every record the BFF creates, plus a backfill over existing rows. Getting the owner wrong is worse than leaving it unset — it would move records into the wrong BU irreversibly without a second migration.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the create path of every record entity the BFF writes; conflicts with anything editing `OfficeService.cs` or the persistence layer.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, security, authorization, data, migration, testing</tags>
+    <estimated-effort>8-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Records created app-only by the BFF have no owner, so Dataverse defaults ownership to the calling application user — which lives in the root business unit. Every such record is therefore invisible to ordinary users at any depth below Global. Set the owner at create time, mirroring what `sprk_matter` already does, and backfill the existing rows.</prompt>
+
+  <role>SPAARKE platform developer. This is the constraint that actually blocks the authorization wave — the role grants were never the binding limit.</role>
+
+  <goal>Every record the BFF creates is owned such that `owningbusinessunit` follows the acting USER, not the application identity — so ownership-depth security discriminates, and the per-record gates in tasks 063/064/066 can function as designed.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21. Owner instruction: *"this needs to be the same pattern for all record entities —
+      otherwise we will have the same issue in other record type entities."* Full evidence in
+      [`notes/role-grant-gap-2026-09-21.md`](../notes/role-grant-gap-2026-09-21.md) §9.
+
+      **The mechanism — three Dataverse defaults chained, no decision anywhere:**
+      1. The create code never sets `ownerid`.
+      2. Dataverse defaults the owner to the identity making the call — a BFF **application user**, because
+         these are app-only creates.
+      3. `owningbusinessunit` is *derived* from the owner's BU; it is not set independently.
+      4. Application users are created in the **root** BU by default (verified: `SDAP-BFF-SPE-API`
+         `bb5a90e5…` and `mi-bff-api-dev` `8793f4b0…` both sit in root `Spaarke` `06fbf21c…`).
+
+      Users sit in **child** BUs. Dataverse `Deep` depth traverses **downward** — own BU plus descendants —
+      so a child-BU user never reaches a parent-owned row. Only **Global** would, and granting that re-opens
+      findings F1 and F9 in one move.
+
+      **Verified state (live, 2026-09-21):**
+
+      | Entity | Owner | BU | Correct? |
+      |---|---|---|---|
+      | `sprk_matter` | **default Owner team** of a child BU (`isdefault: true`, `teamtype: Owner`) | *Spaarke Business Unit 1* | ✅ **this is the precedent to copy** |
+      | `sprk_document` | BFF app user | root | ❌ |
+      | `sprk_communication` | BFF app user | root | ❌ |
+      | `sprk_todo` | BFF app user | root | ❌ |
+
+      **Consequences today**: task 063's Run Index and task 064's document- and communication-source To Dos
+      return 403 for every ordinary user. Task 064 is a **live regression** — Outlook's
+      create-To-Do-from-email worked before the gate. Task 066 could not ship a filter at all, because
+      ownership-depth security over a table whose rows all share one owner degenerates into a table-level
+      on/off switch.
+
+      **The role grants on `Spaarke Core User` are already in place and are NOT the problem.** They were
+      necessary and are now sufficient *once ownership is correct*.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner instruction">The pattern is repo-wide. Do not fix `sprk_document` alone and leave the same defect in every other entity — sweep for every app-only create in the BFF and report the full inventory, even for entities this task does not change.</constraint>
+    <constraint source="this task">Mirror the existing `sprk_matter` precedent (assignment to the BU's default Owner team, or to the acting user) rather than inventing a third ownership convention. State which of the two you chose and why; they have different sharing consequences.</constraint>
+    <constraint source="this task">A wrong owner is worse than no owner — it moves records into a BU irreversibly without a second migration. The backfill MUST be reversible or dry-runnable, and MUST be verified on a sample before running wholesale.</constraint>
+    <constraint source="this task">Cross-project boundary: `sprk_communication` is created by `EmailUploadCaptureService.BuildCommunicationEntity`, owned by the Communication project. Do NOT unilaterally change it — coordinate or hand off, and say which. `sprk_document` and `sprk_todo` are created by this project's `OfficeService` / `OfficeDocumentPersistence` and are ours.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a FRESH origin/master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: as an ordinary user (not an admin), show that a BFF-created `sprk_document` is unreadable at the granted depth, and record the observation verbatim. This is the evidence the ownership placement — not the role grant — is the binding constraint.</criterion>
+    <criterion testable="true">A full inventory of every app-only Dataverse create in the BFF, with its current owner behaviour, is recorded in the task note. Entities not changed by this task are listed with a reason.</criterion>
+    <criterion testable="true">`sprk_document` and `sprk_todo` creates set an owner such that `owningbusinessunit` resolves to the ACTING USER's business unit, not the application identity's.</criterion>
+    <criterion testable="true">The chosen convention (default Owner team vs acting user) is stated with its sharing consequences, and matches the `sprk_matter` precedent unless a documented reason says otherwise.</criterion>
+    <criterion testable="true">A backfill for existing rows is provided, is dry-runnable, and is verified on a sample BEFORE any wholesale run. Report the row counts per entity (262 communications at last count; documents and To Dos to be counted).</criterion>
+    <criterion testable="true">AFTER the change, an ordinary user in a child BU can read a document they saved, at the granted Deep depth — verified live, not asserted.</criterion>
+    <criterion testable="true">Task 063's Run Index and task 064's document-source To Do succeed for an ordinary user. Verify both live; they are the reason this task exists.</criterion>
+    <criterion testable="true">The `sprk_communication` half is either coordinated with the Communication project and landed, or explicitly handed off with a named owner — not left implicit.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled against the then-current baseline (12,411 / 0 / 56 at the time of writing). ArchTests green. Publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the owner assignment per entity, the acting-user BU resolution, and the backfill's dry-run behaviour. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If assigning ownership to the acting user changes who can see EXISTING records in a way that removes access someone relies on — e.g. a shared-service team that reads everything today via root-BU ownership — STOP and escalate per CLAUDE.md §6. Narrowing visibility is the point, but an unplanned narrowing on live data is an outage.</trigger>
+    <trigger>If the backfill cannot be made reversible, STOP and escalate before running it. A one-way move of every record into a different business unit is not a task-local decision.</trigger>
+    <trigger>If `sprk_communication` cannot be coordinated with the Communication project inside this task's window, STOP and hand it off explicitly rather than reaching into their create path.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Reproduce the unreadability as an ordinary user; record verbatim.</step>
+    <step>Read how `sprk_matter` gets its owner — that is the precedent. Establish which convention it uses.</step>
+    <step>Sweep for every app-only create in the BFF; build the inventory.</step>
+    <step>Implement the owner assignment for `sprk_document` and `sprk_todo`.</step>
+    <step>Write the backfill with a dry-run mode; verify on a sample.</step>
+    <step>Verify live that 063's Run Index and 064's document-source To Do now succeed for an ordinary user.</step>
+    <step>Coordinate or hand off `sprk_communication`.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE. Write `notes/080-record-ownership.md`.</step>
+    <step>Update TASK-INDEX.md: 080 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+    <file role="edit">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/role-grant-gap-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/066-communications-gate.md</file>
+      <file>.claude/adr/ADR-044-dataverse-query-safety.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/data-model/</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Correct ownership assignment (the precedent)" location="sprk_matter creation path">
+        `sprk_matter` rows are owned by the **default Owner team** of a child business unit (`isdefault: true`, `teamtype: Owner`) rather than by the calling identity. Find the code that does this and mirror it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>`sprk_matter`'s creation path already assigns ownership correctly — this task generalizes an existing in-repo pattern rather than introducing one.</existing>
+    <extension>Yes — extend the existing convention to the other record entities. No new component; the only new artifact is the backfill script.</extension>
+    <cost-of-doing-nothing>Tasks 063, 064 and 066 ship authorization gates that refuse every ordinary user, Outlook's create-To-Do-from-email stays broken, and every future per-record gate on any BFF-created entity will fail the same way for the same reason.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run ALONE — do not run concurrently with any other agent on this worktree (see notes/064-todo-source-gate.md §10).</protocol>
+  </execution>
+</task>
