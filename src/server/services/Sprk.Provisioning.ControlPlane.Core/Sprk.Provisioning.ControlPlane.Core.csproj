@@ -200,7 +200,7 @@
          the same ArmClientOptions.Transport pattern task 123's ArmSdkTestFakes
          helpers already establish. Version 1.3.2 verified to resolve cleanly
          alongside this project's Azure.ResourceManager 1.14.0 pin. -->
-    <PackageReference Include="Azure.ResourceManager.CosmosDB" Version="1.3.2" />
+    <PackageReference Include="Azure.ResourceManager.CosmosDB" Version="1.5.0" />
 
     <!-- Azure.ResourceManager.CostManagement — task 183 (Phase C'' Wave G-7)
          SDK port of the H13 cost-envelope acceptance gate. Replaces the retired
