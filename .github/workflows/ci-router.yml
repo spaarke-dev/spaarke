@@ -314,7 +314,7 @@ jobs:
         # Pinned to a tagged release (v1.2.2) per supply-chain hygiene.
         # If this action is ever deprecated, fallback is inline bash gate
         # documented in notes/router-signal-model-decision.md §5.
-        uses: re-actors/alls-green@v1.2.2
+        uses: re-actors/alls-green@v1.3.0
         with:
           jobs: ${{ steps.adjudicate.outputs.json }}
           # tier1 may legitimately be skipped when classify finds no Tier-1
