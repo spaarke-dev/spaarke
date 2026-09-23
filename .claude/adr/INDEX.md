@@ -57,7 +57,75 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-049 | Compose Shadow Document Architecture | **AMENDED TWICE — read the R8 amendment before touching the save path.** OOXML server-authoritative source of truth; TipTap = lossy view+controller; **no text-search in the write path** (I-7); opaque atoms for SDT/fields; ONE body author (I-5). **Current save contract (R8, 2026-08-21, Path B)**: the save **renders from the content model AND preserves untouched content** — re-project the retained baseline server-side, pair blocks **by document order** (`paraId` corroborates, never keys — duplicates are spec-legal in `mc:AlternateContent` and Word regenerates ids), then **clone unchanged blocks verbatim** / render changed ones with property inheritance / thin-render+warn the unmergeable — never a content refusal. No per-construct preservation logic: properties survive because an untouched block is never re-derived. **Invariants (1) terminate-in-a-defined-outcome and (2) preserve-untouched-blocks are a PAIR — no future amendment may trade one for the other** (both prior amendments did). Measured 18.08% → 100% overall, 6.67% → 100% near-tier on the 18-doc corpus. **Superseded**: R4's surgical `(paraId, runIndex, offset)` byte-patch on the save path (D2/D5 — the HTTP 422 treadmill; the engine survives ONLY for the op-log path and is **not** confirmed subsumed) and R6's whole-body rebuild (2026-08-05 — the silent fidelity loss). **Path-B amendment supersedes the R3 `ComposeParagraphRedlineSynthesizer` paragraph-diff project decision** with step-level operational deltas. Engine frozen (ADR-039 — no new AI dispatch); `byte[]`-in/out (ADR-007/013). **R4.5 read/reference companion (merged 2026-07-28)**: completed the READ side on the same projection — **one reader** everywhere (client `mammoth` deleted; new stateless `POST /api/compose/project` for browse), **deterministic numbering** (`NumberingComputationEngine`, `numId`-scoped per ECMA-376, 24/24 == Word, non-editable number-atom), **`paraId → legal-number` reference layer + `CitationResolver`** (Section 4.2 / 4.2(b)(iii) / ranges), honest page/line (WS-5 deferred). Read-side invariants **F-1…F-5** in the ADR body | **Accepted**, amended 3× — R4 (2026-07-22, Phase-0 proof gate task 006); read/reference completed by `spaarkeai-compose-fidelity-r4.5` (2026-07-28); R6 render-on-save (2026-08-05); **R8 base re-projection + block copy-through (2026-08-21, `spaarkeai-compose-r8` task 031, owner-accepted) — the current save contract** |
 | ADR-050 | Canonical Modal Shell | One `SprkModal` shell + thin presets in `@spaarke/ui-components`; compose `ModalWindowControls`/`RecordNavigationModalShell` (no forked chrome); keep the Fluent `Dialog` envelope (transform-robust portal); `--sprk-ui-scale` via a scaled Fluent theme, **not** CSS `zoom`; semantic tokens only — zero hex / `'1px'` / inline color (**strengthens ADR-021**); no hand-rolled `position:fixed` overlays; no per-surface bespoke chrome. Preserves the Choice Dialog pattern via `ChoiceModal`. Component guide: `docs/standards/MODAL-DESIGN-SYSTEM.md` | Accepted (2026-08-01) — spaarke-modal-system |
 | ADR-051 | Infinite Lazy-Scroll Lists (not pagination) | Every scrollable list uses **infinite lazy-scroll** (progressive load-on-scroll) + the canonical **thin, theme-aware scrollbar** — **NO pager**: no numbered pages, prev/next, "Load more", or down-arrow/chevron next-page affordance. `<DataGrid>` (`@spaarke/ui-components`) is the standard impl (built-in `useLazyLoad` + `IntersectionObserver` sentinel + `thinScrollbarStyle`); custom scrollers replicate the same 3 mechanics. `hasMore` falls back to **page fullness** because the MDA `Xrm.WebApi` client strips `@Microsoft.Dynamics.CRM.morerecords`/paging-cookie on FetchXML (the "shows only 25" trap). No giant-single-page substitute (`pageSize=500` anti-pattern). Strengthens ADR-021; composes under ADR-012. Patterns: `infinite-scroll-list.md` + `thin-scrollbar.md` | Accepted (2026-08-31) — email-communication-intelligence-r2 |
-| ADR-038 | Testing Strategy — Integration-heavy pyramid | 6 KEEP path categories as MUST rules (`tests/integration/{auth,regression,data-mutation,tenant,contract}/**` + `tests/unit/domain/**`); deletion-safety: removal under KEEP paths requires same-PR replacement; coverage is observation never gate (binding ≥6 months from 2026-06-26); ban `Mock<HttpMessageHandler>` + `Mock<IServiceClient>` + DI-registration tests + ctor null-check tests; mock at module boundaries not HTTP-handler level; `TimeProvider` over `Stopwatch` for time-dependent tests; enforced at `task-execute` Step 9.5 (unconditional code-review on test PRs per spec FR-B07). **STANDALONE — does NOT supersede ADR-022 (PCF Platform Libraries — unrelated frontend scope).** | Accepted (2026-06-26) — ci-cd-unit-test-remediation-r1 Phase 1 Stream B |
+| ADR-038 | Testing Strategy — Integration-heavy pyramid | 6 KEEP path categories as MUST rules (`tests/integration/{auth,regression,data-mutation,tenant,contract}/**` + `tests/unit/domain/**`); deletion-safety: removal under KEEP paths requires same-PR replacement; coverage is observation never gate (binding ≥6 months from 2026-06-26); ban `Mock<HttpMessageHandler>` + `Mock<IServiceClient>` + DI-registration tests + ctor null-check tests; mock at module boundaries not HTTP-handler level; `TimeProvider` over `Stopwatch` for time-dependent tests; enforced at `task-execute` Step 9.5 (unconditional code-review on test PRs per spec FR-B07). **STANDALONE — does NOT supersede ADR-022 (PCF Platform Libraries — unrelated frontend scope).** ⚠️ **No `.claude/adr/` file — canonical at [`docs/adr/ADR-038-testing-strategy.md`](../../docs/adr/ADR-038-testing-strategy.md); this row IS its concise version.** | Accepted (2026-06-26) — ci-cd-unit-test-remediation-r1 Phase 1 Stream B |
+
+<!-- 14 entries below added 2026-09-04 by code-quality-and-assurance-r4 task 010 (spec FR-05).
+     These ADRs existed as files in .claude/adr/ but had no INDEX row, so an agent reading only
+     this index could not know they existed. ADR-035 is absent from BOTH tiers — a genuine gap in
+     the numbering, not a missing file. Do not hunt for it. -->
+
+| ADR-003 | Lean Authorization Seams | **Two seams only**: `IAccessDataSource` for UAC data, `SpeFileStore` for storage. Authorization via an ordered `IAuthorizationRule` chain. No third seam without an amendment. | Accepted |
+| ADR-004 | Async Job Contract | **One standard Job Contract** for all async work; processed by `BackgroundService` workers with **idempotent** handlers. | Accepted |
+| ADR-005 | Flat Storage in SPE | **Flat storage** in SharePoint Embedded containers — **no folder hierarchies**. Hierarchy is represented in Dataverse metadata and associations. Enforced by `SpeUploadPathIsFlatGuardTests`. | Accepted |
+| ADR-009 | Redis-First Caching | **Redis as the distributed cache**; per-request cache for within-request de-dupe. **No hybrid L1+L2 without profiling proof.** Enforced by `ADR009_CachingTests`. | Accepted |
+| ADR-011 | List & Grid UI — Dataset PCF vs React Code Page | **Dataset PCF** for list/grid views embedded on Dataverse entity forms (dataset binding required); **React Code Pages** for standalone surfaces. | Accepted (Revised 2026-02-23) |
+| ADR-014 | AI Caching and Reuse Policy | AI-specific caching layered on ADR-009: cache derived artifacts (text, embeddings) under **versioned keys**; **never cache raw content** without governance approval. | ⚠️ **Proposed** (2025-12-18) — never ratified |
+| ADR-015 | AI Data Governance | **Data minimization** + **logging hygiene** on all AI operations: never log content, always scope by tenant, define retention for anything persisted. | Accepted (Amended 2026-05-17) |
+| ADR-016 | AI Cost, Rate Limits, and Backpressure | **Layered throttling**: per-endpoint rate limiting, bounded concurrency, explicit budgets. Heavy work goes to async jobs. | ⚠️ **Proposed** — never ratified |
+| ADR-017 | Async Job Status and Persistence | Standard **job status persistence** + client polling contract; every job persists its status transitions. | ⚠️ **Proposed** (2025-12-18) — never ratified |
+| ADR-018 | Feature Flags and Kill Switches | **Options-based** flags with typed validation; disabled features return `503 ProblemDetails`; **flags never bypass authorization**. ADR-032 (Accepted) is its enforcement arm. | ⚠️ **Proposed** — never ratified |
+| ADR-019 | ProblemDetails & Error Handling | **RFC 7807 ProblemDetails** for all API errors, with stable error codes + correlation IDs; SSE emits terminal error events. **187 files implement this.** | ⚠️ **Proposed** — never ratified |
+| ADR-020 | Versioning Strategy | **SemVer** for packages, **tolerant readers** for payloads, **explicit schema versioning** for evolving contracts. No silent breaking changes. | ⚠️ **Proposed** — never ratified |
+| ADR-024 | Polymorphic Resolver Pattern | **Dual-field strategy** for polymorphic associations where a child may relate to several parent entity types. | Accepted (amended path-B) |
+| ADR-025 | Icon Library and Deployment Strategy | All icons from **Microsoft Fluent UI System Icons**, standardized. No ad-hoc icon sources. | Accepted |
+
+---
+
+## Classification (FR-05 — added 2026-09-04 by task 010)
+
+Every ADR classified on **enforceability** (can a mechanical test assert it?), **accuracy** (does it describe the code today?), and — for judgment-only ADRs only — **checkability**. Full reasoning, one line per ADR per axis: [`projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md`](../../projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md).
+
+| Axis | Value | Count | Which |
+|---|---|---|---|
+| **Enforceability** | enforceable | 21 | 001, 002, 003, 005, 007, 008, 009, 010, 012, 013, 018, 019, 020, 027, 028, 029, 032, 038, 040, 043, 044 |
+| | partially-enforceable | 25 | 004, 006, 011, 014, 015, 016, 017, 021, 022, 024, 026, 030, 031, 033, 034, 036, 037, 039, 042, 045, 046, 047, 048, 049, 050, 051 |
+| | judgment-only | 3 | 023, 025, 041 |
+| **Accuracy** | current | 36 | all not listed below — re-verified 2026-09-04 against the artifacts each ADR NAMES, not guessed identifiers ([report](../../projects/code-quality-and-assurance-r4/notes/adr-accuracy-reverification-2026-09.md)) |
+| | **contested** | **12** | by ratification (10): 014, 016, 017, 018, 019, 020, 041, 042, 043, 047 · by **drift** (2): **005** (names `sprk_documentassociation`, which exists nowhere) and **033** (names `WorkingDocumentHandler`/`WorkingDocumentTools.cs`; code has `WorkingDocumentService`) |
+| | **stale** | **1** | **023** (Superseded 2026-03-19, demoted to a pattern) |
+| **Checkability** *(judgment-only only)* | checkable-by-reading | 2 | 025, 041 |
+| | aesthetic | 1 | 023 |
+
+### 🔴 Ten ADRs were never ratified — and six of them shipped
+
+`Status: Proposed` on **ADR-014, 016, 017, 018, 019, 020, 041, 042, 043, 047**. These are not idle drafts: **ADR-019 (ProblemDetails) is implemented across 187 files**, ADR-042 across 92, ADR-043 across 59. The codebase rests substantially on decisions nobody ratified.
+
+They are classified `contested` **not because they are inaccurate** — several describe the code precisely — but because enforcing an unratified rule in CI means enforcing something nobody agreed to, which is what FR-08 exists to prevent. **The likely §6.5 path is confirm (ratify), not amend.** Two need a closer look first. **ADR-018** (Proposed) is enforced by **ADR-032** (Accepted) — an accepted ADR enforcing an unratified one. And **ADR-047** is fully built (outbox + SignalR delivery + `@spaarke/notifications` client + four producers) yet `spaarke-notification-spine-r1` shows **0 of 22 tasks complete**, which suggests the spine was assembled piecemeal by its consumers — the fork-collapsing ADR-047 exists to prevent. Its conformance to its own six MUSTs is **unverified**.
+
+
+### Routing (FR-06) — coverage is **50/50 routed**, not "17/50 enforced"
+
+Every ADR has a mechanism that carries it; one left unenforced is a decision on the record, not a gap. Full record: [`adr-routing-2026-09.md`](../../projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md).
+
+| Mechanism | ADRs | Scheduled | Held by FR-08 |
+|---|---|---|---|
+| arch test (blocking) | 21 | 16 | 5 |
+| arch test + nightly review | 26 | 20 | 6 |
+| nightly review | 2 | 1 | 1 |
+| deliberately unenforced | 1 | — | — |
+| **Total** | **50** | **37** | **13** |
+
+**Held by FR-08 (13)** — routed but NOT scheduled until task 012 resolves their status: 005, 014, 016, 017, 018, 019, 020, 023, 033, 041, 042, 043, 047.
+
+**FR-23 nightly-reviewer scope = 28 ADRs** (26 partially-enforceable + 2 judgment-only/checkable-by-reading), of which 22 are schedulable today.
+
+⚠️ **15 ADRs name no checkable artifact** — 002, 004, 008, 014, 016, 017, 019, 020, 023, 025, 027, 039, 040, 041, 051. Their accuracy cannot be verified by tooling or by a person without interpretation. Note this is about verifying ACCURACY, not about whether the rule is testable: ADR-002 names nothing and still has a working named test. Cheap remedy for task 012 — have each name ONE canonical artifact.
+
+---
+
+### Enforcement is 17/49, not 7/49
+
+**8 ADRs have a test named after them** (001, 002, 007, 008, 009, 010, 013, 038). **9 more are enforced by guards that never name them in the title** (003, 012, 028, 032, 034, 036, 040, 045, 049) — including **ADR-028**, asserted by six separate arch tests. The spec's "7 of 49" counts only named tests. Both figures are defensible; FR-09a must state which it reports.
 
 ---
 

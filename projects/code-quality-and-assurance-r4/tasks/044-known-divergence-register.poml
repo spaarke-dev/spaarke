@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Record the known divergences — a list, not a mechanism</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New documentation artifact enumerating known duplicate code paths; no code change, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documenting known pairs seeded from r3's out-of-scope list; the set is already identified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs,reuse,technical-debt</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Enumerate the known divergent code paths — naming both implementations, the behavior they share, and why merging was deferred — seeded from r3's out-of-scope list: the two live .eml builders and the two distinct R6 financial handlers. This is a register, not a remediation.</prompt>
+  <role>SPAARKE platform developer. Record what is true; resist the urge to fix it here.</role>
+  <goal>A register naming each known divergent pair with its shared behavior and deferral reason, and no tooling built to maintain it.</goal>
+
+  <context>
+    <background>spec.md FR-19. The owner's second stated risk is the same function running in two code paths. r4's job is to make those visible and named — not to merge them, which is a separate project with its own risk profile. The spec is explicit that this is a list rather than a mechanism: "if it needs tooling, it has left scope." That fence exists because a divergence register with automated detection would quietly become a duplication-percentage gate, which is exactly the count-proxy NFR-05 forbids.</background>
+    <relevant-files>
+      <file role="new">projects/code-quality-and-assurance-r4/notes/divergence-register.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent — seeded from r3's already-published out-of-scope list.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (a list, not a mechanism): enumerate and describe. MUST NOT build detection tooling, a scanner, or any automated maintenance for this register. If it needs tooling, it has left scope.</constraint>
+    <constraint source="spec">Scope (per entry): name BOTH code paths with concrete paths, the shared behavior, and why merging was deferred.</constraint>
+    <constraint source="spec">Scope (no remediation): r4 does NOT merge these. Any merge is a separate project with its own spec.</constraint>
+    <constraint source="spec">Scope (seed): start from r3's out-of-scope list — two live .eml builders, two distinct R6 financial handlers. Additional divergences found incidentally may be added; do NOT run a repo-wide duplication audit to find more, which the spec rejects explicitly.</constraint>
+    <constraint source="project">Scope (verification): confirm each pair still exists at head before recording it. r3's list predates 65 commits of master merged 2026-09-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Divergent code path documentation</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>projects/code-quality-and-assurance-r4/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read r3's out-of-scope list.</step>
+    <step order="1">Locate both .eml builder implementations at head and confirm both are still live.</step>
+    <step order="2">Locate both R6 financial handler implementations at head and confirm both are still live.</step>
+    <step order="3">For each pair, describe the shared behavior concretely — what both do that is the same.</step>
+    <step order="4">For each pair, record why merging was deferred, citing r3's reasoning where it exists.</step>
+    <step order="5">Write the register with a header stating it is maintained by hand, deliberately, and carries no tooling.</step>
+    <step order="6">Update TASK-INDEX.md: set task 044 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a recorded pair no longer diverges at head — one path was removed or they were merged since r3 — record that it is resolved rather than describing a divergence that no longer exists. A register describing a fixed problem is the same documentation drift this project exists to fix.</trigger>
+    <trigger>If maintaining the register accurately appears to require automated detection, STOP and escalate. The spec's fence is explicit, and crossing it turns a list into the duplication-percentage gate NFR-05 forbids.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>r3's out-of-scope list names the pairs but records no shared behavior or deferral reasoning, and is embedded in a completed project's notes.</existing>
+    <extension>No. r3's list is a scope boundary for a closed project; this is a standing register with a different lifecycle and a different reader — someone about to touch one of the two paths.</extension>
+    <cost-of-doing-nothing>The divergences stay known only to whoever read r3's scope section. Someone edits one .eml builder without knowing the other exists, and the two drift further — which is the concrete failure this register prevents.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/divergence-register.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the register, each entry names both code paths with concrete file paths.</criterion>
+    <criterion testable="true">Given each entry, the shared behavior is described concretely.</criterion>
+    <criterion testable="true">Given each entry, the deferral reason is recorded.</criterion>
+    <criterion testable="true">Given both seeded pairs, each was verified to still exist at head.</criterion>
+    <criterion testable="true">Negative: no detection tooling, scanner, or automated maintenance was built.</criterion>
+    <criterion testable="true">Negative: no divergence was merged or remediated by this task.</criterion>
+    <criterion testable="true">Negative: no repo-wide duplication audit was run.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-19. Serves the second half of success criterion 5 — known divergences enumerated. Merging them is explicitly a separate project.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

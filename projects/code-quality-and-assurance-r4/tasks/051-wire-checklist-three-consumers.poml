@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Wire the checklist into all three consumers</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>050 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Directive edits to skill files plus a pipeline hook; no code, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an existing artifact into three named consumption points.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills/ files — main-session only; code-review/SKILL.md contended with unified-access-control-r2.</parallel-reason>
+    <deps>050</deps>
+    <tags>skill-directives,code-review,governance</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the generated review checklist into all three of its consumers: FR-23's nightly reviewer (as scope input), code-review Step 9.5, and the project wrap-up task. A checklist consumed by only one of the three has not met FR-21d.</prompt>
+  <role>SPAARKE platform developer wiring an artifact into existing skills. Additive edits only.</role>
+  <goal>All three consumers read the checklist, and generation is triggered at a defined point in the project lifecycle.</goal>
+
+  <context>
+    <background>spec.md FR-21d. The checklist's value is entirely in being consumed — an artifact generated and read by nothing is pure overhead. Three consumers were specified deliberately: the reviewer needs it for scope, code-review needs it to check the project's own stated obligations rather than generic ones, and wrap-up needs it to confirm those obligations were met.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/code-review/SKILL.md</file>
+      <file role="modify">.claude/skills/project-pipeline/SKILL.md</file>
+      <file role="canonical-reference">scripts/quality/Generate-ReviewChecklist.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Supplies the generator and the artifact shape all three consumers read.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (all three): reviewer, code-review Step 9.5, and wrap-up. Partial wiring does not satisfy FR-21d.</constraint>
+    <constraint source="project">Scope (generation trigger): define where the checklist is generated in the lifecycle — after task decomposition, when spec, design, and POMLs all exist. Generating earlier produces an incomplete projection.</constraint>
+    <constraint source="project">Scope (graceful absence): a project without a checklist must not break any consumer. Older projects have none, and the consumers must degrade rather than fail.</constraint>
+    <constraint source="project">Scope (minimal edits): additive only; do not restructure the skills.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check before starting and before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Skill wiring</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/project-pipeline/SKILL.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Run /conflict-check.</step>
+    <step order="1">Add checklist consumption to code-review Step 9.5.</step>
+    <step order="2">Add checklist generation to project-pipeline after task decomposition.</step>
+    <step order="3">Add checklist consumption to the wrap-up flow.</step>
+    <step order="4">Record the checklist path convention so FR-23's reviewer (task 054) can locate it per project.</step>
+    <step order="5">Verify graceful degradation: run code-review against a project with no checklist and confirm it does not error.</step>
+    <step order="6">Update TASK-INDEX.md: set task 051 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If wiring into any consumer requires that consumer to change shape significantly, STOP and escalate. The checklist is meant to fit the existing flow; if it does not, the artifact's shape is wrong and task 050 should be revisited rather than three skills reshaped around it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/skills/code-review/SKILL.md</output>
+    <output type="doc">.claude/skills/project-pipeline/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given code-review Step 9.5, it reads the project's checklist when one exists.</criterion>
+    <criterion testable="true">Given project-pipeline, the checklist is generated after task decomposition.</criterion>
+    <criterion testable="true">Given wrap-up, it reads the checklist.</criterion>
+    <criterion testable="true">Given a project with no checklist, every consumer degrades gracefully rather than erroring.</criterion>
+    <criterion testable="true">Given the path convention, task 054's reviewer can locate a checklist per project.</criterion>
+    <criterion testable="true">Negative: no skill was restructured beyond the additive wiring.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-21d. r4's own checklist, generated by task 050, is the first live consumer test.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

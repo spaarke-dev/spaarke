@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Run the header backfill across the 230 .claude/ governance primitives</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>031 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A single mechanical operation rewriting 230 files across a hot, shared surface while ~17 worktrees are active. Blast radius is the whole governance layer.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Running a verified script and inspecting its diff; the judgment was spent in tasks 030 and 031.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Rewrites 230 files under .claude/ — sub-agents cannot write there (root CLAUDE.md §3), and a bulk rewrite must be a single serialized operation regardless.</parallel-reason>
+    <deps>031</deps>
+    <tags>governance,automation,migration</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run scripts/quality/Update-DocHeader.ps1 across the 230 .claude/ governance primitives — 71 skills, 16 constraints, 94 patterns, 49 ADRs — and verify the resulting diff preserves every pre-existing date. This is a single scripted operation; do NOT hand-edit any file.</prompt>
+  <role>SPAARKE platform developer performing a bulk migration. Verify before and after; the script does the writing, you do the checking.</role>
+  <goal>All 230 primitives carry a conformant revision header, every pre-existing date is unchanged, and -Check exits zero.</goal>
+
+  <context>
+    <background>spec.md FR-10 as amended. This is the one irreversible-at-scale step in P3, which is why its steps are prescriptive rather than directional. The risk is not the script failing loudly — it is the script succeeding while quietly resetting dates, which would convert a real staleness signal into a uniform one and silently defeat FR-12's entire ranking. Hence the before/after date inventory.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/</file>
+      <file role="modify">.claude/constraints/</file>
+      <file role="modify">.claude/patterns/</file>
+      <file role="modify">.claude/adr/</file>
+      <file role="canonical-reference">scripts/quality/Update-DocHeader.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">Provides the verified idempotent script, including its proven non-destructiveness on the sample.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (mechanical only): every change is made by the script. MUST NOT hand-edit any file during this task — a hand edit means the script is wrong and should be fixed in task 031 instead.</constraint>
+    <constraint source="project">Scope (.claude/ only): 71 skills, 16 constraints, 94 patterns, 49 ADRs. MUST NOT run against docs/** — that backfill is deliberately deferred (project CLAUDE.md decision, 2026-09-04).</constraint>
+    <constraint source="project">Scope (conflict discipline): run /conflict-check immediately before starting and again before merge, per NFR-06. unified-access-control-r2 declares skill-directives=Y and is executing.</constraint>
+    <constraint source="project">Scope (date preservation): capture a before-inventory of every existing date and diff it against the after-state. Any changed pre-existing date is a failure, not a rounding difference.</constraint>
+    <constraint source="project">Scope (single commit): commit the backfill as one reviewable commit separate from any other change, so it can be reverted atomically.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bulk governance migration</topic>
+    <files>
+      <file>docs/standards/FILE-REVISION-HEADER.md</file>
+      <file>projects/code-quality-and-assurance-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Confirm the working tree is clean.</step>
+    <step order="1">Run /conflict-check for .claude/skills/, .claude/constraints/, .claude/patterns/, .claude/adr/.</step>
+    <step order="2">Capture the before-inventory: for all 230 files, record every existing date (frontmatter or blockquote) to a notes file.</step>
+    <step order="3">Run Update-DocHeader.ps1 -Check first. Record the pre-migration finding count.</step>
+    <step order="4">Run Update-DocHeader.ps1 against .claude/skills/.</step>
+    <step order="5">Inspect the skills diff specifically: confirm description, tags, techStack, appliesTo, alwaysApply, and exemplar are byte-identical.</step>
+    <step order="6">Run Update-DocHeader.ps1 against .claude/constraints/, then .claude/patterns/, then .claude/adr/.</step>
+    <step order="7">Capture the after-inventory and diff it against the before-inventory. Every pre-existing date must be identical.</step>
+    <step order="8">Run Update-DocHeader.ps1 -Check again; it must exit zero.</step>
+    <step order="9">Run the script a second time over the whole set and confirm zero diff (idempotence on the live tree, not just the sample).</step>
+    <step order="10">Commit as a single reviewable commit.</step>
+    <step order="11">Update TASK-INDEX.md: set task 032 status to ✅.</step>
+    <step order="12">Document the before/after counts in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 7's date diff shows ANY pre-existing date changed, STOP and revert the commit. Do not repair individual files by hand — the script is wrong and must be fixed in task 031, then this task re-run from step 2.</trigger>
+    <trigger>If step 5 shows any change to a skill's existing frontmatter keys, STOP and revert. Claude Code parses those keys and a repo-wide reformat could alter skill discovery.</trigger>
+    <trigger>If /conflict-check reports an active edit to any .claude/ primitive by another worktree, STOP and coordinate before running. A 230-file rewrite landing on top of another session's in-flight edit is the collision NFR-06 exists to prevent.</trigger>
+    <trigger>If step 9's second run produces a diff, STOP — the script is not idempotent on real inputs even if it was on the sample, and re-running after a merge would then be unsafe.</trigger>
+  </escalation>
+
+  <tools><tool name="pwsh">Run Update-DocHeader.ps1</tool><tool name="git">Diff, inventory, commit</tool></tools>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/header-backfill-2026-09.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the migrated tree, all 230 primitives carry a conformant revision header.</criterion>
+    <criterion testable="true">Given the before/after inventory diff, no pre-existing date changed.</criterion>
+    <criterion testable="true">Given the skills diff, the six pre-existing frontmatter keys are byte-identical across all 71.</criterion>
+    <criterion testable="true">Given -Check after the run, it exits zero.</criterion>
+    <criterion testable="true">Given a second full run, it produces zero diff.</criterion>
+    <criterion testable="true">Negative: no file under docs/** was modified.</criterion>
+    <criterion testable="true">Negative: no file was hand-edited — every change is attributable to the script.</criterion>
+    <criterion testable="true">Negative: no domain-specific blockquote was removed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-10 as amended. Steps are prescriptive because the operation is bulk and hard to unpick selectively. Measured 2026-09-04: 63/71 skills already carry frontmatter last-reviewed; 87/94 patterns and 15/16 constraints carry blockquote stamps; ~9 files across the set are genuinely undated and will receive git-derived or seeded values.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

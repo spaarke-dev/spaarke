@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Capture the point-of-use signal and resolve the phantom drift script</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>035 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Two small directive edits to skill files plus a citation resolution; no new code and no tests. Both touch .claude/, so the write boundary applies.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small specified directive edits with a named destination for each.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills/code-review/SKILL.md and .claude/skills/ai-procedure-maintenance/SKILL.md — main-session only, and code-review/SKILL.md is contended with unified-access-control-r2.</parallel-reason>
+    <deps>035</deps>
+    <tags>skill-directives,governance,docs</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add one line to code-review Step 9.5 output asking whether any primitive loaded during the task turned out to be wrong, and resolve the ai-procedure-maintenance citation of Find-SkillReferenceDrift.ps1 — a script that does not exist — either by satisfying it with the nightly job's link check or by removing the citation.</prompt>
+  <role>SPAARKE platform developer making minimal directive edits. Both changes are small; the discipline is keeping them small.</role>
+  <goal>The point-of-use signal is captured as a one-bit flag at the moment of discovery, and no skill cites a nonexistent script.</goal>
+
+  <context>
+    <background>spec.md FR-14 and FR-15. FR-14 captures the cheapest, highest-quality drift signal available: the moment someone loads a primitive and finds it wrong is the moment they know, and it is never recorded. Usually the answer is "no", which is why it must stay a one-bit flag — turning it into a review would guarantee it gets skipped. FR-15 is smaller but sharper: ai-procedure-maintenance cites scripts/Find-SkillReferenceDrift.ps1, which does not exist (verified 2026-09-04). Cited-and-nonexistent is the only unacceptable state; either destination is fine.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/code-review/SKILL.md</file>
+      <file role="modify">.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file role="canonical-reference">.github/workflows/nightly-governance.yml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">Provides the nightly job that picks up the FR-14 flag and whose link check may satisfy the FR-15 citation.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (FR-14): ONE line in code-review Step 9.5 output. It is a one-bit flag, NOT a review, NOT a checklist, NOT a required narrative. Anything larger will be skipped and then measures nothing.</constraint>
+    <constraint source="spec">Scope (FR-15): the acceptable outcomes are (a) the nightly link check satisfies the citation, so update the citation to point at it, or (b) remove the citation. Do NOT write Find-SkillReferenceDrift.ps1 — that would add a script to satisfy a reference rather than resolving the reference.</constraint>
+    <constraint source="project">Scope (minimal edits): both skills are hot files. Change only what FR-14 and FR-15 require; do not restructure, reformat, or otherwise improve them in passing.</constraint>
+    <constraint source="project">Scope (conflict discipline): code-review/SKILL.md is contended with unified-access-control-r2 (PR #939, executing, skill-directives=Y). Run /conflict-check immediately before starting and again before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Skill directive maintenance</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Run /conflict-check for both skill files.</step>
+    <step order="1">Add the single FR-14 line to code-review Step 9.5 output — did any primitive you loaded turn out to be wrong.</step>
+    <step order="2">Confirm the nightly job picks that flag up as a finding source.</step>
+    <step order="3">Determine whether the nightly link check genuinely satisfies the Find-SkillReferenceDrift.ps1 citation's intent.</step>
+    <step order="4">Either repoint the citation at the nightly check, or remove it — recording which and why.</step>
+    <step order="5">Verify no other file cites Find-SkillReferenceDrift.ps1.</step>
+    <step order="6">Update TASK-INDEX.md: set task 038 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If satisfying FR-14 appears to need more than one line, STOP and reconsider. The spec is explicit that this is a one-bit flag; a larger mechanism defeats the requirement by guaranteeing it gets skipped under time pressure.</trigger>
+    <trigger>If code-review/SKILL.md has been modified by another worktree since /conflict-check, STOP and re-run it before editing.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/skills/code-review/SKILL.md</output>
+    <output type="doc">.claude/skills/ai-procedure-maintenance/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given code-review Step 9.5, exactly one line asks whether a loaded primitive turned out to be wrong.</criterion>
+    <criterion testable="true">Given the nightly job, it consumes that flag as a finding source.</criterion>
+    <criterion testable="true">Given ai-procedure-maintenance, it no longer cites a nonexistent script.</criterion>
+    <criterion testable="true">Given a repo-wide grep, no file cites Find-SkillReferenceDrift.ps1 unless that script now exists.</criterion>
+    <criterion testable="true">Negative: Find-SkillReferenceDrift.ps1 was NOT created to satisfy the citation.</criterion>
+    <criterion testable="true">Negative: neither skill file was restructured or reformatted beyond the two required edits.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-14 + FR-15. Completes P3, which is independently mergeable here per NFR-01. FR-15 verified 2026-09-04: scripts/Find-SkillReferenceDrift.ps1 does not exist.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

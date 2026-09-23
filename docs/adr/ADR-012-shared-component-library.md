@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (Amended) |
 | Date | 2025-10-03 |
-| Updated | 2026-07-12 |
+| Updated | 2026-09-04 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -431,3 +431,4 @@ Use as a **pass/fail** review gate for PRs that add or change shared components.
 | 2026-03-10 | 1.3 | Updated component inventory to v2.0.0. Added PCF deep import pattern. Added callback-based props constraint. | Spaarke Engineering |
 | 2026-03-19 | 2.0 | **Major revision**: Replaced rigid "zero service dependencies / callback-based only" constraint with **service portability tiers** and `IDataService` abstraction pattern. Added domain wizard components (CreateMatter, CreateProject, etc.) to shared library inventory as extraction targets. Added IDataService, IUploadService, INavigationService interface definitions. Updated React version to 19 per ADR-021. Added Power Pages SPA as consumer. Added adapter pattern examples (Xrm, BFF, mock). Updated compliance checklist for service architecture. | Spaarke Engineering |
 | 2026-07-12 | 2.1 | **Amendment (path B, CLAUDE.md §6.5)**: Sanctioned `@spaarke/visuals` as a governed presentational sibling package (data-viz primitives; `@fluentui/react-charting` quarantine; `@types/react@18` pin for cross-surface JSX safety). Restated the anti-fragmentation boundary (no ad-hoc per-project viz libs; data binding + drill-through stay host-side) and defined the 3-test bar for justifying any new governed sibling package. Introduced by `visual-host-version-update`. | Spaarke Engineering |
+| 2026-09-04 | 2.2 | **Amendment (path B, CLAUDE.md §6.5)**: Closed the sanctioned set. v2.1 said the set was `@spaarke/ui-components`, `@spaarke/visuals`, `@spaarke/auth` "plus the domain component libraries (…, **etc.**)" while requiring an ADR amendment for new siblings — an open set makes that requirement unenforceable by construction. Replaced with a **closed 15-package enumeration**, one line of reason each, and recorded the 2+ consumer rule as a **trigger to evaluate** with three written questions, **none of which is a gate**. Enumeration + questions only: no package added, removed, deprecated, or regressed; the 2+ trigger and the 3-test bar for new siblings are unchanged. Introduced by `code-quality-and-assurance-r4` (spec FR-01 + FR-03), pre-declared in that project's ADR Tensions table. **Substance lives in the [concise ADR](../../.claude/adr/ADR-012-shared-components.md#amendment-2026-09-04-closed-enumeration--promotion-questions)** — not restated here. | Spaarke Engineering |

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Make test growth visible — skip count, flaky count, net delta, no thresholds</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>035 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a workflow section that scans the test suite; the temptation to add a threshold here is the project's stated line not to cross, so the gate discipline needs the full review.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Counting and reporting three defined measures into an existing report section.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows/nightly-governance.yml — contended hot path; main-session only.</parallel-reason>
+    <deps>035</deps>
+    <tags>ci-cd,testing,governance,measurement</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a test-health section to the nightly issue reporting the Skip= count with per-entry age, the Flaky-trait count with age, and the net test delta since the last run. Report all three; gate none of them.</prompt>
+  <role>SPAARKE platform developer. Visibility without gating is the entire design — resist adding a threshold.</role>
+  <goal>Test suite growth and silencing are visible every night, with no threshold on any of the three measures.</goal>
+
+  <context>
+    <background>spec.md FR-25. The owner's position, recorded in spec Owner Clarifications: make growth and silencing visible, never gated, and leave the 68 skipped tests to issue #794. A skip count that nobody sees becomes 168 (as it did by 2026-08-19); a skip count with a gate becomes a number people work around by not writing the test at all. Reporting with per-entry age gives the useful signal — a skip added yesterday is a work-in-progress, one added eight months ago is a decision nobody revisited.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/nightly-governance.yml</file>
+      <file role="canonical-reference">.claude/adr/ADR-038-testing-strategy.md</file>
+      <file role="canonical-reference">tests/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">The workflow this becomes a section of.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (three measures, closed set): Skip= count with per-entry age; Flaky-trait count with age; net test delta since last run.</constraint>
+    <constraint source="spec">Scope (NO THRESHOLD): MUST NOT add a threshold, target, ceiling, or gate on any of the three. This is the explicit line the project must not cross — a count-proxy gate for a judgment question is the retired God-class ratchet.</constraint>
+    <constraint source="spec">Scope (out of scope): do NOT remediate any skipped test. Those belong to issue #794.</constraint>
+    <constraint source="spec">Scope (NFR-04): a section of the existing workflow. No new workflow file.</constraint>
+    <constraint source="project">Scope (worktrees): count tests in this repo only. MUST NOT count sibling worktrees, which would multiply every figure by ~17.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Test suite health reporting</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read ADR-038's position on coverage as observation.</step>
+    <step order="1">Count Skip= occurrences and determine each one's age from git history.</step>
+    <step order="2">Count Flaky-trait occurrences with age.</step>
+    <step order="3">Compute net test delta since the previous run, persisting the prior count.</step>
+    <step order="4">Add the section to the nightly issue.</step>
+    <step order="5">Verify the current figures against the spec's reference points — 68 skips on 2026-09-03, down from 168 on 2026-08-19.</step>
+    <step order="6">Confirm no threshold exists anywhere in the implementation, including in any conditional that could fail the job.</step>
+    <step order="7">Update TASK-INDEX.md: set task 056 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If implementing net delta appears to need a threshold to be meaningful, STOP and report. It does not — a delta is a number, and NFR-05 draws this line deliberately. Introducing one here would violate the project's central constraint inside the requirement designed to demonstrate it.</trigger>
+    <trigger>If skip counts differ wildly from the spec's reference (68 on 2026-09-03), verify the counting method before reporting. The 168-to-68 drop is a real recent change and a wrong method could either miss it or double-count across worktrees.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="config">.github/workflows/nightly-governance.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a nightly run, the issue reports Skip= count with per-entry age.</criterion>
+    <criterion testable="true">Given a nightly run, the issue reports Flaky-trait count with age.</criterion>
+    <criterion testable="true">Given a second run, the issue reports net test delta since the previous one.</criterion>
+    <criterion testable="true">Given any value of any measure, the job exits 0.</criterion>
+    <criterion testable="true">Negative: no threshold, target, ceiling, or gate exists on any of the three measures.</criterion>
+    <criterion testable="true">Negative: no skipped test was remediated by this task.</criterion>
+    <criterion testable="true">Negative: no new workflow file; no sibling worktree counted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-25. Serves success criterion 6 — test growth visible, ungated, no threshold added. The 68 skipped tests remain issue #794's scope.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

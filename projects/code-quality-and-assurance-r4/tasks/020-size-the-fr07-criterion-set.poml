@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Size the FR-07 criterion set — then re-run /task-create for P2b</title>
+    <phase>2b Enforce the criterion set</phase>
+    <gate>011 complete, 012 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Determines the entire scope of P2b. Applying the criterion too loosely produces tests for rules that do not need them; too tightly leaves an expensive silent violation unguarded.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Applying a four-part functional criterion (enforceable AND current AND silent AND expensive) across 49 classified ADRs is architectural judgment that sets the phase's scope — CLAUDE.md §8.5 top tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011,012</deps>
+    <tags>adr,governance,planning,testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Apply FR-07's criterion to the classified ADR set and emit the bounded list of ADRs that must receive an arch test, prioritised within the set by task 003's citation counts. This task produces a SET, not tests — /task-create runs again afterwards to decompose it into per-ADR test tasks.</prompt>
+  <role>SPAARKE platform architect. Apply the criterion literally and report what it yields, whether that is 4 ADRs or 14. Do not tune the criterion to hit a comfortable number.</role>
+  <goal>A criterion-bounded, prioritised list of ADRs requiring arch tests, with the criterion evaluation shown per ADR, ready to hand to /task-create.</goal>
+
+  <context>
+    <background>spec.md FR-07 and NFR-03. This task is why P2 was split: the size of the enforcement work is genuinely unknown until classification completes, and committing to a task count before that is a guess. The criterion is four-part and conjunctive — an ADR needs a test only if it is enforceable AND current AND its violation is both silent (won't surface at review or runtime) AND expensive (security, tenant isolation, auth, data integrity, cross-layer boundary). "Silent and expensive" is the load-bearing half: a rule whose violation breaks the build tomorrow does not need a guard.</background>
+    <relevant-files>
+      <file role="new">projects/code-quality-and-assurance-r4/notes/fr07-criterion-set.md</file>
+      <file role="canonical-reference">.claude/adr/INDEX.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/baseline-2026-09.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Supplies classification + routing — the enforceable and current filters.</dependency>
+      <dependency task="012" status="pending">Supplies the enforcement block for stale/contested ADRs, which are excluded regardless of other axes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (the criterion, conjunctive): enforceable AND current AND violation-is-silent AND violation-is-expensive. All four must hold. Show the evaluation of each part per ADR so the exclusions are reviewable, not just the inclusions.</constraint>
+    <constraint source="spec">Scope (NFR-03): the set is bounded by the criterion, NEVER by a count, a wave size, or a time box. Do not trim to reach a target number and do not pad to look thorough.</constraint>
+    <constraint source="spec">Scope (prioritisation): order WITHIN the set by task 003's ADR citation counts. Citation count is a prioritiser, not a membership test — a low-citation ADR meeting the criterion is still in.</constraint>
+    <constraint source="spec">Scope (FR-08 exclusion): any ADR marked stale or contested is excluded regardless of the other three parts, until amended or confirmed by task 012.</constraint>
+    <constraint source="project">Scope (this task): emit the set only. Write NO tests here. The per-ADR test tasks are created by re-running /task-create against this output.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Criterion-bounded enforcement scoping</topic>
+    <files>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>projects/code-quality-and-assurance-r4/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read the routing output, the task-012 enforcement block, and the baseline citation counts.</step>
+    <step order="1">Filter to enforceable AND current. Record the count remaining.</step>
+    <step order="2">Remove every ADR under the task-012 enforcement block.</step>
+    <step order="3">For each survivor, evaluate whether its violation is silent — would it surface at code review or at runtime anyway? Record the reasoning.</step>
+    <step order="4">For each still surviving, evaluate whether its violation is expensive — security, tenant isolation, auth, data integrity, or a cross-layer boundary. Record the reasoning.</step>
+    <step order="5">Order the resulting set by citation count descending.</step>
+    <step order="6">Write notes/fr07-criterion-set.md showing the full evaluation, including the ADRs excluded at each stage and why.</step>
+    <step order="7">Report the set size to the operator and STOP. Do not begin writing tests.</step>
+    <step order="8">Update TASK-INDEX.md: set task 020 status to ✅ and record the P2b task count now known.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the criterion yields an empty set, STOP and escalate rather than loosening it. An empty set is a legitimate possible answer — it would mean the expensive silent violations are already guarded — but it also changes P2b from a phase into a no-op, which is an owner decision.</trigger>
+    <trigger>If the set is large enough that P2b would exceed the rest of the project combined, STOP and report before /task-create runs. Per the spec's own scope-trim discussion that is an owner decision about r4 versus r5, not something to absorb silently.</trigger>
+    <trigger>If applying the criterion requires deciding whether a given violation is "expensive" in a way that is genuinely ambiguous, record both readings and escalate rather than picking. The membership decision determines whether a blocking CI gate exists for that rule.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No existing artifact scopes enforcement work by criterion. Task 011's routing lists which ADRs COULD be enforced; this narrows to which MUST be.</existing>
+    <extension>No — it consumes task 011's output rather than duplicating it. Routing answers "where does this ADR live"; the criterion answers "does this one need a blocking guard", which is a strictly narrower question with a different test.</extension>
+    <cost-of-doing-nothing>P2b is committed to blind. Either every enforceable ADR gets a test (producing gates for rules whose violation is already loud, which is cost without benefit) or the set is chosen by intuition — and NFR-03 exists specifically to prevent sizing by feel.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/fr07-criterion-set.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the output, every one of the 49 ADRs has a recorded criterion evaluation — included or excluded, with the stage at which it was excluded.</criterion>
+    <criterion testable="true">Given the included set, it is ordered by citation count descending.</criterion>
+    <criterion testable="true">Given each of the four criterion parts, the per-ADR reasoning for it is visible.</criterion>
+    <criterion testable="true">Negative: no ADR marked stale or contested appears in the included set.</criterion>
+    <criterion testable="true">Negative: no arch test is written by this task.</criterion>
+    <criterion testable="true">Negative: the set was not trimmed or padded to reach any target count — no count target appears anywhere in the document.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-07 + NFR-03. This is the deliberate decomposition boundary from the "split P2" decision (plan.md §2). After this task: run /task-create against notes/fr07-criterion-set.md to generate the P2b per-ADR test tasks, numbered 021 onward. Each will carry positive + negative controls, SourceScan reuse, no DI resolution, and a §6.5 challenge path in its failure message.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

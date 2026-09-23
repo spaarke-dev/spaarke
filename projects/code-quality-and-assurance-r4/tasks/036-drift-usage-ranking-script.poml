@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Rank primitives by drift × usage with a U-shaped weight</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>033 complete, 034 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The ranking decides what a human reviews each night. A wrong weighting quietly wastes the only scarce resource in the whole system — owner attention.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Implements a specified formula over two defined inputs; the U-shape and tercile approach are already decided in the spec.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>033,034</deps>
+    <tags>scripts,governance,measurement,tooling</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build scripts/quality/rank-primitive-drift.ps1, ranking governance primitives by drift_signal × usage_weight where the usage weight is U-shaped — heavily used and never used both rank high, for opposite reasons. Emit a ranked list the nightly workflow consumes.</prompt>
+  <role>SPAARKE platform developer. The U-shape is the interesting part; a monotonic weight would hide exactly the primitives most worth deleting.</role>
+  <goal>A ranking script consuming the revision headers and the usage log, producing a ranked top-N with the reason each entry ranked where it did.</goal>
+
+  <context>
+    <background>spec.md FR-12a. Ranking by date alone produced the 55-unreviewed-skill wall: everything ages, so everything ranks, so nothing gets attention. The U-shape fixes this by ranking on two opposite grounds — a heavily-used stale primitive is high-risk because many things depend on it, and a never-used stale primitive is high-signal because it is probably dead and should be deleted rather than reviewed. The middle is where attention is genuinely least valuable. Usage weight terciles come from task 003's baseline; the spec notes they are an assumption to be tuned after roughly two months of hook output.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/rank-primitive-drift.ps1</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/usage-log-format.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/baseline-2026-09.md</file>
+      <file role="canonical-reference">docs/standards/FILE-REVISION-HEADER.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">Parseable headers across all 230 primitives supply the drift signal.</dependency>
+      <dependency task="034" status="pending">Supplies the usage log and its documented format.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (U-shape): usage weight MUST be U-shaped. A monotonic weight would rank never-used primitives lowest, which hides the ones most worth deleting — the opposite of the intent.</constraint>
+    <constraint source="spec">Scope (drift signal): derive from the header's last-reviewed relative to changes in the files the primitive references. Drift is relative, NOT an absolute age.</constraint>
+    <constraint source="project">Scope (no thresholds): output a RANKING, never a pass/fail. MUST NOT emit "N primitives are too old" or any gate. Ranking is ordering, not judgement.</constraint>
+    <constraint source="project">Scope (retroactive inputs): use task 003's ADR citation counts so ranking works from day one rather than after months of hook accumulation.</constraint>
+    <constraint source="project">Scope (explainability): each ranked entry must carry the reason it ranked there — which half of the U, and what drift. An unexplained ranking cannot be trusted or tuned.</constraint>
+    <constraint source="project">Scope (tunability): terciles are an assumption to be revisited after ~2 months. Make them a named parameter, not a magic number buried in the logic.</constraint>
+    <constraint source="project">Scope (worktrees): MUST NOT scan .claude/worktrees/ or sibling worktrees.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Governance drift ranking</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>docs/standards/FILE-REVISION-HEADER.md</file>
+    </files>
+    <patterns>
+      <pattern name="Check-mode script" location="scripts/Validate-TaskPoml.ps1">Parameterised PowerShell producing structured per-item findings.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read the usage log format and the baseline.</step>
+    <step order="1">Parse revision headers across the 230 primitives to extract last-reviewed and last-updated.</step>
+    <step order="2">Compute the drift signal: has any file this primitive references changed since its last-reviewed date.</step>
+    <step order="3">Compute usage counts from the hook log, seeded with task 003's retroactive citation counts.</step>
+    <step order="4">Implement the U-shaped weight with terciles as named parameters.</step>
+    <step order="5">Produce the ranked output, each entry carrying its drift value, usage tercile, U-half, and the resulting score.</step>
+    <step order="6">Sanity-check the output by hand: confirm a known-heavily-used stale primitive and a known-unused one both appear high, and that a fresh mid-usage primitive ranks low.</step>
+    <step order="7">Document the output format for task 035's consumption.</step>
+    <step order="8">Update TASK-INDEX.md: set task 036 status to ✅.</step>
+    <step order="9">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 6's sanity check does not show both U-halves ranking high, STOP. The ranking is the product; shipping one that quietly behaves monotonically would recreate the date-sort wall while appearing to have fixed it.</trigger>
+    <trigger>If the usage log is too sparse for terciles to be meaningful at first run, do NOT invent synthetic data. Report the sparsity, fall back to the retroactive citation counts alone, and record that the terciles need revisiting once the hook has accumulated.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No ranking mechanism exists. scripts/quality/ holds hooks and lints; nothing scores or orders primitives.</existing>
+    <extension>No. The nearest neighbours are pass/fail lints; this produces an ordering with no verdict, which is a different output contract and deliberately gate-free.</extension>
+    <cost-of-doing-nothing>The nightly issue lists everything or nothing. Ranking by date alone is what produced the 55-file wall, and an unranked report is functionally the same as no report.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="pwsh">Run and test the ranking script</tool><tool name="git">Determine referenced-file change dates</tool></tools>
+
+  <outputs>
+    <output type="code">scripts/quality/rank-primitive-drift.ps1</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/ranking-output-format.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the migrated tree and the usage log, the script emits a ranked list.</criterion>
+    <criterion testable="true">Given a heavily-used primitive with high drift, it ranks high.</criterion>
+    <criterion testable="true">Given a never-used primitive with high drift, it also ranks high — proving the U-shape.</criterion>
+    <criterion testable="true">Given a recently-reviewed mid-usage primitive, it ranks low.</criterion>
+    <criterion testable="true">Given any ranked entry, its drift value, usage tercile, and U-half are visible.</criterion>
+    <criterion testable="true">Negative: the script emits no pass/fail verdict and no threshold.</criterion>
+    <criterion testable="true">Negative: terciles are named parameters, not inline literals.</criterion>
+    <criterion testable="true">Negative: no worktree path is scanned.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-12a. Spec assumption recorded: usage-weight terciles drawn from the FR-04 baseline, to be tuned after ~2 months of hook output. Consumed by task 035 section (a).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

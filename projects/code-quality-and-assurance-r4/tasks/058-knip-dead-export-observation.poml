@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Observe dead exports with knip — exit 0, reported not gated</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>035 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a tool to CI. The exclusion configuration is load-bearing — a misconfigured run scans ~17 sibling worktrees and reports phantom findings.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuring an off-the-shelf tool and wiring its output into an existing report section.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows/nightly-governance.yml — contended hot path; main-session only.</parallel-reason>
+    <deps>035</deps>
+    <tags>ci-cd,tooling,shared-components,reuse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run knip over the shared libraries as a section of the nightly issue — exit 0 always, reported never gated. Exclude .claude/worktrees/ and the ~17 sibling worktrees, or it reports phantom findings.</prompt>
+  <role>SPAARKE platform developer wiring an observation tool. The exclusions are the part that determines whether this is useful or noise.</role>
+  <goal>Dead exports in the shared libraries are visible nightly, with no gate and no phantom findings from sibling worktrees.</goal>
+
+  <context>
+    <background>spec.md FR-27. Dead exports in a shared library are a specific kind of waste: they enlarge the surface future work must consider without serving any consumer. Observation is the right posture — a dead export may be legitimately anticipatory, which is exactly the position ADR-012 takes on @spaarke/visuals (0 consumers, recorded as intentional). A gate would force deletion of things that are deliberately ahead of demand. The exclusion requirement is not incidental: sibling worktrees contain near-identical copies of the shared libraries, so an unexcluded scan reports every export as both used and unused.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/nightly-governance.yml</file>
+      <file role="new">knip.json</file>
+      <file role="canonical-reference">src/client/shared/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">The workflow this becomes a section of.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (exit 0): knip runs in observation mode and MUST exit 0 regardless of findings. It gates nothing.</constraint>
+    <constraint source="spec">Scope (exclusions): MUST exclude .claude/worktrees/ and the ~17 sibling worktrees. Without this the output is phantom findings and the section gets ignored.</constraint>
+    <constraint source="spec">Scope (target): the shared libraries. Do not run it across the whole repo.</constraint>
+    <constraint source="spec">Scope (NFR-04): a section of the existing workflow. No new workflow file.</constraint>
+    <constraint source="project">Scope (no deletion): report only. MUST NOT delete any export, and MUST NOT flag @spaarke/visuals as a problem — ADR-012 records it as legitimately anticipatory.</constraint>
+    <constraint source="project">Scope (no threshold): no ceiling on dead-export count.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dead code observation</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Run /conflict-check for the workflow.</step>
+    <step order="1">Configure knip scoped to the 15 shared packages.</step>
+    <step order="2">Configure exclusions for .claude/worktrees/ and sibling worktree paths.</step>
+    <step order="3">Run locally and inspect output for phantom findings caused by sibling copies.</step>
+    <step order="4">Add the section to the nightly workflow, exit 0 enforced.</step>
+    <step order="5">Verify the section reports without failing the job.</step>
+    <step order="6">Cross-check a sample of reported dead exports by hand — confirm they are genuinely unreferenced rather than an artifact of barrel indirection.</step>
+    <step order="7">Update TASK-INDEX.md: set task 058 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 3 or 6 shows phantom findings that exclusions cannot eliminate, STOP and report rather than shipping a noisy section. A report section that is wrong on its first run is one readers learn to skip, and it never recovers that credibility.</trigger>
+    <trigger>If knip flags a large fraction of shared exports as dead, verify the configuration before reporting it as a finding. Barrel re-export patterns commonly confuse dead-code tools, and a false mass-finding would invite exactly the deletion ADR-012 forbids.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No dead-export observation exists. The FR-16 export index (task 040) lists what is exported but not what is consumed.</existing>
+    <extension>No — knip is an off-the-shelf tool answering the consumption question the index deliberately does not. Building consumption analysis into the index generator would be reimplementing knip.</extension>
+    <cost-of-doing-nothing>Dead exports accumulate invisibly in the shared libraries, enlarging the surface every future reuse decision must consider — which directly undercuts the export index's usefulness for FR-18.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="npm">Run knip over the shared libraries</tool></tools>
+
+  <outputs>
+    <output type="config">knip.json</output>
+    <output type="config">.github/workflows/nightly-governance.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a nightly run, dead exports in the shared libraries are reported as a section.</criterion>
+    <criterion testable="true">Given any number of findings, the job exits 0.</criterion>
+    <criterion testable="true">Given the configuration, no sibling worktree or .claude/worktrees/ path is scanned.</criterion>
+    <criterion testable="true">Given a hand cross-check of sampled findings, they are genuinely unreferenced.</criterion>
+    <criterion testable="true">Negative: no export is deleted by this task.</criterion>
+    <criterion testable="true">Negative: @spaarke/visuals is not reported as a problem.</criterion>
+    <criterion testable="true">Negative: no threshold on dead-export count; no new workflow file.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-27. Completes P5. The @spaarke/visuals carve-out matters: ADR-012 (task 001) records it as legitimately anticipatory with 0 consumers, so reporting it as dead would contradict the amendment this project just made.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
