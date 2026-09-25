@@ -239,6 +239,68 @@ explicit assignment and does not deliver team ownership.
    beneath the customer's BU)? That decides whether "the customer's BU" and "the acting user's BU" can differ,
    and what read scope Deep is meant to give.
 
+## 4d. Dataverse does NOT assign new records to the creator's team — and the secure-record rule
+
+**Owner question 2026-09-25**: *"how/why is dataverse setup so that on record create ownership is assigned to
+the user's team and not the user?"*
+
+**Answer: it is not, and it cannot be configured to.** On create Dataverse sets `ownerid` to the **calling
+identity** (user or application user), never to that identity's team. There is no OOB setting that redirects
+it. Verified three ways in live dev:
+
+| Entity | `ownerid` | `owninguser` | `owningteam` |
+|---|---|---|---|
+| `sprk_workassignment` | `1d02f31c…` | **same (a user)** | null |
+| `sprk_document` (app-created) | `8793f4b0…` (app user) | **same** | **null** |
+| `sprk_matter` | `cf15f587…` | null | **the team** |
+
+A record becomes team-owned only by explicit `ownerid` = team on create, an explicit Assign afterwards, or a
+plugin/flow/manual action. `sprk_matter` is team-owned because something assigned it — NOT `RecordCreationService`,
+which assigns the caller.
+
+**Consequence for the owner's plan**: placing each customer's BFF app registration in that customer's BU
+delivers the correct **business unit** (Goal A) but leaves `ownerid` on the **application user**, not its team.
+So Goal A is provisioning and Goal B is code; they compose, and neither substitutes for the other.
+
+| Goal | Delivered by | Gets you |
+|---|---|---|
+| **A** — right customer BU | **Provisioning**: per-customer app registration + app user in the customer's BU | Correct BU on every app-only create; also makes the code's fallback safe |
+| **B** — owned by a team | **Code**: this resolver | `ownerid` = team. No configuration can do this. |
+
+Also established: **wizard/PCF creates via `Xrm.WebApi` run in USER context**, so Dataverse defaults `ownerid`
+to the signed-in user and the BU is already correct. No client code sets `ownerid` (verified). So the earlier
+claim that the 13 non-BFF entities need this convention was overstated **for BU placement** — they were never
+broken there. They need it only for team-vs-user ownership.
+
+### 🔒 SECURE RECORDS — the fallback was unsafe, now fail-closed
+
+Owner: secure records are created in / assigned to the **Secure Project** business unit, a sibling of the
+customer BU, so they are invisible unless the user is added via UAC. Verified: `Secure Project`
+(`d9ec0b6f…`) is a child of root, sibling to the customer BUs.
+
+`RecordContainerResolver` (task 076) already encodes this for containers, and its reasoning transfers verbatim:
+
+> *"Ownership is a property of the record, so the container follows the record."* … *"per
+> `notes/secure-project-workflow-review-2026-08-24.md` §A, users sit in the Operations subtree while secure
+> records are owned in `Secure Projects`, so acting-user resolution writes a secure record's content into the
+> general Operations container."* … *"An unknown answer read as not-secure is the same isolation failure with
+> an extra step."*
+
+Record-first already handles a secure target correctly **when the read succeeds**, because a secure record's
+own `owningbusinessunit` IS the Secure Project BU. The danger was only the **fallback**: a named target whose
+BU could not be read used to fall through to the acting user, which for a secure record would assign its child
+to the caller's general business unit and defeat the isolation.
+
+**Fixed**: a named-but-unresolvable target now **refuses** instead of falling back. Mirrors 076's
+indeterminate-must-refuse rule. The acting-user fallback now applies ONLY when no target was named at all.
+
+### Boundary note
+
+The owner observed this discussion *"may be more appropriately in UAC-r2"*, and that is right for the
+**policy** layer — UAC-r2 owns ADR-034 and the access model. Task 080's scope is the **BFF create-path
+implementation**. The policy questions (which BU per tenancy model, secure-record handling, depth
+configuration) belong with UAC-r2 and should not be settled here.
+
 ## 5. Status
 
 | Criterion | Status |

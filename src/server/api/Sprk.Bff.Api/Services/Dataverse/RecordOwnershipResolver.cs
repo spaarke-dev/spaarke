@@ -158,12 +158,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 return fromTarget;
             }
 
-            // Deliberately falls through to the caller rather than refusing: a target whose own BU cannot be
-            // read is a weaker signal than a known acting user, not a reason to lose the record.
-            _logger.LogInformation(
-                "Owning team could not be derived from target {TargetEntity} {TargetId}; falling back to the "
-                + "acting user's business unit.",
+            // ⛔ REFUSE — do NOT fall back to the acting user when a target WAS named but could not be
+            // resolved. This branch used to fall through, which was wrong, and the reason is the secure-record
+            // case that RecordContainerResolver already documents (task 076,
+            // notes/secure-project-workflow-review-2026-08-24.md §A): users sit in the Operations subtree
+            // while SECURE records are owned in `Secure Projects`. Falling back to the acting user's business
+            // unit would assign a secure record's child to the general Operations team — the precise isolation
+            // failure that resolver refuses to make for containers, and it fails the same way here.
+            //
+            // Record-first already handles secure targets correctly when the read SUCCEEDS, because a secure
+            // record's own owningbusinessunit IS the Secure Project BU. The danger was only ever this
+            // fallback. Per 076: an indeterminate answer read as "not secure" is the same isolation failure
+            // with an extra step, so indeterminate must refuse.
+            _logger.LogWarning(
+                "Refusing to resolve an owning team: target {TargetEntity} {TargetId} was named but its "
+                + "business unit could not be read. NOT falling back to the acting user — for a secure record "
+                + "that would assign it to the caller's general business unit and defeat its isolation "
+                + "(task 076 / task 080).",
                 context.TargetEntityLogicalName, context.TargetRecordId);
+            return null;
         }
 
         // ── 2. FALLBACK: the acting user's business unit ───────────────────────────────────────────
