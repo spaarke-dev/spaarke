@@ -19,12 +19,16 @@ describe('TaskPaneNavigation', () => {
     expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
   });
 
-  it('renders only the Save tab for Word', () => {
+  it('renders Save, Find and Create To Do tabs for Word', () => {
     renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} hostType="word" />);
 
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
-    // Create To Do is Outlook-only (a To Do is created from an email).
-    expect(screen.queryByRole('tab', { name: /create to do/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /find/i })).toBeInTheDocument();
+    // Create To Do is a shared capability (task 049 / FR-14 / FR-19) — no longer Outlook-only.
+    expect(screen.getByRole('tab', { name: /create to do/i })).toBeInTheDocument();
+    // Share/Recent are disabled ("V1") — not rendered on Word either.
+    expect(screen.queryByRole('tab', { name: /share/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
   });
 
   it('highlights selected tab', () => {
@@ -48,8 +52,10 @@ describe('TaskPaneNavigation', () => {
   it('disables tabs when disabled prop is true', () => {
     renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} disabled={true} />);
 
-    const tablist = screen.getByRole('tablist');
-    expect(tablist).toHaveAttribute('aria-disabled', 'true');
+    // Fluent v9's TabList spreads `disabled` onto each rendered `<button role="tab">` (a real HTML
+    // `disabled=""` attribute), not onto the `role="tablist"` container as `aria-disabled` — verified
+    // by inspecting the rendered DOM (task 071).
+    expect(screen.getByRole('tab', { name: /save/i })).toBeDisabled();
   });
 
   it('renders smaller tabs in compact mode', () => {

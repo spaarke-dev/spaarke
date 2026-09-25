@@ -9,6 +9,12 @@ import type { HostAdapterError, HostCapabilities } from '../types';
 
 // Mock data
 const mockReadItem = {
+  // Real Outlook read/compose items always carry `itemType` (Office.js base `Item` interface;
+  // @types/office-js `index.d.ts` documents it on every Message/Appointment read & compose variant).
+  // OutlookAdapter.determineMode() (`OutlookAdapter.ts:193`) gates its ENTIRE read/compose detection
+  // on `'itemType' in item`; without it every mode-dependent call degraded to 'unknown' — a stale mock
+  // gap, not an adapter defect (task 071).
+  itemType: Office.MailboxEnums.ItemType.Message,
   itemId: 'test-item-123',
   subject: 'Test Email Subject',
   from: { emailAddress: 'sender@example.com', displayName: 'Test Sender' },
@@ -61,6 +67,8 @@ const mockReadItem = {
 };
 
 const mockComposeItem = {
+  // See mockReadItem above — same real-API field, same detection gate (task 071).
+  itemType: Office.MailboxEnums.ItemType.Message,
   itemId: '',
   subject: {
     getAsync: jest.fn((callback: (result: Office.AsyncResult<string>) => void) => {
@@ -343,9 +351,61 @@ describe('OutlookAdapter', () => {
         expect(capabilities.canGetRecipients).toBe(true);
         expect(capabilities.canGetSender).toBe(true);
         expect(capabilities.canGetDocumentContent).toBe(false);
+        expect(capabilities.canGetDocumentUrl).toBe(false); // Word-only (FR-01 / task 013)
         expect(capabilities.canSaveAsPdf).toBe(true);
         expect(capabilities.canInsertLink).toBe(false); // Read mode
         expect(capabilities.canAttachFile).toBe(false); // Read mode
+      });
+
+      // task 027 / FR-10 (NFR-10): decided per requirement set, independent of Mailbox-gated flags.
+      it('canOpenBrowserWindow is true when OpenBrowserWindowApi 1.1 is supported', () => {
+        global.Office.context.requirements.isSetSupported = jest.fn().mockReturnValue(true);
+
+        expect(adapter.getCapabilities().canOpenBrowserWindow).toBe(true);
+      });
+
+      it('canOpenBrowserWindow is false when OpenBrowserWindowApi 1.1 is not supported, without affecting Mailbox-gated flags', () => {
+        global.Office.context.requirements.isSetSupported = jest.fn((set: string) => set !== 'OpenBrowserWindowApi');
+
+        const capabilities = adapter.getCapabilities();
+
+        expect(capabilities.canOpenBrowserWindow).toBe(false);
+        // supportedRequirementSet is gated ONLY on isMailboxSupported('1.8'), never on
+        // `_currentMode` — unlike canGetAttachments/canSaveAsEml, so it isolates this assertion
+        // from the read/compose mode setup this describe block's own beforeEach controls.
+        expect(capabilities.supportedRequirementSet).toBe('Mailbox 1.8');
+      });
+    });
+
+    describe('getDocumentUrl (FR-01 / task 013) — Word-only capability', () => {
+      it('rejects with a typed CAPABILITY_NOT_SUPPORTED HostAdapterError', async () => {
+        await expect(adapter.getDocumentUrl()).rejects.toMatchObject({
+          code: 'CAPABILITY_NOT_SUPPORTED',
+        });
+      });
+
+      it('does not resolve to undefined, and does not resolve to an empty string', async () => {
+        // The rejection itself is the "not undefined / not an empty string" proof — a resolved
+        // value would fail the assertion above; this test pins that it is specifically a REJECTION,
+        // not a silently-resolved falsy value.
+        let resolvedValue: string | null | undefined;
+        let rejected = false;
+        try {
+          resolvedValue = await adapter.getDocumentUrl();
+        } catch {
+          rejected = true;
+        }
+
+        expect(rejected).toBe(true);
+        expect(resolvedValue).toBeUndefined();
+      });
+
+      it('rejects with a HostAdapterError object, not a raw Error instance', async () => {
+        await expect(adapter.getDocumentUrl()).rejects.not.toBeInstanceOf(Error);
+        await expect(adapter.getDocumentUrl()).rejects.toMatchObject({
+          code: 'CAPABILITY_NOT_SUPPORTED',
+          message: expect.any(String),
+        });
       });
     });
 

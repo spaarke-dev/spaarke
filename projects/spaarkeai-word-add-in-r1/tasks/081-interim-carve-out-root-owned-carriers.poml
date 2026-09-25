@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Interim — the new gates refuse every ordinary user because the records they gate are root-owned; keep the shipped flows working until 080 lands</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>startable. Becomes OBSOLETE when 080 lands — this task exists to be removed.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deliberately narrows two authorization gates this project just shipped. Tags include bff-api + auth + security. Modifies `.cs`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deliberately leaving a gate off is a security decision. The scope of the exemption, and its removal condition, have to be exact — a temporary carve-out that outlives its cause is how gaps become permanent.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the same gates as 063 and 064.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, auth, authorization, security, office, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Tasks 063 and 064 shipped correct gates that currently refuse every ordinary user, because the records they gate are owned by a BFF application user in the root business unit. Restore the shipped flows with a narrow, loudly-documented exemption that 080 deletes.</prompt>
+
+  <role>SPAARKE platform developer. This is a deliberate, temporary, documented reduction in enforcement — not a retreat from the gates.</role>
+
+  <goal>Outlook's create-To-Do-from-email and the Find view's Run Index work again for ordinary users, with the exemption's scope and removal condition stated in code and in the note.</goal>
+
+  <context>
+    <background>
+      See [`notes/role-grant-gap-2026-09-21.md`](../notes/role-grant-gap-2026-09-21.md) §9.
+
+      Every record the BFF creates app-only is owned by a BFF application user, which Dataverse places in the
+      **root** business unit. Users sit in child BUs, and Deep depth traverses downward, so a child-BU user
+      reaches none of those rows. Verified live for `sprk_document`, `sprk_communication` and `sprk_todo`;
+      `sprk_matter` is the only entity that behaves.
+
+      Consequence of the gates this project just shipped:
+
+      | Flow | Task | State today |
+      |---|---|---|
+      | Find → **Run Index** | 063 (write check on `sprk_document`) | **403 for every ordinary user** |
+      | Outlook → **create To Do from this email** | 064 (read check on `CommunicationId`) | **403 — a live REGRESSION**, it worked before the gate |
+      | Pane → create To Do against a document | 064 (read check on `DocumentId`) | **403** |
+
+      **Task 080 is the real fix** and it is not small — a create-path change across entities plus a backfill,
+      with a cross-project piece for `sprk_communication`. This task buys the shipped flows back in the
+      meantime.
+
+      **The trap this task must avoid**: a temporary carve-out that outlives its cause. The exemption must be
+      impossible to overlook and trivially greppable when 080 lands.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Exempt ONLY the carriers whose records are root-owned — that is a property to VERIFY per entity at the time of writing, not to assume from this note. If an entity turns out to be correctly owned, it keeps its gate.</constraint>
+    <constraint source="this task">The exemption MUST carry an explicit removal condition naming task 080, in code, at the exemption site — not only in the note. A reader of the code must see that it is temporary and what deletes it.</constraint>
+    <constraint source="this task">Log every exempted call at a level that is visible in production telemetry, so the size of the hole is measurable while it is open rather than invisible.</constraint>
+    <constraint source="this task">Do NOT widen the exemption to the tenant, and do NOT resolve this by granting Global depth — that re-opens findings F1 and F9.</constraint>
+    <constraint source="ADR-038">Add a test that FAILS once ownership is fixed, so 080 cannot land without this carve-out being noticed and removed. A self-removing forcing function is the point.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-entity verification recorded: for each carrier gated by 063/064, state whether its rows are root-owned today, with the query evidence. Only verified-root-owned carriers are exempted.</criterion>
+    <criterion testable="true">Outlook's create-To-Do-from-email works again for an ordinary user. Verified live — this is the regression the task exists to fix.</criterion>
+    <criterion testable="true">Find → Run Index works again for an ordinary user. Verified live.</criterion>
+    <criterion testable="true">Every exemption site carries an inline removal condition naming task 080, and a single grep locates all of them. State the grep in the note.</criterion>
+    <criterion testable="true">Each exempted call is logged at a production-visible level, and the log line says which gate was skipped and why.</criterion>
+    <criterion testable="true">A FORCING-FUNCTION test exists that fails once the underlying records are correctly owned — so landing 080 surfaces this carve-out rather than silently leaving it in place. Seed it both ways and record both outputs.</criterion>
+    <criterion testable="true">The gates remain fully enforced for every carrier NOT exempted — prove it with the existing 063/064 negative tests still passing.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green.</criterion>
+    <criterion testable="true">Test scope: the per-carrier exemption, the forcing function, and the still-enforced carriers. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the exemption cannot be scoped narrowly — i.e. the only way to restore the flows is to disable a gate wholesale rather than per-carrier — STOP and escalate per CLAUDE.md §6. Wholesale disablement of a shipped security gate is an owner decision, not a task-local one, and sequencing 080 first may simply be the better answer.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Verify per carrier which records are root-owned TODAY; do not inherit the claim.</step>
+    <step>Implement the narrowest exemption that restores the two flows.</step>
+    <step>Add the inline removal conditions and the production-visible logging.</step>
+    <step>Write the forcing-function test; seed it both ways.</step>
+    <step>Verify both flows live for an ordinary user.</step>
+    <step>Confirm the non-exempted carriers are still refused.</step>
+    <step>Build, full suite, ArchTests. Write `notes/081-interim-carve-out.md`.</step>
+    <step>Update TASK-INDEX.md: 081 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/TodoSourceAccessFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/081-interim-carve-out.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/role-grant-gap-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/063-send-to-index-authz.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/064-todo-source-gate.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/TodoSourceAccessFilter.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/081-interim-carve-out.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run ALONE. If 080 is already done or in flight, this task is unnecessary — confirm before starting.</protocol>
+  </execution>
+</task>

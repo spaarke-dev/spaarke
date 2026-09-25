@@ -178,6 +178,14 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 DocumentId = request.DocumentId,
                 ParentEntity = request.ParentEntity,
                 SearchIndexName = request.SearchIndexName,
+                // Task 048 (spaarkeai-word-add-in-r1): this is the single seam every OBO upload/re-index
+                // caller converges on (Compose save-back, the Create* wizards, SprkChat persist, the
+                // "LinearDocumentProfile" direct-Action re-index). A first index has nothing to trim
+                // (IRagService.DeleteChunksBeyondCountAsync finds no tail and deletes nothing); a re-index
+                // of an item that already has chunks — e.g. every Compose save of the same document — no
+                // longer leaves a stale tail behind. Does not change this method's idempotency behaviour:
+                // it has none (no key/skip check here today).
+                ReplaceStaleChunks = true,
             };
 
             _logger.LogInformation(
@@ -292,6 +300,13 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
         // (Office Add-in finalize, Email-to-Document, post-analysis re-index).
         try
         {
+            // Task 029: a version of an already-indexed item. Its key is per-save (the item-keyed one was marked
+            // by the item's earlier index and would skip this version for 7 days), and its job replaces the
+            // item's previous chunks. Absent for every other caller: key and payload unchanged.
+            var versionDiscriminator = string.IsNullOrWhiteSpace(request.VersionDiscriminator)
+                ? null
+                : request.VersionDiscriminator;
+
             var jobPayload = new RagIndexingJobPayload
             {
                 TenantId = request.TenantId,
@@ -303,6 +318,15 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 SearchIndexName = request.SearchIndexName,
                 Source = request.Source,
                 EnqueuedAt = DateTimeOffset.UtcNow,
+                // Task 048 (spaarkeai-word-add-in-r1): unconditional as of this task (was
+                // `versionDiscriminator is not null`, task 029) — every app-only producer through this
+                // seam (Office create + version save, Email-to-Document, outbound-email enrichment,
+                // post-AI-analysis re-index) now replaces the item's stale tail after a successful
+                // upload, not only a version save. A first index has nothing to trim. The
+                // IdempotencyKey ternary immediately below is UNCHANGED: versionDiscriminator still
+                // governs ONLY the key suffix (so a version is not skipped as a duplicate of the
+                // item's earlier index) — this task does not touch key or skip behaviour.
+                ReplaceStaleChunks = true,
             };
 
             var job = new JobContract
@@ -311,7 +335,9 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 JobType = RagIndexingJobHandler.JobTypeName,
                 SubjectId = request.DocumentId ?? request.ItemId,
                 CorrelationId = request.CorrelationId,
-                IdempotencyKey = $"rag-index-{request.DriveId}-{request.ItemId}",
+                IdempotencyKey = versionDiscriminator is null
+                    ? $"rag-index-{request.DriveId}-{request.ItemId}"
+                    : $"rag-index-{request.DriveId}-{request.ItemId}-version-{versionDiscriminator}",
                 Attempt = 1,
                 MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,

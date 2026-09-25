@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>502 lines of dead adapter that this branch edited five times to keep the compiler quiet, a duplicated function, and three comments that describe code that no longer exists</title>
+    <phase>5 Remediation — code quality</phase>
+    <gate>blocked — requires 065 (which corrects two of the same comments) and 058 (adjacent deletions)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes a 502-line file and changes an error's HTTP status class. Modifies `.ts` and `.cs`.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deletion and correction with every target already located to a file and line.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `OfficeService.cs` comments that 065 also edits, and the e2e/client surface 058 deletes from.</parallel-reason>
+    <deps>058,065</deps>
+    <tags>bff-api, frontend, typescript, refactoring, tech-debt</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete the dead Outlook adapter, de-duplicate the share-link minter, remove the uncalled factory API, correct the stale comments, fix the wrong HTTP status class on internal errors, and remove a hard-coded environment URL.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>No file in the add-in exists only to satisfy the compiler, and no comment in the Office surface describes behaviour that is not there.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable architecture review (`notes/fable-review-2026-09-21.md` §4 findings 4, 6,
+      7 and §9).
+
+      **(a) `outlook/OutlookHostAdapter.ts` — 502 lines, dead.** The file describes itself as *"unreferenced
+      dead code superseded by `shared/adapters/OutlookAdapter.ts`"*. The only non-test reference is a
+      doc-comment example at `HostAdapterFactory.ts:66-67`; the pane registers the shared adapter
+      (`outlook/taskpane/index.tsx:8,253`). Task 010 deleted the Word twin and left this one, and **tasks
+      013, 020, 036, 040 and 051 each added interface members to it purely to keep `tsc` quiet**. Five
+      separate edits to a file nobody runs.
+
+      **(b) `mintDocumentShareLink` duplicated verbatim** — `shareLinkService.ts:50-69` ≡
+      `sendEmailService.ts:98-119`. The former's header (`:8-24`) admits it and blames a wave boundary.
+
+      **(c) `HostAdapterFactory` uncalled API** — `getOrCreate`, `clearCache`, `hasAdapter`,
+      `getRegisteredHosts`, `waitForOfficeReady` (`:155-218`) have no non-test callers; the `cachedAdapter`
+      singleton is never used.
+
+      **(d) Stale premise comments** — `OfficeService.cs:143-145` and `:341-343` assert the no-target branch
+      *"exists for the contract rather than for traffic"*, false since task 037. Task 065 fixes the
+      behaviour; this task ensures no residual comment survives anywhere else.
+
+      **(e) Wrong status class** — `OfficeService.cs:850-891` maps ANY unexpected exception to
+      `Success=false` + `OFFICE_INTERNAL`, which `MapSaveErrorToProblem`'s default arm turns into **HTTP 400**
+      with `ex.Message` on the wire (`OfficeEndpoints.cs:654-663`). A server fault reported as a client
+      error, leaking the exception message. Pre-existing.
+
+      **(f) Hard-coded environment** — `OfficeDocumentPersistence.cs:937-942` hard-codes
+      `spaarkedev1.crm.dynamics.com` and an app id. Pre-existing.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Deleting the dead adapter MUST NOT change the shipped Outlook behaviour — the pane uses `shared/adapters/OutlookAdapter.ts`. Verify the Outlook pane still works before and after.</constraint>
+    <constraint source="this task">Changing `OFFICE_INTERNAL` to a 5xx is a client-visible contract change. Check how the pane handles it before changing the status, and stop leaking `ex.Message` in the same change.</constraint>
+    <constraint source="CLAUDE.md §11">This is a reuse fix: one `mintDocumentShareLink`, exported once and imported where needed. Do not create a third copy in a "shared" location if one of the two existing homes is correct.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build — this task should REDUCE it. CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`outlook/OutlookHostAdapter.ts` is deleted along with the `HostAdapterFactory.ts:66-67` doc reference, and a grep proves zero non-test references remain.</criterion>
+    <criterion testable="true">`mintDocumentShareLink` exists once; the second copy imports it. Both call sites still work.</criterion>
+    <criterion testable="true">The uncalled `HostAdapterFactory` members and the unused `cachedAdapter` are removed — or each retained member is justified in one line.</criterion>
+    <criterion testable="true">A grep proves no comment in `Services/Office/**` or `Api/Office/**` still claims the no-target branch is traffic-free.</criterion>
+    <criterion testable="true">An unexpected server exception returns a 5xx, not a 400, and does NOT put `ex.Message` on the wire. The pane handles the new status without a broken UI state.</criterion>
+    <criterion testable="true">The hard-coded `spaarkedev1` host and app id are replaced by configuration.</criterion>
+    <criterion testable="true">Both panes still build and work in Word and Outlook; the jest suites (all 56 after task 071) stay green.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size reported (expect a reduction) and CVE checked.</criterion>
+    <criterion testable="true">Test scope: the unchanged Outlook behaviour, both share-link call sites, and the new error status/body. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the `OFFICE_INTERNAL` → 5xx change breaks the pane's error handling in a way that needs UX design (not just a status mapping), STOP and escalate per CLAUDE.md §6 — the save-failure UX was an owner decision.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Grep-prove the dead adapter really is unreferenced; delete it and the doc reference.</step>
+    <step>De-duplicate `mintDocumentShareLink`; verify both call sites.</step>
+    <step>Remove the uncalled factory API.</step>
+    <step>Sweep the stale comments; confirm 065 already handled the behaviour half.</step>
+    <step>Check the pane's handling, then fix the status class and stop the message leak.</step>
+    <step>Replace the hard-coded environment with configuration.</step>
+    <step>Build both panes, run jest, run the BFF suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/075-dead-code.md`. Update TASK-INDEX.md: 075 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="delete">src/client/office-addins/outlook/OutlookHostAdapter.ts</file>
+    <file role="edit">src/client/office-addins/shared/adapters/HostAdapterFactory.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/shareLinkService.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/sendEmailService.ts</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/075-dead-code.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/adapters/HostAdapterFactory.ts</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/075-dead-code.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Tasks 058 and 065 must be ✅ first.</protocol>
+  </execution>
+</task>

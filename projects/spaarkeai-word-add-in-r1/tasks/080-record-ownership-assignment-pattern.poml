@@ -1,0 +1,318 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Every BFF-created record lands in the root business unit because nothing sets an owner — establish the ownership-assignment pattern across all record entities</title>
+    <phase>5 Remediation — data model</phase>
+    <gate>startable. BLOCKS the real closure of 063, 064 and 066.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what every app-only Dataverse create writes, and requires a data backfill. Tags include bff-api + dataverse + security. Modifies `.cs`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A data-model change whose blast radius is every record the BFF creates, plus a backfill over existing rows. Getting the owner wrong is worse than leaving it unset — it would move records into the wrong BU irreversibly without a second migration.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the create path of every record entity the BFF writes; conflicts with anything editing `OfficeService.cs` or the persistence layer.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, security, authorization, data, migration, testing</tags>
+    <estimated-effort>8-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Records created app-only by the BFF have no owner, so Dataverse defaults ownership to the calling application user — which lives in the root business unit. Every such record is therefore invisible to ordinary users at any depth below Global. Set the owner at create time, mirroring what `sprk_matter` already does, and backfill the existing rows.</prompt>
+
+  <role>SPAARKE platform developer. This is the constraint that actually blocks the authorization wave — the role grants were never the binding limit.</role>
+
+  <goal>Every record the BFF creates is owned such that `owningbusinessunit` follows the acting USER, not the application identity — so ownership-depth security discriminates, and the per-record gates in tasks 063/064/066 can function as designed.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21. Owner instruction: *"this needs to be the same pattern for all record entities —
+      otherwise we will have the same issue in other record type entities."* Full evidence in
+      [`notes/role-grant-gap-2026-09-21.md`](../notes/role-grant-gap-2026-09-21.md) §9.
+
+      **The mechanism — three Dataverse defaults chained, no decision anywhere:**
+      1. The create code never sets `ownerid`.
+      2. Dataverse defaults the owner to the identity making the call — a BFF **application user**, because
+         these are app-only creates.
+      3. `owningbusinessunit` is *derived* from the owner's BU; it is not set independently.
+      4. Application users are created in the **root** BU by default (verified: `SDAP-BFF-SPE-API`
+         `bb5a90e5…` and `mi-bff-api-dev` `8793f4b0…` both sit in root `Spaarke` `06fbf21c…`).
+
+      Users sit in **child** BUs. Dataverse `Deep` depth traverses **downward** — own BU plus descendants —
+      so a child-BU user never reaches a parent-owned row. Only **Global** would, and granting that re-opens
+      findings F1 and F9 in one move.
+
+      **Verified state (live, 2026-09-21):**
+
+      | Entity | Owner | BU | Correct? |
+      |---|---|---|---|
+      | `sprk_matter` | **default Owner team** of a child BU (`isdefault: true`, `teamtype: Owner`) | *Spaarke Business Unit 1* | ✅ **this is the precedent to copy** |
+      | `sprk_document` | BFF app user | root | ❌ |
+      | `sprk_communication` | BFF app user | root | ❌ |
+      | `sprk_todo` | BFF app user | root | ❌ |
+
+      **Consequences today**: task 063's Run Index and task 064's document- and communication-source To Dos
+      return 403 for every ordinary user. Task 064 is a **live regression** — Outlook's
+      create-To-Do-from-email worked before the gate. Task 066 could not ship a filter at all, because
+      ownership-depth security over a table whose rows all share one owner degenerates into a table-level
+      on/off switch.
+
+      **The role grants on `Spaarke Core User` are already in place and are NOT the problem.** They were
+      necessary and are now sufficient *once ownership is correct*.
+
+      ✅ **OWNER DECISION 2026-09-22 — THE CONVENTION IS SETTLED. Assign `ownerid` to the ACTING USER'S
+      BUSINESS UNIT DEFAULT OWNER TEAM. Not to the user.**
+
+      Owner's words: *"the records should be owned by the acting user's BU default owner team. So if testuser1
+      is in spaarke business unit 1 team/business unit, then the record they create is assigned to that team
+      (not the user)."* This resolves the caller-vs-team question below — **precedent B wins**, and the
+      `sprk_matter` shape was the right instinct after all even though its code was never found.
+
+      **The lookup chain, verified live end-to-end against the owner's own example (dev, 2026-09-22):**
+
+      1. Caller OID → `systemuserid` — already available via `ICallerSystemUserResolver` (task 067 wired it
+         into `OfficeService` as `_callerSystemUserResolver`).
+      2. `systemuser.businessunitid` — e.g. Test User 1 (`testuser1@spaarke.com`,
+         `8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c`) → BU `cb15f587-baa0-f111-aaac-000d3a99d1d7`.
+      3. `team` WHERE `businessunitid` = that AND **`isdefault = true` AND `teamtype = 0` (Owner)** →
+         `cf15f587-baa0-f111-aaac-000d3a99d1d7` ("Spaarke Business Unit 1"). **BOTH predicates are required**:
+         dev also contains non-default Owner teams (`teamtype 0, isdefault false`, GUID-ish names) and Access
+         teams (`teamtype 1`). Filtering on `isdefault` alone, or `teamtype` alone, picks the wrong team.
+      4. `entity["ownerid"] = new EntityReference("team", teamId)`. `owningbusinessunit` then **derives**
+         to `cb15f587…` — it is never set directly.
+
+      One default owner team exists per BU, named after it (verified: `Spaarke` (root), `Spaarke Business
+      Unit 1`, `Spaarke Demo`, `Spaarke Dev 1`, `Spaarke Test 1`, `Secure Project`).
+
+      🔴 **DEPLOYMENT PREREQUISITE + VERIFICATION TRAP — read before testing, this WILL mislead you.**
+
+      This fix only helps where users actually sit in CHILD BUs, and **92.5% of the dev directory does not.**
+      Measured live 2026-09-22 (`GROUP BY businessunitid`, all users — the `isdisabled` filter is not supported
+      by the query surface, so this is not enabled-only; at least two root accounts are known disabled):
+
+      | Business unit | Users |
+      |---|---|
+      | **`Spaarke` (ROOT)** | **172** |
+      | `Spaarke Demo` | 13 |
+      | **`Spaarke Business Unit 1`** | **1** ← Test User 1, the only account that exercises this |
+
+      For a caller in root, this convention **correctly** assigns to root's own default owner team (`Spaarke`,
+      `09fbf21c-…`) — which is still root, so **nothing improves and no 403 is fixed**. That is the design
+      working as specified, not a bug.
+
+      **So the trap is**: verify with a normal account (92.5% chance it is in root), observe no change,
+      and conclude the fix does not work. **Verify with Test User 1 in `Spaarke Business Unit 1`
+      specifically.** Treat "no change" from a root account as the EXPECTED result and record it as such —
+      do not chase it as a defect, and do not report success on the basis of a root-account test either,
+      because a root account cannot distinguish a working fix from a no-op.
+
+      `Ralph Schroeder` (`a7cbf3bd-…`) and every application user are in root. **Placing users in the correct
+      child BUs is part of making this work**, not a precondition someone else owns — say so in the task note.
+
+      ⚠️ **The one existing team-assignment precedent in the repo** is
+      `CommunicationEnrichmentService.cs:712` — `fields["ownerid"] = new EntityReference("team", teamId.Value)`.
+      Read it before writing a second one; it is the only in-repo example of the shape now being adopted.
+
+      📌 **The resolver gap is FILED ELSEWHERE — this task does not fix it.** `unified-access-control-r2`
+      raised it as **issue #1011** ("Membership resolver cannot bind a team-owned Owner column"), scoped as a
+      resolver fix (teach it to bind `owningteam`), with task 080 named as the co-affected consumer. Their
+      ADR-034 A1.1 keeps the hazard but is re-framed from *"team-ownership is dangerous"* to *"the resolver
+      must handle the ownership model we actually use."* **Do not absorb #1011 into this task** — but DO state
+      in the task note that team-owned records may not appear in membership queries until it lands, so the
+      limitation is on the record rather than discovered later as a regression.
+
+      Still untraced by either project, and #1011 says to settle it before sizing the fix: whether A1.1's
+      "structurally conferring WITHOUT a registry entry" rule reaches NON-registry entities' Owner columns. If
+      it does, team-owned documents AND team-owned grants both go dark in membership queries; if not, the
+      blast radius is the seven registered entities, none of which registers an Owner column.
+
+      🔻 **The material below is the pre-decision analysis. Keep it for the reasoning trail, but the
+      caller-vs-team question it agonises over is now ANSWERED above.** In particular the resolver hazard is
+      NOT a reason to reconsider: it is a defect in the membership resolver (it cannot bind a team-owned Owner
+      column), not evidence about what ownership should be. Choosing per-user ownership to dodge a resolver
+      limitation would let a tool defect set the access model. File the resolver gap separately.
+
+      🔴 **CORRECTION 2026-09-22 — there are TWO candidate conventions, and the one in CODE is not the one
+      this task's title assumed.** Found while answering a cross-project query, before this task started:
+
+      - **Precedent A — `ownerid` = the ACTING USER. This is shipped, in-code, and ADR-024-cited.**
+        `OfficeService`'s quick-create already does it (`:2625` and `:2853` set the owner from
+        `ownerSystemUserId`; `IOfficeService.cs:207` documents it as *"Caller's resolved systemuserid for
+        ownerid attribution (ADR-024); null → app-owned"*). The same shape appears in `NotificationService`
+        (`:81`), `OutboxService` (`:135`) and `DirectThreadAccessService` (`:86`). **So this project already
+        owns a working implementation of caller-ownership — in the very service whose document path lacks it.**
+      - **Precedent B — a child BU's default Owner team.** This is what `sprk_matter` rows LOOK like in live
+        dev data. **The code that does it has NOT been found.** It may be a plugin, the model-driven UI, or
+        manual assignment rather than a BFF convention at all.
+
+      **Do not open this task by "mirroring `sprk_matter`" as if that were a code pattern.** Establish first
+      whether B exists in code anywhere. If it does not, then A is the repo's actual convention, the
+      `sprk_matter` rows are an artifact of a different creation path, and the honest fix for
+      `sprk_document` / `sprk_todo` is to pass the ALREADY-RESOLVED caller through the create — which task 067
+      made cheaper by wiring `ICallerSystemUserResolver` into `OfficeService` as `_callerSystemUserResolver`.
+
+      The two conventions have genuinely different consequences and that is why the constraint below demands a
+      stated choice: **A** gives each user their own records (fine for documents a user saves; wrong for
+      records a whole team must work, since only sharing or a higher depth would let a colleague see them);
+      **B** gives a BU-wide team ownership (better for shared matter work, worse for personal scoping).
+
+      **SECOND CONSUMER — this is no longer a one-project decision.** `unified-access-control-r2` verified the
+      same defect in `GrantExternalAccessEndpoint`: `sprk_externalrecordaccess` rows are created app-only with
+      no `ownerid`, and **28 of 29 active rows sit in the root BU** (their ISS-030 / issue #1010). They have
+      asked to CONFORM to whatever convention this task settles on rather than invent a parallel one. So the
+      choice made here becomes a cross-project convention — state it explicitly and tell them.
+
+      🔴 **RESOLVED 2026-09-22 — THE HAZARD IS CONFIRMED IN CODE ON THIS BRANCH. Team-ownership resolves to
+      nobody.** Verified directly in `MembershipFieldDiscoveryService.cs`, three parts:
+
+      1. `:94-95` — `OwnerAttributeTargets = new[] { "systemuser", "team" }`. **Hardcoded, systemuser FIRST.**
+      2. `:531-533` — `AttributeTypeCode.Owner => OwnerAttributeTargets` gives every Owner column those
+         synthetic targets, because the SDK exposes Owner without a `LookupAttributeMetadata` subclass.
+      3. `:288-300` — the scan is `foreach (var target in lookup.Targets)` with
+         `if (identityTypeByTable.TryGetValue(...)) { matchedTarget = …; break; }` — **ordered, breaks on the
+         first hit.**
+
+      So an Owner column's targets are always `["systemuser", "team"]` in that fixed order, the scan breaks on
+      `systemuser`, and **an Owner column can never bind as Team**. On a team-owned record `ownerid` holds the
+      TEAM's id, so it matches no user. Corroborated by an observed production symptom: R7 W12 task 130 —
+      *"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid, verified via raw SQL."*
+
+      **Precision on "it cannot be configured away"** (UAC-r2's framing, refined here): the ordering comes from
+      the hardcoded array, NOT from `Membership:IncludedIdentityTables` — that is materialized into a
+      *dictionary* (`:204`), which is unordered, so **reordering config changes nothing**. There is exactly one
+      configuration that would alter the outcome: **removing `systemuser` from `IncludedIdentityTables`
+      entirely**, which makes the dictionary lookup miss and lets the scan fall through to `team`. That is not a
+      workaround — it would break every user-owned membership resolution in the product. So: not
+      *reconfigurable*, and the one config that touches it is disqualifying.
+
+      **Consequence for this task**: this is a strong, branch-independent argument for **precedent A
+      (caller-ownership)**. Cite the CALL SITE above plus the task-130 symptom. Do **NOT** cite ADR-034 A1.1 —
+      it is on UAC-r2's unmerged branch (27 tasks open, PR #950 unmerged, no merge date), so per CLAUDE.md §6.5
+      path B it cannot be load-bearing here. Its earlier wording was also factually wrong (it attributed the
+      ordering to `IncludedIdentityTables`); they corrected it at `75e7db20e` after this trace.
+
+      ⚠️ **SCOPING QUESTION THIS TASK STILL MUST ANSWER**: the hazard bites only where an entity's Owner column
+      is actually consumed by membership resolution. Establish whether `sprk_document` / `sprk_todo` /
+      `sprk_communication` are in the membership surface at all before treating it as decisive for them — it is
+      confirmed for the resolver, not automatically for these three entities.
+
+      ⚠️ (superseded framing, kept for the trail) **TEAM-OWNERSHIP MAY BE RULED OUT BY A RESOLVER HAZARD — verify this FIRST, it is decision-critical.**
+      Raised by `unified-access-control-r2` 2026-09-22. Their claim: membership discovery binds the FIRST
+      matching target and `IncludedIdentityTables` starts at `systemuser`, so a polymorphic Owner column always
+      resolves to SystemUser and binds the caller's own id — on a **team-owned** record `ownerid` holds the
+      TEAM's id and never matches. If true, landing team-ownership here produces rows that exist, are
+      correctly owned, and **resolve to nobody**. They cite a prior production outage (R7 W12 task 130:
+      *"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid, verified via raw SQL"*).
+
+      **What I verified on this branch, and what I did NOT:**
+      - ✅ `MembershipOptions.CanonicalIdentityTables` (`:241-249`) **does** start with `systemuser`, then
+        contact, team, businessunit, account, sprk_organization. Their ordering premise holds.
+      - ❌ **The ADR text they quote is NOT in this repo.** They cite "ADR-034 line 76" / amendment **A1.1**
+        (their task 043). Neither `.claude/adr/ADR-034-user-record-membership.md` nor the full
+        `docs/adr/` copy contains `A1.1`, the quoted sentence, or `rows=0` — grep-verified. Their branch
+        `work/unified-access-control-r2` is **unmerged** (master is `99cdfe2ea`). So the amendment exists only
+        on their branch.
+      - ⚠️ **The first-match-over-targets code path is UNVERIFIED.** `MembershipFieldDiscoveryService:204`
+        builds a dictionary keyed by table name, not an ordered scan over a polymorphic lookup's targets. The
+        hazard is plausible and consistent with the ordering, but I did not find the code that would produce it.
+
+      **Therefore**: treat the hazard as a serious input to verify, NOT as an established constraint, and do
+      not cite ADR-034 A1.1 — per CLAUDE.md §6.5 path B an ADR amendment must merge before or alongside the
+      code that depends on it, and this one has not merged. If the hazard IS real, it is a strong argument for
+      caller-ownership (precedent A) and should be stated as such with the verification evidence.
+
+      **Related citation defect, already FIXED 2026-09-22** (commit on this branch): four comments attributed
+      owner attribution to **ADR-024**, which is the Polymorphic Resolver Pattern and contains **zero**
+      mentions of ownerid/owningteam/owningbusinessunit (grep-verified, 0 hits). The three OTHER ADR-024
+      citations in the same files are correct — they refer to the denormalized resolver id/name fields, which
+      genuinely is ADR-024's subject. Corrected to ADR-034 so 080 does not inherit and propagate a wrong ADR.
+
+      ⚠️ Their failure mode is worse than ours and is worth understanding before choosing: their client reads
+      those rows in USER context via `context.webAPI.retrieveMultipleRecords` wrapped in `catch { return [] }`
+      (`TrackingFieldTrio/index.ts:805`), so an access failure renders **identically to "nobody has access"**.
+      Ours fails loudly with a 403. **Fixing ownership does not fix that silent catch** — it only removes the
+      common trigger; any transient error still lies. Those are two independent defects and this task must not
+      let the ownership fix be mistaken for closing theirs.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner instruction">The pattern is repo-wide. Do not fix `sprk_document` alone and leave the same defect in every other entity — sweep for every app-only create in the BFF and report the full inventory, even for entities this task does not change.</constraint>
+    <constraint source="OWNER DECISION 2026-09-22">Assign `ownerid` to the **acting user's business-unit DEFAULT OWNER TEAM** — `team` WHERE `businessunitid` = the caller's `systemuser.businessunitid` AND `isdefault = true` AND `teamtype = 0`. NOT to the acting user. `owningbusinessunit` is derived, never set directly. This is settled; do not re-open it, and do not let the membership-resolver hazard argue you back toward per-user ownership — that hazard is a resolver defect to file separately, not evidence about what ownership should be.</constraint>
+    <constraint source="OWNER DECISION 2026-09-22">Both `isdefault = true` AND `teamtype = 0` are required in the team lookup. Dev contains non-default Owner teams and Access teams; either predicate alone selects the wrong team.</constraint>
+    <constraint source="this task">If the caller's BU default owner team cannot be resolved, FAIL — do not silently fall back to app-user ownership, which is the defect this task exists to remove. An unassignable owner is a loud error, not a default.</constraint>
+    <constraint source="this task">A wrong owner is worse than no owner — it moves records into a BU irreversibly without a second migration. The backfill MUST be reversible or dry-runnable, and MUST be verified on a sample before running wholesale.</constraint>
+    <constraint source="this task">Cross-project boundary: `sprk_communication` is created by `EmailUploadCaptureService.BuildCommunicationEntity`, owned by the Communication project. Do NOT unilaterally change it — coordinate or hand off, and say which. `sprk_document` and `sprk_todo` are created by this project's `OfficeService` / `OfficeDocumentPersistence` and are ours.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a FRESH origin/master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: as an ordinary user (not an admin), show that a BFF-created `sprk_document` is unreadable at the granted depth, and record the observation verbatim. This is the evidence the ownership placement — not the role grant — is the binding constraint.</criterion>
+    <criterion testable="true">A full inventory of every app-only Dataverse create in the BFF, with its current owner behaviour, is recorded in the task note. Entities not changed by this task are listed with a reason.</criterion>
+    <criterion testable="true">`sprk_document` and `sprk_todo` creates set an owner such that `owningbusinessunit` resolves to the ACTING USER's business unit, not the application identity's.</criterion>
+    <criterion testable="true">The chosen convention (default Owner team vs acting user) is stated with its sharing consequences, and matches the `sprk_matter` precedent unless a documented reason says otherwise.</criterion>
+    <criterion testable="true">A backfill for existing rows is provided, is dry-runnable, and is verified on a sample BEFORE any wholesale run. Report the row counts per entity (262 communications at last count; documents and To Dos to be counted).</criterion>
+    <criterion testable="true">AFTER the change, an ordinary user in a child BU can read a document they saved, at the granted Deep depth — verified live, not asserted.</criterion>
+    <criterion testable="true">Task 063's Run Index and task 064's document-source To Do succeed for an ordinary user. Verify both live; they are the reason this task exists.</criterion>
+    <criterion testable="true">The `sprk_communication` half is either coordinated with the Communication project and landed, or explicitly handed off with a named owner — not left implicit.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled against the then-current baseline (12,411 / 0 / 56 at the time of writing). ArchTests green. Publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the owner assignment per entity, the acting-user BU resolution, and the backfill's dry-run behaviour. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If assigning ownership to the acting user changes who can see EXISTING records in a way that removes access someone relies on — e.g. a shared-service team that reads everything today via root-BU ownership — STOP and escalate per CLAUDE.md §6. Narrowing visibility is the point, but an unplanned narrowing on live data is an outage.</trigger>
+    <trigger>If the backfill cannot be made reversible, STOP and escalate before running it. A one-way move of every record into a different business unit is not a task-local decision.</trigger>
+    <trigger>If `sprk_communication` cannot be coordinated with the Communication project inside this task's window, STOP and hand it off explicitly rather than reaching into their create path.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Reproduce the unreadability as an ordinary user; record verbatim.</step>
+    <step>Read how `sprk_matter` gets its owner — that is the precedent. Establish which convention it uses.</step>
+    <step>Sweep for every app-only create in the BFF; build the inventory.</step>
+    <step>Implement the owner assignment for `sprk_document` and `sprk_todo`.</step>
+    <step>Write the backfill with a dry-run mode; verify on a sample.</step>
+    <step>Verify live that 063's Run Index and 064's document-source To Do now succeed for an ordinary user.</step>
+    <step>Coordinate or hand off `sprk_communication`.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE. Write `notes/080-record-ownership.md`.</step>
+    <step>Update TASK-INDEX.md: 080 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+    <file role="edit">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/role-grant-gap-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/066-communications-gate.md</file>
+      <file>.claude/adr/ADR-044-dataverse-query-safety.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/data-model/</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Correct ownership assignment (the precedent)" location="sprk_matter creation path">
+        `sprk_matter` rows are owned by the **default Owner team** of a child business unit (`isdefault: true`, `teamtype: Owner`) rather than by the calling identity. Find the code that does this and mirror it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>`sprk_matter`'s creation path already assigns ownership correctly — this task generalizes an existing in-repo pattern rather than introducing one.</existing>
+    <extension>Yes — extend the existing convention to the other record entities. No new component; the only new artifact is the backfill script.</extension>
+    <cost-of-doing-nothing>Tasks 063, 064 and 066 ship authorization gates that refuse every ordinary user, Outlook's create-To-Do-from-email stays broken, and every future per-record gate on any BFF-created entity will fail the same way for the same reason.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run ALONE — do not run concurrently with any other agent on this worktree (see notes/064-todo-source-gate.md §10).</protocol>
+  </execution>
+</task>

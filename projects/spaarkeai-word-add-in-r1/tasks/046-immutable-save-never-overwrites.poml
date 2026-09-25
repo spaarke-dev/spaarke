@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Email/Attachment saves never overwrite or delete another document's file (canonical-delete guard + unique .eml suffix)</title>
+    <phase>2 Save flow</phase>
+    <gate>039 merged</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the BFF save spine; one path deletes another document's file today (live on master).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data-integrity change on the shared save spine touching the immutable dedup branch that email-r2 shipped; must not change the shared detector's semantics.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Owns `OfficeService.SaveAsync`'s immutable (Email/Attachment) branch and the `.eml` name generator — the save-spine region 025 will also edit.</parallel-reason>
+    <deps>039</deps>
+    <tags>bff-api, save-flow, data-integrity, dedup, integration-test</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Two ways an Email or Attachment save can destroy another document's file, found by the 025 residual-collision analysis. (a) The immutable content-dedup branch can DELETE a canonical document's own SPE file. (b) Two emails with the same subject and date get the same generated `.eml` name and the second overwrites the first. Close both. Reproduce each with a failing test first.</prompt>
+
+  <role>SPAARKE platform developer. Deep expertise in the BFF Office save spine, the email-r2 content-dedup layer, and ADR-038 data-mutation testing. Follow ADRs strictly.</role>
+
+  <goal>No Email or Attachment save can delete or overwrite an SPE file that belongs to a different `sprk_document`. Byte-identical immutable content is still suppressed and the user still notified. Word Document saves (link/graduate, version save) are unchanged.</goal>
+
+  <context>
+    <background>
+      Source: `notes/025-residual-collision-surface.md` M9 / R3 and the F-API-C3 / E-C3 rows (2026-09-13). As reported — verify by symbol:
+      - Immutable content (Email, Attachment) runs SUPPRESS dedup. `ContentDedupDetector.FindCanonicalByHashAsync` (`:127-142`) does NOT exclude the probed item's own row. On a hit the caller deletes "the transient blob it just uploaded" (`OfficeService.cs:550-578`, `OfficeDocumentPersistence.cs:158-165`).
+      - Under `ConflictBehavior.Replace` (the add-in path's hard-coded default), a same-name upload overwrites an EXISTING file, so "the transient blob" IS the canonical's own item — and the suppress branch deletes it. The save reports success.
+      - Deterministic for a direct `POST /api/office/save` with `ContentType=Attachment` (no in-repo client sends it, but any authenticated caller can). For Email only if the rebuilt `.eml` is byte-identical (inferred unlikely). The pane's attachment saves get a unique prefix and cannot collide.
+      - Owner decision 2026-09-14 (project CLAUDE.md): generated `.eml` names get a short unique suffix, like attachments' prefix; a file name the USER typed is never changed automatically.
+      `ContentDedupDetector` is shared with `email-communication-intelligence-r2` and Compose.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Documents/ContentDedupDetector.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/025-residual-collision-surface.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (a): add a caller-side guard — never delete an SPE item that is the canonical document's own item (compare the uploaded item's drive-item id with the canonical row's `sprk_graphitemid`). Do NOT change `ContentDedupDetector` itself; if the fix cannot be made caller-side, STOP and escalate (shared with email-r2 and Compose).</constraint>
+    <constraint source="project">Scope (b): only the SYSTEM-GENERATED `.eml` name gets a unique suffix (locate the generator by symbol, reported as `OfficeEmailEnricher.GenerateEmlFileName`). Attachment names keep their existing prefix. Word Document names are untouched (owner principle: a name the user typed is never changed automatically).</constraint>
+    <constraint source="project">Word Document saves (028 link/graduate, 023 version save, 039 keys) are byte-for-byte unchanged in behaviour.</constraint>
+    <constraint source="CLAUDE.md §10 §F.3">Reproduce each defect with a failing data-mutation or contract test BEFORE changing code.</constraint>
+    <constraint source="NFR-07">MUST NOT relax `sprk_graphitemid_uk`.</constraint>
+    <constraint source="ADR-038">No `Mock&lt;HttpMessageHandler&gt;`, DI-registration or ctor null-check tests; tests land at a KEEP path (data-mutation / contract).</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size vs a FRESH master build (Compress-Archive, short output path), CVE check, `/conflict-check`.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md (Decisions 2026-09-14), the 025 analysis note, the 039 and 028 notes, and `DEDUP-AND-SAVE-BACK-IDENTITY.md`. Declare FULL, opus @ high, DIRECTIONAL. `/conflict-check`.</step>
+    <step order="1">Reproduce (a): a data-mutation test where a byte-identical Attachment save to a DIFFERENT record, under the same name in the same container, deletes the canonical's own file today. Reproduce (b): two Email saves with the same subject and date produce the same `.eml` name.</step>
+    <step order="2">Fix (a) with the caller-side guard; fix (b) with the unique suffix. Each reproduction test turns green.</step>
+    <step order="3">Run the BFF build, Office contract + data-mutation + content-dedup tests, ArchTests, and the full suite once; publish size + CVE; record decisions in `notes/046-immutable-save-safety.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the canonical-delete guard can only be implemented by changing `ContentDedupDetector`, STOP and escalate.</trigger>
+    <trigger>If the `.eml` suffix would change the name of any file the USER typed, or change Word Document naming, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The dedup suppress branch and the `.eml` name generator exist; both are modified, nothing new is added.</existing>
+    <extension>Yes — a guard in the existing caller and a suffix in the existing generator.</extension>
+    <cost-of-doing-nothing>A byte-identical attachment saved to another record deletes the original document's file while the save reports success (live on master today), and a second same-subject email silently replaces the first email's `.eml`.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a byte-identical Attachment save to a different record under the same name in the same container, when it runs, then the canonical document's SPE file still exists with its bytes unchanged — proven by a data-mutation test that fails on the old code.</criterion>
+    <criterion testable="true">Given the same scenario, the user is still notified of the duplicate and no second canonical document is created.</criterion>
+    <criterion testable="true">Given two Email saves with the same subject and date to the same container, when both run, then two distinct `.eml` files exist and neither overwrote the other.</criterion>
+    <criterion testable="true">Negative: Word Document saves (create, version, save-as-new override) behave exactly as on the branch head — the existing 023/024/028/039 tests stay green.</criterion>
+    <criterion testable="true">`ContentDedupDetector.cs` is unmodified (`git diff --name-only`).</criterion>
+    <criterion testable="true">`dotnet build` green; Office contract + data-mutation + dedup tests, ArchTests and the full suite pass; publish size and CVE recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-09-14 by the main session from the 025 residual-collision analysis (standing policy: unowned work is owned by this project). Defect (a) is live on master. Independent of the open owner discussion on Word-document matching (014/FR-02 + 025): it only concerns Email/Attachment content. Once 025 switches create uploads away from `Replace`, the (a) precondition disappears — the guard remains as defence in depth.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

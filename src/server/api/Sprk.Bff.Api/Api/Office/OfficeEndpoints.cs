@@ -1,12 +1,18 @@
 using System.IO;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Api.Office.Errors;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Office;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Office;
 
@@ -60,6 +66,9 @@ public static class OfficeEndpoints
 
         // Recent locations endpoint
         MapRecentEndpoints(group);
+
+        // Generate Profile trigger (FR-08, spaarkeai-word-add-in-r1 task 022)
+        MapDocumentProfileEndpoints(group);
 
         return app;
     }
@@ -163,15 +172,23 @@ public static class OfficeEndpoints
         // POST /office/save - Submit email, attachment, or document for saving
         // Authorization: OfficeAuthFilter validates user authentication,
         //                EntityAccessFilter validates user has access to target entity
-        // Idempotency: IdempotencyFilter prevents duplicate document creation
+        // Idempotency (task 039 — see SaveAsync's remarks for the contract): the persistent job de-dupe keys on the
+        //   BODY idempotencyKey, else on the server's own key (content-aware for Document saves). IdempotencyFilter's
+        //   X-Idempotency-Key response cache is bound to that same key for Document saves
+        //   (DocumentSaveIdempotencyBinding), so a reused header can never replay a response for a different document.
+        //   A VERSION save is never replayed from that cache (task 047, SaveResponseMayBeReplayed): whether it repeats
+        //   a completed save depends on what the document holds now, which only the service can check.
         // Rate Limit: 10 requests/minute/user (per spec.md)
         group.MapPost("/save", SaveAsync)
             .WithName("OfficeSave")
             .WithDescription("Submit email, attachment, or document for saving to Spaarke DMS")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
-            .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
+            .AddIdempotencyFilter( // Task 030 + task 039 (finding 4) + task 047
+                bindClientKeyTo: DocumentSaveIdempotencyBinding,
+                mayReplayResponse: SaveResponseMayBeReplayed)
             .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
             .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
+            .AddOfficeVersionSaveAuthorizationFilter() // word-add-in-r1 task 023 - FR-11 version save: "write" on the existing sprk_document
             .Accepts<SaveRequest>("application/json")
             .Produces<SaveResponse>(StatusCodes.Status202Accepted)
             .Produces<SaveResponse>(StatusCodes.Status200OK) // For duplicate detection
@@ -180,6 +197,7 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict) // For idempotency conflicts
+            .ProducesProblem(StatusCodes.Status423Locked) // FR-11 version save: target item locked (OFFICE_019)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
@@ -194,8 +212,26 @@ public static class OfficeEndpoints
     /// - Return 202 Accepted with jobId within 3 seconds (heavy processing is async)
     /// - Validate that association target is provided (OFFICE_003 if missing)
     /// - Validate that association target exists (OFFICE_006/OFFICE_007 if invalid/not found)
-    /// - Support idempotency via X-Idempotency-Key header
+    /// - Support idempotency (contract below)
     /// - Return 200 OK with duplicate=true if idempotent request already processed
+    /// </para>
+    /// <para>
+    /// <b>Idempotency contract (spaarkeai-word-add-in-r1 task 039, finding 1).</b> ONE source decides whether a
+    /// save runs: the request BODY's <c>idempotencyKey</c> when present, else the server's own key
+    /// (<c>OfficeService.GenerateIdempotencyKey</c>, content-aware for every Document save). A ProcessingJob with
+    /// that key that did not fail makes the request a duplicate (200, <c>duplicate: true</c>); a Failed or Cancelled
+    /// one does not (finding 2). The <c>X-Idempotency-Key</c> header is NOT that key — it only names
+    /// <c>IdempotencyFilter</c>'s 24-hour response-replay cache, and for a Document save the cache entry is bound
+    /// to that same authoritative key (<see cref="DocumentSaveIdempotencyBinding"/>), so a reused header replays only
+    /// a request the key would also de-duplicate. Email and Attachment keep the header-keyed replay unchanged: their
+    /// header names the same immutable message/attachment the server key does.
+    /// </para>
+    /// <para>
+    /// <b>Version saves (task 047).</b> A version key names a document and its content, so it cannot tell a retry from
+    /// a later save of the same content (B, then A, then B again). A version save is therefore never replayed from the
+    /// response cache (<see cref="SaveResponseMayBeReplayed"/>; the in-flight lock still applies). A Completed job under
+    /// its key is its duplicate only while the document still holds exactly its content
+    /// (<c>OfficeService.IsStillTheSameOperationAsync</c>).
     /// </para>
     /// </remarks>
     /// <param name="request">The save request with content metadata.</param>
@@ -209,6 +245,12 @@ public static class OfficeEndpoints
         IOfficeService officeService,
         ILogger<Program> logger,
         HttpContext context,
+        // Task 055 (#1005): the collision refusal's display fields are gated on the caller's Read access to
+        // the colliding document. The gate lives HERE, not in OfficeService — ADR-008 puts resource
+        // authorization at the endpoint, OfficeService has no authorization concern among its fifteen
+        // dependencies, and every caller-scoped check in this codebase is handler-side
+        // (ChatDocumentEndpoints, RecordSearchEndpoints). See notes/055-collision-names-its-target.md §2.
+        AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {
         var traceId = context.TraceIdentifier;
@@ -223,9 +265,9 @@ public static class OfficeEndpoints
         var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
             ?? CallerResolution.ResolveObjectId(context.User);
 
-        // Get idempotency key from header if provided
-        var idempotencyKey = context.Request.Headers["X-Idempotency-Key"].FirstOrDefault()
-            ?? request.IdempotencyKey;
+        // Task 039 (finding 1): a dead read of X-Idempotency-Key used to sit here — assigned, never used — which
+        // made the header look like an input to the save's de-duplication. It is not, by decision: see the remarks
+        // above. The header is consumed only by IdempotencyFilter's response cache.
 
         // Diagnostic logging for debugging 400 errors
         logger.LogInformation(
@@ -288,8 +330,14 @@ public static class OfficeEndpoints
                     response.Error?.Code,
                     response.Error?.Message);
 
+                // Task 055 (#1005): withhold the colliding document's identity from a caller who cannot read
+                // it. The service resolved it in-process (one lookup, no second round trip); this is the only
+                // code that can put it on the wire, so this is where the authorization decision belongs.
+                var error = await WithholdCollisionIdentityIfUnauthorizedAsync(
+                    response.Error, userId, context, authorizationService, logger, cancellationToken);
+
                 // Map service errors to ProblemDetails
-                return MapSaveErrorToProblem(response.Error, traceId);
+                return MapSaveErrorToProblem(error, traceId);
             }
         }
         catch (Exception ex)
@@ -312,6 +360,44 @@ public static class OfficeEndpoints
                 });
         }
     }
+
+    /// <summary>
+    /// Task 039 (findings 1 + 4): the value a Document save's <c>X-Idempotency-Key</c> response-cache entry is bound
+    /// to — the save's AUTHORITATIVE idempotency key (<see cref="OfficeService.ResolveIdempotencyKey"/>: the body key,
+    /// else the server's content-aware key). <c>null</c> (the default, header-only cache key) for Email and
+    /// Attachment.
+    /// </summary>
+    /// <remarks>
+    /// <para>Why bind at all. The Word pane's create-save header names the record and the document URL, not the
+    /// content — so the second save of an EDITED document to the same record reused the first save's header and was
+    /// answered with its cached 202, never written. Bound to the authoritative key, the response cache can replay only
+    /// a request that key would ALSO de-duplicate: the header can split two saves, never merge them.</para>
+    /// <para>Why Document only. A Document is editable, so one header can legitimately carry different bytes. An
+    /// Outlook header names an immutable message/attachment — the same identity the server key names — so its replay
+    /// is left exactly as it was.</para>
+    /// <para>Read from the BOUND <see cref="SaveRequest"/> argument: endpoint filters run after parameter binding, so
+    /// the raw JSON body has already been consumed by the time <c>IdempotencyFilter</c> runs.</para>
+    /// </remarks>
+    internal static string? DocumentSaveIdempotencyBinding(EndpointFilterInvocationContext context) =>
+        context.Arguments.OfType<SaveRequest>().FirstOrDefault() is { ContentType: SaveContentType.Document } request
+            ? OfficeService.ResolveIdempotencyKey(request)
+            : null;
+
+    /// <summary>
+    /// Task 047: may <c>IdempotencyFilter</c> answer this save from its response cache? Not a VERSION save
+    /// (<see cref="OfficeService.IsVersionSave"/>). Everything else may, exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// A version save's key names a document and its content. Whether a request under that key repeats a completed save
+    /// depends on what the document holds NOW: after B, then A, the content key of B names a save that no longer
+    /// describes the document. The cache cannot see that, so it replayed the first B save's 202 for 24 hours. The save
+    /// still takes the in-flight lock (a concurrent double submit gets 409). A sequential retry reaches
+    /// <c>OfficeService.SaveAsync</c>, which answers it with the first save's job when the document still holds these
+    /// bytes (<c>200</c>, <c>duplicate: true</c>).
+    /// </remarks>
+    internal static bool SaveResponseMayBeReplayed(EndpointFilterInvocationContext context) =>
+        context.Arguments.OfType<SaveRequest>().FirstOrDefault() is not { } request
+        || !OfficeService.IsVersionSave(request);
 
     /// <summary>
     /// Validates a save request for required fields and constraints.
@@ -436,6 +522,70 @@ public static class OfficeEndpoints
     }
 
     /// <summary>
+    /// Task 055 (#1005 / ISS-006): strips a name-collision refusal's <c>ExistingDocumentName</c> and
+    /// <c>ExistingDocumentId</c> unless the caller holds <see cref="AccessRights.Read"/> on that document.
+    /// Every other error passes through untouched.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the id goes too.</b> It is already returned today with no authorization of any kind —
+    /// <c>FindCollisionTargetByLocationAsync</c> queries by drive + file name through the app-only generic
+    /// seam. Withholding the name while still handing back the id would close the new disclosure and leave
+    /// the pre-existing one. It also costs the caller nothing: without <c>Write</c> they would be refused the
+    /// version retry by <c>OfficeVersionSaveAuthorizationFilter</c> anyway, and the pane's "Keep both only"
+    /// state is already shipped and tested.</para>
+    /// <para><b>Fail closed.</b> An access check that throws withholds rather than reveals —
+    /// <c>AuthorizationService</c> is itself fail-closed (it denies outright when the caller's bearer token
+    /// is absent rather than degrading to app-only), and this mirrors that posture instead of assuming the
+    /// happy path.</para>
+    /// </remarks>
+    private static async Task<SaveError?> WithholdCollisionIdentityIfUnauthorizedAsync(
+        SaveError? error,
+        string userId,
+        HttpContext context,
+        AuthorizationService authorizationService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (error is null
+            || error.Code != OfficeErrorCodes.NameCollision
+            || error.ExistingDocumentId is not { } collidingDocumentId)
+        {
+            return error;
+        }
+
+        AccessRights rights;
+        try
+        {
+            var snapshot = await authorizationService.GetCallerAccessAsync(
+                userId,
+                collidingDocumentId.ToString("D"),
+                TokenHelper.ExtractBearerTokenOrNull(context),
+                cancellationToken);
+            rights = snapshot.AccessRights;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Could not evaluate the caller's access to collision target {DocumentId}; withholding its "
+                + "identity from the refusal (fail closed).",
+                collidingDocumentId);
+            rights = AccessRights.None;
+        }
+
+        if (rights.HasFlag(AccessRights.Read))
+        {
+            return error;
+        }
+
+        logger.LogInformation(
+            "Collision refusal for {FileName}: the caller holds no Read on the owning document, so its name "
+            + "and id are withheld. The pane offers \"Keep both\" only.",
+            error.FileName);
+
+        return error with { ExistingDocumentId = null, ExistingDocumentName = null };
+    }
+
+    /// <summary>
     /// Maps a SaveError to an appropriate ProblemDetails response.
     /// </summary>
     private static IResult MapSaveErrorToProblem(SaveError? error, string correlationId)
@@ -460,6 +610,47 @@ public static class OfficeEndpoints
             "OFFICE_007" => ProblemDetailsHelper.OfficeAssociationTargetNotFound("entity", Guid.Empty, correlationId),
             "OFFICE_009" => ProblemDetailsHelper.OfficeAccessDenied(correlationId),
             "OFFICE_012" => ProblemDetailsHelper.OfficeSpeUploadFailed(error.Message, correlationId),
+            // FR-11 version save (word-add-in-r1 task 023) — refusals that wrote nothing; see OfficeErrorCodes.
+            OfficeErrorCodes.VersionTargetNotFound => ProblemDetailsHelper.OfficeNotFound(
+                error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
+            OfficeErrorCodes.VersionIntentMismatch => ProblemDetailsHelper.OfficeValidationError(
+                error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
+            // FR-02 (word-add-in-r1 task 014) — the uploaded bytes claim to be an Office package but cannot be
+            // opened as one. Refused before any SPE write, so nothing partial was stored. Same validation-error
+            // shape as OFFICE_018 above; it is the request's content that is wrong, not the server's state.
+            OfficeErrorCodes.CorruptDocumentPackage => ProblemDetailsHelper.OfficeValidationError(
+                error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
+            OfficeErrorCodes.VersionTargetHasNoFile or OfficeErrorCodes.VersionTargetLocked => Results.Problem(
+                type: OfficeErrorCodes.GetTypeUri(error.Code),
+                title: OfficeErrorCodes.GetTitle(error.Code),
+                detail: error.Message,
+                statusCode: OfficeErrorCodes.GetStatusCode(error.Code),
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = error.Code,
+                    ["correlationId"] = correlationId,
+                    ["retryable"] = error.Retryable
+                }),
+            // Task 025 (word-add-in-r1) — a same-name collision refused BEFORE any bytes moved. FileName +
+            // ExistingDocumentId (Document saves only, when resolvable) let the pane offer the two-option
+            // choice ("Keep both" / "Save as new version") without re-parsing the message text.
+            OfficeErrorCodes.NameCollision => Results.Problem(
+                type: OfficeErrorCodes.GetTypeUri(error.Code),
+                title: OfficeErrorCodes.GetTitle(error.Code),
+                detail: error.Message,
+                statusCode: OfficeErrorCodes.GetStatusCode(error.Code),
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = error.Code,
+                    ["correlationId"] = correlationId,
+                    ["retryable"] = error.Retryable,
+                    ["fileName"] = error.FileName,
+                    ["existingDocumentId"] = error.ExistingDocumentId,
+                    // Task 055 (#1005): names the document the version retry would write into. Null — and so
+                    // omitted from the body — whenever the id is also null, which is how both the
+                    // filed-elsewhere case and the caller-cannot-read case reach the pane.
+                    ["existingDocumentName"] = error.ExistingDocumentName
+                }),
             _ => Results.Problem(
                 title: "Save Failed",
                 detail: error.Message,
@@ -651,15 +842,27 @@ public static class OfficeEndpoints
 
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.ContentType = "application/problem+json";
-            await context.Response.WriteAsJsonAsync(new
-            {
-                type = "https://tools.ietf.org/html/rfc7235#section-3.1",
-                title = "Unauthorized",
-                status = 401,
-                detail = "User identity could not be determined",
-                errorCode = "OFFICE_009",
-                correlationId = traceId
-            }, cancellationToken);
+            // GitHub #975 (ADR-019 / RFC 7807), task 052: WriteAsJsonAsync's convenience overload
+            // always sets Content-Type to "application/json; charset=utf-8", unconditionally
+            // overwriting the "application/problem+json" set immediately above — it never consults
+            // the response's existing header. This return happens before ANY SSE framing begins
+            // (context.Response.ContentType is not set to "text/event-stream" until further below),
+            // so it is a plain error response, not a frame inside a started stream. Passing
+            // contentType explicitly (the framework's own 4-arg overload, same fix task 050 applied
+            // to the global exception handler) fixes the header without changing the serialized body.
+            await context.Response.WriteAsJsonAsync(
+                new
+                {
+                    type = "https://tools.ietf.org/html/rfc7235#section-3.1",
+                    title = "Unauthorized",
+                    status = 401,
+                    detail = "User identity could not be determined",
+                    errorCode = "OFFICE_009",
+                    correlationId = traceId
+                },
+                options: (JsonSerializerOptions?)null,
+                contentType: "application/problem+json",
+                cancellationToken);
             return;
         }
 
@@ -676,16 +879,28 @@ public static class OfficeEndpoints
 
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.Response.ContentType = "application/problem+json";
-            await context.Response.WriteAsJsonAsync(new
-            {
-                type = "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-                title = "Not Found",
-                status = 404,
-                detail = $"No processing job found with ID '{jobId}'",
-                errorCode = "OFFICE_008",
-                jobId = jobId,
-                correlationId = traceId
-            }, cancellationToken);
+            // GitHub #975 (ADR-019 / RFC 7807), task 052: WriteAsJsonAsync's convenience overload
+            // always sets Content-Type to "application/json; charset=utf-8", unconditionally
+            // overwriting the "application/problem+json" set immediately above — it never consults
+            // the response's existing header. This return happens before ANY SSE framing begins
+            // (context.Response.ContentType is not set to "text/event-stream" until further below),
+            // so it is a plain error response, not a frame inside a started stream. Passing
+            // contentType explicitly (the framework's own 4-arg overload, same fix task 050 applied
+            // to the global exception handler) fixes the header without changing the serialized body.
+            await context.Response.WriteAsJsonAsync(
+                new
+                {
+                    type = "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+                    title = "Not Found",
+                    status = 404,
+                    detail = $"No processing job found with ID '{jobId}'",
+                    errorCode = "OFFICE_008",
+                    jobId = jobId,
+                    correlationId = traceId
+                },
+                options: (JsonSerializerOptions?)null,
+                contentType: "application/problem+json",
+                cancellationToken);
             return;
         }
 
@@ -779,16 +994,40 @@ public static class OfficeEndpoints
         var search = group.MapGroup("/search");
 
         // GET /office/search/entities - Search for association targets
-        // Authorization: OfficeAuthFilter validates user authentication
+        // Authorization: OfficeAuthFilter validates user authentication; per-RECORD authorization is
+        // enforced INSIDE the query by Dataverse row-level security, because the handler resolves the
+        // caller's systemuserid and OfficeService issues the search IMPERSONATED as that user
+        // (task 062, finding F1). Per ADR-008 a per-resource check belongs in a filter — but a filter
+        // runs before the handler and there are no rows yet to authorize, and the subject here is a
+        // whole result set rather than one route-addressed resource. The trim therefore lives in the
+        // query itself, which is the case ADR-008's own constraint carves out ("where trimming must
+        // happen inside the query, document why in the code"). See OfficeService.QuerySearchEntityAsync.
         // Rate Limit: 30 requests/minute/user (per spec.md)
         search.MapGet("/entities", SearchEntitiesAsync)
             .WithName("SearchOfficeEntities")
             .WithSummary("Search for association target entities")
-            .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts. Supports typeahead (min 2 chars). Returns results within 500ms.")
+            .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts the CALLER may read (impersonated Dataverse read). Supports typeahead (min 2 chars). Returns results within 500ms.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
             .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Produces<EntitySearchResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // GET /office/search/matter-types - List active Matter Type reference values (task 038)
+        // A small, load-once reference list (5 rows in dev) — sibling of /entities, not a filter on it:
+        // sprk_mattertype_ref is a reference table (not an association-target entity) and the caller
+        // loads it once, so the 2-character-minimum typeahead contract below does not fit.
+        // Authorization: OfficeAuthFilter validates user authentication
+        // Rate Limit: 30 requests/minute/user (reuses the Search category — same low-risk read shape)
+        search.MapGet("/matter-types", GetMatterTypesAsync)
+            .WithName("GetOfficeMatterTypes")
+            .WithSummary("List active Matter Type reference values")
+            .WithDescription("Returns the active sprk_mattertype_ref rows for the pane's required Matter Type field (spaarkeai-word-add-in-r1 task 038). A small, load-once reference list, not a typeahead search.")
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
+            .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
+            .Produces<MatterTypeListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
@@ -820,12 +1059,21 @@ public static class OfficeEndpoints
     /// - Support pagination via 'skip' and 'top' parameters
     /// - Only return entities the user has access to (Dataverse security roles)
     /// </para>
+    /// <para>
+    /// The last of those was a comment rather than a behaviour until task 062 (finding F1): the search
+    /// ran app-only, so any authenticated caller could enumerate every Matter, Project, Invoice,
+    /// Account and Contact in the tenant from a two-character substring. The handler now resolves the
+    /// caller's Dataverse <c>systemuserid</c> and the service issues the query IMPERSONATED as that
+    /// user, so Dataverse applies row-level security inside the query. A caller who cannot be resolved
+    /// to a Dataverse user is refused (403) — there is no app-only fallback.
+    /// </para>
     /// </remarks>
     /// <param name="q">Search query string (min 2 chars).</param>
     /// <param name="type">Comma-separated entity types to filter (Matter, Project, Invoice, Account, Contact).</param>
     /// <param name="skip">Number of results to skip for pagination (default: 0).</param>
     /// <param name="top">Maximum results to return (default: 20, max: 50).</param>
     /// <param name="officeService">Office service for search operations.</param>
+    /// <param name="callerResolver">Resolves the caller's Dataverse systemuserid for the impersonated read (task 062).</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="context">HTTP context for user claims.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -836,6 +1084,7 @@ public static class OfficeEndpoints
         int? skip,
         int? top,
         IOfficeService officeService,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -894,6 +1143,32 @@ public static class OfficeEndpoints
         var skipValue = Math.Max(skip ?? 0, 0);
         var topValue = Math.Clamp(top ?? 20, 1, 50);
 
+        // Task 062 / finding F1 — the caller identity the search runs AS. Fail-closed: a caller with
+        // no Dataverse systemuser cross-reference has no row-level security context, so there is no
+        // trimmed answer to give them. Refusing is the only alternative to the app-only enumeration
+        // this task closes, and a caller with no Dataverse user has no Dataverse rights to lose.
+        var callerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
+        if (!callerResolution.IsResolved
+            || !Guid.TryParse(callerResolution.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "Entity search refused: caller {UserId} has no resolvable Dataverse systemuserid ({Reason}) — "
+                + "refusing rather than serving a security-untrimmed app-only search (fail closed).",
+                userId,
+                callerResolution.UnresolvedReason ?? "unresolved");
+
+            return Results.Problem(
+                title: "Forbidden",
+                detail: "The caller could not be resolved to a Dataverse user, so search results cannot be scoped to their access.",
+                statusCode: StatusCodes.Status403Forbidden,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_SEARCH_FORBIDDEN",
+                    ["correlationId"] = traceId
+                });
+        }
+
         var request = new EntitySearchRequest
         {
             Query = q,
@@ -912,7 +1187,8 @@ public static class OfficeEndpoints
 
         try
         {
-            var response = await officeService.SearchEntitiesAsync(request, userId, cancellationToken);
+            var response = await officeService.SearchEntitiesAsync(
+                request, userId, callerSystemUserId, cancellationToken);
 
             // Add correlation ID to response
             response = response with { CorrelationId = traceId };
@@ -936,6 +1212,65 @@ public static class OfficeEndpoints
             return Results.Problem(
                 title: "Search Failed",
                 detail: "An error occurred while searching for entities",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_INTERNAL",
+                    ["correlationId"] = traceId
+                });
+        }
+    }
+
+    /// <summary>
+    /// Matter-types list endpoint handler (task 038). No query, no pagination — the whole active set is
+    /// returned in one call for a dropdown loaded once.
+    /// </summary>
+    /// <param name="officeService">Office service for the matter-type reference read.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="context">HTTP context for user claims.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private static async Task<IResult> GetMatterTypesAsync(
+        IOfficeService officeService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? CallerResolution.ResolveObjectId(context.User);
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            logger.LogWarning("Matter-types list requested without valid user identity");
+            return Results.Problem(
+                title: "Unauthorized",
+                detail: "User identity could not be determined",
+                statusCode: StatusCodes.Status401Unauthorized,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_009",
+                    ["correlationId"] = traceId
+                });
+        }
+
+        try
+        {
+            var response = await officeService.GetMatterTypesAsync(cancellationToken);
+
+            logger.LogInformation(
+                "Matter-types list returned {ResultCount} results for user {UserId}",
+                response.Results.Count,
+                userId);
+
+            return TypedResults.Ok(response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error listing matter types for user {UserId}", userId);
+
+            return Results.Problem(
+                title: "Matter Types Unavailable",
+                detail: "An error occurred while listing matter types",
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?>
                 {
@@ -1158,10 +1493,11 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, Invoice, Account, or Contact with minimal required fields. Supports inline entity creation from the Office add-in when the user needs a new association target.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with the caller as a load-bearing owner (an unresolved caller is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. This endpoint assigns NEITHER a matter number nor a project number: both will be set by a planned separate server-side numbering component that triggers on create. Because sprk_matternumber and sprk_projectnumber are their entities' primary name attributes, records created here show a blank name in lookups and grids until that component exists. Invoice keeps the minimal name-only path with best-effort ownership.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
+            .AddQuickCreateSourceAccessFilter() // word-add-in-r1 task 030 - caller must hold Read on the record context
             .Accepts<QuickCreateRequest>("application/json")
             .Produces<QuickCreateResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1172,8 +1508,14 @@ public static class OfficeEndpoints
 
         // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
         // (email-communication-intelligence-r2 #3). Regarding = the record the email was filed to.
-        // Authorization: OfficeAuthFilter validates user authentication.
-        // Rate Limit: reuses the QuickCreate category (both are low-frequency inline creates).
+        // Authorization: OfficeAuthFilter validates user authentication, then TodoSourceAccessFilter
+        // (word-add-in-r1 task 064, ADR-008) read-gates ALL FOUR caller-supplied record ids —
+        // regardingRecordId, documentId, communicationId, assignedToContactId — before the handler runs.
+        // Every one of them is written onto a row the CALLER owns, and the regarding target is read
+        // app-only by CoreAncestorResolver to stamp its parent matter/project onto that row, so an
+        // ungated id let a caller both attach a To Do to a record they cannot read and harvest that
+        // record's core ancestor. The filter's single constant deny body is also what closes the
+        // 403-vs-201 record-existence oracle — see TodoSourceAccessFilter's remarks.
         group.MapPost("/todo", CreateTodoAsync)
             .WithName("OfficeCreateTodo")
             .WithSummary("Create a To Do (sprk_todo)")
@@ -1181,6 +1523,7 @@ public static class OfficeEndpoints
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter()
             .AddOfficeAuthFilter()
+            .AddTodoSourceAccessFilter() // word-add-in-r1 task 064 - caller must hold Read on every source id
             .Accepts<CreateTodoRequest>("application/json")
             .Produces<CreateTodoResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1273,6 +1616,159 @@ public static class OfficeEndpoints
         }
     }
 
+    #endregion
+
+    #region Document Profile Endpoints
+
+    /// <summary>
+    /// FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" trigger. Mirrors
+    /// <c>ComposeDocumentEndpoints.RefreshProfileAsync</c> exactly — fire-and-forget, 202 Accepted, no
+    /// synchronous wait for the profile to complete, unconditional overwrite with no confirmation.
+    /// </summary>
+    private static void MapDocumentProfileEndpoints(RouteGroupBuilder group)
+    {
+        var documents = group.MapGroup("/documents");
+
+        // POST /api/office/documents/{documentId}/generate-profile — re-run the Document Profile for an
+        // identified document on user request (task 021's Profile section reflects the resulting status
+        // transition). ADR-008: resource-level authorization ("write" — the trigger overwrites the
+        // record's profile fields) via the canonical DocumentAuthorizationFilter, the SAME filter and
+        // operation PUT /api/v1/documents/{id} already uses — reused, not duplicated (CLAUDE.md §11).
+        // Filter order matters: the Guid.Empty VALIDATION filter runs BEFORE the AUTHORIZATION filter so
+        // an obviously-invalid id 400s without ever probing the access data source for a record that
+        // cannot exist — validation and authorization stay two separate decisions, neither one inline
+        // in the handler.
+        documents.MapPost("/{documentId:guid}/generate-profile", GenerateProfileAsync)
+            .WithName("OfficeGenerateDocumentProfile")
+            .WithSummary("Re-run the Document Profile for an identified document (FR-08)")
+            .WithDescription("Fire-and-forget best-effort re-dispatch of the Document Profile for the given sprk_document, mirroring Compose's shipped refresh-profile semantics: 202 Accepted, unconditional overwrite of any existing profile, no confirmation prompt.")
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate) // low-frequency inline action — same category as /todo
+            .AddOfficeAuthFilter()
+            .AddEndpointFilter(async (context, next) =>
+            {
+                // Guid.Empty is the one malformed shape that still matches the {documentId:guid} route
+                // constraint (a syntactically valid GUID, but never a real record) — mirrors
+                // ComposeDocumentEndpoints.RefreshProfileAsync's own Guid.Empty check. A non-GUID route
+                // segment never reaches this filter at all; the :guid constraint 404s it at the routing
+                // layer, the same shape Compose's own refresh-profile route accepts.
+                var raw = context.HttpContext.Request.RouteValues["documentId"] as string;
+                if (!Guid.TryParse(raw, out var routeDocumentId) || routeDocumentId == Guid.Empty)
+                {
+                    return ProblemDetailsHelper.OfficeValidationError(
+                        "OFFICE_PROFILE_001",
+                        "Bad Request",
+                        "documentId is required.",
+                        context.HttpContext.TraceIdentifier);
+                }
+
+                return await next(context);
+            })
+            .AddDocumentAuthorizationFilter("write")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            // 503: the compound AI gate is off (IDocumentProfileAi unavailable) — coordinator-review fix,
+            // see GenerateProfileDispatchOutcome.FacadeUnavailable.
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
+
+    /// <summary>
+    /// Generate Profile endpoint handler. See <see cref="IOfficeService.GenerateProfileAsync"/> for the
+    /// dispatch contract. By the time this handler runs, the endpoint filter chain has already validated
+    /// <paramref name="documentId"/> is non-empty and <see cref="Api.Filters.DocumentAuthorizationFilter"/>
+    /// has already authorized the caller for <c>write</c> on it (ADR-008 — no inline authorization here).
+    /// </summary>
+    /// <remarks>
+    /// Coordinator-review fix: this handler used to fire-and-forget
+    /// <c>officeService.GenerateProfileAsync</c> WITHOUT awaiting or inspecting its result, so it
+    /// returned 202 unconditionally — including when the AI profile facade was unavailable (compound AI
+    /// gate off) or no usable bearer token reached the dispatcher. That let an unconditionally-mapped
+    /// endpoint claim success for a feature-gated dependency that would never run the job (root
+    /// CLAUDE.md §10 asymmetric-registration rule / §F.1 / the ADR-032 Null-Object kill-switch
+    /// principle). The fix AWAITS the dispatch DECISION (fast — it does not wait for the background
+    /// profile itself, only for <c>OfficeProfileDispatcher.Dispatch</c>'s synchronous branch) and
+    /// switches on the outcome, so only a genuine dispatch produces 202.
+    /// </remarks>
+    private static async Task<IResult> GenerateProfileAsync(
+        Guid documentId,
+        IOfficeService officeService,
+        ILogger<Program> logger,
+        HttpContext context)
+    {
+        var traceId = context.TraceIdentifier;
+
+        // Awaits only the DISPATCH DECISION, not the background profile — see the XML remarks above and
+        // OfficeProfileDispatcher.Dispatch, whose synchronous branch (facade-availability check, bearer
+        // check, Task.Run scheduling) completes immediately; the profile itself continues detached.
+        var outcome = await officeService.GenerateProfileAsync(documentId, context, context.RequestAborted)
+            .ConfigureAwait(false);
+
+        switch (outcome)
+        {
+            case GenerateProfileDispatchOutcome.Dispatched:
+                logger.LogInformation(
+                    "Office Generate Profile: document {DocumentId} requested by user, dispatched (best-effort) TraceId={TraceId}",
+                    documentId, traceId);
+                return Results.Accepted(value: new { documentId, correlationId = traceId });
+
+            case GenerateProfileDispatchOutcome.FacadeUnavailable:
+                logger.LogWarning(
+                    "Office Generate Profile: document {DocumentId} — AI profile facade unavailable, refusing to claim success. TraceId={TraceId}",
+                    documentId, traceId);
+                return Results.Problem(
+                    type: "https://spaarke.com/errors/office/office_profile_002",
+                    title: "Service Unavailable",
+                    detail: "Document profiling is currently unavailable. Try again later.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_002",
+                        ["correlationId"] = traceId,
+                    });
+
+            case GenerateProfileDispatchOutcome.NoBearer:
+                // Defensive-only branch — unreachable via this route's filter chain (see the XML doc on
+                // GenerateProfileDispatchOutcome.NoBearer and OfficeProfileDispatcher.Dispatch for the
+                // proof). Mapped honestly rather than assumed away.
+                logger.LogWarning(
+                    "Office Generate Profile: document {DocumentId} — no usable bearer token reached the dispatcher. TraceId={TraceId}",
+                    documentId, traceId);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    title: "Unauthorized",
+                    detail: "A caller bearer token is required to generate a document profile.",
+                    type: "https://tools.ietf.org/html/rfc7235#section-3.1",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_003",
+                        ["correlationId"] = traceId,
+                    });
+
+            default:
+                // Exhaustive-switch safety net — new enum members must be handled explicitly, not fall
+                // through to an implicit 202.
+                logger.LogError(
+                    "Office Generate Profile: document {DocumentId} — unrecognized dispatch outcome {Outcome}. TraceId={TraceId}",
+                    documentId, outcome, traceId);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while starting document profiling.",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_INTERNAL",
+                        ["correlationId"] = traceId,
+                    });
+        }
+    }
+
+    #endregion
+
+    #region Quick Create Endpoints — handlers
+
     /// <summary>
     /// Quick Create endpoint handler.
     /// Creates a new entity with minimal required fields for inline creation from the Office add-in.
@@ -1361,8 +1857,9 @@ public static class OfficeEndpoints
 
         try
         {
-            // Attribute record ownership to the caller (ADR-024) — best-effort; an unresolved
-            // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
+            // Resolve the caller's systemuserid for ownerid. For MATTER (task 030) and PROJECT (task 031) it is
+            // load-bearing: the creation service refuses an unresolved caller (403 owner_unresolved, no row written).
+            // For Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 
@@ -1441,6 +1938,27 @@ public static class OfficeEndpoints
 
             // Return 201 Created with location header
             return Results.Created(response.Url ?? $"/office/quickcreate/{entityType}/{response.Id}", response);
+        }
+        catch (SdapProblemException problem)
+        {
+            // Task 030: a structured creation refusal (owner unresolved → 403, invalid input → 400). No row was
+            // written. Rendered in this endpoint's ProblemDetails shape rather than letting the generic catch below
+            // turn a deliberate refusal into a 500.
+            logger.LogWarning(
+                "Quick create refused for {EntityType}: {Code} ({Status}), CorrelationId={CorrelationId}",
+                entityType, problem.Code, problem.StatusCode, traceId);
+
+            return Results.Problem(
+                type: $"https://spaarke.com/errors/office/{problem.Code}",
+                title: problem.Title,
+                detail: problem.Detail,
+                statusCode: problem.StatusCode,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = problem.Code,
+                    ["correlationId"] = traceId,
+                    ["entityType"] = entityType
+                });
         }
         catch (Exception ex)
         {

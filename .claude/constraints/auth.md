@@ -241,6 +241,30 @@ if (!result.IsAllowed)
 > repository.** Both modes run the same direct query `GET sprk_documents({id})` and grant at most
 > `AccessRights.Read` (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323,368-372`).
 >
+> > 🔴 **SUPERSEDED 2026-09-21** (`spaarkeai-word-add-in-r1` task 063). **Both sentences above are now
+> > false, and code written against them will be wrong.** They were **accurate when written on 2026-08-20**
+> > and went stale two days later — this is drift, not an error by the investigation that wrote them.
+> >
+> > | Claim above | Status today | Evidence |
+> > |---|---|---|
+> > | "zero call sites" | **FALSE** — `RetrievePrincipalAccess` appears in **22 files** under `src/server` | `grep -rl RetrievePrincipalAccess --include=*.cs src/server` |
+> > | "grant at most `AccessRights.Read`" | **FALSE** — the probe returns the caller's actual rights, `Write` included, and `send-to-index` now gates on `AccessRights.Write` | `Api/Ai/RagEndpoints.cs` (task 063) |
+> >
+> > **What changed**: `Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs` was **added 2026-08-22**
+> > (`7270a3ba0`, external-access task 008) — *two days after* the note above. It calls
+> > `RetrievePrincipalAccess` **OBO, as the caller**, and is now the shared per-record access primitive
+> > behind `QuickCreateSourceAccessFilter`, `EntityAccessFilter`, `RecordRouteAccessAuthorizationFilter`,
+> > `ContainerDocumentAuthorizationFilter`, `DelegationRuleFilter` and `TodoSourceAccessFilter` (task 064).
+> > It fails closed: every failure mode yields `AccessRights.None`.
+> >
+> > **The paragraph below about `AuthorizationService` passing `userAccessToken: null` was NOT re-verified
+> > by this correction** and should be treated as still-open until someone checks it. Do not read this
+> > supersession as clearing it.
+> >
+> > **Why the correction is stacked rather than rewritten**: the 08-20 finding is a true record of the
+> > repository at that date, and a project reading this file needs to know the claim existed, was right,
+> > and was overtaken — not merely that today's text says something different.
+>
 > Further, `Spaarke.Core/Auth/AuthorizationService.cs:48-52` always passes `userAccessToken: null`, so on
 > that path the probe runs **as the application, not as the caller** — it answers "can the app see this
 > record", not "can this user see it". Do not rely on `AuthorizationService` for caller-scoped access

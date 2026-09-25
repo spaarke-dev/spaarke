@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Every BFF error response is served as application/json, never application/problem+json (GitHub #975, ADR-019)</title>
+    <phase>2 Save flow</phase>
+    <gate>none</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the BFF's global exception middleware, which shapes EVERY error response in the API; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The defect and its cause are both precisely located; the work is a one-line content-type fix plus the test coverage that never existed. The judgment needed is about blast radius, which the constraints below fix.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, error-handling, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`UseSpaarkeMiddleware` sets `ctx.Response.ContentType = "application/problem+json"` and then calls `WriteAsJsonAsync(new {...})` without passing a content type. `WriteAsJsonAsync` unconditionally overwrites the header with `application/json; charset=utf-8`, so every `SdapProblemException`-driven error in the BFF — the majority of its error responses — is served as plain JSON. Fix the header and add the coverage that would have caught it.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core minimal-API middleware, RFC 7807 ProblemDetails and the BFF's error contract. Follow ADRs strictly.</role>
+
+  <goal>Every error response the global handler writes carries `Content-Type: application/problem+json`, its body is unchanged, and a test fails if the header regresses. No successful response changes.</goal>
+
+  <context>
+    <background>
+      Owner decision 2026-09-17: **GitHub #975 is assigned to THIS project** — not deferred, not handed to another project.
+      Issue #975 ("[ISS-003] Global exception handler serves application/json, never application/problem+json"), filed from this project. Full detail: `projects/spaarkeai-word-add-in-r1/notes/defer-issues.md#iss-003-...`.
+      Site: `src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs`, `UseSpaarkeMiddleware`. Re-locate by name; line numbers drift.
+      ADR-019 requires ProblemDetails for all HTTP failures, and RFC 7807 makes the media type part of that contract. A client that dispatches on `Content-Type` — rather than sniffing the JSON shape — cannot recognise a Spaarke error as an RFC-7807 problem today.
+      Proven not to be a fixture artifact: in the same in-process host, a 403 from `DocumentAuthorizationFilter` (which uses ASP.NET Core's own `Results.Problem` / `ProblemHttpResult`) DOES carry the right header. Only the hand-rolled middleware path is wrong.
+      Proven untested: `grep -rln "application/problem\+json" tests/` returned zero hits repo-wide when the issue was filed.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Exceptions/SdapProblemException.cs</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/ApiClient.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">The response BODY must not change — only the media type. Any client parsing the current body must keep working byte-for-byte.</constraint>
+    <constraint source="project">Blast radius: this changes the content type of EVERY error the global handler writes. Before changing it, find every consumer that branches on the response content type — at minimum the add-in's `ApiClient.ts`, the Compose and SpaarkeAi clients, and any test helper — and prove each still parses an error correctly. A consumer that checks for `application/json` exactly would break; if you find one, fix it in the same change or STOP and report.</constraint>
+    <constraint source="project">Prefer the framework's own mechanism over hand-rolled header juggling: pass the content type explicitly to `WriteAsJsonAsync`, or write the problem through the same `ProblemDetails` path the 403 filter already uses. State which you chose and why.</constraint>
+    <constraint source="ADR-038">Tests: a test that fails on today's code and passes after the fix, asserting the header on at least one `SdapProblemException`-driven status (and leaving the body assertions intact). Put it where the existing error-path tests live; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="project">BFF hygiene (root CLAUDE.md §10): publish size against a FRESH master build (Compress-Archive, short paths), CVE check, and a placement statement in the note.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md, ADR-019 and issue #975's note. Declare FULL, sonnet @ high, DIRECTIONAL. Run `/conflict-check` (BFF hot path).</step>
+    <step order="1">Reproduce: add the failing test first and show it failing on unchanged code.</step>
+    <step order="2">Survey the consumers named in the constraint; record what each does with the content type in `notes/050-problem-json-content-type.md`.</step>
+    <step order="3">Fix the header; keep the body identical.</step>
+    <step order="4">BFF build, the error-path and Office/Documents tests, ArchTests, and the full `Sprk.Bff.Api.Tests` once (branch baseline 12,314 passed / 0 failed / 56 skipped). If a client changed, run that package's gates too.</step>
+    <step order="5">Publish size + CVE; record deviations in the note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any shipped client branches on `application/json` for error handling and would break, STOP and report with the list before changing the header.</trigger>
+    <trigger>If fixing the header would also change the body shape (for example by switching to `ProblemDetails` with different member names), STOP — the body is part of the shipped contract and a body change needs its own decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The global handler already writes the body and intends the right header; it is overwritten by the framework call one line later.</existing>
+    <extension>Yes — one call's arguments plus tests; no new middleware, route or service.</extension>
+    <cost-of-doing-nothing>Every BFF error keeps claiming to be plain JSON, so any client that recognises RFC-7807 errors by media type cannot recognise ours, and ADR-019's contract stays untrue in the one place it is most visible.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/050-problem-json-content-type.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test that fails on the code before this task proves an `SdapProblemException`-driven response is served as `application/json`.</criterion>
+    <criterion testable="true">After the fix, that response carries `Content-Type: application/problem+json` and its body is byte-for-byte what it was.</criterion>
+    <criterion testable="true">Negative: a successful (2xx) response's content type is unchanged.</criterion>
+    <criterion testable="true">Every consumer that branches on error content type is listed in the note with evidence that it still parses an error correctly.</criterion>
+    <criterion testable="true">`dotnet build` green; the full `Sprk.Bff.Api.Tests` suite passes; publish size vs a fresh master build and the CVE result are recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-17 by the main session on the owner's decision that #975 belongs to this project. Close the GitHub issue when this merges.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

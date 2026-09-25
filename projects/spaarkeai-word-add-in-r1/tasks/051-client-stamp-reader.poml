@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-02 client half: read the custom XML stamp in the pane and apply the identity precedence</title>
+    <phase>1 Foundation</phase>
+    <gate>014 complete — the server must be writing the stamp before the client can read one</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.ts`/`.tsx` in the add-in's identity path, which decides whether a save becomes a new version or a new record. Tags include office-addins and save-flow.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The design is fully specified by task 014's note (§3 part shape, §9 precedence) and 019's four conditions. The work is careful wiring against a named contract, not a judgment call.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>014</deps>
+    <tags>office-addins, frontend, save-flow, identity</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Task 014 writes an invisible custom XML part carrying the `sprk_document` GUID into the stored bytes. Nothing reads it in the pane. Add the client-side reader and wire it into identity resolution at the correct precedence — a resolved cloud URL still wins; the stamp is the fallback that makes a downloaded, edited, re-uploaded document self-identify.</prompt>
+
+  <role>SPAARKE add-in developer. Expert in Office.js Common APIs, requirement-set gating, and the pane's identity-resolution path. Follow ADRs strictly.</role>
+
+  <goal>A document carrying a Spaarke stamp resolves to its `sprk_document` in the pane WITHOUT a Graph round-trip, at the precedence recorded below. A document with no stamp, an unreadable stamp, or disagreeing ids behaves exactly as it does today. The reader never throws into the save flow.</goal>
+
+  <context>
+    <background>
+      This task exists because task 014's design note (§9) found that **no task in TASK-INDEX owned the client half** — 015 (tab shell) is complete and did not do it, and 014 is server-side by construction. Unowned work belongs to this project (deferral policy, 2026-09-09), so it was created here rather than deferred.
+
+      **The four binding conditions inherited from task 019** (`notes/019-customxml-premise-and-manifest.md` §6) are this task's core contract:
+      1. Use the **COMMON API** `Office.context.document.customXmlParts` (`getByNamespaceAsync` then `getXmlAsync`). **DO NOT** use `Word.Document.customXmlParts` or `Word.Document.settings` — both are WordApi 1.4, and the manifest deliberately stays at 1.3 because a 1.4 bump would drop Office 2019 and 2021 LTSC, the volume-licensed tier enterprise legal departments run. Promisify the callback API the way `WordAdapter.getCompressedFile()` already does.
+      2. The part is found **by namespace**: `urn:spaarke:office:document-identity:1`, root element `&lt;documentIdentity&gt;`, content `&lt;documentId&gt;{guid}&lt;/documentId&gt;` in canonical bare-lowercase form. (Task 014 §3 owns the exact shape — re-read it rather than trusting this summary.)
+      3. A **missing stamp is a normal, recoverable state**, never corruption. Absent, unparseable, or more than one distinct Spaarke id ⇒ return `null` and fall back to task 012's path.
+      4. Guard the read at runtime with `Office.context.requirements.isSetSupported('CustomXmlParts')`. **EXTEND the existing helper `WordAdapter.checkRequirementSet()`** by making its `version` parameter optional (the bare one-arg call is correct for an unversioned set) — do not add a second helper (root CLAUDE.md §11).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/types.ts</file>
+      <file role="modify">src/client/office-addins/shared/services/documentIdentityService.ts</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/014-xml-part-stamp-decisions.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/013-document-identity-client-wiring.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">The server-side stamp. Until it ships there is nothing to read, and the namespace/part shape this task matches on is 014's to define.</dependency>
+    </dependencies>
+  </context>
+
+  <owner-decisions date="2026-09-17">
+    <decision name="precedence">**The binding precedence** (owner decision; task 014 note §9): (1) a cloud URL that resolves through task 012 (`resolved`) **WINS**; (2) the stamp is used when 012 answers `not_cloud_document`, `not_resolvable` or `not_spaarke_document`; (3) a resolved URL whose id **disagrees** with the stamp is `identity_conflict` — no default save target, and never a silent choice between them. ⚠️ Task 014's POML step 5 says "prefer the stamp" — that is **superseded**. Stamp-first has a documented data-loss case: a document copied into SPE through a non-stamping path carries its SOURCE's stamp X while its URL resolves to row W, so a default version save would write W's content into X's file.</decision>
+    <decision name="why-this-task-exists">Part of the owner's 2026-09-17 document-matching decision (A + C, B supporting). Option A is worth nothing without a reader: the server would stamp documents that the pane never recognises.</decision>
+  </owner-decisions>
+
+  <constraints>
+    <constraint source="project">MUST use the Common API per 019 condition 1. A `Word.Document.customXmlParts` call is a manifest-level regression that would silently drop Office 2019/2021 LTSC users.</constraint>
+    <constraint source="project">The reader MUST NOT throw into the save flow. Every failure mode — API unsupported, no part, malformed XML, disagreeing ids — resolves to `null` and falls back to the existing behaviour. A stamp read is an optimization, never a precondition for saving.</constraint>
+    <constraint source="project">**A stamp is a hint, never an authorization** (014 §3). Anyone can author a custom XML part carrying any GUID. The pane MUST still resolve the id through the existing authorized server read; nothing may be displayed or saved on the strength of the stamp alone.</constraint>
+    <constraint source="NFR-10">Gate on a declared **capability**, not on `hostType === 'word'`. Add the capability to `AdapterCapabilities` and have the view read it. This project has already regressed here once (task 020) — do not repeat it.</constraint>
+    <constraint source="ADR-044">The GUID read from the stamp is canonicalized bare-lowercase through the add-in's local `cleanGuid` before it crosses any boundary. Do NOT import `@spaarke/ui-components` (the ADR-012 path-A exception).</constraint>
+    <constraint source="ADR-012">Per this project's path-A exception: thin views under `shared/taskpane/`, no `@spaarke/ui-components` import.</constraint>
+    <constraint source="ADR-038">New tests go in NEW files and are added to `src/client/office-addins/ci-gated-suites.txt` **by the main session** — report the suite paths, do not edit that file yourself.</constraint>
+    <constraint source="project">Build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office.js Common API custom XML parts, requirement-set gating, pane identity resolution</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the project CLAUDE.md, task 014's note (§3 part shape, §9 precedence) and 019's §6 conditions. Declare FULL / sonnet / high / DIRECTIONAL.</step>
+    <step order="1">Extend `WordAdapter.checkRequirementSet()` to make `version` optional, then add a `canReadDocumentStamp` capability that reports `isSetSupported('CustomXmlParts')`.</step>
+    <step order="2">Implement the reader on the Word adapter: `getByNamespaceAsync(namespace)` → `getXmlAsync` → parse → return the canonical GUID, or `null` for every failure mode. Outlook returns the typed `CAPABILITY_NOT_SUPPORTED` the way `getDocumentUrl` already does.</step>
+    <step order="3">Wire it into `documentIdentityService.ts` at the precedence in the owner-decisions block — URL-resolved wins, stamp is the fallback, disagreement is `identity_conflict`.</step>
+    <step order="4">Tests in NEW files: a stamped document self-identifies with no Graph call; an unstamped one is unchanged; a malformed part is `null`; two disagreeing ids are `null`; disagreement with a resolved URL is `identity_conflict`; the capability is false when the requirement set is absent.</step>
+    <step order="5">Run `npx tsc --noEmit` (production must stay 0), `npm run build`, and `npx jest --ci`. Report the suite paths for the main session to gate.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Common API cannot read a part that task 014 demonstrably wrote (019's premise failing in a live host), STOP and report — that invalidates option A itself, and the owner's decision rests on the part being readable.</trigger>
+    <trigger>If honouring the precedence would require a change to task 012's server contract, STOP — that contract is shipped and deployed.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`documentIdentityService.ts` (task 013) already maps every identity outcome to a discriminated union; `WordAdapter.checkRequirementSet()` already gates requirement sets. Both are extended, not duplicated.</existing>
+    <extension>Yes — one new adapter method, one new capability, one new branch in the existing resolver. No new service, route or package.</extension>
+    <cost-of-doing-nothing>Task 014 would stamp every saved document and nothing would ever read it: a downloaded, edited, re-uploaded document would still fork its record on every round trip, which is the exact failure the owner's decision was made to stop.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/adapters/WordAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/services/documentIdentityService.ts</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/051-client-stamp-reader.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document carrying a valid Spaarke stamp and no resolvable cloud URL, when the pane resolves identity, then it resolves to that `sprk_document` with no Graph round-trip.</criterion>
+    <criterion testable="true">Given a document whose cloud URL resolves AND which carries a stamp with the SAME id, when identity resolves, then the outcome is `resolved` (the URL path wins; the result is identical either way).</criterion>
+    <criterion testable="true">Given a resolved cloud URL whose id DISAGREES with the stamp, when identity resolves, then the outcome is `identity_conflict` and no default save target is offered.</criterion>
+    <criterion testable="true">Negative: given no stamp, a malformed part, or two disagreeing Spaarke ids, then the reader returns `null`, no error surfaces, and behaviour is exactly as before this task.</criterion>
+    <criterion testable="true">Negative: given a host without the `CustomXmlParts` requirement set, then the capability is false, the reader is never called, and saving is unaffected.</criterion>
+    <criterion testable="true">Negative: `grep` shows no `hostType === 'word'` added by this task (NFR-10) and no `Word.Document.customXmlParts` / `Word.Document.settings` usage (019 condition 1).</criterion>
+    <criterion testable="true">`npx tsc --noEmit` production errors remain 0; `npm run build` exits 0; `npx jest --ci` shows no new failing suite beyond the ten known ones.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-17 by the main session. The owner's document-matching decision (A + C, B supporting) authorized option A, and task 014's note §9 recorded that no task owned the client half. Filing it here rather than deferring follows the 2026-09-09 deferral policy: unowned work belongs to this project.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

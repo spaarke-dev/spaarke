@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>The authorization census has never looked at the Office surface — govern it, and fix the filter regex that would false-flag it</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>startable — no dependencies. MUST land before 062-067.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the repository's authorization governance test. Tags include security + testing. A defect here silently disables the guard for every route it claims to cover.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security governance with a known trap: the naive fix (add the file to GovernedFiles) false-flags four correctly-gated routes while correctly flagging the ungated ones. Getting the regex and the classification right in one change requires reading both sides carefully.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Prerequisite for the entire 062-067 wave; also edits a shared ArchTests file.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, security, authorization, testing, office</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`RouteAuthorizationGuardTests.GovernedFiles` contains no `Api/Office/*` entry, so the entire Office route surface is classified as serving no Dataverse content — which is false. Govern it, and in the same change fix the `FilterMarker` regex that would otherwise false-flag the routes that ARE correctly gated.</prompt>
+
+  <role>SPAARKE platform developer. This is a governance fix: the deliverable is a test that would have caught findings F1-F5, not the fixes themselves.</role>
+
+  <goal>Every Office and Rag route that serves or mutates Dataverse content is governed by `RouteAuthorizationGuardTests`, the guard recognises all four Office-family filter names, and removing any route's filter turns the test red.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable model-level review (`notes/fable-review-2026-09-21.md` §2).
+
+      `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` `GovernedFiles` (`:111-252`) contains **no
+      `Api/Office/*` entry** and no `Api/Ai/RagEndpoints.cs`. The waiver list (`:327-471`) has no Office route
+      either. So `OfficeEndpoints.cs` and `CommunicationsEndpoints.cs` fall into the 117 files counted at
+      `:581` as *"serves no document or Dataverse content"* (`:84-86`).
+
+      That classification is **false**. `/office/save` writes `sprk_document` rows and file bytes;
+      `/office/search/entities` reads Dataverse rows; `/office/todo` writes `sprk_todo` with regarding
+      lookups; `/office/documents/{id}/generate-profile` mutates a document. `RagEndpoints.cs`
+      `send-to-index` both reads and writes `sprk_document`.
+
+      **This misclassification is the root cause of findings F1-F5.** No test would ever notice any of those
+      routes losing a filter, which is why an untrimmed app-only enumeration has sat on a live route.
+
+      **THE TRAP.** `FilterMarker` (`:1408-1411`) matches only `\.Add\w*AuthorizationFilter` or
+      `AddEndpointFilter&lt;*Authorization|Access*Filter&gt;`. It does **not** match `AddEntityAccessFilter`,
+      `AddJobOwnershipFilter`, `AddQuickCreateSourceAccessFilter` or `AddOfficeAuthFilter`. Classifying
+      `OfficeEndpoints.cs` as `RouteLevelGate` today would therefore **false-flag `/save`, `/jobs/*` and
+      `/quickcreate`** — routes that ARE correctly gated — while correctly flagging the rest. A false-flag
+      storm is how a governance test gets waived wholesale, which would be worse than the status quo.
+
+      `Api/Ai/VisualizationEndpoints.cs` IS governed on this branch (`:174-186`), added by task 032. That
+      entry is the worked example to copy.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">MUST fix the `FilterMarker` recognition and add the `GovernedFiles` entries in the SAME change. Adding governance without fixing the regex produces false flags; fixing the regex without adding governance changes nothing.</constraint>
+    <constraint source="this task">MUST NOT add a waiver to silence a route that is genuinely ungated. A genuinely-ungated route is finding F1-F5's subject matter and is fixed by tasks 062-067, not waived here. Waivers are only for routes that are authorized by a mechanism the regex cannot see, and each one needs a one-line reason.</constraint>
+    <constraint source="ADR-008">Use the existing endpoint-filter vocabulary. If a filter must be renamed to be recognised, rename it everywhere in the same change and verify the build.</constraint>
+    <constraint source="ADR-038">This is a MAINTAIN-class governance test at a KEEP path (`tests/Spaarke.ArchTests/**`). Do not add scaffolding tests alongside it.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Api/Office/OfficeEndpoints.cs`, `Api/Office/CommunicationsEndpoints.cs` and `Api/Ai/RagEndpoints.cs` appear in `GovernedFiles` with the correct rule kind, mirroring the `VisualizationEndpoints.cs` entry at `:174-186`.</criterion>
+    <criterion testable="true">`FilterMarker` recognises `AddEntityAccessFilter`, `AddJobOwnershipFilter`, `AddQuickCreateSourceAccessFilter` and `AddOfficeAuthFilter` — OR those four are renamed to match the existing pattern and every call site is updated. State which approach was taken and why.</criterion>
+    <criterion testable="true">SEED TEST, BOTH DIRECTIONS: remove the filter from a correctly-gated route (`/office/quickcreate`) and show the guard goes RED; restore it and show GREEN. Record both observed outputs verbatim in the task note. A governance test that has not been seen to fail proves nothing.</criterion>
+    <criterion testable="true">NEGATIVE CASE: the guard flags `/office/search/entities`, `/office/todo` and `send-to-index` as ungated — i.e. it reproduces findings F1, F3 and F2 independently. Record the flagged list; it becomes the checklist for 062-067.</criterion>
+    <criterion testable="true">No route that is correctly gated today is flagged. Enumerate every flagged route and classify each as "genuine gap (owned by task NNN)" or "false flag (fix before merging)". Zero false flags at merge.</criterion>
+    <criterion testable="true">The "serves no document or Dataverse content" count at `:581` is updated and the new number is stated in the task note with its derivation.</criterion>
+    <criterion testable="true">Full ArchTests suite green. Report pass count and reconcile against the recorded 191/191.</criterion>
+    <criterion testable="true">Test scope: cover the governance contract plus the two seed directions and the false-flag enumeration named above. Anything beyond that needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If fixing the regex produces more than a handful of flags on route families OUTSIDE the Office/Rag surface, STOP and escalate per CLAUDE.md §6 — that is a repo-wide authorization finding, not this task's scope, and it needs its own owner decision before a sweeping change lands.</trigger>
+    <trigger>If a route can only be governed by adding a waiver, STOP. Write down which route and why, and escalate — a waiver added during a governance-hardening task is exactly how this gap was created.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read `RouteAuthorizationGuardTests.cs` end to end: `GovernedFiles`, the waiver list, `FilterMarker`, and the `VisualizationEndpoints.cs` entry as the worked example.</step>
+    <step>Fix `FilterMarker` (or rename the four filters) and verify the build before adding any governance entry.</step>
+    <step>Add the three `GovernedFiles` entries.</step>
+    <step>Run the guard. Enumerate every flag. Classify each as genuine gap or false flag.</step>
+    <step>Eliminate every false flag. Leave genuine gaps flagged — they are 062-067's checklist.</step>
+    <step>Seed both directions on `/office/quickcreate` and record the observed output.</step>
+    <step>Full ArchTests. Write `notes/061-route-census.md` with the seed evidence, the flag classification and the updated count derivation.</step>
+    <step>Update TASK-INDEX.md: 061 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/JobOwnershipFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/QuickCreateSourceAccessFilter.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/061-route-census.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</file>
+    </files>
+    <patterns>
+      <pattern name="Governed route census entry" location="tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs">
+        Lines 174-186 — the `VisualizationEndpoints.cs` entry added by task 032. Copy its shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <outputs>
+    <file>tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/061-route-census.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. This task is a prerequisite for 062-067 — do not start those until this is ✅.</protocol>
+  </execution>
+</task>

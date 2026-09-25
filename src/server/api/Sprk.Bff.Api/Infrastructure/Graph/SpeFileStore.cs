@@ -293,7 +293,11 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, conflictBehavior, ct);
 
-    public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+    // `virtual` (spaarkeai-word-add-in-r1 task 023) for the same module-boundary-test-double reason as
+    // UploadSmallAsync/DeleteFileAsync: the Office version save (FR-11) writes a new SPE version of an
+    // EXISTING drive item through this call, and the one-row + same-item invariants are only verifiable if a
+    // test can observe which item was written — and prove, on refusal paths, that nothing was. No behaviour change.
+    public virtual Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
@@ -367,6 +371,21 @@ public class SpeFileStore : ISpeFileOperations
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.GetContentStreamAsUserAsync(ctx, driveId, itemId, ct);
+
+    /// <summary>
+    /// FR-01 (task 012): resolves an absolute document URL to the SPE drive item it names, as the caller, via
+    /// Graph <c>/shares</c>. See <see cref="DriveItemOperations.ResolveSharedItemAsUserAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>virtual</c> so a test can substitute resolution at this facade — the seam ADR-007 designates for SPE
+    /// access — instead of faking Graph SDK internals (transport-shaped mocking, banned by ADR-038). Same
+    /// precedent as <see cref="CreateContainerAsync"/>.
+    /// </remarks>
+    public virtual Task<SpeSharedItemResolution> ResolveSharedItemAsUserAsync(
+        HttpContext ctx,
+        Uri documentUrl,
+        CancellationToken ct = default)
+        => _driveItemOps.ResolveSharedItemAsUserAsync(ctx, documentUrl, ct);
 
     // =========================================================================
     // SPE change-detection facade (spaarkeai-compose-r2 FR-26, task 052)

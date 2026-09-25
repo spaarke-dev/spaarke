@@ -97,16 +97,30 @@ public class OfficeSaveContainerProvenanceTests
 
     /// <summary>
     /// TargetEntity remains optional, and that is deliberate — but it means the no-record branch is
-    /// reachable by contract. Pinning it here so a future reader does not assume a record is guaranteed:
-    /// the container for that branch comes from configuration, server-side, and is fail-closed when
-    /// unset. It is NOT derived from the acting user's business unit.
+    /// reachable by contract. Pinning it here so a future reader does not assume a record is guaranteed.
     /// </summary>
     /// <remarks>
-    /// The acting-user derivation was this task's original brief and was deliberately not implemented:
-    /// <c>RecordContainerResolver</c>'s own contract argues against it, because users sit in the
-    /// Operations subtree while secure records are owned in Secure Projects — so acting-user resolution
-    /// writes a secure record's content into the general Operations container, the exact isolation
-    /// failure this project exists to close.
+    /// <para><b>⚠️ AMENDED 2026-09-21 (spaarkeai-word-add-in-r1 task 065).</b> This remark used to say the
+    /// no-record container "comes from configuration … It is NOT derived from the acting user's business
+    /// unit", and that the acting-user derivation "was deliberately not implemented". Both halves are now
+    /// out of date. The no-record branch asks
+    /// <c>RecordContainerResolver.ResolveForActingUserAsync</c> FIRST and uses
+    /// <c>EmailProcessing:DefaultContainerId</c> only as the last resort.</para>
+    ///
+    /// <para><b>The reasoning that rejected it has not been overturned — its scope has been stated.</b>
+    /// <c>RecordContainerResolver.ResolveForRecordAsync</c>'s argument (users sit in the Operations
+    /// subtree while secure records are owned in Secure Projects, so acting-user resolution writes a
+    /// secure record's content into the general Operations container) is about a save that NAMES A
+    /// RECORD, and that case is untouched — pinned by
+    /// <c>OfficeSaveNoTargetContainerContractTests.PostOfficeSave_WithATargetEntity_DoesNotConsultTheActingUsersBusinessUnit</c>.
+    /// On the no-record branch nothing can be secure, which <c>ResolveForActingUserAsync</c>'s own
+    /// contract states as fact rather than assumption, and that branch is task 076's owner-sanctioned
+    /// shape.</para>
+    ///
+    /// <para><b>And the premise that made "contract-only" sound safe was false.</b> Task 065 found that
+    /// the Word ribbon quick-save, every FR-11 version save and every pane save with no "Related to"
+    /// selected all send no target — so this branch is the route's mainline traffic, not a contract
+    /// placeholder.</para>
     /// </remarks>
     [Fact]
     [Trait("Category", "OfficeSaveContainerProvenance")]

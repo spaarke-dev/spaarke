@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-16 — Find returns documents only, can never leave its empty state in Outlook, and never becomes available for a document saved in the current session</title>
+    <phase>5 Remediation — spec integrity</phase>
+    <gate>blocked — requires 063 (send-to-index authorization, which Find's Run Index calls)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Implements client and server behaviour across the Find surface. Tags include frontend + react + bff-api. Modifies `.tsx`/`.ts`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The records bridge is an unresolved design question from discovery (finding F-c): no single endpoint returns similar documents AND records, and the two candidate paths have different authorization models.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Find-view client files are disjoint from 076's server work.</parallel-reason>
+    <deps>063</deps>
+    <tags>frontend, react, fluent-ui, typescript, bff-api, ai, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Find ships documents-only against a spec that says documents and records; its tab can never leave state 1 in Outlook; and a document saved this session never becomes findable. Close all three.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Find behaves as FR-16 specifies in both hosts, including for a document saved in the current session.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable spec-coverage review (`notes/fable-review-2026-09-21.md` §5).
+
+      **(a) Documents only.** `FindResultsList.tsx:29-30` renders documents; parent hubs appear in a labelled
+      "not a similarity match" section. Task 034 deferred the records half by decision note and the spec was
+      never amended. Discovery finding **F-c** is the underlying reason: no single endpoint returns similar
+      documents AND records. `/api/ai/visualization/related/{documentId}` is documents-only;
+      `POST /api/ai/search/records` has real per-row authorization but is **query-text driven and accepts no
+      source document**. The bridge is a real design decision — two calls with a text seed, or something else.
+
+      **(b) Outlook can never leave state 1.** `FindView.tsx:101` maps `documentIdentity === undefined` to
+      the `no-document` state, and Outlook has no identity resolution at all. So the Find tab this project
+      added to Outlook shows "Save this document to Spaarke" forever.
+
+      **(c) No post-save transition.** `App.tsx:712` updates `savedContext.documentId` on save, but
+      `FindView` receives only `documentIdentity` (`:748`), which is set solely by resolution (`:306`,
+      `:316`). A desktop-sourced document saved in this session stays in state 1 and cannot reach Run Index
+      without being reopened from Spaarke — and since the open document is unstamped, the stamp fallback
+      cannot rescue it either. Recorded as out of scope in `notes/033-*.md:43-50`; no task owned it.
+
+      All three are FR-16 acceptance gaps, not enhancements.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">The records half MUST come from a path with real per-row authorization. `POST /api/ai/search/records` has one (`RecordSearchAuthorizationFilter` + `AuthorizeRowsAsync`); do not bolt records onto an unauthorized path to satisfy the spec.</constraint>
+    <constraint source="ADR-051">Keep the infinite lazy-scroll list; no pager. The existing `useLazyResults` IntersectionObserver sentinel is the reference.</constraint>
+    <constraint source="ADR-012">No `@spaarke/ui-components` imports and no `Xrm.` references in the add-in — the project-scoped Path A exception holds.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; verify dark mode.</constraint>
+    <constraint source="this task">If Outlook cannot resolve a document identity at all, then "Find works in Outlook" may be unachievable as specified — in that case amend FR-16 with the evidence rather than leaving a permanently dead tab. Decide; do not ship the dead tab unchanged.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: record all three current behaviours verbatim — documents-only results, Outlook's permanent state 1, and the post-save non-transition.</criterion>
+    <criterion testable="true">Find returns documents AND records, with records coming from a per-row-authorized path. State the bridge design chosen and why, and show a negative test: a record the caller cannot read does not appear.</criterion>
+    <criterion testable="true">Outlook's Find tab reaches a useful state — or FR-16 is amended with recorded evidence that it cannot, and the tab is hidden or given honest copy rather than left permanently empty.</criterion>
+    <criterion testable="true">A document saved in the current session becomes findable without reopening it from Spaarke: after a save, Find transitions out of state 1 and Run Index is reachable.</criterion>
+    <criterion testable="true">Lazy scroll still behaves per ADR-051 with the mixed result set.</criterion>
+    <criterion testable="true">Dark mode verified per ADR-021; no hard-coded colours.</criterion>
+    <criterion testable="true">All 56 jest suites green (post-071); the Find suites cover the three fixed behaviours.</criterion>
+    <criterion testable="true">Test scope: the records bridge with its negative authorization case, the Outlook decision, the post-save transition, and lazy scroll over mixed results. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the records bridge requires a NEW BFF endpoint, STOP and escalate per CLAUDE.md §6 and §10 — a new route needs a Placement Justification and an owner decision, and discovery finding F-c deliberately left this open rather than presuming one.</trigger>
+    <trigger>If Outlook identity resolution turns out to require Graph or manifest changes beyond this project's surface, STOP — amending FR-16 is then the correct outcome, and that is an owner call.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Reproduce all three behaviours; record verbatim.</step>
+    <step>Design the records bridge against the authorization constraint; escalate if it needs new surface.</step>
+    <step>Fix the post-save transition — the narrowest of the three, and the one with a clear cause (`App.tsx:712` vs `:748`).</step>
+    <step>Decide Outlook: make it work, or amend FR-16 with evidence and fix the copy.</step>
+    <step>Verify lazy scroll and dark mode.</step>
+    <step>Run all 56 jest suites; run the UI tests.</step>
+    <step>Write `notes/077-find-gaps.md`. Update TASK-INDEX.md: 077 → ✅.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Find returns documents and records">
+      <steps>
+        <step>Open a Spaarke-sourced document in Word; open the pane; select the Find tab</step>
+        <step>Verify both document results and record results render, visually distinguishable</step>
+        <step>Verify the "not a similarity match" parent-hub section is still labelled honestly</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Mixed results render with no console errors</expected>
+    </test>
+    <test name="Post-save transition">
+      <steps>
+        <step>Open a desktop-sourced (unstamped) document in Word</step>
+        <step>Save it to Spaarke from the Save tab</step>
+        <step>Switch to the Find tab WITHOUT reopening the document</step>
+      </steps>
+      <expected>Find is out of the "Save this document" state and Run Index is reachable</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle the Office theme to dark</step>
+        <step>Verify result rows, section headers and the empty state adapt</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colours resolve from Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useLazyResults.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/077-find-gaps.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>.claude/adr/ADR-021-fluent-theme-tokens.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/infinite-scroll-list.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-row authorized record search" location="src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs">
+        `POST /api/ai/search/records` already has real per-row authorization via `AuthorizeRowsAsync`. It is query-text driven and takes no source document — that gap is the bridge design problem.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/077-find-gaps.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 063 must be ✅ first — Run Index calls that route.</protocol>
+  </execution>
+</task>

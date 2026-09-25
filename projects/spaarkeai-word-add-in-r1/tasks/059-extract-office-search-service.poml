@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Extract the search cluster out of OfficeService into OfficeSearchService</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>blocked until 058 AND 068 merge — 058 deletes SearchDocumentsAsync from this same cluster, and 068 removes the three dispatcher ctor params. RE-SCOPED 2026-09-21: the primary work is now the six optional ctor params, not the search extraction. See the RE-SCOPE block in background.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` on the deployed Office spine; tags include bff-api. A pure move with no behaviour change is still a change to a hot-path file shared with another active worktree.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical extraction with an explicit member list and a canonical sibling to copy (`OfficeDocumentPersistence`, `OfficeStorageUploader` — collaborators OfficeService already delegates to). No design judgment once 058 has settled the member set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`OfficeService.cs` is hot-path and shared with `unified-access-control-r2`.</parallel-reason>
+    <deps>058,068</deps>
+    <tags>bff-api, api, office, refactor</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move the entity-search and matter-type cluster out of OfficeService into a new OfficeSearchService. Behaviour must not change. IOfficeService must not change.</prompt>
+
+  <role>SPAARKE platform developer performing a behaviour-preserving extraction.</role>
+
+  <goal>OfficeService no longer owns entity search. Its constructor loses the dependencies only search used. Every route behaves exactly as before.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-19 by this project's pre-wrap-up `/code-review`. `OfficeService.cs` is **3,479 lines with
+      18 constructor parameters** (12 required, **6 nullable-with-default**) against ADR-010's critical
+      threshold of **&gt;7**, and this project alone added **+1,007 lines** to it (2,472 → 3,479).
+
+      Size is not the finding — `COMPONENT-COMPLEXITY.md` is explicit that a large cohesive file is legitimate.
+      The finding is **ten distinct responsibility clusters in one class**: save spine, job status/SSE, entity
+      search, matter types, document search, share links, quick-create, To Do, recent/favorites, attachments.
+      The six OPTIONAL constructor dependencies are the sharpest signal — an optional ctor dep is how a class
+      says *some callers need only part of me*.
+
+      Task 058 removes three of those clusters by deletion. This task removes one more by extraction.
+
+      ## 🔴 RE-SCOPED 2026-09-21 — the cut below is the WRONG ONE
+
+      The Fable architecture review (`notes/fable-review-2026-09-21.md` §4) answered the cohesion question
+      properly and found this task aimed at the least valuable target.
+
+      **The save spine (`OfficeService.cs:148-1473`) is genuinely cohesive** — every method in it exists
+      because of the save invariants that tasks 039/045/046/047/054/055 each established reproduce-first.
+      CLAUDE.md §11.5 says leave it. Extracting **search** removes ~300 already-cohesive lines and **one**
+      constructor parameter. It is the cheapest move with the smallest payoff.
+
+      **What actually makes the constructor 18-wide:**
+
+      1. **Six optional ctor params** (`:89-94`) — `emailUploadCapture`, `dataverseClient`,
+         `genericEntityService`, `scopeFactory`, `documentProfileAi`, `appLifetime` — each commented
+         *"so bare test constructions keep compiling"* (`:52`, `:56`, `:59-60`, `:70`).
+         **`grep -rn "new OfficeService(" tests/` returns NOTHING.** The justification is for tests that do
+         not exist; the three test consumers substitute the interface. Every one of these dependencies is
+         registered unconditionally in production, so their null-fallback branches — `:1638-1648`,
+         `:1881-1884`, `:2345-2349`, `:2494-2498`, `:2619-2622` — are **unreachable and untested**. The
+         empty-list-200 at `:1881` is the P2-quiet-null shape ADR-032 forbids (dead, but wrong-shaped).
+      2. **Three more params** exist only to hand-build `OfficeProfileDispatcher` in the constructor
+         (`:116`) to honour *"ADR-010: no new DI registration"* (`:67-70`). **ADR-010 does not say that** —
+         it says register concretes inside feature modules
+         (`.claude/adr/ADR-010-di-minimalism.md:25-36`). The constructor grew 14 → 18 to comply with a rule
+         that does not exist. **Task 068 removes these three** by deleting the dispatcher.
+
+      So: 058 deletes the stub clusters, 060 extracts job status (the one genuinely correct extraction),
+      068 removes three params, and **this task's real job is the six optional params and their dead
+      branches** — taking the constructor to roughly 10 **with no new service class**.
+
+      **The search extraction is now OPTIONAL** and comes last, only if it still looks worthwhile after the
+      above. **The `line count drops by at least 250` criterion is DELETED** — it is exactly the metric
+      CLAUDE.md §11.5 forbids, and the God-class LOC ratchet was retired 2026-08-20 for this reason.
+    </background>
+    <notes>
+      **ORDER MATTERS.** 058 deletes `SearchDocumentsAsync` + `GenerateStubDocumentResults`, which live in this
+      cluster. Extract first and you move code that is about to be deleted, then delete it from its new home —
+      two PRs of churn for nothing. Hence `deps: 058`.
+
+      **INTERFACE-LAST IS DELIBERATE.** `IOfficeService` has 27 members and 9 consumers including three test
+      fixtures. This task does NOT touch it: `OfficeService` keeps its search members and delegates to the new
+      service. Splitting the interface is a separate, later decision — and may never be worth making, since
+      ADR-010 permits registering the concrete classes directly and retiring the facade quietly.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="this task">MUST be behaviour-preserving. No signature, response shape, error code or log message changes. If a bug is found during the move, record it and file a follow-up — do NOT fix it here, or the diff stops being reviewable as a move.</constraint>
+    <constraint source="ADR-010">Register the new service as a CONCRETE class. Do NOT introduce an `IOfficeSearchService` interface — a single implementation with no seam is the interface-with-single-implementation smell.</constraint>
+    <constraint source="CLAUDE.md §10">Register via the existing `OfficeModule` feature-module extension, never flat in `Program.cs`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>PRIMARY (added 2026-09-21): the six optional constructor parameters at `OfficeService.cs:89-94` are made REQUIRED or removed, and their unreachable null-fallback branches (`:1638-1648`, `:1881-1884`, `:2345-2349`, `:2494-2498`, `:2619-2622`) are deleted.</criterion>
+    <criterion>PRIMARY (added 2026-09-21): the "bare test constructions" premise is re-verified first — run `grep -rn "new OfficeService(" tests/` and record the result. If it now returns something, STOP and re-plan; the premise for this change would be wrong.</criterion>
+    <criterion>PRIMARY (added 2026-09-21): the constructor parameter count is stated before and after, and reconciled with task 068's three-param reduction so the two tasks' effects are not double-counted.</criterion>
+    <criterion>PRIMARY (added 2026-09-21): the ADR-010 misreading at `OfficeService.cs:67-70` is corrected — the comment must not claim ADR-010 forbids a DI registration when it does not.</criterion>
+    <criterion>DELETED 2026-09-21 — the `OfficeService.cs line count drops by at least 250` criterion is REMOVED. Do not reinstate it or any other LOC target; CLAUDE.md §11.5 forbids gating on line count and the God-class ratchet was retired 2026-08-20.</criterion>
+    <criterion>OPTIONAL (re-scoped 2026-09-21) — the search extraction below is now a judgment call to make AFTER the parameter work. If the class is coherent at ~10 params without it, say so and skip it; record the reasoning either way. Skipping is a legitimate outcome.</criterion>
+    <criterion>If extracted: new `Services/Office/OfficeSearchService.cs` holds: `SearchEntitiesAsync`, `GetMatterTypesAsync`, `QuerySearchEntityAsync`, `MapSearchRow`, `MapMatterTypeRow`, `GetJsonString`, `GetEntityTypesToSearch`, `GetLogicalName`, and the `EntitySearchMeta` type.</criterion>
+    <criterion>`OfficeService` delegates its search members to the new service; `IOfficeService` is UNCHANGED.</criterion>
+    <criterion>Registered as a concrete class in `OfficeModule`, unconditionally (an unconditionally-mapped endpoint requires unconditional registration — RB-T028).</criterion>
+    <criterion>`OfficeService`'s constructor parameter count DROPS. State the before and after numbers explicitly in the task note.</criterion>
+    <criterion>The existing search tests pass UNMODIFIED — that is the proof the move preserved behaviour. Name them in the note. If any test needs changing, the move was not behaviour-preserving: stop and explain.</criterion>
+    <criterion>Full BFF suite green; ArchTests 191/191; publish size measured against a fresh master build.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any search member cannot move without changing behaviour — e.g. it reads private OfficeService state that other clusters also mutate — STOP and report. That is a genuine coupling finding and changes the decomposition plan rather than being worked around.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Confirm 058 has merged and the member set is final.</step>
+    <step>/conflict-check.</step>
+    <step>Create the service; move members verbatim; wire delegation; register in OfficeModule.</step>
+    <step>Run the search tests UNMODIFIED; then the full suite.</step>
+    <step>Record before/after ctor-param and line counts in `notes/059-extract-office-search-service.md`.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="new">src/server/api/Sprk.Bff.Api/Services/Office/OfficeSearchService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/059-extract-office-search-service.md</file>
+  </relevant-files>
+
+  <justification>
+    <existing>`OfficeService.cs:1620-1930` — the search cluster is already a contiguous, self-contained block with its own `Query*`/`Map*` helpers. Grep evidence: `SearchEntitiesAsync`, `GetMatterTypesAsync`, `QuerySearchEntityAsync`, `MapSearchRow`, `MapMatterTypeRow`, `GetJsonString`, `GetEntityTypesToSearch`, `GetLogicalName` appear only within that range and are called only from it.</existing>
+    <extension>No — the point is to REMOVE surface from `OfficeService`, so extending it is the opposite of the goal. The new class is a peer of the existing `OfficeDocumentPersistence` / `OfficeStorageUploader` collaborators that `OfficeService` already delegates to; this follows that established shape rather than inventing one.</extension>
+    <cost-of-doing-nothing>`OfficeService` keeps 18 constructor dependencies against ADR-010's critical threshold of 7, and every future Office task keeps editing one 3,479-line file that four other tasks in this project already contended on. Concretely: `/conflict-check` has flagged `OfficeService.cs` on tasks 014, 025, 031, 052 and 055, and `unified-access-control-r2` holds unpushed edits to it right now.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeSearchService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/059-extract-office-search-service.md</file>
+  </outputs>
+</task>

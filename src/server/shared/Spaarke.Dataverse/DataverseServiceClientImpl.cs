@@ -276,8 +276,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var document = new Entity("sprk_document");
         document["sprk_documentname"] = request.Name;
 
+        // FR-02 (spaarkeai-word-add-in-r1 task 014): honour a caller-supplied primary key. The Office document
+        // CREATE path pre-assigns the id so it can be stamped into the bytes it uploads before this row exists;
+        // see CreateDocumentRequest.Id. Every other caller leaves Id null and Dataverse mints the key as before.
+        if (request.Id is { } suppliedId && suppliedId != Guid.Empty)
+        {
+            document.Id = suppliedId;
+        }
+
         if (!string.IsNullOrEmpty(request.Description))
             document["sprk_documentdescription"] = request.Description;
+
+        // Ownership (spaarkeai-word-add-in-r1 task 080, owner decision 2026-09-22): assign the row to the
+        // acting user's business-unit DEFAULT OWNER TEAM. owningbusinessunit then DERIVES from the team and
+        // is never set directly.
+        //
+        // Until this, nothing set an owner here at all, so Dataverse defaulted it to the calling identity —
+        // an application user, which lives in the ROOT business unit. Measured 2026-09-22: ALL 512 existing
+        // sprk_document rows sit in root, with owningteam null on every one. Users sit in CHILD business
+        // units and Dataverse Deep depth traverses DOWNWARD (own BU plus descendants), so a child-BU user
+        // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
+        //
+        // Null is the pre-existing behaviour, preserved for callers outside the BFF. BFF callers resolve the
+        // team via IRecordOwnershipResolver and REFUSE when it is unresolved; they never fall through to
+        // app-only ownership, because that silently recreates the defect.
+        if (request.OwningTeamId is { } owningTeamId && owningTeamId != Guid.Empty)
+        {
+            document["ownerid"] = new EntityReference("team", owningTeamId);
+        }
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -303,6 +329,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                     "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
                     "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
                     "sprk_graphitemid", "sprk_graphdriveid", "statuscode", "createdon", "modifiedon",
+                    // Document Profile fields (task 021 / FR-07) — populated by AI via
+                    // DocumentProfileFieldMapper + written by CreateDocumentAsync below. Previously
+                    // selected nowhere: DocumentEntity already modeled Summary/Tldr/Keywords/
+                    // DocumentType as properties, but no caller of GetDocumentAsync ever selected or
+                    // mapped the underlying columns, so the pane-facing GET this task extends
+                    // (/api/v1/documents/{id}) always returned them null. sprk_filesummarystatus is
+                    // new (DocumentEntity.SummaryStatus, added task 021).
+                    "sprk_filesummary", "sprk_filetldr", "sprk_filekeywords", "sprk_filesummarystatus",
+                    "sprk_documenttype",
                     // Email fields (MapToDocumentEntityWithEmailFields)
                     "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
                     "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive", "sprk_parentdocument",
@@ -1493,7 +1528,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
-    private DocumentEntity MapToDocumentEntity(Entity entity)
+    /// <summary>
+    /// Maps a raw Dataverse <c>sprk_document</c> <see cref="Entity"/> to the read-model
+    /// <see cref="DocumentEntity"/>. Pure (no ServiceClient / no I/O) and uses no instance state,
+    /// so it is <c>public static</c> for direct testability — the SAME precedent as
+    /// <see cref="StageAnalysisRegardingFields"/> (this file) and <c>TodoRegardingBuilder
+    /// .ApplyResolverFieldsAsync</c>: a test constructs a real <see cref="Entity"/> with real
+    /// Dataverse-typed attribute values (<see cref="OptionSetValue"/> for Choice columns, etc.) and
+    /// calls this method directly, avoiding the tests/CLAUDE.md B8 ban on internal/reflection tests.
+    /// </summary>
+    /// <remarks>
+    /// Task 021 fail-then-pass regression (spaarkeai-word-add-in-r1): <c>sprk_documenttype</c> is a
+    /// Choice (Picklist) column — verified live 2026-09-12 — not free text. Reading it via
+    /// <c>entity.GetAttributeValue&lt;string&gt;("sprk_documenttype")</c> throws
+    /// <see cref="InvalidCastException"/> for any entity where the attribute is present, because the
+    /// underlying stored value is an <see cref="OptionSetValue"/>, not a <see cref="string"/>. Fixed
+    /// by preferring <c>entity.FormattedValues</c> (the SDK populates this on <c>Retrieve</c> with the
+    /// Choice's display label) and falling back to the raw numeric value only when no formatted value
+    /// is present. See <c>tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs</c> for the
+    /// regression test, which fails on the pre-fix line and passes on this one.
+    /// </remarks>
+    public static DocumentEntity MapToDocumentEntity(Entity entity)
     {
         // Handle ContainerId which could be either a lookup (EntityReference) or text field (string)
         string? containerId = null;
@@ -1525,6 +1580,33 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
             ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon"),
+
+            // Document Profile fields (task 021 / FR-07). GetAttributeValue<T> returns default(T) for
+            // any column not in the caller's ColumnSet, so this is safe to populate unconditionally
+            // across every caller of MapToDocumentEntity (list paths included) — callers that didn't
+            // select these columns simply get null back, exactly as before this change.
+            //
+            // sprk_filesummary / sprk_filetldr / sprk_filekeywords are Memo columns (verified live
+            // 2026-09-12) — stored as plain strings, so GetAttributeValue<string> is correct as-is.
+            Summary = entity.GetAttributeValue<string>("sprk_filesummary"),
+            Tldr = entity.GetAttributeValue<string>("sprk_filetldr"),
+            Keywords = entity.GetAttributeValue<string>("sprk_filekeywords"),
+            // sprk_documenttype is a Choice (Picklist) column — verified live 2026-09-12, corroborated
+            // by the writer at line ~850 (`new OptionSetValue(request.DocumentType.Value)`). The
+            // originally-shipped `entity.GetAttributeValue<string>("sprk_documenttype")` cast an
+            // OptionSetValue directly to string and threw InvalidCastException for any entity where
+            // the attribute was present — reachable from GET /api/v1/documents/{id} AND from
+            // VisualizationService's Find Similar entry point (GetDocumentAsync is its unconditional
+            // Step 1). Fixed: prefer the SDK-populated FormattedValues label (what the pane displays);
+            // fall back to the raw numeric value, stringified, only when no label is available. Never
+            // read as <string> or <OptionSetValue> without going through FormattedValues first — see
+            // tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs for the fail-then-pass proof.
+            DocumentType = entity.FormattedValues.TryGetValue("sprk_documenttype", out var documentTypeLabel)
+                ? documentTypeLabel
+                : entity.GetAttributeValue<OptionSetValue>("sprk_documenttype")?.Value.ToString(),
+            SummaryStatus = entity.Contains("sprk_filesummarystatus")
+                ? entity.GetAttributeValue<OptionSetValue>("sprk_filesummarystatus")?.Value
+                : null,
 
             // Search index tracking (multi-container-multi-index-r1 + R3 FR-3H3.2 dual-write) — used
             // by VisualizationService to bind the correct SearchClient for Find Similar against
@@ -1560,7 +1642,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 if (value is Guid guidValue)
                 {
-                    entity[fieldName] = guidValue;
+                    // Lookup fields require an EntityReference, not a bare Guid — the same shape of
+                    // special case the OptionSet fields below already need. sprk_initiatedby is the
+                    // creator lookup (spaarkeai-word-add-in-r1 task 067): it records WHICH Dataverse
+                    // user asked for this job, so job status can be authorized after the in-memory
+                    // entry is gone. Assigning a raw Guid to a lookup attribute throws, and the caller
+                    // catches and silently falls back to an in-memory-only job — so getting this wrong
+                    // would disable job durability rather than fail loudly.
+                    if (fieldName == "sprk_initiatedby")
+                    {
+                        entity[fieldName] = new EntityReference("systemuser", guidValue);
+                        _logger.LogDebug("Set {FieldName} = EntityReference(systemuser, {Value})", fieldName, guidValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = guidValue;
+                    }
                 }
                 else if (value is decimal decimalValue)
                 {
@@ -1701,14 +1798,47 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger.LogInformation("ProcessingJob {JobId} updated", id);
     }
 
+    /// <summary>
+    /// Reads a ProcessingJob, resolving the job's CREATOR to an Entra object id in the same round trip.
+    /// </summary>
+    /// <remarks>
+    /// spaarkeai-word-add-in-r1 task 067 (finding F5). This used a plain <c>RetrieveAsync</c> and returned
+    /// no creator at all, which is why the job-status authorization checks had nothing to compare a caller
+    /// against and (until this task) waved everyone through. It is now a <c>QueryExpression</c> with a
+    /// LEFT OUTER join onto <c>systemuser</c>, so the creator's <c>azureactivedirectoryobjectid</c> comes
+    /// back with the row rather than costing a second round trip on a polled path.
+    /// <para>
+    /// <b>Why the OID and not the systemuserid.</b> <c>sprk_initiatedby</c> necessarily stores a
+    /// systemuser reference, but every ownership comparison upstream is against the Entra OID that
+    /// <c>OfficeAuthFilter</c> extracts from the token. Resolving the join here means the two sides of that
+    /// comparison are the same identity currency by construction, instead of two namespaces that happen to
+    /// line up. Canonicalized bare-lowercase per ADR-044.
+    /// </para>
+    /// <para>
+    /// The join is LEFT OUTER on purpose: rows created before the creator was persisted still return, with
+    /// a null <c>InitiatedByOid</c>. The caller refuses those (the legacy-row rule) — that decision belongs
+    /// upstream, not in this reader, which reports honestly rather than filtering.
+    /// </para>
+    /// </remarks>
     public async Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _serviceClient.RetrieveAsync(
-            "sprk_processingjob",
-            id,
-            new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
-                           "sprk_idempotencykey", "sprk_correlationid"),
-            ct);
+        const string initiatorAlias = "initiator";
+
+        var query = new QueryExpression("sprk_processingjob")
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
+                                       "sprk_idempotencykey", "sprk_correlationid", "sprk_initiatedby"),
+            TopCount = 1,
+            NoLock = true
+        };
+        query.Criteria.AddCondition("sprk_processingjobid", ConditionOperator.Equal, id);
+
+        var initiator = query.AddLink("systemuser", "sprk_initiatedby", "systemuserid", JoinOperator.LeftOuter);
+        initiator.EntityAlias = initiatorAlias;
+        initiator.Columns = new ColumnSet("azureactivedirectoryobjectid");
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        var entity = results.Entities.FirstOrDefault();
 
         if (entity == null) return null;
 
@@ -1721,7 +1851,30 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
             Progress = entity.GetAttributeValue<int?>("sprk_progress"),
             IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
-            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
+            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid"),
+            InitiatedBy = entity.GetAttributeValue<EntityReference>("sprk_initiatedby")?.Id,
+            InitiatedByOid = ExtractAliasedGuid(entity, $"{initiatorAlias}.azureactivedirectoryobjectid")
+        };
+    }
+
+    /// <summary>
+    /// Reads an aliased join column as a canonical bare-lowercase GUID string (ADR-044), or null when the
+    /// join produced no row. Kept explicit because an aliased value arrives wrapped in
+    /// <see cref="AliasedValue"/> and silently reads as null if unwrapped.
+    /// </summary>
+    private static string? ExtractAliasedGuid(Entity entity, string aliasedAttributeName)
+    {
+        if (!entity.Contains(aliasedAttributeName))
+        {
+            return null;
+        }
+
+        var aliased = entity[aliasedAttributeName] as AliasedValue;
+        return aliased?.Value switch
+        {
+            Guid g when g != Guid.Empty => g.ToString("D"),
+            string s when Guid.TryParse(s, out var parsed) && parsed != Guid.Empty => parsed.ToString("D"),
+            _ => null
         };
     }
 
@@ -1740,6 +1893,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             },
             TopCount = 1
         };
+        // The NEWEST row with this key decides (spaarkeai-word-add-in-r1 task 039). A key can carry several rows
+        // once a failed attempt is retried, and the caller treats a Failed/Cancelled row as "not performed" — so
+        // an unordered TOP 1 could return the old failed row and re-run a save whose retry already completed.
+        query.AddOrder("createdon", OrderType.Descending);
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         var entity = results.Entities.FirstOrDefault();

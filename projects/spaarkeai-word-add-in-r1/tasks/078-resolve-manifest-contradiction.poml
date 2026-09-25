@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-05 requires a unified JSON manifest; what Word actually runs is the XML one — and task 011 was closed without verifying either</title>
+    <phase>5 Remediation — spec integrity</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the add-in manifest and the deploy path. Tags include deploy. An error here breaks installation for every user.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The decision — ship JSON or amend the FR — has real consequences for installation and for what the spec claims. Both branches need evidence, and the sideload verification cannot be faked.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Manifest and deploy files are disjoint from 076/077.</parallel-reason>
+    <deps>073</deps>
+    <tags>deploy, frontend, config, devops</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>FR-05 says the add-in installs and runs from a unified JSON manifest. It runs from `dist/word/manifest.xml`. Resolve the contradiction — either sideload and verify the JSON, or amend FR-05 with the evidence.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>The spec and the shipped artifact agree, and the agreement is backed by an observed installation.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable spec-coverage review (`notes/fable-review-2026-09-21.md` §5).
+
+      `word/manifest.json` is authored (`devPreview`) and webpack copies both formats, but **the registered
+      artifact is the XML** — `dist/word/manifest.xml`, version 1.0.9.0.
+      `notes/037-manifest-change.md:5-12` says plainly that *"the format actually live for Word"* is XML.
+
+      Task 011 is ✅ in the index but its POML still reads `<status>in-progress</status>`, and its acceptance
+      criteria 6 and 7 — sideload the **JSON** manifest on desktop and on web — were never verified. The
+      2026-09-18 "close" was an **XML re-upload**.
+
+      So FR-05 is recorded as satisfied on evidence that is about a different file format.
+
+      **Both outcomes are legitimate.** Unified JSON may be genuinely unavailable or unstable for this host
+      and channel, in which case amending FR-05 with that evidence is the correct, honest result. What is not
+      acceptable is leaving the spec asserting one thing and the artifact being another.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">A sideload verification means an OBSERVED installation — the add-in loads and its ribbon and pane work. A successful build of the JSON file is not verification.</constraint>
+    <constraint source="this task">If FR-05 is amended, the amendment MUST carry the evidence (what was attempted, what failed, on which host and channel) — not just a changed sentence.</constraint>
+    <constraint source="this task">Task 011's POML status must be corrected either way; it currently contradicts the index.</constraint>
+    <constraint source="project">Do not break the working XML installation while testing the JSON one. The add-in is deployed and in use.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The current state is confirmed: which manifest the deployed add-in actually loads from, recorded with evidence.</criterion>
+    <criterion testable="true">EITHER the JSON manifest is sideloaded and verified on desktop AND web — with the add-in observed loading and functioning, recorded per host — OR the attempt is recorded with its specific failure and FR-05 is amended.</criterion>
+    <criterion testable="true">If amended: spec.md's FR-05 text and its acceptance criteria are updated, the evidence is cited inline, and the change is noted in the project's changelog.</criterion>
+    <criterion testable="true">If shipped: the deploy path publishes the JSON manifest and the XML path is either retired deliberately or kept with a stated reason.</criterion>
+    <criterion testable="true">Task 011's POML status element is corrected to match reality, and its ACs 6/7 are marked with their real outcome.</criterion>
+    <criterion testable="true">The existing XML installation still works at the end of this task — verified, not assumed.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If sideloading the JSON manifest would disrupt the live dev add-in installation that the operator uses for task 042's UAT, STOP and escalate per CLAUDE.md §6 to agree a window — do not break the UAT environment to test a manifest format.</trigger>
+    <trigger>Amending a spec FR is an owner decision. If the evidence points to amendment, STOP, present the evidence, and get explicit sign-off before editing spec.md.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Confirm which manifest the deployed add-in loads from; record the evidence.</step>
+    <step>Attempt the JSON sideload on desktop and web; record exactly what happens on each.</step>
+    <step>Decide, and escalate for sign-off if the answer is "amend FR-05".</step>
+    <step>Implement the chosen outcome; correct task 011's POML status and its ACs.</step>
+    <step>Verify the XML installation still works.</step>
+    <step>Write `notes/078-manifest-decision.md`. Update TASK-INDEX.md: 078 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/word/manifest.json</file>
+    <file role="edit">src/client/office-addins/word/manifest.xml</file>
+    <file role="edit">.github/workflows/deploy-office-addins.yml</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/tasks/011-unified-json-manifest.poml</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 073 (Node alignment) must be ✅ first, since it changes the deploy job.</protocol>
+  </execution>
+</task>

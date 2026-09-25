@@ -273,8 +273,13 @@ public static class ChatWordExportEndpoints
     private static string ConstructWordOnlineUrl(string? webUrl, string fileId)
     {
         // If we have the WebUrl from Graph, it's the most reliable path to Word Online.
-        // SharePoint Embedded files return a WebUrl like:
-        //   https://{tenant}.sharepoint.com/contentstorage/{containerId}/Document/{filename}
+        // Corrected 2026-09-10 (comment only — behavior unchanged): for SharePoint Embedded files,
+        // Graph's WebUrl is actually the `_layouts/15/doc2.aspx?sourcedoc=...` VIEWER form, not a
+        // path-shaped URL. The path form some comments/docs describe (observed live 2026-09-10:
+        // `/contentstorage/CSP_{guid}/Document Library/{filename}`) is Graph's `webDavUrl`, not
+        // `WebUrl` — see FileAccessEndpoints.cs ~625-628, which prefers `webDavUrl` for exactly this
+        // reason. `WebUrl` still opens correctly in the browser; the `?web=1` below is about that
+        // doc2.aspx viewer form, not a `/contentstorage/.../Document/{filename}` path.
         // Appending ?web=1 forces it to open in Word Online instead of downloading.
         if (!string.IsNullOrEmpty(webUrl))
         {

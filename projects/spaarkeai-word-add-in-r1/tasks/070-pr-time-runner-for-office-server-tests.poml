@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>No merge-blocking check runs any of this project's C# tests — and the one runner that completes is scheduled for deletion</title>
+    <phase>5 Remediation — verification</phase>
+    <gate>blocked — requires 069 (same workflow file)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a CI job that decides merges. Tags include ci-cd + testing.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Must work inside a workflow freeze: the obvious fix (edit Tier 1) is forbidden. Finding a correct path that does not touch a frozen file is the judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same workflow file as 069.</parallel-reason>
+    <deps>069</deps>
+    <tags>ci-cd, devops, testing, ci-workflows, integration-test</tags>
+    <estimated-effort>4-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>This project's ~30 new C# test files run in no completing PR-time job. Add a runner for them to the workflow this project owns, since the tiered workflows are frozen.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Every C# test this project wrote runs to completion on every PR that touches its code, and its result is visible as a check.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable verification review (`notes/fable-review-2026-09-21.md` §1). **This is the
+      review's systemic finding** — no agenda item anticipated it.
+
+      The project's ~30 new test files under `tests/integration/{contract,data-mutation,regression,seam}/**`
+      and `tests/unit/**` compile into `Sprk.Bff.Api.Tests`
+      (`tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj:77,137,149,162,188`).
+
+      - **Tier 1 blocking** runs that assembly only with `Category=GoldenUtteranceEval` / `FidelityGate`
+        filters (`ci-tier1-blocking.yml:577,690`). None of this project's tests carry those categories.
+      - **Tier 2 advisory** is `continue-on-error: true` with `timeout-minutes: 30`
+        (`ci-tier2-advisory.yml:242-243`); the test step was **cancelled in 6 of 6** recent runs on this
+        branch and the verdict step has never executed.
+      - The only runner that completes is legacy `sdap-ci.yml` — 12,379 passed / 0 failed / 56 skipped at
+        HEAD — **and task 077 of another project deletes it.**
+
+      Consequence: after that deletion, the `POST /api/office/save` contract tests this project un-skipped as
+      a deliverable, and NFR-02's 11-Fact per-row authorization suite, run **nowhere** on a PR.
+
+      **The constraint that shapes the fix**: `ci-router.yml`, `ci-tier1-blocking.yml` and
+      `ci-tier2-advisory.yml` are FROZEN under the shadow-comparison window opened 2026-08-27. The fix must
+      not touch them. `office-addins-tests.yml` belongs to this project.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT edit `ci-router.yml`, `ci-tier1-blocking.yml` or `ci-tier2-advisory.yml`. They are frozen.</constraint>
+    <constraint source="this task">The new job must COMPLETE inside its time budget. A job that gets cancelled at a cap reproduces the exact defect being fixed — scope the filter to this project's suites rather than running all 12,379 tests.</constraint>
+    <constraint source="this task">The job must be able to fail the workflow. Apply task 069's lesson: prove it red and green on CI.</constraint>
+    <constraint source="ADR-038">Run the KEEP-path suites; do not add new scaffolding tests to make the job look fuller.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A job in `office-addins-tests.yml` runs this project's Office contract, data-mutation and authorization suites — including NFR-02's `VisualizationRowAuthorizationContractTests` and the un-skipped `POST /api/office/save` contract tests — on every PR touching the relevant paths.</criterion>
+    <criterion testable="true">The job COMPLETES well inside its timeout. Record the observed duration and the margin. If it cannot, narrow the filter rather than raising the cap.</criterion>
+    <criterion testable="true">PROVEN ON CI IN BOTH DIRECTIONS: break one assertion in a covered suite, show the job and the run go red; revert, show green. Record both run URLs.</criterion>
+    <criterion testable="true">The selection mechanism is explicit and greppable — a category, a filter expression or a named project list — so a future test added to these suites is included automatically or the omission is obvious. State which, and how a new suite gets picked up.</criterion>
+    <criterion testable="true">An inventory in the task note lists every C# test file this project added and states, per file, whether the new job runs it. Any file NOT covered is named with a reason.</criterion>
+    <criterion testable="true">The task note states plainly that the repo ruleset still requires only `Router`, so this check does not yet BLOCK a merge, and names the ruleset update as an owner action.</criterion>
+    <criterion testable="true">`actionlint` passes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If this project's suites cannot be selected without either running the whole assembly (which times out) or adding categories to ~30 files (scope creep), STOP and escalate per CLAUDE.md §6 with both options costed. Do NOT silently ship a job that runs a subset while implying full coverage.</trigger>
+    <trigger>If the freeze on the tiered workflows lifts during this task, STOP and re-scope — the correct home for these tests is Tier 1, and duplicating them in a project workflow becomes debt.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (ci-workflows hot path).</step>
+    <step>Inventory every C# test file this project added and where each currently runs.</step>
+    <step>Confirm the freeze is still in effect before designing around it.</step>
+    <step>Choose a selection mechanism; add the job; keep it inside its time budget.</step>
+    <step>Prove red and green on CI. Record both run URLs.</step>
+    <step>Write `notes/070-pr-time-runner.md` with the inventory, the duration margin and the explicit ruleset residual.</step>
+    <step>Update TASK-INDEX.md: 070 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">.github/workflows/office-addins-tests.yml</file>
+    <file role="edit">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/070-pr-time-runner.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/069-gate-binds.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>Three tiered CI workflows already exist and would be the natural home — `ci-tier1-blocking.yml` runs `Sprk.Bff.Api.Tests` with category filters.</existing>
+    <extension>No — the natural home is frozen under an active shadow-comparison window and must not be edited. This project's own workflow is the only writable surface that can run these tests on a PR.</extension>
+    <cost-of-doing-nothing>Once `sdap-ci.yml` is deleted, the save-path contract tests and NFR-02's per-row authorization suite run on no PR check at all, so an authorization regression merges silently.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>.github/workflows/office-addins-tests.yml</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/070-pr-time-runner.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 069 must be ✅ first — same file.</protocol>
+  </execution>
+</task>

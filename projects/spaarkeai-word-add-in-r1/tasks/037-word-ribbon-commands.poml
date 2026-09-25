@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-17: wire quickSave and shareDocument ribbon commands</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>011 complete (Word unified JSON manifest), 010 complete (adapter consolidation)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.ts` command entry points and the Word manifest, which changes what the installed add-in exposes; a manifest defect breaks the add-in for every user. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The working reference (`outlook/commands/index.ts`) and every helper the Word commands need are named exactly. The only unknown is which manifest task 011 produced, and that is a read, not a judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011,010</deps>
+    <tags>frontend, office-addin, manifest, e2e-test</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`word/commands/index.ts` declares `quickSave` and `shareDocument` as `console.log` stubs. Webpack compiles them, but the Word manifest never references them, so they are unreachable at runtime. Implement both following `outlook/commands/index.ts` — the working reference — and add the manifest entries (a function file and `ExecuteFunction` controls) that Word currently lacks entirely.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in Office Add-in command surfaces (function files, `ExecuteFunction` actions, `event.completed()` lifecycles) and the Office unified/XML manifest formats. Follow ADRs strictly.</role>
+
+  <goal>Both `quickSave` and `shareDocument` execute from the Word ribbon and complete their work without opening the task pane where that is the intended behavior. The Word manifest declares the function file and both `ExecuteFunction` controls. Each command reports its outcome to the user through the host's notification surface, and each calls `event.completed()` on every path including failure.</goal>
+
+  <context>
+    <background>
+      **The stubs, verified as-built.** `word/commands/index.ts` declares `quickSave` at `:28-44` and `shareDocument` at `:50-61`, both `console.log` bodies marked `// TRACKED: GitHub #234`. They **are** compiled — `webpack.config.js:83` lists the entry and `:161-165` emits `word/commands.html` — but `word-manifest.xml:47-102` contains a single `VersionOverrides` with exactly one control (`SaveButton`, an `Action xsi:type="ShowTaskpane"` at `:61`) and **no `&lt;FunctionFile&gt;` at all**. So there is no path from the ribbon to the compiled code.
+
+      **The working reference is `outlook/commands/index.ts`**, which shows the whole shape:
+      - bootstraps `authService` + `apiClient` at `:39-52` before doing any work;
+      - uses `fetchEnginePreSelection` (imported at `:10`);
+      - uses `buildEmailSaveRequest` and `computeQuickSaveIdempotencyKey` from `shared/taskpane/services/quickSaveHelpers.ts` (imported at `:11-16`);
+      - reports outcome via `notificationMessages.addAsync` at `:55-70`.
+
+      A Word command needs the same spine with a document-shaped payload instead of an email-shaped one, and Word's own notification surface instead of Outlook's `notificationMessages`.
+
+      **Manifest coordination is the load-bearing dependency.** Task 011 (FR-05) migrates `word-manifest.xml` to the **unified JSON manifest**, following `outlook/manifest.json` as the precedent. This task must add the command declarations to **whatever manifest 011 produced** — read the current state of the Word manifest before authoring, rather than assuming either format. Adding XML `VersionOverrides` entries to a file 011 has replaced with JSON would be silently dead work, exactly like the stubs this task exists to fix.
+
+      **Deploy note:** a manifest change requires a 4-part version bump and M365 re-registration. Task 042 owns the deployment; this task owns the manifest content and must leave the version bump coherent for 042.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/word/commands/index.ts</file>
+      <file role="modify">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/commands/index.ts</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/manifest.json</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/services/quickSaveHelpers.ts</file>
+      <file role="canonical-reference">src/client/office-addins/webpack.config.js</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">The Word unified JSON manifest (FR-05). This task adds command declarations to whatever manifest 011 produced — read it first; do not assume XML or JSON.</dependency>
+      <dependency task="010" status="pending">Adapter consolidation — one Word adapter reached through `HostAdapterFactory`, carrying the UAT-correct `.docx` byte extraction that `quickSave` depends on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow `outlook/commands/index.ts` as the structural reference for both Word commands: bootstrap `authService` + `apiClient` before any work, reuse `buildEmailSaveRequest`'s document-shaped equivalent and `computeQuickSaveIdempotencyKey` from `shared/taskpane/services/quickSaveHelpers.ts`, and report outcome through the host's notification surface. Do not invent a parallel auth or API bootstrap for the command context.</constraint>
+    <constraint source="project">The Word manifest MUST gain a function-file declaration and `ExecuteFunction` controls for both commands. Coordinate with task 011: **read the current Word manifest before authoring** and add the entries in the format 011 produced. Adding XML `VersionOverrides` to a manifest 011 replaced with JSON is dead work.</constraint>
+    <constraint source="project">Both commands MUST call `event.completed()` on **every** path, including validation failure, auth failure and network failure. A command that omits it on an error path leaves the Word ribbon spinner stuck.</constraint>
+    <constraint source="project">Where the intended behavior is to complete without opening the pane, the command MUST NOT open the pane — neither directly nor as a side effect of an error handler. Where opening the pane IS the intended behavior for a specific outcome, state that explicitly in the code and in `notes/`.</constraint>
+    <constraint source="project">`quickSave` MUST use the idempotency key helper (`computeQuickSaveIdempotencyKey`) so a double ribbon click does not create two documents.</constraint>
+    <constraint source="ADR-028">Auth in the command context MUST go through `@spaarke/auth`'s `OfficeNaaStrategy` via the add-in's `AuthService`. No direct MSAL construction anywhere in this package — arch-test enforced. `.WithClientSecret` is forbidden.</constraint>
+    <constraint source="ADR-044">Any Dataverse GUID crossing a boundary in the command path (documentId, association record id) MUST be canonicalized to bare-lowercase via `cleanGuid`. Never interpolate a raw GUID into a URL path segment or OData key predicate without canonicalizing.</constraint>
+    <constraint source="NFR-10">Shared-first: any logic these commands share with the pane belongs in `shared/`, not duplicated into `word/commands/`. The commands are thin entry points over shared services.</constraint>
+    <constraint source="project">The 4-part manifest version bump MUST be left coherent for task 042, which owns deployment and M365 re-registration. Note in `notes/` that this task changed the manifest so 042 knows re-registration is required.</constraint>
+    <constraint source="project">This task is in wave P3-c with 035 and 036. Do not modify `OfficeService.cs`, `CreateTodoView`, or the share-link/send-email path — those belong to siblings in this wave.</constraint>
+    <constraint source="project">There is no `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+    <constraint source="project">Deploy is CI-only. Do not run the deployment workflow as part of this task; validate locally and leave deployment to task 042.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office Add-in ribbon commands, function files, and manifest command declarations</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+    </files>
+    <patterns>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Binding for how the command context obtains a token — INV-1..INV-8. The command runs outside the pane's React tree, so the bootstrap order from `outlook/commands/index.ts:39-52` matters.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-17, and `src/client/office-addins/CLAUDE.md`. **Read the current Word manifest as task 011 left it** and read `outlook/commands/index.ts` + `outlook/manifest.json` in full. Emit the mandatory rigor declaration (FULL / sonnet / high).</step>
+    <step order="1">Confirm the webpack command entry and emitted HTML for Word still match what the manifest will reference (`webpack.config.js:83` and `:161-165`). If task 011 changed the emitted asset names, reconcile before authoring the manifest entries.</step>
+    <step order="2">Implement `quickSave`: bootstrap auth + API client, extract the document bytes through the consolidated `WordAdapter` from task 010, build the save request with the shared helpers, compute the idempotency key, post, and report the outcome through Word's notification surface. Call `event.completed()` on every path.</step>
+    <step order="3">Implement `shareDocument` with the same spine, producing a share link and surfacing it to the user without opening the pane where that is the intended behavior. Call `event.completed()` on every path.</step>
+    <step order="4">Add the function-file declaration and both `ExecuteFunction` controls to the Word manifest in the format task 011 produced, alongside the existing Save (ShowTaskpane) control.</step>
+    <step order="5">Bump the 4-part manifest version and record in `notes/` that a manifest change occurred, so task 042 performs the M365 re-registration.</step>
+    <step order="6">Add unit tests for both command handlers: success, auth failure, network failure, and an explicit assertion that `event.completed()` is called on every path.</step>
+    <step order="7">Run `npm run typecheck` and `npm run build` in `src/client/office-addins`; validate the manifest with the Office manifest validation available to the project. Sideload and execute both `&lt;ui-tests&gt;` in Word desktop.</step>
+    <step order="8">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 011's manifest format cannot express a function file plus `ExecuteFunction` controls the way this task needs — or if 011 has not landed and the manifest is still XML — STOP and escalate per CLAUDE.md §6 rather than authoring entries for a manifest that is about to be replaced. Shipping command declarations into a superseded manifest recreates exactly the unreachable-stub defect this task fixes.</trigger>
+    <trigger>If `quickSave` cannot complete without opening the task pane — for example because auth cannot be obtained in the command context without user interaction — STOP and escalate. FR-17's acceptance is explicitly "without opening the pane where that is the intended behavior"; silently falling back to opening the pane changes the feature.</trigger>
+    <trigger>If the consolidated `WordAdapter` from task 010 cannot supply document bytes from the command context (as opposed to from the pane), STOP and escalate rather than reintroducing the known-broken `body.getOoxml()` path that task 010 removed.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="quickSave from the ribbon">
+      <steps>
+        <step>Sideload the Word add-in with the updated manifest and open a document.</step>
+        <step>Click the Quick Save ribbon button without opening the task pane.</step>
+      </steps>
+      <expected>The document is saved to Spaarke and a notification reports success. The task pane does not open. The ribbon button returns to its idle state (`event.completed()` fired).</expected>
+    </test>
+    <test name="shareDocument from the ribbon">
+      <steps>
+        <step>With a Spaarke-sourced document open, click the Share ribbon button without opening the pane.</step>
+      </steps>
+      <expected>A share link is produced and surfaced to the user through the host notification surface. The pane does not open where that is the intended behavior, and the ribbon button returns to idle.</expected>
+    </test>
+    <test name="Double-click does not duplicate">
+      <steps>
+        <step>Click Quick Save twice in rapid succession on the same unsaved document.</step>
+      </steps>
+      <expected>Exactly one `sprk_document` is created — the idempotency key from `computeQuickSaveIdempotencyKey` suppresses the second write.</expected>
+    </test>
+    <test name="Failure path completes cleanly">
+      <steps>
+        <step>Disconnect the network (or sign out) and click Quick Save.</step>
+      </steps>
+      <expected>An explicit failure notification is shown, the ribbon button returns to idle rather than spinning indefinitely, and no partial record is created.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund`, `npm run typecheck`, `npm run build` in `src/client/office-addins` (no `build:prod` here — `build` IS production).</tool>
+    <tool name="office-addin-validator">Validate the updated Word manifest before sideloading.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/commands/index.ts</output>
+    <output type="code">src/client/office-addins/word/word-manifest.xml</output>
+    <output type="test">src/client/office-addins/word/commands/__tests__/commands.test.ts</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the updated manifest is sideloaded, when the user clicks the Quick Save ribbon button, then the document is saved to Spaarke and the pane does not open.</criterion>
+    <criterion testable="true">Given the updated manifest is sideloaded, when the user clicks the Share ribbon button, then a share link is produced and surfaced, and the pane does not open where that is the intended behavior.</criterion>
+    <criterion testable="true">The Word manifest declares a function file and an `ExecuteFunction` control for each of `quickSave` and `shareDocument`, in the format task 011 produced — verified by reading the manifest, and by the commands actually firing.</criterion>
+    <criterion testable="true">Both command handlers call `event.completed()` on every path including validation, auth and network failure — asserted by unit test, not by inspection.</criterion>
+    <criterion testable="true">Given two rapid Quick Save clicks on the same document, when both requests are issued, then exactly one `sprk_document` is created.</criterion>
+    <criterion testable="true">Negative: given no network or a signed-out user, when a command is invoked, then an explicit failure notification is shown, the ribbon returns to idle, and no partial record is created.</criterion>
+    <criterion testable="true">No `console.log` stub remains in `word/commands/index.ts`, and the `// TRACKED: GitHub #234` markers are removed or updated to reflect completion.</criterion>
+    <criterion testable="true">Auth in the command context goes through `@spaarke/auth`'s `OfficeNaaStrategy`; no direct MSAL construction and no `.WithClientSecret` appears in the package — arch-test green.</criterion>
+    <criterion testable="true">The 4-part manifest version was bumped and `notes/037-manifest-change.md` records that M365 re-registration is required, so task 042 performs it.</criterion>
+    <criterion testable="true">All four `&lt;ui-tests&gt;` pass in Word desktop.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, manifest validation passes, and all unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-17 and the Owner Clarification "Ribbon commands — Include". plan.md §4 Phase 3 task 037. The commands are compiled today (`webpack.config.js:83`, `:161-165`) but unreferenced by `word-manifest.xml:47-102`, whose only control is `SaveButton` → ShowTaskpane at `:61`. The single highest-risk mistake in this task is authoring manifest entries in the format task 011 replaced — read the manifest first.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

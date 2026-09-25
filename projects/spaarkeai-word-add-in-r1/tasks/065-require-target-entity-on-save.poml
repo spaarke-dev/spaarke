@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F4 — a save with no TargetEntity bypasses EntityAccessFilter entirely, lands in the shared container, and is then profiled and RAG-indexed</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>blocked — requires 061</gate>
+    <status>escalated — partially shipped; awaiting owner decision (see notes/065-require-target-entity.md §6)</status>
+    <status-note>
+      Executed 2026-09-21. F4 is REPRODUCED and PROVEN (note §2: accepted → tenant-wide container → queued
+      for profiling + RAG indexing, with CallerRecordAccessProbe never consulted — verbatim ProcessingJob
+      payload recorded). SHIPPED: the false premise at OfficeService.cs:143-145 and :341-343 is CORRECTED
+      (plus two further stale claims it had seeded in OfficeSaveContainerProvenanceTests and
+      SpeWriteSinkContainerProvenanceGuardTests); the record-less branch now derives the ACTING USER's
+      business-unit container (RecordContainerResolver.ResolveForActingUserAsync — task 076's owner-sanctioned
+      no-record shape) before falling back to EmailProcessing:DefaultContainerId, narrowing placement from
+      per-tenant to per-business-unit; the account/contact case is defined and pinned by test.
+
+      NOT SHIPPED — making TargetEntity required. BOTH &lt;escalation&gt;&lt;trigger&gt;s fired, plus a third
+      condition: (1) there is no target for the Word ribbon to send — a Word ribbon click carries no Spaarke
+      context and there is no document-side association prediction, so giving it one needs a new predictor or
+      the removal of FR-17's one-click behaviour; (2) two more shipped paths legitimately send no target, and
+      the decisive one — the FR-11 version save — must not, by owner decision D-4/D-5, PRECISELY because a
+      target would add an EntityAccessFilter check that could refuse a legitimate version save (seeded and
+      measured: 4 pane version-save wire tests break); (3) VERIFIED LIVE against dev Dataverse — no Spaarke
+      end-user role grants prvAppendTo on sprk_matter / sprk_project / sprk_invoice / sprk_workassignment /
+      sprk_event (only System Administrator, System Customizer and Service Writer do, all depth 8), and
+      EntityAccessFilter demands exactly AccessRights.AppendTo. So the targeted path ALREADY refuses ordinary
+      users on shipped code, the no-target bypass is currently the only save path a non-admin has, and
+      requiring the target would convert a silent bypass into a TOTAL SAVE OUTAGE. Same systemic gap as
+      notes/role-grant-gap-2026-09-21.md, one face further on.
+
+      Criteria 2 and 8 are NOT met, and 3 is half met — enumerated in note §8. Sequencing proposed in §6.5:
+      grant the AppendTo rights first (needed for the pane's EXISTING Matter filing regardless), decide the
+      Word ribbon's behaviour second, require TargetEntity third with an IsVersionSave carve-out.
+    </status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the contract of the project's primary save path. Tags include bff-api + auth + security. The Word ribbon quick-save currently depends on the bypassed branch.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches the save spine — the best-evidenced, most reproduce-first-tested part of the project. Breaking it regresses FR-06 through FR-12 at once.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the save spine in `OfficeService.cs` + `OfficeEndpoints.cs` + the Word commands client. Highest-collision surface in the project.</parallel-reason>
+    <deps>061</deps>
+    <tags>bff-api, api, auth, authorization, security, office, frontend, testing</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`POST /office/save` treats association as optional, so a request with no `TargetEntity` passes `EntityAccessFilter` untouched and lands in the tenant-wide default container — and every Word ribbon quick-save takes exactly that path. Make the target required and give the ribbon a real container.</prompt>
+
+  <role>SPAARKE platform developer. The save spine is this project's strongest work — change it carefully and keep every existing save test green.</role>
+
+  <goal>No save reaches storage without an authorized association, and the Word ribbon quick-save files to a container resolved the same way the pane does.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable review (`notes/fable-review-2026-09-21.md` §2 finding F4, §9).
+
+      `OfficeEndpoints.cs:414-462` — "Association is optional". `EntityAccessFilter.cs:201-212` calls
+      `next()` when the target is absent, so **no resource check runs at all**. `OfficeService.cs:186-195`
+      then falls back to `EmailProcessing:DefaultContainerId` (provisioned from `SPE_DEFAULT_CONTAINER_ID`,
+      `appsettings.template.json:233`). Upload is app-only (`:622-627`), the row create is app-only (`:702`),
+      and `TriggerAiProcessing` / `RagIndex` both default true (`Models/Office/SaveRequest.cs:72,413`).
+
+      Same effect for `account` and `contact` targets, which have no `sprk_document` lookup column
+      (`OfficeEndpoints.cs:425-430`).
+
+      **The premise in the code is false.** `OfficeService.cs:143-145` and `:341-343` assert the no-target
+      branch *"exists for the contract rather than for traffic"*. Since task 037 that is wrong:
+      `quickSaveHelpers.ts:172-200` (`buildDocumentSaveRequest`) sends no `targetEntity`, and
+      `word/commands/index.ts:151-153` posts it. **Every Word ribbon quick-save takes the bypassed path** and
+      lands in the shared, BU-agnostic container.
+
+      Not a data-safety bug today — the container fails closed if unset — but the isolation argument written
+      in the code no longer describes real traffic, and the authorization bypass is real.
+
+      Task 076's owner sanction (acting-user BU) is the reference for how the ribbon should resolve a
+      container.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Fix BOTH halves. Making `TargetEntity` required without giving the ribbon a container breaks Word quick-save; giving the ribbon a container without requiring the target leaves the bypass open.</constraint>
+    <constraint source="this task">Every existing save test must stay green. This spine carries FR-06 through FR-12 and five reproduce-first regression suites (039/045/046/047/054/055) — reconcile the count, do not merely assert "tests pass".</constraint>
+    <constraint source="this task">If the account/contact no-lookup-column case cannot carry an association, define its behaviour explicitly rather than letting it fall into the default-container branch.</constraint>
+    <constraint source="ADR-008">The association check stays in `EntityAccessFilter`; this task removes the bypass, it does not move the check into the handler.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: prove a save with no `TargetEntity` is accepted, reaches the default container, and is RAG-indexed — with no resource authorization anywhere in the path. Record verbatim.</criterion>
+    <criterion testable="true">`TargetEntity` is required on `/office/save`; a request without one is rejected with a problem response before any upload or row create.</criterion>
+    <criterion testable="true">The Word ribbon quick-save sends a real target and resolves a container the way the pane does (acting-user BU). It still succeeds end to end.</criterion>
+    <criterion testable="true">The account/contact case has explicitly defined behaviour, stated in the task note and covered by a test.</criterion>
+    <criterion testable="true">The false comments at `OfficeService.cs:143-145` and `:341-343` are corrected to describe what the code now does.</criterion>
+    <criterion testable="true">SEED BOTH DIRECTIONS on the new requirement: remove it, show the negative test RED; restore, show GREEN. Record both.</criterion>
+    <criterion testable="true">Every pre-existing save test is green and the count is reconciled explicitly against 12,379 passed / 0 failed — a regression here is worse than the finding.</criterion>
+    <criterion testable="true">Task 061's guard no longer flags this route.</criterion>
+    <criterion testable="true">ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the required-target contract, the ribbon path, the account/contact case, the unchanged happy paths and the seed directions. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any shipped client legitimately needs to save without an association — check Outlook's paths and the e2e specs before concluding it does not — STOP and escalate per CLAUDE.md §6. Requiring the target then becomes a breaking contract change needing an owner decision and a migration path.</trigger>
+    <trigger>If resolving a container for the ribbon requires new Dataverse or SPE surface rather than reusing the pane's resolution, STOP — that is a design decision beyond this task's scope.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path — highest collision file in the project).</step>
+    <step>Reproduce the bypass end to end; record verbatim.</step>
+    <step>Enumerate every in-repo caller of `/office/save` and confirm which send no target. Do this before changing the contract.</step>
+    <step>Give the ribbon a resolved container first, so the requirement does not break it.</step>
+    <step>Make `TargetEntity` required; define the account/contact behaviour; correct the false comments.</step>
+    <step>Tests; seed both directions; reconcile the full-suite count explicitly.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/065-require-target-entity.md`. Update TASK-INDEX.md: 065 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/quickSaveHelpers.ts</file>
+    <file role="edit">src/client/office-addins/word/commands/index.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/065-require-target-entity.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+    <patterns>
+      <pattern name="Container resolution by acting-user BU" location="src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs">
+        The pane's save path resolves a container from the acting user's business unit. The ribbon must do the same rather than falling back to the tenant default.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+    <file>src/client/office-addins/word/commands/index.ts</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/065-require-target-entity.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 061 must be ✅ first. Run serially with 062 and 064 — all three edit `OfficeService.cs`.</protocol>
+  </execution>
+</task>

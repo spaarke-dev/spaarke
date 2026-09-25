@@ -579,8 +579,11 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
             "containerId parameter <- OfficeService.ResolveContainerAsync <- RecordContainerResolver "
-            + "keyed on SaveRequest.TargetEntity (the record AddEntityAccessFilter authorized), "
-            + "falling back to EmailProcessing:DefaultContainerId only when no target entity is named",
+            + "keyed on SaveRequest.TargetEntity (the record AddEntityAccessFilter authorized); with NO "
+            + "target entity, RecordContainerResolver.ResolveForActingUserAsync (the acting user's "
+            + "business-unit container — task 076's owner-sanctioned no-record shape), falling back to "
+            + "EmailProcessing:DefaultContainerId only when that cannot answer "
+            + "(word-add-in-r1 task 065, 2026-09-21)",
             "CLOSED BY TASK 085. SaveRequest.ContainerId was DELETED from the contract and the container is "
             + "now derived from the SAME record the caller was authorized against, through task 076's "
             + "RecordContainerResolver — so the authorization key and the write destination are one value "
@@ -707,6 +710,25 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "and is best-effort/non-fatal (ADR-003; ADR-007). Server-derived even though it sits two lines "
             + "from a ClientSupplied sink in the same file, which is the clearest argument in this list for "
             + "per-site rather than per-file classification."),
+
+        // ── ADDED 2026-09-11 by spaarkeai-word-add-in-r1 task 023 (FR-11 version save) — a NEW site. ──
+        // Traced backwards: WriteNewVersionAsync(driveId, itemId) <- OfficeService.CompleteVersionSaveAsync
+        // <- VersionTarget.DriveId/ItemId <- OfficeDocumentPersistence.ResolveVersionTargetAsync, which reads
+        // sprk_graphdriveid/sprk_graphitemid off the sprk_document row. The CLIENT supplies only that row's id
+        // (SaveRequest.Document.ExistingDocumentId) — a record key, never a container or drive — and
+        // OfficeVersionSaveAuthorizationFilter requires "write" on that same row before the handler runs.
+        new SinkSite("Services/Office/OfficeStorageUploader.cs", "ReplaceFileContentAsUserAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "driveId/itemId parameters <- OfficeService.CompleteVersionSaveAsync <- "
+            + "OfficeDocumentPersistence.ResolveVersionTargetAsync (sprk_graphdriveid / sprk_graphitemid on the "
+            + "sprk_document row named by SaveRequest.Document.ExistingDocumentId, which the route's "
+            + "OfficeVersionSaveAuthorizationFilter authorized for \"write\")",
+            "The Office version save (FR-11): a new SPE version of an EXISTING item, written OBO into the "
+            + "drive the authorized record itself records (ADR-003; ADR-007; ADR-008). The client names the "
+            + "document, and the document names the drive — so the authorization key and the write "
+            + "destination are one row, the same shape as the Compose save's ServerDerivedRecord replaces. "
+            + "Deliberately NOT the container derived from SaveRequest.TargetEntity: the destination is an "
+            + "item that already exists, and a derived container could only disagree with it."),
 
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED
