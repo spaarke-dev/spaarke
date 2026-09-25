@@ -102,7 +102,7 @@ Several handlers chain to downstream jobs upon completion:
 - **MUST**: Every handler must be idempotent — calling `ProcessAsync` multiple times with the same IdempotencyKey must be safe
 - **MUST**: Return `JobOutcome.Poisoned` for permanent failures (not-found, invalid payload) — do not allow infinite retries
 - **MUST**: Register handlers as `IJobHandler` in `JobProcessingModule` — the processor discovers handlers via `GetServices<IJobHandler>()`
-- **MUST NOT**: Make Graph/HTTP calls from Dataverse plugins — use job handlers for async processing (ADR-002)
+- **MUST NOT**: Add Dataverse plugins — Spaarke ships none; async work from Dataverse changes uses a no-code service-endpoint step → Service Bus → BFF job handler (ADR-002 WP-5, updated 2026-09-25)
 - **MUST NOT**: Use Azure Functions for background processing (ADR-001)
 - **MUST**: Use `JobSubmissionService.SubmitCommunicationJobAsync()` for email jobs — not the shared queue
 

@@ -55,7 +55,7 @@ The key architectural decision was ADR-006: **field-bound controls on a Datavers
 | Control | Path | Purpose | React API |
 |---------|------|---------|-----------|
 | ThemeEnforcer | `src/client/pcf/ThemeEnforcer/` | Invisible control enforcing user dark mode preference on app load | StandardControl (no React rendering) |
-| EmailProcessingMonitor | `src/client/pcf/EmailProcessingMonitor/` | Admin dashboard for email-to-document processing statistics | StandardControl (ReactDOM.render) |
+| ~~EmailProcessingMonitor~~ | ~~`src/client/pcf/EmailProcessingMonitor/`~~ | **Deleted 2026-09-25** (monitored the retired email-to-document pipeline) | — |
 
 ---
 

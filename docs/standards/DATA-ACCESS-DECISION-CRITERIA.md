@@ -14,15 +14,16 @@ Read the question. Pick the first matching row.
 
 | Question | Answer |
 |---|---|
-| Is this **server-side .NET code** (BFF, plugin, function, worker)? | **NEVER `Xrm.WebApi`.** Server uses `IDataverseClient` / `Sprk.Dataverse` SDK. Skip the rest of this table. |
+| Is this **server-side .NET code** (BFF, function, worker)? (Spaarke ships no plugins — ADR-002) | **NEVER `Xrm.WebApi`.** Server uses `IDataverseClient` / `Sprk.Dataverse` SDK. Skip the rest of this table. |
+| Does the write **create or update a table that carries a registered write-path invariant** (field-mapping defaults, core-ancestor stamp, secure isolation, owner, container/search-index default — see the [invariant registry](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md#5-invariant-registry))? | **BFF.** ADR-002 WP-3 (2026-09-25): the server applies the invariant inline; the client may only preview it. |
 | Does the path involve **AI synthesis, orchestration, or playbook execution**? | **BFF.** AI never runs from the client. |
 | Does the operation **cross systems** (Dataverse + Graph + SPE; Dataverse + external API)? | **BFF.** One transaction, server-mediated. |
 | Does the operation require **OBO-protected resources** (Graph on behalf of user; SPE containers; external access accounts)? | **BFF.** Token exchange happens server-side per ADR-028 §OBO. |
 | Does the operation **provision infrastructure** (BU creation, SPE container creation, role assignment)? | **BFF.** Multi-step transactions with rollback semantics. |
-| Does the operation need **server-side validation, business logic, or audit** beyond what a Dataverse plugin gives you? | **BFF.** |
+| Does the operation need **server-side validation, business logic, or audit**? | **BFF.** |
 | Is this a **bulk write** of >50 records, or a **bulk read** that needs aggregation/pagination across multiple entity types? | **BFF.** (Or a Service Bus job dispatched by the BFF.) |
 | Is this a **subscription / streaming / SSE response** (chat completion, long-running analysis)? | **BFF.** Server-Sent Events / chunked responses. |
-| Is this a **single-entity read or single-record write** to one Dataverse table, host-context, no cross-system coupling? | **`Xrm.WebApi`.** Client-direct, no BFF round-trip needed. |
+| Is this a **single-entity read or single-record write** to one Dataverse table (with **no** registered write-path invariant), host-context, no cross-system coupling? | **`Xrm.WebApi`.** Client-direct, no BFF round-trip needed. |
 | Is this a **simple lookup, picklist hydration, formatted-value fetch** scoped to the current user/host context? | **`Xrm.WebApi`.** |
 | Default if no row above matched | **Document the ambiguity in the task notes and ask.** Do not "just pick one." |
 
@@ -202,7 +203,7 @@ Per CLAUDE.md §10 BFF Hygiene, the BFF already has ~120 endpoints. Before addin
 
 ### 6. **Do not put AI access behind `Xrm.WebApi` by routing through a Dataverse plugin**
 
-If a Dataverse plugin makes an outbound HTTP call to Azure OpenAI (or to anything AI-related), that is the wrong place for the AI logic. AI orchestration belongs in the BFF, not in a plugin handler. Plugins are for synchronous data integrity rules and cascading writes — not for LLM calls or playbook execution.
+AI orchestration belongs in the BFF, never in Dataverse. *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)* Spaarke ships **no Dataverse plugins at all** — not for AI, and not for data integrity or cascading writes either. Record invariants (stamps, defaults, isolation, derived fields) are owned by the BFF server-side write path ([ADR-002](../adr/ADR-002-no-heavy-plugins.md) WP-1…WP-8; see [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md)); writes outside the product are corrected by async fix-up + reconciliation, with security failing closed.
 
 ---
 

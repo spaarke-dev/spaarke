@@ -23,7 +23,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | API/BFF | [api.md](api.md) | ADR-001, 004, 008, 010, 019 | 2025-12-18 | 2026-04-05 | Verified |
 | **BFF Extensions (governance)** | [bff-extensions.md](bff-extensions.md) | ADR-001, 007, 008, 010, 013 (refined), 029 (forthcoming) | 2026-05-20 | 2026-05-20 | Active (binding) |
 | PCF Controls | [pcf.md](pcf.md) | ADR-006, 011, 012, 021, 022 | 2026-02-23 | 2026-04-05 | Verified |
-| Plugins | [plugins.md](plugins.md) | ADR-002 | 2026-01-05 | 2026-04-05 | Verified |
+| Plugins + Write Path | [plugins.md](plugins.md) | ADR-002 | 2026-09-25 | 2026-09-25 | Verified |
 | Authentication | [auth.md](auth.md) | ADR-003, 004, 008, 009 | 2026-03-09 | 2026-04-05 | Verified |
 | Data Access | [data.md](data.md) | ADR-005, 007, 009 | 2026-04-05 | 2026-04-05 | Current |
 | AI Features | [ai.md](ai.md) | ADR-013, 014, 015, 016 | 2026-04-05 | 2026-04-05 | Current |
@@ -46,7 +46,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | **ANY addition to BFF (endpoint, service, DI, package, background work)** | **`bff-extensions.md` (binding pre-merge governance) + `api.md` + `auth.md`** |
 | Creating BFF endpoint | `bff-extensions.md` + `api.md` + `auth.md` |
 | Creating PCF control | `pcf.md` |
-| Creating plugin | `plugins.md` |
+| Plugin proposal, record create/update path, rule a record must satisfy on save | `plugins.md` |
 | Data access/caching | `data.md` |
 | Background jobs | `jobs.md` |
 | AI features | `ai.md` |

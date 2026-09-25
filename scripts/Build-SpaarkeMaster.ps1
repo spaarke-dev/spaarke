@@ -78,7 +78,8 @@ $IncludedPcfIds = @(
     "14c0701e-242e-417a-8999-62694c3cdcac"  # VisualHost
     "7bfadd63-1e26-4278-92b9-9cfbf9335b6e"  # SemanticSearchControl
     "1d93fc9e-3291-4f48-a1d8-e05b8f3a42c7"  # EventAutoAssociate
-    # EXCLUDED: UpdateRelatedButton, EmailProcessingMonitor, ThemeEnforcer, RegardingLink (not on forms)
+    # EXCLUDED: UpdateRelatedButton, ThemeEnforcer, RegardingLink (not on forms)
+    # REMOVED: EmailProcessingMonitor (control deleted 2026-09-25; its backing endpoint was removed in 051a098d2)
     # EXCLUDED: UniversalDatasetGrid (broken styles.css web resource reference)
     # EXCLUDED: ScopeConfigEditor, UniversalDocumentUpload (removed from forms)
 )

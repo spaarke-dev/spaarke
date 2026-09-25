@@ -643,9 +643,15 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
    * R3 single-entity model (FR-09 / OS-1): the legacy two-entity
    * (`sprk_event` + `sprk_eventtodo`) shape has been retired. A To Do is now
    * a standalone `sprk_todo` row with the `sprk_RegardingEvent` lookup pointing
-   * at the source event. This binds the entity-specific lookup directly; the
-   * four polymorphic resolver fields (sprk_regardingrecordtype/id/name/url)
-   * are populated server-side by SprkPolymorphicResolverPlugin on create.
+   * at the source event. This binds the entity-specific lookup directly.
+   *
+   * NOTE (corrected 2026-09-25): an earlier version of this comment claimed a
+   * "SprkPolymorphicResolverPlugin" populated the four polymorphic resolver
+   * fields (sprk_regardingrecordtype/id/name/url) server-side on create. No such
+   * plugin exists — Spaarke ships NO Dataverse plugins (ADR-002). The To Do
+   * created here is currently NOT core-ancestor-stamped server-side; that is
+   * tracked by the ADR-002 WP-2/WP-3 write-path migration (see
+   * docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
    *
    * Initial status/state: Active / Open (statecode=0, statuscode=1) — matches
    * `SmartTodo/DataverseService.createTodo` (task 020).

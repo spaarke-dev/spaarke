@@ -37,7 +37,7 @@ Build and deploy React Code Page web resources to Dataverse. Code Pages are stan
 **When NOT to Use**:
 - Deploying PCF controls → Use `pcf-deploy`
 - Deploying BFF API → Use `bff-deploy`
-- Deploying plugins → Use `dataverse-deploy`
+- Solutions / web resources → Use `dataverse-deploy` (Spaarke ships no plugins — ADR-002)
 
 ---
 
@@ -308,7 +308,7 @@ If a target code page's `vite.config.ts` aliases into another code page's `src/`
 |-------|-------------|
 | `pcf-deploy` | PCF control deployment (solution ZIP import). Code Pages are NOT part of PCF solutions. |
 | `bff-deploy` | BFF API deployment to Azure App Service |
-| `dataverse-deploy` | General Dataverse operations (plugins, solution export/import) |
+| `dataverse-deploy` | General Dataverse operations (solution export/import, web resources) |
 
 ---
 

@@ -122,7 +122,7 @@ Container Display:     {BusinessUnit} Documents           e.g., "Root BU Documen
 .NET Namespaces:   Sprk.{Area}.{Component}     e.g., Sprk.Bff.Api
 npm Packages:      @spaarke/{package}           e.g., @spaarke/ui-components
 PCF Projects:      Sprk{ControlName}            e.g., SprkDocumentProfile
-Solution Projects: Sprk.{Purpose}               e.g., Sprk.Plugins.Validation
+Solution Projects: Sprk.{Purpose}               e.g., Sprk.Bff.Api   (no plugin projects — ADR-002)
 ```
 
 ### Service Bus Queues

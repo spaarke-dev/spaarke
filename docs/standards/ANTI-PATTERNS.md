@@ -28,12 +28,12 @@
 | 4 | **Injecting GraphServiceClient directly** — `public class Controller(GraphServiceClient graph)` | Graph SDK types leak above the facade; callers depend on Microsoft.Graph internals | Route all SPE operations through `SpeFileStore` facade; expose only SDAP DTOs | [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) |
 | 5 | **Creating interfaces without a genuine seam** — `services.AddSingleton<IResourceStore, SpeFileStore>()` when only one implementation exists | Adds indirection without value; inflates DI registrations beyond the 15-line budget | Register concretes: `services.AddSingleton<SpeFileStore>()` | [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) |
 
-### Dataverse Plugins
+### Dataverse Write Path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
 
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
-| 6 | **HTTP/Graph calls from plugins** — making remote I/O calls inside `IPlugin.Execute()` | Plugins run inside the Dataverse transaction pipeline; remote calls cause timeouts, retries fail silently, and exceed the 50ms p95 budget | Defer all external work to BFF API endpoints or BackgroundService workers | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) |
-| 7 | **Business logic in plugins** — implementing orchestration, multi-entity coordination, or branching logic in plugin code | Plugins are not an execution runtime; complex logic is untestable, unobservable, and unrecoverable in the transaction pipeline | Keep plugins < 200 LoC; limit to validation, invariant enforcement, audit stamping | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) |
+| 6 | **Adding a Dataverse plugin** — any `IPlugin` type, CrmSdk package, net4x plugin project, or plugin step registration | Spaarke ships no plugins: a second (.NET Framework) runtime and packaging model in every managed solution, per-row cost on bulk import, and creep once one exists | Put the rule in the BFF server-side write path (WP-1); correct non-product writes via async fix-up + reconciliation (WP-5) | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) |
+| 7 | **Client-only invariant enforcement** — applying a stamp/default/isolation rule only in a wizard `onFinish` or other client code | Every other write path (Office add-ins, OOB forms, imports, flows) silently skips it — the root cause of the backfill scripts and reconciliation jobs across ~15 projects | One server-side owner per invariant; client may preview only; invariant-bearing tables written via BFF; security fails closed | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) WP-1…WP-6 |
 
 ### Frontend (PCF)
 
@@ -96,7 +96,7 @@
 ## Related
 
 - [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API + BackgroundService as BFF runtime; Azure Functions permitted for narrow out-of-band integration
-- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- Thin Dataverse plugins (no HTTP/Graph calls)
+- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- No Dataverse plugins; invariants in the BFF server-side write path (2026-09-25)
 - [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) -- Code Pages and PCF over legacy JS
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) -- SpeFileStore facade (no Graph SDK leaks)
 - [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) -- Endpoint filters for authorization (no global middleware)

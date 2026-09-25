@@ -225,7 +225,7 @@ Every Spaarke-internal browser surface routes through one library: **`@spaarke/a
 | External Workspace SPA (`src/client/external-spa/`) | B2B portal | Per-tab `sessionStorage` MSAL config | ⚠️ **Intentional exception** — B2B users, different cookie/auth model |
 | Dataverse JS webresources (legacy) | `sprk_DocumentOperations.js` etc. | `Xrm.WebApi` only | ✅ No new ones (ADR-006); existing use Xrm not MSAL |
 | BFF API server-side | `Sprk.Bff.Api` | MSAL.NET `ConfidentialClientApplication` + OBO | N/A — different runtime, see Pattern 2 |
-| Dataverse plugins | `Sprk.Plugins.*` | `IOrganizationService` (built-in plugin identity) | N/A — plugin runtime, no token acquisition |
+| ~~Dataverse plugins~~ | — | — | N/A — Spaarke ships no Dataverse plugins (ADR-002, updated 2026-09-25) |
 
 **Rule for new components**: any new browser-side Spaarke surface that calls the BFF MUST consume `@spaarke/auth`. Exceptions require an ADR.
 

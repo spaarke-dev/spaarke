@@ -1,25 +1,20 @@
-# Plugin Structure Pattern
+# Plugin Structure Pattern → RETIRED (use the Server-Side Write Path)
 
-> **Last Reviewed**: 2026-08-14
-> **Reviewed By**: code-quality-and-assurance-r3 task 034 (doc-drift)
-> **Status**: Verified
->
-> **⚠️ 2026-08-14 (task 015 assessment): the `BaseProxyPlugin` / `Spaarke.CustomApiProxy` "Custom API proxy → BFF" pattern is RETIRED.** It is `[Obsolete]`-marked and is an ADR-002 violation (HTTP + AAD token acquisition inside the plugin pipeline; a plain-text OAuth secret at rest on a Dataverse column). r3 task 015's recommendation is **decommission** — do NOT extend `BaseProxyPlugin` or create new Custom-API-proxy plugins. New plugins are **thin validation / projection / audit only** (no HTTP/Graph). Client→BFF calls belong in a Code Page / PCF / web resource via `@spaarke/auth` (ADR-028), not a plugin.
+> **Last Reviewed**: 2026-09-25
+> **Reviewed By**: ADR-002 plugin review (owner-approved)
+> **Status**: Verified — pattern retired
+
+**Spaarke ships no Dataverse plugins (ADR-002, reaffirmed 2026-09-25).** There is no plugin pattern to follow. The `Spaarke.CustomApiProxy` / `BaseProxyPlugin` code was the counter-example and has been removed.
 
 ## When
-Creating or modifying Dataverse plugins (validation, projection, or audit stamping — NOT Custom API proxy; see the retirement note above).
+You were about to write a plugin, or a feature needs a rule enforced when a record is saved (default, stamp, isolation, derived field).
 
-## Read These Files
-1. `tests/unit/Spaarke.Plugins.Tests/ValidationPluginTests.cs` — test patterns for thin plugins
-2. *(retired — reference only)* `src/dataverse/plugins/Spaarke.CustomApiProxy/**` — the `[Obsolete]` proxy plugin; read only to understand what NOT to build (r3 task 015 recommends decommission).
+## Do This Instead
+1. `.claude/constraints/plugins.md` — decision table: where the rule goes
+2. `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` — layers + invariant registry
+3. `src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs` — reference server-side invariant owner (stamp resolved in the BFF write path, fail-closed)
+4. `src/server/api/Sprk.Bff.Api/Services/Jobs/` + `MembershipReconciliationJob` — reference reconciliation (WP-5)
 
 ## Constraints
-- **ADR-002**: Plugins must be thin — <200 LoC, <50ms p95
-- MUST NOT make HTTP/Graph calls from standard plugins (only Custom API Proxy → BFF)
-- Plugin types: validation, projection, audit stamping ONLY — no orchestration
-
-## Key Rules
-- Late-bound entities only (no early-bound code generation)
-- Always wrap in try/catch → `InvalidPluginExecutionException`
-- Do NOT make HTTP/Graph/AAD calls from a plugin, and do NOT extend `BaseProxyPlugin` (retired — see the note above). A plugin needing to reach the BFF is a design smell → move the trigger to a Code Page / PCF / web resource using `@spaarke/auth`.
-- Redact sensitive data before logging request/response payloads; never persist a secret on a Dataverse column
+- **ADR-002 WP-1…WP-8**: one server owner per invariant; client previews only; tables with invariants written via BFF; inline for security/on-load UX; async fix-up for non-product writes; security fails closed
+- Any plugin proposal → root CLAUDE.md §6.5 against the ADR-002 reopen criteria

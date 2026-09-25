@@ -297,7 +297,7 @@ IDENTIFY likely files from spec.md:
   - Parse spec.md for mentioned components:
     • PCF controls → src/client/pcf/
     • API endpoints → src/server/api/
-    • Dataverse plugins → src/solutions/
+    • Record create/update paths + invariants → src/server/api/ (BFF write path; no plugins — ADR-002)
     • Shared libraries → src/*/shared/
     • Documentation → docs/, .claude/
   - List directories/files likely to be modified

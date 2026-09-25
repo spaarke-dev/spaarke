@@ -126,29 +126,27 @@ Identify which module(s) the changed files belong to, then apply the correspondi
 
 ---
 
-## Module: Dataverse Plugins (`src/dataverse/plugins/`)
+## Module: Dataverse Write Path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
+
+Spaarke ships **no Dataverse plugins** (the former "Dataverse Plugins" module checklist is retired). Apply this checklist to any change that creates/updates records or adds a record rule. Reference: [ADR-002](../adr/ADR-002-no-heavy-plugins.md), [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
 
 ### Checklist
 
-- [ ] **Execution Time (ADR-002)**: Plugin code path must complete in <50ms p95; no complex logic, no loops over collections
-- [ ] **No HTTP Calls (ADR-002)**: Absolutely no `HttpClient`, `WebClient`, `HttpWebRequest`, or any network calls
-- [ ] **No Graph API Calls (ADR-002)**: No Microsoft Graph SDK usage; all Graph operations belong in BFF API
-- [ ] **Code Size**: Plugin class should be <200 lines of code
-- [ ] **Assembly Size**: Built DLL must be <1MB (validated in CI pipeline)
-- [ ] **Thin Validation Only**: Plugins should only perform field validation, simple calculations, or data projection
-- [ ] **No Business Logic**: Complex business logic belongs in the BFF API, not plugins
-- [ ] **.NET Framework 4.8**: Plugin projects target .NET Framework 4.8 (Dataverse requirement)
-- [ ] **No External Dependencies**: Plugins cannot add NuGet packages beyond CrmSdk; assemblies must be self-contained
-- [ ] **IPlugin Interface**: Implements `IPlugin.Execute(IServiceProvider)` directly
+- [ ] **No plugins (ADR-002)**: No `IPlugin` types, CrmSdk packages, net4x plugin projects, or plugin step registrations (enforced by `ADR002_PluginTests`)
+- [ ] **WP-1 One server owner**: Every new record invariant (stamp/default/isolation/derived field) has exactly one BFF owner and a row in the invariant registry
+- [ ] **WP-2 Client previews only**: Wizards / code pages / PCF / add-ins may pre-compute an invariant for UX but are never its sole enforcement
+- [ ] **WP-3 Write via BFF**: Creates/updates of invariant-bearing tables go through a BFF endpoint (`Xrm.WebApi` direct writes only for tables with no registered invariant)
+- [ ] **WP-4 Inline for security + on-load UX**: Such invariants are applied in the same request; multi-row effects in one Dataverse transaction
+- [ ] **WP-5 Non-product writes**: Rule has an async fix-up and/or reconciliation path that is idempotent and fill-only
+- [ ] **WP-6 Fail closed**: A missing security stamp/flag results in *less* access, never more
 
 ### Common Mistakes
 
 | Mistake | Correct Pattern |
 |---------|----------------|
-| `new HttpClient().GetAsync(...)` | Move to BFF API endpoint |
-| Complex orchestration in plugin | Enqueue to Service Bus, BFF handles orchestration |
-| `using Microsoft.Graph;` | Only in BFF API, behind SpeFileStore facade |
-| Plugin > 200 LoC | Extract into BFF API service |
+| Invariant applied only in a `Create*Wizard` `onFinish` | Server owner in the BFF write path; client previews (WP-1/WP-2) |
+| Adding a plugin to "catch" non-product writes | No-code service-endpoint step → Service Bus → BFF worker, plus reconciliation (WP-5) |
+| NULL flag / absent stamp treated as "allowed" | Treat as no grant / restricted (WP-6) |
 
 ---
 
@@ -181,7 +179,7 @@ When a changeset touches multiple modules, also check:
 |------|-------------|---------|
 | ADR compliance (structural) | `Spaarke.ArchTests` NetArchTest suite in CI | No |
 | Fluent UI version mixing | ESLint rules | Partially |
-| Plugin size validation | `sdap-ci.yml` code-quality job | No |
+| Zero-plugin guard (ADR-002) | `Spaarke.ArchTests` `ADR002_PluginTests` in CI (the legacy plugin size check is dead — removal deferred to post-cutover) | No |
 | Formatting (C#) | `dotnet format --verify-no-changes` in CI | No |
 | Formatting (TS) | Prettier check in CI | No |
 | ESLint (PCF) | `eslint . --max-warnings 0` in CI | No |

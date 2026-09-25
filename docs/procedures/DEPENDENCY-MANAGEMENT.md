@@ -29,7 +29,7 @@ All .NET package versions are centralized in `Directory.Packages.props` at the r
 | Microsoft Graph + Kiota | `Microsoft.Graph`, `Microsoft.Kiota.*` (7 packages) | ALL Kiota packages must be the same version |
 | Identity | `Microsoft.Identity.Client`, `Microsoft.Identity.Web`, `System.IdentityModel.Tokens.Jwt` | Update together; test OBO flow |
 | OpenTelemetry | `OpenTelemetry`, `OpenTelemetry.Extensions.Hosting`, `OpenTelemetry.Instrumentation.*` | Update together |
-| Dataverse SDK | `Microsoft.CrmSdk.CoreAssemblies`, `Microsoft.CrmSdk.Workflow`, `Microsoft.PowerPlatform.Dataverse.Client` | Update together; test plugin build |
+| Dataverse SDK | `Microsoft.PowerPlatform.Dataverse.Client` | Test Dataverse access paths. *(updated 2026-09-25)* Spaarke ships no plugins (ADR-002): `Microsoft.CrmSdk.*` plugin packages must not be referenced by any project (enforced by `ADR002_PluginTests`) |
 | Test | `xunit`, `FluentAssertions`, `Moq`, `WireMock.Net`, `coverlet.collector` | Can update independently |
 | PCF Build | `Microsoft.PowerApps.MSBuild.Pcf`, `Microsoft.PowerApps.MSBuild.Solution` | Must match; affects PCF build pipeline |
 

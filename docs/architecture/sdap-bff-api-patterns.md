@@ -178,7 +178,7 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 | Consumed by | Office Add-ins | REST endpoints (OBO auth) | Outlook/Word save and search |
 | Consumed by | M365 Copilot Agent | `/api/agent/*` endpoints | Bot framework gateway via AgentModule |
 | Consumed by | Power Pages Portal | `/api/v1/external/*` endpoints | Portal JWT auth (not Azure AD) |
-| Consumed by | Dataverse Webhooks | `/api/v1/emails/webhook-trigger` | HMAC-SHA256 validated, enqueues jobs |
+| ~~Consumed by~~ | ~~Dataverse Webhooks~~ | ~~`/api/v1/emails/webhook-trigger`~~ | **Retired** — `MapEmailEndpoints` removed (email-communication-solution-r4 task 007); inbound email is Graph-only via `IncomingCommunicationProcessor`. `scripts/Register-EmailWebhook.ps1` deleted 2026-09-25. A future generic Dataverse → BFF change signal (ADR-002 WP-5) is described in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §6 |
 | Depends on | Microsoft Graph | `GraphClientFactory` (OBO + app-only) | SPE file operations, email fetch |
 | Depends on | Dataverse | `IDataverseService` / `DataverseWebApiService` | Entity CRUD, metadata queries |
 | Depends on | Azure AI Search | `RagService` | RAG search with OData filter builder |
@@ -298,7 +298,7 @@ All handlers follow the same pattern: idempotency check, acquire Redis processin
 - **MUST** use `IDistributedCache` (Redis) for all caching — no in-process L1 cache (ADR-009)
 - **MUST** use `SpeFileStore` facade for SPE operations — no `GraphServiceClient` injection into endpoints (ADR-007)
 - **MUST NOT** add Azure Functions — all background work via BackgroundService + Service Bus (ADR-001)
-- **MUST NOT** make HTTP/Graph calls from Dataverse plugins
+- **MUST NOT** add Dataverse plugins — record invariants live in the BFF server-side write path (ADR-002 WP-1…WP-8, updated 2026-09-25)
 
 ---
 
