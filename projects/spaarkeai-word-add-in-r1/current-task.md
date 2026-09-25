@@ -115,6 +115,28 @@ search-index default; **G2** create and association are **not atomic** (create a
 `RecordCreationService`; **G5** now decided (item 3 above). Recommendation 1 asks to keep `RecordCreationService` /
 `CreateTimeFieldMapping` **generic, not Office-specific** — the resolver already is.
 
+### 🔴 PRE-DEPLOY GATE — the resolver's Dataverse queries are NOT SDK-verified
+
+`push-to-github` Step 1.7 fires on `RecordOwnershipResolver.cs` (it queries `systemuser`, `team`, and the
+target record). Honest status, same shape as task 067's:
+
+**Verified against real dev Dataverse via MCP** — the *schema and semantics* half:
+- `team` filtered on `isdefault = true` AND `teamtype = 0` returns exactly one owner team per BU, and the
+  non-default Owner / Access teams that would break a single-predicate filter genuinely exist.
+- `systemuser.businessunitid` is populated and resolves (Test User 1 → `cb15f587…`).
+- The BU → default-owner-team pairing was confirmed end-to-end (`cb15f587…` → `cf15f587…`).
+
+**NOT verified** — the *SDK* half: the `QueryExpression` code path itself has never run against real
+Dataverse. Neither has `CreateDocumentAsync` writing `ownerid` as an `EntityReference("team", …)`. A mock
+cannot validate either (the R4 `sprk_contact`-vs-OOB-`contact` precedent). Failure direction is fail-closed —
+an unresolved team refuses the create — so it is safe but outage-shaped.
+
+**Before deploy**: save a document as Test User 1 and confirm the row lands in `cb15f587…` owned by team
+`cf15f587…`. That one round trip exercises resolve → assign → derive.
+
+**Local verification this session**: build 0/0 · Office test subset **399 passed / 0 failed / 10 skipped**.
+Full suite NOT re-run since 067 (`12,415/0/56`) — re-run it before 080 is called complete.
+
 ### DEV ENVIRONMENT + process notes
 
 - `unified-access-control-r2` owns `spaarke-bff-dev` (`e45627fde`). Our **pre-gate 09-19** build is preserved
