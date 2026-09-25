@@ -180,6 +180,22 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // ── 2. FALLBACK: the acting user's business unit ───────────────────────────────────────────
+        //
+        // OWNER DECISION 2026-09-25, and a DELIBERATE divergence worth naming (CLAUDE.md §6.5 Path A —
+        // project-scoped exception, not an oversight). The ADR-002 write-path review's gap G5 flags that
+        // "the user's-BU fallback is the pattern task 076 removed elsewhere": for SPE containers, 076 refuses
+        // rather than falling back to the acting user's business unit.
+        //
+        // Ownership keeps the fallback anyway, on the owner's call, because the two have different failure
+        // costs. For a container, guessing wrong puts BYTES in the wrong place — 076 is right to refuse. For
+        // ownership, refusing would block every legitimately UNASSOCIATED save (the Word ribbon quick-save
+        // and any pane save with no "Related to" selected — per OfficeService's own analysis, roughly 80 of
+        // the ~85 save bodies in the test corpus have no target). Refusing those is a save outage; assigning
+        // them to the creator's own BU team is the correct answer for a record that genuinely belongs to
+        // nobody else yet.
+        //
+        // The secure-record risk that motivates 076's stricter rule does NOT arise here, because this branch
+        // is reached only when NO target was named at all. A named-but-unresolvable target refuses above.
         if (context.CallerSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
         {
             return await ResolveFromUserAsync("systemuserid", systemUserId, ct).ConfigureAwait(false);

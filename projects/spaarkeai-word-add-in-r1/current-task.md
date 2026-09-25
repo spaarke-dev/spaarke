@@ -1,28 +1,133 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## 🔵 ACTIVE TASK — **080** (not started) — supersedes the NEXT ACTION line below
+## 🔵 ACTIVE TASK — **080** (in progress) — READ THIS FIRST
 
 | Field | Value |
 |---|---|
-| **Task** | 080 — record-ownership assignment pattern (**the real blocker**) |
+| **Task** | 080 — record ownership: assign to a BU default owner team |
 | **File** | `tasks/080-record-ownership-assignment-pattern.poml` |
 | **Rigor / tier** | FULL · opus @ xhigh · steps directional · **run ALONE** |
-| **Status** | **in-progress** — steps 1-3 done (reproduce, precedent, inventory); ESCALATED on scope |
-| **Next Action** | Wire `IRecordOwnershipResolver` into the 6 BFF create paths (document ✓ contract, todo, matter, project, workassignment, analysis), then the reversible backfill |
+| **Status** | in-progress — resolver BUILT; 5 of 6 create paths NOT yet wired; backfill not started |
+| **Next Action** | Wire the remaining create paths (worker x2, matter, project, workassignment, analysis) using `RecordOwnershipContext`, then the reversible backfill, then tests + gates |
 
-🔴 **CORRECTION before 080 starts (2026-09-22).** I had been saying *"`sprk_matter` is the precedent to copy — a child BU's default Owner team."* That was inferred from **live data**; I went looking for the code and **did not find it**. What IS in code is the opposite shape: **`ownerid` = the ACTING USER**, shipped and ADR-024-cited — `OfficeService` quick-create already does it (`:2625`, `:2853`; `IOfficeService.cs:207`), as do `NotificationService:81`, `OutboxService:135`, `DirectThreadAccessService:86`. So this project already owns a working caller-ownership implementation **in the very service whose document path lacks one**, and 067 wired `ICallerSystemUserResolver` into `OfficeService` already. 080 must establish which convention is real BEFORE mirroring anything. Full detail in the POML's background.
+### 🔑 THE DECIDED SOLUTION — read this before touching anything
 
-✅ **OWNER DECISION 2026-09-22 — SETTLED: `ownerid` = the ACTING USER'S BU DEFAULT OWNER TEAM, not the user.** Chain verified live end-to-end: caller OID → `systemuser.businessunitid` → `team` WHERE that BU AND `isdefault=true` AND `teamtype=0` → `EntityReference("team", teamId)`; `owningbusinessunit` derives. Confirmed against the owner's own example: Test User 1 → BU `cb15f587…` → team `cf15f587…` ("Spaarke Business Unit 1"). BOTH predicates required — dev has non-default Owner teams AND Access teams. 🔴 **VERIFICATION TRAP — measured**: `GROUP BY businessunitid` gives **172 users in ROOT `Spaarke`, 13 in `Spaarke Demo`, 1 in `Spaarke Business Unit 1`** — **92.5% are in root**. For a root caller this convention correctly assigns to root's OWN default team, so nothing improves and no 403 is fixed; that is the design working, not a bug. **Verify with Test User 1 in `Spaarke Business Unit 1` — the only account that exercises it.** A root-account test cannot distinguish a working fix from a no-op, so neither a "it didn't work" nor a "it worked" conclusion from one is valid. User BU placement is part of the fix. Only in-repo precedent for the shape: `CommunicationEnrichmentService.cs:712`.
+**Two separate goals. They compose; neither substitutes for the other.**
 
-ℹ️ The resolver hazard does NOT re-open this: it is a defect in the membership resolver (cannot bind a team-owned Owner column), not evidence about what ownership should be. File it separately.
+| Goal | Mechanism | Status |
+|---|---|---|
+| **A** — records land in the right CUSTOMER business unit | **PROVISIONING**: each customer gets its own BFF app registration (Azure + Dataverse) with its app user placed in that customer's BU | BLOCKED/NOT CODE — not done, owner-owned. Today all 25 app users sit in ROOT. |
+| **B** — records owned by a **TEAM**, not an individual or the app | **CODE**: `Services/Dataverse/RecordOwnershipResolver.cs` | resolver built; call sites pending |
 
-🔴 **(superseded analysis) THE CHOICE IS NOW LARGELY MADE FOR US.** The resolver hazard is **confirmed in code on this branch** (`MembershipFieldDiscoveryService.cs`): Owner columns get hardcoded synthetic targets `["systemuser","team"]` (`:94-95`, `:531-533`) and the scan breaks on the first match (`:288-300`), so an Owner column **can never bind as Team** — a team-owned record resolves to nobody. Corroborated by a real outage (R7 W12 task 130: `sprk_matter` rows=0 for a user owning 44 matters). Not reconfigurable: the order comes from the hardcoded array, not from `IncludedIdentityTables` (a dictionary). **Strong argument for caller-ownership.** Open scoping question: does membership resolution actually consume `sprk_document`/`sprk_todo`/`sprk_communication`? Confirmed for the resolver ≠ confirmed for those entities.
+**Why both are needed.** Dataverse **never** assigns a new record to the creator's team — on create `ownerid` =
+the calling identity (user or app user), and no setting changes that. Verified three ways: `sprk_workassignment`
+and app-created `sprk_document` rows are **user-owned with `owningteam` null**; only `sprk_matter` is team-owned
+and something other than the BFF assigned it. So placing the app user in the customer BU fixes the **BU** (A) but
+leaves `ownerid` on the **app user** — team ownership (B) requires code.
 
-🤝 **080 now has a SECOND consumer.** `unified-access-control-r2` verified the same defect in `GrantExternalAccessEndpoint` (**28 of 29** `sprk_externalrecordaccess` rows in the root BU; their ISS-030 / issue #1010, credited to this session) and asked to conform to whatever 080 settles on. I told them to hold until 080 verifies which convention is real. The choice is now cross-project — state it and tell them.
+**Resolution order, encoded once in `RecordOwnershipContext` so no call site can differ:**
 
-**Why 080 and not the next 🔲 in number order**: it blocks the real closure of 063, 064 and 066, and it now
-also gates getting dev back (see the deploy block below). 057/058/059/060/068+ can all wait behind it.
-Note 060 is *unblocked* by 067's schema decision whenever it is picked up — but 058 gates it.
+1. **Target record's `owningbusinessunit`** -> that BU's default owner team. Preferred: *"ownership is a property
+   of the record"* (task 076's words). Handles secure records correctly, since a secure record's own BU **is** the
+   Secure Project BU. Also the only source when there is no human (inbound email).
+2. **Named target that cannot be read -> REFUSE.** Do NOT fall back. For a secure record, falling back would
+   assign its child to the caller's general BU and defeat the isolation (076's indeterminate-must-refuse rule).
+3. **No target named -> acting user's BU default owner team.** **OWNER DECISION 2026-09-25**, a deliberate
+   CLAUDE.md 6.5 Path A divergence from 076 (whose gap G5 flags this pattern): refusing would block every
+   legitimately unassociated save (~80 of ~85 save bodies in the corpus have no target). Documented in the code.
+4. **Neither -> refuse.** Fail-closed throughout; never fall back to app-only ownership.
+
+Team lookup: `team` WHERE `businessunitid` = resolved BU AND `isdefault = true` AND **`teamtype = 0`**.
+**Both predicates required** — dev has non-default Owner teams AND Access teams.
+
+### 🔴 MODEL 1 IS A SHARED DATAVERSE — and the authoritative doc says otherwise
+
+**Owner, 2026-09-25**: Model 1 does NOT give each customer its own Dataverse environment — *that is the whole
+point of Model 1*. Customers are segregated **by business unit**, each starting at a child BU below root
+`Spaarke`. Model 2 = dedicated Dataverse (**2a** in the Spaarke tenant, **2b** in the customer's own tenant).
+
+**`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` 3.2 states the opposite** — *"Dedicated per-customer:
+Dataverse env..."* — and CLAUDE.md 17 calls that file the single authoritative operator guide. **It drives
+provisioning.** The 2a/2b split is also absent. **Owner ruling + doc fix still needed.**
+
+So ownership placement is the Model 1 **customer-data-visibility** mechanism, not org tidiness, and the refuse
+branches are isolation-critical.
+
+### DEV DATA IS NOT INDICATIVE (owner, 2026-09-25)
+
+Users and records at root are a **setup artifact**, not the production shape. Do not reason about production from
+it. It remains a **verification hazard**: 172 of 186 users are in root, so a root-account test cannot distinguish
+a working fix from a no-op. **Verify with Test User 1** (`testuser1@spaarke.com`, BU `cb15f587...`) — the only
+child-BU account. Customer security profile is **BU + children** (= Deep, depth 4), confirmed by measurement on
+document / todo / workassignment for `Spaarke Core User`.
+
+### WORK COMPLETED THIS SESSION
+
+| Commit | What |
+|---|---|
+| `d24a1c975` | **Task 067 COMPLETE** — job ownership fails closed (two fail-opens, not one); creator persisted to the already-existing `sprk_initiatedby`; production test-job backdoor deleted |
+| `3f55cd91f` | 067 Step 1.7 gate: the new LinkEntity query is **NOT verified against real Dataverse** — pre-deploy requirement |
+| `db046e534` | `IRecordOwnershipResolver` + unconditional DI + `CreateDocumentRequest.OwningTeamId` + the `sprk_document` write |
+| `d6b16f9cc` | Resolver accepts an Entra OID (background workers have no `ClaimsPrincipal`); threaded `owningTeamId` through `OfficeDocumentPersistence` |
+| `c50d6dadf` | **Record-first** refactor (was creator-first) |
+| `e454af78a` | Model 1 correction recorded + doc contradiction flagged |
+| `21969129b` | **Secure-record fix**: named-but-unresolvable target now refuses |
+| *this commit* | G5 owner decision documented as a 6.5 Path A divergence |
+
+Build 0/0 throughout. Task 067 gates: ArchTests 191/191 · full suite **12,415/0/56** · CVE clean · publish +0.08 MB.
+
+### 🔴 OPEN ITEMS
+
+**Owner decisions needed:**
+1. **Model 1 doc ruling** — which is correct, then fix `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` 3.2 (+ add 2a/2b).
+2. **Goal A provisioning** — confirm every customer gets its own BFF app registration with the app user in that
+   customer's BU. Owner said *"need to check if always does."* If ever shared, one app user cannot sit in several
+   BUs and Goal A breaks.
+3. **Can a customer span more than one BU?** (departments beneath the customer BU) — decides whether the
+   customer's BU and the acting user's BU can differ, and what the backfill can infer for the 512 root rows.
+
+**Work remaining in 080:**
+4. Wire 5 create paths: `UploadFinalizationWorker` x2 (has `payload.UserId`, an OID), `RecordCreationService`
+   matter + project (today assign the CALLER — a deliberate task-030 behaviour to change), `WorkAssignmentEndpoints`,
+   `sprk_analysis`. `sprk_todo` via `OfficeService:2765`.
+5. **Reversible / dry-runnable backfill** — 512 documents + other entities. Escalation trigger 2 says refuse if it
+   cannot be made reversible.
+6. Tests incl. the **cross-customer negative** (BU-A user must not read a BU-B record) and the refuse branches.
+7. Gates: full suite reconciled, ArchTests, publish size, CVE.
+8. `sprk_communication` — cross-project; coordinate with the Communication project or hand off explicitly.
+
+**Resolved, do NOT re-open:**
+- **No Dataverse plugins** (owner). **No form-event `.js`** — wizards create via `Xrm.WebApi.createRecord`, so a
+  form script never fires; ADR-006 also forbids new legacy JS web resources.
+- **No client-side helper.** ADR-002 write-path guidance WP-2 / WP-3: clients may preview an invariant but never
+  be its only enforcement; tables carrying invariants are written **through the BFF**. G4 records the
+  `CreateTodoWizard` -> `Xrm.WebApi` gap as **not this project's to fix**.
+- Membership-resolver hazard (team-owned Owner columns bind to nobody) is a **resolver defect**, filed by UAC-r2
+  as **issue #1011**. Not 080's to fix; 080 must state the limitation.
+
+### ADR-002 WRITE-PATH GUIDANCE — arrived in the worktree 2026-09-25
+
+`notes/adr-002-write-path-guidance-2026-09-25.md` (source branch `work/adr-002-server-side-write-path`, **not yet
+on master**). It names **`RecordOwnershipResolver.cs` as the owner of invariant I-6**, so this component is already
+canonical. Open gaps that touch us: **G1** document save applies no field mapping / core-ancestor stamp /
+search-index default; **G2** create and association are **not atomic** (create at `:271`, association update at
+`:317` — a failure between leaves an unassociated, unstamped document); **G3** QuickCreate Invoice not covered by
+`RecordCreationService`; **G5** now decided (item 3 above). Recommendation 1 asks to keep `RecordCreationService` /
+`CreateTimeFieldMapping` **generic, not Office-specific** — the resolver already is.
+
+### DEV ENVIRONMENT + process notes
+
+- `unified-access-control-r2` owns `spaarke-bff-dev` (`e45627fde`). Our **pre-gate 09-19** build is preserved
+  byte-exact at `C:\tmp\bff-dev-rollback\bff-dev-wwwroot-2026-09-21-preUACdeploy.zip` (sha256 `35c8e161...`).
+  **Do NOT restore by rebuilding from this branch tip** — it would 403 Run Index for every ordinary user until 080
+  lands. They will hand dev back after 080.
+- **`deploy-bff-api.yml` has been broken since 2026-06-05** — verified 12 runs / 12 failures, one titled *"fix(ci):
+  repair Deploy BFF API pipeline"*. Every BFF deploy for ~3.5 months was hand-pushed OneDeploy. Blocks task 042.
+- SCM basic auth is **disabled**; Kudu needs an AAD bearer token. `az webapp deploy` can return 200 with Kudu
+  `status=4` while file locks prevent DLL replacement — **a SHA-256 file-replacement check is the only real proof**.
+- **Process slip to avoid repeating**: I committed `notes/adr-002-write-path-guidance-2026-09-25.md` via
+  `git add -A` **without reading it first**. It belonged here, but that was luck. Check untracked files before
+  committing mid-task, not only at `/push-to-github`.
 
 ### ✅ 067 COMPLETE (2026-09-21, commit `d24a1c975`)
 
