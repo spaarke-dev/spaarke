@@ -163,6 +163,82 @@ is the owner's call, not a task-local one.** Awaiting the decision.
 **Path-independent work that proceeds regardless**: the **backfill** fixes EXISTING rows whatever created
 them, so it is needed under every option and is not blocked by this decision.
 
+## 4c. 🔴 MODEL 1 IS A SHARED DATAVERSE — this is tenant isolation, not org tidiness
+
+**Owner correction 2026-09-25**: *"in model 1 each customer DOES NOT get their own dataverse
+environment — that's the whole point. customers are segregated by business unit (i.e., each customer would
+start at a child business unit / team below the root 'Spaarke')."*
+
+### ⚠️ The authoritative deployment guide says the OPPOSITE
+
+[`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md)
+§3.2, Model 1 composition, verbatim: *"**Dedicated per-customer**: Dataverse env, SPE container-type + root
+container, Key Vault, Storage, UAMI, Entra app config."* That directly contradicts the owner's stated model,
+and CLAUDE.md §17 calls that file *"the single authoritative operator guide."* **It drives provisioning**, so
+the contradiction is not cosmetic — a provisioning run following the doc would stand up a dedicated
+environment per customer. Needs an owner decision on which is correct, then a doc fix. Filed here rather than
+silently resolved, because I do not know which side is stale.
+
+### Verified BU structure — consistent with the owner's model
+
+Root **Spaarke** (`06fbf21c…`, `parentbusinessunitid` null) with **five flat children**, all directly under
+root: `Secure Project`, `Spaarke Business Unit 1`, `Spaarke Demo`, `Spaarke Dev 1`, `Spaarke Test 1`.
+One level, exactly the shape "each customer starts at a child BU below root" implies.
+
+### What this changes: the stakes, and the direction of the failure
+
+Deep depth = own BU **+ descendants**, never the parent. So with every record pooled in ROOT today:
+
+| Reader | Sees root-owned records? |
+|---|---|
+| Customer A user in BU-A (Deep) | ❌ **No** — root is their PARENT |
+| Customer B user in BU-B (Deep) | ❌ No |
+| Spaarke staff in root (Deep) | ✅ Yes — root + all descendants |
+
+So there is **no cross-customer leak today**, but something worse for a shared-tenancy product: **every
+customer's data pools in root where only Spaarke staff can see it, and no customer can see their own.**
+After the fix, records land in the customer's BU, that customer's users can read them, siblings cannot, and
+root staff retain the support-wide view.
+
+**So the ownership fix is the Model 1 customer-data-visibility mechanism, not an org-structure nicety.**
+Its `refuse` branch becomes isolation-critical rather than merely tidy.
+
+### Record-first is MORE right under Model 1, not less
+
+Spaarke staff sit in **root**. A staff member filing a document to customer A's matter would, under
+creator-first, land it in ROOT — invisible to customer A. Record-first lands it in A's BU, from the matter.
+The correction made on 2026-09-25 is therefore load-bearing for Model 1 specifically.
+
+### The per-customer BFF app registration idea — assessed, and NOT configured today
+
+Owner's hypothesis: each client may have its own BFF app registration, so its Dataverse application user
+would sit in that customer's BU, making the Dataverse default land records correctly with no code.
+
+**Verified: it is not configured that way.** All **25** application users in dev — including all three BFF
+ones (`mi-bff-api-dev` `8793f4b0…`, `spaarke-bff-api-prod` `905a7d55…`, `SDAP-BFF-SPE-API` `bb5a90e5…`) —
+sit in **ROOT** `06fbf21c…`. Not one is in a child BU.
+
+Assessment if it were configured:
+- ✅ Would give customer-level correctness for app-only creates with zero code.
+- ❌ Gives **application-user** ownership, not **team** ownership — not what the owner asked for.
+- ❌ Customer-level granularity only; no within-customer BU/department scoping.
+- ❌ Breaks if one BFF app registration serves several Model 1 customers — an app user can sit in only ONE BU.
+  The owner flagged this themselves (*"need to check if always does"*).
+- ❌ Correct placement is an operational provisioning step, enforced by nothing in code.
+
+**Conclusion**: worth doing as defence-in-depth for the no-target/no-user case, but it is not a substitute for
+explicit assignment and does not deliver team ownership.
+
+### New obligations this creates for 080
+
+1. **A cross-customer negative test** — a BU-A user MUST NOT read a BU-B record. Previously absent from the
+   criteria because ownership read as org structure; under Model 1 it is the isolation proof.
+2. **The refuse branch is isolation-critical** — a fallback that ever resolved to ROOT would make a customer's
+   record invisible to them. Already fail-closed; now it must be tested as such.
+3. **OPEN QUESTION for the owner**: in Model 1, is a customer ever more than one business unit (departments
+   beneath the customer's BU)? That decides whether "the customer's BU" and "the acting user's BU" can differ,
+   and what read scope Deep is meant to give.
+
 ## 5. Status
 
 | Criterion | Status |
