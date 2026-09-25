@@ -271,6 +271,8 @@ As of project `spaarke-multi-container-multi-index-r1`, document storage and sea
 3. Explicit overrides on the create form persist (e.g., a "Protected Matter" with `sprk_searchindexname = "spaarke-file-index"` keeps that value).
 4. No Dataverse plugins, no Power Automate flows, no new field mappings — the wizards are the canonical cascade mechanism.
 
+> **(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)** Item 4 describes the original design. Under [ADR-002](../adr/ADR-002-no-heavy-plugins.md) **WP-2** the wizard is **not** the canonical enforcement point: it may preview the container/index defaults, but the authoritative owner is the BFF server-side write path (target) — `RecordContainerResolver` (container; done for uploads) and `RecordCreationService` (search-index default; Matter/Project on `work/spaarkeai-word-add-in-r1`, not yet on master). Records created outside a wizard are corrected by WP-5 async fix-up / reconciliation, never a plugin. See [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](DATAVERSE-WRITE-PATH-ARCHITECTURE.md) (registry rows I-4, I-5).
+
 **Resolution at search time** (`IKnowledgeDeploymentService.GetSearchClientAsync` — see `src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs`):
 
 1. Client (PCF `SemanticSearchControl` v1.1.74 or the `sprk_semanticsearch` Code Page) sends the record's `sprk_searchindexname` in the search request.

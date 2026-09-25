@@ -46,7 +46,7 @@
 | `shared/` | TypeScript — `@spaarke/ui-components`, `@spaarke/auth` | `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` |
 | `webresources/` | Legacy JS web resources | (ADR-006: no new legacy webresources) |
 
-**PCF Controls** (field-bound form controls — React 16/17 platform libs): controls including `AssociationResolver`, `DocumentRelationshipViewer`, `EmailProcessingMonitor`, `RelatedDocumentCount`, `ScopeConfigEditor`, `SemanticSearchControl`, `SpaarkeGridCustomizer`, `ThemeEnforcer`, `UniversalDatasetGrid`, `UniversalQuickCreate`, `UpdateRelatedButton`, `VisualHost`. (`AIMetadataExtractor` and `DrillThroughWorkspace` were deleted 2026-07 by ai-architecture-redesign-r1.)
+**PCF Controls** (field-bound form controls — React 16/17 platform libs): controls including `AssociationResolver`, `DocumentRelationshipViewer`, `RelatedDocumentCount`, `ScopeConfigEditor`, `SemanticSearchControl`, `SpaarkeGridCustomizer`, `ThemeEnforcer`, `UniversalDatasetGrid`, `UniversalQuickCreate`, `UpdateRelatedButton`, `VisualHost`. (`AIMetadataExtractor` and `DrillThroughWorkspace` were deleted 2026-07 by ai-architecture-redesign-r1; `EmailProcessingMonitor` was deleted 2026-09-25.)
 
 Run `ls src/client/pcf/` for the authoritative list.
 

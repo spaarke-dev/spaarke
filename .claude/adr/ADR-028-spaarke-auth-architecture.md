@@ -329,7 +329,7 @@ E-2 is **re-affirmed, not resolved.** It was re-tested rather than inherited, an
 - **Rotation**: per `docs/guides/SECRET-ROTATION-PROCEDURES.md` while E-3 is open. Rotation must update **all six paths**, including the lowercase alias.
 - **Restore-to-compliance**: complete `spaarke-auth-v4-dataverse-MI` — migrate all listed clients to the A4 credential provider, verify OBO per environment, then remove the secret from app settings and Key Vault and relax `DataverseOptions.ClientSecret` `[Required]` (+ `GraphOptionsValidator`, `AgentTokenOptions`).
 - **Remediation TODO**: ~~OPEN~~ — ✅ **DONE 2026-08-24** (task 033). E-3 was time-boxed to `spaarke-auth-v4-dataverse-MI` and that project discharged it. It is **not** a standing exception and must not be cited for new code; see the closure banner above.
-- **Not covered by E-3**: E-1 per-customer SpeAdmin owning-app secrets (different applications' identities, architectural); non-Entra API keys (Bing, LlamaParse, Document Intelligence, AI Search — inventoried, out of A4 scope); plaintext secrets in Dataverse columns used by `BaseProxyPlugin` (separate defect, filed).
+- **Not covered by E-3**: E-1 per-customer SpeAdmin owning-app secrets (different applications' identities, architectural); non-Entra API keys (Bing, LlamaParse, Document Intelligence, AI Search — inventoried, out of A4 scope); plaintext secrets in Dataverse columns used by `BaseProxyPlugin` (separate defect, filed — **resolved 2026-09-25**: the plugin was deleted from source per the ADR-002 review; the `sprk_externalserviceconfig` table and any live registration must still be removed from environments).
 
 ## Key Patterns
 

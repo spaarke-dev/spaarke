@@ -287,7 +287,7 @@ The code-review skill performs multi-dimensional analysis:
 2. CATEGORIZE files by type
    → .cs → .NET review checklist
    → .ts/.tsx → TypeScript/PCF review checklist
-   → Plugin code → Plugin constraints
+   → Dataverse write-path code → ADR-002 WP-1…WP-8 (no plugins; invariants server-side)
 
 3. RUN security checks
    → Secrets detection
@@ -364,7 +364,7 @@ The adr-check skill validates code against Architecture Decision Records:
 | ADR | Constraint | Violation Example |
 |-----|------------|-------------------|
 | ADR-001 | No Azure Functions | Using `[FunctionName]` attribute |
-| ADR-002 | Thin plugins (<50ms, no HTTP) | HttpClient in plugin |
+| ADR-002 | No Dataverse plugins; record invariants owned server-side (WP-1…WP-8) | Any `IPlugin` type; invariant enforced only in a wizard `onFinish` |
 | ADR-006 | PCF over webresources | Creating legacy .js webresource |
 | ADR-007 | Graph types isolated | GraphServiceClient in controller |
 | ADR-008 | Endpoint filters for auth | Global middleware for auth |
@@ -376,7 +376,7 @@ The adr-check skill validates code against Architecture Decision Records:
 1. IDENTIFY resource types in modified files
    → API endpoint → ADR-001, ADR-008, ADR-010
    → PCF control → ADR-006, ADR-011, ADR-012, ADR-021
-   → Plugin → ADR-002
+   → Dataverse write path / record create → ADR-002
    → Caching → ADR-009
 
 2. LOAD applicable ADRs
@@ -399,11 +399,11 @@ The adr-check skill validates code against Architecture Decision Records:
 
 ### 🔴 Violations Found
 
-**ADR-002: Thin Dataverse Plugins**
-- File: `src/solutions/Plugins/ValidateContact.cs:34`
-- Violation: HttpClient instantiation in plugin
-- Constraint: "No HTTP/Graph calls from plugins"
-- Fix: Move HTTP call to BFF API, call via action
+**ADR-002: No Dataverse Plugins / Server-Side Write Path**
+- File: `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` *(illustrative — a known master-today gap, registry I-3)*
+- Violation: record invariant (creation-time field mapping via `applyFieldMappings`) enforced only in client wizard code
+- Constraint: "Client code MAY preview an invariant but MUST NOT be its only enforcement" (WP-2)
+- Fix: Apply the invariant in the BFF write path (single server owner, WP-1) and create via a BFF endpoint (WP-3)
 
 **ADR-021: Fluent UI v9 Design System**
 - File: `src/client/pcf/Panel/styles.ts:12`
@@ -648,7 +648,7 @@ The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All 
 | **Security Scan** | ubuntu-latest | Trivy filesystem vulnerability scan | Yes |
 | **Build & Test** | windows-latest | `dotnet build`, `dotnet test` with coverage | Yes |
 | **Client Quality** | ubuntu-latest | Prettier format check, ESLint strict check | Yes |
-| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), plugin size validation, dependency audit | Yes |
+| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), dependency audit (legacy plugin size step is dead — Spaarke ships no plugins, ADR-002; removal deferred to post-cutover) | Yes |
 | **Integration Readiness** | windows-latest | Build for deployment, package artifacts, environment readiness | Yes |
 | **ADR Violations Report** | ubuntu-latest | Parses NetArchTest results and comments on PR | Advisory |
 | **CI Summary** | ubuntu-latest | Aggregates all job results into step summary | Advisory |
@@ -1004,7 +1004,6 @@ This section defines **which tests to run when you modify code in a specific mod
 |-------------|------|-----------|--------|
 | **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + NSubstitute + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
 | **Spaarke.Core.Tests** | `tests/unit/Spaarke.Core.Tests/` | xUnit + FluentAssertions | Shared .NET library (Spaarke.Core) |
-| **Spaarke.Plugins.Tests** | `tests/unit/Spaarke.Plugins.Tests/` | xUnit + FluentAssertions + Moq + CRM SDK | Dataverse plugin validation and projection logic |
 | **Spe.Integration.Tests** | `tests/integration/Spe.Integration.Tests/` | xUnit + FluentAssertions + Moq + Mvc.Testing | End-to-end API integration (auth, AI, reporting, RAG) |
 | **Spaarke.ArchTests** | `tests/Spaarke.ArchTests/` | xUnit + NetArchTest.Rules | ADR compliance via architecture reflection tests |
 | **E2E (Playwright)** | `tests/e2e/` | Playwright + TypeScript | Browser-based PCF control and add-in testing |
@@ -1102,29 +1101,21 @@ cd tests/e2e && npx playwright test --project=edge specs/universal-dataset-grid/
 
 **Playwright configuration**: `tests/e2e/config/playwright.config.ts` (Edge primary, 60s timeout, Power Apps URLs)
 
-**PCF controls in the codebase**: AssociationResolver, DocumentRelationshipViewer, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost (AIMetadataExtractor and DrillThroughWorkspace deleted 2026-07, ai-architecture-redesign-r1)
+**PCF controls in the codebase**: AssociationResolver, DocumentRelationshipViewer, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost (AIMetadataExtractor and DrillThroughWorkspace deleted 2026-07, ai-architecture-redesign-r1; EmailProcessingMonitor deleted 2026-09-25)
 
 **ADR constraints validated**: ADR-006 (PCF over webresources), ADR-012 (shared component library), ADR-021 (Fluent UI v9, dark mode), ADR-022 (PCF uses React 16 platform libraries)
 
-### For Dataverse Plugins
+### For the Dataverse Write Path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
 
-**When you modify**: `src/server/plugins/Spaarke.Plugins/` (Dataverse plugin classes)
+Spaarke ships **no Dataverse plugins** — there is no plugin project or plugin test project (the `Spaarke.Plugins` / `Spaarke.Plugins.Tests` projects previously listed here never existed). Record invariants live in the BFF server-side write path ([ADR-002](../adr/ADR-002-no-heavy-plugins.md) WP-1…WP-8; [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md)), so they are tested with the BFF: invariant owners in `Sprk.Bff.Api.Tests`, write-path seams in `Spe.Integration.Tests`.
 
 **Run these tests**:
 ```bash
-# Plugin unit tests (validation and projection logic)
-dotnet test tests/unit/Spaarke.Plugins.Tests/
-
-# Architecture tests (ADR-002 thin plugin constraints)
+# Architecture tests (ADR-002 zero-plugin guard)
 dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-002"
 ```
 
-**Key test files**:
-- `tests/unit/Spaarke.Plugins.Tests/ValidationPluginTests.cs` -- field validation logic
-- `tests/unit/Spaarke.Plugins.Tests/ProjectionPluginTests.cs` -- projection/mapping logic
-- `tests/Spaarke.ArchTests/ADR002_PluginTests.cs` -- enforces no HTTP/Graph calls, plugin size constraints
-
-**ADR constraints validated**: ADR-002 (thin plugins, <50ms, no HTTP/Graph calls)
+**Key test file**: `tests/Spaarke.ArchTests/ADR002_PluginTests.cs` -- repo-wide zero-plugin guard (see Architecture Test Inventory below).
 
 ### For Shared Libraries (Spaarke.Core, Spaarke.Dataverse)
 
@@ -1202,7 +1193,6 @@ Given a changed file path, this matrix determines which test projects to execute
 | `src/server/api/Sprk.Bff.Api/Program.cs` | `Sprk.Bff.Api.Tests` | `Spe.Integration.Tests` | `Spaarke.ArchTests` | -- |
 | `src/server/shared/Spaarke.Core/**` | `Spaarke.Core.Tests` + `Sprk.Bff.Api.Tests` | -- | `Spaarke.ArchTests` (filter: `ADR-007\|ADR-009`) | -- |
 | `src/server/shared/Spaarke.Dataverse/**` | `Sprk.Bff.Api.Tests` | `Spe.Integration.Tests` | `Spaarke.ArchTests` (filter: `ADR-007`) | -- |
-| `src/server/plugins/Spaarke.Plugins/**` | `Spaarke.Plugins.Tests` | -- | `Spaarke.ArchTests` (filter: `ADR-002`) | -- |
 | `src/client/pcf/**` | -- | -- | -- | `tests/e2e/` (matching control spec) |
 | `src/client/code-pages/**` | -- | -- | -- | -- (manual or UI test via Step 9.7) |
 | `src/client/shared/**` | -- | -- | -- | `tests/e2e/` (all control specs, since shared components affect all) |
@@ -1226,7 +1216,6 @@ dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettin
 # Run a specific test project
 dotnet test tests/unit/Sprk.Bff.Api.Tests/
 dotnet test tests/unit/Spaarke.Core.Tests/
-dotnet test tests/unit/Spaarke.Plugins.Tests/
 dotnet test tests/integration/Spe.Integration.Tests/
 dotnet test tests/Spaarke.ArchTests/
 
@@ -1249,7 +1238,7 @@ reportgenerator -reports:**/coverage.cobertura.xml -targetdir:coverage-report
 
 ## Coverage Targets
 
-Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`). The `Include` filter covers: `[Sprk.Bff.Api]*`, `[Spaarke.Plugins]*`, `[Spaarke.Core]*`, `[Spaarke.Dataverse]*`. Test assemblies and `Program.cs` are excluded.
+Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`). The `Include` filter covers: `[Sprk.Bff.Api]*`, `[Spaarke.Core]*`, `[Spaarke.Dataverse]*` (it also lists `[Spaarke.Plugins]*`, which matches no assembly — Spaarke ships no plugins, ADR-002). Test assemblies and `Program.cs` are excluded.
 
 ### Per-Module Coverage Targets
 
@@ -1258,7 +1247,6 @@ Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`)
 | **Core services** (SpeFileStore, auth, caching) | `src/server/shared/Spaarke.Core/` | **80%+** | Critical shared infrastructure; high reuse surface |
 | **BFF API endpoints** | `src/server/api/Sprk.Bff.Api/Api/` | **70%+** | Route handlers; integration tests cover remaining paths |
 | **AI pipeline services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | **70%+** | Complex orchestration; some paths require live AI services |
-| **Dataverse plugins** | `src/server/plugins/Spaarke.Plugins/` | **80%+** | Thin, testable logic; must be exhaustively validated |
 | **Infrastructure** (DI, auth, resilience) | `src/server/api/Sprk.Bff.Api/Infrastructure/` | **60%+** | Framework glue code; some paths only exercised at runtime |
 | **Dataverse abstractions** | `src/server/shared/Spaarke.Dataverse/` | **60%+** | Thin wrappers over SDK; mocking limited by CRM SDK |
 | **Utility/helper classes** | (scattered) | **90%+** | Pure functions; easy to test exhaustively |
@@ -1291,7 +1279,7 @@ Architecture tests (`tests/Spaarke.ArchTests/`) use **NetArchTest.Rules** to enf
 | Test File | ADR | What It Enforces |
 |-----------|-----|-----------------|
 | `ADR001_MinimalApiTests.cs` | ADR-001 | No Azure Functions packages or attributes; Minimal API + BackgroundService only |
-| `ADR002_PluginTests.cs` | ADR-002 | Plugin assembly has no HTTP/Graph dependencies; plugins stay thin |
+| `ADR002_PluginTests.cs` | ADR-002 | Repo-wide **zero-plugin guard** *(2026-09-25)*: no `IPlugin` types; no CrmSdk packages, net4x projects, or `.snk` files; no ILMerge/ILRepack; no plugin registrations in solution XML; no `src/dataverse/plugins` directory. Also: BFF contains no plugin-named types and BFF endpoints reference no `IPlugin` |
 | `ADR007_GraphIsolationTests.cs` | ADR-007 | Graph SDK types do not leak above the SpeFileStore facade layer |
 | `ADR008_AuthorizationTests.cs` | ADR-008 | Authorization uses endpoint filters, not global middleware |
 | `ADR009_CachingTests.cs` | ADR-009 | Redis-first caching; no hybrid L1 cache without profiling justification |

@@ -61,7 +61,7 @@ Our strategy is **"custom first, adopt selectively"**: we build on the same Azur
 │  CUSTOM IMPLEMENTATIONS (Full Control)                              │
 │  ┌────────────────┐ ┌────────────────┐ ┌────────────────────────┐ │
 │  │ Orchestration  │ │ Tool Handlers  │ │ Multi-tenant RAG       │ │
-│  │ Engine         │ │ (C# plugins)   │ │ (tenantId isolation)   │ │
+│  │ Engine         │ │ (C# in BFF)    │ │ (tenantId isolation)   │ │
 │  └────────────────┘ └────────────────┘ └────────────────────────┘ │
 │                                                                     │
 │  AZURE PRIMITIVES (Same as Microsoft Foundry Backend)               │

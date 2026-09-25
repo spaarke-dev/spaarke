@@ -61,7 +61,7 @@ Quick reference of key constraints:
 | ADR | Key Constraint | Check For |
 |-----|----------------|-----------|
 | ADR-001 | BFF endpoints in Minimal API (Functions OK for narrow out-of-band integration) | `[FunctionName]` on BFF endpoints; Durable Functions; Functions duplicating BFF auth/correlation |
-| ADR-002 | Thin plugins | `HttpClient` in plugins, >50ms operations |
+| ADR-002 | No plugins; invariants server-side | Any `IPlugin`/plugin project; invariant enforced only in client wizard (WP-2); invariant table written via `Xrm.WebApi` (WP-3); fail-open security (WP-6) |
 | ADR-006 | PCF over webresources | New `.js` files in webresources |
 | ADR-007 | Graph isolation | `Microsoft.Graph` outside Infrastructure |
 | ADR-008 | Endpoint filters | Global `UseAuthorization` middleware |

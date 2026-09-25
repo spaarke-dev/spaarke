@@ -5,7 +5,7 @@ techStack: [github-actions, dotnet, azure, dataverse]
 appliesTo: [".github/workflows/", "ci-cd", "build status", "pipeline"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-09-25
 ---
 
 # CI/CD Pipeline Skill
@@ -30,21 +30,20 @@ Understanding the distinction between CI, deployment, and sync:
 
 | Term | What It Means | Workflow |
 |------|---------------|----------|
-| **CI (Continuous Integration)** | Build, test, code quality checks | `sdap-ci.yml` |
-| **Staging Deployment** | Deploy to staging environment | `deploy-staging.yml` (separate workflow) |
-| **Production Deployment** | Deploy to production | `deploy-to-azure.yml` (manual trigger) |
+| **CI (Continuous Integration)** | Build, test, code quality checks | `ci-router.yml` → `ci-tier1-blocking.yml` (required check **`Router`**) + `ci-tier2-advisory.yml`; legacy `sdap-ci.yml` runs in shadow until cutover (ci-cd-unit-test-remediation-r1) |
+| **Deployment** | Deploy a component to an environment | Per-component `deploy-*.yml` (see [Deployment Workflows](#deployment-workflows)) — mostly `workflow_dispatch` / operator-driven |
 | **Merge to Master** | Push changes to origin/master | Git operation (not a workflow) |
 | **Sync Main Repo** | Pull origin/master to local main repo | Git operation (needed for worktrees) |
 
 ### Important Distinctions
 
-1. **CI ≠ Staging Deployment**: CI validates code quality. Staging deployment is a *separate* workflow that runs *after* CI passes on master.
+1. **CI ≠ Deployment**: CI validates code quality. There is **no staging environment and no automatic "deploy after CI" chain**. (`deploy-staging.yml` / `deploy-to-azure.yml` were documented here previously; neither exists — removed from this skill 2026-09-25.)
 
 2. **"Merge to master" updates origin/master** but does NOT:
-   - Trigger staging deployment immediately (CI runs first)
+   - Deploy the BFF — BFF deploys are **operator-driven** (`/bff-deploy`, or `deploy-bff-api.yml` via `workflow_dispatch`); CI never auto-deploys the BFF on merge
    - Sync the main repo's local master (must be done explicitly when using worktrees)
 
-3. **Staging deployment triggers automatically** after CI passes on master, but may fail independently of CI.
+3. **A few deploy workflows are path-triggered on push to master** (`deploy-spaarke-ai.yml`, `deploy-office-addins.yml`, `deploy-infrastructure.yml`) — they can fail independently of CI.
 
 ---
 
@@ -102,7 +101,7 @@ gh run watch
 |-----|---------|-----------|
 | `security-scan` | Trivy vulnerability scanner | Yes |
 | `build-test` | Build + test (Debug & Release) | Yes |
-| `code-quality` | Format check, ADR tests, plugin size, dependencies | Yes |
+| `code-quality` | Format check, ADR tests, dependencies | Yes |
 | `integration-readiness` | Package artifacts for deployment | Yes |
 | `adr-pr-comment` | Post ADR violations to PR (non-blocking) | No |
 | `summary` | Pipeline summary report | No |
@@ -111,40 +110,24 @@ gh run watch
 - Trivy security scan uploads to GitHub Security tab
 - `dotnet format --verify-no-changes` for code style
 - NetArchTest ADR validation (`Spaarke.ArchTests`)
-- Plugin assembly size limit (1MB per ADR-002)
+- ADR-002 zero-plugin guard (`ADR002_PluginTests` — no plugin code/projects anywhere in `src/`)
 - Vulnerable package detection
 
-### Deployment: `deploy-to-azure.yml`
+### Deployment Workflows
 
-**Triggers**: Manual (`workflow_dispatch`), After `sdap-ci.yml` succeeds on master
+Verified against `.github/workflows/` on 2026-09-25. There is no staging environment and no plugin deployment (Spaarke ships no Dataverse plugins — ADR-002).
 
-| Job | Purpose |
-|-----|---------|
-| `deploy-infrastructure` | Deploy Bicep templates to Azure |
-| `deploy-api` | Deploy BFF API to App Service |
-| `smoke-test` | Verify `/ping` endpoint responds |
-| `notify` | Deployment summary |
+| Workflow | Deploys | Trigger |
+|----------|---------|---------|
+| `deploy-bff-api.yml` | BFF API (App Service) | `workflow_dispatch` only — BFF deploys are operator-driven; prefer the `/bff-deploy` skill |
+| `deploy-infrastructure.yml` | Bicep infrastructure | PR (what-if) + push to master on `infrastructure/bicep/**` |
+| `deploy-spaarke-ai.yml` | SpaarkeAi code page | Push to master on `src/solutions/SpaarkeAi/**` / shared UI lib |
+| `deploy-office-addins.yml` | Office add-ins (Static Web App) | Push to master on `src/client/office-addins/**` |
+| `deploy-external-spa.yml` | External SPA (Static Web App) | `workflow_dispatch` |
+| `deploy-teams-app.yml` | Teams app package | `workflow_dispatch` |
+| `deploy-promote.yml` | Environment promotion | `workflow_dispatch` (target environment input) |
 
-**Prerequisites**:
-- Azure OIDC authentication configured
-- `AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID` secrets set
-- Environment: `production`
-
-### Staging Deployment: `deploy-staging.yml`
-
-**Triggers**: Manual, After `sdap-ci.yml` succeeds on master
-
-| Job | Purpose |
-|-----|---------|
-| `deploy-api` | Deploy API to staging App Service |
-| `deploy-plugins` | Deploy Dataverse plugins via PAC CLI |
-| `integration-tests` | Run integration tests against staging |
-| `notify` | Deployment summary |
-
-**Prerequisites**:
-- `STAGING_APP_NAME` secret configured
-- `POWER_PLATFORM_*` secrets for plugin deployment
-- Environment: `staging`
+Read each workflow's `on:` block before relying on a trigger — they change.
 
 ### ADR Compliance Audit: `adr-audit.yml`
 
@@ -187,24 +170,20 @@ gh run watch
 ### After Merge to Master
 
 ```
-1. sdap-ci.yml runs on master
-2. If successful, deploy-staging.yml triggers automatically
-3. Monitor staging deployment:
-   gh run list --workflow=deploy-staging.yml
-4. Verify staging health:
-   curl https://{staging-app}.azurewebsites.net/ping
+1. CI (Router) runs on master
+2. Path-triggered deploy workflows run if their paths changed
+   (deploy-spaarke-ai / deploy-office-addins / deploy-infrastructure):
+   gh run list --limit 10
+3. Nothing else deploys automatically — the BFF is deployed by an operator
 ```
 
-### Manual Production Deployment
+### Deploying the BFF
 
 ```
-1. Verify staging is healthy
-2. Trigger production deployment:
-   gh workflow run deploy-to-azure.yml
-3. Monitor deployment:
-   gh run watch
-4. Verify production health:
-   curl https://{prod-app}.azurewebsites.net/ping
+Use the /bff-deploy skill (operator-driven). Or, on demand:
+   gh workflow run deploy-bff-api.yml -f environment=<env>
+Monitor: gh run watch
+Verify:  curl https://{app}.azurewebsites.net/ping
 ```
 
 ---
@@ -250,23 +229,12 @@ gh run watch
                               │ (on master merge)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  deploy-staging.yml (Automatic after CI success)                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ deploy-api   │─▶│deploy-plugins│─▶│ integration  │          │
-│  │ (App Service)│  │ (PAC CLI)    │  │ tests        │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ (manual trigger)
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  deploy-to-azure.yml (Manual production deployment)             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ deploy-infra │─▶│ deploy-api   │─▶│ smoke-test   │          │
-│  │ (Bicep)      │  │ (App Service)│  │ (/ping)      │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  Path-triggered deploy-*.yml only (SpaarkeAi, Office add-ins,   │
+│  Bicep). BFF + everything else: operator-driven /              │
+│  workflow_dispatch — see "Deployment Workflows".                │
 └─────────────────────────────────────────────────────────────────┘
 ```
+(The diagram's CI box shows the legacy `sdap-ci.yml` job layout; the required check is now `Router` → Tier 1/Tier 2 — see Key Terminology.)
 
 ---
 
@@ -280,7 +248,6 @@ gh run watch
 | `build-test` | Compilation error | Fix code errors locally |
 | `code-quality` format | Code style violation | Run `dotnet format` locally |
 | `code-quality` ADR | Architecture violation | Run `/adr-check` locally, fix violations |
-| `code-quality` plugin size | Plugin >1MB | Reduce dependencies per ADR-002 |
 | `code-quality` vulnerable | Package vulnerability | Update or replace vulnerable package |
 
 ### View Detailed Logs
@@ -316,27 +283,8 @@ gh run rerun {run-id}
 ### CI Pipeline (sdap-ci.yml)
 No secrets required - runs in read-only mode.
 
-### Staging Deployment
-| Secret | Purpose |
-|--------|---------|
-| `AZURE_CLIENT_ID` | Azure OIDC app ID |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription |
-| `AZURE_TENANT_ID` | Azure AD tenant |
-| `STAGING_APP_NAME` | App Service name |
-| `POWER_PLATFORM_URL` | Dataverse environment URL |
-| `POWER_PLATFORM_CLIENT_ID` | Dataverse app ID |
-| `POWER_PLATFORM_CLIENT_SECRET` | Dataverse app secret |
-| `STAGING_TEST_CLIENT_ID` | Integration test credentials |
-| `STAGING_TEST_CLIENT_SECRET` | Integration test credentials |
-
-### Production Deployment
-| Secret | Purpose |
-|--------|---------|
-| `AZURE_CLIENT_ID` | Azure OIDC app ID |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription |
-| `AZURE_TENANT_ID` | Azure AD tenant |
-| `AZURE_RESOURCE_GROUP` | Target resource group |
-| `AZURE_APP_SERVICE_NAME` | App Service name |
+### Deployment Workflows
+Each `deploy-*.yml` declares its own secrets / OIDC federation — read the workflow's `env:` and `secrets.*` references rather than relying on a list here.
 
 ---
 
@@ -346,8 +294,9 @@ No secrets required - runs in read-only mode.
 |-------|-------------------|
 | `push-to-github` | After push, check `gh pr checks` before merge |
 | `adr-check` | Local validation mirrors `code-quality` ADR tests |
-| `azure-deploy` | Manual deployment uses same process as `deploy-to-azure.yml` |
-| `dataverse-deploy` | Plugin deployment mirrors `deploy-staging.yml` |
+| `azure-deploy` | Bicep / Key Vault deployment (automated counterpart: `deploy-infrastructure.yml`) |
+| `bff-deploy` | BFF deployment (automated counterpart: `deploy-bff-api.yml`, `workflow_dispatch` only) |
+| `dataverse-deploy` | Solution / PCF / web resource deployment (no plugins — ADR-002) |
 | `code-review` | Quality gates run same checks as `code-quality` job |
 
 ---
@@ -367,8 +316,8 @@ No secrets required - runs in read-only mode.
 - Always check `gh pr checks` before suggesting merge
 - If CI fails, read logs with `gh run view {id} --log` before suggesting fixes
 - ADR violations in CI mirror local `/adr-check` - use same fix guidance
-- Staging deploys automatically after master merge - no manual trigger needed
-- Production deployment requires manual trigger - never auto-deploy to prod
+- There is no staging environment; the BFF is never auto-deployed on merge (operator-driven via `/bff-deploy`)
+- Never auto-deploy to prod
 - Use `gh run watch` to monitor long-running deployments
 
 ### Worktree Considerations
@@ -376,16 +325,16 @@ No secrets required - runs in read-only mode.
 - After merging to master from a worktree, **always sync the main repo**
 - CI passing does NOT mean the main repo is synced - these are separate concerns
 - When user asks to "merge to master and sync", ensure BOTH operations complete:
-  1. Push to origin/master (triggers CI → staging)
+  1. Push to origin/master (triggers CI + any path-triggered deploy workflows)
   2. Pull origin/master to main repo's local master
-- Report full status: CI status, staging deployment status, AND main repo sync status
+- Report full status: CI status, any triggered deploy workflow status, AND main repo sync status
 
 ### Complete Merge Flow (Worktree)
 
 ```
 1. Push branch:master → updates origin/master
 2. CI runs on master → monitor with gh run watch
-3. If CI passes → staging deployment triggers automatically
+3. Path-triggered deploy workflows (if any) run → check gh run list
 4. Sync main repo → cd {main-repo} && git pull origin master
 5. Report all statuses to user
 ```
@@ -397,6 +346,6 @@ No secrets required - runs in read-only mode.
 | Failure | Cause | Prevention / Recovery |
 |---|---|---|
 | Workflow fails in 0-2 seconds with "failed" status | Workflow startup failure — action version doesn't exist in registry (e.g., `actions/checkout@v6` when current major is v4). See [`FAILURE-MODES.md#G-3`](../../FAILURE-MODES.md#g-3-zero-second-github-actions-workflow-failures-are-startup-failures-not-test-failures) | Look at action version pins FIRST before debugging test logic. `actionlint` (Phase 4b) catches this pre-merge. |
-| CI green but staging deploy didn't trigger | Slot-swap workflow's `workflow_run` trigger depends on the CI workflow's name — rename broke the chain | Inspect the deploy workflow's `on: workflow_run: workflows: [<name>]` block. After renaming any workflow, update every workflow that depends on it. |
+| Merge landed but an expected deploy didn't run | Deploy workflows are path-filtered or `workflow_dispatch`-only; the change didn't touch the filtered paths, or a `workflow_run` chain references a renamed workflow | Inspect the deploy workflow's `on:` block (paths / `workflow_run: workflows: [<name>]`). After renaming any workflow, update every workflow that depends on it. |
 | Required-status check failing but not gating the PR | Branch protection allows merge despite failing status (admin-bypass enabled OR check not marked required) | Re-audit required status checks in repo settings. Branch protection bypass during ai-procedure-quality-r1 is acceptable; re-audit at project wrap. |
 | Action version is pinned to a major tag (`@v4`) instead of SHA | SHA pinning not enforced in any current workflow (0 of 115 actions are SHA-pinned per Phase 0 inventory) | Phase 4b task 070 introduces SHA pinning; until then, treat major-tag pins as a known security/reproducibility gap. |

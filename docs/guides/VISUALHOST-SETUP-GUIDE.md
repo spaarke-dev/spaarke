@@ -1220,7 +1220,7 @@ Add the `aiSummaryField` key to the **Options JSON** (`sprk_optionsjson`) on any
 ### Requirements
 
 - The field specified in `aiSummaryField` must exist on the entity identified by `sprk_entitylogicalname` on the chart definition
-- The field should be a text field (single-line or multi-line) that is pre-populated by an external process (e.g., a BFF API endpoint, plugin, or flow)
+- The field should be a text field (single-line or multi-line) that is pre-populated by an external process (e.g., a BFF API endpoint/job or a flow — Spaarke ships no Dataverse plugins, ADR-002)
 - VisualHost reads the field via `context.webAPI.retrieveRecord()` — no additional PCF properties are needed
 
 ---
@@ -2444,7 +2444,7 @@ If `aiSummaryField` is omitted, the toolbar shows no sparkle icon (legacy behavi
 ### Authoring Notes
 
 - The column must exist on the parent entity (validate via `dataverse:dv-metadata describe_table` if unsure).
-- The column should be populated by a server-side process (Power Automate flow, plugin, Insights Engine R2, etc.). The VisualHost only READS the value — it does not generate the summary.
+- The column should be populated by a server-side process (BFF job/Action, Insights Engine R2, Power Automate flow, etc. — not a Spaarke plugin; Spaarke ships none, ADR-002). The VisualHost only READS the value — it does not generate the summary.
 - If the column is null/empty for the current record, the popover shows a "Summary not available" empty-state message.
 
 ---

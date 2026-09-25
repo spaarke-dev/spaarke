@@ -80,7 +80,7 @@
 | **AssociationResolver** | `Spaarke.Controls` | 1.1.0 | ⛔ **RETIRED (SRFR-045, 2026-07-05)** — folded into RegardingResolver; no longer in the repo | 2026-05-14 | Do not deploy/reference. Its picker + subgrid auto-detect live in **RegardingResolver** now |
 | **DocumentRelationshipViewer** | `Spaarke.Controls` | 1.0.35 | Code Page version (`code-pages/DocumentRelationshipViewer`) is canonical; this PCF may be retired | 2026-05-13 | Coexists with Code Page; project memory mentions sharing `@spaarke/ui-components` |
 | **DrillThroughWorkspace** | `Spaarke.Controls` | 1.1.1 | Dataset PCF — expected to bind on subgrids or views, but zero matches | 2026-03-30 | Confirm whether deployed but unbound |
-| **EmailProcessingMonitor** | `Spaarke` | 1.1.0 | Standalone admin app/page — likely in MDA sitemap, not on a form | 2026-05-13 | Plausibly active; verify via app config |
+| ~~**EmailProcessingMonitor**~~ | `Spaarke` | 1.1.0 | — | 2026-05-13 | **Deleted from source 2026-09-25**; remove from environments/solution |
 | **ScopeConfigEditor** | `Sprk` | 1.2.7 | Possibly field-level (column override on `sprk_aichatscope`?) | 2026-03-30 | Specialized editor — confirm binding |
 | **SpaarkeGridCustomizer** | `Spaarke.Controls` | 1.0.0 | Grid customizer — expected at entity default level, but zero matches | 2026-05-14 | Check MDA grid components |
 | **ThemeEnforcer** | `Spaarke` | 1.0.0 | Likely invoked at app load (e.g., via webresource JS), not bound on a form | 2026-03-13 | Plausibly active globally |

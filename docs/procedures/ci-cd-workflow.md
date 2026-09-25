@@ -97,7 +97,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │                                                                      │
 │  1. Download artifacts from CI                                      │
 │  2. Deploy API to staging App Service                               │
-│  3. Deploy plugins via PAC CLI (if enabled)                         │
+│  3. (no plugin deploy — Spaarke ships no plugins, ADR-002)          │
 │  4. Run integration tests                                           │
 │  5. Health check verification                                       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -259,7 +259,6 @@ Follow **Conventional Commits** format:
 |-------|------|
 | `api` | BFF API changes |
 | `pcf` | PCF control changes |
-| `plugin` | Dataverse plugin changes |
 | `dataverse` | Dataverse configuration |
 | `infra` | Infrastructure/Bicep |
 | `docs` | Documentation |
@@ -435,7 +434,7 @@ Before merging any PR to master, verify all of the following:
 - [ ] **Build succeeds** — Both Debug and Release configurations compile without warnings (`-warnaserror`)
 - [ ] **Tests pass** — All unit tests pass with coverage collected
 - [ ] **Client quality** — Prettier format check and ESLint strict (`--max-warnings 0`) pass
-- [ ] **Code quality** — `dotnet format --verify-no-changes` passes; ADR architecture tests pass; plugin size under 1MB
+- [ ] **Code quality** — `dotnet format --verify-no-changes` passes; ADR architecture tests pass (incl. ADR-002 zero-plugin guard)
 
 ### Manual Checks (Reviewer Responsibility)
 
@@ -476,7 +475,7 @@ Before merging any PR to master, verify all of the following:
 | `security-scan` | Trivy vulnerability scan | ~1 min | Yes |
 | `build-test` | Build + run tests (Debug & Release) | ~3-4 min | Yes |
 | `client-quality` | Prettier format check + ESLint strict | ~1-2 min | Yes |
-| `code-quality` | Format check, ADR tests, plugin size | ~2 min | Yes |
+| `code-quality` | Format check, ADR tests, vulnerable packages | ~2 min | Yes |
 | `integration-readiness` | Package artifacts | ~1 min | Yes |
 | `adr-pr-comment` | Post ADR violations to PR | ~30s | No |
 | `summary` | Generate summary report | ~10s | No |
@@ -503,7 +502,6 @@ code-quality:
   • dotnet format --verify-no-changes
   • ADR architecture tests (NetArchTest) — blocking
   • ADR policy check (Legacy PowerShell) — advisory (continue-on-error)
-  • Plugin assembly size (<1MB per ADR-002)
   • Vulnerable package detection
 
 integration-readiness:
@@ -782,10 +780,11 @@ After merging to master:
 1. CI Pipeline runs on master
 2. If successful, deploy-staging.yml triggers
 3. API deployed to staging App Service
-4. Plugins deployed (if enabled)
-5. Integration tests run
-6. Health check verifies deployment
+4. Integration tests run
+5. Health check verifies deployment
 ```
+
+(Plugin deployment step removed 2026-09-25 — Spaarke ships no plugins, ADR-002.)
 
 **Monitor staging deployment:**
 ```powershell
@@ -848,7 +847,6 @@ gh workflow run deploy-to-azure.yml -f artifact_id={id}
 | `client-quality` ESLint | ESLint rule violation | Run `cd src/client/pcf && npx eslint . --fix` |
 | `code-quality` format | C# style violation | Run `dotnet format` |
 | `code-quality` ADR | Architecture violation | Run `/adr-check`, fix violations |
-| `code-quality` size | Plugin >1MB | Reduce dependencies per ADR-002 |
 
 ### Viewing CI Logs
 

@@ -62,10 +62,7 @@ public class ADR010_DITests
         // Verify IHttpClientFactory is used (not new HttpClient()) in service registrations
         // Check across all server source for direct HttpClient construction
         var serverSourcePath = Path.Combine(SourceRoot, "src", "server", "api", "Sprk.Bff.Api");
-        var serverCsFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
-
-        // Exclude the plugin project from this check
-        var bffFiles = serverCsFiles.Where(f => !f.Contains("CustomApiProxy")).ToList();
+        var bffFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
 
         // Check that IHttpClientFactory is registered somewhere
         var hasHttpClientFactory = allDiSource.Contains("AddHttpClient") ||
