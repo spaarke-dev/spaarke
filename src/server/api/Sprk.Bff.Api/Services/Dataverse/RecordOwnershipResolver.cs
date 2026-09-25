@@ -4,6 +4,14 @@
 // So if testuser1 is in spaarke business unit 1 team/business unit, then the record they create is
 // assigned to that team (not the user)."
 //
+// REFINED 2026-09-25, same owner, after they asked whether a BFF-created record even HAS an accurate
+// "user BU": the source is the TARGET record's business unit first, the acting user's only as a fallback.
+// Two reasons, both verified — some BFF creates have no acting user at all (EmailAttachmentProcessor,
+// inbound email), and where there is one their BU is often the wrong scope (a root-BU user filing to a
+// child-BU matter would put the document where the matter's own team cannot see it). This matches
+// RecordContainerResolver's already-sanctioned order for SPE containers. Nothing about the team-ownership
+// convention changed; only where the business unit is read from.
+//
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — nothing resolves "business unit → default owner team". The two neighbours both do
 //       something else: UserOrgContextReader (Services/Ai/Context/) reads BU and team NAMES to bind AI
@@ -32,12 +40,13 @@ using Spaarke.Dataverse;
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
-/// Resolves the team that should own a record the given caller creates: the <b>default owner team</b> of the
-/// caller's business unit.
+/// Resolves the team that should own a newly created record: the <b>default owner team</b> of the relevant
+/// business unit — the TARGET record's BU where the record is being filed against something, otherwise the
+/// acting user's. See <see cref="RecordOwnershipContext"/> for why that order and not the reverse.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Setting <c>ownerid</c> to that team makes <c>owningbusinessunit</c> <b>derive</b> to the caller's BU —
+/// Setting <c>ownerid</c> to that team makes <c>owningbusinessunit</c> <b>derive</b> from it —
 /// <c>owningbusinessunit</c> is never assigned directly. This is the shape <c>sprk_matter</c> rows already
 /// have in every environment checked, which is why it is the target rather than an invention.
 /// </para>
@@ -50,22 +59,61 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 public interface IRecordOwnershipResolver
 {
     /// <summary>
-    /// Resolves the default owner team of <paramref name="callerSystemUserId"/>'s business unit.
-    /// Returns <c>null</c> when the user, the business unit, or the team cannot be resolved.
+    /// Resolves the team that should own a new record, applying the priority order in ONE place so no call
+    /// site can get it wrong: <b>the target record's business unit first, the acting user's second</b>.
+    /// Returns <c>null</c> when neither resolves — callers MUST then refuse.
     /// </summary>
-    Task<Guid?> ResolveOwningTeamAsync(Guid callerSystemUserId, CancellationToken ct);
+    Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct);
+}
+
+/// <summary>
+/// What is known about a record being created, in the order that decides its owner.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why record-first rather than creator-first.</b> The acting user's business unit is the wrong answer more
+/// often than it is the right one:
+/// </para>
+/// <list type="number">
+/// <item><b>Some creates have no acting user at all.</b> <c>EmailAttachmentProcessor</c> creates documents from
+/// inbound email — no human initiated it, so "the acting user's BU" is undefined. Creator-first would have to
+/// refuse and would break inbound attachment processing outright.</item>
+/// <item><b>Even with an acting user, their BU is often the wrong scope.</b> A root-BU paralegal filing a
+/// document to a child-BU matter would, creator-first, put the document in ROOT — where the very team that
+/// owns the matter cannot see it. The document belongs with its matter, not with whoever uploaded it.</item>
+/// </list>
+/// <para>
+/// This mirrors <c>RecordContainerResolver</c> (task 076, owner-sanctioned), which derives an SPE container the
+/// same way — <c>ResolveForRecordAsync</c> from the target record, <c>ResolveForActingUserAsync</c> only when
+/// there is no record. Same question, same answer shape; reusing the established order rather than inventing a
+/// second one. It is also the same instinct as FR-26's <c>CoreAncestorResolver</c>, which exists precisely
+/// because access for a server-created child has to be inherited from its core ancestor.
+/// </para>
+/// </remarks>
+public sealed record RecordOwnershipContext
+{
+    /// <summary>Logical name of the record this one is being filed against (e.g. <c>sprk_matter</c>). Null when unfiled.</summary>
+    public string? TargetEntityLogicalName { get; init; }
+
+    /// <summary>Id of the record this one is being filed against. Null when unfiled.</summary>
+    public Guid? TargetRecordId { get; init; }
+
+    /// <summary>The acting user's Dataverse systemuserid, when known (HTTP paths that already resolved it).</summary>
+    public Guid? CallerSystemUserId { get; init; }
 
     /// <summary>
-    /// Same resolution keyed by the caller's <b>Entra object id</b> instead of their Dataverse systemuserid.
+    /// The acting user's Entra object id, when that is all the path has. Background paths have only this:
+    /// <c>UploadFinalizationWorker</c> runs from a queue message carrying <c>payload.UserId</c> with no
+    /// <see cref="System.Security.Claims.ClaimsPrincipal"/> to hand to <c>ICallerSystemUserResolver</c>. The
+    /// cross-reference is <c>systemuser.azureactivedirectoryobjectid</c> (ADR-028) — the same key that
+    /// resolver uses.
     /// </summary>
-    /// <remarks>
-    /// Background paths have an OID and nothing else: <c>UploadFinalizationWorker</c> runs from a queue
-    /// message carrying <c>payload.UserId</c> (an OID), with no <see cref="System.Security.Claims.ClaimsPrincipal"/>
-    /// to hand to <c>ICallerSystemUserResolver</c>. Rather than fabricate a principal at each such call site,
-    /// this overload does the same two-query chain from the other end — the cross-reference is
-    /// <c>systemuser.azureactivedirectoryobjectid</c> (ADR-028), the same key that resolver uses.
-    /// </remarks>
-    Task<Guid?> ResolveOwningTeamForObjectIdAsync(Guid callerObjectId, CancellationToken ct);
+    public Guid? CallerObjectId { get; init; }
+
+    /// <summary>True when a target record was supplied — i.e. the preferred source is available.</summary>
+    public bool HasTarget =>
+        !string.IsNullOrWhiteSpace(TargetEntityLogicalName)
+        && TargetRecordId is { } id && id != Guid.Empty;
 }
 
 /// <inheritdoc cref="IRecordOwnershipResolver" />
@@ -74,6 +122,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string SystemUserEntity = "systemuser";
     private const string TeamEntity = "team";
     private const string BusinessUnitColumn = "businessunitid";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
 
     /// <summary>
     /// Owner-team teamtype. Dataverse defines 0 = Owner, 1 = Access. BOTH this and <c>isdefault</c> are
@@ -92,31 +141,100 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <inheritdoc />
-    public Task<Guid?> ResolveOwningTeamAsync(Guid callerSystemUserId, CancellationToken ct)
-        => ResolveCoreAsync("systemuserid", callerSystemUserId, ct);
-
-    /// <inheritdoc />
-    public Task<Guid?> ResolveOwningTeamForObjectIdAsync(Guid callerObjectId, CancellationToken ct)
-        => ResolveCoreAsync("azureactivedirectoryobjectid", callerObjectId, ct);
-
-    /// <summary>
-    /// The shared two-query chain. <paramref name="userKeyColumn"/> selects which identity the caller is
-    /// known by — the Dataverse systemuserid, or the Entra object id cross-reference (ADR-028).
-    /// </summary>
-    private async Task<Guid?> ResolveCoreAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
+    public async Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
     {
-        if (userKey == Guid.Empty)
+        ArgumentNullException.ThrowIfNull(context);
+
+        // ── 1. PREFERRED: the target record's business unit ────────────────────────────────────────
+        // A filed record belongs with what it is filed against, not with whoever uploaded it. This is also
+        // the only source available when there is no acting user at all (inbound email).
+        if (context.HasTarget)
         {
-            _logger.LogWarning(
-                "Cannot resolve an owning team: no caller identity was supplied ({UserKeyColumn}). The record "
-                + "must be refused rather than created app-owned (task 080).",
-                userKeyColumn);
-            return null;
+            var fromTarget = await ResolveFromTargetRecordAsync(
+                context.TargetEntityLogicalName!, context.TargetRecordId!.Value, ct).ConfigureAwait(false);
+
+            if (fromTarget is not null)
+            {
+                return fromTarget;
+            }
+
+            // Deliberately falls through to the caller rather than refusing: a target whose own BU cannot be
+            // read is a weaker signal than a known acting user, not a reason to lose the record.
+            _logger.LogInformation(
+                "Owning team could not be derived from target {TargetEntity} {TargetId}; falling back to the "
+                + "acting user's business unit.",
+                context.TargetEntityLogicalName, context.TargetRecordId);
         }
 
+        // ── 2. FALLBACK: the acting user's business unit ───────────────────────────────────────────
+        if (context.CallerSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
+        {
+            return await ResolveFromUserAsync("systemuserid", systemUserId, ct).ConfigureAwait(false);
+        }
+
+        if (context.CallerObjectId is { } objectId && objectId != Guid.Empty)
+        {
+            return await ResolveFromUserAsync("azureactivedirectoryobjectid", objectId, ct).ConfigureAwait(false);
+        }
+
+        // ── 3. Neither. Refuse upstream. ───────────────────────────────────────────────────────────
+        _logger.LogWarning(
+            "Cannot resolve an owning team: no target record and no acting-user identity were supplied. The "
+            + "record must be refused rather than created app-owned (task 080).");
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the target record's <c>owningbusinessunit</c> and returns that business unit's default owner
+    /// team. Works whether the target is itself user-owned or team-owned, because the BU is derived either way.
+    /// </summary>
+    private async Task<Guid?> ResolveFromTargetRecordAsync(
+        string entityLogicalName, Guid recordId, CancellationToken ct)
+    {
         try
         {
-            // 1. The caller's business unit.
+            var query = new QueryExpression(entityLogicalName)
+            {
+                ColumnSet = new ColumnSet(OwningBusinessUnitColumn),
+                TopCount = 1,
+                NoLock = true
+            };
+            query.Criteria.AddCondition($"{entityLogicalName}id", ConditionOperator.Equal, recordId);
+
+            var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            var businessUnitId = results.Entities.FirstOrDefault()
+                ?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+
+            if (businessUnitId is null || businessUnitId == Guid.Empty)
+            {
+                return null;
+            }
+
+            return await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Not fatal — the caller falls back to the acting user. Logged so a systematically unreadable
+            // target (a wrong logical name, a missing primary-key column) is visible rather than silent.
+            _logger.LogWarning(ex,
+                "Could not read owningbusinessunit from target {EntityLogicalName} {RecordId}.",
+                entityLogicalName, recordId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the acting user's business unit, then that BU's default owner team.
+    /// <paramref name="userKeyColumn"/> selects which identity the caller is known by.
+    /// </summary>
+    private async Task<Guid?> ResolveFromUserAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
+    {
+        try
+        {
             var userQuery = new QueryExpression(SystemUserEntity)
             {
                 ColumnSet = new ColumnSet(BusinessUnitColumn),
@@ -138,34 +256,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 return null;
             }
 
-            // 2. That business unit's DEFAULT OWNER team. Both predicates are load-bearing — see OwnerTeamType.
-            var teamQuery = new QueryExpression(TeamEntity)
-            {
-                ColumnSet = new ColumnSet("teamid"),
-                TopCount = 1,
-                NoLock = true
-            };
-            teamQuery.Criteria.AddCondition(BusinessUnitColumn, ConditionOperator.Equal, businessUnitId.Value);
-            teamQuery.Criteria.AddCondition("isdefault", ConditionOperator.Equal, true);
-            teamQuery.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
-
-            var teams = await _dataverse.RetrieveMultipleAsync(teamQuery, ct).ConfigureAwait(false);
-            var teamId = teams.Entities.FirstOrDefault()?.Id;
-
-            if (teamId is null || teamId == Guid.Empty)
-            {
-                _logger.LogWarning(
-                    "Cannot resolve an owning team: business unit {BusinessUnitId} has no default owner team "
-                    + "(isdefault = true AND teamtype = {OwnerTeamType}).",
-                    businessUnitId, OwnerTeamType);
-                return null;
-            }
-
-            _logger.LogDebug(
-                "Resolved owning team {TeamId} for caller {UserKeyColumn}={UserKey} (business unit {BusinessUnitId}).",
-                teamId, userKeyColumn, userKey, businessUnitId);
-
-            return teamId;
+            return await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -180,5 +271,37 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 userKeyColumn, userKey);
             return null;
         }
+    }
+
+    /// <summary>
+    /// A business unit's DEFAULT OWNER team. Both predicates are load-bearing — see <see cref="OwnerTeamType"/>.
+    /// </summary>
+    private async Task<Guid?> ResolveDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        var teamQuery = new QueryExpression(TeamEntity)
+        {
+            ColumnSet = new ColumnSet("teamid"),
+            TopCount = 1,
+            NoLock = true
+        };
+        teamQuery.Criteria.AddCondition(BusinessUnitColumn, ConditionOperator.Equal, businessUnitId);
+        teamQuery.Criteria.AddCondition("isdefault", ConditionOperator.Equal, true);
+        teamQuery.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
+
+        var teams = await _dataverse.RetrieveMultipleAsync(teamQuery, ct).ConfigureAwait(false);
+        var teamId = teams.Entities.FirstOrDefault()?.Id;
+
+        if (teamId is null || teamId == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "Business unit {BusinessUnitId} has no default owner team "
+                + "(isdefault = true AND teamtype = {OwnerTeamType}).",
+                businessUnitId, OwnerTeamType);
+            return null;
+        }
+
+        _logger.LogDebug(
+            "Resolved owning team {TeamId} for business unit {BusinessUnitId}.", teamId, businessUnitId);
+        return teamId;
     }
 }
