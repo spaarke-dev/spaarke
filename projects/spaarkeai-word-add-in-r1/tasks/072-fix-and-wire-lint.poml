@@ -4,7 +4,7 @@
     <title>`npm run lint` points at a directory that does not exist and no workflow calls it — CI passes because lint never runs</title>
     <phase>5 Remediation — verification</phase>
     <gate>blocked — requires 069 (adds to the same gate)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a CI workflow and will change `.ts`/`.tsx` files to satisfy newly-running rules. Tags include ci-cd.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,4 +94,77 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 069 must be ✅ first — same workflow file.</protocol>
   </execution>
+
+  <status-note date="2026-09-28">
+    COMPLETED. Full record: notes/072-lint.md.
+
+    THE FINDING (the number nobody had): the first successful lint run reported 32
+    violations -- 4 errors, 28 warnings -- across 17 of 125 files. 13
+    no-empty-function, 12 no-unused-vars, 3 react-hooks/exhaustive-deps, 2 no-namespace
+    (error), 1 no-case-declarations (error), 1 no-var-requires (error). Not hundreds, so
+    the escalation trigger did not fire, and the backlog is driven to ZERO.
+
+    NO RULE DISABLED OR DOWNGRADED. One rule OPTION changed and it is the rule's own:
+    no-namespace gains allowDeclarations, because both hits are
+    `declare global { namespace Office { ... } }` -- global augmentation CANNOT be
+    expressed in ES2015 module syntax, so the rule's advice has no applicable form, and
+    the declaration is erased at compile time so no runtime namespace is created.
+    Non-declaration namespaces remain errors.
+
+    The 13 empty functions needed no config change because I PROBED rather than assumed:
+    ESLint treats a body containing a comment as non-empty, so each became
+    `{ /* no-op */ }`. The obvious alternative -- an overrides block for __tests__ --
+    would have switched a rule off across a quarter of the package to fix 11 stubs.
+
+    --max-warnings 0 is load-bearing and is now proven so: 28 of 32 were WARNINGS, so
+    without it this gate would have gone green over 87% of the backlog.
+
+    TWO INERT SUPPRESSIONS FOUND, both the same class as the defects 069 and 070 fixed:
+    (1) DocumentProfileSection.tsx wrapped an eslint-disable-next-line justification onto
+    a SECOND // line, so "next line" resolved to the comment and the rule still fired;
+    (2) matterTypeLookupService.cache.test.ts disabled no-require-imports while the rule
+    that actually fires under typescript-eslint 6 is no-var-requires. Neither was
+    discoverable until lint ran once.
+
+    ONE REAL CODE IMPROVEMENT, not a suppression: EntityPicker's allOptions was a bare
+    const [] + .push(), a new array identity every render, which made the useCallback
+    below it re-create every render -- the memoisation was doing nothing, and that is
+    what the rule reported. Now useMemo'd with explicit deps; contents unchanged. The
+    other two exhaustive-deps sites are genuine intentional omissions with per-site
+    reasons. no-case-declarations in SseClient.ts was a real minor defect (a const
+    scoped to the whole switch, so a later cross-branch reference would be a runtime
+    ReferenceError).
+
+    CROSS-TASK INTERACTION, caught locally: six unused locals were ALSO counted by tsc's
+    noUnusedLocals, so 069's pinned debt fell 74 -> 68. Because that pin is an EQUALITY
+    and not a ceiling, CI would have refused the reduction until it was written down --
+    the pin working exactly as designed on its first real encounter. Re-baselined to 68
+    in the same PR. Production errors remain 0.
+
+    CI PROOFS: green 36459612571 (all four jobs; pin verified in-run at 68), red
+    36460853616 (ESLint failure on "1 problem (0 errors, 1 warning)" -> "ESLint found too
+    many warnings (maximum: 0)" while the other three jobs stayed GREEN -- clean
+    isolation), then revert -> green.
+
+    AN OWN GOAL THAT WOULD HAVE PRODUCED A FALSE PROOF: the first seed was named
+    __072_unusedSeed, and .eslintrc sets varsIgnorePattern ^_ , so the leading underscore
+    made ESLint ignore it BY DESIGN. Local lint exited 0; had I pushed it, CI would have
+    gone green and the record would have claimed a proof that the gate cannot fail.
+    Proving the seed locally before pushing is what caught it. The second attempt also
+    needed narrowing, because an unused const trips tsc's noUnusedLocals too and would
+    have reddened the typecheck job as well, leaving no clean attribution.
+
+    OUT-OF-SCOPE FINDING, deliberately NOT absorbed here and needing a decision:
+    SaveFlow.test.tsx contains FIVE it(...) blocks with NO assertions -- they build mocks
+    and carry only a comment saying the test would require more work. They PASS, and the
+    file is in ci-gated-suites.txt, so the 56-suite gate counts them as coverage. That is
+    ADR-038's banned coverage-filler class and vacuous green one level below anything
+    069/070/072 addressed. I did NOT delete the now-unused fixtures, because that would
+    make the empty tests look tidy while still asserting nothing; they are _-prefixed
+    using the rule's own convention, recording the honest state -- pending, not dead.
+    Route to /test-diet at 090 or its own task.
+
+    DID NOT CLOSE: lint runs and can fail the workflow run, but does not BLOCK a merge --
+    the ruleset requires only Router. Same owner action as 069 and 070.
+  </status-note>
 </task>
