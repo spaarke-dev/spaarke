@@ -126,14 +126,80 @@ Task 056's `set +e` block and its comment are **untouched**, as the POML require
 Every change proven on CI, not locally — the task's binding constraint, because `shell: bash` errexit
 injection is invisible locally and this desktop additionally has stale `node_modules`.
 
-| # | Proof | Run | Result |
-|---|---|---|---|
-| 1 | Baseline: pin at the true value, all changes in | `6d8e1c1c4` | *pending* |
-| 2 | `actionlint` (criterion 6) via `workflows-validate.yml` | `6d8e1c1c4` | *pending* |
-| 3 | Debt pin fires: seed one extra accepted test-file error → job fails | | *pending* |
-| 4 | Debt pin reverts → green | | *pending* |
-| 5 | Trailing-newline guard fires: strip the manifest's final newline → job fails | | *pending* |
-| 6 | Newline guard reverts → green | | *pending* |
+| # | Proof | Commit | Run | Result |
+|---|---|---|---|---|
+| 1 | Baseline: pin at the true value, all changes in | `4d8752caa` | **36445980632** | ✅ **success** |
+| 2 | `actionlint` (criterion 6) | `4d8752caa` | `actionlint` workflow | ✅ **success** |
+| 3 | Debt pin **fires**: one extra accepted test-file error | `a154a0cb0` | **36447308107** | ✅ **failure, correctly** — `##[error]Accepted test-file debt ROSE: 75 line(s) vs the pinned 74`. `typecheck` job failed; `gated-jest` stayed **green**. |
+| 4 | Debt pin **passes** back at the true value | `dd4add510` | **36447724326** | ✅ **typecheck success** — `74 total line(s), of which 74 are accepted test-file debt (pinned at 74)` |
+| 5 | Newline guard **fires**: manifest's final newline stripped | `dd4add510` | **36447724326** | ✅ **gated-jest failure, correctly** — `##[error]ci-gated-suites.txt does not end with a newline…` |
+| 6 | Newline guard silent when restored → both green | `47c7b5272` | **36448019636** | ✅ **both jobs success**; `actionlint` success |
+
+**All six proofs are on `ubuntu-latest`**, which matters beyond this task: the promotion standard for making
+this gate merge-blocking requires *N consecutive green runs on `ubuntu-latest`*, and at landing this gate's
+evidence was five green runs all on a local Windows box and none on CI. These runs are the first real entries
+against that standard — two green (`36445980632`, `36448019636`) plus two deliberate reds that failed **for
+the intended reason**, which is stronger evidence than green alone.
+
+**Proofs 4 and 5 shared one run deliberately.** They fire in **different jobs**, so neither can mask the
+other — `typecheck` proved the pin passes at 74 while `gated-jest` proved the newline guard refuses, in the
+same CI cycle. Isolation is per guard, which is what the prescriptive step sequence is protecting; one run
+fewer is not a shortcut through it.
+
+**What proof 3 also establishes**: `gated-jest` stayed green with a live TypeScript error in a gated test
+file, confirming the header's claim that `ts-jest` runs `isolatedModules` and type-checks nothing. That is
+*why* the typecheck job has to exist separately — jest cannot see this class of defect at all.
+
+**What proof 5 establishes about the old code** — the thing the deleted comment claimed to prevent. Strip
+that newline and: the manifest loses its final entry (`useSaveFlow.test.ts`), `GATED_COUNT` drops 56 → 55,
+jest runs 55, and the suite-count assertion compares **55 to 55 and PASSES**. A live gated suite silently
+ungated behind a green check. The old comment credited that assertion with catching exactly this, and it
+never could.
+
+**Proof 1 was checked for vacuity, not just for green.** A pass proves nothing if the assertion never
+executed, so the run's own output was read back:
+
+```
+Production typecheck clean: 0 production error(s); 74 total line(s), of which 74 are accepted test-file debt (pinned at 74).
+Suite-count assertion OK: jest ran 56 suite(s), manifest declares 56.
+```
+
+The pin is named in the output, so it was evaluated. The newline guard correctly stayed silent — the manifest
+ends `0x0a` today.
+
+### 🔴 The blocker that had to be cleared first: this PR was running NO CI at all
+
+Every criterion here requires proof on CI, so the first push went out and **nothing ran** — not the
+office-addins gate, not `Router`, **no workflow at all**, for five consecutive pushes across three days. The
+API confirmed it bluntly: `actions/runs?head_sha=<HEAD>` returned `total_count: 0`.
+
+Actions was healthy repo-wide the whole time (`unified-access-control-r2`'s PR ran normally 30 minutes
+earlier), which is what made it confusing.
+
+**Cause: PR #960 was `mergeable=CONFLICTING`.** A `pull_request` workflow runs against the PR's *merge
+commit*; a conflicted PR has no merge ref, so GitHub silently schedules nothing.
+
+> **The generalisable trap**: a conflicted PR does not show red checks — **it shows no checks**, which reads
+> as "nothing to report" rather than "your gates are off". Any judgement of the form "CI is green" or "no
+> failures" is *vacuous* on a conflicted PR. Check `gh pr view N --json mergeable` before trusting a check
+> state. This is the same class as the no-vacuous-green guards inside this very workflow, one level up: the
+> workflow guards against jest running nothing, and nothing guarded against *GitHub* running nothing.
+> Candidate for `.claude/FAILURE-MODES.md` as a gotcha — not filed here, since that is a `.claude/` edit
+> outside this task's scope.
+
+Cleared by merging `origin/master` (we were 1 commit behind — **#1012, ADR-002 landing**, which also makes
+`RecordOwnershipResolver.cs` as owner of invariant I-6 citable from master rather than an unmerged branch).
+One conflict, in `.claude/agent-memory/researcher/MEMORY.md`: resolved by comparing the *referenced entry
+sets* rather than by eye — HEAD was a superset (78 refs vs 56) missing exactly one master entry
+(`dataverse-plugins-state-alternatives-2026-09-25.md`, from the ADR-002 work itself), so the resolution is
+HEAD plus that line. Build after merge: **0 warnings / 0 errors**. `mergeable=MERGEABLE`, CI restored.
+
+### A stale figure in the POML, corrected
+
+The POML warned that local and CI disagree — *"80 local vs 74 CI at the same commit"* — and told this task to
+pin the CI number for that reason. **At the pinning commit they agree: local `tsc` reports 74, CI reports 74.**
+Pinning the CI figure remains correct (CI is what enforces it), but the specific discrepancy cited no longer
+reproduces.
 
 ---
 

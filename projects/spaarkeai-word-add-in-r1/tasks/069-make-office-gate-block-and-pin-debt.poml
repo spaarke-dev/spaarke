@@ -4,7 +4,7 @@
     <title>FR-18 says "CI gates"; the job says "Reports, does not block" — make the gate bind, pin the test-debt total, and delete a comment that claims a protection the code does not have</title>
     <phase>5 Remediation — verification</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a CI workflow that decides merges. Tags include ci-cd. Task 056 proved this file's failure modes are non-obvious.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -120,4 +120,56 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. `steps mode="prescriptive"` — the order matters because each proof must be isolated to one change.</protocol>
   </execution>
+
+  <status-note date="2026-09-28">
+    COMPLETED with finding (a) REJECTED on evidence. Full record: notes/069-gate-binds.md.
+
+    (a) "The gate does not bind" was wrong. Both jobs already fail the workflow run: no
+    continue-on-error exists anywhere in the file (both matches are comments discussing it),
+    every step runs under set -euo pipefail, there are six exit-1 decision points, and the
+    production error count IS consumed. The POML's "nothing consumes that result" is false.
+    "Reports, does not block" means does not block a MERGE -- master's ruleset requires one
+    named check, Router. The file's own header separates those two senses and names the
+    conflation as FAILURE-MODES AP-12, one screen above the line the POML cites. Prescriptive
+    step 2 therefore had no work in it; per task-execute, a needed deviation in prescriptive
+    mode is an escalation, which this note is. What WAS wrong is that both summary strings
+    invited the misreading -- they now state the two facts separately.
+
+    (b) DONE. Debt pinned at 74 via ACCEPTED_TEST_DEBT_LINES, as an EQUALITY, after the
+    production check. Measured from CI (run 36162453924), not copied: the POML carried 111,
+    stale by 37 lines since task 071. A decrease fails too, deliberately, so a reduction is
+    locked in rather than silently spent. Re-baseline procedure documented in the workflow.
+
+    (c) DONE, implemented rather than deleted -- a real tail -c 1 guard cost three lines. The
+    claim was false for the stated reason. The POML's "latent because the last line is a
+    comment" was also stale: the last line is a real entry, so a stripped newline would
+    silently ungate a live suite.
+
+    BEYOND THE CLOSED ACCEPTANCE SET, justified because leaving a known-false claim in a file
+    being edited FOR truthfulness would be perverse: "12 of 22 suites green" corrected to 56
+    of 56, and the no-vacuous-green comment's "roots is currently rootDir/shared only" corrected
+    to the three roots jest.config.js:12 now declares.
+
+    SIX CI PROOFS, BOTH DIRECTIONS. Baseline green 36445980632 (checked for vacuity -- the run
+    names the pin in its own output). Pin fires 36447308107 (debt ROSE: 75 vs 74; jest stayed
+    green, confirming ts-jest is transpile-only). Pin passes + newline guard fires together
+    36447724326 (different jobs, so neither masks the other). Newline restored -> green.
+    actionlint green throughout.
+
+    DID NOT CLOSE FR-18. A red office-addins check still does not block a merge: that is a
+    repository RULESET setting and an owner action. Promotion also needs path classification
+    hoisted into the job first, because a path-filtered workflow in the required list deadlocks
+    ("expected but never reported" -- observed on PR #322), plus N consecutive green runs on
+    ubuntu-latest. Task 070 is the other half.
+
+    BLOCKER CLEARED EN ROUTE, wider than this task: PR #960 had been running ZERO CI for three
+    days -- not red checks, NO checks, across five pushes, because the PR was CONFLICTING and a
+    conflicted PR has no merge ref for pull_request workflows to run against. "CI is green" is a
+    vacuous claim on a conflicted PR; check `gh pr view N --json mergeable` first. Candidate for
+    .claude/FAILURE-MODES.md, not filed here (outside this task's scope). Cleared by merging
+    master (#1012, ADR-002), which also makes RecordOwnershipResolver.cs as owner of invariant
+    I-6 citable from master. Build after merge 0/0.
+
+    Task 056's set +e block and its comment are untouched, as required.
+  </status-note>
 </task>
