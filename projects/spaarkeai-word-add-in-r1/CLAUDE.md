@@ -211,7 +211,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 
 ### Applicable ADRs
 
-**From spec** — ADR-001 (Minimal API + BackgroundService) · ADR-007 (`SpeFileStore` facade) · ADR-008 (endpoint-filter authorization) · ADR-010 (DI minimalism) · ADR-012 (shared component library — Path A exception) · ADR-021 (Fluent v9 + dark mode) · ADR-028 (Auth v2, secret-free, NAA) · ADR-029 (publish hygiene + size ratchet) · ADR-038 (testing strategy — **`docs/adr/` only**) · ADR-044 (`cleanGuid`) · ADR-050 (modal shell — Path C) · ADR-051 (infinite lazy-scroll)
+**From spec** — ADR-001 (Minimal API BFF runtime — **where background/scheduled/event-driven work RUNS is [ADR-052](../../docs/adr/ADR-052-workload-placement.md)**, and how it runs inside the BFF is ADR-004 / ADR-036; this entry used to read "Minimal API + BackgroundService", which ADR-052's drift guard correctly flags as crediting placement to ADR-001) · ADR-007 (`SpeFileStore` facade) · ADR-008 (endpoint-filter authorization) · ADR-010 (DI minimalism) · ADR-012 (shared component library — Path A exception) · ADR-021 (Fluent v9 + dark mode) · ADR-028 (Auth v2, secret-free, NAA) · ADR-029 (publish hygiene + size ratchet) · ADR-038 (testing strategy — **`docs/adr/` only**) · ADR-044 (`cleanGuid`) · ADR-050 (modal shell — Path C) · ADR-051 (infinite lazy-scroll)
 
 **Added during discovery** — **ADR-049** (Compose Shadow Document — the Word/OOXML ADR) · ADR-013 (`PublicContracts` facade) · ADR-004 / ADR-036 (job contract) · ADR-019 (ProblemDetails) · ADR-024 (polymorphic regarding)
 
