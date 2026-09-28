@@ -651,8 +651,3 @@ describe('useSaveFlow', () => {
     });
   });
 });
-
-// ⏳ TEMPORARY — task 069 CI proof 3 (debt pin fires). Reverted in the next commit.
-// Deliberate single TS2322. `void` keeps noUnusedLocals from adding a second error.
-const __069_debtPinSeed: number = 'deliberate type error';
-void __069_debtPinSeed;
