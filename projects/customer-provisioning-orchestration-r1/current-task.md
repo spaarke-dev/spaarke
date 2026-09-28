@@ -1,5 +1,23 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Last Updated**: 2026-08-25 SESSION 8 END — **🎯 SESSION 8 accomplishments**: Task **203a COMPLETE** in a single main session (~3h actual vs 15h estimate). All 9 in-scope Class-A rows resolved via verify-first pattern (7 applied + 2 already-applied). Sub-Agent Write Boundary honored: all `.claude/**` writes from main session. Build sanity: ControlPlane.Core succeeded 0 warnings / 0 errors. See "SESSION 8 Quick Recovery" block below. Prior session block (SESSION 7) retained below for reference.
 
 ## 🎯 SESSION 8 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)

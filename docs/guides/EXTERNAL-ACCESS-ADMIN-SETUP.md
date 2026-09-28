@@ -1,7 +1,7 @@
 # EXTERNAL ACCESS — ADMIN & OPERATIONS SETUP GUIDE
 
 > **Audience**: Azure / Power Platform admins and DevOps engineers configuring the external access environment
-> **Last Updated**: 2026-07-21
+> **Last Updated**: 2026-09-08 (`unified-access-control-r2` task 026 — corrected stale `sprk_externalrecordaccess` column names in §4.2/§7.3, and added the delegation-rule deny-code table at §7.1a. This is the operator-facing troubleshooting doc for this surface; task 026's originally-named target, `docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md`, documents an unrelated feature — field-mapping profiles for wizard-created child records, not access/delegation — and was not the right home for this content)
 > **Applies To**: Azure Static Web Apps, Microsoft Entra External ID (CIAM), Dataverse, Azure App Service (BFF)
 > **Architecture Reference**: [`docs/architecture/external-access-spa-architecture.md`](../architecture/external-access-spa-architecture.md)
 
@@ -161,12 +161,55 @@ The stable link between a CIAM identity and a Dataverse Contact. Populated by th
 
 ### 4.2 `sprk_externalrecordaccess` (participation grant)
 
+> ⚠️ **Corrected 2026-09-08** (`unified-access-control-r2` task 026, review finding M4): this section named
+> `sprk_contactid`, `sprk_projectid`, `sprk_expirydate` and `sprk_accountid` — **none exist** on this table.
+> Verified against `src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md` (corrected
+> 2026-08-20 against live `$metadata`) and `Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs`.
+
 Unchanged authorization model. A grant is one active record with:
-- Grantee = the **Contact** (`sprk_contactid@odata.bind` → `/contacts(...)`) — never a firm/org lookup.
-- `sprk_projectid` → the project, `sprk_accesslevel` (see Section 8), `sprk_granteddate`, and `sprk_grantedby` (audited caller).
-- Optional `sprk_expirydate` and `sprk_accountid` (record-keeping only; not the grantee).
+- Grantee = the **Contact** (`sprk_Contact@odata.bind` → `/contacts(...)`, read as `_sprk_contact_value`) — never a firm/org lookup.
+- `sprk_project` (read: `_sprk_project_value`) → the project, `sprk_accesslevel` (see Section 8), `sprk_granteddate`, and `sprk_grantedby` (audited caller).
+- `sprk_expiresdate` — **optional on the Dataverse column, but NOT safe to omit.** Since task 107 (ISS-009 /
+  #974, owner decision D-1, 2026-09-19), a row with no `sprk_expiresdate` confers **NOTHING** — see Section
+  7.1 and §4.2a below. The BFF itself never writes an undated grant (task 097 defaults an absent expiry to
+  today + 90 days); this matters only for rows created outside the BFF.
+- `sprk_organization` (read: `_sprk_organization_value`; targets the custom `sprk_organization` table, NOT
+  the OOB `account` entity — record-keeping / org-grant lookup, not the grantee for a per-contact grant).
 
 > Power Pages web roles, table permissions, and the `adx_*` / `mspp_*` built-in tables are **retired** — they are no longer part of this platform.
+
+### 4.2a Pre-deploy gate — COUNT undated active grants before deploying task 107
+
+> 🔴 **Operator action required before deploying the ISS-009 read-side fix (task 107).** Before task 107, a
+> `sprk_externalrecordaccess` row with no `sprk_expiresdate` conferred access **forever** (task 007's
+> original `eq null` branch). After task 107 deploys, that same row confers **NOTHING** — undated moved
+> from fail-OPEN to fail-CLOSED (ADR-003). **Every currently-Active, currently-undated grant row loses
+> access the moment this deploys.** This is a deliberate access REMOVAL, and its blast radius is entirely
+> data-dependent — it was NOT possible to measure from this session (the `dataverse` MCP server was not
+> authenticated), so it has not been re-verified since D-1's "blast radius zero today" note, which was
+> itself a claim about live data, not a measurement.
+>
+> **Run this COUNT before deploying, and review the result before proceeding:**
+>
+> ```bash
+> TOKEN=$(az account get-access-token \
+>   --resource https://spaarkedev1.crm.dynamics.com \
+>   --query accessToken -o tsv)
+>
+> curl -s -H "Authorization: Bearer $TOKEN" \
+>   "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_externalrecordaccesses?\$filter=statecode eq 0 and sprk_expiresdate eq null&\$select=_sprk_contact_value,_sprk_organization_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value&\$count=true"
+> ```
+>
+> - **Count is 0** — nothing loses access; deploy has no read-side impact on existing rows (new BFF-written
+>   grants are already dated since task 097, so this should trend toward zero over time).
+> - **Count is non-zero** — each listed row is a grant that will stop conferring access on deploy. Review
+>   the list with the record owner(s) before deploying: either backfill an expiry (`PATCH` the row with an
+>   explicit `sprk_expiresdate`, e.g. today + 90 to match the FR-33 default) or confirm the removal is
+>   intended. **Do not deploy silently over a non-zero count** — the caller-facing symptom is a grantee who
+>   had a working, unbounded-looking grant suddenly seeing an empty project list (Section 7.1).
+>
+> This is a **code + docs task** (task 107); the live COUNT and the deploy itself are **operator steps**,
+> run separately from and after code review.
 
 ---
 
@@ -320,10 +363,29 @@ External SPE access is entirely BFF-brokered app-only. There is **no per-externa
 | 401 on all `/api/v1/external/*` calls | `Ciam:Audience` mismatch | Must equal the BFF-API **client-id GUID** (`4a4d5126-…`); confirm `requestedAccessTokenVersion: 2` |
 | 403 `contact_not_found` | No Contact resolvable by `oid` (or first-login email) | Confirm onboarding populated `sprk_externalobjectid`; check the Contact exists |
 | Empty project list from `/me` | No active participation records | Check `sprk_externalrecordaccess` for `statecode = 0` records for the Contact |
+| Empty project list from `/me`, but a grant record clearly exists and is Active | The grant's `sprk_expiresdate` is in the past | Expected as of task 007 (2026-08-23) — expiry IS enforced on this read path (see Section 4.2). Extend `sprk_expiresdate` on the grant (do **not** clear it — since task 107 a null expiry confers nothing too, see the row below), or issue a fresh grant; deactivating/reactivating the row does not help since `statecode` alone no longer determines visibility. |
+| Empty project list from `/me`, grant record is Active, and `sprk_expiresdate` is **blank/null** | Expected as of task 107 (2026-09-21, ISS-009 / D-1) — a grant with NO expiry confers **nothing**, inverted from task 007's original "null never expires". Reachable only for rows created outside the BFF (form / Web API / flow / import), since the BFF always writes an expiry (task 097). | Set an explicit `sprk_expiresdate` on the row (e.g. today + 90 to match the FR-33 default), or re-grant through the BFF `/grant` endpoint, which always supplies one. See §4.2a for the pre-deploy COUNT of rows this affected at rollout. |
 | New grant not visible for ~60s | Redis cache not invalidated | Grant invalidates the cache; verify `tid` claim present for cache key |
 | Download returns 403 with no bytes | Authz-before-stream denied (no project access or doc not in project) | Expected for unauthorized callers; verify participation + document→project scoping |
 | CORS error in browser console | SWA origin not in BFF CORS allow-list | Add the SWA origin to `Cors__AllowedOrigins` |
 | Provisioning fails (Graph `POST /users`) | CIAM Graph provisioner cert/permission | Verify `ciam-graph-provisioner-cert` in Key Vault + `User.ReadWrite.All` consented in the CIAM tenant |
+
+### 7.1a Delegation Rule Denials — `/api/v1/external-access/*` mutations only
+
+> **Added 2026-09-08** (task 026, review finding M5): these four codes were previously undocumented outside
+> code (`Api/ExternalAccess/DelegationRuleFilter.cs`). They apply to the **internal, workforce-authenticated**
+> management group (`/grant`, `/invite`, `/invite-and-grant`, `/revoke`, `/close-project`, `/provision-project`,
+> `/unsecure-project`) — the rule (owner decision B-14, task 008): *a caller may change who can reach a
+> record only if they hold **Write** on that record, evaluated as the caller.* Every denial is HTTP **403**
+> with a `reasonCode` extension in the ProblemDetails body; look for `[DELEGATION] DENIED` in the BFF logs
+> (Section 7.2) for the specific route and target.
+
+| `reasonCode` | What it means | What the operator should do |
+|---|---|---|
+| `sdap.access.deny.delegation_no_caller_token` | The request carried no caller bearer token, so the Write check could not be evaluated as the calling user (the filter refuses to fall back to an app-only check). | Confirm the caller's session token is being forwarded to the BFF on this call. This is a client/session bug, not a permissions problem — a signed-in core user should never hit this in normal use. |
+| `sdap.access.deny.delegation_target_unresolved` | No target record could be identified from the request body (e.g. an empty/invalid `ProjectId`, or — for `/revoke` — an `AccessRecordId` that doesn't resolve to a row with a derivable root). | Verify the request body names a real, existing record (project/matter/work assignment id, or a valid access-record id for `/revoke`). A malformed or already-deleted id produces this code rather than a 404, deliberately — see the class remarks on enumeration in `DelegationRuleFilter.cs`. |
+| `sdap.access.deny.delegation_write_required` | The caller was correctly identified and the target record correctly resolved, but the caller does **not** hold Write on that record (Read-only, or no access at all, is not enough — B-14 requires Write specifically). | This is very often correct behavior, not a bug — check whether the caller SHOULD have Write on the target record via a share, role, or ownership before assuming it's an error. If they should, grant them Write on the underlying record (not on the external-access surface) and retry. |
+| `sdap.access.deny.delegation_check_failed` | The Write-rights check itself threw — either resolving the target record or evaluating `CallerRecordAccessProbe.GetCallerRightsAsync` failed (transport error, OBO exchange failure, or a Dataverse outage). Logged as `DELEGATION-RPA-UNAVAILABLE` in some call paths. | Transient — retry. If it persists, check BFF connectivity to Dataverse and whether OBO token exchange is healthy (see `src/server/api/Sprk.Bff.Api/CLAUDE.md` Auth section); this fails CLOSED by design, so a systemic outage here denies these six mutation endpoints entirely rather than silently widening access. |
 
 ### 7.2 Checking BFF Logs
 
@@ -350,7 +412,9 @@ TOKEN=$(az account get-access-token \
   --query accessToken -o tsv)
 
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_externalrecordaccesses?\$filter=_sprk_contactid_value eq {contactId} and statecode eq 0&\$select=_sprk_contactid_value,_sprk_projectid_value,sprk_accesslevel,statecode"
+  "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_externalrecordaccesses?\$filter=_sprk_contact_value eq {contactId} and statecode eq 0&\$select=_sprk_contact_value,_sprk_project_value,sprk_accesslevel,statecode"
+# NOTE (corrected 2026-09-08): the field names are _sprk_contact_value / _sprk_project_value, not the
+# *id_value forms this example previously used -- those attributes do not exist on this table.
 ```
 
 ### 7.4 Audit Trail

@@ -4,7 +4,7 @@
     <title>FR-20 — ImpersonatedRootSetSource: thin source over the live impersonated-read primitive, with per-user cache</title>
     <phase>1 One evaluator</phase>
     <gate>after-031</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation; tags bff-api/auth; new surface on the row-level-security path.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -33,7 +33,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="031" status="pending">ADR-028 A2 amendment sanctioning impersonated derivation (cite it in this PR).</dependency>
+      <dependency task="031" status="completed">ADR-028 A2 amendment sanctioning impersonated derivation (cite it in this PR). ⚠️ This annotation read `pending` until 2026-09-09 and was WRONG — 031's own POML and the index both say completed. `check-task-status-drift.ps1` does NOT reconcile `<dependency status>` attributes (it compares `<status>` to the index only), so this third status home drifts silently. Never trust it; re-derive from the dependency's own POML.</dependency>
     </dependencies>
   </context>
 

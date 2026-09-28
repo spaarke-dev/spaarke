@@ -42,7 +42,7 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">Minimal API + BackgroundService. NO Azure Functions hosting BFF endpoints.</constraint>
+    <constraint source="ADR-001">Minimal API; BFF endpoints are never hosted in Azure Functions, and no Azure Functions inside the BFF assembly.</constraint>
     <constraint source="ADR-029">Framework-dependent linux-x64 publish; sourcemap exclusion; ≤5MB delta verified by task 065.</constraint>
     <constraint source="bff-extensions.md">Pre-merge checklist verified: placement decision stated; ADRs cited; publish-size impact verified (G8); no new HIGH CVE (G9); feature-module DI per ADR-010.</constraint>
     <constraint source="project">Tasks 060–066 (G1–G9) MUST all be PASS before this task starts.</constraint>
@@ -54,7 +54,7 @@
       <file>.claude/constraints/api.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
       <file>.claude/skills/bff-deploy/SKILL.md</file>
-      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
       <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
       <file>docs/guides/auth-deployment-setup.md</file>
       <file>docs/architecture/auth-azure-resources.md</file>

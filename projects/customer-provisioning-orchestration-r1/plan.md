@@ -1,5 +1,23 @@
 # Project Plan: Customer Provisioning & Deployment Orchestration (r1)
 
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Last Updated**: 2026-08-16
 > **Status**: Ready for Tasks
 > **Spec**: [spec.md](./spec.md)
@@ -38,7 +56,7 @@
 - **ADR-013**: AI facade `PublicContracts/` — H0.5 endpoint MUST NOT inject `IActionResolver`/`IActionRunner` directly
 - **ADR-014**: Session isolation `tenantId + sessionId` dual-filter on `spaarke-session-files` (I2 strengthens)
 - **ADR-020**: Model version pinning — 4 model deployments in H2a Bicep (gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large v1)
-- **ADR-027**: Subscription-per-customer — Model 1 shared-tier is Path A exception
+- **ADR-027** *(amended 2026-09-28)*: one Azure subscription **per customer** in both models. 🔴 The former *"Model 1 shared-tier is Path A exception"* no longer applies — there is no shared tier, so nothing to except.
 - **ADR-028**: 21 MUSTs for auth ceremony — H4 KV secrets + UAMI RBAC + `keyVaultReferenceIdentity` PATCH
 - **ADR-032**: Null-Object kill-switch — SignalR feature-gate follows P1/P2/P3 pattern
 - **ADR-036**: Background-job infrastructure (Service Bus + `IJobHandler` + Redis idempotency)
@@ -259,7 +277,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 6. Migrate RBAC (KV Secrets User, Storage Blob Data Contributor, Cognitive Services User, Cosmos DB Data Contributor) from System-Assigned MI → UAMI principal
 7. Migrate Graph app-role grants + Dataverse App User registration to UAMI app ID
 8. Rebuild `platform.bicep` — shrink to control-plane-only (App Service + Cosmos + platform KV + monitoring)
-9. NEW `model1-shared.bicep` stack — first-class trial-tier composition
+9. ~~NEW `model1-shared.bicep` stack~~ — 🔴 **RETIRED (D-12, 2026-09-28)** — the shared trial tier does not exist. Retiring the file is a six-surface atomic change (see design.md §3A A1).
 10. NEW `platform-controlplane.bicep` — L2 orchestrator infra
 11. Scaffold `src/server/services/Sprk.Provisioning.ControlPlane/**` .NET 10 project
 12. Implement 19 `IProvisioningHandler` handlers (H0/H0.5/H1/H2a/b/H3–H11/H12a/b/c/H13/H14) with 3-level idempotency

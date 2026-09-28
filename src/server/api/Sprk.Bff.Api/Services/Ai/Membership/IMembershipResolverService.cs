@@ -62,11 +62,21 @@ public interface IMembershipResolverService
     /// Path C additive reuse). Given a bare <paramref name="contactId"/> — with
     /// NO systemuser — builds a contact-only <see cref="PersonIdentity"/> and
     /// resolves the same membership record set the systemuser path returns, but
-    /// <b>filtered to the access-conferring role allowlist</b> (spec.md NFR-05):
-    /// only <c>contact</c>-target lookups whose logical name matches the
-    /// configured convention (default <c>sprk_assigned*</c>, via
-    /// <see cref="IMembershipFieldDiscoveryService"/> metadata discovery) minus a
-    /// config/data-driven exclusion list. Adverse/informational contact fields
+    /// <b>filtered to the access-conferring column registry</b> (spec.md NFR-05):
+    /// only <c>contact</c>- or <c>sprk_organization</c>-target lookups that appear
+    /// as an explicit entry for this entity in
+    /// <c>MembershipOptions.AccessConferringRoles</c>, with the entry's declared
+    /// identity type matching what live metadata discovery resolved.
+    /// <para>
+    /// ⚠️ <b>Corrected 2026-09-17 (task 043).</b> This paragraph previously described
+    /// the retired <c>sprk_assigned*</c> <i>naming convention</i> plus an exclusion
+    /// list. Task 041 (ADR-034 Amendment A1 / FR-24) DELETED that prefix check — it
+    /// is not layered under the registry, it is gone — so a reader trusting this
+    /// doc would have concluded that naming a new column <c>sprk_assigned*</c> still
+    /// confers access. It does not; only a reviewed registry entry does, which is
+    /// the entire point of FR-24.
+    /// </para>
+    /// Adverse/informational contact fields
     /// (opposing-counsel lookups) and polymorphic <c>sprk_regardingrecord*</c>
     /// fields NEVER confer access. Reuses the same discovery + FetchXml engine as
     /// <see cref="ResolveAsync"/> — it does not fork the resolution pipeline.
@@ -138,12 +148,54 @@ public interface IMembershipResolverService
 /// Opaque pagination cursor. Pass the value returned from a prior
 /// <see cref="MembershipResponse.ContinuationToken"/> to fetch the next page.
 /// </param>
+/// <param name="AccessConferringOnly">
+/// ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041). When <c>true</c> on
+/// <see cref="IMembershipResolverService.ResolveAsync"/> (the systemuser plane), the resolver applies
+/// the SAME access-conferring column registry filter <see cref="IMembershipResolverService.ResolveByContactAsync"/>
+/// always applies — narrowing discovered descriptors to only those registered in
+/// <c>MembershipOptions.AccessConferringRoles</c> for the target entity, covering both Contact- and
+/// Organization-typed lookups. Default <c>false</c> leaves <see cref="ResolveAsync"/>'s existing
+/// unfiltered (all-discovered-descriptors) scoping behavior byte-identical — this option is an explicit
+/// opt-in for callers making an ACCESS decision (e.g. the accessible-record-set composer), never a
+/// change to the AI-scoping default. Ignored by <see cref="IMembershipResolverService.ResolveByContactAsync"/>,
+/// which already applies the registry filter unconditionally regardless of this flag's value.
+/// </param>
+/// <param name="OrganizationIds">
+/// Design §4.5 term 4 — ORG EXPANSION (unified-access-control-r2 task 043 / spec FR-24 + FR-25). The
+/// <c>sprk_organization</c> ids to bind into the resolved
+/// <see cref="PersonIdentity.OrganizationIds"/> on the CONTACT plane
+/// (<see cref="IMembershipResolverService.ResolveByContactAsync"/>), so that registry-listed
+/// <b>org-typed</b> descriptors emit conditions instead of resolving to nothing.
+/// <para>
+/// ⚠️ <b>Supplied by the caller, deliberately not read here.</b> The ids come from the
+/// <c>sprk_contactorganization</c> junction, which lives behind
+/// <c>Infrastructure/ExternalAccess/ExternalParticipationService.QueryActiveOrgIdsAsync</c> — a read the
+/// accessible-record-set composer ALREADY performs for the FR-23 deny veto. Resolving them here instead
+/// would invert the layering (<c>Services/Ai/Membership</c> depending on
+/// <c>Infrastructure/ExternalAccess</c>) and add a SECOND, separately-cached junction read that could
+/// disagree with the first mid-composition. The pre-existing
+/// <c>IIdentityOrganizationResolver</c> seam is not a substitute: its implementation resolves via the
+/// configured <c>sprk_organization</c>→<c>systemuser</c> lookup
+/// (<c>MembershipOptions.OrganizationLookup.UserLookupField</c>, default empty), which is a different
+/// mechanism from the junction and returns nothing for a contact.
+/// </para>
+/// <para>
+/// <c>null</c> or empty (the default) leaves the contact plane byte-identical to its pre-task-043
+/// behaviour: the identity carries no org ids, so every org-typed descriptor emits zero conditions.
+/// Callers wanting ONLY the org-derived records should pair this with
+/// <c>IdentityTypes: ["Organization"]</c> — binding org ids alone does not stop the always-present
+/// <c>ContactId</c> from binding, and a contact-derived record credited at an ORGANIZATION's baseline
+/// is an over-grant that the returned id list cannot reveal.
+/// </para>
+/// </param>
 public sealed record MembershipResolveOptions(
     IReadOnlyList<string>? Roles = null,
     IReadOnlyList<string>? IdentityTypes = null,
     IReadOnlyList<string>? IncludeRelated = null,
     int Limit = MembershipResolveOptions.DefaultLimit,
-    string? ContinuationToken = null)
+    string? ContinuationToken = null,
+    bool AccessConferringOnly = false,
+    IReadOnlyList<Guid>? OrganizationIds = null)
 {
     /// <summary>Default per-page row limit when not specified by caller.</summary>
     public const int DefaultLimit = 500;

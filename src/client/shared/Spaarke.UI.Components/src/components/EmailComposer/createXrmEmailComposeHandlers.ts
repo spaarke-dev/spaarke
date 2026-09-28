@@ -235,16 +235,17 @@ export function createXrmEmailComposeHandlers(options?: {
           const xrm = getXrm();
           if (!xrm?.WebApi) throw new Error('Dataverse is unavailable — cannot upload the attachment.');
 
-          // 🔴 PARENTLESS UPLOAD (1 of 3). Task 076: this flow genuinely has no owning record when
-          // the bytes move — the `sprk_document` is created AFTER the upload and deliberately
-          // unassociated, because the email may have no persisted regarding yet. So it uses the
-          // record-LESS route (`PUT /api/obo/me/files/{path}`), where the SERVER derives the
-          // container from the acting user's business unit.
+          // 🔴 PARENTLESS UPLOAD. Task 076: this flow genuinely has no owning record when the bytes
+          // move — the `sprk_document` is created AFTER the upload and deliberately unassociated,
+          // because the email may have no persisted regarding yet. So it uses the record-LESS route
+          // (`PUT /api/obo/me/files/{path}`), where the SERVER derives the container from the acting
+          // user's business unit. Task 076's classification (project notes
+          // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
+          // parentless, alongside the Analysis wizard's standalone-document flow — the only other
+          // caller of `uploadFilesWithoutRecord` at HEAD.
           //
           // The client no longer resolves or names that container. The value is the same one it used
-          // to compute here; the difference is that the client is no longer the authority for it,
-          // which is the property this task establishes. Reordering this flow so the email draft is
-          // persisted first — removing the need for the record-less route at all — is task 093.
+          // to compute here; the difference is that the client is no longer the authority for it.
           const userId: string | undefined = xrm.Utility?.getGlobalContext?.()?.userSettings?.userId;
           if (!userId) throw new Error('Could not resolve the current user for upload.');
           // Still needed for the SEARCH-INDEX routing fields below; the container half of this

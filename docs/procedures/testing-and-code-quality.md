@@ -363,7 +363,7 @@ The adr-check skill validates code against Architecture Decision Records:
 
 | ADR | Constraint | Violation Example |
 |-----|------------|-------------------|
-| ADR-001 | No Azure Functions | Using `[FunctionName]` attribute |
+| ADR-001 | BFF endpoints in Minimal API; no Functions or Durable Task packages inside the BFF (placement of background work: ADR-052) | Using `[Function]` / `[FunctionName]` attribute in `Sprk.Bff.Api` |
 | ADR-002 | No Dataverse plugins; record invariants owned server-side (WP-1…WP-8) | Any `IPlugin` type; invariant enforced only in a wizard `onFinish` |
 | ADR-006 | PCF over webresources | Creating legacy .js webresource |
 | ADR-007 | Graph types isolated | GraphServiceClient in controller |
@@ -1278,7 +1278,7 @@ Architecture tests (`tests/Spaarke.ArchTests/`) use **NetArchTest.Rules** to enf
 
 | Test File | ADR | What It Enforces |
 |-----------|-----|-----------------|
-| `ADR001_MinimalApiTests.cs` | ADR-001 | No Azure Functions packages or attributes; Minimal API + BackgroundService only |
+| `ADR001_MinimalApiTests.cs` | ADR-001 | No Functions or Durable Task packages and no Function-attributed methods inside the BFF assembly |
 | `ADR002_PluginTests.cs` | ADR-002 | Repo-wide **zero-plugin guard** *(2026-09-25)*: no `IPlugin` types; no CrmSdk packages, net4x projects, or `.snk` files; no ILMerge/ILRepack; no plugin registrations in solution XML; no `src/dataverse/plugins` directory. Also: BFF contains no plugin-named types and BFF endpoints reference no `IPlugin` |
 | `ADR007_GraphIsolationTests.cs` | ADR-007 | Graph SDK types do not leak above the SpeFileStore facade layer |
 | `ADR008_AuthorizationTests.cs` | ADR-008 | Authorization uses endpoint filters, not global middleware |

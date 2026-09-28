@@ -5,10 +5,12 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -47,6 +49,12 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
     /// root, which is not the id in the request body.
     /// </summary>
     public ConcurrentBag<(string EntitySet, Guid RecordId)> ProbedTargets { get; } = new();
+
+    /// <summary>
+    /// The POA share table behind task 063's system-user share routes. In memory, so a caller WITH Write gets a
+    /// real answer from <c>/user-shares</c> offline, and a test can prove a denied request wrote nothing.
+    /// </summary>
+    public FakeRecordShareTable RecordShares { get; } = new();
 
     /// <summary>Grant rows the stubbed <see cref="DataverseWebApiClient"/> can retrieve by id.</summary>
     private readonly ConcurrentDictionary<Guid, ExternalGrantRow> _grantRows = new();
@@ -133,6 +141,11 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
                     _grantRows.TryGetValue(id, out var row) ? row : null);
 
             services.AddSingleton(clientMock.Object);
+
+            // Task 063's share routes read and write through the one POA seam. Without this the list route
+            // would reach the real DataverseWebApiService — a network call from a unit-test host.
+            services.RemoveAll<IDataverseRecordShareService>();
+            services.AddSingleton<IDataverseRecordShareService>(RecordShares);
         });
     }
 

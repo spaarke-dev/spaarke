@@ -66,7 +66,7 @@ If reopened: one plugin **package**, `net48`, unsigned, in `Spaarke.sln` + CI; ~
 | Record invariants | BFF server-side write path (WP-1…WP-4) |
 | Non-product writes | Async fix-up + reconciliation, fail-closed (WP-5/6) |
 | Business logic / orchestration | BFF endpoints + async workers |
-| Long-running work | Job contracts + queues (ADR-004), BackgroundService (ADR-001) |
+| Long-running work | Job contracts + queues (ADR-004); where it RUNS is decided per workload under ADR-052 |
 | Authorization | Endpoint-level filters (ADR-008) |
 
 ---

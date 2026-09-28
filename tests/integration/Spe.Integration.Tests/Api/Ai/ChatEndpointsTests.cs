@@ -55,6 +55,17 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
     // fixture never seeded, which resolves to null and must 404.
     private const string TestEmptySessionId = "test-session-empty-001";
 
+    // A session id used ONLY by the history read, so no other test can contaminate it.
+    //
+    // 🔴 Why a dedicated id is REQUIRED, not merely tidier. `ChatSessionManager.GetSessionAsync`
+    // consults the `ITenantCache` hot path FIRST and only falls back to the Dataverse mock on a
+    // miss — and this fixture registers a REAL in-memory cache, shared for the whole class. A
+    // `POST …/{id}/messages` write-through therefore leaves a 4-message session in that cache
+    // under the posted id, and a later history read on the SAME id gets a CACHE HIT that never
+    // reaches the mock at all. Seeding the mock differently cannot fix it; the read is not asking
+    // the mock. Only an id nothing writes to stays deterministic.
+    private const string TestHistorySessionId = "test-session-history-002";
+
     // A session id the fixture's mock has never seeded — GetSessionAsync resolves to null at
     // every tier (Redis miss, no Cosmos persistence registered in this fixture, Dataverse mock
     // returns null for any id other than TestSessionId/TestEmptySessionId).
@@ -213,16 +224,19 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
         var client = _fixture.CreateAuthenticatedClient(TestTenantId);
 
         // Act
-        var response = await client.GetAsync($"/api/ai/chat/sessions/{TestSessionId}/history");
+        var response = await client.GetAsync($"/api/ai/chat/sessions/{TestHistorySessionId}/history");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var content = await response.Content.ReadFromJsonAsync<ChatHistoryResponse>(_jsonOptions);
         content.Should().NotBeNull();
-        content!.SessionId.Should().Be(TestSessionId);
+        content!.SessionId.Should().Be(TestHistorySessionId);
         content.Messages.Should().NotBeNull();
-        content.Messages.Length.Should().Be(2); // Session mock returns 2 messages
+        // Exact count is the point of this test, and it is only safe because TestHistorySessionId
+        // is written by nothing — see the constant's remarks. Asserting >= 2 instead would have
+        // "fixed" the flake by giving up the assertion.
+        content.Messages.Length.Should().Be(2);
     }
 
     [Fact]
@@ -634,6 +648,10 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
     // zero messages — must stay distinguishable from TestMissingSessionId's null resolution.
     private const string TestEmptySessionId = "test-session-empty-001";
 
+    // Read-only twin of TestSessionId for the history assertion — nothing posts to it, so it can
+    // never be contaminated via the shared in-memory ITenantCache. See the test class' remarks.
+    private const string TestHistorySessionId = "test-session-history-002";
+
     private static readonly Guid TestPlaybookId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     // IChatDataverseRepository is an interface — fully mockable.
@@ -942,12 +960,29 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             .Returns(Task.CompletedTask);
 
         // GetSessionAsync — returns a session for TestSessionId (with 2 messages)
+        // 🔴 `ReturnsAsync(() => new ...)`, NOT `ReturnsAsync(new ...)` — the factory form is
+        // load-bearing (fixed 2026-09-03 by unified-access-control-r2).
+        //
+        // The object form evaluates ONCE at setup, so Moq handed the SAME ChatSession instance to
+        // every GetSessionAsync call for the life of this class fixture. Any test that posts a
+        // message (`POST …/{TestSessionId}/messages`, two of them in this class) can then leave a
+        // third message on the aggregate that `GetHistory_ReturnsMessages_WhenAuthenticated` counts,
+        // and that test asserts an EXACT length of 2.
+        //
+        // xUnit does not guarantee intra-class ordering, so this was an order-dependent flake that
+        // stayed green by luck: the full 424-test assembly passes locally, while CI's
+        // "Changed-Surface Integration Smoke" job — which runs a FILTERED 53-test subset, and so a
+        // different order — failed on it and took the BLOCKING `Router` check down with it (PR #950).
+        //
+        // A repository read must not hand callers a shared mutable aggregate. The factory gives every
+        // call a pristine session, which removes the coupling instead of papering over it with a
+        // `>= 2` assertion that would stop detecting a real regression.
         MockDataverseRepository
             .Setup(r => r.GetSessionAsync(
                 It.IsAny<string>(),
                 TestSessionId,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ChatSession(
+            .ReturnsAsync(() => new ChatSession(
                 SessionId: TestSessionId,
                 TenantId: "chat-test-tenant-abc",
                 DocumentId: TestDocumentId,
@@ -980,7 +1015,11 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 It.IsAny<string>(),
                 TestEmptySessionId,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ChatSession(
+            // Factory form for the same reason as TestSessionId above: this session's whole point is
+            // that it is EMPTY, so it is the one most damaged by another test appending to a shared
+            // instance — "existing but empty must stay 200" would start asserting against a
+            // non-empty session and the FR-D3 regression guard would quietly stop guarding.
+            .ReturnsAsync(() => new ChatSession(
                 SessionId: TestEmptySessionId,
                 TenantId: "chat-test-tenant-abc",
                 DocumentId: null,
@@ -988,6 +1027,42 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 CreatedAt: now,
                 LastActivity: now,
                 Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = IntegrationTestConstants.TestUserId });
+
+        // GetSessionAsync — TestHistorySessionId: a read-only session carrying EXACTLY two
+        // messages, for GetHistory_ReturnsMessages_WhenAuthenticated.
+        //
+        // Registered AFTER the `s != TestSessionId` catch-all above, because Moq resolves with
+        // most-recently-added-setup-wins — the same ordering requirement TestEmptySessionId
+        // documents. Registered before it, this id would resolve to null and the history test
+        // would 404 instead of returning messages.
+        //
+        // This exists because the previous version of the test read TestSessionId, which two
+        // message-posting tests in this class also write. Those writes land in the fixture's REAL
+        // in-memory ITenantCache, and ChatSessionManager checks that cache BEFORE the Dataverse
+        // mock — so the history read returned the contaminated 4-message session (CI: "Expected 2,
+        // but found 4" — exactly one appended user+assistant turn) and never consulted this mock.
+        // xUnit gives no intra-class ordering guarantee, so it passed locally on the full 424-test
+        // assembly and failed in CI's filtered 53-test subset.
+        MockDataverseRepository
+            .Setup(r => r.GetSessionAsync(
+                It.IsAny<string>(),
+                TestHistorySessionId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new ChatSession(
+                SessionId: TestHistorySessionId,
+                TenantId: "chat-test-tenant-abc",
+                DocumentId: TestDocumentId,
+                PlaybookId: TestPlaybookId,
+                CreatedAt: now,
+                LastActivity: now,
+                Messages: [
+                    new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
+                        "hist-001", TestHistorySessionId, ChatMessageRole.User,
+                        "Hello", 5, now.AddMinutes(-2), 1),
+                    new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
+                        "hist-002", TestHistorySessionId, ChatMessageRole.Assistant,
+                        "Hi there!", 10, now.AddMinutes(-1), 2)
+                ]) { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // ArchiveSessionAsync — no-op (called by DeleteSessionAsync)
         MockDataverseRepository

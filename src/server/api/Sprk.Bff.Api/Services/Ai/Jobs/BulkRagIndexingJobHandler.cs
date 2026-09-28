@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Ai.Jobs;
 /// Queries documents from Dataverse matching criteria, processes them with bounded concurrency,
 /// and updates job status as progress is made.
 ///
-/// Follows ADR-001 (BackgroundService pattern) and ADR-004 (async job contract).
+/// An ADR-004 IJobHandler (dispatched by ServiceBusJobProcessor; async job contract).
 /// Uses FileIndexingService for the actual indexing pipeline.
 /// </summary>
 /// <remarks>

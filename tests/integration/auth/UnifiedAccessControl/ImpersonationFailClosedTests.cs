@@ -43,7 +43,7 @@ public class ImpersonationFailClosedTests
             NullLogger<DataverseWebApiService>.Instance);
 
     /// <summary>
-    /// The load-bearing guard (DataverseWebApiService.cs:962-965): an empty caller systemuserid MUST
+    /// The load-bearing guard (the top of DataverseWebApiService.RetrieveMultipleImpersonatedAsync): an empty caller systemuserid MUST
     /// throw rather than fall back to an app-only query. Fail-closed by construction — the whole
     /// point is that a missing impersonation identity can never silently widen the result set.
     ///
