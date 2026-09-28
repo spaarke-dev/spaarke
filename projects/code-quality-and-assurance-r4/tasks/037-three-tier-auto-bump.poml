@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Mechanical review clears itself — the three-tier auto-bump</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>035 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Machine-writes a governance stamp across many files. Bumping a stamp on a primitive that DID change would launder drift into apparent freshness — a silent, self-concealing failure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Implements a three-tier rule whose boundaries are fully specified by FR-13.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes last-reviewed stamps across .claude/ primitives — main-session only per root CLAUDE.md §3.</parallel-reason>
+    <deps>035</deps>
+    <tags>governance,automation,tooling</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the three-tier review model: Tier 1 — primitives whose referenced files have not changed since last-reviewed get their stamp auto-bumped by machine; Tier 2 — referenced files did change, so route to doc-drift-audit on the diff; Tier 3 — "is this still the rule we want" reaches the owner, and only for ADR and constraint semantics.</prompt>
+  <role>SPAARKE platform developer. The honesty of Tier 1 is the whole point — the bump means "verified nothing changed", so it must only fire when nothing changed.</role>
+  <goal>Tier 1 clears mechanically without owner attention, Tier 2 routes to an existing skill, and Tier 3 is the only thing that reaches a human.</goal>
+
+  <context>
+    <background>spec.md FR-13. This is what makes the maintenance model survivable: 230 primitives cannot all be human-reviewed on any cadence, and pretending otherwise is what produced four dead cadences. Most reviews are mechanical — the primitive points at code that has not moved, so the honest verdict is "still accurate" and a machine can say that. The bump is honest precisely because last-reviewed and last-updated are distinct fields (task 030): moving last-reviewed while leaving last-updated alone says "verified nothing changed", not "this was edited".</background>
+    <relevant-files>
+      <file role="new">scripts/quality/auto-bump-reviewed.ps1</file>
+      <file role="modify">.github/workflows/nightly-governance.yml</file>
+      <file role="canonical-reference">.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file role="canonical-reference">docs/standards/FILE-REVISION-HEADER.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">The nightly workflow this attaches to.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (Tier 1 precondition): auto-bump ONLY when no referenced file changed since last-reviewed. If any did, it is Tier 2 — no exceptions, no partial bumps.</constraint>
+    <constraint source="spec">Scope (field discipline): bump last-reviewed ONLY. MUST NOT touch last-updated, version, or revision-type — the primitive was not edited, it was verified.</constraint>
+    <constraint source="spec">Scope (Tier 2): route to the existing doc-drift-audit skill on the diff. MUST NOT write a second drift-review mechanism.</constraint>
+    <constraint source="spec">Scope (Tier 3): reserved for ADR and constraint semantics — "is this still the rule we want". Patterns and skills do not reach Tier 3 by default.</constraint>
+    <constraint source="project">Scope (attribution): a machine bump must be attributable. Set reviewed-by to a machine identifier so an auto-bump is never mistaken for a human review.</constraint>
+    <constraint source="project">Scope (NFR-04): attach to the task-035 workflow as a step. MUST NOT create a second workflow.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Automated documentation review tiers</topic>
+    <files>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>docs/standards/FILE-REVISION-HEADER.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Diff-based review" location=".claude/skills/doc-drift-audit/SKILL.md">Compact diff-based drift detection — the Tier 2 destination. Reuse, do not reimplement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read doc-drift-audit and the header standard.</step>
+    <step order="1">Determine each primitive's referenced files — the paths it points at.</step>
+    <step order="2">Compare each referenced file's last change date against the primitive's last-reviewed.</step>
+    <step order="3">Implement Tier 1: bump last-reviewed only, set reviewed-by to a machine identifier.</step>
+    <step order="4">Implement Tier 2 routing: emit the primitive plus the diff for doc-drift-audit.</step>
+    <step order="5">Implement Tier 3 identification: ADR and constraint semantic questions surfaced for the owner.</step>
+    <step order="6">Attach as a step in the task-035 workflow.</step>
+    <step order="7">Verify Tier 1 honesty empirically: touch a file referenced by a primitive, confirm that primitive is NOT auto-bumped but routed to Tier 2 instead.</step>
+    <step order="8">Verify the inverse: a primitive whose references are untouched IS bumped, and only last-reviewed moved.</step>
+    <step order="9">Update TASK-INDEX.md: set task 037 status to ✅.</step>
+    <step order="10">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a primitive's referenced files cannot be determined reliably, do NOT default it to Tier 1. Default to Tier 2 — a false Tier 1 bump launders real drift into apparent freshness and is undetectable afterwards, which is the worst available failure.</trigger>
+    <trigger>If step 7 shows a primitive being auto-bumped despite a changed reference, STOP and do not ship. That single defect would silently corrupt the entire staleness signal the phase exists to build.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>doc-drift-audit handles diff-based drift review; no mechanism auto-clears the mechanical case.</existing>
+    <extension>Partly — Tier 2 explicitly reuses doc-drift-audit rather than reimplementing it. Tier 1 is new because doc-drift-audit reviews a diff, whereas Tier 1's entire job is recognising there is no diff to review.</extension>
+    <cost-of-doing-nothing>All 230 primitives route to human review on every cadence, which is what killed the previous four. The maintenance model is unaffordable and quietly stops running.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="pwsh">Run and test the bump script</tool><tool name="git">Compare reference change dates</tool></tools>
+
+  <outputs>
+    <output type="code">scripts/quality/auto-bump-reviewed.ps1</output>
+    <output type="config">.github/workflows/nightly-governance.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a primitive whose referenced files are unchanged, last-reviewed is bumped.</criterion>
+    <criterion testable="true">Given that bump, last-updated, version, and revision-type are unchanged.</criterion>
+    <criterion testable="true">Given that bump, reviewed-by identifies a machine, not a person or project.</criterion>
+    <criterion testable="true">Given a primitive with a changed reference, it is NOT bumped and is routed to Tier 2.</criterion>
+    <criterion testable="true">Given a primitive whose references cannot be determined, it defaults to Tier 2.</criterion>
+    <criterion testable="true">Given Tier 3, only ADR and constraint semantic questions appear there.</criterion>
+    <criterion testable="true">Negative: no second workflow file is created.</criterion>
+    <criterion testable="true">Negative: doc-drift-audit is invoked rather than reimplemented.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-13. This requirement is also what removed the project's highest-collision edit: the original design had a task-execute Step 11 hook, and the three-tier model made it unnecessary.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Revision-header census — a new unstamped primitive fails the build</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>032 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs under tests/**; TEST-MODIFYING override in CLAUDE.md §8 applies unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Census following the established pattern against a contract already fixed by task 030.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>032</deps>
+    <tags>testing,arch-test,governance,docs</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add tests/Spaarke.ArchTests/RevisionHeaderCensusTests.cs asserting that every .claude/ governance primitive carries a conformant revision header, so a new skill, constraint, pattern, or ADR added without one fails the build.</prompt>
+  <role>SPAARKE platform developer writing architecture-fitness tests. ADR-038 discipline: paired controls, no DI resolution, reuse SourceScan.</role>
+  <goal>A census that passes on the 230 migrated primitives, fails on a synthetic unstamped file, validates field values against the standard rather than merely checking presence, and names the §6.5 challenge path in its failure message.</goal>
+
+  <context>
+    <background>spec.md FR-10 as amended. Task 032's backfill is a one-time correction; without a forcing function the surface re-decays the moment someone adds an unstamped file — which is the same decay this project exists to stop. The census is what makes the standard self-sustaining. It also feeds FR-12: a header that parses is the precondition for ranking staleness at all.</background>
+    <relevant-files>
+      <file role="new">tests/Spaarke.ArchTests/RevisionHeaderCensusTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/CredentialCensusTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/SourceScan.cs</file>
+      <file role="canonical-reference">docs/standards/FILE-REVISION-HEADER.md</file>
+      <file role="canonical-reference">scripts/quality/Update-DocHeader.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">The tree must already be migrated, or the census fails on 110 pre-existing files rather than asserting a maintained invariant.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope (this test): positive and negative controls required; no DI resolution (ban B3); reuse SourceScan, never fork it.</constraint>
+    <constraint source="project">Scope (validation depth): assert field VALUES against the standard's allowed values, not merely that frontmatter exists. A header with revision-type "whatever" parses but is not conformant.</constraint>
+    <constraint source="project">Scope (coverage): all four primitive families — .claude/skills/*/SKILL.md, .claude/constraints/*.md, .claude/patterns/**/*.md, .claude/adr/ADR-*.md.</constraint>
+    <constraint source="project">Scope (failure message): name the §6.5 challenge path and point at docs/standards/FILE-REVISION-HEADER.md so the reader can fix it without hunting.</constraint>
+    <constraint source="project">Scope (worktrees): MUST NOT scan .claude/worktrees/ or sibling worktrees.</constraint>
+    <constraint source="project">Scope (no thresholds): assert conformance of an enumerated set. MUST NOT assert anything about how OLD a date is — staleness is FR-12's relative ranking, never a gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Governance census tests</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/standards/FILE-REVISION-HEADER.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Census test" location="tests/Spaarke.ArchTests/CredentialCensusTests.cs">Assert an enumerated fact with paired controls and a teaching failure message.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Read the standard and the migrated tree.</step>
+    <step order="1">Implement header parsing consistent with Update-DocHeader.ps1's -Check semantics — the two must agree on what conformant means.</step>
+    <step order="2">Assert presence and valid values for all six fields across all four primitive families.</step>
+    <step order="3">Add the positive control: the 230 migrated primitives pass.</step>
+    <step order="4">Add the negative control: a synthetic unstamped file fails, and a synthetic malformed-value file fails — two distinct failure modes.</step>
+    <step order="5">Write the failure message naming the §6.5 challenge path and the standard's location.</step>
+    <step order="6">Verify empirically: create an unstamped pattern file, observe the failure, remove it.</step>
+    <step order="7">Cross-check that the census and the script's -Check mode agree on the same tree — a disagreement means one of them is wrong.</step>
+    <step order="8">Run dotnet build Spaarke.sln and the ArchTests project; confirm green.</step>
+    <step order="9">Update TASK-INDEX.md: set task 033 status to ✅.</step>
+    <step order="10">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the census and Update-DocHeader.ps1 -Check disagree on any file, STOP and escalate. Two conformance definitions is worse than none — CI would enforce one contract while the migration tool implements another.</trigger>
+    <trigger>If making the census pass would require weakening it to presence-only checking, STOP. A census that accepts any value asserts nothing, and loosening the assertion to reach green is the failure ADR-038's control pairing exists to catch.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CredentialCensusTests.cs, plus the SharedPackageCensusTests (task 002) and AdrClassificationCensusTests (task 013) this project adds.</existing>
+    <extension>No. Those assert a package list and ADR classification completeness respectively; this asserts frontmatter conformance across 230 files in four families. Different subject, different failure message, and per-file locality is what keeps a census failure legible.</extension>
+    <cost-of-doing-nothing>Task 032's backfill is a one-time correction that decays immediately. FR-12 loses its ability to rank any newly-added primitive, and within months the surface returns to the two-convention state this phase just fixed.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build and run tests/Spaarke.ArchTests</tool><tool name="pwsh">Cross-check against -Check mode</tool></tools>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/RevisionHeaderCensusTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the migrated tree, the census passes on all 230 primitives across all four families.</criterion>
+    <criterion testable="true">Given a synthetic unstamped file in any family, the census fails.</criterion>
+    <criterion testable="true">Given a synthetic file with an out-of-range revision-type, the census fails.</criterion>
+    <criterion testable="true">Given any failure, the message names the §6.5 challenge path and the standard's path.</criterion>
+    <criterion testable="true">Given the same tree, the census and Update-DocHeader.ps1 -Check reach the same verdict.</criterion>
+    <criterion testable="true">Negative: the census asserts nothing about date age — no staleness threshold exists.</criterion>
+    <criterion testable="true">Negative: no DI resolution; SourceScan is reused, not forked; no worktree path is scanned.</criterion>
+    <criterion testable="true">dotnet build Spaarke.sln is green; the ArchTests project passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-10 as amended ("a new unstamped file fails the build"). Step 7's cross-check matters because the script and the test are two implementations of one contract, and drift between them would be invisible until a CI failure nobody can reproduce locally.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

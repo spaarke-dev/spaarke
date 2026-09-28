@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Measure usage — a PostToolUse hook logging skill and primitive reads</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Registers a hook in .claude/settings.json that fires on every matching tool call. A slow or failing hook degrades every session, and settings.json is a per-worktree merge-conflict surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the two hooks live since March; the mechanism, matcher shape, and registration point are all established.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/settings.json — main-session only per root CLAUDE.md §3, and it is a tracked file copied per worktree.</parallel-reason>
+    <deps>none</deps>
+    <tags>hooks,governance,measurement,tooling</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a PostToolUse hook that appends "timestamp, name" to a usage log — matching the Skill tool for skills, and Read on .claude/{adr,patterns,constraints}/** for everything else — and register it in .claude/settings.json alongside the two hooks live since March.</prompt>
+  <role>SPAARKE platform developer extending existing hook infrastructure. Same mechanism, new matcher — this adds no new capability.</role>
+  <goal>A usage log accumulating which governance primitives are actually loaded, so FR-12's ranking has a real usage signal from day one rather than a calendar.</goal>
+
+  <context>
+    <background>spec.md FR-11. FR-12 ranks staleness by drift_signal × usage_weight, where the weight is U-shaped — heavily used AND never used both rank high, for opposite reasons. Without a usage measure that ranking degenerates into "sort by date", which is precisely what produced the 55-unreviewed-skill wall the project is trying to clear. Task 003's retroactive ADR citation counts mean the ranking works immediately rather than after months of accumulation; this hook supplies the forward-looking half.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/log-primitive-usage.sh</file>
+      <file role="modify">.claude/settings.json</file>
+      <file role="canonical-reference">scripts/quality/post-edit-lint.sh</file>
+      <file role="canonical-reference">scripts/quality/task-quality-gate.sh</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent of the header work; can run in parallel with 030–033 at the operator's discretion.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (mechanism): reuse the existing hook mechanism exactly as post-edit-lint.sh and task-quality-gate.sh use it. This is a new matcher on proven infrastructure, NOT new infrastructure.</constraint>
+    <constraint source="project">Scope (matchers, exactly two): the Skill tool for skills; Read on .claude/{adr,patterns,constraints}/** for the rest. Do not broaden to all Reads — that logs noise and slows every session.</constraint>
+    <constraint source="project">Scope (performance): the hook must complete in well under a second and MUST NOT block or fail the tool call it observes. A measurement that degrades the session will be disabled, and then measures nothing.</constraint>
+    <constraint source="project">Scope (log content): append timestamp and name only. MUST NOT log file contents, prompts, or any payload — this is a frequency counter, not a transcript.</constraint>
+    <constraint source="project">Scope (settings.json): add alongside the existing hooks. MUST NOT modify or reorder the two existing registrations. Note in the task notes that settings.json is copied per worktree and is a genuine merge-conflict surface — the spec flags this as its one undeclared hot path.</constraint>
+    <constraint source="project">Scope (log location): the log must be gitignored or written outside the repo. A usage log committed to the repo would produce diff noise on every session.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Claude Code hooks</topic>
+    <files>
+      <file>.claude/settings.json</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing hook" location="scripts/quality/post-edit-lint.sh">The established shape — fast, non-blocking, registered in settings.json. Live since March; copy its structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read both existing hooks and the current settings.json registration block.</step>
+    <step order="1">Write the logging script: append timestamp and name, fail silently, exit 0 always.</step>
+    <step order="2">Choose the log location and ensure it is gitignored or outside the repo.</step>
+    <step order="3">Register the two PostToolUse matchers in settings.json without touching the existing entries.</step>
+    <step order="4">Verify the Skill matcher fires: invoke a skill, confirm one line appended.</step>
+    <step order="5">Verify the Read matcher fires on .claude/patterns/** and does NOT fire on an unrelated Read.</step>
+    <step order="6">Measure hook latency; confirm it is negligible and that a deliberately broken hook does not fail the observed tool call.</step>
+    <step order="7">Document the log format so task 036's ranking script can consume it.</step>
+    <step order="8">Update TASK-INDEX.md: set task 034 status to ✅.</step>
+    <step order="9">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the hook cannot be made non-blocking — if a failure in it can fail the observed tool call — STOP and escalate. A measurement mechanism that can break the session is worse than no measurement.</trigger>
+    <trigger>If registering in settings.json would conflict with another worktree's pending change, STOP and coordinate. settings.json is copied per worktree and the spec flags it as an undeclared hot-path surface.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>scripts/quality/post-edit-lint.sh and task-quality-gate.sh — both PostToolUse hooks registered in .claude/settings.json, live since March.</existing>
+    <extension>Yes — same mechanism, new matcher. No new capability is introduced; this is the extension path CLAUDE.md §11 asks for, and the spec's own component table records it as such.</extension>
+    <cost-of-doing-nothing>FR-12's ranking degenerates to sorting by calendar date, which is exactly the mechanism that produced the 55-file unreviewed wall. The U-shaped weighting has no input and the nightly issue ranks by age alone.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="bash">Run and test the hook script</tool></tools>
+
+  <outputs>
+    <output type="code">scripts/quality/log-primitive-usage.sh</output>
+    <output type="config">.claude/settings.json</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/usage-log-format.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Skill invocation, exactly one timestamp+name line is appended.</criterion>
+    <criterion testable="true">Given a Read of a file under .claude/patterns/, one line is appended.</criterion>
+    <criterion testable="true">Given a Read of an unrelated source file, no line is appended.</criterion>
+    <criterion testable="true">Given a deliberately broken hook script, the observed tool call still succeeds.</criterion>
+    <criterion testable="true">Given settings.json, the two pre-existing hook registrations are unchanged.</criterion>
+    <criterion testable="true">Negative: no file content, prompt, or payload appears in the log.</criterion>
+    <criterion testable="true">Negative: the log path is gitignored or outside the repo — git status stays clean across a session.</criterion>
+    <criterion testable="true">The log format is documented for task 036's consumption.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-11. The spec explicitly flags .claude/settings.json as an undeclared hot-path surface: tracked, copied per worktree, a genuine merge-conflict surface, and not one of the five declared hot-path categories. Flagged rather than silently incurred.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

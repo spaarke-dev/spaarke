@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Prove the Claude Code headless runner works in GitHub Actions</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Spike resolving the project's one acknowledged unverified external dependency; involves CI credentials and determines whether P5's central deliverable is buildable at all.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Empirical verification spike — run it and report what happens.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ci-cd,spike,verification</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prove — or disprove — that Claude Code can run headless in GitHub Actions with working auth, before task 054 wires the nightly reviewer to depend on it. spec.md lists this as an unresolved question; this task answers it empirically.</prompt>
+  <role>SPAARKE platform developer running a verification spike. The deliverable is a truthful answer, not a working reviewer.</role>
+  <goal>A documented yes or no on headless execution in Actions, with the auth mechanism identified if yes and the blocker named if no.</goal>
+
+  <context>
+    <background>spec.md Unresolved Question 2 and Dependencies: "Claude Code headless execution in CI for FR-23 — the prompt exists; the runner does not." The reviewer prompt has been written since 2026-03-14 and never wired, and one plausible reason is that nobody verified the runner. Task 054 depends entirely on this working, so proving it first prevents building a section around a mechanism that cannot execute. A negative answer is a perfectly good outcome — it redirects FR-23 rather than wasting the work.</background>
+    <relevant-files>
+      <file role="new">projects/code-quality-and-assurance-r4/notes/headless-runner-spike.md</file>
+      <file role="canonical-reference">scripts/quality/nightly-review-prompt.md</file>
+      <file role="canonical-reference">.github/workflows/nightly-health.yml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent spike; runs in parallel with other P5 work.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (spike only): prove the mechanism. Do NOT wire the reviewer — that is task 054, and only if this succeeds.</constraint>
+    <constraint source="project">Scope (secrets): follow CLAUDE.md §9. MUST NOT commit any credential. Use repository secrets.</constraint>
+    <constraint source="project">Scope (honest reporting): a negative result is a valid deliverable. Do NOT work around a genuine blocker to manufacture a positive — the point is to know.</constraint>
+    <constraint source="project">Scope (minimal footprint): use a throwaway branch or a manual-dispatch workflow that is removed afterwards. Do NOT leave spike scaffolding in .github/workflows/, and do NOT consume the project's one permitted new workflow (NFR-04).</constraint>
+    <constraint source="project">Scope (cost): bound the trial run. Do not run an unbounded review across the whole repo as the test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Claude Code headless execution</topic>
+    <files>
+      <file>scripts/quality/nightly-review-prompt.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read the spec's dependency note.</step>
+    <step order="1">Determine the available headless invocation mechanism and its auth model.</step>
+    <step order="2">Confirm what credential is required and that it can live as a repository secret.</step>
+    <step order="3">Build a minimal manual-dispatch trial on a throwaway branch, scoped to a tiny diff.</step>
+    <step order="4">Run it. Record whether it authenticates, executes, and returns usable output.</step>
+    <step order="5">Record cost and runtime for the bounded scope, so task 054 can size its own.</step>
+    <step order="6">Remove the spike scaffolding.</step>
+    <step order="7">Write the spike note: yes or no, mechanism or blocker, cost, and the recommendation for task 054.</step>
+    <step order="8">Update TASK-INDEX.md: set task 052 status to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If headless execution requires a credential the repository cannot hold safely, STOP and escalate rather than proceeding. This is a security decision under CLAUDE.md §9, not a build choice.</trigger>
+    <trigger>If the runner does not work, STOP and report. Do NOT attempt to build an alternative reviewer mechanism — that would be a scope change into territory the owner has not approved, and FR-23 explicitly forbids a reviewer sub-agent.</trigger>
+    <trigger>If the bounded trial's cost extrapolates to something significant at nightly cadence, report the figure before task 054 commits to the cadence.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No headless Claude Code invocation exists in any workflow. The reviewer prompt exists; no runner does.</existing>
+    <extension>Not applicable — this is a verification spike producing a document, not a component.</extension>
+    <cost-of-doing-nothing>Task 054 is built on an unverified assumption. If the runner does not work, that is discovered after the workflow section, the scoping, and the issue plumbing are already built.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="gh">Dispatch the trial workflow and read logs</tool></tools>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/headless-runner-spike.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the spike note, it states a clear yes or no on headless execution in Actions.</criterion>
+    <criterion testable="true">If yes, the auth mechanism and required secret are named.</criterion>
+    <criterion testable="true">If no, the specific blocker is named.</criterion>
+    <criterion testable="true">Given the note, cost and runtime for the bounded scope are recorded.</criterion>
+    <criterion testable="true">Negative: no credential appears in any committed file.</criterion>
+    <criterion testable="true">Negative: no spike scaffolding remains in .github/workflows/.</criterion>
+    <criterion testable="true">Negative: the project's one permitted new workflow was not consumed by this spike.</criterion>
+  </acceptance-criteria>
+
+  <notes>Resolves spec.md Unresolved Question 2 and plan.md risk R5. A negative answer redirects FR-23 rather than failing it — P5 remains droppable per NFR-01.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

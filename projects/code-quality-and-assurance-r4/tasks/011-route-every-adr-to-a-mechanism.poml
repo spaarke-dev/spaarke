@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Route every ADR to a mechanism — coverage is 49/49 routed, not 7/49 enforced</title>
+    <phase>2a Every ADR is routed, accurate, and measured</phase>
+    <gate>010 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation mapping derived from task 010's classification; no code, no tests. The judgment was spent in 010.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical mapping from a completed classification to four defined destinations; the decision rules are fully specified by FR-06.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/adr/INDEX.md — main-session only per root CLAUDE.md §3.</parallel-reason>
+    <deps>010</deps>
+    <tags>adr,governance,classification,docs</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Map each of the 49 classified ADRs to the mechanism that will carry it: enforceable to an arch test (blocking); partially-enforceable to an arch test plus nightly review; judgment-only plus checkable-by-reading to the nightly review; judgment-only plus aesthetic to a recorded deliberately-unenforced status. State coverage as 49/49 routed.</prompt>
+  <role>SPAARKE platform developer. Apply the routing rule literally — the interesting judgment already happened in task 010.</role>
+  <goal>Every ADR in INDEX.md carries a mechanism assignment consistent with its classification, and the coverage statement reads 49/49 routed with a per-mechanism breakdown.</goal>
+
+  <context>
+    <background>spec.md FR-06. "7 of 49 ADRs enforced" is a true number that tells a misleading story: many of the other 42 are judgment calls no test could assert. Routing reframes the measure honestly — every ADR has a home, and an ADR deliberately left unenforced is a decision on the record rather than a gap. This also produces the input list for FR-23's nightly reviewer, which covers exactly the judgment-only plus checkable-by-reading set.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/INDEX.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Supplies the three-axis classification every routing decision reads from.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (routing rule): enforceable → arch test (blocking); partially-enforceable → arch test + nightly review; judgment-only + checkable-by-reading → nightly review; judgment-only + aesthetic → recorded as deliberately unenforced. Apply exactly this mapping; do not invent a fifth destination.</constraint>
+    <constraint source="spec">Scope (coverage statement): state coverage as "49/49 routed" with a per-mechanism breakdown. Do NOT report "n/49 enforced" as the headline — that is the framing this task exists to correct.</constraint>
+    <constraint source="project">Scope (this task): routing only. Do NOT write arch tests — P2b does that, and only for the FR-07 criterion subset, which is narrower than the full enforceable set.</constraint>
+    <constraint source="project">Scope (stale/contested): an ADR marked stale or contested by task 010 is routed but NOT scheduled for enforcement. FR-08 blocks that until task 012 resolves it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR enforcement routing</topic>
+    <files>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>scripts/quality/nightly-review-prompt.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read task 010's classification summary.</step>
+    <step order="1">Apply the four-way routing rule to all 49 ADRs.</step>
+    <step order="2">Record each ADR's mechanism in INDEX.md alongside its classification.</step>
+    <step order="3">Produce the coverage statement: 49/49 routed, with counts per mechanism.</step>
+    <step order="4">Extract the judgment-only + checkable-by-reading list as the explicit scope input for FR-23's reviewer (task 054).</step>
+    <step order="5">Mark every stale or contested ADR as routed-but-not-scheduled, citing FR-08.</step>
+    <step order="6">Update TASK-INDEX.md: set task 011 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an ADR's classification does not map cleanly to one of the four destinations, STOP and escalate rather than inventing a fifth. A routing rule with an escape hatch stops being a routing rule, and the gap more likely means task 010's classification needs revisiting.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/adr/INDEX.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given INDEX.md, all 49 ADRs carry a mechanism assignment.</criterion>
+    <criterion testable="true">Given each assignment, it is consistent with the ADR's task-010 classification per the four-way rule.</criterion>
+    <criterion testable="true">SUPERSEDED to 50/50 (same cause as task 010): ADR-038 is a real, Accepted, named-test-enforced ADR with 1,778 citations whose concise version lives in its INDEX row rather than a .claude/adr/ file. Excluding it to reach a round 49 would drop an ENFORCED ADR from the coverage statement. Coverage reads 50/50 routed with a per-mechanism breakdown.</criterion>
+    <criterion testable="true">Given the aesthetic ADRs, each is explicitly recorded as deliberately unenforced rather than left blank.</criterion>
+    <criterion testable="true">Negative: no ADR marked stale or contested is scheduled for enforcement.</criterion>
+    <criterion testable="true">Negative: no arch test is written by this task.</criterion>
+    <criterion testable="true">The judgment-only + checkable-by-reading list is extracted as a standalone scope input for task 054.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-06. The extracted reviewer scope list is consumed by task 053 (prompt refresh — sections aligned to what routing sends it) and task 054 (reviewer wiring).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <date>2026-09-04</date>
+    <summary>All 50 ADR entries routed to one of the four FR-06 destinations: 21 arch test (blocking), 26 arch test + nightly review, 2 nightly review, 1 deliberately unenforced. The rule mapped cleanly for every ADR — no fifth destination needed, so the escalation trigger did not fire. 37 scheduled; 13 routed-but-not-scheduled per FR-08 (contested or stale). FR-23 reviewer scope extracted as 28 ADRs (26 partially-enforceable + 2 judgment-only/checkable-by-reading), 22 schedulable today — a sizing input task 052/054 needs BEFORE the spike, since a 2-ADR scope would have been hard to justify wiring.</summary>
+    <files-modified>.claude/adr/INDEX.md; projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md; projects/code-quality-and-assurance-r4/notes/adr-inventory-2026-09.md (enriched with all 010/011 findings at owner request)</files-modified>
+    <findings>12 of the 15 artifact-less ADRs are routed to an arch test. Mostly NOT a contradiction — "names no artifact" concerns verifying the ADR's ACCURACY, not whether its RULE is testable (ADR-002 names nothing and has a working named test). But P2b will hit ADRs whose rule is testable while the ADR gives nothing to anchor the test to; the three that matter are ADR-039 (858 citations), ADR-019 (555, also FR-08-held) and ADR-040 (483). Cheap remedy for task 012: one sentence per ADR naming its canonical artifact.</findings>
+  </completion>
+
+</task>

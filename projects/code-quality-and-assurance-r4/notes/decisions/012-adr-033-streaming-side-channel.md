@@ -1,0 +1,12 @@
+# 🔔 ADR Conflict — Resolution Record: ADR-033
+
+> **Task** 012 (spec FR-08) · **Date** 2026-09-04 · **Format**: CLAUDE.md §6.5
+
+- **ADR in question**: ADR-033 — Streaming chat-tool side channel
+- **Specific rule challenged**: the ADR's named artifacts. It specifies `WorkingDocumentHandler`, `WorkingDocumentHandler.cs`, `WorkingDocumentHandlerTests.cs`, and `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs`.
+- **Conflict**: **none of those four exists.** The concept survived as `Services/Ai/IWorkingDocumentService.cs` + `WorkingDocumentService.cs` — a different name, a different shape (Service, not Handler), a different path (not under `Chat/Tools/`), and no test file by the named name. 7 of the ADR's 14 named artifacts are absent; 4 of those 7 are genuine (the rest are framework types). The ADR describes a structure that was refactored out from under it, and nobody updated it. A developer following ADR-033 would look for files that do not exist.
+- **Proposed path**: **B — amend.** Update the ADR's named artifacts to the shipped reality.
+- **Rationale**: the *decision* — a two-channel side channel where chat-tool handlers emit document-stream SSE via a delegate rather than an interface extension, leaving `IToolHandler` unchanged — is intact and still describes how the code works. Only the **names and paths** are wrong. Path C (comply) would mean renaming live code back to match a document, which is the tail wagging the dog: the ADR exists to record the decision, not to dictate identifiers after a legitimate refactor.
+- **Impact of accepting path B**: an editorial-to-minor amendment touching only the artifact references in ADR-033 — `WorkingDocumentHandler` → `WorkingDocumentService`, corrected paths, and removal of the two file references that have no successor. **No code changes.** Amendment scope is confined to the ADR's artifact-naming lines; the Decision and Constraints sections are untouched.
+- **Alternative considered and rejected**: **Path C (comply)** — rename `WorkingDocumentService` back to `WorkingDocumentHandler` and relocate it under `Chat/Tools/`. Rejected: it is churn in live code to satisfy a stale document, it would break every current reference, and the Service shape is the better one (it is what the DI module registers). Nothing about the decision required the Handler name.
+- **Enforcement status**: ⛔ held until amended. Post-amendment → schedulable.

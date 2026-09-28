@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Wire export-index regeneration into the nightly job</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>040 complete, 035 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds a step to an existing workflow; no new file, no new test.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an existing generator into an existing workflow section.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows/nightly-governance.yml — contended hot path; main-session only.</parallel-reason>
+    <deps>040,035</deps>
+    <tags>ci-cd,tooling,reuse</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the export-index generator into the nightly workflow's Class-1 regeneration section (task 035 section d), so the index regenerates each night and any diff is reported as a finding.</prompt>
+  <role>SPAARKE platform developer wiring CI. Small, additive change to an existing workflow.</role>
+  <goal>The index regenerates nightly, a diff is reported as an advisory finding, and no new workflow file is created.</goal>
+
+  <context>
+    <background>spec.md FR-16d. A generated artifact that is only generated once decays into a stale artifact that looks authoritative — which is worse than no artifact, because FR-18 would resolve against it and return confidently wrong answers. Regenerating nightly and reporting the diff keeps it honest and also catches the case where someone hand-edits it, which per FR-16e means the generator is broken.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/nightly-governance.yml</file>
+      <file role="canonical-reference">scripts/quality/Generate-ExportIndex.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Supplies the generator and the committed index.</dependency>
+      <dependency task="035" status="pending">Supplies the workflow and its section (d) extension point.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (NFR-04): add a step to the existing workflow. MUST NOT create a second workflow file.</constraint>
+    <constraint source="spec">Scope (advisory): report the diff as a finding. MUST NOT fail the job or gate anything on it.</constraint>
+    <constraint source="project">Scope (no auto-commit): report the diff; do NOT auto-commit a regenerated index. A silent auto-commit hides the fact that someone hand-edited a Class-1 artifact, which is precisely the signal worth surfacing.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check before starting and before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI wiring for generated artifacts</topic>
+    <files>
+      <file>.github/workflows/nightly-governance.yml</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Run /conflict-check for .github/workflows/.</step>
+    <step order="1">Add a regeneration step in the workflow's Class-1 section.</step>
+    <step order="2">Diff the regenerated index against the committed one; report any difference as a finding in the rolling issue.</step>
+    <step order="3">Confirm the job still exits 0 when a diff is present.</step>
+    <step order="4">Verify empirically: hand-edit the committed index in a scratch branch, dispatch the workflow, confirm the diff is reported, then revert.</step>
+    <step order="5">Update TASK-INDEX.md: set task 041 status to ✅.</step>
+    <step order="6">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the regenerated index differs from the committed one on the very first run with no intervening source change, STOP — the generator is not idempotent and task 040's acceptance criteria were not actually met. Shipping this would produce a permanent phantom finding every night, which trains readers to ignore the report.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="config">.github/workflows/nightly-governance.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a nightly run, the index is regenerated and compared against the committed copy.</criterion>
+    <criterion testable="true">Given a hand-edited index, the diff is reported as a finding.</criterion>
+    <criterion testable="true">Given a diff, the job still exits 0.</criterion>
+    <criterion testable="true">Given an unchanged tree, no diff is reported.</criterion>
+    <criterion testable="true">Negative: no new workflow file is created.</criterion>
+    <criterion testable="true">Negative: the workflow does not auto-commit a regenerated index.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-16d. Completes the Class-1 loop: generated, never hand-authored, and drift is visible.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

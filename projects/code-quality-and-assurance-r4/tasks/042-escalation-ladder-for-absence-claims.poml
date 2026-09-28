@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Give absence assertions a second rung</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>040 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Directive edits to two skill files; no code, no tests. Both are hot, contended files.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Specified directive additions with a named destination in each skill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills/task-create/SKILL.md and code-review/SKILL.md — main-session only, and both are contended with unified-access-control-r2.</parallel-reason>
+    <deps>040</deps>
+    <tags>skill-directives,governance,reuse</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Require, in task-create and code-review, that an escalation beyond the lexical pass has been performed before a justification's &lt;existing&gt; element may say "none" — and that the record states which passes actually ran.</prompt>
+  <role>SPAARKE platform developer editing skill directives. Keep the ladder short enough that it is genuinely performed rather than asserted.</role>
+  <goal>"None found" becomes a claim with a recorded method behind it instead of the result of one grep.</goal>
+
+  <context>
+    <background>spec.md FR-17. Task 003's baseline measures how often &lt;existing&gt; says "none" — 53 of 448 justifications on 2026-09-03. Some of those are true; some are a single grep for an exact name that missed an equivalent capability under a different one. A second rung — resolving against task 040's export index — turns the claim from "I looked" into "I looked these specific ways", which is both more honest and reviewable. Recording which passes ran is what makes it checkable at review time.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+      <file role="modify">.claude/skills/code-review/SKILL.md</file>
+      <file role="canonical-reference">.claude/catalogs/shared-export-index.json</file>
+      <file role="canonical-reference">CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Supplies the export index that constitutes the second rung.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (the ladder): lexical pass, then a recorded escalation beyond it — resolution against the export index. Record WHICH passes ran, not merely that some did.</constraint>
+    <constraint source="spec">Scope (trigger): the ladder applies before &lt;existing&gt; may say "none". A justification naming a concrete neighbour already demonstrates the search worked and needs no extra rung.</constraint>
+    <constraint source="project">Scope (proportionality): two rungs. MUST NOT grow this into a multi-step research protocol — an expensive ladder gets performed once and asserted thereafter, which is worse than the single grep it replaced.</constraint>
+    <constraint source="project">Scope (no sub-agent): MUST NOT introduce a reviewer sub-agent. The owner rejected reviewer agents explicitly; this is retrieval against an index.</constraint>
+    <constraint source="project">Scope (minimal edits): change only what FR-17 requires in each skill. Both files are hot and contended.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check before starting and before merge — unified-access-control-r2 edits both files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Component justification and reuse discovery</topic>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Three-question justification gate" location="CLAUDE.md §11">existing / extension / cost-of-doing-nothing. FR-17 strengthens the evidence standard for the first question only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Run /conflict-check for both skill files.</step>
+    <step order="1">Add the ladder requirement to task-create's justification step (§3.5.6).</step>
+    <step order="2">Add the matching verification to code-review's justification check (Step 6.6).</step>
+    <step order="3">Define the recorded form: which passes ran, against what, with what result.</step>
+    <step order="4">Confirm the index path referenced in both edits is correct and stable.</step>
+    <step order="5">Sanity-check against a recent real justification that said "none" — would the ladder have changed the answer? Record the finding either way.</step>
+    <step order="6">Update TASK-INDEX.md: set task 042 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the ladder cannot be expressed in a couple of sentences per skill, STOP and simplify. A long directive is a directive that gets skimmed, and the failure mode here is a ritual that produces the same "none" with more words attached.</trigger>
+    <trigger>If step 5 shows the ladder would not have changed any recent "none" claim, report that honestly before shipping — it is evidence about the mechanism's value that the owner should see.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/skills/task-create/SKILL.md</output>
+    <output type="doc">.claude/skills/code-review/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given task-create, a justification may not record &lt;existing&gt;none without a recorded escalation beyond the lexical pass.</criterion>
+    <criterion testable="true">Given code-review, the reviewer verifies which passes ran.</criterion>
+    <criterion testable="true">Given the recorded form, it names the passes performed and their results.</criterion>
+    <criterion testable="true">Negative: the ladder has exactly two rungs — no multi-step protocol was introduced.</criterion>
+    <criterion testable="true">Negative: no reviewer sub-agent is introduced or referenced.</criterion>
+    <criterion testable="true">Negative: neither skill file was restructured beyond the required additions.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-17. Baseline for measuring effect: 53 &lt;existing&gt;none claims of 448 justifications (2026-09-03, confirmed by task 003).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

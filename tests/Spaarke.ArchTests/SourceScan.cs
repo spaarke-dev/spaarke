@@ -1,8 +1,9 @@
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// Shared source-scanning machinery for the credential arch-fitness guards
-/// (<see cref="CredentialGuardTests"/> and <see cref="CredentialCensusTests"/>).
+/// Shared source-scanning machinery for the arch-fitness guards — the credential guards
+/// (<see cref="CredentialGuardTests"/>, <see cref="CredentialCensusTests"/>) and the shared-package
+/// census (<see cref="SharedPackageCensusTests"/>).
 ///
 /// <para>Extracted rather than duplicated because the two guards must agree on what "the server source"
 /// is and on how a statement is delimited. Two copies would drift, and the failure mode of drift here is
@@ -40,6 +41,41 @@ internal static class SourceScan
             .EnumerateFiles(testRoot, "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Every immediate subdirectory of <c>src/client/shared/</c> — the sanctioned shared-package
+    /// directories enumerated by ADR-012. Returns directory NAMES, not paths, ordered so a failure message
+    /// reads the same on every machine.
+    ///
+    /// <para>Added for <see cref="SharedPackageCensusTests"/> (code-quality-and-assurance-r4 task 002)
+    /// following the precedent of <see cref="TestSourceFiles"/>: the census asks a question about a
+    /// different part of the tree than the credential guards do, so it needs its own enumerator here rather
+    /// than a private walker of its own. Extending is the point — a forked walker would resolve the repo
+    /// root a second way, and <see cref="ResolveRepoRoot"/> is precisely the fragile part.</para>
+    ///
+    /// <para><b>Keyed on the directory, deliberately.</b> ADR-012 enumerates DIRECTORIES, so the census
+    /// must too. Keying on <c>package.json</c> instead would make the census's subject "packages the
+    /// manifest scan happened to find", and a new directory that arrives without a manifest — or with one
+    /// added a commit later — would be invisible for exactly as long as it takes someone to notice by
+    /// hand. <see cref="SharedPackageCensusTests.Census_CountsADirectoryWithNoPackageJson"/> proves the
+    /// distinction rather than asserting it.</para>
+    /// </summary>
+    internal static IEnumerable<string> SharedClientPackageDirectories()
+    {
+        var sharedRoot = Path.Combine(RepoRoot, "src", "client", "shared");
+        if (!Directory.Exists(sharedRoot))
+        {
+            return Array.Empty<string>();
+        }
+
+        return Directory
+            .EnumerateDirectories(sharedRoot)
+            .Select(d => Path.GetFileName(d)!)
+            .Where(n => !string.IsNullOrEmpty(n)
+                        && !n.Equals("node_modules", StringComparison.Ordinal)
+                        && !n.StartsWith('.'))
+            .OrderBy(n => n, StringComparer.Ordinal);
     }
 
     /// <summary>Removes a <c>//</c> (and therefore <c>///</c>) line comment.</summary>

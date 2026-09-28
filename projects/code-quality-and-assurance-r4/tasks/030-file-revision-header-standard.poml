@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Author the file revision-header standard</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New standards document; no code, no tests. It is however the contract three later tasks implement against, so precision matters more than the level implies.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The field set, bump rules, and rationale are fully specified in the project CLAUDE.md "FR-10 amendment" section; this is careful literal authoring against a decided design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs,standards,governance</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author docs/standards/FILE-REVISION-HEADER.md — the one standard way Spaarke dates and revision-tracks governance files. Top-of-file YAML frontmatter, human readable, carrying version and revision-type alongside the dates. This document is the contract that tasks 031 (script), 032 (backfill), and 033 (census) implement.</prompt>
+  <role>SPAARKE platform developer authoring a cross-cutting standard. Ground every field in what the repository already carries; only version and revision-type are genuinely new.</role>
+  <goal>A standards document defining the header's six fields, their allowed values, the version-bump rules, why last-updated and last-reviewed are distinct, and the scope of application — precise enough that tasks 031 and 033 need no further design decisions.</goal>
+
+  <context>
+    <background>spec.md FR-10, as amended by owner direction on 2026-09-04 (see projects/code-quality-and-assurance-r4/CLAUDE.md, "The FR-10 amendment"). FR-10 as originally written asked for "a parseable last-reviewed" and claimed ~110 files had no stamp. Measured 2026-09-04, that count is true only for YAML frontmatter: 87 of 94 patterns and 15 of 16 constraints DO carry a human-readable "> **Last Reviewed**:" blockquote. The files are not undated — the repo has two competing conventions and roughly 9 genuinely undated files. So this is a format standardisation, and the owner asked for a richer header than a bare date while it is being done.</background>
+    <relevant-files>
+      <file role="new">docs/standards/FILE-REVISION-HEADER.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/CLAUDE.md</file>
+      <file role="canonical-reference">.claude/skills/code-review/SKILL.md</file>
+      <file role="canonical-reference">.claude/constraints/testing.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent — the design decisions are already recorded in the project CLAUDE.md.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (format): YAML frontmatter at the top of the file. NOT a blockquote. Rationale must be stated: skills cannot drop frontmatter because Claude Code parses description/tags/appliesTo from it, so a blockquote standard would leave every skill carrying two headers.</constraint>
+    <constraint source="project">Scope (fields, exactly six): version, status, revision-type, last-updated, last-reviewed, reviewed-by. Do not add a seventh field without owner sign-off — the header loads on every file and each field is a maintenance obligation.</constraint>
+    <constraint source="project">Scope (distinctness): last-updated and last-reviewed MUST remain separate fields, and the standard MUST state why — FR-13's auto-bump moves only last-reviewed, so the stamp honestly means "verified nothing changed". Collapsing them breaks the three-tier model in task 037.</constraint>
+    <constraint source="project">Scope (skills): the standard must state that for .claude/skills/*/SKILL.md the new keys are ADDED to existing frontmatter; description, tags, techStack, appliesTo, alwaysApply, and exemplar are never touched.</constraint>
+    <constraint source="project">Scope (application): .claude/** governance primitives in r4 — 71 skills, 16 constraints, 94 patterns, 49 ADRs. docs/** is in the standard's scope but its backfill is explicitly deferred; say so rather than leaving it ambiguous.</constraint>
+    <constraint source="project">Scope (no thresholds): the standard describes a header. It MUST NOT define any staleness threshold, age limit, or gate — ranking is FR-12's job and is deliberately relative, not absolute.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cross-cutting documentation standards</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/CLAUDE.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+    </files>
+    <patterns>
+      <pattern name="Standards document shape" location="docs/standards/COMPONENT-COMPLEXITY.md">A Spaarke standard states the rule, the rationale, the enforcement mechanism, and explicitly what it is NOT.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read the FR-10 amendment section in the project CLAUDE.md.</step>
+    <step order="1">Re-measure the current state before writing: frontmatter and blockquote counts across skills, constraints, patterns, and ADRs. Do not copy the figures from CLAUDE.md — confirm them.</step>
+    <step order="2">Define the six fields with allowed values and one line of purpose each.</step>
+    <step order="3">Define the version-bump rules: major = a MUST/MUST NOT or the rule's meaning changed; minor = content added or clarified; editorial = typo/link/formatting, no version bump; baseline = standard applied retroactively; initial = first authored under the standard.</step>
+    <step order="4">State why last-updated and last-reviewed are distinct, citing FR-13's auto-bump.</step>
+    <step order="5">State the skills exception (add keys only) and the scope of application (.claude/** now, docs/** deferred).</step>
+    <step order="6">State what the standard is NOT: not a threshold, not a gate, not a review policy.</step>
+    <step order="7">Add a pointer from docs/standards/ conventions and note the enforcement mechanism (task 033's census).</step>
+    <step order="8">Update TASK-INDEX.md: set task 030 status to ✅.</step>
+    <step order="9">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 1's re-measurement disagrees materially with the CLAUDE.md figures (skills 63/71 frontmatter; patterns 87/94 blockquote; constraints 15/16 blockquote), STOP and report before authoring. The whole amendment rests on the two-convention finding, and if the measurement was wrong the design should be revisited rather than documented.</trigger>
+    <trigger>If a sixth-field design decision turns out to be underspecified for skills — for example if some skill frontmatter would collide with a new key — STOP and escalate rather than renaming a field unilaterally. Skill frontmatter is parsed by Claude Code itself.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No standard governs file dating today. Grep of docs/standards/ returns CODING-STANDARDS, INTEGRATION-CONTRACTS, ANTI-PATTERNS, COMPONENT-COMPLEXITY, TEST-ARCHITECTURE, MODAL-* — none covers document metadata.</existing>
+    <extension>No. The nearest neighbours govern code, not documentation metadata, and folding a file-header contract into any of them would bury the contract three implementing tasks must read.</extension>
+    <cost-of-doing-nothing>Two competing conventions persist, so FR-12's staleness ranking cannot parse 110 of 230 primitives, and task 037's auto-bump has no field to move. The nightly job would rank a third of the governance surface as permanently unknown.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">docs/standards/FILE-REVISION-HEADER.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the standard, all six fields are defined with allowed values and purpose.</criterion>
+    <criterion testable="true">Given the standard, the five version-bump rules are defined with a worked example each.</criterion>
+    <criterion testable="true">Given the standard, the reason last-updated and last-reviewed are distinct is stated and cites FR-13's auto-bump.</criterion>
+    <criterion testable="true">Given the standard, the skills exception (add keys only, never touch the six existing ones) is explicit.</criterion>
+    <criterion testable="true">Given the standard, the scope of application names .claude/** as in-scope now and docs/** as deferred.</criterion>
+    <criterion testable="true">Negative: no staleness threshold, age limit, or gate appears anywhere in the document.</criterion>
+    <criterion testable="true">Negative: the standard does not prescribe a blockquote format for any file type.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-10 as amended (plan.md risk R4). Obligation carried by this phase: spec.md FR-10 still describes the superseded version and must be updated so spec and implementation agree.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

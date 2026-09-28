@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>The one new workflow — nightly governance job with a rolling issue</title>
+    <phase>3 The governance surface maintains itself</phase>
+    <gate>033 complete, 036 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates the single new CI workflow the project is permitted (NFR-04) on a contended hot path, and it is the mechanism every remaining advisory requirement plugs into.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows nightly-health.yml's rolling-issue pattern with a specified five-part report; the pattern source is named.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Creates a file in .github/workflows/, contended with PR #894 and spaarkeai-compose-r8. Main-session so the collision stays visible.</parallel-reason>
+    <deps>033,036</deps>
+    <tags>ci-cd,governance,automation</tags>
+    <estimated-effort>5-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the single nightly governance workflow, reporting into one rolling GitHub issue: stale primitives ranked by drift × usage, broken pointer paths, broken mechanism claims, Class-1 regeneration diffs, and unclassified ADRs. Advisory and never blocking. A clean night closes the issue.</prompt>
+  <role>SPAARKE platform developer wiring CI. This is the ONE workflow r4 may add — everything later attaches to it as a section.</role>
+  <goal>A nightly workflow whose rolling issue carries all five report sections, exits 0 regardless of findings, and closes the issue on a clean night.</goal>
+
+  <context>
+    <background>spec.md FR-12 (closed set a–e) and NFR-04. The project's central finding is that four specified quality cadences have already failed to fire — they were written as paragraphs in documents rather than as jobs. A fifth paragraph would predictably meet the same fate, so this must be an actual scheduled job. It is deliberately ONE workflow: FR-23's reviewer, FR-25's test health, and FR-27's dead-export scan all become sections of it rather than siblings, because a governance report split across five files is a report nobody reads.</background>
+    <relevant-files>
+      <file role="new">.github/workflows/nightly-governance.yml</file>
+      <file role="canonical-reference">.github/workflows/nightly-health.yml</file>
+      <file role="canonical-reference">.github/workflows/adr-audit.yml</file>
+      <file role="canonical-reference">scripts/quality/rank-primitive-drift.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">Parseable headers exist across all 230 primitives — the precondition for measuring drift at all.</dependency>
+      <dependency task="036" status="pending">Supplies the ranking script this workflow invokes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (NFR-04): this is the ONLY new workflow file the entire project may create. Verify with git diff --stat .github/workflows/ that exactly one addition exists across the project before merging.</constraint>
+    <constraint source="spec">Scope (five report sections, closed set): (a) stale primitives ranked by drift × usage; (b) broken pointer paths across .claude/** and docs/**; (c) broken mechanism claims — every *.yml named in docs/** or .claude/** must exist in .github/workflows/; (d) Class-1 regeneration diffs; (e) unclassified ADRs.</constraint>
+    <constraint source="spec">Scope (NFR-05): advisory. The job MUST exit 0 regardless of findings. MUST NOT gate any PR, and MUST NOT be added to any required status check.</constraint>
+    <constraint source="spec">Scope (rolling issue): one issue, updated idempotently — not a new issue per night. A clean night closes it.</constraint>
+    <constraint source="project">Scope (worktrees): every scan MUST exclude .claude/worktrees/ and sibling worktrees.</constraint>
+    <constraint source="project">Scope (sections, not workflows): leave clearly-marked extension points for FR-23, FR-25, and FR-27. Those tasks add sections here; none of them may add a workflow file.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check immediately before starting and again before merge (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI workflow authoring and rolling issues</topic>
+    <files>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/architecture/ci-cd-architecture.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Rolling issue" location=".github/workflows/nightly-health.yml">Nightly schedule updating one issue rather than opening many. The cadence and issue-management model to copy.</pattern>
+      <pattern name="Idempotent issue update" location=".github/workflows/adr-audit.yml">Find-or-create then update, so re-runs do not multiply issues.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Run /conflict-check for .github/workflows/.</step>
+    <step order="1">Create the workflow on a nightly schedule matching nightly-health.yml's cadence, with manual dispatch for testing.</step>
+    <step order="2">Implement section (a): invoke task 036's ranking script; report top N.</step>
+    <step order="3">Implement section (b): resolve every relative link across .claude/** and docs/**; report unresolvable paths.</step>
+    <step order="4">Implement section (c): extract every *.yml named in docs/** or .claude/** and assert it exists in .github/workflows/. This is the check that would have caught the nightly-quality.yml phantom.</step>
+    <step order="5">Implement section (d): regenerate Class-1 artifacts and report any diff. Wire the FR-16 index in task 041.</step>
+    <step order="6">Implement section (e): report unclassified ADRs, reading task 011's routing.</step>
+    <step order="7">Implement idempotent rolling-issue update, and close-on-clean.</step>
+    <step order="8">Add clearly-labelled extension points for FR-23 (task 054), FR-25 (056), FR-27 (058).</step>
+    <step order="9">Test via manual dispatch. Verify exit 0 even with findings present.</step>
+    <step order="10">Verify section (c) empirically: introduce a phantom *.yml reference in a scratch doc, confirm it is flagged, then remove it.</step>
+    <step order="11">Verify close-on-clean behaviour.</step>
+    <step order="12">Update TASK-INDEX.md: set task 035 status to ✅.</step>
+    <step order="13">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any section cannot be implemented without a second workflow file, STOP and escalate. NFR-04 is a hard project constraint and "just one more workflow" is the exact drift that produced today's sprawl.</trigger>
+    <trigger>If the job cannot be made to exit 0 while still surfacing findings, STOP. An advisory job that fails the run becomes a blocking gate by accident, and NFR-05 draws that line deliberately.</trigger>
+    <trigger>If .github/workflows/ has changed on master since /conflict-check, STOP and re-run it before creating the file.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>.github/workflows/nightly-health.yml (rolling issue, nightly) and adr-audit.yml (idempotent tracking issue) are the closest neighbours.</existing>
+    <extension>Considered and rejected, per the spec's component table: folding a governance report into nightly-health's issue mixes two audiences and dilutes a channel that currently gets read. The rejection is recorded rather than assumed.</extension>
+    <cost-of-doing-nothing>Four specified quality cadences have already failed to fire because they were paragraphs rather than jobs. A fifth paragraph is the predictable outcome, and the entire maintenance half of the project would deliver nothing that actually runs.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="gh">Test workflow dispatch and issue updates</tool></tools>
+
+  <outputs>
+    <output type="config">.github/workflows/nightly-governance.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a manual dispatch, the job completes and updates exactly one rolling issue.</criterion>
+    <criterion testable="true">Given findings in every section, the job still exits 0.</criterion>
+    <criterion testable="true">Given the issue body, all five report sections are present.</criterion>
+    <criterion testable="true">Given a deliberately-introduced phantom *.yml reference, section (c) flags it.</criterion>
+    <criterion testable="true">Given a clean night, the rolling issue is closed rather than updated with an empty report.</criterion>
+    <criterion testable="true">Given two consecutive runs, only one issue exists.</criterion>
+    <criterion testable="true">Negative: git diff --stat .github/workflows/ shows exactly one added file across the whole project.</criterion>
+    <criterion testable="true">Negative: the workflow is not referenced by any required status check and gates no PR.</criterion>
+    <criterion testable="true">Negative: no scan visits .claude/worktrees/ or a sibling worktree.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-12 (closed set a–e), NFR-04, NFR-05. Section (c) is the check that makes success criterion 4 true — docs cannot claim mechanisms that do not exist. Task 055 fixes the four current phantom claims; this section prevents recurrence.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
