@@ -4,7 +4,7 @@
     <title>This project modified an e2e spec that no workflow runs</title>
     <phase>5 Remediation — verification</phase>
     <gate>blocked — requires 069</gate>
-    <status>not-started</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (CLAUDE.md §8): touches `tests/**` and carries `e2e-test`. Also modifies a CI workflow.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,4 +93,65 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Coordinate with 058 on `tests/e2e/pages/`.</protocol>
   </execution>
+
+  <status-note date="2026-09-28">
+    COMPLETED WITH ESCALATION. Full record: notes/074-e2e.md.
+
+    OUTCOME: all three Office e2e specs are classified NOT-RUNS-IN-CI, marked in-file, and
+    listed in notes/parity-checklist.md section 10. Nothing was wired into the workflow,
+    deliberately. 109 tests (32 word + 48 outlook save + 29 outlook share) currently run
+    NOWHERE -- no workflow executes tests/e2e at all.
+
+    DETERMINED EMPIRICALLY, as the constraint required, and the easy wrong answer was
+    available: .env.example asks for CLIENT_SECRET, TEST_USER_PASSWORD and TENANT_ID, which
+    LOOKS like proof a live tenant is needed. The code says otherwise -- the specs default
+    to localhost:3000, there are 24 route interceptions (the BFF is mocked),
+    mockWordEnvironment() injects window.Office/window.Word, and the build's four required
+    env values are PLAIN TEXT in deploy-office-addins.yml:66-69 (public client IDs and a
+    URL, not secrets). So I ran them: npm install at root (Playwright was declared there and
+    NOT installed), playwright install chromium, built the add-in with those four values,
+    served dist/ on 127.0.0.1:3000 (HTTP 200), ran the word spec on chromium.
+
+    RESULT: every test failed with page.waitForFunction timeout. A timeout does not say why,
+    so I probed the page: it BOOTS and stalls at "Loading..." with NO page errors --
+    "Stage 1: Waiting for Office.js" -> "Office.js is loaded outside of Office client" ->
+    "Office.js ready: {host: null, platform: null, addin: null}" -> "Stage 2: Initializing
+    auth service" and stops.
+
+    TWO BLOCKERS, both in the HARNESS rather than the specs' intent: (1) the spec DOES apply
+    its mock in beforeEach before navigating, but NOTHING intercepts the real office.js CDN
+    script -- grep for appsforoffice/office.js across spec and page object returns ZERO -- so
+    the real script supersedes the mock and host detection reports host:null; (2) the
+    bootstrap then awaits MSAL, which cannot settle headless. A third, smaller defect
+    recorded for whoever fixes those: the readiness probe waits for
+    [data-fui-focus-visible], which Fluent v9 sets on KEYBOARD FOCUS, not on mount, so even
+    a rendered pane might never satisfy it.
+
+    WHICH HALF OF THE TRIGGER FIRED, precisely: NOT the infrastructure half -- no test tenant
+    and no hosted add-in are required. The PARALLEL-HARNESS half. Making these run needs
+    office.js route-blocking, a completed Office mock, a readiness-probe fix, a CI job, and
+    -- the reason this is not a tidy-up -- a TEST SEAM IN THE ADD-IN'S AUTH SERVICE so
+    bootstrap can proceed without MSAL. That is a production change to an auth path, CLAUDE.md
+    section 6 territory in its own right, and must not be smuggled in under a CI-wiring task.
+    Costed in the note (~2.5 days). OWNER DECISION NEEDED: fund it as its own task, or accept
+    these as live-host-manual and let task 042's UAT be where they earn their keep.
+
+    CRITERIA DISPOSITION, stated rather than silently skipped: 1 done; 2 VACUOUS (no spec
+    qualifies, nothing wired); 3 N/A and cannot be otherwise -- there is no running spec to
+    break, so the both-directions proof is impossible, recorded not dropped; 4 done (three
+    in-file markers + parity-checklist section 10); 5 classified, not green; 6 actionlint
+    unchanged because the workflow was NOT modified. The POML lists the workflow as an edit
+    target; adding a job that runs zero specs, or one that runs failing specs, would be worse
+    than adding nothing. Deviation recorded.
+
+    058 COORDINATION: the POML asks to coordinate on tests/e2e/pages/addins/
+    OutlookTaskPanePage.ts:305-331. 058 is BLOCKED (delete-vs-modify contention with
+    unified-access-control-r2), so there is nothing to coordinate with yet. Whoever unblocks
+    058 must keep these markers alive through the page-object deletion.
+
+    DRIVE-BY: package.json's lint:fix still read `eslint src` -- the same nonexistent-directory
+    defect task 072 fixed in `lint`, left behind because 072's criteria named only one script.
+    Fixed. Leaving a known-identical bug on the adjacent line is the inconsistency this wave
+    exists to remove.
+  </status-note>
 </task>

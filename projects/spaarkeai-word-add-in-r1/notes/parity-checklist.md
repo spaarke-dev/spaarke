@@ -228,3 +228,30 @@ data, and has been fully converted, not merely reasoned about).
 Full detail, including why Outlook is `false` despite technically having a subject it could offer: the
 capability's own doc comment in `shared/adapters/types.ts`, and `projects/spaarkeai-word-add-in-r1/notes/
 020-filename-defaults-document-name.md`'s follow-up section.
+
+---
+
+## 10. Addendum (2026-09-28) — Office e2e specs are LIVE-VERIFICATION items, added by task 074
+
+§5 above already records that the POML `<ui-tests>` are UNVERIFIED with no live host. Task 074 adds the
+**Playwright e2e specs** to that same list, because they are in the same state and were previously easy to
+mistake for executing coverage.
+
+| Spec | Tests | Runs in CI? | Basis |
+|---|---|---|---|
+| `tests/e2e/specs/word-addins/save-flow.spec.ts` | 32 | ❌ no | Measured: taskpane boots, hangs at `Stage 2: Initializing auth service`. Real `office.js` is never intercepted so the injected Office mock is superseded (`host: null`); MSAL then cannot complete headless. |
+| `tests/e2e/specs/outlook-addins/save-flow.spec.ts` | 48 | ❌ no | Same shape and same blockers as above. |
+| `tests/e2e/specs/outlook-addins/share-flow.spec.ts` | 29 | ❌ no | Same. |
+
+**109 tests, running nowhere.** No workflow executes `tests/e2e` at all, and each spec now carries an in-file
+marker saying so, so a reader cannot mistake them for coverage.
+
+**These are NOT inherently live-host-only.** They are authored as mocked headless tests whose mock is
+incomplete in two specific, fixable ways (route-block `office.js`; stub the auth service). Completing it is an
+e2e-harness build, which task 074's escalation trigger puts outside its scope — so it is **escalated**, with
+the cost, rather than half-built. See `notes/074-e2e.md`.
+
+**For task 042's live UAT**: these specs are the closest thing to a scripted regression pass for the save and
+share flows. Running them against a live host — `ADDIN_TASKPANE_URL` pointed at the deployed taskpane, with
+`tests/e2e/config/.env` filled in — is a legitimate way to execute part of this checklist, and is worth doing
+manually even while they cannot run unattended.

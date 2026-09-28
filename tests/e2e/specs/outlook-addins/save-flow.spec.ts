@@ -1,4 +1,23 @@
 /**
+ * 🔴 THIS SPEC DOES NOT RUN IN CI, AND DOES NOT CURRENTLY RUN ANYWHERE.
+ * ---------------------------------------------------------------------
+ * Classified by task 074 (2026-09-28). Do not read these 48 tests as coverage - no
+ * workflow executes `tests/e2e`, and they do not pass headless today.
+ *
+ * Basis (measured on the sibling word-addins/save-flow.spec.ts, which shares this exact
+ * shape - same `taskPaneUrl` default, same navigate-then-wait pattern): the taskpane
+ * BOOTS and then hangs at "Loading...", because (1) nothing intercepts the real
+ * `office.js` CDN script, so the injected Office mock is superseded and host detection
+ * reports `host: null`, and (2) the add-in's bootstrap then awaits its MSAL auth service,
+ * which cannot complete headless. Full evidence and console trace:
+ * `projects/spaarkeai-word-add-in-r1/notes/074-e2e.md`.
+ *
+ * These are authored as MOCKED HEADLESS tests whose mock is incomplete - not tests that
+ * inherently require Outlook desktop. Completing the mock is an e2e-harness build, which
+ * task 074's escalation trigger puts outside its scope. Escalated rather than silently
+ * left looking like coverage.
+ */
+/**
  * E2E Tests: Outlook Save Flow
  *
  * Tests validate the complete save flow for saving Outlook emails and attachments
