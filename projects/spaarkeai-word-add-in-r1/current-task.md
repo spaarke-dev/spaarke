@@ -40,18 +40,30 @@ leaves `ownerid` on the **app user** — team ownership (B) requires code.
 Team lookup: `team` WHERE `businessunitid` = resolved BU AND `isdefault = true` AND **`teamtype = 0`**.
 **Both predicates required** — dev has non-default Owner teams AND Access teams.
 
-### 🔴 MODEL 1 IS A SHARED DATAVERSE — and the authoritative doc says otherwise
+### TENANCY MODELS — REVISED 2026-09-28. Both models are DEDICATED per customer.
 
-**Owner, 2026-09-25**: Model 1 does NOT give each customer its own Dataverse environment — *that is the whole
-point of Model 1*. Customers are segregated **by business unit**, each starting at a child BU below root
-`Spaarke`. Model 2 = dedicated Dataverse (**2a** in the Spaarke tenant, **2b** in the customer's own tenant).
+**Owner, 2026-09-28** (driven by UAC-r2 requirements): **Model 1** = dedicated customer Dataverse environment +
+Azure resources in **Spaarke's tenant**. **Model 2** = dedicated customer Dataverse environment + Azure
+resources in **the customer's own tenant**. **There is no shared-Dataverse model any more** — the models differ
+only by which tenant hosts the stamp. Maps onto this project's earlier interim labels as: new Model 1 = old 2a,
+new Model 2 = old 2b, old shared Model 1 **retired**.
 
-**`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` 3.2 states the opposite** — *"Dedicated per-customer:
-Dataverse env..."* — and CLAUDE.md 17 calls that file the single authoritative operator guide. **It drives
-provisioning.** The 2a/2b split is also absent. **Owner ruling + doc fix still needed.**
+⚠️ **This supersedes the 2026-09-25 entry** (commit `e454af78a`) which said Model 1 was shared with customers
+segregated by business unit. Ignore that version wherever you find it quoted.
 
-So ownership placement is the Model 1 **customer-data-visibility** mechanism, not org tidiness, and the refuse
-branches are isolation-critical.
+**What it changes for 080 — all simplifications:**
+- **Cross-customer isolation is the environment boundary**, not BU placement. No ownership bug can leak between
+  customers. The `refuse` branch is still required but its justification reverts to **secure-record isolation
+  within one customer** (UAC-r2 task 076's rule), not cross-customer.
+- **The bug is unchanged**: BFF creates land on the app user in **ROOT**, and Deep never traverses upward, so
+  child-BU customer users cannot read their own records. Identical symptom, smaller blast radius
+  (over-restriction inside one customer, never a cross-customer leak).
+- **Goal A is satisfied by construction** — an app user is per-environment, so a dedicated environment per
+  customer means it is always the right customer's. That open provisioning question **dissolves**, and 080 is no
+  longer gated on it. But correct app-user placement now fixes *nothing* by itself (it was never in the wrong
+  customer, only the wrong BU), so **the resolver is the whole fix**, not half of it.
+
+Full reasoning + the shared-doc blast radius: `notes/080-record-ownership.md` §4c.
 
 ### DEV DATA IS NOT INDICATIVE (owner, 2026-09-25)
 
@@ -79,12 +91,19 @@ Build 0/0 throughout. Task 067 gates: ArchTests 191/191 · full suite **12,415/0
 ### 🔴 OPEN ITEMS
 
 **Owner decisions needed:**
-1. **Model 1 doc ruling** — which is correct, then fix `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` 3.2 (+ add 2a/2b).
-2. **Goal A provisioning** — confirm every customer gets its own BFF app registration with the app user in that
-   customer's BU. Owner said *"need to check if always does."* If ever shared, one app user cannot sit in several
-   BUs and Goal A breaks.
-3. **Can a customer span more than one BU?** (departments beneath the customer BU) — decides whether the
-   customer's BU and the acting user's BU can differ, and what the backfill can infer for the 512 root rows.
+1. ~~**Model 1 doc ruling**~~ — **DECIDED 2026-09-28**, see the tenancy section above. What remains is **not this
+   project's to do**: the revision makes `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §3.2/§3.3, `model1-shared.bicep`
+   (filename), ADR-052's tenancy rows, the §8 I2/I3 rationale, CLAUDE.md §17 and the `/provision-environment`
+   intake stale. **Route to UAC-r2 / customer-provisioning** — the guide has unmerged edits on
+   `work/unified-access-control-r2`, so editing it from here is a hot-path collision. Table in notes §4c.
+2. ~~**Goal A provisioning**~~ — **DISSOLVED** by the revision. An app user is per-environment, so a dedicated
+   environment per customer makes it always the right customer's. No provisioning dependency remains on 080's
+   critical path.
+3. **Can a customer span more than one BU?** (departments beneath the customer's root) — **STILL OPEN and now
+   MORE important**, because within-customer BU structure is the only structure that matters. Decides the
+   resolver's practical behaviour and what the backfill can infer for the 512 root rows. Also needs: where does
+   the **Secure Project BU** sit inside a dedicated customer environment? The owner's earlier statement placed it
+   *"at the same child level as the customer bu"*, which described the retired shared hierarchy.
 
 **Work remaining in 080:**
 4. Wire 5 create paths: `UploadFinalizationWorker` x2 (has `payload.UserId`, an OID), `RecordCreationService`
@@ -92,7 +111,10 @@ Build 0/0 throughout. Task 067 gates: ArchTests 191/191 · full suite **12,415/0
    `sprk_analysis`. `sprk_todo` via `OfficeService:2765`.
 5. **Reversible / dry-runnable backfill** — 512 documents + other entities. Escalation trigger 2 says refuse if it
    cannot be made reversible.
-6. Tests incl. the **cross-customer negative** (BU-A user must not read a BU-B record) and the refuse branches.
+6. Tests incl. the **cross-BU negative WITHIN one customer** — a child-BU user must not read a sibling BU's
+   team-owned record, the security-relevant instance being a **Secure Project BU** record. (Replaces the
+   cross-customer negative, withdrawn 2026-09-28: two customers are never in one Dataverse, so that test would
+   have asserted a property the environment boundary already guarantees.) Plus the refuse branches.
 7. Gates: full suite reconciled, ArchTests, publish size, CVE.
 8. `sprk_communication` — cross-project; coordinate with the Communication project or hand off explicitly.
 

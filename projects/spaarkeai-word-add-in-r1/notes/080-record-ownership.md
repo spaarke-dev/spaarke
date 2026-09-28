@@ -163,81 +163,108 @@ is the owner's call, not a task-local one.** Awaiting the decision.
 **Path-independent work that proceeds regardless**: the **backfill** fixes EXISTING rows whatever created
 them, so it is needed under every option and is not blocked by this decision.
 
-## 4c. 🔴 MODEL 1 IS A SHARED DATAVERSE — this is tenant isolation, not org tidiness
+## 4c. TENANCY MODEL — REVISED 2026-09-28. Every customer gets a DEDICATED Dataverse.
 
-**Owner correction 2026-09-25**: *"in model 1 each customer DOES NOT get their own dataverse
-environment — that's the whole point. customers are segregated by business unit (i.e., each customer would
-start at a child business unit / team below the root 'Spaarke')."*
+> ⚠️ **This section was rewritten twice. Read only the current definition below.** The 2026-09-25 version of
+> §4c asserted that Model 1 was a *shared* Dataverse with customers segregated by business unit. That is
+> **superseded** — do not act on it if you find it quoted in an older commit, in `current-task.md` history, or
+> in commit message `e454af78a`.
 
-### ⚠️ The authoritative deployment guide says the OPPOSITE
+### The current definitions (owner, 2026-09-28)
 
-[`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md)
-§3.2, Model 1 composition, verbatim: *"**Dedicated per-customer**: Dataverse env, SPE container-type + root
-container, Key Vault, Storage, UAMI, Entra app config."* That directly contradicts the owner's stated model,
-and CLAUDE.md §17 calls that file *"the single authoritative operator guide."* **It drives provisioning**, so
-the contradiction is not cosmetic — a provisioning run following the doc would stand up a dedicated
-environment per customer. Needs an owner decision on which is correct, then a doc fix. Filed here rather than
-silently resolved, because I do not know which side is stale.
+Revised as a result of **UAC-r2 requirements**:
 
-### Verified BU structure — consistent with the owner's model
+| Model | Dataverse environment + Azure resources | Tenant |
+|---|---|---|
+| **Model 1** | **Dedicated per customer** | **Spaarke's** tenant |
+| **Model 2** | **Dedicated per customer** | **the customer's own** tenant |
 
-Root **Spaarke** (`06fbf21c…`, `parentbusinessunitid` null) with **five flat children**, all directly under
-root: `Secure Project`, `Spaarke Business Unit 1`, `Spaarke Demo`, `Spaarke Dev 1`, `Spaarke Test 1`.
-One level, exactly the shape "each customer starts at a child BU below root" implies.
+**There is no shared-Dataverse deployment model any more.** The distinction between the two models is now
+*only which tenant hosts the stamp* — it is no longer about sharing. This maps onto the interim labels used
+earlier in this project as: new **Model 1 = old 2a**, new **Model 2 = old 2b**, and the old shared Model 1 is
+**retired**.
 
-### What this changes: the stakes, and the direction of the failure
+### What this changes for task 080 — three things, and they all simplify it
 
-Deep depth = own BU **+ descendants**, never the parent. So with every record pooled in ROOT today:
+**1. Cross-customer isolation is the ENVIRONMENT boundary, not business-unit placement.**
+Two customers can never be in one Dataverse, so no ownership bug can leak data between customers. The BU
+hierarchy now only ever describes structure *inside a single customer*. The `refuse` branch is therefore
+**not** cross-customer-isolation-critical — its justification reverts to the original one inherited from
+UAC-r2 task 076: **secure-record isolation within the customer** (see §4d).
 
-| Reader | Sees root-owned records? |
+**2. The bug is unchanged, and its cause is now entirely within our code to fix.**
+Deep depth = own BU **+ descendants**, never the parent. Inside one customer environment:
+
+| Reader | Sees a ROOT-owned record? |
 |---|---|
-| Customer A user in BU-A (Deep) | ❌ **No** — root is their PARENT |
-| Customer B user in BU-B (Deep) | ❌ No |
-| Spaarke staff in root (Deep) | ✅ Yes — root + all descendants |
+| Customer user in a child BU (Deep) | ❌ **No** — root is their PARENT |
+| A user sitting in that environment's root (Deep) | ✅ Yes — root + all descendants |
 
-So there is **no cross-customer leak today**, but something worse for a shared-tenancy product: **every
-customer's data pools in root where only Spaarke staff can see it, and no customer can see their own.**
-After the fix, records land in the customer's BU, that customer's users can read them, siblings cannot, and
-root staff retain the support-wide view.
+BFF-created records land on the **app user, in ROOT**. So any customer user who sits in a child BU cannot
+read records the product created for them. That is the 063/064 symptom, and it is identical under the new
+model. What changes is only the blast radius: over-restriction inside one customer, never a leak across two.
 
-**So the ownership fix is the Model 1 customer-data-visibility mechanism, not an org-structure nicety.**
-Its `refuse` branch becomes isolation-critical rather than merely tidy.
+**3. Goal A is now satisfied by construction — 080 is no longer gated on a provisioning decision.**
+A Dataverse application user exists per environment, so a dedicated environment per customer means the app
+user is *necessarily* the right customer's. The old open question — *"does every customer get its own BFF app
+registration?"* — **dissolves**. But note the consequence: placing the app user correctly now fixes
+**nothing** on its own, because it was never in the wrong customer; it is in the wrong **BU** (root). So the
+resolver (Goal B) is no longer one half of the fix — **it is the whole fix**, and the only remaining question
+is which BU *within* the customer, which is exactly what record-first answers.
 
-### Record-first is MORE right under Model 1, not less
+### Record-first is still the right order
 
-Spaarke staff sit in **root**. A staff member filing a document to customer A's matter would, under
-creator-first, land it in ROOT — invisible to customer A. Record-first lands it in A's BU, from the matter.
-The correction made on 2026-09-25 is therefore load-bearing for Model 1 specifically.
+The argument changes but the conclusion does not. Previously: Spaarke staff sit in shared root, so
+creator-first would misfile a customer's document into root. Now: the **app user** sits in the customer's own
+root, so creator-first would misfile into root just the same — invisible to every child-BU user. Record-first
+takes the BU from the target record, which is authored inside the customer's structure and therefore correct.
+Record-first also remains the only source when there is no human at all (inbound email).
 
-### The per-customer BFF app registration idea — assessed, and NOT configured today
+### The per-customer BFF app registration idea — now moot as a fix, still worth knowing
 
-Owner's hypothesis: each client may have its own BFF app registration, so its Dataverse application user
-would sit in that customer's BU, making the Dataverse default land records correctly with no code.
+Measured in dev: all **25** application users — including all three BFF ones (`mi-bff-api-dev` `8793f4b0…`,
+`spaarke-bff-api-prod` `905a7d55…`, `SDAP-BFF-SPE-API` `bb5a90e5…`) — sit in **ROOT** `06fbf21c…`. Not one is
+in a child BU.
 
-**Verified: it is not configured that way.** All **25** application users in dev — including all three BFF
-ones (`mi-bff-api-dev` `8793f4b0…`, `spaarke-bff-api-prod` `905a7d55…`, `SDAP-BFF-SPE-API` `bb5a90e5…`) —
-sit in **ROOT** `06fbf21c…`. Not one is in a child BU.
+Under the revised model this measurement no longer indicates a *customer* mismatch (there is one customer per
+environment). It indicates the remaining real defect: **the app user is in root, so its creates are
+root-owned.** Moving an app user into a child BU is still not a substitute for the resolver — it would give
+**application-user** ownership rather than **team** ownership, and no within-customer BU scoping.
 
-Assessment if it were configured:
-- ✅ Would give customer-level correctness for app-only creates with zero code.
-- ❌ Gives **application-user** ownership, not **team** ownership — not what the owner asked for.
-- ❌ Customer-level granularity only; no within-customer BU/department scoping.
-- ❌ Breaks if one BFF app registration serves several Model 1 customers — an app user can sit in only ONE BU.
-  The owner flagged this themselves (*"need to check if always does"*).
-- ❌ Correct placement is an operational provisioning step, enforced by nothing in code.
+### Obligations for 080 — one REMOVED, one restated, one still open
 
-**Conclusion**: worth doing as defence-in-depth for the no-target/no-user case, but it is not a substitute for
-explicit assignment and does not deliver team ownership.
+1. ~~**A cross-customer negative test** (BU-A user must not read a BU-B record)~~ — **WITHDRAWN 2026-09-28.**
+   Two customers are never in one Dataverse, so this test would assert a property the environment boundary
+   already guarantees, using a scenario that cannot occur in production. Replaced by ⬇.
+2. **A cross-BU negative test *within* one customer** — a user in one child BU MUST NOT read a record owned by
+   a sibling BU's team. The security-relevant instance is the **Secure Project BU** (§4d): a record assigned
+   there must be invisible to ordinary users unless the UAC adds them to it explicitly. The `refuse` branch is
+   tested as part of this, since a fallback that resolved to the caller's general BU would defeat it.
+3. **STILL OPEN for the owner, and now MORE important**: inside a customer environment, what is the BU
+   structure — is a customer ever more than one BU (departments)? Under the retired shared model this decided
+   whether "the customer's BU" and "the acting user's BU" could differ. Now that within-customer structure is
+   the *only* structure, it decides the resolver's whole practical behaviour and what the backfill can infer
+   for the 512 root-owned documents.
 
-### New obligations this creates for 080
+### ⚠️ Consequence the owner should route to UAC-r2 / customer-provisioning
 
-1. **A cross-customer negative test** — a BU-A user MUST NOT read a BU-B record. Previously absent from the
-   criteria because ownership read as org structure; under Model 1 it is the isolation proof.
-2. **The refuse branch is isolation-critical** — a fallback that ever resolved to ROOT would make a customer's
-   record invisible to them. Already fail-closed; now it must be tested as such.
-3. **OPEN QUESTION for the owner**: in Model 1, is a customer ever more than one business unit (departments
-   beneath the customer's BU)? That decides whether "the customer's BU" and "the acting user's BU" can differ,
-   and what read scope Deep is meant to give.
+The revision makes several **shared** documents wrong — none of them this project's to edit, and
+`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` currently has unmerged edits on `work/unified-access-control-r2`, so
+editing it from here would be a hot-path collision. Handed off rather than fixed:
+
+| Surface | What is now wrong |
+|---|---|
+| `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §3.2/§3.3 | Model 1 is described as a shared platform — *"**Shared** across all Model 1 tenants: App Service Plan, Azure OpenAI …, Azure AI Search"*. Nothing is shared per-customer under the revision. The 3-way split by tenant (Spaarke vs customer) is absent. |
+| `infrastructure/bicep/stacks/model1-shared.bicep` | The **filename** encodes the retired concept. |
+| `docs/adr/ADR-052-workload-placement.md` (UAC-r2, unmerged) | Tenancy rows: *"Model 1 — a **shared multi-tenant** Function app is acceptable"*, *"Model 1: the **shared** BFF UAMI"*, *"a **shared** hub for Model 1"*. |
+| Deployment guide §8 invariants **I2/I3** | `tenantId` on every AI Search query, partition key on every Cosmos read — these were the *shared-resource* mechanisms. With dedicated Azure resources they become defence-in-depth. **Recommend keeping them mandatory anyway** (the code is shared even when the resources are not, and the cost is one predicate), but the rationale should be restated so nobody later removes them as obsolete. |
+| CLAUDE.md §17 | Describes the guide as *"Model 1 (shared trial/SMB) + Model 2 (dedicated stamp)"*. |
+| `/provision-environment` skill intake | `tenancyModel` semantics change. |
+
+One thing the revision **resolves**: the absence of a Dataverse row-scoping invariant (there is no I6 for
+Dataverse alongside I2–I5) is no longer a gap. It was always correct — Dataverse isolation comes from the
+environment boundary. My 2026-09-25 reading of that absence as evidence of a doc/owner conflict was the
+weaker half of that analysis; the docs were right about Dataverse and wrong only about sharing compute.
 
 ## 4d. Dataverse does NOT assign new records to the creator's team — and the secure-record rule
 
