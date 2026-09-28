@@ -227,6 +227,83 @@ from an ADR-002 review on 2026-09-25 and was untracked. Committed here to preven
 
 ---
 
+## § SESSION 24 (2026-09-28) — D-12/D-13 remediation: ADRs + docs DONE, code NOT started
+
+> **Read `notes/D-12-deployment-model-redefinition.md` + `notes/D-13-per-customer-bff-app-registration.md`
+> first.** They are the decisions. Everything else is execution.
+
+### ▶ Decisions settled this session (all owner-approved)
+
+| # | Decision |
+|---|---|
+| **D-12 §3a** | One Azure **subscription + resource group per customer** → **ADR-027 amended** (§6.5 path B) |
+| **D-12 §4** | Dedicated **App Service Plan** — *forced*: an app cannot use a plan in another subscription (verified vs MS docs) |
+| **D-12 §3** | **Redis dedicated at STANDARD tier.** ✅ Premium **not** required — RDB persistence unneeded (upload bytes are *"the hot-tier peer of the durable blob copy"*); VNet injection unused + MS-deprecated (private endpoint works on all tiers). ⚠️ **confirm Standard meets the PERFORMANCE bar** |
+| **D-12 §3** | **App Insights PROMOTED to dedicated** — customers may need access to their own output, which cannot be granted on a shared workspace. Exceptions **3 → 2** |
+| **D-12 §3** | Sharing exceptions **CLOSED at two**: Static Web Apps, Content Safety — each needs a **`customerId`** discriminator |
+| **D-13** | 🔴 **BFF Entra app registration PER CUSTOMER. BINDING. DO NOT RE-OPEN.** |
+
+### ▶ 🔴 D-13 — why it is binding, in one line
+
+app registration → Dataverse **application user** → assigned to exactly **one business unit** → every
+BFF-created record is **owned by it** → lands in **that BU**. A record can only land in customer X's BU if
+the BFF authenticated as an app registration dedicated to customer X. *(I re-opened this once and was
+wrong; the counter-argument and why it fails are recorded in D-13 §2. The 20-FIC-per-app cap **supports**
+per-customer — sharing hits an unraisable Entra limit at customer 21.)*
+
+### ▶ DONE — docs + ADRs (11 commits, all pushed)
+
+- **6 ADRs amended**: 027 (subscription-per-customer) · 009 (cache key: prefix is not the customer boundary,
+  **+ new MUST**: the part after the tenant segment must discriminate the subject) · 015 (`/tenantId`
+  partition → dedicated Cosmos account; **resolves a live ADR-042/ADR-015 contradiction**) · 052 (no shared
+  Model 1 Function app/UAMI/task hub) · 028 (3 shape rows → 2; Decision untouched) · 013 (Context + resource
+  tables).
+- **Docs**: all of Lane A (guides+enhancements), Lane B (architecture/procedures/assessments), the
+  authoritative `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`, the provisioning project's design/spec/plan/README,
+  `COMPONENT-INVENTORY.md` §§7/8/11/12 (the authoritative BOM), the run templates, and the
+  `provision-environment` + `azure-deploy` operator skills.
+- **3 MUST-NOTs reversed** that forbade what D-12/D-13 require (2 in a project `CLAUDE.md` an agent would
+  obey): per-customer Redis ×2, and *"MUST NOT create a per-customer app registration for Model 1"*.
+- **D-12 id collision resolved** — `INSIGHTS-ENGINE-ARCHITECTURE.md` used `D-12` locally for *"`tenantId` is
+  first-class on every index"* (4 sites, 2 of them MUSTs) → `D-IE-12`. A third namespace in
+  `HOW-TO-INITIATE-NEW-PROJECT.md` → `D-DEVOPS-12`.
+
+### ▶ 🔴 NEXT — CODE. None of this is started.
+
+1. 🔴 **Delete the H3 shared-app-registration branch** — `H3EntraAppRegHandler.cs:272` → `HandleModel1Async`
+   *"creates ZERO new app-reg objects"*, reusing `SharedBffAppRegistrationId`. **This is live code doing what
+   D-13 forbids.** Also remove `SharedBffAppRegistrationId` / `SharedPlatformKeyVaultName` options,
+   `EntraAppRegSharedVerifyRequest`, and the shared-path tests.
+2. 🔴 **One shared `TenancyModel` enum**, absorbing **9 branch sites + 4 silent defaults** — full inventory
+   in `notes/D-12-code-branch-inventory.md`. **Parse-or-reject at the edge**; H1 and H3 already do this, the
+   other sites default silently **and disagree with each other**. Do this **before any renaming**.
+3. 🔴 **Migrate `sprk_tenancymodel` — do NOT relabel.** Value `1` holds both old-2a and old-2b, which need
+   **opposite** Lighthouse answers. Value `0` has no successor. Fan out by `Profile`.
+4. **Retire `model1-*.bicep`** — a **six-surface atomic change**: the stack + `.json`, `model1-customer`,
+   `model1-shared-l2-rbac`, `model1-prod.bicepparam`, the **dev/prod/staging.bicepparam** bound via `using`,
+   an **inverted-polarity assertion** in `bicep-e2e-dry-run.ps1` (passes only while the build FAILS), and
+   `.github/workflows/publish-provisioning-arm-artifacts.yml` + its manifest schema, which declares
+   `model1-shared` a **required** key.
+5. **`Secure Project` → `Secure Record`** BU rename — one coordinated change (live BU + code default + config
+   key + pinning test + docs) or provisioning stops.
+6. **Fix the 3 Redis key sites** that fail subject-discrimination: `agent-thread` (🔴 cross-**USER**, latent —
+   `Enabled` defaults false), `agent-config`, `approle-module-map`. Required **regardless** of the Redis
+   dedication decision.
+
+### ▶ Open for the owner
+
+- **Power BI shared F-SKU capacity pool** — `reporting-admin.md` assumed one; not on the closed exception
+  list. A shared pool is a **new decision**, not an inherited default.
+- **M365 Copilot agent** — shared vs per-customer, still TBD (`COMPONENT-INVENTORY.md` §11).
+- Confirm **Redis Standard** meets the performance bar.
+
+### ▶ Carried, unrelated to D-12
+
+`invite-and-grant` 500 · ISS-030's `catch { return [] }` at `TrackingFieldTrio/index.ts:805` · the four
+misnamed `*TenantScope*` symbols · task 109 implementation (Steps 0+1 done).
+
+---
+
 ## § SESSION 22 (2026-09-21) — superseded by session 23 above
 
 **Session 21's recommended 2-wide wave was run and both halves closed.** Two subagents, strict
