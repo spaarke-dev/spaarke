@@ -51,16 +51,18 @@ the synopsis. Remediation has **not** started.
 **Settled 2026-09-28, beyond the model labels themselves:**
 - 🔴 **One Azure SUBSCRIPTION + resource group per customer** (billing segregation). ✅ This *resolves*
   the OpenAI TPM-quota caveat — quota is per-subscription-per-region.
-- 🔴 **App Service Plan = dedicated per customer (option A), FORCED** — an App Service app must be in
-  the **same subscription** as its plan, so the "shared plan, dedicated app" option **closed** when
-  per-customer subscriptions were decided. ⚠️ **Verify that Azure constraint before it carries budget.**
+- 🔴 **App Service Plan = dedicated per customer (option A), FORCED** — an App Service app cannot use a
+  plan in a **different subscription**, so the "shared plan, dedicated app" option **closed** when
+  per-customer subscriptions were decided. ✅ **VERIFIED 2026-09-28** against Microsoft docs (D-12 §4).
+  ⚠️ Don't over-read the source: its "same **resource group**" clause is about *moving* an app and is
+  tighter than the create-time rule. Only the cross-**subscription** prohibition is load-bearing.
 - **All Azure resources dedicated.** Redis especially: the cache key is
   `tenant:{tenantId}:{resource}:{id}:v{version}` and `tenantId` is **Spaarke's for every Model 1
   customer**, so a shared Redis would **collide across customers**. Not a cost trade-off — a correctness one.
-- ⚠️ **Requires an ADR-027 AMENDMENT** (§6.5 path B). ADR-027 Decision 1 says *"Production subscription:
-  **All** production shared and customer resources"*. It also **raises** "whether customers need their own
-  subscriptions" as its own question 4 **and never answers it** — so D-12 answers it. Amendment must be
-  written, not assumed.
+- ✅ **ADR-027 AMENDMENT WRITTEN 2026-09-28** (§6.5 path B), both copies. ADR-027 Decision 1 had said
+  *"Production subscription: **All** production shared and customer resources"*; it also **raised**
+  "whether customers need their own subscriptions" as its own question 4 **and never answered it** — so
+  the amendment answers it explicitly and marks Decision 1 superseded.
 - **Side effect**: with per-customer subscriptions + dedicated plans, Model 1 and Model 2 are **nearly
   identical infrastructurally**, differing only in which Azure tenant owns the subscription. Do not
   re-invent differences that no longer exist when rewriting docs.
@@ -206,8 +208,10 @@ a real invitation email** — that is why it was not reproduced unattended.
 2. ✅ ~~Answer the three-resource question~~ — **DONE**: all dedicated; App Service Plan forced to option A
    by the per-customer subscription; Redis dedicated for a **correctness** reason (cache-key collision),
    not cost.
-3. **Write the ADR-027 amendment** (§6.5 path B) for per-customer subscriptions — D-12 §3a. Do this
-   before or alongside any code that depends on it.
+3. ✅ ~~Write the ADR-027 amendment~~ — **DONE 2026-09-28** (§6.5 path B), in **both** copies:
+   `docs/adr/ADR-027-…md` (amendment block before the body; Decision 1 marked SUPERSEDED; Context
+   question 4 marked ANSWERED) and `.claude/adr/ADR-027-…md` (Decision 1 rewritten; constraints amended).
+   The App Service Plan constraint is **verified** against Microsoft docs — see D-12 §4.
 4. **Resolve the four conflicting "Model 1" definitions** in docs — 13 BLOCKING files. D-12 is now the
    target definition, so this is mechanical. ⚠️ `COMPONENT-INVENTORY.md` §7 is the **authoritative**
    shared-vs-dedicated BOM — *"when the two disagree, INVENTORY wins."*

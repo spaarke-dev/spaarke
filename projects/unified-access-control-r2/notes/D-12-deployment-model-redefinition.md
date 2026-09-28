@@ -4,7 +4,8 @@
 > **Supersedes**: D3 v3 (`customer-provisioning-orchestration-r1/design.md`, 2026-08-12), which created
 > the two-tier shared/dedicated split.
 > **Status**: **FULLY DECIDED** (incl. §3a subscription structure and §4 App Service Plan, both settled
-> 2026-09-28). Remediation NOT started. ⚠️ Requires an **ADR-027 amendment** — see §3a.
+> 2026-09-28). ✅ **ADR-027 amendment written 2026-09-28** (§3a) and the App Service Plan constraint
+> **verified** against Microsoft docs (§4). Code/doc remediation (§6) NOT started.
 > **Evidence**: `notes/DEPLOYMENT-MODEL-SYNOPSIS.md` (problems → solutions → why they close), plus three
 > discovery sweeps and direct verification against live Dataverse, live Azure and the source tree.
 
@@ -115,7 +116,11 @@ subscription would not have.
 subscription** as its App Service Plan, so a plan cannot be shared across customers that live in
 different subscriptions.
 
-### ⚠️ This requires an ADR-027 amendment (CLAUDE.md §6.5 path B)
+### ✅ ADR-027 amendment — WRITTEN 2026-09-28 (CLAUDE.md §6.5 path B)
+
+The amendment is written in both places: `docs/adr/ADR-027-…md` (full — new amendment block before the
+body, Decision 1 marked SUPERSEDED, Context question 4 marked ANSWERED) and `.claude/adr/ADR-027-…md`
+(concise — Decision 1 rewritten, constraints list amended). The rest of this section records *why*.
 
 `docs/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` **Decision 1** currently
 specifies environment-separated subscriptions — *"**Production subscription**: All production shared and
@@ -142,11 +147,25 @@ Three shapes exist in principle:
 | **B. Shared plan, dedicated BFF app per customer** | Process/config/identity per-customer; CPU + memory shared | 🔴 **IMPOSSIBLE under §3a** |
 | **C. One shared BFF app for many customers** | — | ❌ rejected outright |
 
-🔴 **Why B is impossible, not merely rejected**: an App Service **app must be in the same Azure
-subscription as its App Service Plan.** With one subscription per customer, a shared plan would sit in
-one subscription while the apps sat in others. Azure does not support that.
-⚠️ **Verify this constraint against current Azure documentation before it carries budget** — it is now
-load-bearing for a per-customer cost floor. The reasoning is sound but it should not stay unverified.
+🔴 **Why B is impossible, not merely rejected**: an App Service **app cannot use an App Service Plan in a
+different subscription.** With one subscription per customer, a shared plan would sit in one subscription
+while the apps sat in others. Azure does not support that.
+
+✅ **VERIFIED 2026-09-28** against current Microsoft documentation. Microsoft's canonical pages do not
+state the subscription rule as one quotable sentence, so it was checked from two directions — and the
+result is **stricter** than "same subscription":
+
+- [Manage an App Service plan](https://learn.microsoft.com/en-us/azure/app-service/app-service-plan-manage#move-an-app-to-another-app-service-plan)
+  — *"as long as the source plan and the target plan are in the same **resource group** and geographical
+  region and of the same OS type"*, plus a *webspace* constraint (webspace = resource group + region + OS).
+  Same-subscription follows from same-resource-group.
+- [MS Q&A — share a plan across subscriptions](https://learn.microsoft.com/en-us/answers/questions/1048743/share-app-service-plan-across-different-subscripti)
+  — a single plan cannot be used across different subscriptions.
+
+⚠️ **Do not over-read the first source.** Its "same resource group" clause governs **moving an existing
+app**, and is tighter than the create-time rule: at create time, apps in *different* resource groups of the
+*same* subscription **can** share a plan. Only the cross-**subscription** prohibition is load-bearing for
+this decision — but both readings kill option B, so the conclusion holds either way.
 
 **C was rejected independently**: each BFF is bound to one Dataverse environment through per-deployment
 config (`AzureAd:TenantId`, Dataverse URL), so a per-customer app is required regardless — and a shared

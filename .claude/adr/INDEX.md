@@ -34,7 +34,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-022 | PCF Platform Libraries | PCF uses React 16/17 platform-provided; Code Pages use React 19 bundled | Accepted |
 | ADR-023 | ~~Choice Dialog Pattern~~ | _Superseded — demoted to pattern_ | Superseded (2026-03-19) |
 | ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 for all Code Pages | Accepted (Revised 2026-03-19) |
-| ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | Managed solutions for prod; env-separated subscriptions | Accepted |
+| ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | **One Azure subscription PER CUSTOMER** (amended 2026-09-28 — replaces env-separated subscriptions; forces a dedicated App Service Plan per customer); unmanaged solutions everywhere today (amended 2026-06-02), managed for prod is target-only | Accepted (amended 2026-06-02, 2026-09-28) |
 | ADR-028 | Spaarke Auth Architecture (v2) | Function-based contract; managed identity for outbound; named API key schemes; HMAC webhooks; audit middleware | Accepted (2026-05-19) |
 | ADR-029 | BFF Publish Hygiene | Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override pattern, size baseline ratchet | Accepted (2026-05-26) |
 | ADR-030 | PaneEventBus pattern | Typed multi-subscriber cross-pane bus; four channels (workspace/context/conversation/safety); no `any` payloads; one provider at shell root | Accepted (2026-05-26) |
@@ -76,7 +76,7 @@ Load concise ADRs proactively when creating new components:
 - Working with shared components → Load ADR-012 (service architecture, portability tiers)
 - Working with cross-pane communication / widget mount sources → Load **ADR-030** (PaneEventBus)
 - Working with SpaarkeAi shell stages, widget lifecycle, or session restore → Load **ADR-031** (stage lifecycle) + ADR-030 (PaneEventBus) + ADR-028 (session restore contract)
-- Deploying to production → Load ADR-027 (subscription isolation, Dataverse solution management)
+- Deploying to production → Load ADR-027 (one subscription per customer, Dataverse solution management)
 - Working with Dataverse solutions → Load ADR-027 (managed vs unmanaged, import order)
 
 Full ADRs in `docs/adr/` should be loaded only when:

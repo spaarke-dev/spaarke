@@ -170,7 +170,7 @@ Reference this table for common constraints. The source of truth is:
 | ADR-021 | Fluent UI v9 Design | Use Fluent v9; dark mode; tokens | Hard-coded colors, Fluent v8 imports |
 | ADR-022 | PCF Platform Libraries | PCF uses React 16/17 (platform); Code Pages use React 19 (bundled) | `createRoot` in PCF; `useId()` in PCF |
 | ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 | Webpack/CRA for new Code Pages; no `viteSingleFile` |
-| ADR-027 | Subscription Isolation | Managed solutions for prod; env-separated subs | Unmanaged in prod; ad-hoc resource groups |
+| ADR-027 | Subscription Isolation | **One Azure subscription per CUSTOMER** (amended 2026-09-28) + declarative per-scope resource groups; **unmanaged** solutions in every environment (amended 2026-06-02) | Two customers in one subscription; a shared App Service Plan across customers (impossible cross-subscription); ad-hoc/manually-created resource groups; **enforcing managed solutions** — that mandate is suspended, not active |
 | ADR-028 | Spaarke Auth Architecture (v2) | `useAuth()` + `authenticatedFetch`; MI (UAMI) for **app-only** outbound; **MI-FIC client assertion or KV certificate for confidential clients / OBO (A4)**; HMAC webhooks; tenant-specific authority | Raw `fetch(... Authorization: Bearer ...)`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, 6-strategy cascade, `ClientSecretCredential` for app-only when MI available, **`.WithClientSecret(...)` on BFF-identity clients (A4; transitional sites covered by E-3)**, per-request CCA construction, `/common` or `/organizations` authority |
 
 ---

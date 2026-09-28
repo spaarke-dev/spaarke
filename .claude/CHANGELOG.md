@@ -7,6 +7,39 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-28 — ADR-027 Decision 1 amended: one Azure subscription PER CUSTOMER (owner-decided)
+
+- **`.claude/adr/ADR-027-…md` Decision 1** rewritten, and the full ADR (`docs/adr/ADR-027-…md`) gains a
+  `🟡 AMENDMENT 2026-09-28` block before the body. Was: *environment*-separated subscriptions, with
+  *"**Production subscription**: All production shared and customer resources"* — i.e. one production
+  subscription holding every customer. Now: **one subscription per customer**, containing that customer's
+  resource group, in both D-12 tenancy models. Environment separation survives but is **subordinate** to
+  customer separation. Decision 1's original text is retained and marked SUPERSEDED.
+- **Constraints amended**: *"**SHOULD** use separate subscriptions for dev vs production"* → **MUST**
+  provision one subscription per customer + **MUST NOT** put two customers in one. Azure Management Groups
+  raised **SHOULD → MUST** (hand-applied policy does not scale to one subscription per customer). The old
+  *"**MAY** add customer-specific subscriptions … NOT required for initial customers"* is **withdrawn**.
+- **This answers the ADR's own open question.** ADR-027 §Context item 4 asked *"**Customer isolation**:
+  Whether customers need their own subscriptions"* and **never answered it** — Decision 4 turned out to be
+  about Dataverse CI/CD, so Decision 1 became the de facto answer by omission. Item 4 is now marked
+  ANSWERED. That is what makes this an amendment (path **B**) rather than a violation.
+- **Why now**: billing segregation became a requirement (a subscription is Azure's billing boundary, not a
+  tag); under D-12 Model 1 **every customer presents the same `tenantId`**, so every `tenantId`-keyed
+  isolation control — AI Search filter, Cosmos partition, SPE container resolver, the
+  `tenant:{tenantId}:…` Redis key — **cannot separate customers and reports success while failing**; and
+  Azure OpenAI TPM quota is **per-subscription-per-region**, so separate resources in one subscription
+  still share a quota pool.
+- 🔴 **Forced consequence**: a **dedicated App Service Plan per customer**. An app cannot use a plan in a
+  different subscription, so "shared plan, dedicated app per customer" is **unavailable**, not rejected on
+  preference — a real per-customer cost floor. Verified 2026-09-28 against Microsoft Learn + MS Q&A.
+  ⚠️ The move-restriction's "same **resource group**" clause is about *moving* an app and is tighter than
+  the create-time rule; only the cross-**subscription** prohibition is load-bearing.
+- **Source**: owner decision D-12 §3a (`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`),
+  decided 2026-09-28; CLAUDE.md §6.5 path **B**. ⚠️ Decision 2's `rg-spaarke-platform-{env}` shared-platform
+  group is a survivor of the retired shared tier and is **not** resolved by this amendment — tracked in
+  D-12 §6 / `COMPONENT-INVENTORY.md` §7.
+
+---
 ###### 2026-09-18 — ADR-038 A2: ban B8 targets reflection, not `InternalsVisibleTo` (owner-ratified)
 
 - **`.claude/constraints/testing.md` ban 8** rewritten. Was: *"MUST NOT test internal/private methods via
