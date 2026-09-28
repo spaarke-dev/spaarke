@@ -94,14 +94,14 @@ concept already exists and is modelled correctly in the L2 control plane (`Custo
 | Resource | Dedicated? | Why |
 |---|---|---|
 | **AI Search** | ✅ **Yes** | Holds indexed document text and embeddings — the highest-value segregation case. A shared service means one filter defect exposes another firm's material. Real monthly floor; pay it. |
-| **Redis** | ⚠️ **REOPENED 2026-09-28** | 🔴 **My collision claim was too strong — corrected.** A collision needs `{resource}:{id}` to repeat too, and most ids are GUIDs/hashes (globally unique). Exposure is **3 enumerable sites**, not every key. Real cost: **C0 ~$16/mo, P1 ~$405/mo per customer**. Full evidence + options: `notes/D-12-redis-shared-vs-dedicated.md`. **Owner decision pending.** |
+| **Redis** | ✅ **Yes — DECIDED 2026-09-28, at STANDARD tier** | Owner: dedicated *provided Standard suffices, including for performance*. ✅ **RDB persistence is NOT required** — verified in code: `SessionUploadCacheKeys` holds *"a copy"* of upload bytes for 4 hours and the binary entry is *"the hot-tier peer of the **durable blob copy**"*, so a Redis loss costs a cold start, not data. Premium's other exclusives (VNet injection — unused and Microsoft-deprecated, geo-replication, clustering) are not in use. ⚠️ Confirm Standard meets the **performance** bar before provisioning. Evidence: `notes/D-12-redis-shared-vs-dedicated.md`, `notes/D-12-resource-sharing-analysis.md` §4. |
 | **Azure OpenAI** | ✅ Yes | ⚠️ Note the reasoning differs: Azure OpenAI does not persist prompts or completions by default, so the *data*-segregation argument is weaker than for AI Search. The reason to dedicate is **noisy-neighbour / quota isolation**. Consumption-priced, so dedication costs nothing extra. ⚠️ **TPM quota is per-subscription-per-region** — separate OpenAI *resources* in one subscription still share the quota pool. Quota isolation needs subscription separation, not just resource separation. |
 | **App Service Plan** | 🔔 **See §4** | The one genuine trade-off. |
 | SignalR | optional | Feature-gated (`Notifications:SignalRSpine:Enabled`), Null-Object when off. Dedicate when enabled. |
 
 ### Named exceptions to "everything dedicated" (decided 2026-09-28)
 
-⚠️ **"Every Azure resource is dedicated" has exactly three exceptions.** They were previously unstated,
+⚠️ **"Every Azure resource is dedicated" has exactly TWO exceptions** (was three; App Insights was promoted to dedicated 2026-09-28 — see the struck row below). They were previously unstated,
 which made the rule unfalsifiable — `COMPONENT-INVENTORY.md` records all three as genuinely shared today
 **with no per-customer provisioning path** (*"that provisioning does not exist yet (gap)"*), so the rule as
 written was already untrue. Naming them is what makes the rest of §3 honest.
@@ -109,7 +109,7 @@ written was already untrue. Naming them is what makes the rest of §3 honest.
 | Resource | Why it may stay shared | 🔴 Required of it |
 |---|---|---|
 | **Static Web Apps** (Office add-ins + external SPA) | Static client bundles. Hold no customer data at rest; the privileged content they display is fetched per-request through the BFF, which **is** per-customer. | **`customerId` discriminator** in the BFF runtime for anything they read or write |
-| **App Insights / Log Analytics** | Fleet telemetry. Operational diagnostics, not document content. | **`customerId` discriminator** on emitted telemetry, so per-customer data can be segregated, queried and **deleted** on offboarding |
+| ~~App Insights / Log Analytics~~ | 🔴 **PROMOTED TO DEDICATED 2026-09-28 — no longer an exception.** Two reasons: telemetry legitimately carries user and record identifiers (Spaarke logs record ids by design), so a shared workspace holds metadata about every customer's matters; and **customers may need access to their own App Insights output**, which cannot be granted on a workspace holding other customers' telemetry. Billing is **per Log Analytics workspace**, so dedicating also makes per-customer cost directly attributable. | — |
 | **Content Safety** | Stateless classifier — no persistence, nothing to leak between calls. | **`customerId` discriminator** on any call that is logged or metered |
 
 **Every exception carries the same obligation**: a **`customerId`** discriminator in the BFF runtime. That

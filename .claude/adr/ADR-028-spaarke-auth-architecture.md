@@ -248,13 +248,7 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 **MUST (standing guard)**: if any future shape cannot satisfy the same-tenant rule, fall back to a Key Vault certificate — **not** to a client secret. A client secret is the one credential a hardened customer tenant can refuse outright via Entra app-management policy. No such shape exists today, so **no certificate provisioning automation is required**.
 
-**Open (provisioning's call, does not affect feasibility)**: whether the BFF authenticates as ONE shared multitenant app registration or one per customer.
-
-> ⚠️ **Partially closed, then REOPENED 2026-09-28.** D-12 closes the *compute* half: there is no shared Model 1 BFF App Service and no shared BFF UAMI — each customer gets its own, and `SharedBffAppRegistrationId` is retired (D-12 §6). An earlier edit on 2026-09-28 also asserted "its own app registration" per customer; **that was an over-assertion and is withdrawn.** App-registration sharing is a **separate axis** from compute sharing: one app registration can serve many per-customer App Services, because each customer's UAMI gets its **own FIC** on the same app object and MI-FIC binds to the managed identity, not the app.
->
-> 🔴 **But the cap is low and hard**: [**20 federated identity credentials** per application](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-considerations), *"no way to increase this quota, even through a support request"* — the workaround is another app registration. This ADR already tracks the dev app reg at *"1 of 20 used"*. So a shared app registration serves **at most 20 customers** before sharding. ⚠️ [Flexible FICs](https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-flexible-federated-identity-credentials) exist to escape the cap but are **preview**.
->
-> Analysis: `projects/unified-access-control-r2/notes/D-12-resource-sharing-analysis.md` §5.
+🔴 **CLOSED — BINDING. ONE APP REGISTRATION PER CUSTOMER, both models.** (Owner decision, re-affirmed 2026-09-28. Full mechanism and rejected counter-arguments: `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.) This was recorded here as an open question, which is why it kept being re-opened; it is not open.
 
 ### Adoption status (as of 2026-08-17)
 
