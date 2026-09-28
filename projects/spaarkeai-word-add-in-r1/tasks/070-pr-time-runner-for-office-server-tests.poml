@@ -4,7 +4,7 @@
     <title>No merge-blocking check runs any of this project's C# tests — and the one runner that completes is scheduled for deletion</title>
     <phase>5 Remediation — verification</phase>
     <gate>blocked — requires 069 (same workflow file)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a CI job that decides merges. Tags include ci-cd + testing.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -113,4 +113,80 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 069 must be ✅ first — same file.</protocol>
   </execution>
+
+  <status-note date="2026-09-28">
+    COMPLETED. Full record: notes/070-pr-time-runner.md.
+
+    Escalation trigger 2 checked FIRST (re-scope if the freeze lifted) and did NOT fire --
+    scripts/ci/shadow-window-status.ps1 reports the window still open and prints "Do NOT
+    edit ci-router.yml / ci-tier1-blocking.yml / ci-tier2-advisory.yml". The reverse
+    obligation is recorded in the workflow header: when the window closes, MIGRATE this
+    job into Tier 1 and DELETE it here.
+
+    Escalation trigger 1 did NOT fire either, because a THIRD selection option existed
+    that the POML did not anticipate. It offered only "run the whole assembly" (12,359
+    tests; measured 23-34 min from sdap-ci runs, which is why Tier 2's 30-min cap
+    cancelled it 6 of 6 -- the cap is not the defect, the scope is) or "add a Category
+    trait to 46 files" (scope creep). The namespaces are ALREADY organised by feature
+    area, so a 15-term namespace-prefix filter selects the suites while changing NO test
+    file. A new class in a listed namespace is picked up automatically; a new NAMESPACE is
+    not, and that shows as one missing line.
+
+    Measured: 1,776 selected / 1,752 passed / 0 failed / 24 skipped. Job 9m40s on CI
+    against a 20-minute cap = 2.1x margin. Criterion-1 suites verified by NAME, not
+    assumed -- VisualizationRowAuthorizationContractTests selects exactly 11 tests,
+    matching the POML's "11-Fact" description.
+
+    Two guards, both from lessons already in this repo: a MIN_SELECTED_TESTS floor,
+    because sdap-ci.yml:246 already documents that "a --filter term can silently match
+    zero tests" and a collapsed filter exits 0 and reports GREEN (checked BEFORE the
+    failure check -- silent coverage collapse is worse than a red test; a floor not an
+    equality, since tests are expected to grow); and set +e, because shell: bash injects
+    errexit and dotnet test's non-zero exit would otherwise kill the step before the count
+    assertion ran, making a real failure and a collapsed filter indistinguishable.
+
+    ALSO FIXED, and without it the job was pointless: on: paths listed only CLIENT paths,
+    so a BFF-only PR would change the code under test without firing this workflow. Added
+    the Office/Documents server dirs and suite dirs to BOTH pull_request and push
+    (verified identical, 15 each). Scoped to this project's surface, not all of
+    src/server/**, so this does not become a repo-wide BFF gate. Accepted cost stated
+    in-file: on:-level paths fire the whole workflow, so a server-only PR also runs the
+    npm jobs.
+
+    THE GATE FOUND A REAL DEFECT ON ITS FIRST RUN, AND IT WAS MINE. Run 36451879399 failed
+    with 2 NdaSaveNo422RegressionTests failures -- another project's tests, pulled in by
+    the broad Integration.Regression prefix. The tempting fix was to narrow the filter and
+    go green; that would have been wrong. Those tests pass locally AND in sdap-ci, so
+    local-vs-CI was never the axis: .gitattributes sets *.docx filter=lfs, checkout does
+    not smudge LFS by default, and the test opens AppligentNDA_Signed.docx -- it was
+    reading a ~130-byte POINTER FILE. sdap-ci already carries lfs:true at :122 and :878
+    with exactly that comment. The tests were right and the job was misconfigured; dodging
+    them would have left every LFS-backed fixture silently reading pointer bytes.
+
+    FOUR CI PROOFS: 36451879399 (found the LFS defect), 36453304430 green, 36455895181 red
+    on a deliberately INVERTED NFR-02 authorization assertion (chosen because the job's
+    justification says the cost of doing nothing is "an authorization regression merges
+    silently"), 36456902915 green after revert.
+
+    CRITERION 5 INVENTORY: 54 .cs test files touched, 50 covered, 4 not -- computed by
+    namespace matching, not by eye. Three omissions verified benign: MinimalDocx.cs has
+    ZERO test attributes (a helper); RouteAuthorizationGuardTests is genuinely covered by
+    TIER 1, which names four of its facts explicitly; ChatEndpointsTests is a different
+    assembly. THE FOURTH IS A REAL GAP:
+    SpeWriteSinkContainerProvenanceGuardTests appears ZERO times in Tier 1's filter and
+    runs only in sdap-ci (whole-project ArchTests) and advisory Tier 2, so once sdap-ci is
+    deleted it runs in NO blocking job. Not fixed here (different assembly; would
+    duplicate the ArchTests pattern and erode the margin) -- HANDED OFF to the owner of
+    the sdap-ci deletion, since a PR removing the only runner for a guard should extend
+    Tier 1 to cover what it removes.
+
+    DID NOT CLOSE FR-18. This check does not BLOCK a merge: master's ruleset requires only
+    Router, and promotion needs path classification hoisted into the jobs first (a
+    path-filtered required check deadlocks -- PR #322) plus N green runs on ubuntu-latest.
+    Owner action. With 069, the checks now exist, run, and report truthfully; making them
+    binding is one owner action away.
+
+    Corrected POML premises: 46 test files, not ~30; and sdap-ci.yml STILL EXISTS, so the
+    coverage gap is PROSPECTIVE rather than already live.
+  </status-note>
 </task>

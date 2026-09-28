@@ -177,8 +177,11 @@ deletion.**
 |---|---|---|---|---|
 | 1 | First green attempt — **found the LFS defect** | `caf6171d5` | 36451879399 | ❌ 2 failures on pointer files (job itself completed in 9 m 30 s) |
 | 2 | Green after `lfs: true` | `0572bbce2` | **36453304430** | ✅ `1752 passed, 0 failed, 1776 selected (floor 1600)` |
-| 3 | **Red direction** — NFR-02 assertion inverted | `b6628af82` | 36455895181 | *pending* |
-| 4 | Revert → green | | | *pending* |
+| 3 | **Red direction** — NFR-02 assertion inverted | `b6628af82` | **36455895181** | ✅ **failed, correctly** — `1 server test(s) failed`, naming `VisualizationRowAuthorizationContractTests.Related_WhenCallerIsDeniedReadOnAMatter_ServesNoneOfThatMattersDocuments` |
+| 4 | Revert → green | `1e8c0fc79` | **36456902915** | ✅ **success** |
+
+All four on `ubuntu-latest`. Two green, one deliberate red **that failed for the intended reason**, and one red
+that exposed a genuine defect in the runner — stronger evidence than four greens would have been.
 
 **The red-direction seed was chosen deliberately.** Not a convenient arithmetic typo: `NotContain` → `Contain`
 on the core NFR-02 claim — *a caller denied Read on a matter must not receive that matter's documents through
