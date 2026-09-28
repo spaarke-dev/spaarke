@@ -1,6 +1,28 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## 🔵 ACTIVE TASK — **080** (in progress) — READ THIS FIRST
+## 🔵 ACTIVE TASK — **069** (in progress) — READ THIS FIRST
+
+| Field | Value |
+|---|---|
+| **Task** | 069 — make the office-addins CI gate bind, pin the test-file debt |
+| **File** | `tasks/069-make-office-gate-block-and-pin-debt.poml` |
+| **Rigor / tier** | FULL · opus @ xhigh · steps **prescriptive** |
+| **Status** | in-progress — edits pushed at `6d8e1c1c4`; awaiting CI proofs |
+| **Next Action** | Land the four remaining CI proofs in order (debt pin fires → reverts; newline guard fires → reverts), filling the proof table in `notes/069-gate-binds.md`. **One push at a time** — `concurrency.cancel-in-progress: true` means a second push cancels the proof in flight. |
+
+**Disposition**: finding (a) "the gate does not bind" is **REJECTED on evidence** — both jobs already fail the
+workflow run (no `continue-on-error`; six `exit 1` points; `:450` consumes the production count). The POML
+conflated *fails the run* with *blocks a merge*, which is a ruleset setting the task itself scopes out, and the
+workflow's own header names that conflation as AP-12. Findings (b) debt pin and (c) trailing-newline claim were
+real and are done. Full argument + the ruleset residual: `notes/069-gate-binds.md`.
+
+**Why 069 and not 057/058**: both were blocked at Step 0.5 conflict-check by `unified-access-control-r2`
+contention. See `notes/uac-r2-contention-survey-2026-09-28.md` — 6 of 16 pending tasks are contended, 10 are
+free, and the free runway is **069 → (070, 072, 074) → 077 → 078 → 079**.
+
+---
+
+## ⏸ PAUSED — **080** (reference; was the active task until 2026-09-28)
 
 | Field | Value |
 |---|---|
