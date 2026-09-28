@@ -186,6 +186,30 @@ For any 2026-05-30+ question about Insights, answer-order is:
 
 ---
 
+## 0b. ⚠️ Decision-ID disambiguation — "D-12" (added 2026-09-28)
+
+This document's **local** decision log (§19) numbers its decisions `D-01`…`D-63`. One of them used to be
+called **`D-12`** and means *"`tenantId` is a first-class top-level field on every new index."* That
+identifier **collided with the platform-level owner decision D-12**
+([`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md)),
+which redefines the Spaarke deployment models — and which says something close to the **opposite** about
+what a `tenantId` field guarantees.
+
+**The local decision is therefore renamed `D-IE-12`** (Insights Engine 12) at every occurrence in this
+file. `D-12` unqualified now always means the platform deployment-model decision.
+
+**The substantive point, so the two are never confused again:**
+
+- `tenantId` is an **Entra tenant GUID**. Under platform **Model 1**, every customer's environment lives in
+  **Spaarke's** Azure tenant, so **`tenantId` is identical for every Model 1 customer** and a
+  `tenantId eq '…'` filter **cannot separate customers** — while its tests pass.
+- Customer isolation comes from the **dedicated per-customer resource in a per-customer Azure subscription**
+  (AI Search service, Cosmos account, Storage, Key Vault, …) — a **boundary**, not a filter.
+- `D-IE-12` remains in force as **belt-and-braces**: carry `tenantId`, filter on it, and never treat it as
+  the thing that keeps one customer's material away from another.
+
+---
+
 ## Table of contents
 
 1. [Overview](#1-overview)
@@ -388,7 +412,7 @@ Every artifact uses the same envelope so surfaces can render uniformly. Fields l
 ```
 
 Notes:
-- `tenantId` is a **top-level field** (not just nested in `scope`) so it is a filterable index field. Per D-12 it is first-class on every new index — the existing `spaarke-records-index` omits this and the Engine MUST NOT repeat that gap.
+- `tenantId` is a **top-level field** (not just nested in `scope`) so it is a filterable index field. Per D-IE-12 it is first-class on every new index — the existing `spaarke-records-index` omits this and the Engine MUST NOT repeat that gap. ⚠️ `tenantId` separates **Entra tenants**, not **customers** — under the platform Model 1 every customer presents Spaarke's tenant GUID, so this field is belt-and-braces on top of the dedicated per-customer AI Search service, never the customer boundary itself (see the disambiguation note in §0b).
 - `producedBy.version` is **mandatory for Observations** (D-05) — enables selective re-extraction when a playbook ships v2.
 - `embedding` is populated for Observations and Inferences; null for Facts (which are retrieved by direct filter, not similarity).
 - `validFrom` / `validTo` model temporal validity (e.g., "total spend as of 2026-05-19" differs from "total spend as of 2026-06-30").
@@ -854,7 +878,13 @@ This builds a real graph data model on a document database. What it lacks is gra
 }
 ```
 
-**Partition key**: `tenantId` (per knowledge research recommendation — supports per-tenant cost attribution and clean physical isolation).
+**Partition key**: `tenantId` (per knowledge research recommendation — supports per-tenant cost attribution).
+
+> 🔴 **Do not read this as customer isolation** (added 2026-09-28, D-12 §3; cf. the ADR-015 amendment).
+> A `/tenantId` partition holds the **same value for every Model 1 customer** — Spaarke's tenant GUID — so
+> it is one partition, not one per customer, and it separates nothing. It is also a **hot-partition**
+> shape in dedicated-per-customer environments. **The Cosmos account is dedicated per customer**; that is
+> the isolation. Pick a partition key for throughput distribution, not for tenancy.
 
 **Domain schema**:
 
@@ -1205,19 +1235,28 @@ In Bicep, the Function's UAMI gets role assignments to each target resource (Ser
 
 The artifact envelope's `value.displayHint` signals which category an artifact is in.
 
-### 13.2 Per-tenant isolation (physical)
+### 13.2 Per-customer isolation (physical)
 
-**Decision (D-31)**: Physical per-tenant isolation. Legal data privilege boundaries are physical, not just logical.
+**Decision (D-31)**: Physical per-**customer** isolation. Legal data privilege boundaries are physical, not just logical.
 
-| Resource | Per-tenant deployment |
+> 🟡 **AMENDED 2026-09-28 (platform decision D-12 §3 / §3a).** This section previously said "per-tenant" and
+> offered *"per-tenant indexes in a shared service (acceptable with strict `tenantId` preFilter)"* as an
+> alternative. That alternative is **withdrawn**. Under Model 1 every customer presents **Spaarke's** tenant
+> GUID, so a `tenantId` preFilter separates Entra tenants, **not customers** — it would have sanctioned
+> putting several customers' indexed document text and embeddings in one AI Search service behind a filter
+> that cannot tell them apart. The unit of isolation is the **customer**, and it is a resource boundary.
+
+| Resource | Per-**customer** deployment |
 |---|---|
-| AI Search service | Per-tenant service (preferred for legal clients) OR per-tenant indexes in a shared service (acceptable with strict `tenantId` preFilter) |
-| Cosmos account | Per-tenant account (clean partition + cost attribution) |
-| Function App | Per-tenant app with per-tenant UAMI |
-| Service Bus topic | Per-tenant topic |
-| App Insights | Shared with workspace-based separation; correlation IDs include `tenantId` |
+| AI Search service | **Dedicated service per customer.** Not "or per-customer indexes in a shared service" — that option is withdrawn (see the amendment note above). This index holds document text and embeddings, the highest-value segregation case. |
+| Cosmos account | Dedicated account per customer (clean separation + cost attribution). ⚠️ Do **not** rely on a `/tenantId` partition for customer separation — the partition value is identical for every Model 1 customer. |
+| Function App | Dedicated app per customer with its own UAMI |
+| Service Bus topic | Dedicated namespace/topic per customer |
+| App Insights / Log Analytics | **Dedicated workspace per customer** (promoted from "shared" 2026-09-28 — telemetry legitimately carries user and record identifiers, and per-workspace billing makes per-customer cost attributable). Correlation IDs still include `tenantId`. |
 
-Cross-tenant data leakage is structurally impossible because there is no path between the resources.
+Cross-**customer** data leakage is prevented because each customer's resources sit in **their own Azure
+subscription and resource group**, with no path between them. Cross-**tenant** filters (`tenantId eq …`)
+remain in place as belt-and-braces, but they are not what delivers this guarantee.
 
 ### 13.3 In-tenant access trimming
 
@@ -1440,7 +1479,7 @@ This section consolidates the Engine's resource footprint per environment. Autho
 |---|---|---|---|
 | **Cosmos DB account (NoSQL/SQL API)** | `Microsoft.DocumentDB/databaseAccounts` | Serverless or autoscale 400–4000 RU/s (start serverless for Phase 1; promote to autoscale at ~1M vertices) | `cosmos-graph.bicep` |
 | **Cosmos DB database** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases` | — | `cosmos-graph.bicep` |
-| **Cosmos DB container** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers` | Partition key: `/tenantId`; indexing policy excludes `embedding` field from default index path | `cosmos-graph.bicep` |
+| **Cosmos DB container** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers` | Partition key: `/tenantId` (⚠️ **not** a customer boundary, and a hot-partition shape in a dedicated-per-customer account — see §8.2); indexing policy excludes `embedding` field from default index path | `cosmos-graph.bicep` |
 | **Function App (Flex Consumption)** | `Microsoft.Web/sites` (kind: functionapp,linux) | Flex Consumption plan; per-tenant scale; .NET 10 isolated | `functions.bicep` |
 | **Function App Hosting Plan** | `Microsoft.Web/serverfarms` | Flex Consumption SKU | `functions.bicep` |
 | **AI Search indexes (×4)** | `Microsoft.Search/searchServices/indexes` (deployed via deployment script — Management API, not Bicep-native for index schema) | `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions` — JSON schemas in `infra/insights/schemas/` | `search-indexes.bicep` + deployment script |
@@ -1617,7 +1656,7 @@ infra/insights/
 
 ```
 1. Validate Bicep parameters (tenant ID, region availability)
-2. Provision resources (AI Search service if not shared, Cosmos, Functions, SBus)
+2. Provision resources (AI Search service — **dedicated per customer**, see §13.2 — Cosmos, Functions, SBus)
 3. Deploy AI Search indexes from schema JSONs (deployment script — Management API)
 4. Set up Cosmos containers + indexing policies
 5. Configure Function App settings + secrets via Key Vault refs
@@ -1667,7 +1706,7 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 | Graph | Cosmos NoSQL with adjacency-list documents — D-09 | Traversals are 2–3 hops with filters; vector co-location is a real benefit; MS strategic direction. | — |
 | Graph abstraction | `IInsightGraph` exposes named traversals — D-10 | Preserves swap path. | — |
 | Live Facts | Direct Dataverse queries; expensive aggregates materialized in `insight-matters` — D-11 | Cheap, fresh; fast retrieval for expensive aggregates. | — |
-| `tenantId` first-class on every new index | D-12 | Existing `spaarke-records-index` omits this (acknowledged gap); MUST NOT repeat. | — |
+| `tenantId` first-class on every new index | D-IE-12 (⚠️ renamed from "D-12" 2026-09-28 — see §0b; NOT the platform deployment-model decision) | Existing `spaarke-records-index` omits this (acknowledged gap); MUST NOT repeat. Belt-and-braces only — `tenantId` separates Entra tenants, not customers. | — |
 
 ### 19.4 Synthesis
 
@@ -1763,7 +1802,7 @@ These six decisions are responses to the LAVERN analysis (`projects/ai-advanced-
 - Do not call a separate "auth service" for JWT validation (D-28).
 - Do not use `common` or `organizations` as `TenantId` (D-26).
 - Do not use `@spaarke/auth` for server-side inbound validation (D-25).
-- Do not create any new index without `tenantId` as a first-class field (D-12).
+- Do not create any new index without `tenantId` as a first-class field (D-IE-12). ⚠️ This is a defence-in-depth field, **not** the customer boundary — see §0b.
 - Do not require human curation of identity resolution (D-29).
 - Do not return generic AI hedging when Inference evidence is insufficient — return structured `insufficient_evidence` (D-06).
 - Do not put document content into cross-matter aggregates (privilege leakage — §13.4).
@@ -1790,7 +1829,7 @@ This section lists the MUST / MUST NOT rules that govern modifications to the En
 
 ### 20.1 MUST
 
-- **MUST** carry `tenantId` as a first-class top-level field on every Insight artifact and on every new index schema (D-12).
+- **MUST** carry `tenantId` as a first-class top-level field on every Insight artifact and on every new index schema (D-IE-12). ⚠️ This MUST is defence-in-depth. Customer isolation is delivered by the **dedicated per-customer AI Search service** (§13.2), not by this field — `tenantId` separates Entra tenants and is identical for every Model 1 customer. See §0b.
 - **MUST** carry `producedBy.version` on every Observation; never write an Observation without it (D-05).
 - **MUST** apply `accessibleMatterSet` trimming at every AI Search query (with `filter: tenantId eq '{tenantId}' and search.in(scope_matterId, '{accessibleMatterCsv}', ',')`) AND every graph traversal vertex-touch.
 - **MUST** use `vectorFilterMode=preFilter` on every vector query (D-33).

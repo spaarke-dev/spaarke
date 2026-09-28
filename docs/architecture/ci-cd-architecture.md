@@ -36,9 +36,22 @@ The key design decision is separating CI (build/test/quality) from CD (deploymen
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **Deploy Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch | Validate Bicep -> what-if preview (PR comment) -> deploy on approval; supports Model 1 (shared) and Model 2 (dedicated) stacks |
-| **Deploy Platform Infrastructure** | `deploy-platform.yml` | Manual dispatch | Deploy shared platform via `Deploy-Platform.ps1`; what-if preview -> deploy -> verify (resource group, App Service health, Key Vault) |
+| **Deploy Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch | Validate Bicep -> what-if preview (PR comment) -> deploy on approval. Deploys the **full per-customer stack**, which is the same in both deployment models (see the note below) |
+| **Deploy Platform Infrastructure** | `deploy-platform.yml` | Manual dispatch | Deploys Spaarke's own non-customer-serving platform resources via `Deploy-Platform.ps1`; what-if preview -> deploy -> verify (resource group, App Service health, Key Vault). ⚠️ **Not a prerequisite for onboarding a customer** — see the note below |
 | **Provision Customer** | `provision-customer.yml` | Manual dispatch | End-to-end customer provisioning via `Provision-Customer.ps1`; input validation -> provision (with approval) -> post-provisioning verification; supports dry run |
+
+> 🟡 **Deployment-model note (2026-09-28, owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))**
+> — this table previously said the Bicep workflow *"supports Model 1 (shared) and Model 2 (dedicated)
+> stacks"*. **There is no shared Model 1 stack.** Spaarke has **two deployment models that differ in one
+> axis only: which Azure tenant owns the customer's subscription** (Model 1 = Spaarke's; Model 2 = the
+> customer's). **Every Azure resource is dedicated per customer in both**, in that customer's own Azure
+> subscription and resource group, so infrastructure CI deploys **one full stack per customer** — there is
+> no shared-platform step to run first and no per-customer overlay on top of it. The `model1-shared.bicep`
+> and `model1-customer.bicep` stacks are **retired artifacts**; retiring them is a coordinated
+> multi-surface change (stacks, parameter files, `bicep-e2e-dry-run.ps1`, the provisioning ARM manifest
+> schema and the publish workflow) tracked in D-12 §6. The only model-dependent CI behaviour is that
+> **Model 2 additionally requires H0.5 admin consent and Azure Lighthouse delegation**; Model 1 requires
+> neither.
 
 ### Quality & Monitoring
 

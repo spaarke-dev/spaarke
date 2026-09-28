@@ -107,11 +107,17 @@ overstated it.** A collision needs `{resource}:{id}` to repeat across customers 
 exposure is the keys whose id is *not* unique, which is exactly what the new MUST above forbids. Three such
 sites exist today (`agent-thread`, `agent-config`, `approle-module-map`).
 
-⚠️ **Whether the Redis instance itself is shared or dedicated per customer is an OPEN owner decision**
-(reopened 2026-09-28 on cost grounds — Premium P1 is ~$405/customer/mo). Evidence and options:
-`projects/unified-access-control-r2/notes/D-12-redis-shared-vs-dedicated.md`. **This amendment does not
-depend on that decision**: the new MUST is required either way, and it is the only thing that fixes the
-cross-*user* case, which dedication does not.
+✅ **DECIDED (owner, 2026-09-28): one Redis instance per customer, at STANDARD tier**, in that customer's
+own subscription. *(This paragraph previously said the question was open — it was, for part of that day.)*
+**Premium is not required**: RDB persistence is unneeded (the upload-bytes entry is *"the hot-tier peer of
+the durable blob copy"*), and VNet injection is unused and Microsoft-deprecated in favour of private
+endpoint, which works on all tiers. Standard restores the SLA and replication that Basic C0 lacks.
+⚠️ Confirm Standard meets the **performance** bar before provisioning. Evidence:
+`projects/unified-access-control-r2/notes/D-12-redis-shared-vs-dedicated.md` and `…/D-12-resource-sharing-analysis.md` §4.
+
+**The dedication decision and the new MUST are independent.** The MUST is required either way, and it is
+the only thing that fixes the cross-*user* case — dedicating per customer still leaves every **user** inside
+that customer sharing one `agent-thread` key.
 
 🔴 **The new MUST above closes a real gap that this ADR never covered.** Requiring only the *tenant* segment
 permits a key whose remaining parts are constants. Verified live example: `AgentServiceClient` composes
