@@ -17,7 +17,12 @@ type ServiceModule = typeof MatterTypeLookupServiceModule;
 
 function freshService(): ServiceModule {
   jest.resetModules();
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- deliberate fresh module load; see file header
+  // ⚠️ Rule name corrected by task 072 (2026-09-28). This read
+  // `@typescript-eslint/no-require-imports`, which is NOT the rule that fires here — under
+  // typescript-eslint 6 the `require()` call is reported by `no-var-requires`. So the
+  // suppression was INERT and the violation stood, unseen, because `npm run lint` had never
+  // run in this package. Second instance of that shape found in this task.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires -- deliberate fresh module load; see file header
   return require('../matterTypeLookupService') as ServiceModule;
 }
 

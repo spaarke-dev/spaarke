@@ -138,7 +138,7 @@ beforeEach(() => {
 describe('SaveView', () => {
   describe('loading and error state', () => {
     it('shows a loading state while the adapter resolves', () => {
-      const adapter = makeWordAdapter({ getSubject: jest.fn(() => new Promise(() => {})) });
+      const adapter = makeWordAdapter({ getSubject: jest.fn(() => new Promise(() => { /* no-op */ })) });
       renderSaveView(adapter);
 
       expect(screen.getByText('Loading document information...')).toBeInTheDocument();

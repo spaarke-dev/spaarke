@@ -29,7 +29,7 @@ describe('openRecord', () => {
   let warnSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { /* no-op */ });
   });
 
   afterEach(() => {

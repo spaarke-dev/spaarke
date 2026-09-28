@@ -57,7 +57,7 @@ const mockAttachments: AttachmentInfo[] = [
 ];
 
 // Mock entity search result
-const mockEntity: EntitySearchResult = {
+const _mockEntity: EntitySearchResult = {
   id: 'entity-123',
   entityType: 'Matter',
   logicalName: 'sprk_matter',
@@ -69,7 +69,7 @@ const mockEntity: EntitySearchResult = {
 const mockGetAccessToken = jest.fn().mockResolvedValue('test-access-token');
 
 // Mock save response
-const mockSaveResponse = {
+const _mockSaveResponse = {
   jobId: 'job-123',
   documentId: 'doc-456',
   statusUrl: '/office/jobs/job-123',
@@ -80,7 +80,7 @@ const mockSaveResponse = {
 };
 
 // Mock job status response
-const mockJobStatus = {
+const _mockJobStatus = {
   jobId: 'job-123',
   status: 'Running',
   stages: [
@@ -348,7 +348,7 @@ describe('SaveFlow', () => {
         json: async () => duplicateResponse,
       });
 
-      const onDuplicate = jest.fn();
+      const _onDuplicate = jest.fn();
 
       // Note: This test would require simulating entity selection first
       // For full integration testing, we'd need to mock the EntityPicker selection
@@ -383,7 +383,7 @@ describe('SaveFlow', () => {
     });
 
     it('handles view document action', async () => {
-      const onViewDocument = jest.fn();
+      const _onViewDocument = jest.fn();
       // Note: This test would require simulating the full save flow
     });
 

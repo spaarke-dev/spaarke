@@ -5,7 +5,6 @@
  */
 
 import { OutlookAdapter } from '../OutlookAdapter';
-import type { HostAdapterError, HostCapabilities } from '../types';
 
 // Mock data
 const mockReadItem = {

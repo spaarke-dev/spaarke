@@ -59,7 +59,7 @@ describe('TaskPaneShell', () => {
 
   it('shows navigation tabs when authenticated', () => {
     renderWithProvider(
-      <TaskPaneShell isAuthenticated={true} showNavigation={true} selectedTab="save" onTabChange={() => {}}>
+      <TaskPaneShell isAuthenticated={true} showNavigation={true} selectedTab="save" onTabChange={() => { /* no-op */ }}>
         <div>Content</div>
       </TaskPaneShell>
     );
@@ -139,7 +139,7 @@ describe('TaskPaneShell', () => {
     };
 
     // Suppress console.error for this test
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => { /* no-op */ });
 
     renderWithProvider(
       <TaskPaneShell showErrorDetails={true}>

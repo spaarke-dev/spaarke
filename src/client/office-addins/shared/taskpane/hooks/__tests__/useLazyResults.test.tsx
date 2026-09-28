@@ -97,7 +97,7 @@ describe('useLazyResults', () => {
 
   it('does not observe once hasMore is false (nothing left to reveal)', () => {
     const items = Array.from({ length: 5 }, (_, i) => i); // fits in one chunk of 20
-    render(<Harness items={items} chunkSize={20} onResult={() => {}} />);
+    render(<Harness items={items} chunkSize={20} onResult={() => { /* no-op */ }} />);
 
     expect(observeCalls).toBe(0);
   });

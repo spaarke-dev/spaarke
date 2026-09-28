@@ -146,8 +146,15 @@ export function DocumentProfileSection({ documentId, refreshSignal }: DocumentPr
       return;
     }
     refetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: refetch is
-    // intentionally excluded.
+    // ⚠️ The suppression below was INERT until task 072 (2026-09-28). It used to read:
+    //     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: refetch is
+    //     // intentionally excluded.
+    // `eslint-disable-next-line` applies to the NEXT LINE only, and wrapping the
+    // justification onto a second `//` line made that next line *the comment*, not the
+    // hook call. The rule therefore still fired, and nobody saw it because
+    // `npm run lint` had never run in this package (it pointed at a `src/` that does not
+    // exist). Keep the directive on the single line immediately above the dependency array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch is intentionally excluded: including it re-fetches on every identity change, not only on a genuine refreshSignal bump.
   }, [refreshSignal]);
 
   // Disabled without a resolved identity (task 013 resolved nothing) or while a request is already

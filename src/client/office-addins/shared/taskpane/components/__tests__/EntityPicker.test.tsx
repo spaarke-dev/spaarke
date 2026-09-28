@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { EntityPicker } from '../EntityPicker';
@@ -33,7 +33,7 @@ jest.mock('../../hooks/useEntitySearch', () => ({
   ALL_ENTITY_TYPES: ['Matter', 'Project', 'Invoice', 'Account', 'Contact'],
 }));
 
-import { useEntitySearch, ALL_ENTITY_TYPES } from '../../hooks/useEntitySearch';
+import { useEntitySearch } from '../../hooks/useEntitySearch';
 
 // Helper to render with FluentProvider
 const renderWithProvider = (ui: React.ReactElement) => {

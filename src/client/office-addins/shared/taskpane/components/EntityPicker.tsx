@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect, type KeyboardEvent } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect, type KeyboardEvent } from 'react';
 import {
   makeStyles,
   tokens,
@@ -295,21 +295,38 @@ export const EntityPicker: React.FC<EntityPickerProps> = props => {
   const showEmptyState = query.length >= 2 && !isLoading && results.length === 0;
   const showCreateOption = showQuickCreate && query.length >= 2 && !isLoading;
 
-  // All options for keyboard navigation
-  const allOptions: (EntitySearchResult | { type: 'create'; entityType: EntityType })[] = [];
-  if (showRecentSection) {
-    allOptions.push(...recentEntities);
-  }
-  if (showResultsSection) {
-    allOptions.push(...results);
-  }
-  if (showCreateOption) {
-    // Add Quick Create options for active type filters
-    const createTypes = typeFilter.length > 0 ? typeFilter : effectiveAllowedTypes;
-    createTypes.forEach(type => {
-      allOptions.push({ type: 'create', entityType: type });
-    });
-  }
+  // All options for keyboard navigation.
+  //
+  // MEMOISED by task 072. This was a bare `const allOptions = []` followed by `.push(...)`,
+  // so it was a NEW ARRAY IDENTITY on every render — which made the `useCallback` for the
+  // keyboard handler below re-create on every render too, i.e. the memoisation there was
+  // doing nothing. That is what `react-hooks/exhaustive-deps` was reporting. Contents are
+  // unchanged; only the identity is now stable.
+  const allOptions = useMemo<(EntitySearchResult | { type: 'create'; entityType: EntityType })[]>(() => {
+    const options: (EntitySearchResult | { type: 'create'; entityType: EntityType })[] = [];
+    if (showRecentSection) {
+      options.push(...recentEntities);
+    }
+    if (showResultsSection) {
+      options.push(...results);
+    }
+    if (showCreateOption) {
+      // Add Quick Create options for active type filters
+      const createTypes = typeFilter.length > 0 ? typeFilter : effectiveAllowedTypes;
+      createTypes.forEach(type => {
+        options.push({ type: 'create', entityType: type });
+      });
+    }
+    return options;
+  }, [
+    showRecentSection,
+    recentEntities,
+    showResultsSection,
+    results,
+    showCreateOption,
+    typeFilter,
+    effectiveAllowedTypes,
+  ]);
 
   // Handle entity selection
   const handleSelect = useCallback(

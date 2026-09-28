@@ -473,7 +473,17 @@ jobs:
           # is an equality, so paying debt down turns the job red until you lower the
           # pin. That is deliberate: it stops a hard-won reduction from being silently
           # spent again later.
-          ACCEPTED_TEST_DEBT_LINES: '74'
+          # 74 -> 68 by task 072 (2026-09-28). RE-BASELINED DOWNWARD, per the procedure above.
+          # Task 072 pointed `npm run lint` at the real source directories for the first time
+          # and cleared the 32-violation backlog; six of those were unused imports/locals that
+          # `tsc --noEmit` ALSO counts under `noUnusedLocals`, so the accepted debt fell by six.
+          # Production errors remain 0.
+          #
+          # This is the pin behaving exactly as designed rather than an inconvenience: because
+          # it is an equality and not a ceiling, CI refused the reduction until it was written
+          # down here, which is what stops a hard-won decrease from being silently spent again
+          # later. Measured at this commit, not copied.
+          ACCEPTED_TEST_DEBT_LINES: '68'
         run: |
           # 🔴 `set +e` IS LOAD-BEARING — DO NOT REMOVE IT.
           #
@@ -733,3 +743,81 @@ jobs:
           fi
 
           echo "Office-scope server suites green: ${passed} passed, ${failed} failed, ${total} selected (floor ${MIN_SELECTED_TESTS})."
+
+  # ============================================================================
+  # ESLint (task 072 - Fable review 2026-09-21 section 8)
+  # ============================================================================
+  # WHY THIS EXISTS
+  # ---------------
+  # `package.json` declared `"lint": "eslint src --ext .ts,.tsx"` in a package that has
+  # NO `src/` directory - the sources are `shared/`, `word/` and `outlook/`. Running it
+  # printed "No files matching the pattern src" and exited non-zero for that reason
+  # alone. No workflow called it either: the repo's ESLint jobs run in `src/client/pcf`,
+  # not here.
+  #
+  # So CI passed because lint never ran, not because lint passed, and nobody knew how
+  # many violations the package held. The first successful run answered that: **32**
+  # (4 errors, 28 warnings) across 17 of 125 files. All 32 are now fixed - see
+  # `projects/spaarkeai-word-add-in-r1/notes/072-lint.md` for the by-rule table.
+  #
+  # `--max-warnings 0` is load-bearing. 28 of the 32 were WARNINGS, so without it this
+  # job would have gone green over almost the entire backlog and the gate would have
+  # been decorative in exactly the way this wave exists to fix.
+  #
+  # NOT type-aware, deliberately: `.eslintrc.js` sets no `parserOptions.project`, so the
+  # parser needs no type information and this job does NOT have to build the
+  # `@spaarke/auth` `file:` dependency the way the typecheck job does. That keeps it
+  # short. If type-aware rules are ever added, this job must gain that build step.
+  # ============================================================================
+  lint:
+    name: ESLint (office-addins)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          # Node 20, matching every other job in this workflow.
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: src/client/office-addins/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/client/office-addins
+        # NOT `npm ci` (root CLAUDE.md section 12); a bare `npm install` also fails here
+        # with ERESOLVE (@testing-library/react@14 peer-requires React 18, this package
+        # is on React 19).
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: ESLint
+        working-directory: src/client/office-addins
+        shell: bash
+        run: |
+          set -uo pipefail
+          # No `set +e` needed or wanted here, unlike the typecheck job: eslint's exit
+          # code IS the verdict (non-zero on any error, and on any warning because of
+          # --max-warnings 0), so letting the injected errexit fail the step is correct.
+          npm run lint 2>&1 | tee "$RUNNER_TEMP/eslint.log"
+          lint_exit=${PIPESTATUS[0]}
+
+          {
+            echo "# office-addins ESLint"
+            echo
+            if [ "$lint_exit" -eq 0 ]; then
+              echo "Clean - 0 errors, 0 warnings over \`shared/\`, \`word/\` and \`outlook/\`."
+            else
+              echo "**Violations found** (exit ${lint_exit}). \`--max-warnings 0\`, so warnings fail too."
+              echo
+              echo '```'
+              tail -40 "$RUNNER_TEMP/eslint.log"
+              echo '```'
+            fi
+            echo
+            echo "**This job DOES fail the workflow run.** It does NOT block a merge -"
+            echo "master's ruleset requires only \`Router\`. Promotion is an owner action."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$lint_exit"

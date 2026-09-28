@@ -108,8 +108,8 @@ function installMockAuth(): void {
   mutableAuth.isAuthenticated = () => true;
   mutableAuth.getAccount = () => mockAccount;
   mutableAuth.getAccessToken = async () => 'mock-access-token';
-  mutableAuth.signIn = async () => {};
-  mutableAuth.signOut = async () => {};
+  mutableAuth.signIn = async () => { /* no-op */ };
+  mutableAuth.signOut = async () => { /* no-op */ };
 }
 
 // Global root for error rendering

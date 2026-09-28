@@ -5,10 +5,10 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { ShareView, type DocumentSearchResult, type SharePermissions } from '../ShareView';
+import { ShareView, type DocumentSearchResult } from '../ShareView';
 
 // Helper to render with FluentProvider
 const renderWithProvider = (ui: React.ReactElement) => {
