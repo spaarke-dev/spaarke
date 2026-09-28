@@ -194,7 +194,128 @@ documentation commit. Filing separately.
 
 ---
 
-## 7. Sequencing
+## 7. Lane C — `.claude` + `infrastructure` + `scripts` + `provisioning-runs` + provisioning-project core ✅ swept
+
+**30 BLOCKING · 26 WORDING · 3 AMBIGUOUS · 18 CLEAN**, of 71 files scanned. The largest lane.
+
+### 7.1 🔴 `COMPONENT-INVENTORY.md` §7 is the highest-leverage single file in the repo
+
+It is the **authoritative** shared-vs-dedicated BOM — *"when the two disagree, INVENTORY wins."* **8 of its 14
+rows contradict D-12**, so until it is rewritten it will silently overrule every corrected design/spec doc.
+
+| Row | Says today | D-12 |
+|---|---|---|
+| App Service + Plan | 🟡 shared (Model 1) / 🔴 dedicated (Model 2) | 🔴 dedicated both — **§4, forced by §3a** |
+| Azure OpenAI | **decision point** | ✅ closed — dedicated |
+| Azure AI Search | **decision point** | ✅ closed — dedicated (highest-value case) |
+| Cosmos DB | 🟡 partition by `/tenantId` | same partition for all Model 1 customers ⇒ no separation |
+| Redis | 🟡 **key-prefix** | the key-prefix **IS** the collision |
+| Service Bus | 🟢 shareable | already per-customer |
+| Storage | 🟡 container-level | already per-customer |
+| Doc Intelligence | 🟢 shareable (stateless) | already per-customer |
+
+Plus §11 L229 keeps the retired tier alive as a live option: *"**If** a shared trial/SMB tier is added…"*.
+
+### 7.2 🔴 Two MUST-NOTs that forbid what D-12 requires
+
+- `…/spec.md:255` — *"**MUST NOT** provision Redis per-customer **FOR MODEL 1**"*
+- `…/CLAUDE.md:101` — the same rule at **project level**, where an agent will obey it
+
+These are not stale prose; they are active constraints pointing the wrong way.
+
+### 7.3 ✅ Q3 CONFIRMED — and retiring `model1-shared.bicep` is a SIX-surface atomic change
+
+D-12 said deleting the file breaks a test assertion. True, and understated. Verified:
+
+`scripts/tests/bicep-e2e-dry-run.ps1:483-490` — **Assertion 8 inverts polarity**: it PASSES only when the
+build FAILS (`ExpectedBuild = 'EXPECTED_FAILURE'`). Delete the file and `$Results.BuildResults[…]` is
+`$null` → the assertion **FAILS** and the dry run goes red (and may throw on the `.Status` dereference under
+`Set-StrictMode`). Corroborated independently by a timestamped run artifact (2026-08-17, **4 build errors**).
+
+🔴 **But the harder blocker is one D-12 does not mention at all** — verified directly:
+
+- `.github/workflows/schemas/provisioning-arm-manifest.json:32` — `"required": ["customer", "model1-shared"]`
+- `.github/workflows/publish-provisioning-arm-artifacts.yml:122-129, 214-215` — **compiles and uploads
+  `model1-shared.bicep` to blob storage on every run**, and H2a reads that manifest at provisioning time.
+
+⚠️ **The schema contradicts its own stated design goal.** Its description claims the keys are
+*"stable file-basename identifiers (NOT raw TenancyModel enum strings) **so this manifest does not need to
+change shape if the TenancyModel vocabulary grows**"* — yet `required` hard-codes `model1-shared`. It is
+vocabulary-independent in intent and tier-coupled in fact.
+
+**Atomic retirement set** (all six, one change): the `.bicep` + `.json` · `model1-customer.bicep` ·
+`model1-shared-l2-rbac.bicep` (its only caller is the stack, L690) · `model1-prod.bicepparam` ·
+**`dev`/`prod`/`staging.bicepparam`** — all three `using` the stack, **not on D-12's list**, and they break
+compilation the moment it goes · the test assertion + its `$Stacks` entry + doc lines · the workflow steps +
+schema `required` + manifest contract.
+
+### 7.4 ✅ Q4 — good news: **no PowerShell branches on tenancy**
+
+Searched every `scripts/**/*.ps1` for a comparison against a tenancy literal. **Zero.** Every occurrence is
+inert — comments, help text, option-set *definition* payloads. The `.ps1` surface needs text edits, not
+logic rework.
+
+🔴 **But the branch surface is wider than C#.** The literal drives behaviour through **six independent
+mechanisms with no shared definition**: C# (8 sites, `notes/D-12-code-branch-inventory.md`), Bicep
+conditionals (`controlplane-worker-app-service.bicep:120,123,278,283`), a **GitHub Actions conditional**,
+a **JSON-schema `required` key**, an operator skill's **`$validProfiles` array**
+(`provision-environment/SKILL.md:214`), and a **Dataverse option-set creation script**
+(`Extend-DataverseEnvironmentSchema-v3.3.ps1:217-218`).
+
+The last two are where a partial rename causes a **wrong provisioning run** rather than a confusing
+document. The JSON schema even *mirrors the C# rule in prose* — a fourth copy of the same branch logic.
+
+### 7.5 🔔 ADR-028 is a FIFTH ADR needing amendment — but it is the safe one
+
+✅ Verified `.claude/adr/ADR-028:238-240`. Its table has three rows: *"**Model 1** — shared Spaarke
+environment (20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI)"*,
+*"**Model 2 — Spaarke tenant**"*, *"**Model 2 — customer tenant"*.
+
+Under D-12 row 2 **is** the new Model 1, row 3 **is** the new Model 2, and row 1 is deleted.
+
+✅ **Its Decision survives untouched.** The ADR concludes *"Every Spaarke deployment shape is intra-tenant,
+so MI-FIC covers all of them — one mechanism, no special cases."* Deleting the shared row does not weaken
+that; it **strengthens** it. So unlike ADR-009/015, this is a **mechanical, low-risk** amendment: only the
+enumeration of shapes changes. It also strikes a now-moot open question at `:248` and the `2b/2c` labels
+at `:258`.
+
+### 7.6 🔔 A genuine GAP in D-12 §3 — owner input needed
+
+D-12 §3 says *"every Azure resource is dedicated per customer"* but its per-resource table names only AI
+Search, Redis, OpenAI, App Service Plan and SignalR. `COMPONENT-INVENTORY.md` records three resources as
+genuinely shared today **with no per-customer provisioning path** (*"that provisioning does not exist yet
+(gap)"*):
+
+- **Static Web Apps** (Office add-ins + external SPA) — §8, §11 L219
+- **App Insights / Log Analytics**
+- **Content Safety**
+
+Whether "every resource" reaches telemetry and the shared SWAs **is not decidable from D-12 as written**.
+This needs an owner call: dedicate them, or record them as named exceptions carrying a `customerId`
+discriminator.
+
+---
+
+## 8. Scope reality check
+
+| | BLOCKING files |
+|---|---|
+| Recorded in D-12 / synopsis | **13** of 45 |
+| Lane A — guides + enhancements | 6 |
+| Lane B — architecture + adr + assessments + procedures | 15 |
+| Lane C — .claude + infrastructure + scripts + provisioning | 30 |
+| **Actual total** | **51** |
+
+The gap is not sloppiness in the original count — the earlier sweep looked at `docs/`. The remediation's real
+mass is in **infrastructure, the provisioning project, and `.claude/` operator surfaces**, which is also
+where a wrong file causes a wrong *deployment* rather than a wrong belief.
+
+**Five ADRs** now need amendments: ADR-009, ADR-013, ADR-015, ADR-052 (Decision-text, owner approval) and
+ADR-028 (mechanical, low-risk).
+
+---
+
+## 9. Sequencing
 
 1. **§1 is fixed first** and every rewrite conforms to it. (D-12 §6 item 1.)
 2. **A5 delete** before A4 — otherwise A4's fix gets copied into a file that is about to be removed.
