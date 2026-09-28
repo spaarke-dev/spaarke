@@ -268,6 +268,70 @@ per-customer — sharing hits an unraisable Entra limit at customer 21.)*
   first-class on every index"* (4 sites, 2 of them MUSTs) → `D-IE-12`. A third namespace in
   `HOW-TO-INITIATE-NEW-PROJECT.md` → `D-DEVOPS-12`.
 
+### ▶ 🔴 STATE AS OF 2026-09-28 END OF SESSION 24
+
+| | |
+|---|---|
+| **PR #950** | ✅ **MERGED** to master — `38f48723e`, 228 commits, 2026-09-28T18:32:44Z |
+| Branch | in sync with master + **1 commit ahead** (the cpo-r1 handoff note) |
+| Tree | clean, all pushed |
+| Tier 1 CI | ✅ all 8 blocking gates green. ⚠️ **Trivy fails repo-wide** (`"1 configuration not found"`, 5s) — scanner-config issue, `skipping` on other PRs, **not ours**, now on master's head too |
+
+✅ **The D-12/D-13 decisions and all six amended ADRs are ON MASTER.** That was the prerequisite for
+`cpo-r1` to proceed.
+
+### ▶ 🔴 NEXT — in this order (owner-set 2026-09-28)
+
+**1. #1015 — Office route census in `RouteAuthorizationGuardTests`** (handed over by
+`spaarkeai-word-add-in-r1`, owner-approved). ✅ **Both halves verified by us:**
+- `Api/Office/*` appears **zero times** in `GovernedFiles` (`:111-252`), so `:581` counts the whole Office
+  surface as *"serves no document or Dataverse content"* — **false** for `/save`, `/search/entities`,
+  `/todo`, `/generate-profile`. No test would notice those routes losing a filter.
+- 🔴 **The trap**: `FilterMarker` is at **`:1528-1531`** (not 1408) and matches only
+  `\.Add\w*AuthorizationFilter\s*[<(]` or `\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>`.
+  `.AddEntityAccessFilter(` matches **neither**. **`AddJobOwnershipFilter` is the worst case — "Ownership"
+  is not in the alternation at all**, so a widening that only adds `Access` still misses it.
+- 🔴 **Both changes must land together**, and the widening needs a **negative control** or it will look
+  like it works while still missing `Ownership`.
+
+**2. Item 5 — `Secure Project` → `Secure Record`** BU rename. One coordinated change (live BU + code default
+`DefaultSecureBusinessUnitName` + config key `SecureProject:BusinessUnitName` + pinning test + docs) or
+provisioning stops. Code: `Sprk.Bff.Api/Api/ExternalAccess/*`, `tests/integration/data-mutation/ExternalAccess/*`.
+
+**3. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
+`AgentServiceClient` (`agent-thread:thread` — 🔴 cross-**USER**, latent: `Enabled` defaults false),
+`AgentConfigurationService` (`exposed-playbooks`, `capabilities`), `ModuleEntitlementResolver`
+(`approle-module-map:all`). **Required regardless** of the Redis dedication decision — dedication does not
+fix the cross-user case.
+
+### ▶ ⚠️ ONE OPEN ITEM THE OWNER MUST DECIDE
+
+🔴 **`projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` is NOT on master.**
+It is on this branch only (1 commit ahead). **`cpo-r1` merges master — so it will NOT see the note** unless
+it is fast-tracked to master or this branch merges again first. Either open a small PR for that one commit,
+or let it ride on the next uac-r2 merge and tell cpo-r1 to wait.
+
+### ▶ Handed to `spaarkeai-word-add-in-r1` (replied 2026-09-28)
+
+- **Merge order**: we merged first; they rebase 058 **by hand**.
+- **`/office/recent`**: we do **not** depend on it — `onFetchRecent` is an optional callback at
+  `useShareFlow.ts:119` with 3 refs, **all inside the hook**; nothing provides it. Our three `OfficeService.cs`
+  hunks are **collateral**: we removed `Account` from `AssociationType` (ordinal 3 **burned**) and the stub
+  wouldn't compile. 🔴 **The enum change must survive their rebase** even though the stub dies.
+- **#1014**: ours stays **A2**; theirs becomes **A3**, written against the **amended** B8 text now on master.
+- They parked task 080 behind our 043 deliberately.
+
+### ▶ Still open for the owner (unchanged)
+
+Power BI shared F-SKU pool · M365 Copilot agent disposition · whether Redis **Standard** meets the
+performance bar · Trivy config failure (repo-wide, not ours).
+
+### ▶ 🔴 NOT ours — `cpo-r1` items 1–4
+
+H3 shared-app-reg branch · `TenancyModel` enum (9 sites, 4 defaults) · `sprk_tenancymodel` **migration** ·
+`model1-*.bicep` **seven**-surface retirement. Full instructions:
+`projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md`.
+
 ### ▶ 🔴 NEXT — CODE. None of this is started.
 
 1. 🔴 **Delete the H3 shared-app-registration branch** — `H3EntraAppRegHandler.cs:272` → `HandleModel1Async`

@@ -1,5 +1,18 @@
 # CLAUDE.md — customer-provisioning-orchestration-r1
 
+> # 🔴 READ FIRST — [`INCOMING-D12-D13-REMEDIATION.md`](INCOMING-D12-D13-REMEDIATION.md)
+>
+> **The deployment model this project was built around has CHANGED** (owner decisions **D-12** + **D-13**,
+> merged to master 2026-09-28 in `38f48723e`). The "Model 1 = shared trial/SMB tier" is **RETIRED**; both
+> models are dedicated stamps differing only in which **Azure tenant** owns the customer's subscription, and
+> the BFF Entra app registration is **per customer in both models (BINDING)**.
+>
+> 🔴 **Four required code changes are in THIS project**, including one where `H3EntraAppRegHandler` currently
+> does the opposite of what D-13 requires. This branch is **812 commits behind master**.
+> **Do not start work, and do not resolve a merge conflict, before reading that file.**
+
+
+
 > **Per-project AI context. This file is loaded automatically when Claude Code operates in this project directory.**
 > **Last Updated**: 2026-08-19 (v3.6 — task 128b Redis Model 1/Model 2 reconciliation; see spec.md/design.md v3.6 CHANGELOG)
 > **Root CLAUDE.md rules apply — this file EXTENDS, does not replace.**
