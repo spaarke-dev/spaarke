@@ -62,7 +62,7 @@ ELSE:
 CATEGORIZE files by type:
   - .cs -> .NET review checklist
   - .ts/.tsx -> TypeScript/PCF review checklist
-  - Plugin code -> Plugin review checklist
+  - Record create/update paths (wizard services, BFF writers) or any plugin code -> Dataverse write-path checklist (ADR-002)
 ```
 
 ### Step 2: Load Context
@@ -616,7 +616,7 @@ RUN subset of adr-check skill:
 
 CRITICAL ADRs to always check:
   - ADR-001: BFF endpoints in Minimal API (no Functions hosting BFF endpoints; Functions OK for out-of-band integration)
-  - ADR-002: Thin plugins (<50ms, no HTTP)
+  - ADR-002: No plugins; record invariants server-side (WP-1…WP-8)
   - ADR-007: Graph types isolated
   - ADR-008: Endpoint filters for auth
   - ADR-013 (refined 2026-05-20): AI architecture — CRUD code MUST consume AI via Services/Ai/PublicContracts/ facades (no direct injection of IOpenAiClient, IPlaybookService, or other AI-internal types into CRUD code)
@@ -836,13 +836,16 @@ See: [`.claude/skills/task-create/SKILL.md`](../task-create/SKILL.md) "Completen
   - Accessibility: aria-labels on icon-only buttons
 ```
 
-#### For Plugin Code
+#### For Dataverse Write-Path Code (ADR-002, reviewed 2026-09-25)
 ```
-  Plugin constraints (ADR-002)
-  - No HttpClient usage
-  - No external service calls
-  - Execution time estimation <50ms
-  - Code size <200 LoC
+  - ANY plugin code / plugin-backed Custom API / low-code plugin → Critical (no plugins exist in Spaarke)
+  - New rule a record must satisfy on save → has ONE BFF server-side owner, listed in the
+    invariant registry (docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5)   [WP-1]
+  - Wizard/PCF/add-in applies the invariant only as preview, not sole enforcement      [WP-2]
+  - Invariant-bearing table created/updated via BFF, not Xrm.WebApi                    [WP-3]
+  - Security/on-load invariants applied inline; multi-row = one Dataverse transaction  [WP-4]
+  - Non-product writes have an idempotent fill-only fix-up or reconciliation          [WP-5]
+  - Security invariants fail closed (NULL/absent ≠ "not secure")                       [WP-6]
 ```
 
 ### Step 8: Generate Review Report

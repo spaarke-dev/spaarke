@@ -37,6 +37,7 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [Dataverse plugins state + alternatives (2026-09-25)](dataverse-plugins-state-alternatives-2026-09-25.md) — still .NET Framework only (4.6.2–4.8, 4.8 recommended); plugin packages = no ILMerge; MI GA 2025-08-31 but FIC-per-environment (20 FIC cap) = ISV friction; low-code/functions still preview. Input to the ADR-002 revisit (merged as #1012).
 - [Dataverse env provisioning E2E (2026-08-22)](dataverse-env-provisioning-e2e-2026-08-22.md) — 8 API surfaces; restrictGuestUserAccess default TRUE since Mar 2026
 - [Record restriction / Secure Project (2026-08-20)](dataverse-record-restriction-secure-project-2026-08-20.md) — no record deny; matrix BUs; secure BU + owner-team
 - [Cascade-share parent→child (2026-08-18)](dataverse-cascade-share-parent-child-access-2026-08-18.md) — one parental 1:N Cascade All; rest needs code

@@ -43,29 +43,30 @@ For each Function found outside the BFF:
 
 ---
 
-## ADR-002: Thin Dataverse Plugins
+## ADR-002: No Dataverse Plugins + Server-Side Write Path (reviewed 2026-09-25)
 
-**Constraint**: Plugins must be <200 LoC, <50ms p95. No HTTP calls, no orchestration.
+**Constraint**: Spaarke ships **no plugins** (C#, plugin-backed Custom API, low-code). Record invariants (defaults, stamps, isolation, derived fields) have **one BFF server-side owner** (WP-1); client code may preview but never solely enforce (WP-2); tables with registered invariants are written via BFF (WP-3); security fails closed (WP-6).
 
 ### Check For (Violations)
 
 ```bash
-# HTTP calls in plugins
-grep -r "HttpClient\|WebRequest\|GraphServiceClient" src/dataverse/ --include="*.cs"
+# Any plugin code or plugin project (also enforced by tests/Spaarke.ArchTests/ADR002_PluginTests.cs)
+grep -rEn ":\s*IPlugin\b|IPluginExecutionContext|CodeActivity" src/ --include="*.cs"
+grep -rln "Microsoft.CrmSdk.CoreAssemblies\|ILRepack\|ILMerge" src/
 
-# Plugin classes in wrong location
-find src/api -name "*Plugin.cs"
+# WP-2: invariant applied only client-side then written via Xrm.WebApi (review each hit —
+# is there a server-side owner in the invariant registry?)
+grep -rn "applyFieldMappings\|applyResolverFields\|deriveCoreAncestorStamps" src/client src/solutions --include="*.ts" --include="*.tsx"
 
-# Long operations (look for async patterns that shouldn't be there)
-grep -r "await\|Task<\|async " src/dataverse/ --include="*Plugin.cs"
+# WP-6: security flag read that treats NULL as "not secure" (fail-open)
+grep -rn "sprk_issecure == true" src/server
 ```
 
 ### Fix
 
-Move orchestration to BFF API or workers. Plugins should only:
-- Validate input
-- Transform/project data
-- Dispatch messages to Service Bus
+- Plugin code → remove; implement in the BFF write path. If genuinely insufficient, escalate via root CLAUDE.md §6.5 against the ADR-002 reopen criteria.
+- Client-only invariant → add/extend the server owner (see `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` registry), route the create/update through the BFF; client keeps preview only.
+- Non-product writes → idempotent, fill-only async fix-up and/or reconciliation (WP-5).
 
 ---
 

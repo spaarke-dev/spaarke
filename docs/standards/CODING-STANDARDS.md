@@ -4,7 +4,7 @@
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: New
-> **Applies To**: All source code — C# backend, TypeScript frontend (PCF and Code Pages), Dataverse plugins
+> **Applies To**: All source code — C# backend, TypeScript frontend (PCF and Code Pages). (Spaarke ships no Dataverse plugins — ADR-002, 2026-09-25.)
 
 ---
 
@@ -46,12 +46,12 @@
 23. **MUST** use `ConfigureAwait(false)` in library code *(spaarke-conventions)*
 24. **SHOULD** return `Task` directly when no `await` is needed (elide async) *(spaarke-conventions)*
 
-### C# — Dataverse Plugins
+### C# — Dataverse write path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
 
-25. **MUST** keep plugins under 200 lines of code and under 50 ms p95 *(ADR-002)*
-26. **MUST** limit plugin logic to validation, invariant enforcement, or audit stamping *(ADR-002)*
-27. **MUST NOT** make HTTP, Graph, AI, or any remote I/O calls from plugins *(ADR-002)*
-28. **MUST NOT** implement business logic or workflow orchestration in plugins *(ADR-002)*
+25. **MUST NOT** add Dataverse plugins (`IPlugin`, CrmSdk packages, net4x plugin projects, plugin step registrations) — Spaarke ships none; reopening requires the ADR-002 reopen criteria via CLAUDE.md §6.5 *(ADR-002)*
+26. **MUST** give every record invariant exactly one server-side owner in the BFF write path and register it in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` *(ADR-002 WP-1)*
+27. **MUST NOT** make client code (wizards, code pages, PCF, add-ins) the sole enforcement of an invariant — clients may preview only *(ADR-002 WP-2)*
+28. **MUST** write tables that carry a registered invariant through a BFF endpoint; security invariants fail closed *(ADR-002 WP-3, WP-6)*
 
 ### TypeScript — UI Framework
 
@@ -210,7 +210,7 @@ createRoot(document.getElementById("root")!).render(
 | Global auth middleware | Runs before routing; no access to route values | Endpoint filters | ADR-008 |
 | Interface for single implementation | Adds indirection without value; DI sprawl | Register concrete type | ADR-010 |
 | `GraphServiceClient` injected into endpoints | Leaks Graph SDK types above facade boundary | Use `SpeFileStore` facade | ADR-007 |
-| HTTP/Graph calls in Dataverse plugins | Plugins must complete in <50 ms; no external I/O | Defer to BFF API or workers | ADR-002 |
+| Dataverse plugins (any) / client-only invariant enforcement | Spaarke ships no plugins; invariants enforced only in a wizard are skipped by every other write path | BFF server-side write path; async fix-up + reconciliation for non-product writes | ADR-002 (2026-09-25) |
 | Fluent UI v8 imports | Deprecated; breaks theming consistency | Use `@fluentui/react-components` (v9) | ADR-021 |
 | Hard-coded colors (`#fff`, `rgb()`) | Breaks dark mode and high-contrast | Use `tokens.color*` design tokens | ADR-021 |
 | `createRoot` in PCF control | Platform provides React 16/17; React 18 API crashes | Use `ReactDOM.render` or `ReactControl` | ADR-022 |
@@ -225,7 +225,7 @@ createRoot(document.getElementById("root")!).render(
 ## Related
 
 - [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API + BackgroundService as BFF runtime; Azure Functions permitted for narrow out-of-band integration
-- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) — Thin Dataverse plugins; no remote I/O
+- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) — No Dataverse plugins; record invariants live in the BFF server-side write path (WP-1…WP-8, 2026-09-25)
 - [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) — Code Pages as default UI surface; no legacy JS
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) — SpeFileStore facade; no Graph SDK leakage
 - [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) — Endpoint filters for authorization
