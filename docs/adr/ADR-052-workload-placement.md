@@ -14,6 +14,38 @@
 > document states it by a one-line summary and a link here. `tests/Spaarke.ArchTests/WorkloadPlacementDocDriftTests.cs`
 > fails the build when a contradicting phrasing reappears outside a marked historical region.
 
+---
+
+## 🟡 AMENDMENT 2026-09-28 — no shared Model 1 compute (§6 Tenancy, §6 Identity, §7)
+
+> **Path**: CLAUDE.md §6.5 **path B**. **Source**: owner decision D-12 §1/§3/§3a
+> (`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`), 2026-09-28.
+> **Scope**: the tenancy and identity rules only. The placement decision — *no default host, no prohibition;
+> weigh the signals; fewer moving parts as tie-breaker* — is **unchanged**.
+
+**What changed.** §6 previously allowed *"a shared multi-tenant Function app"* for Model 1, one shared BFF
+UAMI for Model 1, and *"a shared hub for Model 1 with `tenantId` in every orchestration input"* in §7. D-12
+retires the shared Model 1 tier: every customer now gets a dedicated environment and, per the ADR-027
+amendment of the same date, **its own Azure subscription**. So:
+
+- **A Function app per customer stamp, in both models.** A shared multi-tenant Function app is not permitted.
+- **The stamp UAMI, in both models.** There is no shared Model 1 BFF UAMI.
+- **A Durable Task hub per customer stamp, in both models.**
+
+**Why the old rule was not merely outdated — it was unsound.** It justified shared Model 1 compute by
+pointing at invariants I2–I5, which key on **`tenantId`**. Under Model 1 every customer presents the *same*
+`tenantId` (Spaarke's), so those invariants cannot separate customers **and their ArchTests pass anyway**.
+The rule cited as the safeguard was the thing that could not work. I2–I5 remain in force and remain
+ArchTest-enforced, but as **belt-and-braces** — the customer boundary is the per-customer resource in the
+per-customer subscription.
+
+⚠️ **§10's approval gate is retained deliberately.** *"The first Function under each tenancy model"* still
+requires owner approval, even though the two models are now infrastructurally near-identical (D-12 §4). The
+gate is cheap and the models still differ in tenant ownership, consent and Lighthouse.
+
+✅ **Checked, no CI impact**: `WorkloadPlacementDocDriftTests` matches phrasings about *Functions-versus-BFF*
+placement (e.g. a flat ban on Functions), not tenancy wording. This amendment adds none of them.
+
 ## Related AI Context
 
 - [ADR-052 Concise](../../.claude/adr/ADR-052-workload-placement.md) — decision, signals, MUST / MUST NOT, guardrails
@@ -166,12 +198,11 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 | Area | Rule |
 |---|---|
 | Hosting | .NET isolated worker on **Flex Consumption**. Premium only for a named Flex limitation (owner approval, §10). |
-| Tenancy — Model 2 | A Function app per customer stamp. |
-| Tenancy — Model 1 | A shared multi-tenant Function app is acceptable. It carries the same tenant-isolation invariants as the shared BFF — `tenantId` on every AI Search query and Cosmos partition key, per-tenant SPE containers and Graph tokens (deployment guide §8, invariants I2–I5) — enforced by the `src/server/**` ArchTests (I2/I3 as of 2026-09-13; I4, I5 and the ArchTest-only I6 once widened, §10). |
+| Tenancy — **both models** | **A Function app per customer stamp, in that customer's own subscription** (ADR-027 as amended 2026-09-28). *Amended 2026-09-28 per D-12 — see the amendment block at the top of this ADR.* A shared multi-tenant Function app serving many customers is **NOT** acceptable. The tenant-isolation invariants I2–I5 still apply and are still ArchTest-enforced, but they are **belt-and-braces, not the customer boundary**: they key on `tenantId`, which under Model 1 is Spaarke's for *every* customer, so they cannot separate customers and would pass while failing. The boundary is the per-customer resource, in the per-customer subscription. |
 | Tenancy — fleet-scoped | Platform-level work that is not per customer (e.g. the provisioning control plane) runs in the platform subscription under the platform's identity, never a customer stamp's. |
-| Identity | **Reuse the stamp's user-assigned managed identity by default** — attach the UAMI the BFF runs as (Model 1: the shared BFF UAMI; Model 2: the stamp UAMI) and authenticate **app-only** as it (`DefaultAzureCredential` pinned to the UAMI's client ID, e.g. `AZURE_CLIENT_ID`). This is ADR-028 A4's **app-only** row, so it needs no new grants (§4). The Function **MUST NOT** use A4's **confidential-client** row: no MSAL confidential client, no client-assertion or certificate credential to act as the BFF app registration, no OBO, no accepting or exchanging user tokens. **Impersonating a Dataverse user (ADR-028 A5) is permitted only under these conditions** (owner-accepted 2026-09-15; `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`): (1) only for a unit of work that user started through an authenticated BFF request — never for timer, webhook or system-triggered work, which runs app-only with explicit filtering; contacts and CIAM users are never impersonated; (2) the caller id comes from a typed requester field (`oid` + `tid`) the BFF writes from the validated token into the job message (#989), on a channel only the stamp identity can write — Entra-only Service Bus (`disableLocalAuth`), *Data Sender* held only by the stamp identity (#988) — never from a client payload, a webhook body or Dataverse data; (3) the impersonated user is the user the output is delivered or attributed to, and writes are impersonated only where attributing the record to that user is intended; (4) only through the shared fail-closed helper in `Spaarke.Dataverse` (#990), with the NFR-04 canary extended to it; (5) only the stamp's application user holds `prvActOnBehalfOfAnotherUser`, assigned directly. **Not usable until #988, #989 and #990 land.** Model 1 additionally binds the message's tenant to the Dataverse environment URL. Impersonation cannot widen what the identity can already do app-only — the effective rights are the overlap — so the controls are about *which* user, not *how much*. (The UAMI is technically able to mint the assertion and to send the headers, so the Functions-project ArchTest bans the confidential-client, credential and OBO types and the raw impersonation headers under `src/server/functions/**`; impersonation passes only through the helper.) It **MUST NOT** call BFF endpoints. A dedicated identity only when isolation is the reason for the Function, or when it needs access bound to another app registration (owner approval, §10). No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
+| Identity | **Reuse the stamp's user-assigned managed identity by default** — attach the UAMI the BFF runs as — **the stamp UAMI, in both models** (*amended 2026-09-28 per D-12; there is no shared Model 1 BFF UAMI*) and authenticate **app-only** as it (`DefaultAzureCredential` pinned to the UAMI's client ID, e.g. `AZURE_CLIENT_ID`). This is ADR-028 A4's **app-only** row, so it needs no new grants (§4). The Function **MUST NOT** use A4's **confidential-client** row: no MSAL confidential client, no client-assertion or certificate credential to act as the BFF app registration, no OBO, no accepting or exchanging user tokens. **Impersonating a Dataverse user (ADR-028 A5) is permitted only under these conditions** (owner-accepted 2026-09-15; `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`): (1) only for a unit of work that user started through an authenticated BFF request — never for timer, webhook or system-triggered work, which runs app-only with explicit filtering; contacts and CIAM users are never impersonated; (2) the caller id comes from a typed requester field (`oid` + `tid`) the BFF writes from the validated token into the job message (#989), on a channel only the stamp identity can write — Entra-only Service Bus (`disableLocalAuth`), *Data Sender* held only by the stamp identity (#988) — never from a client payload, a webhook body or Dataverse data; (3) the impersonated user is the user the output is delivered or attributed to, and writes are impersonated only where attributing the record to that user is intended; (4) only through the shared fail-closed helper in `Spaarke.Dataverse` (#990), with the NFR-04 canary extended to it; (5) only the stamp's application user holds `prvActOnBehalfOfAnotherUser`, assigned directly. **Not usable until #988, #989 and #990 land.** Model 1 additionally binds the message's tenant to the Dataverse environment URL. Impersonation cannot widen what the identity can already do app-only — the effective rights are the overlap — so the controls are about *which* user, not *how much*. (The UAMI is technically able to mint the assertion and to send the headers, so the Functions-project ArchTest bans the confidential-client, credential and OBO types and the raw impersonation headers under `src/server/functions/**`; impersonation passes only through the helper.) It **MUST NOT** call BFF endpoints. A dedicated identity only when isolation is the reason for the Function, or when it needs access bound to another app registration (owner approval, §10). No secrets (ADR-028 A4), including the host storage account: identity-based `AzureWebJobsStorage`, no shared keys. |
 | Inbound HTTP | Webhook-shaped triggers only, and each MUST validate its sender (Graph `clientState`, Event Grid subscription validation, or an Entra app role). A Function never serves an interactive API. |
-| Deployment | Bicep inside the stamp's provisioning (Model 1 / Model 2 stacks); same repo, same CI/CD. |
+| Deployment | Bicep inside the stamp's provisioning (the per-customer stamp stack, both models); same repo, same CI/CD. |
 | Configuration | Key Vault references. |
 | Observability | The stamp's shared App Insights, using the supported App Insights / OpenTelemetry integration for the .NET isolated worker, with W3C trace context so a trace spans BFF → Service Bus → Function. |
 | Events | Service Bus buffers event sources whose delivery must survive a Function outage. Handlers idempotent (atomic per-unit claim — ADR-004 A1); `MaxDeliveryCount` sends poison messages to the dead-letter queue, which is monitored and alerted; lock renewal configured for long handlers; sessions when ordering matters. Latency-sensitive intake (e.g. Graph notifications, which expect a fast acknowledgement) keeps **≥1 always-ready instance**. |
@@ -182,8 +213,8 @@ A workload moves out of the BFF when at least one F-signal is material **and** o
 **Durable Task** — Durable Functions, or the Durable Task SDK in a dedicated worker — backed by **Durable Task
 Scheduler**, is permitted for multi-step, long-running, human-gated or fan-out orchestration. It runs in its **own
 host, never inside `Sprk.Bff.Api`**; the ADR-001 ArchTest keeps the Durable Task namespaces banned in the BFF
-assembly. Durable Task Scheduler follows the tenancy rules: a task hub per stamp for Model 2; a shared hub for
-Model 1 with `tenantId` in every orchestration input; no document content in orchestration payloads (ADR-004).
+assembly. Durable Task Scheduler follows the tenancy rules: **a task hub per customer stamp in both models** (*amended 2026-09-28 per D-12 — a shared
+hub keyed on `tenantId` cannot separate Model 1 customers, who all present Spaarke's tenant GUID*); no document content in orchestration payloads (ADR-004).
 Hand-rolled orchestration (Service Bus plus a state machine) remains permitted but needs a written reason in the
 Placement Justification.
 

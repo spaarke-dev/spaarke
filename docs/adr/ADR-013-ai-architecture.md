@@ -14,8 +14,18 @@
 
 Spaarke is extending its platform with AI capabilities to provide intelligent document processing, semantic search, and conversational interfaces. The AI features must support two deployment models:
 
-1. **Model 1 (Spaarke-Hosted SaaS)** - Multi-tenant, shared Azure AI resources
-2. **Model 2 (Customer-Hosted)** - Dedicated Azure AI resources per customer
+1. **Model 1** — a dedicated Dataverse environment and **dedicated Azure AI resources** per customer, hosted in **Spaarke's** Azure tenant, in the customer's own subscription.
+2. **Model 2** — the same dedicated stamp, in the **customer's own** Azure tenant.
+
+> 🟡 **AMENDED 2026-09-28** (CLAUDE.md §6.5 path B; owner decision D-12 §1/§3/§3a). This previously read
+> *"Model 1 (Spaarke-Hosted SaaS) — Multi-tenant, shared Azure AI resources"*. The models now differ on **one
+> axis only: which Azure tenant owns the customer's subscription.** AI resources are dedicated in both.
+> The **Decision** of this ADR — extend the BFF, the four extraction criteria, the `PublicContracts` facade,
+> the canonical `invoke(bindingId, args)` verb — is **unaffected**; this amendment changes the stated
+> *context and resource sizing* only. ⚠️ The reason to dedicate AI resources differs by service: for **AI
+> Search** it is data segregation (it holds indexed document text and embeddings); for **Azure OpenAI** it is
+> quota and noisy-neighbour isolation — prompts and completions are not persisted by default, and TPM quota
+> is per-subscription-per-region, which the per-customer subscription resolves.
 
 Without a clear architecture decision, we risk:
 - **Inconsistent patterns** - AI endpoints diverging from established BFF patterns
@@ -460,7 +470,13 @@ public class AiIndexingJobHandler : IJobHandler
 
 ## Model 1 vs Model 2 Resource Configuration
 
-### Model 1: Spaarke-Hosted SaaS (Multi-Tenant)
+### Model 1: dedicated stamp in Spaarke's Azure tenant
+
+> 🟡 **AMENDED 2026-09-28 (D-12 §3).** ⚠️ The config sample below still shows a shared endpoint and an
+> `IndexPerTenant` isolation mode keyed on `{tenantId}`. **Under Model 1 every customer presents the same
+> `tenantId`, so `spaarke-documents-{tenantId}` resolves to ONE index for all of them.** The index must key
+> on the **customer**, in that customer's own AI Search service. Treat the sample as illustrative of the
+> config *shape* only, not of correct values.
 
 ```json
 {
@@ -506,20 +522,29 @@ public class AiIndexingJobHandler : IJobHandler
 
 ### Per-Environment Resources
 
-| Resource | Model 1 (Shared) | Model 2 (Dedicated) | SKU |
-|----------|------------------|---------------------|-----|
-| Azure OpenAI | 1 per region | 1 per customer | Standard S0 |
-| AI Search | 1 per region | 1 per customer | Standard |
-| Document Intelligence | 1 per region | 1 per customer | S0 |
-| Redis Cache | Shared | Shared | Standard C1+ |
+> 🟡 **AMENDED 2026-09-28 (D-12 §3)** — the Model 1 / Model 2 split is removed. Every row is **1 per
+> customer, in that customer's own subscription**. Redis in particular was *"Shared"* in **both** columns;
+> that is now a 🔴 correctness defect, not a cost choice — the cache key is `tenant:{tenantId}:…` and
+> `tenantId` is Spaarke's for every Model 1 customer, so a shared instance **collides across customers**.
+
+| Resource | Both models | SKU |
+|----------|-------------|-----|
+| Azure OpenAI | 1 per customer | Standard S0 |
+| AI Search | 1 per customer | Standard |
+| Document Intelligence | 1 per customer | S0 |
+| Redis Cache | **1 per customer** | Standard C1+ |
 
 ### OpenAI Model Deployments
 
-| Model | Use Case | TPM (Model 1) | TPM (Model 2) |
-|-------|----------|---------------|---------------|
-| gpt-4o | Chat, complex reasoning | 40K | 80K |
-| gpt-4o-mini | Simple queries, summarization | 60K | 120K |
-| text-embedding-3-large | Vector embeddings | 100K | 200K |
+> 🟡 **AMENDED 2026-09-28 (D-12 §3a)** — one TPM table, not two. The differential envelopes encoded the
+> retired shared tier. TPM quota is **per-subscription-per-region**, and each customer now has their own
+> subscription, so the allocation is per customer in both models.
+
+| Model | Use Case | TPM (per customer) |
+|-------|----------|--------------------|
+| gpt-4o | Chat, complex reasoning | 80K |
+| gpt-4o-mini | Simple queries, summarization | 120K |
+| text-embedding-3-large | Vector embeddings | 200K |
 
 ---
 

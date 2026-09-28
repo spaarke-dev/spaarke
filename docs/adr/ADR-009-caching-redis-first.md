@@ -81,9 +81,44 @@ These constraints were introduced after the dev environment drifted (Redis delet
 
 ### 5. Cache key tenant prefix mandatory
 
+> 🟡 **AMENDED 2026-09-28 (D-12 §3) — the prefix is NOT the customer boundary.** CLAUDE.md §6.5 path B.
+> The format and the `ITenantCache` enforcement are **unchanged**. What changes is the *claim made about
+> them*, plus one new MUST. See the amendment note below the bullets.
+
 - Format: `{InstanceName}tenant:{tenantId}:{resource}:{id}:v{version}` → on-wire `spaarke:tenant:{tenantId}:{resource}:{id}:v{version}`.
-- Enforced by the `ITenantCache` wrapper: every public method requires `tenantId` parameter. Compile-time enforcement of multi-tenant invariant.
+- Enforced by the `ITenantCache` wrapper: every public method requires `tenantId` parameter. Compile-time enforcement of the **tenant**-scoping invariant.
+- 🔴 **MUST (added 2026-09-28): the key part AFTER the tenant segment MUST discriminate the subject** — the user, session, record or other principal whose data is cached — whenever the cached value is not identical for every principal in the tenant. `{resource}:{id}` MUST NOT both be compile-time constants.
 - System-level exceptions (cross-tenant resources like idempotency event IDs, Dataverse schema metadata, SPE-dashboard aggregates, Graph token by SHA256(user-token)) MUST be explicitly enumerated in `Sprk.Bff.Api/Infrastructure/Cache/SystemCacheKeys.cs` with per-site rationale (NFR-08). Allow-list threshold: 20 sites; escalate for architecture review if exceeded.
+
+#### 🟡 Amendment note (2026-09-28) — what the prefix does and does not do
+
+**Source**: owner decision D-12 §3 (`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`).
+
+**The tenant prefix separates Entra tenants. It does not separate customers.** Under D-12 Model 1, every
+customer's Dataverse environment is hosted in **Spaarke's** Azure tenant, so `tenantId` holds the **same
+GUID for every Model 1 customer**. A key prefixed with it is identical across customers. The original text
+called this *"compile-time enforcement of multi-tenant invariant"*, which is true and was being read as
+"customer isolation", which it never was.
+
+✅ **What actually separates customers is the resource boundary**: D-12 §3 dedicates the **Redis instance
+per customer**, in that customer's own subscription (ADR-027 as amended the same day). The prefix is now
+**defence in depth**, and is retained on that basis — it still separates tenants in Model 2, still prevents
+accidental key reuse, and costs nothing.
+
+🔴 **The new MUST above closes a real gap that this ADR never covered.** Requiring only the *tenant* segment
+permits a key whose remaining parts are constants. Verified live example: `AgentServiceClient` composes
+`spaarke:tenant:{tenantId}:agent-thread:thread:v1`, where `agent-thread` and `thread` are compile-time
+constants — so the key varies by `tenantId` and nothing else, and **every user in a tenant resumes the same
+Foundry conversation thread**. That is a cross-**user** leak *inside one tenant*, wholly independent of
+tenancy model, and ADR-009 as written permitted it. (Latent, not live: `AgentServiceOptions.Enabled`
+defaults to `false` and no `appsettings` sets it.) Contrast `chat:session:{tenantId}:{sessionId}`, which is
+safe because `sessionId` discriminates.
+
+⚠️ **The System-Level Exception allow-list is unchanged but should be re-read under this framing.** It
+enumerates keys deliberately shared *across tenants*. Under Model 1 "across tenants" and "across customers"
+are no longer the same question — an entry that is safe to share across Entra tenants may still be unsafe to
+share across customers. Re-validate each entry's rationale on that axis when next touched; no entry is known
+to fail today.
 
 ### 6. `InstanceName` is `spaarke:`
 

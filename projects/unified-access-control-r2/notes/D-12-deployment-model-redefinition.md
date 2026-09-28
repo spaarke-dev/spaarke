@@ -62,8 +62,9 @@ pinning test and the docs must change **together**, or provisioning stops.
 
 ## 3. Azure resource disposition — DEDICATED per customer
 
-**Every Azure resource is dedicated per customer, in both models.** Under Model 1 these live inside
-Spaarke's Azure tenant as separate resources; sharing a *tenant* does not mean sharing *resources*.
+**Every Azure resource is dedicated per customer, in both models**, with **three named exceptions** listed
+at the end of this section. Under Model 1 these live inside Spaarke's Azure tenant as separate resources;
+sharing a *tenant* does not mean sharing *resources*.
 
 Already per-customer before this decision, and unchanged: Cosmos (serverless — no fixed floor), Key
 Vault, Storage, Service Bus, Document Intelligence, UAMI, SPE container, Dataverse environment.
@@ -97,6 +98,30 @@ concept already exists and is modelled correctly in the L2 control plane (`Custo
 | **Azure OpenAI** | ✅ Yes | ⚠️ Note the reasoning differs: Azure OpenAI does not persist prompts or completions by default, so the *data*-segregation argument is weaker than for AI Search. The reason to dedicate is **noisy-neighbour / quota isolation**. Consumption-priced, so dedication costs nothing extra. ⚠️ **TPM quota is per-subscription-per-region** — separate OpenAI *resources* in one subscription still share the quota pool. Quota isolation needs subscription separation, not just resource separation. |
 | **App Service Plan** | 🔔 **See §4** | The one genuine trade-off. |
 | SignalR | optional | Feature-gated (`Notifications:SignalRSpine:Enabled`), Null-Object when off. Dedicate when enabled. |
+
+### Named exceptions to "everything dedicated" (decided 2026-09-28)
+
+⚠️ **"Every Azure resource is dedicated" has exactly three exceptions.** They were previously unstated,
+which made the rule unfalsifiable — `COMPONENT-INVENTORY.md` records all three as genuinely shared today
+**with no per-customer provisioning path** (*"that provisioning does not exist yet (gap)"*), so the rule as
+written was already untrue. Naming them is what makes the rest of §3 honest.
+
+| Resource | Why it may stay shared | 🔴 Required of it |
+|---|---|---|
+| **Static Web Apps** (Office add-ins + external SPA) | Static client bundles. Hold no customer data at rest; the privileged content they display is fetched per-request through the BFF, which **is** per-customer. | **`customerId` discriminator** in the BFF runtime for anything they read or write |
+| **App Insights / Log Analytics** | Fleet telemetry. Operational diagnostics, not document content. | **`customerId` discriminator** on emitted telemetry, so per-customer data can be segregated, queried and **deleted** on offboarding |
+| **Content Safety** | Stateless classifier — no persistence, nothing to leak between calls. | **`customerId` discriminator** on any call that is logged or metered |
+
+**Every exception carries the same obligation**: a **`customerId`** discriminator in the BFF runtime. That
+concept already exists and is modelled correctly in the L2 control plane (`CustomerId` alongside
+`TenantId`) and **has never reached L1** — these three resources are now the explicit, bounded reason it
+must.
+
+🔴 **The exception list is CLOSED.** A resource not named above is dedicated. Adding a fourth is a new
+decision, not an inference from "it seemed like infrastructure".
+
+⚠️ Note the **asymmetry that makes these safe**: none of the three holds privileged legal content at rest.
+That — not cost, and not "it feels like plumbing" — is the test any future candidate must pass.
 
 ---
 

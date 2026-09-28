@@ -7,6 +7,52 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-28 — five ADRs amended for D-12: no shared Model 1 tier (owner-approved)
+
+Owner chose "amend all five" after the D-12 doc sweep found 51 BLOCKING files (recorded: 13). CLAUDE.md
+§6.5 path **B** throughout. Common cause: each ADR assumed a **shared Model 1 tier** and leaned on a
+`tenantId`-keyed control to make it safe — but under D-12 every Model 1 customer presents **Spaarke's**
+`tenantId`, so those controls cannot separate customers **and pass anyway**.
+
+- **ADR-009 (Redis caching)** — 🔴 a **MUST NOT was REVERSED**. The concise ADR said *"**MUST NOT** recreate
+  per-customer Redis instances. Per-customer Redis is deprecated."* It now **MUST** provision one per
+  customer: the key is `tenant:{tenantId}:…`, identical across Model 1 customers, so a shared instance
+  **collides** — a correctness defect, not a cost preference. Decision §5's key format and `ITenantCache`
+  enforcement are **unchanged**; what changed is the claim made about them (tenant separation, not customer
+  separation) plus **one new MUST**: the key part *after* the tenant segment must discriminate the subject.
+  That closes a gap the ADR never covered — `spaarke:tenant:{tenantId}:agent-thread:thread:v1` has constants
+  in both remaining slots, so **every user in a tenant shares one Foundry thread**. Cross-*user*, inside one
+  tenant, independent of tenancy model. Latent (`Enabled` defaults false), not live.
+- **ADR-015 (AI data governance)** — Tier 2 + Tier 3 `MUST partition by tenantId` replaced by **MUST reside
+  in the customer's own dedicated Cosmos account**, which is what actually backs the 7-year audit and GDPR
+  Art. 17 erasure guarantees. Added **MUST NOT** partition by `/tenantId` — inside a per-customer account it
+  is one constant value, so every document lands in a single hot partition. ✅ **Resolves a live
+  ADR-042/ADR-015 contradiction** that predates D-12: ADR-042 already rejected `/tenantId` on *capacity*
+  grounds while ADR-015 mandated it, and neither cited the other. ⚠️ No data migration ordered; ADR-042's
+  legacy container stays as-is.
+- **ADR-052 (workload placement)** — §6 allowed *"a shared multi-tenant Function app"* for Model 1,
+  justified by invariants I2–I5. Now **one Function app per customer stamp in both models**, the **stamp
+  UAMI** in both, and a **task hub per stamp** in §7. The old rule was not merely outdated but unsound: it
+  cited as its safeguard the very controls that cannot work. The §10 per-tenancy-model approval gate is
+  **kept deliberately**. ✅ `WorkloadPlacementDocDriftTests` re-run — 102 passed; it matches
+  Functions-vs-BFF phrasings, not tenancy wording.
+- **ADR-028 (auth v2)** — mechanical. Its shape table had **three** rows; old *"Model 2 — Spaarke tenant"*
+  **is** the new Model 1, old *"Model 2 — customer tenant"* **is** the new Model 2, shared row deleted. ✅
+  **Its Decision is untouched and strengthened**: *"every shape is intra-tenant, so MI-FIC covers all of
+  them"* now has one fewer special case. Also closed a moot open question (the shared Model 1 app
+  registration → one FIC per customer) and replaced the `2b/2c` labels with the condition they stood for.
+- **ADR-013 (AI architecture)** — Context + the Azure Resource Requirements tables. Decision unaffected.
+  Two TPM tables collapsed to one (quota is per-subscription-per-region). ⚠️ Flagged rather than silently
+  fixed: the Model 1 config sample still shows `IndexPerTenant` keyed on `{tenantId}`, which resolves to
+  **one index for all customers**.
+
+Also: **D-12 §3's "every Azure resource is dedicated" gained three named exceptions** (owner-decided) —
+Static Web Apps, App Insights/Log Analytics, Content Safety — each requiring a **`customerId`**
+discriminator. The rule was previously unfalsifiable: all three are shared today with no per-customer
+provisioning path, so "every resource" was already untrue. The list is **closed**; the test any future
+candidate must pass is *holds no privileged legal content at rest*.
+
+---
 ###### 2026-09-28 — ADR-027 Decision 1 amended: one Azure subscription PER CUSTOMER (owner-decided)
 
 - **`.claude/adr/ADR-027-…md` Decision 1** rewritten, and the full ADR (`docs/adr/ADR-027-…md`) gains a

@@ -72,8 +72,13 @@ state: `projects/spaarke-ai-code-audit-r1/OVERLAY-MATRIX.md`.
 
 | Model | Description | Resource Isolation |
 |-------|-------------|-------------------|
-| Model 1 | Spaarke-Hosted SaaS | Shared resources, per-tenant index |
-| Model 2 | Customer-Hosted | Dedicated resources per customer |
+| Model 1 | Dedicated stamp in **Spaarke's** Azure tenant | **Dedicated** Azure AI resources per customer |
+| Model 2 | Dedicated stamp in the **customer's own** Azure tenant | **Dedicated** Azure AI resources per customer |
+
+> 🟡 *Amended 2026-09-28 (D-12 §1/§3). Model 1 previously read "Shared resources, per-tenant index" — a
+> per-tenant index gives NO customer separation under Model 1, where every customer presents Spaarke's
+> `tenantId`. Both models are fully dedicated; they differ only in which Azure tenant owns the subscription.
+> This ADR's Decision (extend the BFF; PublicContracts facade; `invoke(bindingId, args)`) is unaffected.*
 
 ---
 

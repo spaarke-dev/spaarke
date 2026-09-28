@@ -156,7 +156,7 @@ The non-systemuser (contact) principal resolves to membership via an **additive 
 > | **Negative control** | an assertion minted for the wrong identity **fails loudly** at minting time |
 >
 > **MI-FIC is the adopted credential. The KV-certificate alternative was NOT taken** — it remains sanctioned for
-> cases where the same-tenant rule cannot hold (e.g. a cross-tenant Model 2 shape, still unresolved).
+> cases where the same-tenant rule cannot hold (a shape whose app registration and OBO identity sit in different tenants). *Amended 2026-09-28: D-12 leaves **no such shape** — both models are intra-tenant — so this is a standing guard, not an open gap.*
 >
 > Evidence: [`notes/decisions/002-spike-results.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md) ·
 > decision: [`notes/decisions/003-credential-decision.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/003-credential-decision.md).
@@ -235,9 +235,12 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 | Deployment | App registration | UAMI performing OBO | Credential |
 |---|---|---|---|
-| **Model 1** — shared Spaarke environment (20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI `sprk-{env}-shared-bff-uami`) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
-| **Model 2 — Spaarke tenant** (dedicated stamp) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
-| **Model 2 — customer tenant** (Azure + Dataverse + SPE + app registration all customer-side) | Customer tenant | Customer tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 1** — dedicated stamp in **Spaarke's** Azure tenant, one per customer (own subscription, own BFF App Service, own BFF UAMI) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 2** — dedicated stamp in the **customer's** Azure tenant (Azure + Dataverse + SPE + app registration all customer-side) | Customer tenant | Customer tenant | ✅ **MI-FIC** — intra-tenant |
+
+> 🟡 **Amended 2026-09-28 (D-12).** This table had **three** rows: a shared Model 1 environment (*"20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI"*), plus *"Model 2 — Spaarke tenant"* and *"Model 2 — customer tenant"*. D-12 retires the shared tier and collapses the 2a/2b split onto the model axis: old *"Model 2 — Spaarke tenant"* **is** the new Model 1, old *"Model 2 — customer tenant"* **is** the new Model 2, and the shared row is deleted.
+>
+> ✅ **The conclusion below is unchanged — and strengthened.** Removing the shared row removes nothing from *"every shape is intra-tenant"*; it deletes the shape that had the most moving parts. MI-FIC still covers every case, with one fewer special case than before.
 
 **Every Spaarke deployment shape is intra-tenant, so MI-FIC covers all of them** — one mechanism, no special cases. The app registration **MUST** be created in the tenant that hosts the deployment.
 
@@ -245,7 +248,7 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 **MUST (standing guard)**: if any future shape cannot satisfy the same-tenant rule, fall back to a Key Vault certificate — **not** to a client secret. A client secret is the one credential a hardened customer tenant can refuse outright via Entra app-management policy. No such shape exists today, so **no certificate provisioning automation is required**.
 
-**Open (provisioning's call, does not affect feasibility)**: whether the shared Model 1 BFF authenticates as ONE shared multitenant app registration or one per customer — this decides whether onboarding creates a FIC per customer or none. See `TENANCY-AND-CREDENTIALS.md` §4.
+~~**Open (provisioning's call)**: whether the shared Model 1 BFF authenticates as ONE shared multitenant app registration or one per customer.~~ **CLOSED 2026-09-28 by D-12**: there is no shared Model 1 BFF. Every customer gets its own BFF App Service, its own UAMI and its own app registration, in both models — so onboarding creates **a FIC per customer**. `SharedBffAppRegistrationId` is a retired artifact (D-12 §6).
 
 ### Adoption status (as of 2026-08-17)
 
@@ -255,7 +258,7 @@ A4 states the target shape; adoption is staged by `spaarke-auth-v4-dataverse-MI`
 
 - **Path A only (document the secret as an exception and stop)** — rejected as the primary path: it entrenches the credential type Microsoft designates dev/test-only, keeps per-customer secret rotation as a permanent operating cost, and leaves Spaarke exposed to customer-tenant app-management policies that can block or time-limit secrets on a service principal. Retained as the **transitional** mechanism only (E-3).
 - **Path C (comply with the pre-A4 rule as written)** — not viable: the rule was literally unsatisfiable for OBO.
-- **Certificate as the default instead of MI-FIC** — rejected as the default because it preserves a rotation lifecycle Microsoft's ranking explicitly treats as inferior; retained as the **sanctioned alternative** precisely where MI-FIC's tenancy constraints bite (Model 2b/2c), where it is not a fallback but the correct answer.
+- **Certificate as the default instead of MI-FIC** — rejected as the default because it preserves a rotation lifecycle Microsoft's ranking explicitly treats as inferior; retained as the **sanctioned alternative** precisely where MI-FIC's tenancy constraints bite — i.e. any shape where the app registration and the OBO managed identity sit in **different tenants**, where it is not a fallback but the correct answer. (*Amended 2026-09-28: previously named "Model 2b/2c". D-12 retires the 2a/2b split and has no "2c" at all; the condition is stated directly so it does not depend on a retired vocabulary. **No current shape meets it.***)
 
 > **Note (A4)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries Amendments **A1–A4**. A4 changes **server-side credential mechanism only** — it introduces no new IdP or client surface, and **does not weaken the A1/A2/A3 "no OBO on the external, collaboration, or module-host planes" invariants**, which remain in force.
 
