@@ -64,6 +64,43 @@
       **THE POINT OF THIS TASK IS THAT PARTIAL UPDATES ARE THE FAILURE MODE.** A1 updated four of six copies.
       The two it missed are why this list has been wrong for a month. Update all six or the amendment has not
       landed.
+
+      🛑 **BLOCKED 2026-09-28 — AMENDMENT-NUMBER COLLISION. Do not execute this task as written.**
+
+      Found at Step 0.5's mandatory hot-path `/conflict-check`, before any edit.
+
+      **`unified-access-control-r2` has ALREADY authored an "Amendment A2" to ADR-038** — a different
+      amendment on a different subject, dated **2026-09-18**, owner-ratified, raised by their task 106
+      Step 9.5: *"ban B8 targets reflection into privates, not `InternalsVisibleTo`"*. It lives on
+      `work/unified-access-control-r2` in **open PR #950** and is **not on master** (master's ADR-038 carries
+      **A1 only**). Their `.claude/constraints/testing.md` ban #8 already cites *"ADR-038 **Amendment A2**,
+      2026-09-18"* by number.
+
+      Consequences, all of which change this task's contract:
+
+      1. **This amendment must be A3, not A2** — the title, the goal element and six criterion entries say A2.
+         Two different A2 sections in one ADR would make every *"ADR-038 Amendment A2"* citation ambiguous.
+      2. **Three of the six files are in PR #950** — `docs/adr/ADR-038-testing-strategy.md`,
+         `.claude/constraints/testing.md`, `.claude/adr/INDEX.md`. `.claude/**` is declared **serial PRs
+         only**; `.claude/adr/INDEX.md` is also in draft PR #935 (`code-quality-and-assurance-r4`), so three
+         projects contend on that one file. PR #950 is **CONFLICTING**, +64,820/-8,041, last updated
+         2026-09-28 — not merging cleanly or imminently.
+      3. **Their A2 NARROWED ban B8.** This task's constraint *"do not weaken any existing ban; B1-B17 continue
+         to apply in full"* must therefore be read against **their amended B8**, not master's. Authoring from
+         master's text would silently revert an owner-ratified amendment.
+
+      **Splitting the work by contention is FORBIDDEN**, and specifically by this task: doing the three
+      uncontested files (`.claude/skills/test-diet/SKILL.md`, `docs/standards/TEST-ARCHITECTURE.md`,
+      `tests/CLAUDE.md`) and deferring the rest **is** the partial-update failure mode 057 exists to repair —
+      it would reproduce A1's error at larger scale.
+
+      **The underlying finding is unaffected and still valid**: the KEEP-path list is still eight and still
+      excludes `tests/unit/Sprk.Bff.Api.Tests/**`, and `.claude/adr/INDEX.md` still says *"6 KEEP path
+      categories"* even on UAC-r2's branch. Only the numbering and the sequencing are blocked.
+
+      Awaiting an owner decision between: (1) renumber to A3 and execute after #950 merges; (2) execute now as
+      A3 against #950's branch content; (3) hand the amendment to `unified-access-control-r2`, who already own
+      ADR-038 amendments and are already editing all three contested files.
     </notes>
   </context>
 
