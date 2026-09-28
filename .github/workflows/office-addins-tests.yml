@@ -640,6 +640,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # 🔴 `lfs: true` IS REQUIRED — DO NOT DROP IT.
+          # `.gitattributes` has `*.docx filter=lfs`, and `actions/checkout` does NOT
+          # smudge LFS by default, so without this the fixtures arrive as ~130-byte
+          # POINTER FILES and any test that opens one fails on malformed bytes.
+          #
+          # Found the hard way on run 36451879399, the first green-direction attempt
+          # for this job: exactly 2 failures, both
+          # `NdaSaveNo422RegressionTests` (which reads `AppligentNDA_Signed.docx`),
+          # while the same tests passed locally AND in `sdap-ci.yml`. The divergence
+          # was never local-vs-CI — it was this checkout versus sdap-ci's, which sets
+          # `lfs: true` at `:122` and `:878` with exactly this comment: "else ~200
+          # Compose corpus seam tests fail on pointer files".
+          #
+          # The failing tests were RIGHT and this job was misconfigured. Narrowing the
+          # filter to dodge them would have hidden a real defect in the runner.
+          lfs: true
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
