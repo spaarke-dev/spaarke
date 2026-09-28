@@ -203,6 +203,23 @@ reproduces.
 
 ---
 
+## Step 9.5 quality gates
+
+`code-review` and `adr-check` are **not in this session's available-skills listing**, so the gate work was done
+directly rather than by guessing at a skill name. What was actually checked, and how:
+
+| Check | Result | How |
+|---|---|---|
+| **ADR-038** (testing strategy) | ✅ | No test file added, moved or deleted — `git diff` over `src/client/office-addins/` across the proof commits is **empty**. No KEEP-path change. The pin is CI configuration, not a test; bans B1–B17 untouched. |
+| **Frozen-workflow constraint** | ✅ | `ci-tier1-blocking.yml` *does* appear in the range diff, but `git log` attributes it to `5fedee9e8` (#1012), confirmed an **ancestor of `origin/master`**. My only workflow edit is `office-addins-tests.yml`. |
+| **Criterion 5 — `set +e` preserved** | ✅ **proven, not assumed** | The task diff removes **no** line matching `set +e` / errexit / `noprofile`, and the block plus its `🔴 LOAD-BEARING` comment are still present at `:438`–`:455`. |
+| **CLAUDE.md §10 BFF hygiene** | N/A | No BFF change: no endpoint, service, DI registration or package. No publish-size or CVE impact. |
+| **CLAUDE.md §6.5** | No conflict | The (a) rejection is not an ADR conflict — it is a factual correction to a task premise, escalated under `task-execute`'s prescriptive-mode rule. |
+| **`actionlint`** | ✅ | Green on CI at three separate commits. |
+| **Shell correctness** | ✅ with a caveat | `shellcheck` is **not installed locally**, so this is inspection plus *executed* edge-case tests, not static analysis. Three cases run against the new guard: empty manifest → passes and falls through to the pre-existing zero-entry check (correct layering, no double report); `CRLF` ending → passes (a CRLF file does end with a newline); bare `CR` → fires (malformed, correct to refuse). Integer comparison via `-ne` on the env-supplied `'74'`, and the failure branch's grep pipeline is `|| true`-guarded so `pipefail` cannot abort it. |
+
+---
+
 ## 🔴 What this task did NOT close (criterion 7)
 
 **A red office-addins check still does not block a merge.** Master's ruleset `21824191` requires exactly one
