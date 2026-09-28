@@ -190,8 +190,8 @@ The raw inventory (45 doc files, ~205 passages, ~38 code surfaces) overstates th
 
 | Category | Real size | Nature |
 |---|---|---|
-| **Code branch sites** | **7** across 6 handlers + 2 H13 probes | All compare a string literal. No shared constant — the literal is duplicated independently in ~8 places |
-| **Silent defaults** | **3** | `H2a:284` and `H2b:289` coerce blank → `Model2Dedicated`; `ArmCostEnvelopeChecker:267` coerces unknown → **shared-floor cost envelope**. These fail *quietly* |
+| **Code branch sites** | **8** *(re-verified 2026-09-28; was recorded as 7)* | All compare a string literal in **four** different styles. Only the two H13-probe sites use a named constant, and it is file-private |
+| **Silent defaults** | **4** *(re-verified 2026-09-28; was recorded as 3)* | `H2a:284`, `H2b:289` and **`AiSearchTenantFilterInvariantProbe:240`** coerce blank → Model 2; `ArmCostEnvelopeChecker:268` coerces **anything unrecognized, incl. wrong-case** → **retired shared-tier cost envelope**. They **disagree with each other** and all fail *quietly* |
 | **Data migration** | **1** | `sprk_tenancymodel`: value `1` holds **both** old-2a and old-2b, which now split across different models. A relabel silently misclassifies every existing dedicated customer |
 | **Idempotency keys** | **1** | H12c embeds the tenancy string; renaming invalidates completed phases |
 | **Docs — BLOCKING** | **13 files** | The rest of the 45 are wording or passing mentions |

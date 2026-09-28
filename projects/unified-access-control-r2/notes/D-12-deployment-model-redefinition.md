@@ -231,10 +231,15 @@ Ordered. Earlier items gate later ones.
 
 1. **Resolve the four conflicting "Model 1" definitions in the docs** — four are live simultaneously;
    two docs say "three models", one says "two". Pick this decision, or remediation re-encodes ambiguity.
-2. 🔴 **Introduce ONE shared `TenancyModel` enum** and force all **7 branch sites** and **3 silent
-   defaults** through it — **before any renaming.** The literal is duplicated independently in ~8 places
-   with three comparison styles. A partial rename fails **silently**: wrong Bicep stack, wrong
-   Lighthouse gate, wrong cost envelope.
+2. 🔴 **Introduce ONE shared `TenancyModel` enum** and force every branch site and silent default through
+   it — **before any renaming.** A partial rename fails **silently**: wrong Bicep stack, wrong Lighthouse
+   gate, wrong cost envelope.
+   ⚠️ **Re-verified 2026-09-28 against source** → `notes/D-12-code-branch-inventory.md`. The real shape is
+   **8 branch sites and 4 silent defaults** (not 7 + 3), in **four** comparison styles — one of which
+   (`ArmCostEnvelopeChecker.cs:264`, a raw-string `switch`) is **case-SENSITIVE** while all others use
+   `OrdinalIgnoreCase`. The four defaults **disagree with each other**: three coerce to Model 2, one to the
+   retired shared tier. The enum must adopt H1's **parse-or-reject** behaviour, which is the only site that
+   already fails loudly.
 3. 🔴 **Migrate `sprk_tenancymodel` — do not relabel it.** Value `1` (`Model2Dedicated`) holds **both**
    old-2a and old-2b, which now split across *different* models. Re-pointing labels silently
    misclassifies every existing dedicated customer. Value `0` has no successor.
