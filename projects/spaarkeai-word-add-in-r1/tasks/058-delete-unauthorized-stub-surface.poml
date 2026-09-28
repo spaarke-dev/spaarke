@@ -111,6 +111,43 @@
       test fixtures. Removing members touches `OfficeEndpoints.cs`, `OfficeModule.cs`, `JobOwnershipFilter.cs`,
       `OfficeProfileDispatcher.cs` and the contract/regression tests.
     </notes>
+  
+    🟢 **UNBLOCKED 2026-09-28 — and `unified-access-control-r2` answered the merge-order question.**
+
+    PR #950 merged to master at `38f48723e`, and this branch has merged it (0 behind). Their answer,
+    verbatim in substance:
+
+    **(a) They do NOT depend on `/office/recent`.** Verified on their side: `onFetchRecent` is an
+    OPTIONAL callback (`useShareFlow.ts:119`) with exactly three references in the repo — the
+    declaration, the `if (!callbacks.onFetchRecent) return;` guard at `:529`, and the call at `:537`.
+    Nothing provides it, so no client code reaches the endpoint. Server-side it returns
+    `GenerateStubRecentDocuments` — fabricated data. Their three `OfficeService.cs` hunks were
+    COLLATERAL, not a dependency: they removed `Account` from `AssociationType` and the stub would not
+    compile until its sample data stopped naming it. **Delete the endpoint and the stub generator
+    freely.**
+
+    🔴 **THE ONE THING THAT MUST SURVIVE THE HAND-REBASE**: the `AssociationType` enum change
+    itself — `Account` removed, **ordinal 3 left BURNED** so it cannot be silently reused. If this
+    task's deletion and the enum edit ride in the same hunks, RE-APPLY THE ENUM SEPARATELY. This is the
+    specific reason to rebase by hand rather than re-run the task.
+
+    ⚠️ **DELETING THE ROUTES LEAVES LIVE CONFIG DANGLING — not just doc comments.** Their slower
+    repo-wide scan found three further references, two of them real config that will NOT break the
+    build, which is exactly why they would survive:
+
+    | Reference | What it is |
+    |---|---|
+    | `Configuration/OfficeRateLimitOptions.cs:105` | `RecentRequestsPerMinute = 30` with `[Range(1, 1000)]` — a bindable, **validated** option nobody would read any more |
+    | `Api/Filters/OfficeRateLimitFilter.cs:31` | a `Recent` member on the rate-limit category enum, unreachable after the delete |
+    | `Models/Office/RecentDocumentsResponse.cs:6` | doc comment only — dies with the model |
+
+    **Check the same for `/office/share/*`, which this task also deletes**: the enum's sibling member is
+    `Share`, and `ShareRequestsPerMinute` sits directly above `RecentRequestsPerMinute` in the same
+    options class. Both categories and both properties may go dead together.
+
+    **Confirm rather than assume**: if either option is set in an `appsettings*.json` or a deployed App
+    Service setting, removing the property while the key remains is usually harmless under `IOptions`
+    binding — but grep before deleting. They checked source only, not deployed config.
   </context>
 
   <constraints>
