@@ -4,7 +4,7 @@
     <title>This project modified an e2e spec that no workflow runs</title>
     <phase>5 Remediation — verification</phase>
     <gate>blocked — requires 069</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (CLAUDE.md §8): touches `tests/**` and carries `e2e-test`. Also modifies a CI workflow.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -153,5 +153,13 @@
     defect task 072 fixed in `lint`, left behind because 072's criteria named only one script.
     Fixed. Leaving a known-identical bug on the adjacent line is the inconsistency this wave
     exists to remove.
+  
+    OWNER DECISION 2026-09-28, escalation CLOSED: "we don't need 109 tests every CI for this
+    - we'll manual test when deployed". The ~2.5-day harness work is DECLINED, including the
+    auth test seam -- which also removes that production auth-path risk. The specs stay
+    classified and marked; they are live-verification items for task 042's UAT, where the
+    in-file markers are now the permanent answer rather than a placeholder. Do not wire them
+    into CI, and do not delete them either: only 2 of 109 lack an expect(), so as a SCRIPT for
+    the manual pass they are worth more than re-deriving those cases by hand each UAT.
   </status-note>
 </task>
