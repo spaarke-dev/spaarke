@@ -69,7 +69,6 @@ public static class RegistrationEndpoints
         DemoRequestDto request,
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
-        DataverseEnvironmentService environmentService,
         EmailDomainValidator domainValidator,
         IOptions<DemoProvisioningOptions> options,
         ILogger<RegistrationDataverseService> logger,
@@ -171,9 +170,11 @@ public static class RegistrationEndpoints
                 recordId, trackingId, request.Email, httpContext.TraceIdentifier);
 
             // Send admin notification (fire-and-forget — do not block the response)
+            // The URL comes from the service that just wrote the record, so the link and
+            // the record cannot point at different environments.
             _ = SendAdminNotificationAsync(
-                emailService, environmentService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
-                dataverseUrl: null, appId: null);
+                emailService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
+                dataverseUrl: dataverseService.DataverseBaseUrl, appId: null);
 
             // Send acknowledgement email to applicant (fire-and-forget)
             _ = SendAcknowledgementEmailAsync(
@@ -448,46 +449,33 @@ public static class RegistrationEndpoints
     /// </summary>
     private static async Task SendAdminNotificationAsync(
         RegistrationEmailService emailService,
-        DataverseEnvironmentService environmentService,
         DemoProvisioningOptions options,
         string trackingId,
         DemoRequestDto request,
         Guid recordId,
         ILogger logger,
         string traceIdentifier,
-        string? dataverseUrl = null,
+        string dataverseUrl,
         string? appId = null)
     {
         try
         {
-            // Build record URL: prefer explicit parameters, then fall back to the default
-            // Dataverse environment record read from Dataverse (via DataverseEnvironmentService).
-            // customer-provisioning-orchestration-r1 task 081 migrated this off the
-            // now-removed DemoProvisioningOptions.Environments/DefaultEnvironment pair —
-            // task 080's DataverseEnvironmentRecord.SelectDefault helper preserves the
-            // original selection semantics.
-            string? envUrl = dataverseUrl;
-            string? envAppId = appId;
-            if (string.IsNullOrEmpty(envUrl))
-            {
-                try
-                {
-                    var envs = await environmentService.GetActiveEnvironmentsAsync(CancellationToken.None);
-                    var defaultEnv = DataverseEnvironmentRecord.SelectDefault(envs);
-                    envUrl = defaultEnv.DataverseUrl;
-                    envAppId = defaultEnv.AppId;
-                }
-                catch (Exception envEx)
-                {
-                    // Environment lookup failed — log and fall back to a generic URL below so
-                    // the admin still gets the notification with a best-effort deep link.
-                    logger.LogWarning(
-                        envEx,
-                        "Failed to resolve default Dataverse environment for admin notification (TrackingId={TrackingId}, TraceId={TraceId}); falling back to generic Dataverse URL.",
-                        trackingId, traceIdentifier);
-                }
-            }
-            var recordUrl = BuildRegistrationRecordUrl(envUrl, envAppId, recordId);
+            // The link points at the environment the record was written to, which the
+            // caller takes from RegistrationDataverseService.DataverseBaseUrl.
+            //
+            // It used to come from the default sprk_dataverseenvironment row, via
+            // DataverseEnvironmentRecord.SelectDefault. That row describes where demos
+            // are provisioned, which is a different environment and has nothing to say
+            // about where a registration request lives. With no row flagged as default
+            // the selection fell through to the first by name, "Demo 1", so every
+            // notification deep-linked into spaarke-demo for a record that only exists
+            // in spaarkedev1, and the admin got "Record Is Unavailable".
+            //
+            // SelectDefault is still correct for its other caller, DemoExpirationService,
+            // which really does want the demo environment. Do not fix this class of bug
+            // by flagging a row as default: that would silently redirect team removal and
+            // SPE revoke on expiry.
+            var recordUrl = BuildRegistrationRecordUrl(dataverseUrl, appId, recordId);
 
             await emailService.SendAdminNotificationAsync(
                 adminEmails: options.AdminNotificationEmails,
