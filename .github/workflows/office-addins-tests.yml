@@ -130,6 +130,32 @@ on:
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
       # (ci-gated-suites.txt needs no entry — 'src/client/office-addins/**' covers it.)
       - '.github/workflows/office-addins-tests.yml'
+      # ── SERVER PATHS, added by task 070 ────────────────────────────────────
+      # The `server-tests` job below runs C# suites that cover this surface. Without
+      # these entries a BFF-only PR would change the code under test and this
+      # workflow would not fire — the tests would exist, be selected, and never run.
+      # Scoped to the Office/Documents surface this project owns rather than all of
+      # `src/server/**`: this workflow must not quietly become a repo-wide BFF gate.
+      - 'src/server/api/Sprk.Bff.Api/Api/Office/**'
+      - 'src/server/api/Sprk.Bff.Api/Services/Office/**'
+      - 'src/server/api/Sprk.Bff.Api/Workers/Office/**'
+      - 'src/server/api/Sprk.Bff.Api/Services/Documents/**'
+      # The suites themselves, and the project that compiles them.
+      - 'tests/unit/Sprk.Bff.Api.Tests/**'
+      - 'tests/unit/domain/**'
+      - 'tests/integration/contract/Api/**'
+      - 'tests/integration/data-mutation/**'
+      - 'tests/integration/regression/**'
+      - 'tests/integration/seam/Office/**'
+      - 'tests/integration/auth/UnifiedAccessControl/**'
+      # ⚠️ KNOWN COST, accepted deliberately: `on:`-level paths fire the WHOLE
+      # workflow, so a server-only PR also runs the jest and typecheck jobs (~3-5 min
+      # each of npm work that cannot fail for a server change). Under-triggering
+      # loses regressions; over-triggering loses a few runner-minutes, so this is the
+      # right side to err on. The fix is job-level path classification, which is
+      # ALREADY a prerequisite for promoting this workflow to a required check
+      # (see the header, and PR #322's deadlock) — do it there, once, rather than
+      # building a second mechanism here now.
   push:
     branches:
       - master
@@ -138,6 +164,20 @@ on:
       - 'src/client/shared/Spaarke.Auth/**'
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
       - '.github/workflows/office-addins-tests.yml'
+      # Mirrors the pull_request server paths above (task 070) so a direct push to
+      # master over the same surface is covered identically. Keep the two lists in
+      # step — a path present in one and not the other is a silent coverage hole.
+      - 'src/server/api/Sprk.Bff.Api/Api/Office/**'
+      - 'src/server/api/Sprk.Bff.Api/Services/Office/**'
+      - 'src/server/api/Sprk.Bff.Api/Workers/Office/**'
+      - 'src/server/api/Sprk.Bff.Api/Services/Documents/**'
+      - 'tests/unit/Sprk.Bff.Api.Tests/**'
+      - 'tests/unit/domain/**'
+      - 'tests/integration/contract/Api/**'
+      - 'tests/integration/data-mutation/**'
+      - 'tests/integration/regression/**'
+      - 'tests/integration/seam/Office/**'
+      - 'tests/integration/auth/UnifiedAccessControl/**'
   workflow_dispatch:
 
 permissions:
@@ -517,3 +557,162 @@ jobs:
           fi
 
           echo "Production typecheck clean: 0 production error(s); ${total} total line(s), of which ${debt} are accepted test-file debt (pinned at ${ACCEPTED_TEST_DEBT_LINES})."
+
+  # ============================================================================
+  # Server-side C# suites (task 070 - Fable review 2026-09-21 section 1)
+  # ============================================================================
+  # WHY THIS EXISTS
+  # ---------------
+  # This project added 46 C# test files and NO COMPLETING PR-TIME JOB RAN THEM.
+  #
+  #   - `ci-tier1-blocking.yml` runs `Sprk.Bff.Api.Tests` only with
+  #     `Category=GoldenUtteranceEval` / `FidelityGate`. None of these tests carry
+  #     either category, so Tier 1 runs none of them.
+  #   - `ci-tier2-advisory.yml` is `continue-on-error: true` with a 30-minute cap.
+  #     Its test step was CANCELLED in 6 of 6 recent runs on this branch and its
+  #     verdict step never executed. Measured cause: the equivalent `sdap-ci.yml`
+  #     "Build & Test" job takes 23-34 minutes (runs 36434557427 = 32.6 min,
+  #     36431157503 = 34.4 min, 36162831641 = 22.8 min), so a 30-minute cap sits
+  #     below the real cost of the whole assembly. The cap is not the defect - the
+  #     SCOPE is.
+  #   - The only runner that completes is legacy `sdap-ci.yml`, and another
+  #     project's task 077 deletes it. It still exists as of 2026-09-28, so the gap
+  #     is PROSPECTIVE, not yet live. That is the honest framing.
+  #
+  # After that deletion the `POST /api/office/save` contract tests this project
+  # un-skipped as a deliverable, and NFR-02's 11-test per-row authorization suite
+  # (`VisualizationRowAuthorizationContractTests`), would run on NO PR check.
+  #
+  # WHY IT LIVES HERE AND NOT IN TIER 1
+  # -----------------------------------
+  # Tier 1 is the natural home and is FROZEN under the shadow-comparison window -
+  # confirmed still open 2026-09-28 by `scripts/ci/shadow-window-status.ps1`:
+  # "Do NOT edit ci-router.yml / ci-tier1-blocking.yml / ci-tier2-advisory.yml".
+  # This workflow is the only writable surface that runs on a PR.
+  #
+  # WHEN THE WINDOW CLOSES, MIGRATE THIS JOB INTO TIER 1 AND DELETE IT HERE.
+  # Leaving it in both places is duplication, not defence in depth.
+  #
+  # SELECTION MECHANISM: an explicit namespace-prefix filter (in the step below)
+  # ---------------------------------------------------------------------------
+  # Chosen over the two options the task anticipated, both worse:
+  #   - run the whole assembly: 12,359 tests, 23-34 min - the very timeout
+  #     behaviour being fixed;
+  #   - add `[Trait("Category", ...)]` to 46 test files: scope creep, and it makes
+  #     inclusion depend on an attribute a new file can silently omit.
+  # The namespaces are ALREADY organised by feature area, so prefix selection needs
+  # no change to any test file.
+  #
+  # HOW A NEW SUITE GETS PICKED UP: a new test class in any listed namespace is
+  # included AUTOMATICALLY, no edit here. A test in a NEW namespace is not, and that
+  # omission shows up as one missing line in the filter. Measured at 2026-09-28:
+  # 1,708 tests selected; 1,752 passed / 0 failed / 24 skipped in 3 m 44 s locally.
+  #
+  # NOT COVERED, deliberately, because they are DIFFERENT ASSEMBLIES: this project
+  # also touched `tests/Spaarke.ArchTests/**` (2 files) and
+  # `tests/integration/Spe.Integration.Tests/**` (1 file). ArchTests already run in
+  # Tier 1 AND in `sdap-ci.yml`, so they are covered elsewhere; Spe.Integration.Tests
+  # is a separate project this job does not build. Both are named in
+  # `notes/070-pr-time-runner.md` rather than silently omitted.
+  # ============================================================================
+  server-tests:
+    name: Server tests (office scope)
+    runs-on: ubuntu-latest
+    # Local wall-clock for the filtered set is 3 m 44 s; CI adds restore + build.
+    # 20 minutes is a hang guard with roughly 2x margin, NOT a budget to grow into.
+    # If this job approaches the cap, NARROW THE FILTER - do not raise the cap.
+    # Raising it is how Tier 2 ended up cancelled in 6 of 6 runs.
+    timeout-minutes: 20
+    env:
+      # -- VACUOUS-GREEN FLOOR ------------------------------------------------
+      # `sdap-ci.yml:246` already records the hazard this guards: "A --filter term
+      # can silently match zero tests (renamed, deleted, ...)". A filter that
+      # selects NOTHING exits 0 and reports a green check - the same false green as
+      # a gate that runs no suites. Rename one namespace in the filter and, without
+      # this floor, coverage silently collapses behind a passing check.
+      #
+      # A FLOOR, not an equality. Unlike the typecheck debt pin above, tests are
+      # EXPECTED to grow, and an exact pin would fail every PR that adds one. Set
+      # ~6% under the measured 1,708 so ordinary churn does not trip it while a
+      # collapse does. Re-baseline UPWARD only, deliberately, in the PR that grows
+      # the suites.
+      MIN_SELECTED_TESTS: '1600'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          # '10.x' matches every other .NET job in the repo; global.json pins
+          # 10.0.100 with rollForward latestFeature.
+          dotnet-version: '10.x'
+
+      - name: Run office-scope server suites
+        shell: bash
+        env:
+          DOTNET_NOLOGO: 'true'
+          DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+          TEST_FILTER: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Ai|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl'
+        run: |
+          # `set +e` IS LOAD-BEARING HERE TOO - the lesson from tasks 056 and 069.
+          # `shell: bash` expands to `bash --noprofile --norc -e -o pipefail {0}`, so
+          # errexit is injected into the interpreter. `dotnet test` exits non-zero on
+          # ANY test failure, which under injected `-e` would kill this step before
+          # the count assertion and the summary could run - making a real test
+          # failure and a collapsed filter indistinguishable in the log. This step
+          # decides from the counts AND the exit code, explicitly, below.
+          set +e
+          set -uo pipefail
+
+          mkdir -p "$RUNNER_TEMP/trx"
+          dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj \
+            -c Debug --filter "$TEST_FILTER" \
+            --logger "trx;LogFileName=office-server.trx" \
+            --results-directory "$RUNNER_TEMP/trx" \
+            2>&1 | tee "$RUNNER_TEMP/dotnet-test.log"
+          test_exit=${PIPESTATUS[0]}
+
+          TRX="$RUNNER_TEMP/trx/office-server.trx"
+          if [ ! -f "$TRX" ]; then
+            echo "::error::No TRX was produced. dotnet test did not run to completion (exit $test_exit) - this is a broken gate, not a clean pass."
+            tail -40 "$RUNNER_TEMP/dotnet-test.log" || true
+            exit 1
+          fi
+
+          counters=$(grep -o '<Counters[^/]*/>' "$TRX" | head -1)
+          field() { printf '%s' "$counters" | grep -o "$1=\"[0-9]*\"" | grep -o '[0-9][0-9]*' | head -1; }
+          total=$(field total); passed=$(field passed); failed=$(field failed)
+          total=${total:-0}; passed=${passed:-0}; failed=${failed:-0}
+
+          {
+            echo "# Office-scope server suites"
+            echo
+            echo "| | Count |"
+            echo "|---|---|"
+            echo "| **Failed** | **${failed}** |"
+            echo "| Passed | ${passed} |"
+            echo "| Total selected | ${total} (floor ${MIN_SELECTED_TESTS}) |"
+            echo
+            echo "Namespace-prefix selection over \`Sprk.Bff.Api.Tests\`. A new class in a"
+            echo "listed namespace is picked up automatically; a new NAMESPACE needs a line"
+            echo "added to the filter in this workflow."
+            echo
+            echo "**This job DOES fail the workflow run.** It does NOT block a merge -"
+            echo "master's ruleset requires only \`Router\`. Promotion is an owner action."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # The vacuous-green floor is checked FIRST: a collapsed filter is a worse
+          # failure than a red test, because it is silent.
+          if [ "$total" -lt "$MIN_SELECTED_TESTS" ]; then
+            echo "::error file=.github/workflows/office-addins-tests.yml::Filter selected only ${total} test(s), below the floor of ${MIN_SELECTED_TESTS}. A namespace was probably renamed or removed, so coverage collapsed while the run stayed green. Fix the filter, or lower MIN_SELECTED_TESTS deliberately in this PR with the reason in the PR body."
+            exit 1
+          fi
+
+          if [ "$test_exit" -ne 0 ] || [ "$failed" -gt 0 ]; then
+            echo "::error::${failed} server test(s) failed in the office-scope selection (dotnet test exit ${test_exit})."
+            grep -E "Failed |Error Message|Assert" "$RUNNER_TEMP/dotnet-test.log" | head -40 || true
+            exit 1
+          fi
+
+          echo "Office-scope server suites green: ${passed} passed, ${failed} failed, ${total} selected (floor ${MIN_SELECTED_TESTS})."
