@@ -89,18 +89,23 @@
 # regression class, `pull_request` + `push: master`, path-filtered, standalone,
 # outside the tiers). This file follows it deliberately.
 #
-# IT GATES A SUBSET, AND THE SUBSET IS THE POINT
-# ----------------------------------------------
-# This package is 12 of 22 suites green (164 of 380 tests) as of 2026-09-10.
-# The 10 red suites fail on pre-existing mock/assertion defects that long
-# predate this gate. Gating the full suite would have been red the moment it
-# was created — a check that is always red is a check everyone learns to
-# ignore, which is worse than no check. So the gated set is the green line,
-# recorded in `src/client/office-addins/ci-gated-suites.txt`, and it ratchets
-# upward as suites are fixed.
+# IT GATED A SUBSET — AND THE SUBSET IS NOW THE WHOLE PACKAGE
+# -----------------------------------------------------------
+# ⚠️ Corrected by task 069 (2026-09-28). This section read "12 of 22 suites green
+# (164 of 380 tests) as of 2026-09-10", which has been stale since task 071
+# repaired the ten red suites. The gate now covers **56 of the package's 56
+# suites** — verified at commit 949bfa123 (run 36162453924: "jest ran 56 suite(s),
+# manifest declares 56"). The ratchet in `ci-gated-suites.txt` reached the top.
 #
-# No test is deleted, skipped, or modified to achieve that. All 22 suites still
-# run nightly in `client-tests.yml`, which is the promotion signal for this list.
+# The original reasoning is kept because it is why the ratchet existed and why it
+# must not be replaced with a blanket `npm test`: gating the full suite on day one
+# would have been red from the moment it landed, and "a check that is always red is
+# a check everyone learns to ignore, which is worse than no check". The list is now
+# complete, but it stays an explicit list — that is what makes a deletion or rename
+# fail loudly (the manifest step) instead of silently shrinking coverage.
+#
+# No test was deleted, skipped, or modified to reach 56. All of them also run
+# nightly in `client-tests.yml`, which remains the promotion signal for this list.
 #
 # The manifest step fails if a gated path no longer exists, so a gated test
 # cannot be renamed away or deleted to turn the gate green.
@@ -190,6 +195,22 @@ jobs:
             exit 1
           fi
 
+          # ── TRAILING-NEWLINE CHECK (task 069) ─────────────────────────────────
+          # `while read` DROPS a final line that has no terminating newline, without
+          # a word of complaint, silently shrinking the gate. The suite-count
+          # assertion downstream (:~270) does NOT catch this and never could: both
+          # sides of that comparison derive from this same array, so a dropped line
+          # shrinks GATED_COUNT and the number of suites jest runs *equally* and the
+          # equality still holds. This is the only place the hole can be closed.
+          #
+          # Not hypothetical housekeeping: the manifest's last line is a REAL ENTRY
+          # (`shared/taskpane/hooks/__tests__/useSaveFlow.test.ts`), not a trailing
+          # comment, so a stripped newline silently ungates a live suite.
+          if [ -n "$(tail -c 1 "$manifest")" ]; then
+            echo "::error file=src/client/office-addins/ci-gated-suites.txt::$manifest does not end with a newline. \`while read\` would silently drop its final entry and shrink the gate. Add a trailing newline."
+            exit 1
+          fi
+
           suites=()
           while IFS= read -r line; do
             line="${line%%#*}"
@@ -243,15 +264,23 @@ jobs:
           #     npx jest --runTestsByPath <a real test> jest.setup.js
           #     -> "Test Suites: 1 passed, 1 total"   EXIT 0
           #
-          # That is LIVE here, not theoretical: jest.config.js sets
-          # `roots: ['<rootDir>/shared']`, so the moment anyone promotes a suite
-          # under word/ or outlook/ — exactly the coverage gap notes/043 F-5 flags —
-          # the file exists, the manifest check passes, jest runs nothing for it, and
-          # this gate reports a green covering 12 of a claimed 13.
+          # That WAS live here: jest.config.js used to set `roots: ['<rootDir>/shared']`
+          # alone, so promoting a suite under word/ or outlook/ — exactly the coverage
+          # gap notes/043 F-5 flags — gave a file that exists, a manifest check that
+          # passes, and a gate reporting green over a suite jest never ran.
+          # ⚠️ Updated by task 069 (2026-09-28): `roots` is now
+          # `['<rootDir>/shared', '<rootDir>/word', '<rootDir>/outlook']`
+          # (jest.config.js:12), so `word/commands/__tests__/commands.test.ts` IS
+          # reachable and the gate genuinely covers all 56 of its 56 entries. The
+          # assertion stays regardless — `roots` can narrow again, and it is the only
+          # thing that would notice.
           #
-          # It also closes a second, quieter hole: a manifest whose final line lacks
-          # a trailing newline is dropped by `while read` without a word, shrinking
-          # the gate silently. .editorconfig makes that latent, not impossible.
+          # ⚠️ IT DOES **NOT** CLOSE THE TRAILING-NEWLINE HOLE. This comment used to
+          # claim it did (corrected by task 069, 2026-09-28). It cannot: both sides of
+          # the comparison below derive from the SAME `while read` array, so a dropped
+          # final line shrinks GATED_COUNT and the suites jest runs equally, and the
+          # equality still passes. That hole is now closed for real, at its only
+          # possible site — the explicit `tail -c 1` check in the manifest step above.
           #
           # Asserting that jest ran exactly as many suites as the manifest declared
           # makes "no vacuous green" true BY CONSTRUCTION rather than by argument.
@@ -272,7 +301,12 @@ jobs:
           {
             echo "# Office Add-ins gated jest suites"
             echo
-            echo "**Reports, does not block.** ${GATED_COUNT:-0} suite(s) gated, of 56 in the package."
+            echo "**This job DOES fail the workflow run** when a gated suite fails. It does"
+            echo "NOT block a merge — master's ruleset requires exactly one named check,"
+            echo "\`Router\`, and this workflow is not in it. Two different claims; see the"
+            echo "file header. Merge-blocking is an owner ruleset action."
+            echo
+            echo "${GATED_COUNT:-0} suite(s) gated."
             echo
             echo "The ungated suites are not skipped — they run nightly, unchanged, in"
             echo "client-tests.yml. When the nightly baseline shows one of them green, add"
@@ -373,6 +407,33 @@ jobs:
       - name: Typecheck — fail on PRODUCTION errors only
         working-directory: src/client/office-addins
         shell: bash
+        env:
+          # ── PINNED ACCEPTED TEST-FILE DEBT (task 069, 2026-09-28) ──────────────
+          # The owner-approved 2026-09-09 accept is "production stays at 0, test-file
+          # debt is tolerated". Until this pin existed, the total was PRINTED and
+          # never CHECKED, so 74 -> 75 passed silently and new debt accrued invisibly
+          # behind a green check — FAILURE-MODES AP-12 in its live form.
+          #
+          # MEASURED, NOT COPIED. 74 is the figure CI itself reported at commit
+          # 949bfa123 (run 36162453924: "0 production error(s); 74 total line(s)").
+          # A number lifted from a document instead of measured at the moment of
+          # pinning is the stale-baseline error root CLAUDE.md §10 records for publish
+          # size, where a three-week-old figure led a project to overstate its own
+          # contribution 46×. This task's own POML carried 111 — already stale by 37
+          # lines after task 071 repaired the red suites. Pin the CI number, never the
+          # local one (they disagreed: 80 local vs 74 CI at the same commit), because
+          # CI is what enforces it.
+          #
+          # ── HOW TO RE-BASELINE (a deliberate edit, never a silent drift) ───────
+          # An INCREASE needs a reason. Order matters:
+          #   1. Confirm `prod` is still 0 — this pin never licenses production debt.
+          #   2. Read the new total from THIS job's own output on the PR that moved it.
+          #   3. Edit the number here, in the same PR, with the reason in the PR body.
+          # A DECREASE is the good direction and still requires the edit — the check
+          # is an equality, so paying debt down turns the job red until you lower the
+          # pin. That is deliberate: it stops a hard-won reduction from being silently
+          # spent again later.
+          ACCEPTED_TEST_DEBT_LINES: '74'
         run: |
           # 🔴 `set +e` IS LOAD-BEARING — DO NOT REMOVE IT.
           #
@@ -420,12 +481,17 @@ jobs:
             echo "| | Count |"
             echo "|---|---|"
             echo "| **Production errors** | **${prod}** |"
-            echo "| Test-file errors (accepted debt) | $((total - prod)) |"
+            echo "| Test-file errors (accepted debt) | $((total - prod)) / pinned ${ACCEPTED_TEST_DEBT_LINES} |"
             echo "| Total \`error TS\` lines | ${total} |"
             echo
             echo "Production errors fail this job. Test-file errors are the owner-approved"
-            echo "2026-09-09 accept and do not. **Reports, does not block** — master's"
-            echo "ruleset requires only \`Router\`."
+            echo "2026-09-09 accept — tolerated, but PINNED, so drift in either direction"
+            echo "fails too (task 069)."
+            echo
+            echo "**This job DOES fail the workflow run.** It does NOT block a merge:"
+            echo "master's ruleset requires exactly one named check, \`Router\`, and this"
+            echo "workflow is not in it. Those are two different claims — see the file"
+            echo "header. Making a red here merge-blocking is an owner ruleset action."
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$prod" -gt 0 ]; then
@@ -434,4 +500,20 @@ jobs:
             exit 1
           fi
 
-          echo "Production typecheck clean: 0 production error(s); ${total} total line(s) are accepted test-file debt."
+          # ── THE DEBT PIN ASSERTION (task 069) ─────────────────────────────────
+          # Runs AFTER the production check so a production error is always the first
+          # thing reported. Equality, not a ceiling: drift in either direction is a
+          # deliberate edit. See the step's `env:` block for the re-baseline procedure.
+          debt=$((total - prod))
+          if [ "$debt" -ne "$ACCEPTED_TEST_DEBT_LINES" ]; then
+            if [ "$debt" -gt "$ACCEPTED_TEST_DEBT_LINES" ]; then
+              echo "::error file=.github/workflows/office-addins-tests.yml::Accepted test-file debt ROSE: ${debt} line(s) vs the pinned ${ACCEPTED_TEST_DEBT_LINES}. New test-file type debt is accruing behind a green check. Fix the new errors, or re-baseline ACCEPTED_TEST_DEBT_LINES in this PR with the reason in the PR body."
+            else
+              echo "::error file=.github/workflows/office-addins-tests.yml::Accepted test-file debt FELL: ${debt} line(s) vs the pinned ${ACCEPTED_TEST_DEBT_LINES}. This is the good direction — lower ACCEPTED_TEST_DEBT_LINES to ${debt} in this PR so the reduction is locked in and cannot be silently spent again."
+            fi
+            echo "Test-file error lines currently counted:"
+            grep 'error TS' "$RUNNER_TEMP/tsc.txt" | grep -E '__tests__|\.test\.|\.spec\.|__mocks__' || true
+            exit 1
+          fi
+
+          echo "Production typecheck clean: 0 production error(s); ${total} total line(s), of which ${debt} are accepted test-file debt (pinned at ${ACCEPTED_TEST_DEBT_LINES})."
