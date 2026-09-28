@@ -1,5 +1,18 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> # 🔴 READ FIRST — [`INCOMING-D12-D13-REMEDIATION.md`](INCOMING-D12-D13-REMEDIATION.md)
+>
+> **The deployment model this project was built around has CHANGED** (owner decisions **D-12** + **D-13**,
+> merged to master 2026-09-28 in `38f48723e`). The "Model 1 = shared trial/SMB tier" is **RETIRED**; both
+> models are dedicated stamps differing only in which **Azure tenant** owns the customer's subscription, and
+> the BFF Entra app registration is **per customer in both models (BINDING)**.
+>
+> 🔴 **Four required code changes are in THIS project**, including one where `H3EntraAppRegHandler` currently
+> does the opposite of what D-13 requires. This branch is **812 commits behind master**.
+> **Do not start work, and do not resolve a merge conflict, before reading that file.**
+
+
+
 > 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
 > tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
 > stamps and differ **only** in which Azure tenant owns the customer's subscription:
