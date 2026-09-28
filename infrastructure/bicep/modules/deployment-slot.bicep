@@ -66,6 +66,9 @@ param slotSettingNames array = [
   'ApplicationInsightsAgent_EXTENSION_VERSION'
   'WEBSITE_SWAP_WARMUP_PING_PATH'
   'WEBSITE_SWAP_WARMUP_PING_STATUSES'
+  // ADR-036 A1 rule 2: a non-production slot runs no scheduled jobs. MUST stay sticky, or a swap carries
+  // `false` into production and silently stops every scheduled job there.
+  'Scheduling__RunScheduledJobs'
 ]
 
 @description('Resource ID of the User-Assigned Managed Identity to bind to this slot. REQUIRED (T5 structural fix). MUST equal the `userAssignedIdentityResourceId` bound to the parent App Service (`modules/app-service.bicep`) so slot-swap does NOT rotate the effective identity. Sourced from `modules/uami.bicep` (task 028) as `uami.outputs.id`.')
@@ -90,6 +93,8 @@ resource appService 'Microsoft.Web/sites@2023-01-01' existing = {
 var swapWarmUpSettings = {
   WEBSITE_SWAP_WARMUP_PING_PATH: healthCheckPath
   WEBSITE_SWAP_WARMUP_PING_STATUSES: '200'
+  // ADR-036 A1 rule 2 — the staging slot runs no scheduled jobs (sticky; see slotSettingNames).
+  Scheduling__RunScheduledJobs: 'false'
 }
 var mergedSettings = union(appSettings, swapWarmUpSettings)
 

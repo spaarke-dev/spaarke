@@ -52,8 +52,20 @@ const LazyQuickSummaryDashboardDialog = React.lazy(() =>
   }))
 );
 
+// Repointed to the SHARED copy 2026-09-04 (unified-access-control-r2, owner directive "work from
+// shared components where efficient"). This used to import a LegalWorkspace twin that was "kept in
+// lockstep" with the shared component BY A COMMENT — a maintenance tax with an obvious failure mode.
+// The twin is deleted; the shared component is strictly better, taking `authenticatedFetch` and
+// `bffBaseUrl` as injected props instead of importing solution-specific modules.
+// The shared file carries a default export specifically so React.lazy() keeps working here.
+// NOTE the path shape: the vite alias (vite.config.ts:134) already resolves
+// "@spaarke/ui-components" TO the package's `src` directory, so the subpath must NOT repeat it.
+// "@spaarke/ui-components/src/components/..." typechecks (tsconfig paths resolve it) but fails the
+// BUNDLE with a doubled `src/src/`. Deep-imported rather than taken off the barrel so React.lazy
+// still yields a separate chunk — importing from the package root would pull the whole barrel into
+// the main bundle and defeat the lazy split this call site exists for.
 const LazyCloseProjectDialog = React.lazy(
-  () => import("../CreateProject/CloseProjectDialog")
+  () => import("@spaarke/ui-components/components/CreateProjectWizard/CloseProjectDialog")
 );
 
 // SmartToDoDialog — inline replacement for the retired
@@ -1022,6 +1034,11 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
             projectName={closeProjectContext.projectName}
             containerId={closeProjectContext.containerId}
             onClose={handleCloseProjectDialog}
+            // Injected 2026-09-04 with the repoint to the shared component. The deleted LW twin
+            // imported both of these itself; the shared one takes them as props so it stays free of
+            // solution-specific imports. Both were already in scope here.
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={getBffBaseUrl()}
           />
         </React.Suspense>
       )}

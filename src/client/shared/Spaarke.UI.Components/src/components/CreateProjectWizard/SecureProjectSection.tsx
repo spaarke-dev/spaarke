@@ -3,14 +3,34 @@
  * Secure Project toggle section for the Create Project wizard.
  *
  * Displays a Fluent v9 Switch allowing users to designate the project as
- * "Secure". When toggled on, an expanded information panel explains:
- *   - What a Secure Project is
- *   - What additional infrastructure will be provisioned
- *   - That the designation is IRREVERSIBLE after creation
+ * "Secure". When toggled on, an expanded information panel explains what
+ * provisioning actually does, and that the designation can be undone.
  *
  * This component is rendered as a section within CreateProjectStep rather
  * than as a standalone wizard step, so that toggle state persists naturally
  * through Back/Next navigation (it lives in the parent's form state).
+ *
+ * COPY REWRITTEN 2026-09-09 (task 068, spec FR-31). Two claims were wrong and
+ * are gone:
+ *
+ *   1. The retired external-portal claim. That portal product is retired (the
+ *      external surface is SWA + CIAM) and provisioning activates no portal at
+ *      all — nothing in POST /api/v1/external-access/provision-project touches
+ *      one. External participants reach a secure project through explicit
+ *      `sprk_externalrecordaccess` grants instead.
+ *
+ *   2. The irreversibility warning. The designation CAN be removed: POST
+ *      /api/v1/external-access/unsecure-project (UnsecureProjectEndpoint)
+ *      reassigns the record to a named owner, revokes every share provisioning
+ *      issued, then clears `sprk_issecure`. design.md §5.1 calls the designation
+ *      reversible; spec FR-28 counts the reverse path as part of the mechanism.
+ *
+ * The verbatim retired copy is preserved in
+ * `projects/unified-access-control-r2/notes/task-068-secure-step-copy.md` —
+ * deliberately NOT reproduced here, so the FR-31 grep gate stays meaningful.
+ *
+ * Every sentence rendered below is traceable to ProvisionProjectEndpoint.cs as
+ * merged by task 061 — see the per-item notes on PROVISIONING_ITEMS.
  *
  * Constraints:
  *   - Fluent v9 only: Switch, Text, Divider, MessageBar, makeStyles
@@ -19,18 +39,24 @@
  */
 
 import * as React from 'react';
-import { Divider, MessageBar, MessageBarBody, Switch, Text, makeStyles, tokens } from '@fluentui/react-components';
 import {
-  LockClosedRegular,
-  BuildingRegular,
-  StorageRegular,
-  PeopleTeamRegular,
-  WarningRegular,
-} from '@fluentui/react-icons';
+  Divider,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  Switch,
+  Text,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
+import { LockClosedRegular, BuildingRegular, StorageRegular, PeopleTeamRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+/** Ties the toggle's `aria-controls` to the panel it discloses. */
+const PANEL_ID = 'secure-project-details';
 
 export interface ISecureProjectSectionProps {
   /** Current toggle state — controlled by parent. */
@@ -128,8 +154,8 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  // ── Warning bar ───────────────────────────────────────────────────────────
-  warningBar: {
+  // ── Notice bar (reversibility note) ───────────────────────────────────────
+  noticeBar: {
     borderRadius: tokens.borderRadiusMedium,
   },
 });
@@ -144,22 +170,47 @@ interface IProvisioningItem {
   description: string;
 }
 
+/**
+ * What provisioning does, in the order the server does it.
+ *
+ * Each entry maps to a step of `ProvisionProjectEndpoint.ProvisionProjectAsync`
+ * (task 061). Nothing forward-looking belongs here — if the server does not do
+ * it today, it must not be described here (CLAUDE.md §2, code wins).
+ */
 const PROVISIONING_ITEMS: IProvisioningItem[] = [
   {
+    // Endpoint steps 2, 3 and 5: resolve the ONE canonical `Secure Project`
+    // business unit BY NAME from configuration, resolve its default owner team,
+    // assign the project to that team, and verify the assignment took effect.
+    // Nothing is created — no business unit per project, and no account.
+    //
+    // "by design has no people in it" is deliberate hedging. Provisioning resolves
+    // the BU's DEFAULT owner team and never asserts it is empty; a Dataverse default
+    // owner team tracks BU membership, so emptiness holds only while no user is
+    // placed in that BU. That is an environment invariant, not a guarantee this code
+    // makes — and copy must not state it as one.
     icon: <BuildingRegular fontSize={16} />,
-    title: 'Dedicated Business Unit',
-    description: 'A Dataverse Business Unit is created to scope security roles and data access for this project.',
-  },
-  {
-    icon: <StorageRegular fontSize={16} />,
-    title: 'SharePoint Embedded Container',
-    description: 'An isolated SPE document container is provisioned exclusively for this project\u2019s files.',
-  },
-  {
-    icon: <PeopleTeamRegular fontSize={16} />,
-    title: 'External Access Portal',
+    title: 'Moved into the Secure Project business unit',
     description:
-      'A Power Pages workspace is activated so invited external users can access project documents and events.',
+      'The project is reassigned to the Secure Project business unit’s owner team, which by design has no people in it. Ownership therefore grants nobody access to the project.',
+  },
+  {
+    // Endpoint step 5.5 (ShareToCreatorAndPrincipalsAsync): the creator is
+    // identified from their own token via WhoAmI and always shared to with
+    // Read/Write/Append/Append To/Share. Provisioning FAILS rather than finish
+    // without it — an unshared secure project is a record nobody can open.
+    icon: <PeopleTeamRegular fontSize={16} />,
+    title: 'Shared with you, and only with people you add',
+    description:
+      'You are given access to the project explicitly, including the right to bring colleagues in. Everyone else — internal or external — needs an explicit grant before they can see it.',
+  },
+  {
+    // Endpoint steps 6 and 7: create the project's own SPE container and record
+    // it on sprk_containerid, failing if the write cannot be verified.
+    icon: <StorageRegular fontSize={16} />,
+    title: 'Given its own document container',
+    description:
+      'An isolated SharePoint Embedded container is created for this project’s files and recorded on the project record.',
   },
 ];
 
@@ -197,25 +248,40 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({ isS
             Secure Project
           </Text>
           <Text size={200} className={styles.toggleDescription}>
-            Enables external access, an isolated document container, and dedicated security boundaries for this project.
+            Restricts this project to people it is explicitly shared with, and gives it its own document container.
           </Text>
         </div>
 
+        {/*
+          The accessible name CONTAINS the visible label ("Enabled" / "Disabled").
+
+          It previously did not: the visible label said "Enabled" while `aria-label` said "Mark this
+          project as a Secure Project", so the accessible name shared no words with the visible one.
+          That fails WCAG 2.1 §2.5.3 Label in Name (Level A) — a speech-input user saying the word
+          they can see gets no match. Naming it "Secure Project: Enabled" keeps the context a screen
+          reader needs and the word a voice user says.
+
+          `aria-expanded` / `aria-controls` are here because flipping this switch mounts the panel
+          below. Without them the disclosure is silent, and the panel is exactly the copy this task
+          exists to make truthful — it would be corrected for sighted users only.
+        */}
         <Switch
           checked={isSecure}
           onChange={handleToggleChange}
           label={isSecure ? 'Enabled' : 'Disabled'}
           labelPosition="before"
-          aria-label="Mark this project as a Secure Project"
+          aria-label={`Secure Project: ${isSecure ? 'Enabled' : 'Disabled'}`}
+          aria-expanded={isSecure}
+          aria-controls={PANEL_ID}
         />
       </div>
 
       {/* Expanded info panel — shown when toggle is on */}
       {isSecure && (
         <>
-          <div className={styles.infoPanel}>
+          <div className={styles.infoPanel} id={PANEL_ID}>
             <Text size={300} weight="semibold" className={styles.infoPanelTitle}>
-              What will be provisioned when this project is created:
+              What securing this project does:
             </Text>
 
             <div className={styles.provisioningList}>
@@ -237,15 +303,29 @@ export const SecureProjectSection: React.FC<ISecureProjectSectionProps> = ({ isS
             </div>
           </div>
 
-          {/* Irreversibility warning */}
-          <MessageBar intent="warning" className={styles.warningBar}>
+          {/*
+            Reversibility note — replaces the permanence warning removed by task
+            068. Informational rather than a warning: undoing the designation is a
+            supported operation (UnsecureProjectEndpoint), not a hazard.
+
+            It names an ADMINISTRATOR on purpose. The endpoint ships, but no client
+            surface calls /unsecure-project yet (grep over src/**: this file's own
+            comments are the only references). "This can be undone later" would read
+            as something the person at this screen can do, and they cannot — which
+            would be a fresh instance of the promise-what-the-code-doesn't-do defect
+            this task exists to remove. Reword when the surface ships.
+          */}
+          <MessageBar intent="info" className={styles.noticeBar}>
             <MessageBarBody>
-              <Text size={200} weight="semibold">
-                <WarningRegular fontSize={14} aria-hidden="true" /> This designation is permanent.{' '}
-              </Text>
+              {/*
+                Phrased as "can be reversed", not "is not permanent". The negated form would put the
+                banned word back into the rendered copy, and the FR-31 gate is a blanket absence
+                check on it — a gate that has to reason about negation is a gate that stops working.
+              */}
+              <MessageBarTitle>This can be reversed.</MessageBarTitle>{' '}
               <Text size={200}>
-                Once a project is marked as Secure and created, the secure designation cannot be removed. Please confirm
-                this is correct before proceeding.
+                An administrator can remove the secure designation later. Doing so returns the project to a named owner
+                and revokes the access that securing it granted, so anyone who still needs it is added again.
               </Text>
             </MessageBarBody>
           </MessageBar>

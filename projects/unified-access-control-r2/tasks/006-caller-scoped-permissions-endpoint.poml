@@ -31,8 +31,8 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/DownloadAuthorizationCharacterizationTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test pinning app-scoped capability disclosure, flipped here.</dependency>
-      <dependency task="004" status="pending">Caller-scoped AuthorizationService to source the per-caller snapshot.</dependency>
+      <dependency task="001" status="completed">Characterization test pinning app-scoped capability disclosure, flipped here.</dependency>
+      <dependency task="004" status="completed">Caller-scoped AuthorizationService to source the per-caller snapshot.</dependency>
     </dependencies>
   </context>
 

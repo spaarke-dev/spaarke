@@ -260,6 +260,24 @@ When a task adds NEW endpoints, services, DI registrations, packages, or backgro
    - **The baseline AGES, and this dominates.** Every other project's merges land in your publish. Measured 2026-09-02: master alone had grown **44.96 → 45.42 MB (+0.46)** in the three weeks since the 2026-08-13 baseline. A project comparing to that baseline would attribute the whole +0.46 to itself — which is exactly what happened, and is 46× its actual +0.01 contribution.
    - **The zip tool changes the number by ~1.3 MB on byte-identical content.** PowerShell `Compress-Archive` gave **45.42 MB** for the same publish folder Python `shutil.make_archive` gave **44.11 MB**. `.claude/constraints/azure-deployment.md` already pins the method (Compress-Archive Optimal over `deploy/api-publish/*`) — **consult it before quoting any number**; the 2026-09-02 error was partly not doing so. This is also the likeliest mechanism behind the documented 2026-08-27 incident, where three agents on an identical base commit reported a 1.29 MB spread.
 
+   **Hazard THREE — the BUILD ENVIRONMENT (added 2026-09-10 by `unified-access-control-r2`).** A publish
+   from a worktree you have been iterating in is **not comparable** to one from a fresh worktree — *even
+   at the same commit, even after an apparent clean*. Measured: stale build state produced a **+4.95 MB**
+   delta that did not exist. The number was plausible enough to send an agent auditing its own code
+   rather than its measurement. The procedure below already prescribes a fresh worktree for **master**;
+   **the same discipline applies to the BRANCH side**, which the worked example does not spell out.
+   Corroboration that it was environmental: the pre-task commit and the task commit publish at 45.37 and
+   45.38 MB from fresh worktrees.
+
+   **Hazard FOUR — DEEP PATHS BREAK THIS PROCEDURE'S OWN TOOLING (added 2026-09-10 by
+   `unified-access-control-r2`).** Past `MAX_PATH`, MSBuild reports `MSB3030: Could not copy … because it
+   was not found` **for a file that exists**, and the resulting **partial publish zips SMALLER** — so a
+   broken measurement reads as an improvement. A 262-char scratchpad worktree path triggered it. Also:
+   the `C:\` root is **not writable** for the zip. **Publish and zip from a SHORT path** (e.g. `C:\wtNNNm`
+   / `C:\wtNNNb`), and sanity-check the FILE COUNT on both sides — if they differ, one publish is
+   incomplete and the delta is meaningless. Two verified-equal sides of 173 files each is the shape of a
+   trustworthy measurement; 173 vs 152 is not.
+
    **The procedure that isolates YOUR contribution:**
    ```bash
    git worktree add /tmp/wt-master origin/master --detach
@@ -407,6 +425,7 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 | Code patterns (25-line pointer files) | [`.claude/patterns/`](.claude/patterns/) |
 | Cross-cutting constraints | [`.claude/constraints/`](.claude/constraints/) |
 | **BFF additions governance (binding)** | [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md) — load before adding to `Sprk.Bff.Api`. §G Config Boundary rewritten 2026-06-29 for R7 single-hop dispatch (FR-29). |
+| **Workload placement — where background work runs (binding)** | [`.claude/adr/ADR-052-workload-placement.md`](.claude/adr/ADR-052-workload-placement.md) — the BFF, Azure Functions or Container Apps Jobs, decided **per workload** on stated signals and costs; tie-breaker = fewer moving parts. Inside the BFF: queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`; no new hand-rolled timer `BackgroundService`. `WorkloadPlacementDocDriftTests` fails the build on contradicting phrasings. `unified-access-control-r2` task 102 (2026-09-13). |
 | **BFF AI extraction assessment (evidence base)** | [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) |
 | **Wiring a new capability (Action + Binding — maker tutorial)** | [`docs/guides/ai-guide-consumer-wiring.md`](docs/guides/ai-guide-consumer-wiring.md) — Action + Binding authoring, mirror-first input schemas, all three entry paths, gate/resume, eval-case obligation, create-task worked example (REWRITTEN 2026-07-07 by ai-architecture-redesign-r1 task 052; supersedes the R7 consumer-triangle content) |
 | **Playbook-driven LLM Output Pattern (architecture)** | [`docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) — Wave 11 two-layer architecture (Layer 1 orchestrator template resolution + Layer 2 PromptSchemaRenderer `## Input` section). The canonical pattern for narrative-output consumers (Daily Briefing shipped reference; Insight Engine matter-summary worked example). Required reading before authoring new AI executors or playbooks. R7 task 111a / operator-binding 2026-06-29. |

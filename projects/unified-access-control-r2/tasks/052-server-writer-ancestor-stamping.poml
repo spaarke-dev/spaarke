@@ -32,7 +32,7 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (new CoreAncestorResolver tests + updated writer tests)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="050" status="pending">Soft: derivation-rules note for parity; the rules themselves are spec-fixed so this task may start in parallel.</dependency>
+      <dependency task="050" status="completed">Soft: derivation-rules note for parity; the rules themselves are spec-fixed so this task may start in parallel.</dependency>
     </dependencies>
   </context>
 

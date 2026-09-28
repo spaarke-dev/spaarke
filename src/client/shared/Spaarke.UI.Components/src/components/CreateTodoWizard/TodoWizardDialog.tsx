@@ -242,14 +242,20 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         // (task 021 / FR-12) — TodoService calls it after applyResolverFields, before
         // createRecord, when a regarding parent is present.
         const todoService = new TodoService(dataService, authenticatedFetch, bffBaseUrl);
-        const result = await todoService.createTodo(currentFormValues, context.association);
+        // ISS-027 / task 119: thread the wizard's attached files through so TodoService can
+        // upload them to SPE and create the linked sprk_document rows AFTER the to do exists.
+        // Zero files is a no-op inside createTodo — the zero-files path is unchanged.
+        const result = await todoService.createTodo(currentFormValues, context.association, context.uploadedFiles);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create to do');
         }
 
         const todoId = result.todoId!;
         const todoName = result.todoName!;
-        const warnings: string[] = [];
+        // Seed with any warnings TodoService already accumulated (field-mapping engine,
+        // and — as of task 119 — file upload / document-record-link warnings). Previously
+        // dropped here, which is how a failed upload could reach this panel silently.
+        const warnings: string[] = [...(result.warnings ?? [])];
 
         // ── Send email (if selected) — preserved from R1/R2 follow-on flow ────────
         if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {

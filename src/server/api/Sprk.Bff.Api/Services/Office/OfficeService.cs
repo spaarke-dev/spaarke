@@ -2962,16 +2962,9 @@ public class OfficeService : IOfficeService
                 LastUsed = DateTimeOffset.UtcNow.AddHours(-5),
                 UseCount = 8
             },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Account,
-                LogicalName = "account",
-                Name = "Acme Corporation",
-                DisplayInfo = "Industry: Manufacturing | City: Chicago",
-                LastUsed = DateTimeOffset.UtcNow.AddDays(-1),
-                UseCount = 23
-            },
+            // An `account` sample row was removed here 2026-09-04: `account` is no longer an association
+            // type (sprk_document has no account lookup in either column family), and sample data that
+            // shows a type the save path now refuses teaches the wrong shape.
             new()
             {
                 Id = Guid.NewGuid(),
@@ -3033,10 +3026,11 @@ public class OfficeService : IOfficeService
                 FileSize = 1024567,
                 EntityReference = new EntityReference
                 {
+                    // Retyped from `account` 2026-09-04 — see the removal note above.
                     Id = Guid.NewGuid(),
-                    EntityType = AssociationType.Account,
-                    LogicalName = "account",
-                    Name = "Acme Corporation"
+                    EntityType = AssociationType.Project,
+                    LogicalName = "sprk_project",
+                    Name = "Acme Implementation Project"
                 }
             },
             new()
@@ -3094,14 +3088,8 @@ public class OfficeService : IOfficeService
                 Name = "Smith vs Jones Matter",
                 FavoritedAt = DateTimeOffset.UtcNow.AddDays(-30)
             },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Account,
-                LogicalName = "account",
-                Name = "Acme Corporation",
-                FavoritedAt = DateTimeOffset.UtcNow.AddDays(-25)
-            },
+            // An `account` favorite sample was removed here 2026-09-04 — same reason as the removal in
+            // the recent-associations sample above.
             new()
             {
                 Id = Guid.NewGuid(),

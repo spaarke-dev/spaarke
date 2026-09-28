@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="107" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-009 (#974) option A — invert the read default: a grant with NO sprk_expiresdate confers NOTHING</title>
+    <phase>FR-33 External grant expiry (register-driven, owner rule 2026-09-15)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs in Infrastructure/ExternalAccess — this changes what every external caller can reach, in the fail-CLOSED direction. Two definitions of "expired" (the OData predicate and its in-memory mirror) must move together or /grant reports an outcome the reader contradicts.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The mechanism is now fully decided (owner D-1) and the edit is two adjacent members plus the tests that pin their old semantics. No mechanism choice remains.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small diff, large blast radius: the change is a deliberate access REMOVAL, and the characterization tests that currently pin "null never expires" must be inverted with intent rather than deleted to make a build pass.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>🔴 CHANGED 2026-09-21 by the D-1 rescope. This task no longer touches src/dataverse/** — it modifies Infrastructure/ExternalAccess/ExternalParticipationService.cs, the project's declared EXCLUSIVE zone. It was marked parallel-safe=true only while it was a Dataverse-plugin task. It must NOT run alongside 054/055/056/088 or anything else in that zone.</parallel-reason>
+    <deps>097</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3-5 hours + an operator COUNT before deploy</estimated-effort>
+    <origin>Register ISS-009 / GitHub #974. 🔴 RESCOPED 2026-09-21 (task 115 follow-on) to the owner's D-1 decision of 2026-09-19 — see notes/owner-decision-brief-2026-09-18.md §D-1. The prior version of this file specified a Dataverse-side default (plugin or entity-scope business rule) and required the read filter to stay UNCHANGED; both were retired by that decision, and every binding element still asserted them.</origin>
+  </metadata>
+
+  <prompt>🔴 THE ORIGINAL PREMISE OF THIS TASK IS RETIRED. Do NOT write a Dataverse plugin, and do NOT add a Dataverse-side default. The owner ruled on 2026-09-19 (D-1): **"We do not use Dataverse plugins."** Plugins are off the table REPO-WIDE and no ADR-002 exception is being sought.
+
+ISS-009 is instead closed from the READ side. Today `ExpiryPredicate` treats a null `sprk_expiresdate` as "never expires", so a grant row created outside the BFF — through a form, the Web API, a flow or an import, all reachable because users hold Create on `sprk_externalrecordaccess` — confers access forever. Invert that default: **a row with no expiry confers NOTHING.** Undated becomes fail-closed rather than fail-open.
+
+The other two halves of D-1 are SEPARATE, ALREADY-AUTHORED tasks. Do not absorb them: **117** is option B (the scheduled reconciliation job that stamps undated rows, reusing `ExternalGrantLifecycle.DefaultExpiry` rather than a second literal 90), and **118** is option C (retire the Create-privilege proxy — code before config).</prompt>
+  <role>SPAARKE platform developer. BFF authorization internals: the external-access read filters and their in-memory mirror. Follow ADRs strictly.</role>
+  <goal>A `sprk_externalrecordaccess` row with a null `sprk_expiresdate` confers NO access on any path: the OData read filter excludes it, and the in-memory write-path mirror agrees. Both definitions of "expired" move together and remain a single source of truth. A row WITH an expiry is unaffected in either direction, including on the expiry date itself. The operator COUNT of currently-undated rows is documented and stated as a pre-deploy gate, because this change REMOVES access from every such row.</goal>
+
+  <context>
+    <background>Register ISS-009 (task 097 code review). Since 097 the BFF never writes a grant without `sprk_expiresdate` — but the column is optional in Dataverse and users hold Create on the table, so non-BFF writes can still omit it, and the read filter treats null as never-expiring.
+
+🔴 **THE OWNER DECISION THAT RESCOPED THIS TASK** (2026-09-19, D-1; verbatim in notes/owner-decision-brief-2026-09-18.md): *"We do not use Dataverse plugins."* → A + B, and C is in scope, not deferred. Plugins are OFF the table repo-wide; no ADR-002 exception is sought. **Task 107 is RESCOPED off every Dataverse-side mechanism.** Option **A** is: invert the read default so a null `sprk_expiresdate` confers NOTHING — drop the `eq null` branch from `ExpiryPredicate`.
+
+**GROUND TRUTH, verified at HEAD 2026-09-21** (do not inherit; re-check before editing):
+
+1. `ExpiryPredicate` — `ExternalParticipationService.cs:99-100`:
+   `=> $"(sprk_expiresdate eq null or sprk_expiresdate ge {today:yyyy-MM-dd})";`
+   It is the ONE string definition. `grep "sprk_expiresdate eq null"` over `src/**/*.cs` returns exactly this line. Both grant filters consume it — the contact filter (`:62`) and `BuildOrganizationGrantFilter` (`:71`) — as does `ExternalDataService.cs:1031`. So there is ONE site to change, not six; earlier notes counting "six server-side sites" were counting CONSUMERS of this hoisted predicate.
+
+2. 🔴 **`ConfersAccessOn` — `ExternalParticipationService.cs:124-125` — IS THE PART THE OLD POML NEVER MENTIONED, AND IT IS THE RISK.**
+   `=> expiresDate is null || expiresDate.Value >= today;`
+   It is the IN-MEMORY MIRROR of `ExpiryPredicate`, deliberately adjacent to it, and the only in-memory expiry test in the external-access WRITE path (task 106). Its own doc comment states why: *"Two independent definitions of 'expired' is precisely the drift that would let `/grant` report an outcome the reader contradicts."* **If you change the predicate and not the mirror, `/grant` will tell a caller a grant is live while the reader denies it.** `SetRecordShareExpiryEndpoint` was deliberately routed through this method so the single-definition claim is true by construction — keep it true. (`GrantExpiryReminderJob`'s days-until-expiry arithmetic is NOT a mirror; it answers a different question. Leave it.)
+
+3. **Tests that PIN THE CURRENT (about to be retired) SEMANTICS.** These must be inverted with intent and a recorded reason — never deleted to make a build go green:
+   - `GrantExpiryCharacterizationTests.ExpiryPredicate_TreatsAGrantWithNoExpiryAsNeverExpiring` (`:90`) — its NAME states the retired rule.
+   - `GrantExpiryCharacterizationTests` `:224` — the `ConfersAccessOn` mirror assertion.
+   - `GrantLifecycleCharacterizationTests` `:955` — *"(`ExpiryPredicate`'s `eq null` branch), so that row confers access too."*
+   - `ExternalAccessQueryIntegrityGuardTests` (`:40`, `:85`) — the guard asserting the builders append `ExpiryPredicate`; it should still pass unchanged, and if it does not, understand why before touching it.
+   A prior measurement (notes/task-007-grant-expiry.md:112) recorded that dropping the `eq null` branch made **1 of 11** tests fail. Expect MORE than one now — that count predates tasks 097/100/106. Report the real number.
+
+4. **This is an access REMOVAL, and the blast radius is data-dependent.** D-1 says "blast radius zero today but COUNT before deploy". Zero-today is a claim about live data, not about code, and it was not re-measured this session. Every currently-undated active grant row loses access the moment this deploys. The count is the gate.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs — `ExpiryPredicate` (:99-100) AND `ConfersAccessOn` (:124-125); both, or neither</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/GrantExpiryCharacterizationTests.cs — the characterization tests that pin the retired semantics</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/GrantLifecycleCharacterizationTests.cs — `:955`'s `eq null` assertion</file>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md — its "Expiry enforcement — NOT IMPLEMENTED" note (~:220) is stale since tasks 007 / 097 / 100</file>
+      <file role="modify">docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md — the pre-deploy COUNT command and what it means</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs — the BFF's own default (task 097)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md §D-1 — the ruling this task now implements</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/task-007-grant-expiry.md — why the `eq null` branch was added in the first place; read it before removing it</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="097" status="completed">The BFF-side default — after it, the BFF itself never writes an undated grant, which is what makes inverting the read default safe for BFF-written rows.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner D-1 2026-09-19">🔴 BINDING, DO NOT RE-LITIGATE. "We do not use Dataverse plugins." Scope: the whole task. No plugin, no entity-scope business rule, no Dataverse-side default, no ADR-002 exception request. If the answer seems to require one, that is an escalation, not a decision.</constraint>
+    <constraint source="project">Scope: the two definitions. `ExpiryPredicate` and `ConfersAccessOn` MUST change in the same commit and MUST remain semantically identical. A test pins their agreement; if no such test exists after this task, the task is not done.</constraint>
+    <constraint source="ADR-003">Fail closed. The whole point of this change is that the undated case moves from fail-OPEN to fail-CLOSED. Do not add a compensating fallback that restores the old behaviour for "safety" — that would reinstate exactly what is being removed.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives. A test that still passes when the `eq null` branch is restored is not pinning this change.</constraint>
+    <constraint source="ADR-038">Tests stay at KEEP paths (tests/integration/auth/**). Characterization tests are INVERTED with a recorded reason, never deleted to make the build pass. Rename any test whose NAME asserts the retired rule.</constraint>
+    <constraint source="owner 2026-09-04">Scope: deployment. Code + docs only; the live operator COUNT and the deploy itself are operator steps — document them, do not execute them.</constraint>
+    <constraint source="CLAUDE.md §10">BFF-touching: state the placement decision citing .claude/constraints/bff-extensions.md; report publish size (ceiling 60 MB). This is an in-place edit of an existing service, so expect ~0.00 MB — but measure against a FRESH master build, never the recorded baseline.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>external-access read filters; expiry semantics; fail-closed inversion</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/notes/owner-decision-brief-2026-09-18.md</file>
+      <file>projects/unified-access-control-r2/notes/task-007-grant-expiry.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Access-control seam map.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Re-verify the two line references at HEAD (`ExpiryPredicate`, `ConfersAccessOn`) and re-run the `grep "sprk_expiresdate eq null"` census — if it returns more than the one line, STOP and report, because a second hand-rolled copy would mean the hoist has already been broken by another project.</step>
+    <step order="1">Invert BOTH definitions in one edit: drop the `eq null` branch from `ExpiryPredicate`, and change `ConfersAccessOn` so a null expiry confers nothing. Update both doc comments — they currently EXPLAIN the old rule, and a comment that outlives its mechanism is this project's AP-12.</step>
+    <step order="2">Add a test that pins the two definitions to the SAME semantics for the null case, so they cannot drift apart again. Then invert the characterization tests that assert the retired rule, renaming any whose name states it, each with a one-line reason citing D-1.</step>
+    <step order="3">Perturbation (mandatory): restore the `eq null` branch and confirm the new tests go RED; restore the mirror's `is null ||` and confirm the agreement test goes RED independently. Revert both. Report the exact counts before and after.</step>
+    <step order="4">Docs: fix entity-schema.md's stale "NOT IMPLEMENTED" note; add the pre-deploy COUNT command to EXTERNAL-ACCESS-ADMIN-SETUP.md, stating plainly that every undated active grant loses access on deploy and that the count must be taken and reviewed BEFORE the deploy, not after.</step>
+    <step order="5">Build + full external-access suite green; publish size reported vs a fresh master build. Write notes/task-107-grant-expiry-read-default.md. Leave TASK-INDEX.md and this POML's status to the orchestrator.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `sprk_expiresdate eq null` census returns MORE than the single `ExpiryPredicate` line, STOP — a second copy means the single-definition invariant is already broken, and fixing that is a prerequisite, not a side effect of this task.</trigger>
+    <trigger>If closing ISS-009 appears to need a Dataverse-side mechanism after all, STOP and escalate to the owner. D-1 ruled plugins out repo-wide; re-opening that is the owner's call, never an implementation decision.</trigger>
+    <trigger>🔔 If the live COUNT of undated active grant rows cannot be taken (no Dataverse access this session), deliver the code + tests + docs and state EXPLICITLY that the pre-deploy gate is unmet. Do NOT claim "blast radius zero" on the strength of the D-1 note — that claim was about live data and has not been re-measured.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ExpiryPredicate` + `ConfersAccessOn` already exist as the single hoisted definition pair; this task changes their semantics, it does not add a component.</existing>
+    <extension>Yes — an in-place semantic change to two adjacent existing members. No new service, no new mechanism, no new surface. This is why option A was chosen over B/C for the read half.</extension>
+    <cost-of-doing-nothing>A grant row created outside the BFF with no expiry confers access FOREVER, and FR-33 holds only for BFF-written rows. Users hold Create on `sprk_externalrecordaccess`, so the path is reachable today, not hypothetical.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ (inverted characterization + the new predicate/mirror agreement test)</output>
+    <output type="doc">entity-schema.md, EXTERNAL-ACCESS-ADMIN-SETUP.md, notes/task-107-grant-expiry-read-default.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ExpiryPredicate(today)` no longer contains `eq null`; a grant row with a null `sprk_expiresdate` is excluded by the filter.</criterion>
+    <criterion testable="true">`ConfersAccessOn(null, today)` returns FALSE, and a test pins `ExpiryPredicate` and `ConfersAccessOn` to the same answer for the null case — so the two definitions cannot drift apart again.</criterion>
+    <criterion testable="true">Unchanged in the other direction: a row with an expiry in the future confers access, and a row expiring TODAY still confers access (`ge`, not `gt` — task 007's DateOnly rule).</criterion>
+    <criterion testable="true">Negative: rows the BFF creates are unaffected — since task 097 it always sends an expiry.</criterion>
+    <criterion testable="true">Every characterization test asserting the retired "null never expires" rule is INVERTED (and renamed where its name stated the rule), each carrying a one-line reason citing D-1. None was deleted. State the exact count changed.</criterion>
+    <criterion testable="true">Perturbation: restoring the `eq null` branch reddens the new tests, and restoring the mirror's null-passthrough reddens the agreement test INDEPENDENTLY. Both reverted; exact pass/fail counts reported for each.</criterion>
+    <criterion testable="true">No Dataverse plugin, business rule or schema default was added anywhere — `src/dataverse/**` is untouched by this task (verified by diff).</criterion>
+    <criterion testable="true">entity-schema.md no longer says expiry is enforced nowhere; EXTERNAL-ACCESS-ADMIN-SETUP.md carries the pre-deploy COUNT command and states that undated active grants lose access on deploy.</criterion>
+    <criterion testable="true">Build green; full external-access suite green with exact numbers; publish size reported against a FRESH master build.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register ISS-009; GitHub #974 (label unified-access-control-r2). Related: tasks 097, 100, 101; DEF-001 (#961). Siblings from the same D-1 decision: **117** (option B — the scheduled reconciliation job) and **118** (option C — retire the Create-privilege proxy, code before config).
+
+🔴 RESCOPED 2026-09-21 as a task-115 follow-on. This file was NOT in task 115's nine, so its premise rot survived that pass — it is the TENTH instance. What it said before: build a Dataverse-side default (plugin or entity-scope business rule), with acceptance criterion 5 requiring that *"the read filter is unchanged (grep: the `eq null` clause is still there)"* — the exact opposite of the owner's decision, which is to remove that clause. Its `&lt;parallel-safe&gt;` was also flipped true → **false**: the rescope moved it from `src/dataverse/**` into `Infrastructure/ExternalAccess/**`, the project's exclusive zone.
+
+The single most important thing this file now carries and did not before: **`ConfersAccessOn` (`:124-125`) is the in-memory mirror of `ExpiryPredicate` and must change with it.** Changing only the predicate makes `/grant` report a grant as live while the reader denies it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

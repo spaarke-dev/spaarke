@@ -43,13 +43,25 @@ public class RecordKeyedUploadAuthorizationTests
 {
     private const string MappedEntity = "sprk_matter";
     private const string MappedEntitySet = "sprk_matters";
-    // Changed 2026-09-03 from `sprk_workassignment`, which the Q4 widening ADDED to the shared map —
-    // so the old value silently stopped testing the deny path and this test went red, correctly.
-    // `sprk_todo` is the better example anyway: it is genuinely unmappable rather than merely
-    // not-yet-mapped, because `sprk_document` has no `sprk_todo` lookup column at all, so a document
-    // uploaded against a to-do could never be associated to it. If a to-do lookup is ever added and
-    // the type is mapped, pick another unmapped type here — do not delete the test.
-    private const string UnmappedEntity = "sprk_todo";
+    // This constant has now moved TWICE, each time because the type it named got mapped:
+    //   2026-09-03  sprk_workassignment -> sprk_todo   (Q4 widening mapped work assignment)
+    //   2026-09-04  sprk_todo           -> account     (sprk_relatedtodo turned out to exist)
+    //
+    // The 2026-09-03 move called `sprk_todo` "genuinely unmappable rather than merely not-yet-mapped".
+    // That was wrong — `sprk_relatedtodo` existed the whole time; the claim came from searching only
+    // the bare `sprk_{type}` family. So the deny path was once again not being tested, which is the
+    // exact defect that move was made to fix.
+    //
+    // `account` is the first value here that is unmappable for a REASON rather than by omission:
+    // `sprk_document` has no account lookup in EITHER column family, and the owner decided on
+    // 2026-09-04 that it never will (Spaarke's organization analogue is `sprk_organization`). It was
+    // removed from BOTH EntityAccessFilter.EntitySetByType and the Office save allow-list on that
+    // basis, so it is unmappable by policy, not by accident.
+    //
+    // If account is ever mapped, move this again rather than deleting the test — and note that the
+    // recurrence itself is the signal: pick the value from what the maps EXCLUDE ON PURPOSE, never
+    // from what merely happens to be missing today.
+    private const string UnmappedEntity = "account";
     private const string OwnContainer = "b!secure-own-container-0000000000";
     private const string BusinessUnitContainer = "b!record-bu-container-00000000000";
 
@@ -117,8 +129,8 @@ public class RecordKeyedUploadAuthorizationTests
     [Fact(DisplayName = "Task 076: an entity logical name outside the shared map DENIES rather than passing through")]
     public async Task Upload_WhenEntityTypeIsNotAuthorizable_IsDeniedWithoutProbing()
     {
-        // sprk_todo is NOT in EntityAccessFilter's logical-name -> entity-set table. It must deny, not
-        // proceed: an entity whose per-record access nothing here can evaluate is an entity whose
+        // UnmappedEntity is NOT in EntityAccessFilter's logical-name -> entity-set table. It must deny,
+        // not proceed: an entity whose per-record access nothing here can evaluate is an entity whose
         // uploads cannot be accepted, because accepting one writes bytes into a container on the
         // strength of no decision.
         var probe = new StubProbe(RequiredRights);

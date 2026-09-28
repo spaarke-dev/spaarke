@@ -46,7 +46,7 @@
 - Completed: `{ts}`
 - Status: `{Success | Failed}`
 - Resources provisioned: `{N}`
-- Bicep stack: `{stack-name}` (model1-shared / model1-customer / model2-full / customer)
+- Bicep stack: `{stack-name}` (model2-full / customer) — *`model1-shared` and `model1-customer` retired 2026-09-28 per D-12*
 - Duration: `{N} min`
 - Notes: {any errors; deploymentId; RG name}
 
@@ -65,7 +65,7 @@
 - Status: `{Success | Failed}`
 - Notes: {app-reg objectId; client-cred rotation timestamp; per ADR-028 21 MUSTs applied}
 
-## Handler H4 (KV secret seeding — per-tenant + shared)
+## Handler H4 (KV secret seeding — per-customer)
 
 - Started: `{ts}`
 - Completed: `{ts}`

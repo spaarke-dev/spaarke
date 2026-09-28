@@ -4,7 +4,7 @@
     <title>ADR-028 A2 narrow amendment (path B) — workforce systemuser root sets derive from Dataverse's impersonated answer</title>
     <phase>1 One evaluator</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architecture change on the auth architecture ADR; tags include auth/adr (CLAUDE.md §8 FULL row).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,7 +81,29 @@
     <criterion testable="true">.claude/CHANGELOG.md carries an entry for this amendment.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec ADR Tensions row 3; investigation 08 §6 conditions 1 and 6. Task 036 (the swap) lists this task as a dependency; task 035 (the source) should also cite it in its PR.</notes>
+  <notes>Spec ADR Tensions row 3; investigation 08 §6 conditions 1 and 6. Task 036 (the swap) lists this task as a dependency; task 035 (the source) should also cite it in its PR.
+
+COMPLETED 2026-09-04 as ADR-028 **Amendment A5** (not "A2 amendment" — ADR-028 already carried A1-A4;
+the title describes what it amends, not its name). Concise-only; no docs/adr/ADR-028-*.md exists
+(re-confirmed, consistent with the A2/A3/A4 notes).
+
+The escalation trigger did NOT fire, and narrowness is MECHANICAL rather than asserted: across the
+428-line ADR, git diff shows EXACTLY ONE modified line - the A2 derivation clause - plus the additive
+A5 section. A3 needed no edit (it describes plane selection, not root-set derivation).
+
+Both negative criteria were diff-verified, not asserted: the five "no OBO" prohibition sites are
+intact, and the contact branch of the modified clause is BYTE-IDENTICAL. Self-caught deviation: an
+annotation added to the contact branch was REVERTED because it modified text criterion 4 protects.
+
+TWO PROJECT-NOTE ERRORS FOUND AND RECORDED IN THE ADR:
+ 1. notes/access-model-decision.md pairs MSCRMCallerID with the AAD oid. WRONG - it takes the
+    systemuserid; the live helper says so in its own XML doc.
+ 2. The fail-closed is in the READ METHOD (DataverseWebApiService.cs:978 throws on Guid.Empty), NOT in
+    DataverseImpersonation, which deliberately adds no header and lets the request proceed APP-ONLY.
+    A new impersonated call site that bypasses the read method would silently issue an UNSCOPED query
+    on the exact path whose purpose is to narrow it. A5 requires new paths to carry their own refusal.
+
+See notes/task-031-adr-028-a5-amendment.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

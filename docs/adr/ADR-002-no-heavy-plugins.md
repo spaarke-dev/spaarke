@@ -106,8 +106,7 @@ A **write-path invariant** is a rule that must always be true about a record at 
 | Writes outside the product | Async fix-up worker + reconciliation, fail-closed (WP-5, WP-6) |
 | Business logic | BFF endpoints |
 | Orchestration | API + async workers |
-| External services | BackgroundService (ADR-001) |
-| Long-running work | Job contracts + queues (ADR-004) |
+| External services | A host chosen under ADR-052 (inside the BFF: ADR-004 queue / ADR-036 schedule) |
 | Observability | Application Insights |
 | Retries & idempotency | Worker infrastructure |
 | Authorization | Endpoint-level filters (ADR-008) |
@@ -174,7 +173,8 @@ So a future exception does not repeat the retired `Spaarke.CustomApiProxy` mista
 
 | ADR | Relationship |
 |-----|-------------|
-| ADR-001 | APIs and BackgroundService workers as primary runtime |
+| ADR-001 | Minimal API as the BFF runtime |
+| ADR-052 | Where background work runs — decided per workload (BFF / Functions / Container Apps Jobs); supersedes ADR-001s Functions provisions |
 | ADR-004 | Uniform async job contracts (fix-up / reconciliation jobs) |
 | ADR-008 | Endpoint-level authorization |
 | ADR-028 | Webhook/HMAC + managed identity auth for change signals |

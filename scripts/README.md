@@ -1009,7 +1009,62 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 ---
 
+## Data Backfill Scripts
+
+### `Backfill-CoreAncestorStamps.ps1`
+**Purpose:** One-time (re-runnable) backfill of FR-26 core-ancestor stamps onto EXISTING child-class Dataverse records (`sprk_todo`, `sprk_communication`, `sprk_event`, `sprk_invoice`, `sprk_document`, `sprk_analysis`) whose regarding target is itself a child-class record — so FR-27 access inheritance ("a contact with Project access sees its To Dos/communications/...") works for records created before the `unified-access-control-r2` FR-26 write-path tasks (050/052) shipped. Discovers ancestor-stamp columns and child-of-child lookups from LIVE Dataverse metadata every run (never a hard-coded list) — see the script header and the companion runbook for a live-metadata finding this caught (`sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema).
+**Usage:** 🔴 One-time (per environment) — re-runnable to fixpoint for deep (2+ hop) chains; safe to run repeatedly (idempotent).
+**Lifecycle:** ✅ Maintained (added 2026-09-04 by `unified-access-control-r2` task 053)
+**Dependencies:** Azure CLI (`az login`), Dataverse connection, PowerShell 7+
+**Owner:** UAC Team (`unified-access-control-r2`)
+**Last Used:** Author-time syntax validation only (`[ScriptBlock]::Create`, `Get-Help -Full`, PSScriptAnalyzer, and an isolated local test of the retry/closure helper) — **not yet run against a live environment**; live metadata (`EntityDefinitions`/`ManyToOneRelationships`, read-only) was queried during authoring to verify column names. Execution against a real environment is an explicit operator decision (see the runbook §7).
+
+**When to Use:**
+- Once, per environment, after tasks 050/052 (FR-26 write-path convergence) have shipped — to backfill pre-existing child records that predate the stamp.
+- Re-run after a partial/interrupted `-Apply` — resumable by construction (the candidate query itself excludes already-stamped rows; no checkpoint file needed).
+- Re-run to fixpoint for deep chains (2+ hops of child-of-child) — each pass can resolve one more hop as earlier targets get stamped; converged when a run reports `ToWrite: 0`.
+
+**Command:**
+```powershell
+# Dry run (default) — zero writes, full candidate summary + log. Always run first.
+.\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Apply — writes every resolvable stamp (unless the 50k/20%-unresolvable escalation gate fires).
+.\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+
+# Stage one entity at a time.
+.\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply -Entities sprk_todo
+```
+
+**Safety model:** dry-run default (`-WhatIf` also forces preview even combined with `-Apply`); idempotent (compares the derived value against the row's current value, not just null-vs-populated); a disagreeing existing stamp is reported as a `Conflict` and never overwritten; an escalation gate (>50,000 total candidates, or any entity >20% unresolvable) blocks `-Apply` until `-AcknowledgeEscalation` is passed. Full detail: `Get-Help .\Backfill-CoreAncestorStamps.ps1 -Full` and [`projects/unified-access-control-r2/notes/phase3-backfill-runbook.md`](../projects/unified-access-control-r2/notes/phase3-backfill-runbook.md).
+
+---
+
 ## Testing & Validation Scripts
+
+### `Test-SpeContainerPermissionPaging.ps1`
+**Purpose:** Settles one open question — does `GET /storage/fileStorage/containers/{id}/permissions` actually emit `@odata.nextLink`? `unified-access-control-r2` task 024 fixed both ExternalAccess reads to follow it, but could only verify the CODE defect, not the exploitability: Microsoft documents `$skip`/`$top`/`$orderBy`/`$filter` and **not** `$skiptoken` for this endpoint, and the sample response carries no `nextLink`. **Read-only** — issues GETs, creates/modifies/deletes nothing.
+**Usage:** 🔵 One-shot — run once against dev, record the verdict, then the question is closed.
+**Lifecycle:** ✅ Maintained (added 2026-09-09 by `unified-access-control-r2` task 024)
+**Dependencies:** A Microsoft Graph token whose app holds `FileStorageContainer.Selected` **and** the container-type-level grant for Spaarke's container type. The BFF's own app registration has both.
+**Owner:** `unified-access-control-r2` → hands the answer to task 047 (live verification)
+
+**When to Use:**
+- Before task 047 asserts anything about live multi-page enumeration — this says whether there is anything to assert
+- If SPE container permissions ever start behaving unexpectedly at scale
+
+⚠️ **An `az account get-access-token --resource https://graph.microsoft.com` token will NOT work.** That is the Azure CLI's own delegated identity; it 403s with `accessDenied` — "Caller does not have required permissions for this API" (confirmed 2026-09-09). This is why the question is still open.
+
+💡 **It does not need a container seeded past a page boundary.** The design assumed that was required, which made the check look expensive. `$top` is documented as supported, so capping the page below the total is the condition that produces a `nextLink` if the service pages at all — probe 2 does exactly that, and any container with ≥2 permissions suffices.
+
+**Command:**
+```powershell
+pwsh scripts/Test-SpeContainerPermissionPaging.ps1 -ContainerId 'b!...' -AccessToken $tok
+```
+
+**Related**: `projects/unified-access-control-r2/notes/task-024-spe-paging-parity.md` §1 (record the verdict there); `notes/decisions/spe-paging-and-revoke-honesty-design.md` §0; GitHub #968, #969.
+
+---
 
 ### `tests/bicep-e2e-dry-run.ps1`
 **Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 4 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep, stacks/model1-shared.bicep) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.
@@ -1436,3 +1491,4 @@ Most scripts require:
 - **2026-03-31:** Added Initialize-ReportingCustomer.ps1 — end-to-end customer onboarding for the Reporting module: PBI workspace, SP profile, report deployment, Dataverse module enablement (Task 040).
 - **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).
 - **2026-04-04:** Added Release & Deployment Orchestration section with three new scripts: Deploy-Release.ps1 (master release orchestrator), Build-AllClientComponents.ps1 (dependency-ordered client build), Deploy-AllWebResources.ps1 (all web resources to Dataverse) — Task PRPR-032.
+- **2026-09-04:** Added new "Data Backfill Scripts" section with Backfill-CoreAncestorStamps.ps1 — one-time FR-26 core-ancestor stamp backfill for existing child records (`unified-access-control-r2` task 053). Discovers ancestor-stamp + child-of-child lookup columns from live Dataverse metadata every run rather than a hard-coded list, after a live-metadata check during authoring found the project's own prior notes stale on which columns `sprk_todo` carries, and found `sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema (filed for owner decision, not fixed by this script).

@@ -33,9 +33,9 @@
       <file role="modify">tests/unit/Spaarke.Core.Tests/Auth/AuthorizationServiceCharacterizationTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization tests pinning app-scoped evaluation, flipped here.</dependency>
-      <dependency task="003" status="pending">Policy keys resolve — caller-scoped denials must be attributable to access, not unknown_operation.</dependency>
-      <dependency task="014" status="pending">Cache key carries auth mode — prevents SP-mode snapshots being served to the new OBO calls.</dependency>
+      <dependency task="001" status="completed">Characterization tests pinning app-scoped evaluation, flipped here.</dependency>
+      <dependency task="003" status="completed">Policy keys resolve — caller-scoped denials must be attributable to access, not unknown_operation.</dependency>
+      <dependency task="014" status="completed">Cache key carries auth mode — prevents SP-mode snapshots being served to the new OBO calls.</dependency>
     </dependencies>
   </context>
 
