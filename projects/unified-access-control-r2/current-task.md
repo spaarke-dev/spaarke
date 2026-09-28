@@ -1,6 +1,11 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-21, session 22 — TASKS 093 + 108 CLOSED (the 2-wide wave session 21 recommended).**
+> **Last Updated**: **2026-09-28, session 23 — DEPLOYMENT-MODEL REDEFINITION (the project's largest open item) + BFF/PCF DEPLOYED + a three-fault POA query fix.**
+> HEAD `538158774`, 0 unpushed, tree clean, PR **#950**. 📖 **READ § SESSION 23 first, then
+> `notes/DEPLOYMENT-MODEL-SYNOPSIS.md`.** 🔔 **The model redefinition is AGREED but has NO decision record yet — write it first.**
+> 🔔 Immediate blocker: `POST /invite-and-grant` 500 — next action is in the session-23 block.
+> Prior stamp:
+> **2026-09-21, session 22 — TASKS 093 + 108 CLOSED (the 2-wide wave session 21 recommended).**
 > Pushed `f389b369f..0c543e63a`, 0 unpushed, tree clean, PR **#950**.
 > **Measured: 85 done · 27 open · 3 escalated (⚠️) · 1 blocked (🟡 034) = 116** — reconciles with the drift gate.
 > ⚠️ A marker set of `✅|🔲|⚠️|🔄` **undercounts by one**: task 034 uses **🟡 [blocked]**. Include it.
@@ -30,7 +35,171 @@
 
 ---
 
-## § SESSION 22 (2026-09-21) — READ THIS FIRST; IT SUPERSEDES SESSION 21 BELOW
+## § SESSION 23 (2026-09-22 → 09-28) — READ THIS FIRST; IT SUPERSEDES SESSION 22 BELOW
+
+**Two threads: a deploy-and-fix chain, and a deployment-model architecture discussion that is now the
+project's largest open item.** 18 commits, all pushed. Tree clean.
+
+### ▶ THE LIVE THREAD — deployment-model redefinition (NOT yet formally recorded)
+
+📖 **Read `notes/DEPLOYMENT-MODEL-SYNOPSIS.md` FIRST.** It is the agreed statement of problems,
+solutions, and why they close. Everything below is delta.
+
+**The owner has REDEFINED the deployment models** (2026-09-27/28, in discussion — **no decision record
+written yet; this is the first thing to do**):
+
+| | Dataverse env | Azure tenant | Was |
+|---|---|---|---|
+| **Model 1** | dedicated per customer | **Spaarke's** | old 2a |
+| **Model 2** | dedicated per customer | **customer's own** | old 2b |
+
+The old "Model 1 = shared environment, many customers" tier is **RETIRED**. 2a/2b collapse into the axis.
+
+**Owner answers received 2026-09-28:**
+1. **S-3 dedicated resources: YES** — but confirm the genuine floors. ✅ Already resolved by analysis:
+   Redis is *per-environment*, which under one-env-per-customer **automatically becomes per-customer** —
+   no decision needed. Cosmos already per-customer (serverless, no floor). SignalR optional/feature-gated.
+   🔔 **The only open decision is THREE resources**: App Service Plan · Azure OpenAI · AI Search
+   (design.md:639 "the three fixed-floor levers"). OpenAI is consumption-priced and shared for TPM-quota
+   reasons, not cost — so the real question is **App Service Plan and AI Search**.
+2. **SPE container type for Model 1 EXISTS; create + sharing resolved.** ✅ Documented in
+   `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`. ⚠️ **My 25-cap alarm was WRONG and is
+   retired**: R4 says one container type *registers into many consuming tenants* — *"Do Model 2 customers
+   consume our 25? No. One container type serves all of them."* One type, one container per customer.
+3. **Rename `Secure Project` → `Secure Record` BU: YES.** No customer deployments exist, so now is the
+   cheapest moment. ⚠️ It is a **fail-closed lookup key** — code default (`DefaultSecureBusinessUnitName`),
+   config key (`SecureProject:BusinessUnitName`), the pinning test, the live BU, and docs must change
+   **together** or provisioning stops.
+4. **"Spaarke Model 1 Production" subscription** = retired tier; handled as a separate Azure cleanup track.
+
+**THE CRUX, confirmed with a sharpening the next session must not lose.** The owner's framing was
+*"there is no way to differentiate multiple customers in one Dataverse environment."* That is slightly
+too strong — per-customer app registrations as per-customer app users in per-customer BUs *could*
+differentiate ownership. **The conclusion still holds for three stronger reasons**: (a) 🔴 one shared
+`Secure Record` BU would hold every customer's secure records, so a single misconfiguration exposes
+**all customers at once** instead of one — and per-customer secure BUs break resolve-by-name; (b) there
+is **no data-level discriminator** (verified: no tenant/customer column on `sprk_project` or
+`sprk_matter`), so BU depth is the only mechanism with no backstop; (c) the BU hierarchy cannot carry
+*customer* and *security tier* at once — they want opposite containment.
+
+**BU hierarchy (verified already deployed in dev)**: `Secure Project` and `Spaarke Business Unit 1` are
+**siblings** under root `Spaarke`. Sibling placement is load-bearing — Deep depth traverses *downward*,
+so a customer user cannot reach a sibling secure BU.
+
+**Three discovery sweeps ran (docs / code+infra / terminology). Scope, corrected — the raw numbers
+overstate the risk:**
+
+| Category | Real size |
+|---|---|
+| Code branch sites on tenancy model | **7** (6 handlers + 2 H13 probes), literal duplicated in ~8 places, **no shared constant** |
+| 🔴 Silent defaults | **3** — `H2a:284`/`H2b:289` blank⇒`Model2Dedicated`; `ArmCostEnvelopeChecker:267` unknown⇒**shared-floor envelope**. These fail *quietly* |
+| 🔴 Data migration | **1** — `sprk_tenancymodel` value `1` holds **both** old-2a and old-2b, which now split across different models. A relabel silently misclassifies every existing dedicated customer |
+| Idempotency keys | **1** — H12c embeds the tenancy string; renaming invalidates completed phases |
+| Docs BLOCKING | **13 files** (of 45 with hits / ~205 passages) |
+
+**HIGHEST-LEVERAGE FIRST ACTION**: introduce **one shared `TenancyModel` enum** and force all 7 branch
+sites + 3 silent defaults through it **BEFORE any renaming** — otherwise the rename lands partially and
+the failures (wrong Bicep stack, wrong Lighthouse gate, wrong cost envelope) are **silent**.
+
+**P-2, the live bug the redefinition REPAIRS**: `Model2Dedicated` is overloaded 2:1.
+`H1SubscriptionReadinessHandler.cs:109-118` maps it → `CustomerOwned` → **demands Azure Lighthouse
+delegation for subscriptions Spaarke already owns**. Verified: **H1 reads `Profile` zero times**, so it
+cannot tell 2a from 2b. The new split maps exactly onto what H1 already decides.
+
+**SOURCE OF THE CONFLICT**: `projects/customer-provisioning-orchestration-r1` — decision **D3 v3**
+(2026-08-12) created the two tiers; §3A A1 made `model1-shared.bicep` first-class; §10.1 defined the
+profiles. ✅ **It is still "Ready for Implementation", NOT complete** — changing the definition now is
+far cheaper than after. ⚠️ `COMPONENT-INVENTORY.md` §7 is the **authoritative** shared-vs-dedicated BOM
+— *"when the two disagree, INVENTORY wins."* Reconcile there, not only in design.md.
+
+⚠️ **Pre-existing defect that must be resolved FIRST**: **four mutually incompatible definitions of
+"Model 1" are live in the docs simultaneously**; two docs say "three models", one says "two". Pick one
+before remediating or the ambiguity is re-encoded.
+
+**Terminology (owner-confirmed)**: *tenant* = Entra/Dataverse tenant GUID; *customer* = the business
+entity. Model 1 ⇒ tenant is always Spaarke's. Model 2 ⇒ tenant is the customer's. Every runtime
+`tenantId` genuinely holds an Entra GUID — **the values are right; the CLAIMS about what they isolate
+are wrong**. 🔴 **Do NOT mass-rename `tenantId`.** Rename only the four symbols holding something that is
+*not* a tenant: `SpeAdminTenantScope`, `SpeAdminTenantScopeFilter`, `TenantFilterTemplateDocument`,
+`TenancyModel`. `SpeAdminTenantScope` is the most dangerous — it walks a **business-unit** hierarchy and
+its own comment admits *"the cross-customer boundary lives in this codebase, not in Entra."*
+
+### ✅ What else landed this session
+
+| Commit | What |
+|---|---|
+| `8ea2c5e14` · `0c543e63a` | **Tasks 108 and 093 CLOSED** (see session 22 block) — **047 unblocked** |
+| `783761e45` | **Owner decision D-10** — `sprk_startdate`: a future-dated membership confers NOTHING; access begins ON the start date. Folded into task 109 |
+| `8680752ef` | **Task 109 Steps 0+1 DONE** — both date columns live-verified DATE ONLY (neither escalation fires); all three removal categories measure **0**, each with a denominator. **107's pre-deploy COUNT gate PASSES in dev (0 undated of 28)** |
+| `e3e3169ed` | **PCF TrackingFieldTrio v1.0.31 built + deployed.** Found two compile-only defects: `pack.ps1` stuck at 1.0.29, and the `AccessGrantModal` barrel never re-exported `IUserPick`/`ISecureOwnerInfo` |
+| `0eb4d9709` | **BFF DEPLOYED to dev.** Overwrote `work/spaarkeai-word-add-in-r1`'s unmerged build — **cleared with that session first**. 🔴 Rollback artifact: `C:\tmp\bff-dev-rollback\bff-dev-wwwroot-2026-09-21-preUACdeploy.zip` (sha256 `35c8e161…`). **Restore THAT ZIP, never rebuild from their branch tip** — their tip 403s Run Index for everyone (their task 080) |
+| `3a97520e1` | **Owner decision D-11** — records owned by the acting user's **BU default owner team** (`isdefault=true AND teamtype=0`, both predicates), `owningbusinessunit` derives |
+| `519cee6f8`+ | **ISS-030 / #1010** — grant rows land in root BU **and** the modal reads them in user context with `catch { return [] }`. Ownership half decided by D-11; **the silent catch is severable and is the recommended next fix** |
+| `75e7db20e` | **ADR-034 A1.1 mechanism CORRECTED** — the Owner-binding hazard is real, but `IncludedIdentityTables` order is **not** the cause (it's a dictionary). The determinant is hardcoded `OwnerAttributeTargets = {systemuser, team}`. **It cannot be configured away** |
+| `#1011` | Resolver defect re-filed — the hazard is a **resolver bug** (cannot bind a team-owned Owner column), *not* an argument against team ownership |
+| `61c0e9ef0` | 🔴 **THE POA SHARE QUERY WAS WRONG IN THREE WAYS** — see below |
+
+### 🔴 The POA fix, because it generalizes
+
+`GET /user-shares` 500'd for every caller. Traced against live Dataverse, each fault masking the next:
+1. `$select` asked for **`modifiedon`** — POA has no such column; it is **`changedon`**
+2. `objecttypecode` is **`Edm.String`**, not an int
+3. The string is the **LOGICAL NAME**, not the numeric code
+
+**`PrincipalAccessQuery` is shared by BOTH reads.** The SOFT read turns any non-success into an **empty
+list** — so *every share read in this environment has been silently reporting "no shares"*, possibly
+since the feature shipped. **Task 108's strict read is what surfaced it, by refusing rather than
+inventing an empty answer.** And **three offline tests pinned the broken contract** because the fixtures
+echoed whatever the code asked for. Replaced with a test that pins the **wire shape**.
+
+### 🔔 OPEN — the immediate blocker
+
+**`POST /api/v1/external-access/invite-and-grant` returns 500** for a non-admin (and probably everyone).
+**Ruled out**: CIAM cert (in Key Vault, enabled, valid to 2028, correct PKCS#12), the BFF's user-assigned
+identity `mi-bff-api-dev`, its **Key Vault Secrets User** role, and Step 1's Dataverse half (contact
+query + create payload both correct against live metadata).
+
+**NEXT ACTION**: the endpoint has **two** 500 paths with different bodies — Step 1 *"Failed to onboard the
+external user."* vs Step 2 *"…onboarded but granting project access failed."* **Get the response body**
+(DevTools → Network → the failed call → Response), or reproduce with an **already-invited** email (the
+idempotency gate returns early when the Contact has an oid, isolating Step 2). ⚠️ A fresh address **sends
+a real invitation email** — that is why it was not reproduced unattended.
+⚠️ **App Service filesystem logging was ENABLED on `spaarke-bff-dev` for this diagnosis** (auto-expires
+~12h from 2026-09-25). Turn it off once the exception is captured.
+
+### Corrections I made to my own claims this session — do not re-inherit the originals
+
+1. **"`sprk_noaccessentry` is a hard pre-deploy blocker"** — WRONG. It already exists live. I inferred
+   "not created" from the schema doc being new on the branch and never checked. **No schema work is
+   required for this branch to deploy.** Only `sprk_accessevent` is missing, and nothing reads it (087 open).
+2. **"Sharing an Azure tenant means customers can't be isolated"** — WRONG. Sharing a *tenant* ≠ sharing
+   *resources*. One tenant holds unlimited per-customer resource groups.
+3. **"`OptionsTenantContainerResolver` returns one container per tenant"** — true, but it is an
+   **implementation gap**, not a design property. ✅ `businessunit` already carries `sprk_containerid`,
+   `sprk_searchindexname` and an `sprk_ai_search_index` lookup — per-customer binding is **already modelled**.
+4. **"172 *enabled* users in root"** — the `isdisabled` filter was **rejected** by the query surface; the
+   count is **unfiltered**. Conclusion unaffected (~92% root either way).
+5. **The 25 container-type cap** — retired, see owner answer 2 above.
+
+### ▶ NEXT — in order
+
+1. **Write the model-redefinition decision record** (D-12) from `notes/DEPLOYMENT-MODEL-SYNOPSIS.md`. Nothing
+   downstream should start until the definition is signed.
+2. **Resolve the four conflicting "Model 1" definitions** in docs — before any remediation.
+3. **Answer the three-resource question** (App Service Plan · OpenAI · AI Search).
+4. **Then** the `TenancyModel` enum → rename → `sprk_tenancymodel` migration → docs.
+5. **Independently, any time**: ISS-030's `catch { return [] }` at `TrackingFieldTrio/index.ts:805`, and
+   the four misnamed `*TenantScope*` symbols. Neither depends on any decision above.
+6. **Also independently**: the `invite-and-grant` 500 (above), and task **109**'s implementation (Steps 0+1
+   are done and recorded in `notes/task-109-junction-read-two-named-sets.md`).
+
+⚠️ **`notes/adr-002-write-path-guidance-2026-09-25.md` was NOT authored by this session** — it arrived
+from an ADR-002 review on 2026-09-25 and was untracked. Committed here to prevent loss. It confirms D-1
+(no Dataverse plugins) and references branch `work/adr-002-server-side-write-path`, **not yet on master**.
+
+---
+
+## § SESSION 22 (2026-09-21) — superseded by session 23 above
 
 **Session 21's recommended 2-wide wave was run and both halves closed.** Two subagents, strict
 disjoint lanes, verified afterwards that neither crossed into the other's tree.
