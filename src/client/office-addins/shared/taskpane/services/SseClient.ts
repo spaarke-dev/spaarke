@@ -320,3 +320,12 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
     isConnected: (): boolean => isConnected,
   };
 }
+
+// ⏳ TEMPORARY — task 072 CI proof (red direction). Reverted in the next commit.
+// A WARNING-ONLY violation on purpose: 28 of the 32 violations found were warnings, so this
+// is what proves `--max-warnings 0` is load-bearing rather than decoration.
+// Also deliberately LINT-ONLY, to isolate which guard fired: it is EXPORTED so tsc's
+// noUnusedLocals cannot see it, and an empty body is invisible to tsc but not to ESLint.
+// (An earlier attempt named `__072_unusedSeed` proved nothing — .eslintrc sets
+// varsIgnorePattern `^_`, so the leading underscore made ESLint ignore it by design.)
+export const seed072LintProof = () => {};
