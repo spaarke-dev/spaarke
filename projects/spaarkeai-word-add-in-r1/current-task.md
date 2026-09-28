@@ -7,17 +7,63 @@
 | **Task** | 080 — record ownership: assign to a BU default owner team |
 | **File** | `tasks/080-record-ownership-assignment-pattern.poml` |
 | **Rigor / tier** | FULL · opus @ xhigh · steps directional · **run ALONE** |
-| **Status** | in-progress — resolver BUILT; 5 of 6 create paths NOT yet wired; backfill not started |
-| **Next Action** | Wire the remaining create paths (worker x2, matter, project, workassignment, analysis) using `RecordOwnershipContext`, then the reversible backfill, then tests + gates |
+| **Status** | ⏸ **PAUSED 2026-09-28 by owner sequencing decision** — finish UAC-r2 first, then complete 080 on top of what it builds. Resolver BUILT; 5 of 6 create paths NOT wired; backfill not started. Nothing is half-applied: build 0/0, tree clean, every decision recorded. |
+| **Next Action** | ⛔ **Do NOT resume 080 until UAC-r2's gating items land** (list below). UAC-r2 executes in **its own worktree** `C:\code_files\spaarke-wt-unified-access-control-r2` on `work/unified-access-control-r2` — never from here. On resume: wire the remaining create paths (worker x2, matter, project, workassignment, analysis) via `RecordOwnershipContext`, then the reversible backfill, then tests + gates. |
+
+### ⏸ WHY 080 IS PAUSED — and the ONE finding that makes the sequencing right
+
+**Owner, 2026-09-28**: complete UAC-r2's work items first, then finish 080 with the benefit of what UAC-r2 built.
+
+🔴 **This retires a stale warning in this file's own history.** Earlier handoffs said the membership-resolver
+hazard (issue **#1011** — a team-owned Owner column binds to nobody) was *"not 080's to fix; 080 must state the
+limitation."* **UAC-r2 task 043 is ✅ DONE and already handles it**, and it handled exactly the mechanism 080
+would have tripped over. From its own record:
+
+> *"`ownerid`/`owningteam`/`owningbusinessunit` confer **structurally**, ahead of the registry … **`owningteam`
+> is load-bearing** — discovery binds the first matching target and the list starts at `systemuser`, so a
+> polymorphic Owner column always resolves to SystemUser; on a team-owned record `ownerid` holds the TEAM's id
+> and never matches, so keying on it alone would have been a false fix."*
+
+**Be precise about what is and is not fixed**: 043 makes a team-owned record confer access via `owningteam`, so
+the practical blocker for 080 is closed. **#1011 itself is still OPEN** — `MembershipFieldDiscoveryService`
+still binds `systemuser` first, which 043 **routed around rather than repaired**. Do not close #1011 on 043's
+strength, and do not assume the discovery path is safe for any *other* Owner-column use.
+
+**It also corroborates Goal B from the other side**: UAC-r2's owner decision **D-11 (2026-09-22)** already makes
+team ownership the product-wide record-ownership convention, and 043's escalation records the owner's words —
+*"records are owned primarily at team/business-unit level."* So 080 is implementing a product decision, not a
+project-local preference.
+
+**Net effect of the sequencing: 080 stops shipping into a hazard.** Had 080 landed first, every record it made
+team-owned would have resolved to nobody in the membership resolver until 043 merged.
+
+#### Which UAC-r2 items actually touch 080 (of ~26 open)
+
+Assessed 2026-09-28 by reading their `TASK-INDEX.md` at `origin/work/unified-access-control-r2` (212 commits
+ahead of master). **The single most important one is already done**; most of their remaining work is orthogonal.
+
+| UAC-r2 item | State | Why it matters to 080 |
+|---|---|---|
+| **043** — ownership confers structurally | ✅ **done**, unmerged | **The real gate.** Must be in 080's base before team-owned records ship, or they resolve to nobody. |
+| **095** — Document↔record multi-association | 🔲 open · opus/xhigh | **Answers a question 080 has:** record-first asks for "the TARGET record's BU", but a document has **two association slots per type**. 095's stated default — *"primary lookup stays the access ancestor"* — is the answer. If 095 slips, 080 must pin the primary lookup itself and say so. |
+| **047** — provisioning E2E; a secure project gets its OWN container | 🔲 open · opus | Informs the still-open **Secure Project BU geometry** question. Note their finding: *provisioning has never once run successfully; dev holds ZERO secure projects* — so there is no live secure record to test 080's refuse branch against yet. |
+| **082** — caller-identity primitive consolidation | 🔲 open · opus/xhigh | 080 added a use of `ICallerSystemUserResolver`. Coordinate so 080 does not become a **fifth** primitive. |
+| **054 / 055 / 056** — FR-27 child inheritance | 🔲 open | Adjacent, not blocking: inheritance is an additive access term, ownership is a separate axis. Re-check 055 before writing 080's cross-BU negative test. |
+| 094, 109–114, 036, 064–067, 087–089, 099, 101, 105, 090 | 🔲 open | **Orthogonal** — external access, deny-list, provenance, attestation, expiry UI, upload collision. No 080 interaction. |
+
+⚠️ **Scope note for whoever resumes**: the owner's instruction was to complete UAC-r2's work items and then finish
+080. Recorded faithfully. But if timeline pressure appears, the technically-sufficient gate is narrower — **043 in
+our base + 095's primary-lookup answer** — and that is an owner call, not one to take unilaterally.
+
+✅ **Side benefit**: `unified-access-control-r2` owns `spaarke-bff-dev` and was to hand it back *after* 080. With
+UAC-r2 going first they simply keep it — the handoff dance, and the rollback-zip hazard noted below, both go away.
 
 ### 🔑 THE DECIDED SOLUTION — read this before touching anything
 
-**Two separate goals. They compose; neither substitutes for the other.**
-
 | Goal | Mechanism | Status |
 |---|---|---|
-| **A** — records land in the right CUSTOMER business unit | **PROVISIONING**: each customer gets its own BFF app registration (Azure + Dataverse) with its app user placed in that customer's BU | BLOCKED/NOT CODE — not done, owner-owned. Today all 25 app users sit in ROOT. |
-| **B** — records owned by a **TEAM**, not an individual or the app | **CODE**: `Services/Dataverse/RecordOwnershipResolver.cs` | resolver built; call sites pending |
+| **A** — records land in the right CUSTOMER business unit | Was PROVISIONING (per-customer BFF app registration) | ✅ **DISSOLVED 2026-09-28** — dedicated Dataverse per customer means an app user is always the right customer's. No provisioning dependency remains. |
+| **B** — records owned by a **TEAM**, not an individual or the app | **CODE**: `Services/Dataverse/RecordOwnershipResolver.cs` | resolver built; call sites pending. **This is now the WHOLE fix**, not half of it. |
 
 **Why both are needed.** Dataverse **never** assigns a new record to the creator's team — on create `ownerid` =
 the calling identity (user or app user), and no setting changes that. Verified three ways: `sprk_workassignment`
