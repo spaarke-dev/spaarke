@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Api.Filters;
@@ -106,6 +107,25 @@ public static class RegistrationEndpoints
                 extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
         }
 
+        // A use case we cannot read is refused rather than dropped. sprk_usecase is
+        // required on the form, and the old behaviour wrote the record without it:
+        // ParseUseCase returned null, the write was skipped, and nothing reported a
+        // problem. A caller sending something we do not understand should be told.
+        var parsedUseCase = ParseUseCase(request.UseCase);
+        if (parsedUseCase is null)
+        {
+            logger.LogWarning(
+                "Demo request rejected: unrecognised use case {UseCase}, TraceId={TraceId}",
+                request.UseCase, httpContext.TraceIdentifier);
+
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "Use case is required and must be one of: DocumentManagement, AiAnalysis, FinancialIntelligence, General.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+        }
+
         // Block disposable email domains
         if (domainValidator.IsDisposableDomain(request.Email))
         {
@@ -157,7 +177,7 @@ public static class RegistrationEndpoints
                 Organization = request.Organization,
                 JobTitle = request.JobTitle,
                 Phone = request.Phone,
-                UseCase = ParseUseCase(request.UseCase),
+                UseCase = parsedUseCase,
                 ReferralSource = ParseReferralSource(request.ReferralSource),
                 Notes = request.Notes,
                 ConsentAccepted = request.ConsentAccepted
@@ -558,23 +578,60 @@ public static class RegistrationEndpoints
         }
     }
 
-    private static UseCaseOption? ParseUseCase(string? value)
+    /// <summary>
+    /// Lower-cases and strips everything that is not a letter or a digit, so that
+    /// separators cannot decide whether a value parses.
+    /// </summary>
+    /// <remarks>
+    /// The previous helpers listed separator variants by hand: "documentmanagement",
+    /// "document-management", "document_management". The space was missed, and the
+    /// website sends its picker labels, so "Document Management" matched nothing,
+    /// fell through to Enum.TryParse, failed there too, and became null. Callers
+    /// treat null as "not supplied", so sprk_usecase was written empty on every
+    /// registration request ever created, with no error on either side.
+    ///
+    /// Normalising once is what stops a separator being a correctness question.
+    /// </remarks>
+    internal static string NormalizeChoice(string value)
+    {
+        var buffer = new StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            if (char.IsLetterOrDigit(c)) buffer.Append(char.ToLowerInvariant(c));
+        }
+        return buffer.ToString();
+    }
+
+    /// <summary>
+    /// Maps the website's use case to the <see cref="UseCaseOption"/> choice.
+    /// Returns null when the value is absent or unrecognised; the endpoint rejects
+    /// the unrecognised case rather than writing the record without it.
+    /// </summary>
+    internal static UseCaseOption? ParseUseCase(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        return value.ToLowerInvariant() switch
+        return NormalizeChoice(value) switch
         {
-            "documentmanagement" or "document-management" or "document_management" => UseCaseOption.DocumentManagement,
-            "aianalysis" or "ai-analysis" or "ai_analysis" => UseCaseOption.AiAnalysis,
-            "financialintelligence" or "financial-intelligence" or "financial_intelligence" => UseCaseOption.FinancialIntelligence,
-            "general" => UseCaseOption.General,
+            "documentmanagement" => UseCaseOption.DocumentManagement,
+            "aianalysis" => UseCaseOption.AiAnalysis,
+            "financialintelligence" => UseCaseOption.FinancialIntelligence,
+            // "General Evaluation" is the label the website shows. The choice is
+            // called General, so tolerance has to cover the longer form too.
+            "general" or "generalevaluation" => UseCaseOption.General,
             _ => Enum.TryParse<UseCaseOption>(value, true, out var result) ? result : null
         };
     }
 
-    private static ReferralSourceOption? ParseReferralSource(string? value)
+    /// <summary>
+    /// Maps the website's referral source to the <see cref="ReferralSourceOption"/>
+    /// choice. This one never broke, because its labels happen to be single words
+    /// that match the choice names. That is luck rather than design, so it is
+    /// normalised the same way.
+    /// </summary>
+    internal static ReferralSourceOption? ParseReferralSource(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        return value.ToLowerInvariant() switch
+        return NormalizeChoice(value) switch
         {
             "conference" => ReferralSourceOption.Conference,
             "website" => ReferralSourceOption.Website,
