@@ -5,12 +5,11 @@
 > **Scope**: production code only. Test fixtures (~25 sites, mechanical) are excluded and tracked separately.
 
 ⚠️ **This corrects and extends D-12 §6 / the synopsis §5 table**, which recorded *"7 branch sites + 3 silent
-defaults"*. The real shape is **4 silent defaults, not 3**, and **four** comparison styles, not three — and
-one of them is **case-sensitive** while every other site is case-insensitive.
+defaults"*. The real shape is **9 branch sites and 4 silent defaults** (recorded: 7 and 3), in four comparison styles — **two** of which are case-sensitive while the other seven are not.
 
 ---
 
-## 1. Branch sites — production
+## 1. Branch sites — production (**9**, was recorded as 7)
 
 | # | File:line | Compares | Style | Selects |
 |---|---|---|---|---|
@@ -22,8 +21,25 @@ one of them is **case-sensitive** while every other site is case-insensitive.
 | B6 | `…/E2EAcceptance/AiSearchTenantFilterInvariantProbe.cs:250` | `Model1TenancyModel` const | `string.Equals(…, OrdinalIgnoreCase)` | I2 probe: expect template artifact |
 | B7 | `…/E2EAcceptance/AiSearchTenantFilterInvariantProbe.cs:301` | `Model2TenancyModel` const | `string.Equals(…, OrdinalIgnoreCase)` | I2 probe: expect NO template artifact |
 | B8 | `…/E2EAcceptance/ArmCostEnvelopeChecker.cs:264-268` | both literals | **`switch` on raw string — CASE-SENSITIVE** | which monthly **cost envelope** is expected |
+| **B9** | `…/EntraAppReg/H3EntraAppRegHandler.cs:272` | `Model1Shared` const (`:129`) | `string.Equals(…, **StringComparison.Ordinal**)` — **case-SENSITIVE** | 🔴 **whether a per-customer BFF app registration is created at all** |
 
-**B6/B7 are the only sites that name the literal through a constant** (`Model1TenancyModel` /
+🔴 **B9 was missing from this inventory until 2026-09-28 and is the most consequential site of the nine.**
+`HandleModel1Async` (`:406-460`) is documented as *"MODEL 1 (shared multitenant BFF app-reg). **Creates ZERO
+new app-reg objects and ZERO new FIC objects** (acceptance criterion)"* — it verifies the shared app
+registration and returns `BffAppRegId = _options.SharedBffAppRegistrationId`.
+
+**This is live code implementing exactly what D-13 forbids.** D-13 is therefore **not a documentation
+change**: closing it requires deleting the Model 1 branch, the `SharedBffAppRegistrationId` /
+`SharedPlatformKeyVaultName` options, `EntraAppRegSharedVerifyRequest` and the shared-path tests, so that
+H3 provisions a per-customer app registration unconditionally. Note
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md:335` **already** documents H3's output as the per-customer
+`appreg-{customerId}-{tenantId}` — the guide and the code already disagree, independently of D-13.
+
+⚠️ **Correction 2026-09-28: the case-sensitivity finding was understated.** B8 was described as the only case-sensitive comparison; **B9 is also ordinal/case-sensitive** (`StringComparison.Ordinal` at `:272` and `:516`). So two of nine sites reject a wrong-cased value that the other seven accept.
+
+✅ **And there are TWO fail-loud sites, not one.** B9, like H1 (B4/B5), **rejects** an unrecognized `tenancyModel` with no default (`:220-224`, citing invariant I6 — *"requires an explicit value with NO default"*). That strengthens §4's conclusion: parse-or-reject is already the pattern in the two handlers that gate identity and subscription, and the enum should generalise it rather than invent it.
+
+**B6/B7 are the only sites that name the literal through a *file-private* constant** (`Model1TenancyModel` /
 `Model2TenancyModel`, `AiSearchTenantFilterInvariantProbe.cs:142,145`). Those two constants are file-private
 — they are a local tidy, not a shared vocabulary, and the other six sites do not see them.
 

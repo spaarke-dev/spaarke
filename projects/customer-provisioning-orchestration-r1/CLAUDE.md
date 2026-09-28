@@ -35,7 +35,7 @@ Per [spec.md § Technical Constraints § Applicable ADRs](./spec.md#applicable-a
 | ADR-014 | `.claude/adr/ADR-014-ai-caching.md` | `spaarke-session-files` tenantId + sessionId dual-filter invariant (§4D I2 strengthens) |
 | ADR-017 | `.claude/adr/ADR-017-job-status.md` | Per-handler job status vs ProvisioningRun (different stores per §5.3) |
 | ADR-020 | `.claude/adr/ADR-020-versioning.md` | Pinned model deployment versions in H2a Bicep OpenAI config |
-| ADR-027 | `.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` | D4 sub-per-customer; Model 1 shared-tier is Path A exception |
+| ADR-027 | `.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` | One Azure subscription **per customer** (ADR amended 2026-09-28); **no** shared-tier exception |
 | ADR-028 | `.claude/adr/ADR-028-spaarke-auth-architecture.md` | H4 KV secrets + UAMI RBAC + `keyVaultReferenceIdentity` PATCH follow 21 MUSTs |
 | ADR-032 | `.claude/adr/ADR-032-bff-nullobject-kill-switch.md` | SignalR feature-gate follows P1/P2/P3 pattern |
 | ADR-034 | `.claude/adr/ADR-034-user-record-membership.md` | Optional SignalR per-customer aligns with realtime pattern |
@@ -96,9 +96,10 @@ Discovery report enumerates the strongest exemplars. Key ones the task POMLs ref
 Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rules). Highlights that come up on EVERY task:
 
 - **MUST** register provisioning handlers in **L2 control-plane service, not the BFF** (§5.2 + D3/D8/D12)
-- **MUST NOT** create per-customer Entra tenant; use one Spaarke tenant + one multitenant BFF app (spec.md §9.1 v3)
+- **MUST NOT** create a per-customer Entra **tenant** — Model 1 uses one Spaarke tenant (still correct under D-12).
+  🔴 **AMENDED 2026-09-28**: the *"+ one multitenant BFF app"* half is **REVERSED**. **MUST** create **one BFF app registration per customer**, in both models — D-13 (BINDING). The app registration determines the Dataverse application user, which determines the business unit every BFF-created record lands in. `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`
 - **MUST NOT** re-introduce Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers)
-- **MUST NOT** provision Redis per-customer **FOR MODEL 1** (Q-E FR-12; per-env via `Deploy-RedisCache.ps1`, unchanged). **MUST** provision Redis per-customer **FOR MODEL 2** (v3.6, task 128b, 2026-08-19 — `customer.bicep` is the sole Model2Dedicated template, env=customer 1:1 there, so `modules/redis.bicep` is wired unconditionally in that file)
+- 🔴 **REVERSED 2026-09-28 (D-12 §3).** Was: *"**MUST NOT** provision Redis per-customer **FOR MODEL 1**"*. Now: **MUST provision Redis per-customer in BOTH models**, at **Standard** tier. Redis access control is per-instance (not per-keyspace) and it holds OBO tokens + the `uac-access` authorization cache. ✅ Premium is not required — RDB persistence is unneeded (upload bytes are the hot-tier peer of a durable blob copy) and VNet injection is unused and Microsoft-deprecated. ⚠️ confirm Standard meets the performance bar. `customer.bicep` already wires `modules/redis.bicep` unconditionally, which is now correct for both models.
 - **MUST** use confidential-client (app-only) token for SPE container-type creation (T6)
 - **MUST** PATCH App Service `keyVaultReferenceIdentity` to UAMI on both slots (T1)
 - **MUST** apply canonical KV secret + resource naming (Phase G / R1–R4); vault name is Bicep parameter
@@ -121,7 +122,7 @@ Declared in [spec.md § ADR Tensions](./spec.md#adr-tensions-per-claudemd-65--ma
 
 **Path A rows** — code-review at PR time expects PR description to cite these:
 - **ADR-004**: L2 orchestration is NEW component pattern — a custom state machine over Cosmos rather than Durable Task, and not single-shot (ADR-052 §7 now also permits Durable Task in its own host). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
-- **ADR-027**: Model 1 shared-tier is documented exception. Rationale: D3 (v3) rewrites tenancy to include both tiers; §4D invariants enforce logical isolation.
+- **ADR-027**: 🔴 **no longer an exception.** ADR-027 was **amended 2026-09-28** to one Azure subscription **per customer** in both models, which is what this project already does — so there is nothing to except. The former rationale (*"§4D invariants enforce logical isolation"*) is **withdrawn**: I2–I4 key on `tenantId`, which is identical for every Model 1 customer, so they cannot separate customers and pass anyway.
 
 ## Sub-Agent Write Boundary (root CLAUDE.md §3)
 
