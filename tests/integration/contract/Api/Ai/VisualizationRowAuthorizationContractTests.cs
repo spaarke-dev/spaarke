@@ -80,7 +80,11 @@ public sealed class VisualizationRowAuthorizationContractTests
 
         var body = OkBody(result);
 
-        body.Nodes.Select(n => n.Id).Should().NotContain(
+        // ⏳ TEMPORARY — task 070 CI proof (red direction). Reverted in the next commit.
+        // NotContain -> Contain deliberately INVERTS the NFR-02 authorization assertion,
+        // so this test must fail. If the new server-tests job does not go red here, the
+        // job is not actually running this suite and its green is worthless.
+        body.Nodes.Select(n => n.Id).Should().Contain(
             [
                 DeniedMatterDocumentA.ToString(),
                 DeniedMatterDocumentB.ToString(),
