@@ -79,7 +79,7 @@ keys on `tenantId` therefore cannot separate customers, **and reports success wh
 | AI Search `tenantId eq` filter (I2) | Azure tenant GUID | identical for all customers ⇒ **no separation**, ArchTest passes |
 | Cosmos `/tenantId` partition (I3) | Azure tenant GUID | same partition ⇒ **no separation** |
 | SPE container resolver (I4) | Azure tenant GUID | same container ⇒ **no separation** |
-| **Redis cache key** `tenant:{tenantId}:{resource}:{id}:v{version}` | Azure tenant GUID | 🔴 **KEY COLLISION** — Customer A's cached value served to Customer B |
+| **Redis cache key** `tenant:{tenantId}:{resource}:{id}:v{version}` | Azure tenant GUID | ⚠️ **collides ONLY where `{resource}:{id}` also repeats** — 3 verified sites, not every key (corrected 2026-09-28) |
 
 **Dedicating the resource moves isolation from a query filter to a resource boundary.** A filter must be
 written correctly in every query, forever, by everyone. A boundary cannot be forgotten. For a legal
@@ -94,7 +94,7 @@ concept already exists and is modelled correctly in the L2 control plane (`Custo
 | Resource | Dedicated? | Why |
 |---|---|---|
 | **AI Search** | ✅ **Yes** | Holds indexed document text and embeddings — the highest-value segregation case. A shared service means one filter defect exposes another firm's material. Real monthly floor; pay it. |
-| **Redis** | ✅ **Yes** | 🔴 Not merely cost: the cache key is tenant-keyed, so a shared instance **collides** across Model 1 customers. Dedicating is the fix; the alternative is adding `customerId` to every cache key. Has a genuine **per-instance cost** — see §4. |
+| **Redis** | ⚠️ **REOPENED 2026-09-28** | 🔴 **My collision claim was too strong — corrected.** A collision needs `{resource}:{id}` to repeat too, and most ids are GUIDs/hashes (globally unique). Exposure is **3 enumerable sites**, not every key. Real cost: **C0 ~$16/mo, P1 ~$405/mo per customer**. Full evidence + options: `notes/D-12-redis-shared-vs-dedicated.md`. **Owner decision pending.** |
 | **Azure OpenAI** | ✅ Yes | ⚠️ Note the reasoning differs: Azure OpenAI does not persist prompts or completions by default, so the *data*-segregation argument is weaker than for AI Search. The reason to dedicate is **noisy-neighbour / quota isolation**. Consumption-priced, so dedication costs nothing extra. ⚠️ **TPM quota is per-subscription-per-region** — separate OpenAI *resources* in one subscription still share the quota pool. Quota isolation needs subscription separation, not just resource separation. |
 | **App Service Plan** | 🔔 **See §4** | The one genuine trade-off. |
 | SignalR | optional | Feature-gated (`Notifications:SignalRSpine:Enabled`), Null-Object when off. Dedicate when enabled. |

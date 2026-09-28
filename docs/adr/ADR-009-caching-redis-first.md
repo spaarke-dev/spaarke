@@ -100,10 +100,18 @@ GUID for every Model 1 customer**. A key prefixed with it is identical across cu
 called this *"compile-time enforcement of multi-tenant invariant"*, which is true and was being read as
 "customer isolation", which it never was.
 
-✅ **What actually separates customers is the resource boundary**: D-12 §3 dedicates the **Redis instance
-per customer**, in that customer's own subscription (ADR-027 as amended the same day). The prefix is now
-**defence in depth**, and is retained on that basis — it still separates tenants in Model 2, still prevents
-accidental key reuse, and costs nothing.
+⚠️ **How much this matters in practice — stated precisely, because an earlier draft of this amendment
+overstated it.** A collision needs `{resource}:{id}` to repeat across customers as well. At most call sites
+`{id}` is a **GUID or hash** (conversation id, session id, document id, `SHA256(user-token)`,
+`userId:resourceId`), which is globally unique — **those keys do not collide on a shared instance.** The
+exposure is the keys whose id is *not* unique, which is exactly what the new MUST above forbids. Three such
+sites exist today (`agent-thread`, `agent-config`, `approle-module-map`).
+
+⚠️ **Whether the Redis instance itself is shared or dedicated per customer is an OPEN owner decision**
+(reopened 2026-09-28 on cost grounds — Premium P1 is ~$405/customer/mo). Evidence and options:
+`projects/unified-access-control-r2/notes/D-12-redis-shared-vs-dedicated.md`. **This amendment does not
+depend on that decision**: the new MUST is required either way, and it is the only thing that fixes the
+cross-*user* case, which dedication does not.
 
 🔴 **The new MUST above closes a real gap that this ADR never covered.** Requiring only the *tenant* segment
 permits a key whose remaining parts are constants. Verified live example: `AgentServiceClient` composes
