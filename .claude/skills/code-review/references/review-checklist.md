@@ -106,11 +106,12 @@ grep -rln "PeriodicTimer\|Task.Delay(" src/server/api/Sprk.Bff.Api/ --include="*
 grep -rln "Microsoft.Azure.Functions.Worker" --include="*.csproj" .
 ```
 
-### ADR-002: Thin Plugins
+### ADR-002: No Plugins + Server-Side Write Path
 ```
-# Check plugin folder for HttpClient
-grep -rn "HttpClient" src/dataverse/plugins/
-grep -rn "System.Net.Http" src/dataverse/plugins/
+# Any plugin code (also guarded by tests/Spaarke.ArchTests/ADR002_PluginTests.cs R1–R5)
+grep -rEn "[:,]\s*IPlugin\b|IPluginExecutionContext" src/ --include="*.cs"
+# WP-2: invariant applied only client-side (check each hit has a server owner in the registry)
+grep -rn "applyFieldMappings\|applyResolverFields" src/client src/solutions --include="*.ts*"
 ```
 
 ### ADR-007: Graph Isolation

@@ -71,7 +71,7 @@ Our strategy is **"custom first, adopt selectively"**: we build on the same Azur
 │  CUSTOM IMPLEMENTATIONS (Full Control)                              │
 │  ┌────────────────┐ ┌────────────────┐ ┌────────────────────────┐ │
 │  │ Orchestration  │ │ Tool Handlers  │ │ Per-customer RAG       │ │
-│  │ Engine         │ │ (C# plugins)   │ │ (dedicated AI Search)  │ │
+│  │ Engine         │ │ (C# in BFF)    │ │ (dedicated AI Search)  │ │
 │  └────────────────┘ └────────────────┘ └────────────────────────┘ │
 │                                                                     │
 │  AZURE PRIMITIVES (Same as Microsoft Foundry Backend)               │

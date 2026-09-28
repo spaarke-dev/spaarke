@@ -23,7 +23,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR | Title | Key Constraint | Status |
 |-----|-------|----------------|--------|
 | ADR-001 | Minimal API BFF runtime | BFF endpoints in Minimal API, one pipeline; no Functions / Durable Task packages inside the BFF assembly; background-work placement → ADR-052 | Accepted (amended 2026-09-12, A1) |
-| ADR-002 | Thin Dataverse plugins | No HTTP/Graph calls in plugins | Accepted |
+| ADR-002 | Dataverse plugins not used + Server-Side Write Path | **No plugins** (C#, plugin-backed Custom API, low-code). Record invariants have ONE BFF server-side owner (WP-1); client previews only (WP-2); invariant-bearing tables written via BFF (WP-3); security/on-load UX inline (WP-4); non-product writes → async fix-up/reconciliation (WP-5); security fails closed (WP-6) | Accepted (reviewed 2026-09-25, §6.5 Path C) |
 | ADR-006 | UI Surface Architecture | Code Pages are default for new UI; PCF only for form binding | Accepted (Revised 2026-03-19) |
 | ADR-007 | SpeFileStore facade | No Graph SDK types leak above facade | Accepted |
 | ADR-008 | Endpoint filters for auth | No global auth middleware | Accepted |
@@ -68,8 +68,8 @@ Load concise ADRs proactively when creating new components:
 - Creating API → Load ADR-001, ADR-008, ADR-010, **ADR-028** (auth)
 - Creating PCF → Load ADR-006, ADR-012, ADR-022 (React 16 compatibility), **ADR-028** (auth)
 - Creating Code Page (dialog, wizard, full page) → Load ADR-006, ADR-026, ADR-021 (React 19), **ADR-028** (auth)
-- Creating Plugin → Load ADR-002
 - Adding background, scheduled, queue- or event-driven work, or proposing an Azure Function / Container Apps job / Durable Task → Load **ADR-052** (where it runs) + ADR-004 (queue) / ADR-036 (schedule) (how it runs inside the BFF)
+- Considering a plugin, OR adding a rule a record must satisfy on save (default/stamp/isolation/derived field), OR writing a create/update path → Load **ADR-002** + `.claude/constraints/plugins.md`
 - **Working with auth → Load ADR-028 (canonical) + ADR-003 (server seams + OBO) + ADR-008 (filters) + ADR-009 (Redis caching) + `.claude/constraints/auth.md` (operational MUST/MUST NOT)**
 - Working with SPE → Load ADR-007, ADR-019
 - Working with UI/UX → Load ADR-021, ADR-022

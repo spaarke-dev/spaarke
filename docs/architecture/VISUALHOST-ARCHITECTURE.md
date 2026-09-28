@@ -157,7 +157,7 @@ Parameters are passed as a URL-encoded string in the `data` property of `navigat
 
 ### AI Summary: Pre-Populated Field (Not Live AI Call)
 
-The AI Summary sparkle icon (v1.3.0) reads a pre-populated Dataverse text field via `context.webAPI.retrieveRecord()` — it does NOT call Azure OpenAI at render time. The field is populated upstream (background service or plugin). Configured via `"aiSummaryField": "sprk_aisummary"` in `sprk_optionsjson`.
+The AI Summary sparkle icon (v1.3.0) reads a pre-populated Dataverse text field via `context.webAPI.retrieveRecord()` — it does NOT call Azure OpenAI at render time. The field is populated upstream by a server-side process (e.g. a BFF AI job/Action or a flow) — never a Spaarke plugin (Spaarke ships none, ADR-002). Note: no Spaarke code writes `sprk_aisummary` today; it is an example column name. Configured via `"aiSummaryField": "sprk_aisummary"` in `sprk_optionsjson`.
 
 ### Caching Strategy
 

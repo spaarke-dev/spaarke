@@ -18,7 +18,7 @@ spaarke/
 │  RUNTIME CODE                                                                    │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐  │
 │  │  src/client/    │  │  src/server/    │  │  src/dataverse/                 │  │
-│  │  ├─ pcf/        │  │  └─ api/        │  │  ├─ plugins/                    │  │
+│  │  ├─ pcf/        │  │  └─ api/        │  │  ├─ forms/                      │  │
 │  │  ├─ office-     │  │     └─ Sprk.    │  │  ├─ solutions/                  │  │
 │  │  │   addins/    │  │        Bff.Api/ │  │  └─ webresources/               │  │
 │  │  └─ webres/     │  │                 │  │                                 │  │
@@ -156,9 +156,11 @@ Sprk.Bff.Api/
 
 | Subdirectory | Technology | Purpose |
 |--------------|------------|---------|
-| `plugins/` | C# | Dataverse plugins (thin validation/projection) |
+| `forms/` | Form XML | Exported Dataverse form definitions (e.g. `sprk_matter/`) |
 | `solutions/` | Dataverse solution | Solution XML, entity definitions |
 | `webresources/` | JavaScript | Dataverse form scripts |
+
+> No `plugins/` directory: Spaarke ships no Dataverse plugins; record invariants live in the BFF server-side write path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*.
 
 ---
 
@@ -259,7 +261,7 @@ projects/{project-name}/
 |-----------|-------------------|-----------|
 | PCF control work | `src/client/pcf/{control}/` | `tests/unit/` |
 | BFF API work | `src/server/api/Sprk.Bff.Api/` | `tests/unit/Sprk.Bff.Api.Tests/` |
-| Dataverse plugin | `src/dataverse/plugins/` | `tests/unit/` |
+| Dataverse write-path invariant (no plugins — ADR-002) | `src/server/api/Sprk.Bff.Api/` | `tests/unit/Sprk.Bff.Api.Tests/` |
 | Infrastructure | `infrastructure/bicep/` | `docs/reference/architecture/` |
 | Documentation | `docs/ai-knowledge/` | `docs/reference/` |
 
@@ -380,7 +382,6 @@ Before submitting code:
 | **BFF Email services** | `src/server/api/Sprk.Bff.Api/Services/Email/` |
 | **BFF AI services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` |
 | **BFF Export services** | `src/server/api/Sprk.Bff.Api/Services/Ai/Export/` |
-| Dataverse plugins | `src/dataverse/plugins/` |
 | Unit tests | `tests/unit/{ProjectName}.Tests/` |
 | **Email conversion tests** | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
 | **AI export tests** | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |

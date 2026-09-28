@@ -14,7 +14,7 @@
 2. **MUST**: All BFF API endpoints require authentication except `/healthz` and `/ping`.
 3. **MUST**: Resource authorization uses endpoint filters, not global middleware (ADR-008).
 4. **MUST**: Graph API access goes through `SpeFileStore` facade; never inject `GraphServiceClient` directly (ADR-007).
-5. **MUST NOT**: Make HTTP or Graph calls from Dataverse plugins (ADR-002).
+5. **MUST NOT**: Add Dataverse plugins; record invariants are enforced in the BFF server-side write path, and Dataverse → BFF change signals use no-code service-endpoint steps → Service Bus (ADR-002 WP-1…WP-8) *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*.
 6. **MUST**: All Service Bus jobs use the `JobContract` schema with `jobType` routing.
 7. **SHOULD**: Frontend callers use `authenticatedFetch` wrappers that attach Bearer tokens automatically.
 8. **MUST**: AI service endpoints return `503` with `ai_unavailable` error code when circuit breaker is open.
@@ -347,7 +347,7 @@ Via `RetryPolicies.GetDataverseRetryPolicy()`:
 |-------------|---------------|-----------------|-----------|
 | Injecting `GraphServiceClient` in endpoints | Leaks Graph SDK types above facade boundary | Use `SpeFileStore` facade | ADR-007 |
 | Global authorization middleware | Prevents per-resource auth logic | Use endpoint filters per route | ADR-008 |
-| HTTP calls from Dataverse plugins | Plugins must complete in <50ms; network calls are unreliable | Submit job to Service Bus; process in BFF | ADR-002 |
+| Dataverse plugins (any), incl. HTTP calls from them | Spaarke ships no plugins (2026-09-25) | Enforce in the BFF write path; for non-product writes use a no-code service-endpoint step → Service Bus → BFF worker | ADR-002 |
 | Hardcoded BFF URL in PCF controls | Breaks multi-tenant deployment | Read from `sprk_BffApiBaseUrl` environment variable | ADR-010 |
 | Per-request `ServiceClient` creation | Connection pooling lost; expensive handshake per call | Singleton `ServiceClient` registration | ADR-010 |
 | Skipping circuit breaker on AI calls | Cascading failures when OpenAI/Search is down | Use `OpenAiClient`, `ResilientSearchClient` wrappers | ADR-013 |
@@ -357,7 +357,7 @@ Via `RetryPolicies.GetDataverseRetryPolicy()`:
 ## Related
 
 - [ADR-001](../../docs/adr/ADR-001-minimal-api-and-workers.md) -- Minimal API + BackgroundService
-- [ADR-002](../../docs/adr/ADR-002-no-heavy-plugins.md) -- Thin Dataverse plugins
+- [ADR-002](../../docs/adr/ADR-002-no-heavy-plugins.md) -- No Dataverse plugins; server-side write path (2026-09-25)
 - [ADR-007](../../docs/adr/ADR-007-spe-storage-seam-minimalism.md) -- SpeFileStore facade
 - [ADR-008](../../docs/adr/ADR-008-authorization-endpoint-filters.md) -- Endpoint filters for auth
 - [ADR-009](../../docs/adr/ADR-009-caching-redis-first.md) -- Redis-first caching

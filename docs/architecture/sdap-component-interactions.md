@@ -41,7 +41,7 @@ When modifying a component, check this table for potential downstream effects:
 | BFF authentication / OBO | PCF auth config, Office add-in auth, Code Page auth bootstrap, Copilot Agent token service |
 | PCF control API calls | BFF endpoint contracts, shared UI component interfaces |
 | Dataverse entity schema | BFF Dataverse queries, PCF form bindings, Office workers, email processing |
-| Shared .NET libraries (`Spaarke.Core`, `Spaarke.Dataverse`) | All ProjectReference consumers — BFF, plugins, workers |
+| Shared .NET libraries (`Spaarke.Core`, `Spaarke.Dataverse`) | All ProjectReference consumers — BFF, workers (no plugins — ADR-002) |
 | Shared UI library (`@spaarke/ui-components`) | All PCF controls and Code Pages that import from it |
 | `SpeFileStore` facade | All document endpoints, upload flows, AI analysis, RAG indexing |
 | `GraphClientFactory` | OBO flow (user-initiated), app-only flow (jobs), all Graph-dependent services |
@@ -328,7 +328,7 @@ Sequence: Teams/M365 Copilot → AgentEndpoints → SpaarkeAgentHandler → Play
 - **MUST** use `SpeFileStore` for all SPE operations — never inject `GraphServiceClient` directly (ADR-007)
 - **MUST** use endpoint filters for resource authorization — no global auth middleware (ADR-008)
 - **MUST** use `GraphClientFactory.ForApp()` for background workers and `ForUserAsync(ctx)` for user-initiated operations
-- **MUST NOT** add HTTP/Graph calls to Dataverse plugins (ADR-002)
+- **MUST NOT** add Dataverse plugins; record invariants belong in the BFF server-side write path (ADR-002 WP-1…WP-8, updated 2026-09-25)
 - **MUST** update both sync and async paths when changing `IFileIndexingService`
 - **MUST** update all consumers when modifying shared library interfaces (`IDataverseService`, `@spaarke/ui-components`)
 
