@@ -1,10 +1,10 @@
-# Dataverse Plugin Constraints
+# Dataverse Plugin + Write-Path Constraints
 
-> **Domain**: Dataverse Extensibility
-> **Source ADRs**: ADR-002
-> **Last Updated**: 2026-01-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Domain**: Dataverse Extensibility / Record Invariants
+> **Source ADRs**: ADR-002 (reviewed + clarified 2026-09-25)
+> **Last Updated**: 2026-09-25
+> **Last Reviewed**: 2026-09-25
+> **Reviewed By**: ADR-002 plugin review (main session, owner-approved)
 > **Status**: Verified
 
 ---
@@ -12,101 +12,68 @@
 ## When to Load This File
 
 Load when:
-- Creating new Dataverse plugins
-- Modifying existing plugin logic
-- Reviewing plugin code
-- Deciding where to place business logic
+- Anyone proposes a Dataverse plugin, plugin-backed Custom API, low-code plugin, or Dataverse Function
+- A feature adds a rule a record must satisfy on save (default, stamp, isolation, derived field, cascade)
+- Writing a `Create*Wizard` / create or update path for a Spaarke table
+- Designing import, integration, or Office add-in write paths
+- Deciding `Xrm.WebApi` vs BFF for a **write**
 
 ---
 
 ## Core Principle
 
-**Dataverse plugins are NOT an execution runtime.**
+**Spaarke ships no Dataverse plugins. Invariants live on the server.**
 
-Plugins exist only to protect data integrity—not to run the system. All orchestration, business logic, integrations, and AI-driven processing belong in APIs and workers.
+Every rule a record must satisfy when saved has **one owner in the BFF write path**. Clients may preview it; they never solely enforce it. Writes outside the product are corrected asynchronously, and security rules fail closed.
 
----
-
-## MUST NOT Rules (Prohibited)
-
-### In ALL Plugins (ADR-002)
-
-- ❌ **MUST NOT** implement business logic or workflow orchestration
-- ❌ **MUST NOT** make HTTP, Graph, AI, or any remote I/O calls
-- ❌ **MUST NOT** implement multi-entity coordination or side effects
-- ❌ **MUST NOT** use retries, polling, or long-running execution
-- ❌ **MUST NOT** depend on external state or services
-
-**Low-code plugins are treated the same as C# plugins** — no exceptions.
+Full rationale + registry: [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../../docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
 
 ---
 
-## MUST Rules (When Plugins Are Used)
+## MUST NOT Rules
 
-### Plugin Design (ADR-002)
-
-- ✅ **MUST** keep plugins < 200 lines and < 50ms p95
-- ✅ **MUST** limit to: validation, invariant enforcement, denormalization/projection, audit stamping
-- ✅ **MUST** defer all side effects to APIs or workers
-- ✅ **MUST** pass correlation IDs through API boundaries
-- ✅ **MUST** require explicit ADR exception approval for any plugin use
-
----
-
-## Restricted Use (Exception-Only)
-
-Plugins **MAY** be used *only* when ALL of the following are true:
-
-- Execution is synchronous and deterministic
-- Work completes in < 50 ms p95
-- Logic is limited to: validation, invariant enforcement, denormalization/projection, audit stamping
-- No external calls of any kind
-- No orchestration or branching logic
-
-**Use of plugins requires explicit ADR exception approval.**
+- ❌ **MUST NOT** add plugin assemblies/packages, plugin-backed Custom APIs, or low-code plugins / Dataverse Functions (ADR-002)
+- ❌ **MUST NOT** enforce a write-path invariant only in client code — wizard `onFinish`, PCF, code page, add-in (WP-2)
+- ❌ **MUST NOT** write a table that carries a registered invariant via `Xrm.WebApi` from product code (WP-3)
+- ❌ **MUST NOT** design a security invariant that fails open — e.g. treating NULL as "not secure", or leaving a stale stamp that over-grants (WP-6)
+- ❌ **MUST NOT** run per-row synchronous logic for bulk import inside Dataverse (WP-7)
+- ❌ **MUST NOT** write code comments or docs that claim a plugin performs work (no Spaarke plugin exists — see FAILURE-MODES AP-12)
 
 ---
 
-## Quick Reference Patterns
+## MUST Rules
 
-### Allowed: Validation/Stamping Plugin
-
-```csharp
-// ValidationPlugin — invariant enforcement only
-public sealed class DocumentValidationPlugin : IPlugin
-{
-    public void Execute(IServiceProvider serviceProvider)
-    {
-        var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
-        var target = context.InputParameters["Target"] as Entity;
-
-        // ✅ Validation only
-        if (string.IsNullOrWhiteSpace(target.GetAttributeValue<string>("sprk_name")))
-            throw new InvalidPluginExecutionException("Document name is required.");
-
-        // ✅ Stamping only
-        target["sprk_validatedon"] = DateTime.UtcNow;
-    }
-}
-```
-
-### Where Business Logic Belongs
-
-| Concern | Required Mechanism |
-|---------|-------------------|
-| Business logic | BFF / Custom API |
-| Orchestration | API + async workers |
-| External services | BackgroundService / Azure Functions |
-| Long-running work | Job contracts + queues (ADR-004) |
-| Observability | Application Insights |
-| Retries & idempotency | Worker infrastructure |
-| Authorization | Endpoint-level filters (ADR-008) |
+- ✅ **MUST** give each new invariant exactly one server-side owner and add it to the invariant registry (WP-1)
+- ✅ **MUST** apply security and on-load-UX invariants **inline, same request**; multi-row effects in one Dataverse transaction (WP-4)
+- ✅ **MUST** provide an idempotent, **fill-only** async fix-up and/or reconciliation for writes outside the product (WP-5)
+- ✅ **MUST** make security invariants fail closed (WP-6)
+- ✅ **MUST** escalate via root CLAUDE.md §6.5 (against the ADR-002 reopen criteria) before proposing any plugin
 
 ---
 
-## Pattern Files (Complete Examples)
+## Decision Table — "Where does this rule go?"
 
-- [Plugin Structure](../patterns/dataverse/plugin-structure.md) - Thin plugin patterns
+| Question | Answer |
+|---|---|
+| Is it a rule the saved record must satisfy? | Yes → **write-path invariant** → BFF write path owner (WP-1) |
+| Does it affect security, or what the user sees when the record opens? | Inline in the BFF create/update request (WP-4) |
+| Can the record also be written outside the product? | Add async fix-up (change signal → BFF worker) and/or reconciliation (WP-5) |
+| Is it a security rule? | Must fail closed (WP-6) |
+| Is it only uniqueness? | Alternate key |
+| Is it a trivial derived value? | Formula column may suffice (no owner needed if no code) |
+| Is it a UX suggestion the user can change before saving? | Client-only is fine — it is not an invariant |
+
+---
+
+## Permitted Non-Plugin Mechanisms
+
+| Mechanism | Use |
+|---|---|
+| Service endpoint / webhook **step registration (no code)** | Async change signal to Service Bus / BFF for WP-5 |
+| Plugin-less Custom API | Business-event contract only |
+| Alternate keys | Uniqueness |
+| Formula / rollup columns, entity-scope business rules | Trivial derived values/defaults |
+| Native Dataverse security | Real access control |
 
 ---
 
@@ -114,11 +81,9 @@ public sealed class DocumentValidationPlugin : IPlugin
 
 | ADR | Focus | When to Load |
 |-----|-------|--------------|
-| [ADR-002](../adr/ADR-002-thin-plugins.md) | Plugins not an execution runtime | Exception approval, architecture review |
-| [ADR-001](../adr/ADR-001-minimal-api.md) | APIs and workers as primary runtime | When deciding where logic belongs |
-| [ADR-004](../adr/ADR-004-job-contract.md) | Async job contracts | When deferring work from plugins |
+| [ADR-002](../adr/ADR-002-thin-plugins.md) | No plugins + Server-Side Write-Path rule | Always for this domain |
+| [ADR-001](../adr/ADR-001-minimal-api.md) | APIs + BackgroundService workers | Placing fix-up workers |
+| [ADR-004](../adr/ADR-004-job-contract.md) | Async job contracts | Fix-up / reconciliation jobs |
+| [ADR-036](../adr/ADR-036-background-job-infrastructure.md) | Scheduled jobs | Reconciliation scheduling |
 
----
-
-**Lines**: ~100
-**Purpose**: Single-file reference for all Dataverse plugin constraints
+Companion: [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](../../docs/standards/DATA-ACCESS-DECISION-CRITERIA.md) (`Xrm.WebApi` vs BFF — WP-3 row).

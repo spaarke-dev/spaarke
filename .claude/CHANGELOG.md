@@ -8,6 +8,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-25 — ADR-002 review: **no Dataverse plugins reaffirmed + Server-Side Write-Path rule (WP-1…WP-8)**
+
+- **Decision (owner-approved, §6.5 Path C + clarification).** Reviewed ADR-002 against current Microsoft/MVP
+  guidance (plugins still .NET Framework-only; packages replace ILMerge; steps still hand-registered; managed
+  identity needs one FIC per customer env; low-code/Functions still preview) from the perspective of Spaarke as
+  a product. Posture kept: **no plugins at all** — the old "thin plugins with exception approval" path is replaced
+  by explicit reopen criteria. The defect the review actually found was **invariants enforced only in client
+  wizards** (field mapping, core-ancestor stamping, container/index default-fill), silently skipped by every other
+  write path including the Office add-ins. New rule: one BFF server-side owner per invariant; clients preview only;
+  invariant-bearing tables written via BFF; security + on-load UX inline; non-product writes → async fix-up +
+  reconciliation; security fails closed.
+- **Updated**: `.claude/adr/ADR-002-thin-plugins.md`, `.claude/constraints/plugins.md` (+ INDEX),
+  `.claude/patterns/dataverse/plugin-structure.md` (retired → redirect) + dataverse/INDEX + patterns INDEX +
+  `testing/unit-test-structure.md` + `pcf/control-initialization.md`, `.claude/adr/INDEX.md`,
+  `.claude/adr/ADR-028` (BaseProxyPlugin secret defect resolved in source). Skills: `spaarke-conventions`
+  (IPlugin "✅ DO" sample removed), `dataverse-deploy` (phantom plugin-deploy CI section removed), `ci-cd`
+  (plugin jobs removed; **flagged: `deploy-staging.yml`/`deploy-to-azure.yml` don't exist — section needs
+  rewrite**), `adr-check` (+ validation rules), `adr-aware`, `code-review` (+ checklist), `design-to-spec`,
+  `project-pipeline`, `project-setup` template, `pcf-deploy`, `code-page-deploy`, skills INDEX. Root `CLAUDE.md`
+  §13 entry point + §17 pointer row. New: `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`.
+- **Removed (non-conforming)**: `Spaarke.CustomApiProxy` plugin (HTTP + plaintext secret + ILRepack),
+  `EmailProcessingMonitor` PCF (dead endpoint), `scripts/Register-EmailWebhook.ps1` (dead endpoint),
+  CrmSdk package pins. `ADR002_PluginTests` rewritten as a repo-wide zero-plugin guard (R1–R5 +
+  negative/positive/scanner controls) and **armed in the Tier-1 blocking filter** (verdict-neutral under the PR
+  #865 mid-shadow-window precedent). Dead plugin-size CI jobs **deferred** to post-cutover — router/tier2/sdap-ci
+  are frozen while the shadow window runs (`projects/ci-cd-unit-test-remediation-r1/notes/post-cutover-adr002-ci-cleanup.md`).
+
 ###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
 
 - **New `FAILURE-MODES.md` AP-12: prose outlives the mechanism it describes.** Promoted from a single

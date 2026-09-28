@@ -21,7 +21,6 @@ This module contains TypeScript/React PCF controls for Dataverse model-driven ap
 - **RelatedDocumentCount** - Semantically-related document count + drill-through
 - **RegardingResolver** - Polymorphic "set-regarding" parent picker on child forms; writes the denormalized `sprk_regarding*` fields + subgrid auto-detect (Xrm.WebApi, no BFF). Supplies the source parent that the Field Mapping Framework inherits from — see `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`
 - **AssociationResolver** - ⛔ RETIRED (SRFR-045, 2026-07). Folded into RegardingResolver; no longer in the repo. Do not reference
-- **EmailProcessingMonitor** - Admin monitoring control
 - **ScopeConfigEditor** - Scope entity admin (Action / Skill / Knowledge / Tool)
 - **SpaarkeGridCustomizer** - Power Apps Grid Control cell customizer
 - **UpdateRelatedButton** - Field-mapping update trigger
