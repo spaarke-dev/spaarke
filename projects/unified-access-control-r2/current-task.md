@@ -45,8 +45,27 @@ project's largest open item.** 18 commits, all pushed. Tree clean.
 📖 **Read `notes/DEPLOYMENT-MODEL-SYNOPSIS.md` FIRST.** It is the agreed statement of problems,
 solutions, and why they close. Everything below is delta.
 
-**The owner has REDEFINED the deployment models** (2026-09-27/28, in discussion — **no decision record
-written yet; this is the first thing to do**):
+✅ **D-12 IS WRITTEN AND FULLY DECIDED** → `notes/D-12-deployment-model-redefinition.md`. Read it with
+the synopsis. Remediation has **not** started.
+
+**Settled 2026-09-28, beyond the model labels themselves:**
+- 🔴 **One Azure SUBSCRIPTION + resource group per customer** (billing segregation). ✅ This *resolves*
+  the OpenAI TPM-quota caveat — quota is per-subscription-per-region.
+- 🔴 **App Service Plan = dedicated per customer (option A), FORCED** — an App Service app must be in
+  the **same subscription** as its plan, so the "shared plan, dedicated app" option **closed** when
+  per-customer subscriptions were decided. ⚠️ **Verify that Azure constraint before it carries budget.**
+- **All Azure resources dedicated.** Redis especially: the cache key is
+  `tenant:{tenantId}:{resource}:{id}:v{version}` and `tenantId` is **Spaarke's for every Model 1
+  customer**, so a shared Redis would **collide across customers**. Not a cost trade-off — a correctness one.
+- ⚠️ **Requires an ADR-027 AMENDMENT** (§6.5 path B). ADR-027 Decision 1 says *"Production subscription:
+  **All** production shared and customer resources"*. It also **raises** "whether customers need their own
+  subscriptions" as its own question 4 **and never answers it** — so D-12 answers it. Amendment must be
+  written, not assumed.
+- **Side effect**: with per-customer subscriptions + dedicated plans, Model 1 and Model 2 are **nearly
+  identical infrastructurally**, differing only in which Azure tenant owns the subscription. Do not
+  re-invent differences that no longer exist when rewriting docs.
+
+**The redefinition itself** (2026-09-27/28):
 
 | | Dataverse env | Azure tenant | Was |
 |---|---|---|---|
@@ -183,14 +202,19 @@ a real invitation email** — that is why it was not reproduced unattended.
 
 ### ▶ NEXT — in order
 
-1. **Write the model-redefinition decision record** (D-12) from `notes/DEPLOYMENT-MODEL-SYNOPSIS.md`. Nothing
-   downstream should start until the definition is signed.
-2. **Resolve the four conflicting "Model 1" definitions** in docs — before any remediation.
-3. **Answer the three-resource question** (App Service Plan · OpenAI · AI Search).
-4. **Then** the `TenancyModel` enum → rename → `sprk_tenancymodel` migration → docs.
-5. **Independently, any time**: ISS-030's `catch { return [] }` at `TrackingFieldTrio/index.ts:805`, and
+1. ✅ ~~Write the D-12 decision record~~ — **DONE**, `notes/D-12-deployment-model-redefinition.md`, fully decided.
+2. ✅ ~~Answer the three-resource question~~ — **DONE**: all dedicated; App Service Plan forced to option A
+   by the per-customer subscription; Redis dedicated for a **correctness** reason (cache-key collision),
+   not cost.
+3. **Write the ADR-027 amendment** (§6.5 path B) for per-customer subscriptions — D-12 §3a. Do this
+   before or alongside any code that depends on it.
+4. **Resolve the four conflicting "Model 1" definitions** in docs — 13 BLOCKING files. D-12 is now the
+   target definition, so this is mechanical. ⚠️ `COMPONENT-INVENTORY.md` §7 is the **authoritative**
+   shared-vs-dedicated BOM — *"when the two disagree, INVENTORY wins."*
+5. **Then** the `TenancyModel` enum → rename → `sprk_tenancymodel` migration → remaining docs.
+6. **Independently, any time**: ISS-030's `catch { return [] }` at `TrackingFieldTrio/index.ts:805`, and
    the four misnamed `*TenantScope*` symbols. Neither depends on any decision above.
-6. **Also independently**: the `invite-and-grant` 500 (above), and task **109**'s implementation (Steps 0+1
+7. **Also independently**: the `invite-and-grant` 500 (above), and task **109**'s implementation (Steps 0+1
    are done and recorded in `notes/task-109-junction-read-two-named-sets.md`).
 
 ⚠️ **`notes/adr-002-write-path-guidance-2026-09-25.md` was NOT authored by this session** — it arrived

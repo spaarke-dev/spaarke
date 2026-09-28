@@ -3,7 +3,8 @@
 > **Decided**: 2026-09-28 by the owner, in discussion, across several turns.
 > **Supersedes**: D3 v3 (`customer-provisioning-orchestration-r1/design.md`, 2026-08-12), which created
 > the two-tier shared/dedicated split.
-> **Status**: DECIDED. Remediation not started. One sub-decision open — see §4.
+> **Status**: **FULLY DECIDED** (incl. §3a subscription structure and §4 App Service Plan, both settled
+> 2026-09-28). Remediation NOT started. ⚠️ Requires an **ADR-027 amendment** — see §3a.
 > **Evidence**: `notes/DEPLOYMENT-MODEL-SYNOPSIS.md` (problems → solutions → why they close), plus three
 > discovery sweeps and direct verification against live Dataverse, live Azure and the source tree.
 
@@ -98,30 +99,68 @@ concept already exists and is modelled correctly in the L2 control plane (`Custo
 
 ---
 
-## 4. 🔔 OPEN SUB-DECISION — App Service Plan
+## 3a. Azure subscription structure — ONE SUBSCRIPTION PER CUSTOMER (decided 2026-09-28)
 
-**This is not binary, and the middle option may be the right answer.**
+**Each customer gets their own Azure subscription AND resource group**, so that usage can be segregated
+and billed per customer. Applies to both models; under Model 1 the subscription lives in Spaarke's
+Azure tenant, under Model 2 in the customer's.
 
-An App Service **Plan** is the compute resource; **multiple App Service apps can run on one plan**. So
-there are three shapes, not two:
+**Two consequences, one good and one expensive:**
 
-| Option | Isolation | Cost |
+✅ **It resolves the OpenAI TPM-quota caveat in §3.** Quota is per-subscription-per-region, so
+per-customer subscriptions give genuine quota isolation. Separate OpenAI *resources* inside one
+subscription would not have.
+
+🔴 **It forces App Service Plan option A — see §4.** An App Service app must be in the **same
+subscription** as its App Service Plan, so a plan cannot be shared across customers that live in
+different subscriptions.
+
+### ⚠️ This requires an ADR-027 amendment (CLAUDE.md §6.5 path B)
+
+`docs/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` **Decision 1** currently
+specifies environment-separated subscriptions — *"**Production subscription**: All production shared and
+customer resources"* — i.e. one production subscription holding every customer's resources. Per-customer
+subscriptions contradict that as written.
+
+Note the ADR **raises this exact question and never answers it**: its §Context lists
+*"4. **Customer isolation**: Whether customers need their own subscriptions"*, but Decision 4 turned out
+to be about Dataverse CI/CD. **This decision answers ADR-027's own open question**, which makes it an
+amendment rather than a violation — but the amendment must be written, not assumed.
+
+---
+
+## 4. App Service Plan — option A, FORCED by §3a
+
+**DECIDED: option A — a dedicated App Service Plan per customer, in both models.** Not by preference —
+§3a's per-customer subscription forces it.
+
+Three shapes exist in principle:
+
+| Option | Isolation | Viable here? |
 |---|---|---|
-| **A. Dedicated plan per customer** | Full — compute, process, config, identity, blast radius | Highest. A real per-customer floor |
-| **B. Shared plan, dedicated BFF app per customer** | Process, config, managed identity and Dataverse binding are all **per-customer**; CPU/memory are shared | One plan floor amortised across customers |
-| **C. One shared BFF app serving many customers** | ❌ **Rejected** — requires a multi-tenant BFF, which is a far larger architectural change and re-introduces every `tenantId`-can't-separate-customers problem |
+| **A. Dedicated plan per customer** | Full — compute, process, config, identity, blast radius | ✅ **CHOSEN** |
+| **B. Shared plan, dedicated BFF app per customer** | Process/config/identity per-customer; CPU + memory shared | 🔴 **IMPOSSIBLE under §3a** |
+| **C. One shared BFF app for many customers** | — | ❌ rejected outright |
 
-**Option C is out.** Each customer's BFF is bound to one Dataverse environment through per-deployment
-config (`AzureAd:TenantId`, Dataverse URL), so a per-customer app is required regardless.
+🔴 **Why B is impossible, not merely rejected**: an App Service **app must be in the same Azure
+subscription as its App Service Plan.** With one subscription per customer, a shared plan would sit in
+one subscription while the apps sat in others. Azure does not support that.
+⚠️ **Verify this constraint against current Azure documentation before it carries budget** — it is now
+load-bearing for a per-customer cost floor. The reasoning is sound but it should not stay unverified.
 
-**The real question is A vs B**, and it is narrower than it looks: under **B** each customer already has
-their own app, identity, configuration and secrets. What is shared is **CPU and memory**, which means
-the exposure is **noisy-neighbour performance**, not data disclosure.
+**C was rejected independently**: each BFF is bound to one Dataverse environment through per-deployment
+config (`AzureAd:TenantId`, Dataverse URL), so a per-customer app is required regardless — and a shared
+app would re-introduce every "`tenantId` cannot separate customers" problem in §3.
 
-**Recommendation: B for Model 1, A for Model 2** — Model 2 lives in the customer's own subscription, so
-a shared plan is not available there anyway. Revisit B→A per customer if load warrants.
+**Consequence**: a genuine App Service Plan floor per customer, the largest single per-customer fixed
+cost in the stack. It was previously recorded here as an open trade-off (B for Model 1, A for Model 2);
+that option **closed** when the per-customer subscription was decided.
 
-⚠️ **Not yet decided by the owner. Everything else in §3 is.**
+> **Side effect worth noting**: with per-customer subscriptions and dedicated plans, Model 1 and Model 2
+> become **nearly identical infrastructurally** — own subscription, own everything — differing only in
+> **which Azure tenant owns the subscription**. That is consistent with this decision's framing, and it
+> means the Model 1 / Model 2 distinction is genuinely thin. Worth remembering when writing the docs:
+> resist re-inventing differences that no longer exist.
 
 ---
 
