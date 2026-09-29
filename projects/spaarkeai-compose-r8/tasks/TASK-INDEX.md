@@ -9,6 +9,21 @@
 > while this index showed ✅, because CLAUDE.md §7 step 1 (flip the POML) was skipped each time only the
 > index was updated. A naive status query therefore reported 13 open tasks when one was open. Fixed in
 > bulk; if you add a task, update BOTH.
+>
+> ⚠️ **Three rows here have no POML file** — `046` (soft line breaks), `047` (editor node-inventory
+> survey) and `048` (tabs + symbols). All three were executed as in-flight residual-loss follow-ons
+> during Track A and recorded only here; `047b` exists as a POML because it was a spin-off that got one.
+> Left as-is deliberately: the work is done and described, and writing POMLs after the fact would
+> fabricate a plan that never guided anything. Noted so the set mismatch is a known, explained state
+> rather than a surprise to the next reconciliation.
+>
+> ⚠️ `043` is the mirror case — a POML marked `superseded` with no row here.
+>
+> ⚠️ **`scripts/check-task-status-drift.ps1` cannot read this file.** It expects a marker-FIRST row
+> (`| <marker> <id> | …`); this index is id-first with the marker in the LAST cell, so it parses 1 row
+> of 50 and then reports ~47 phantom drifts. Reconcile this project by the layout it actually uses, not
+> by that script's verdict — and treat the script as needing a second row shape before it can gate
+> id-first projects.
 > **36 tasks / 9 phases** · Legend: 🔲 pending · 🔄 needs retry · ✅ complete · ⛔ blocked
 
 **Phase 4 does not start until Phase 3's gate passes.** A miss is an owner escalation (root §6/§6.5).
@@ -311,7 +326,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
-| 090 | Anti-clobber deploy · `/test-diet` · write-side fidelity doc · lessons-learned · `projects/INDEX.md` + root §17 update | STANDARD | sonnet/high | ❌ | all | 🔲 |
+| 090 | Anti-clobber deploy · `/test-diet` · write-side fidelity doc · lessons-learned · `projects/INDEX.md` + root §17 update | STANDARD | sonnet/high | ❌ | all | 🔲✅ |
 
 ---
 
