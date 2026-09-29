@@ -1,8 +1,26 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-09-01 SESSION 22 — **/context-handoff invoked**. This session: (1) landed **213.4-correction** (Model 2 BFF gate hardened per owner architectural framing — hard-throw on `-CreateBffApp Model2` without `-CustomerName`; symmetric guards; 3 gate hardenings + 4/4 test cases pass; commit `2d6512c49`); (2) landed **SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md** (owner-mandated infrastructure inventory before task 213.7 / 186 dispatch; 202 lines / 4 sections / 4 UNCLEAR rows honestly flagged; sub-agent authored + main session added CLAUDE.md §17 pointer + fixed SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE §H6 divergence 8→9 solutions; commit `54e6e9e1c`); (3) multi-turn architectural conversation with owner covering Azure subscription/tenant/RG semantics + Model 1 architectural intent + AI Search logical isolation safety + solutions creation flow correction + managed solution operational gaps → surfaced 3 new tasks (216 / 217 / 218) proposed but **awaiting owner go-ahead**. Working tree: CLEAN. All commits pushed to origin.
+> **Last Updated**: 2026-09-28 SESSION 23 — **/context-handoff invoked before /compact**. This session (2026-09-28, 27 days after SESSION 22): (1) merged 812 master commits into our branch (commit `92b480500`) per the INCOMING-D12-D13-REMEDIATION.md protocol — 11 conflicts resolved per doc rules; (2) 1 auto-merge cascade compile failure fixed (`CustomerRunGuardModule.cs` — took master); build 0/0; (3) ArchTest suite ran: **322/4 — STEP 1 gate NOT green** (need 326/326); 4 failures rooted in our pre-existing code that master's stricter suite now surfaces; (4) discovered UAC-r2 team wrote an **incoming coordination handoff** specifically for us — 4 mandatory work items (Items 1-4) + 3 open owner questions (§9) that MUST be answered before ANY code work; (5) owner (Ralph) provided decisions on the 3 §9 questions + confirmed 215/216/217/218 dispositions. **This handoff captures all owner decisions + the definitive execution sequence for the next session.**
 >
-> **Prior state (SESSION 21)**:
+> **THE BINDING SEQUENCE (per instruction, do not reorder)**:
+> ```
+> post-/compact:
+>   1. T215 hygiene (SPE cert retirement — concrete steps below)
+>   2. STEP 1 completion task (bring ArchTest 326/326)
+>   3. Item 1 (delete H3 shared-app-reg branch — D-13)
+>   4. Item 2 (one TenancyModel enum + parse-or-reject)
+>   5. Item 3 (migrate sprk_tenancymodel — do NOT relabel)
+>   6. Item 4 (retire model1-*.bicep — 6-surface atomic)
+>   7. Section 6 items (six more contradictions per incoming doc §6)
+>   8. Task 218 (managed solution flow + IAM + UPDATE audit — absorbs 217)
+>   9. Task 186 (first live E2E dispatch — Trial 1 customer)
+> ```
+>
+> **T216 formally DROPPED** (owner confirmed 2026-09-28): superseded by D-12 which retires the shared Model 1 tier entirely. One deployment package (dedicated customer stamp); only difference between models is Spaarke-hosted vs customer-tenant-hosted. Item 4 replaces T216's scope.
+>
+> **T217 formally FOLDED into T218** (owner confirmed 2026-09-28) with additional scope: owner clarified this project's OBJECTIVE includes DEFINING the complete solution package — may consolidate existing solutions or design new ones to ensure ALL required components are packaged. Not just documenting what exists.
+>
+> **Prior state (SESSION 22, 2026-09-01)**:
 >
 > **This session's arc (SESSION 20, 2026-08-28 → 2026-08-30 across pre- and post-compact)**:
 > 1. Attempted `/provision-environment trial1 --batch runs/trial1-intake.json` → HARD STOPPED at SKILL Step 0.5b constants sanity check (both `containerTypeId` + `bffMultiTenantAppId` null in spaarke-constants.yaml). Deep audit surfaced 5 gap classes.
@@ -14,15 +32,109 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 23 checkpoint 2026-09-28)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **PENDING**: file 216 (Model 1 architectural simplification) + 217 (Solution ship-list confirmation) + 218 (Managed-solution flow + IAM + UPDATE audit) — user has requested these follow-on POMLs but paused for review before filing. Awaiting explicit "file 216/217/218 now" go-ahead. |
-| **Step** | SESSION 22: (1) 213.4-correction landed (Model 2 BFF gate hardened); (2) inventory doc landed (owner-mandated infra inventory); (3) architectural conversation surfaced Model 1 simplification opportunity + managed solution operational gaps + terminology fix ("tenant"→"customer" throughout Bicep + code); (4) 216/217/218 scopes drafted, waiting on user go-ahead. |
-| **Status** | Working tree CLEAN. All commits on origin. Task 213.4 corrected; task 214 remains ✅ from SESSION 21. Inventory doc live in `docs/architecture/`. Three tasks (216/217/218) drafted-but-not-filed. |
-| **Next Action** | **FIRST**: get user go-ahead to file 216/217/218 POMLs. **SECOND**: owner-review the 4 UNCLEAR rows in SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md (see Critical Context below) — some inform 216's Model 1 refactor scope. **THEN**: address either 216 (if user wants Model 1 refactor before 186 dispatches to Model 1 customer) OR 207 (mechanical placeholder-substitution) OR wait on 213.7 (operator SPE runbook completion). |
-| **Task 186 dispatch blocker list (post-SESSION-22)** | {**216** NEW (Model 1 simplify — if scoped as blocker), **217** NEW (solution ship-list doc — soft blocker), **218** NEW (managed solution runbook — HARD blocker before ANY customer dispatch), **213.7** (operator SPE runbook + constants), **207** (placeholder-substitution), **208** (validator CI wiring), **209** (branch protection restore)}. 214-cert-retirement (task 215) is low-priority hygiene, not blocking. |
+| **Task** | **POST-COMPACT SEQUENCE ITEM #1 = T215 SPE cert retirement** (concrete steps in "SESSION 23 Owner Decisions" below). Then STEP 1 completion (bring ArchTest 326/326). Then Items 1-4 per incoming doc. |
+| **Step** | SESSION 23 landed: (1) master merged (commit `92b480500`) — 11 conflicts resolved per INCOMING-D12-D13-REMEDIATION.md rules; (2) 1 auto-merge compile cascade fixed (`CustomerRunGuardModule.cs` — took master); build 0/0; (3) ArchTest 322/4 — STEP 1 gate NOT green; (4) owner (Ralph) provided binding answers to incoming doc §9 three open questions + confirmed 215/216/217/218 dispositions; (5) this handoff captures all decisions for post-compact continuation. |
+| **Status** | Working tree CLEAN after SESSION 23 handoff commit. Branch pushed as `92b480500` (merge) → this handoff commit next. Divergence from master: 100 ahead / 0 behind. `T215` filed (POML exists) but code work not yet done. `T216` DROPPED (superseded by Item 4). `T217` FOLDED into `T218` (with expanded scope per owner). `T218` still HARD BLOCKER before task 186 dispatch. |
+| **Next Action** | Fresh session post-compact: **START with T215 concrete steps** (see "T215 Concrete Execution Plan" section below). All other decisions locked in — proceed without re-litigation. |
+| **Task 186 dispatch blocker list (post-SESSION-23, post-D-12/D-13 merge)** | **HARD blockers**: STEP 1 completion (ArchTest 326/326), Items 1-4 from INCOMING doc §5, Section 6 six-items sweep, T218 (managed solution runbook + full solution package definition — owner-clarified scope). **Pre-existing (still relevant)**: 213.7 operator SPE runbook + constants, 207 placeholder-substitution, 208 validator CI wiring, 209 branch protection restore. **Non-blocking hygiene**: T215 (SPE cert retirement — run first post-compact per owner). **DROPPED**: T216 (superseded by Item 4). **FOLDED**: T217 → T218. |
+
+## 📋 SESSION 23 Owner Decisions (2026-09-28) — LOCKED IN
+
+Per owner Ralph, in this session. Do NOT re-litigate:
+
+### §9 Question 1 — Power BI shared F-SKU capacity pool → **DEFERRED**
+
+- **Decision**: No BI reporting in MVP. Per-customer F-SKU eventually, but do NOT procure license now.
+- **Actions required in Items 1-4 / Section 6 remediation**:
+  - Remove `reporting-admin.md`'s "shared F-SKU pool" assumption
+  - Add PLACEHOLDER for future per-customer F-SKU (Bicep module hook, docs note) — do NOT deploy
+  - Note in customer deployment guide: F-SKU is a future customer add-on that EXCEEDS the Model 1 marginal cost envelope when procured
+- **Task 186 dispatch impact**: unblocked — no BI = no F-SKU dependency
+
+### §9 Question 2 — M365 Copilot agent → **PER-CUSTOMER**
+
+- **Decision**: Per-customer Copilot agent (aligns with D-13 principle).
+- **Actions required in Items 1-4 / Section 6 remediation**:
+  - Add new handler (or extend existing) to create per-customer Copilot agent during provisioning
+  - Coordinate with T218's "solution package definition" scope — Copilot agent may ship inside a solution package (see T218 owner-expanded scope below)
+  - Update inventory doc (`docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`) `M365 → Add-in app registration` section — currently listed as "one shared package"; revise to per-customer
+
+### §9 Question 3 — Redis Standard C1 tier performance → **ACCEPT + VERIFY EMPIRICALLY**
+
+- **Decision**: Accept Standard C1 baseline for MVP. Verify empirically after first customer goes live (Option C).
+- **Actions required**:
+  - Confirm `customer.bicep` `modules/redis.bicep` defaults to Standard C1 (not Premium)
+  - Add post-first-customer verification task (load test / observed throughput / cache hit rate) as follow-on
+  - Document the "verify empirically after first customer" decision in design.md §7.2 disposition table
+- **Task 186 dispatch impact**: unblocked — Standard C1 is Bicep default
+
+## 📋 SESSION 23 Task Dispositions (2026-09-28) — LOCKED IN
+
+### T215 — SPE cert retirement → **RUN FIRST POST-COMPACT** (owner directive)
+
+Owner directive verbatim: "unless a reason to not run this now, otherwise run it now so that the issue is removed."
+
+Deferred from THIS session to post-compact FRESH session only because /compact is next — same effective outcome, cleaner context.
+
+**T215 Concrete Execution Plan (FIRST post-compact action)**:
+
+The POML already exists at `projects/customer-provisioning-orchestration-r1/tasks/215-cert-retirement-spe-app-cert.poml` (filed SESSION 21, commit `1d1f6fd61`). Fresh session executes it via `task-execute 215`, which will:
+
+1. **Grep sweep** — confirm consumers are ONLY in the known 2 files:
+   ```
+   git grep -n "spe-app-cert" -- '*.cs' '*.ps1' '*.yaml' '*.yml' '*.json'
+   ```
+   Expected consumers: `config/spaarke-resources.yaml` (lines ~452-455 + ~492-493) + `scripts/Import-And-Register.ps1` (lines ~6-8). If ANY new consumer found, expand scope + document in task notes before proceeding to step 3.
+
+2. **Deprecate consumer references**:
+   - `config/spaarke-resources.yaml`:
+     - Mark `cert_secrets` block with `_meta: status: retired, retired: 2026-09-28, reason_retained: "documentation of pre-H8-B cert reference; H8-B (task 214, 2026-08-30) reads cert from SPE-OwnerCert-Pfx per topology doc §3A E-1"` per file's own convention (lines 11-19)
+     - Move `spe-app-cert` + `spe-app-cert-pass` from `keyvault_inventory.referenced:` list into new `keyvault_inventory.retired_but_present_in_kv:` subsection with retired dates
+     - Add `_changelog:` entry dated 2026-09-28
+   - `scripts/Import-And-Register.ps1`:
+     - **Recommended: Option A (archive)** — `git mv scripts/Import-And-Register.ps1 scripts/_archive/Import-And-Register.ps1` with retirement banner header
+     - Parity with task 213.3 `Create-NewContainerType.ps1` retirement pattern
+
+3. **FR-35 pre-check** — verify no live App Service reference before KV soft-delete:
+   ```
+   az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev --query "[?value=='@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=spe-app-cert)' || value=='@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=spe-app-cert-pass)']"
+   ```
+   Expected: empty array. If ANY reference found, HALT + escalate.
+
+4. **KV soft-delete** (OPERATOR command — Ralph runs these; agent stops after step 3):
+   ```
+   az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert
+   az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass
+   az keyvault secret list-deleted --vault-name spaarke-spekvcert --query "[?name=='spe-app-cert' || name=='spe-app-cert-pass']"
+   # Expected: both in list. Do NOT purge — soft-delete has 90-day recovery.
+   ```
+   **DO NOT touch `spe-owning-app-secret`** — that's E-1 exception per ADR-028, retained indefinitely.
+
+5. **Verify** the T215 acceptance criteria via `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/Spaarke.ArchTests/` (should stay at 322/4 — this task doesn't change the ArchTest failure count).
+
+6. **Commit + push** as `hygiene(provisioning): T215 SPE cert retirement — code + config landed; KV soft-delete pending operator`.
+
+### T216 — Model 1 architectural simplification → **DROPPED**
+
+Owner confirmed 2026-09-28: superseded by D-12 which retires the shared Model 1 tier entirely. Owner's understanding: "we have only one deployment package (dedicated customer) — the only difference is which environment (Spaarke hosted or customer tenant hosted)." Item 4 replaces T216 scope. Do NOT file 216 POML.
+
+### T217 — Solution ship-list confirmation → **FOLDED INTO T218 with EXPANDED SCOPE**
+
+Owner directive verbatim 2026-09-28: "as per T216 each customer needs to get the full Spaarke solution. BUT it may be more efficient to define a solution (or multiple solutions) rather than use existing solutions that may not contain all required components; that is part of the objectives of this project is to define the complete package."
+
+**Owner-expanded T218 scope** (this is IMPORTANT):
+- T218 is no longer just "audit + document the existing 9 solutions"
+- T218 becomes: **DEFINE the complete Spaarke solution package** — audit existing 9 solutions, identify gaps, potentially consolidate/redesign solutions to ensure ALL required components (entities, roles, forms, MDA, Copilot agent per §9 Q2, custom app registrations per D-13, etc.) are packaged in a clean shippable set
+- Absorbs both the original T217 (documenting what ships) + T218 (managed solution runbook + IAM + UPDATE audit)
+- Task 186 HARD BLOCKER — cannot dispatch a customer without knowing the complete solution package is correctly defined
+
+### T218 — Managed solution flow + IAM + UPDATE audit + **complete package definition** → **STILL HARD BLOCKER**
+
+New expanded scope (per T217 folding above). Sequence: AFTER Items 1-4 complete (so per-customer app-reg reality is what gets documented), BEFORE task 186 dispatch.
 | **213.4-correction — Model 2 BFF semantics** | Owner clarification 2026-08-31: Model 2 has NO shared-environment concept. Every Model 2 stamp IS a customer (1 env = 1 tenant = 1 customer). Therefore Model 2 BFF app-reg is per-stamp; `-CreateBffApp Model2` REQUIRES `-CustomerName` (hard-throw without). Also added symmetric guards: `-CreateBffApp {Trial1\|Model1}` with `-CustomerName` → hard-throw (Trial 1 / Model 1 are shared, per-customer identity meaningless); `-CreateOwningApp` with `-CustomerName` → hard-throw (owning apps are 1:1 per tier, never per-customer). Prod flow no-regression proved. Commit `2d6512c49`. |
 | **Definitive BFF app-reg naming** | Model 1 BFF: ONE shared `Spaarke BFF - Model 1` (multiple customers) · Trial 1 BFF: ONE shared `Spaarke BFF - Trial 1` (multiple customers) · Model 2 BFF: ONE `Spaarke BFF - {CustomerName}` per Model 2 stamp (every stamp = customer; no shared concept). All 3 owning apps: ONE per tier, never per-customer (topology doc §R1 permanent 1:1 container-type binding). |
 | **Inventory doc (owner-mandated)** | `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` (202 lines, 45KB). 4 sections per owner-mandated structure: Dataverse (env / app user setup / solutions) · Azure (subs / RGs / resources) · SharePoint Embedded (container type / container) · M365 (add-in / Teams app). Every row cites specific H0-H14 handler / script / runbook step. Distinguishes 3 time-scales: one-time-per-tier (operator) · per-customer (H0-H14) · one-time-per-platform (L2 bootstrap). Includes 4 concrete reference AppIds. Model 1 vs Model 2 variance called out per resource. |
@@ -48,6 +160,9 @@
 | `1d1f6fd61` (SESSION 21) | 2 | **Task 215 filed** — SPE cert retirement follow-on POML (spe-app-cert + spe-app-cert-pass have live consumers in config/spaarke-resources.yaml + scripts/Import-And-Register.ps1). Non-blocking hygiene. |
 | `2d6512c49` (SESSION 22) | 1 | **Task 213.4-correction** — Model 2 BFF gate hardened per owner architectural framing (2026-08-31). Hard-throw on `-CreateBffApp Model2` without `-CustomerName`. Symmetric guards for `-CustomerName` on Trial1/Model1/OwningApp. Removed shared-placeholder fallback in Get-SpeTopologyBffDisplayName. Verification: 3 gate hardenings + 4 test cases + prod-flow regression PASS. |
 | `54e6e9e1c` (SESSION 22) | 3 | **Inventory doc landed** — `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` (202 lines, 45KB) authored by sub-agent per owner-mandated 4-section structure (Dataverse / Azure / SPE / M365). Plus `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §H6 corrected 8→9 solutions (SESSION 19 MDA-GAP reconciliation). Plus root `CLAUDE.md` §17 pointer added. |
+| `0b799b592` (SESSION 22) | 1 | SESSION 22 handoff checkpoint. |
+| `92b480500` (SESSION 23) | 2163 | **Master merge — D-12/D-13 remediation prep** — merged 812 master commits into our branch per INCOMING-D12-D13-REMEDIATION.md protocol. 11 conflicts resolved (8 took MASTER per shared-tier-retirement rule; 1 took OURS for current-task.md rolling log; 2 surgical SKILL.md edits keeping master's D-12 hard-stop). Plus 1 auto-merge compile cascade fixed (`CustomerRunGuardModule.cs` — took master). Build 0/0. ArchTest 322/4 (STEP 1 gate NOT green — see SESSION 23 handoff for the 4 failures + concrete fix plan in "STEP 1 completion task"). |
+| SESSION 23 handoff (this commit) | 1 | This comprehensive handoff — owner Q1/Q2/Q3 answers locked in + T215/T216/T217/T218 dispositions + post-compact execution sequence + T215 concrete steps. |
 
 ### Critical Context (must-know for fresh session)
 
@@ -100,28 +215,29 @@
 - Never touch claude.ai Gmail / Calendar / Drive MCPs (memory `reference_unused_mcp_connectors` — Spaarke doesn't use these).
 - Canonical Spaarke regional strategy: westus2 platform + westus3 OpenAI (memory `reference_azure_fresh_sub_regional_gotchas`).
 
-### To resume in fresh session
+### To resume in fresh session (SESSION 23 END + post-compact)
 
-- **"where was I"** → reads this Quick Recovery
-- **"continue"** or **"proceed"** → **FIRST get user's explicit decision on 216/217/218**. Options:
-  1. **"file 216/217/218 now"** → Claude authors all three POMLs + updates TASK-INDEX + commits + pushes (~20 min)
-  2. **"discuss 216 further first"** → focused conversation on Model 1 refactor scope before filing
-  3. **"skip 216/217/218 and go to 213.7"** → risky — Model 1 refactor may need to happen before customer dispatch; 218 managed-solution runbook is a HARD blocker
-- **"file 216/217/218 now"** → Claude authors:
-  - `projects/customer-provisioning-orchestration-r1/tasks/216-model1-simplify-plus-tenant-terminology.poml`
-  - `projects/customer-provisioning-orchestration-r1/tasks/217-solution-shiplist-confirmation.poml`
-  - `projects/customer-provisioning-orchestration-r1/tasks/218-managed-solution-flow-plus-iam-plus-update-audit.poml`
-  - Update TASK-INDEX top blurb + rows
-  - Commit + push
-- **"run 216"** → task-execute the Model 1 simplification (once filed)
-- **"run 218"** → task-execute the managed-solution audit (once filed)
-- **"unblock 213.7"** → operator must have completed SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-8 against Spaarke tenant; then main session populates `containerTypeId` + `bffApiAppId` values in `scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.<env>` from the runbook outputs; then smoke-verify via 3 delegated Graph probes per runbook Step 8.
-- **"review inventory"** → open `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`; owner needs to resolve the 4 UNCLEAR rows (Dataverse env naming pattern, Model 2 sub creation automation, SPE Model 2 registration handler, Office Add-in Entra app-reg identity).
-- **"verify SESSION 22 work"** → `git log --oneline -3` should show `54e6e9e1c` (inventory doc) + `2d6512c49` (213.4-correction) + `1d1f6fd61` (task 215 filing). Working tree CLEAN. `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` should return 1919 pass / 0 fail / 1 skip.
-- **"what's the current dispatch blocker list"** → `{216 NEW (Model 1 simplify), 217 NEW (solution ship-list), 218 NEW (managed solution runbook — HARD), 213.7 (HUMAN operator action), 207 (mechanical), 208 (validator CI wiring), 209 (branch protection restore)}`.
-- **Full H8 live-test evidence**: `runs/h8-live-test-2026-08-30.md`
-- **5-gap audit (SESSION 20 origin)**: `runs/pre-dispatch-readiness-gap-report.md`
-- **Inventory doc**: `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`
+- **"where was I"** → read this Quick Recovery + the SESSION 23 Owner Decisions block above
+- **"continue"** or **"proceed"** or **"start T215"** → **FIRST action: execute T215 SPE cert retirement** per the "T215 Concrete Execution Plan" section above. Invoke: `task-execute projects/customer-provisioning-orchestration-r1/tasks/215-cert-retirement-spe-app-cert.poml`. Owner already directed this ("run it now so that the issue is removed"). Agent stops after step 3 (code + config edits) — operator (Ralph) runs step 4 (`az keyvault secret delete` commands) manually. Commit + push after agent portion done.
+- **After T215 lands**: **file STEP 1 completion task** via `task-create` — bring ArchTest to 326/326. The 4 failures with root cause + fix plan are documented in the previous session's response (or run `dotnet test tests/Spaarke.ArchTests/` to see current failures). FULL rigor per `tests/CLAUDE.md` structural-fitness-function KEEP path. Then task-execute it.
+- **After STEP 1 gate green (326/326)**: **file + execute Items 1-4** from `projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` §5, IN ORDER, each as its own `task-create` + `task-execute` at FULL rigor. Do NOT reorder. Do NOT collapse.
+  - Item 1: delete H3 shared-app-registration branch (D-13)
+  - Item 2: one shared TenancyModel enum (BEFORE any renaming; `AiSearchTenantFilterInvariantProbeTests` must be REWRITTEN not mechanically updated)
+  - Item 3: migrate `sprk_tenancymodel` (fan value `1` by Profile; do NOT relabel)
+  - Item 4: retire `model1-*.bicep` (6 surfaces atomic; note surface 6 has INVERTED polarity, surface 7 = `.github/workflows/publish-provisioning-arm-artifacts.yml` + its schema require-key)
+- **After Items 1-4**: address INCOMING doc §6 six-item contradiction sweep (prereqs.yaml lingering shared-BFF entries, canonical-secret-catalog manifest SOURCE fix, `Seed-PlatformKeyVault.ps1:402-403`, `controlplane-worker-app-service.bicep`, `bff-runtime-rbac.bicep`, `controlplane-subscription-rbac.bicep`).
+- **After §6 sweep**: **execute T218** (managed solution flow + IAM + UPDATE audit + **complete package definition** per SESSION 23 owner-expanded scope). File via `task-create`, run via `task-execute` at FULL rigor. This is the HARD BLOCKER before task 186.
+- **After T218 lands**: **task 186 dispatch** — `/provision-environment {customerId}` for first live E2E Trial 1 customer.
+- **Owner Q1/Q2/Q3 decisions**: locked in SESSION 23 (see block above). Do NOT re-litigate. Items 1-4 + §6 sweep + T218 all incorporate these decisions.
+- **Verify SESSION 23 merge**: `git log --oneline -3` should show SESSION 23 handoff commit + `92b480500` merge + `5a2332ff6` master's incoming state. Divergence: 100 ahead / 0 behind master. `dotnet build src/server/api/Sprk.Bff.Api/` should be 0/0. `dotnet test tests/Spaarke.ArchTests/` should be 322/4 pre-STEP-1-completion.
+- **INCOMING doc**: `projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` — BINDING. READ IT before doing anything else per owner directive.
+- **Referenced UAC-r2 notes on master** (read as needed): `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` (the decision) · `D-13-per-customer-bff-app-registration.md` (mechanism + rejected counter-arguments) · `D-12-code-branch-inventory.md` (the work-list with file:line) · `D-12-resource-sharing-analysis.md` (per-resource shared-vs-dedicated criteria) · `coordination-cpo-r1-2026-09-28.md` (overlap analysis).
+- **Old artifacts still relevant**: `runs/h8-live-test-2026-08-30.md` (§R5 empirical evidence) · `runs/pre-dispatch-readiness-gap-report.md` (SESSION 20 5-gap audit) · `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` (SESSION 22 inventory — sections need REVISION post-D-12/D-13 per §9 Q2 per-customer Copilot decision + Q1 F-SKU deferral).
+- **Constraints to respect throughout** (per owner instruction verbatim):
+  - Do NOT re-open D-13
+  - §9 open questions have OWNER answers now (SESSION 23) — do NOT re-ask
+  - §8 items belong to unified-access-control-r2 — leave alone (Secure Project→Secure Record rename + 3 Redis subject-discrimination keys)
+  - Definition of done is §7 — report against it line by line when Items 1-4 complete
 
 ### SESSION 22 conversation reference (owner questions + Claude answers)
 
