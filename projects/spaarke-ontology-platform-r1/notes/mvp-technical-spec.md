@@ -376,3 +376,319 @@ public sealed record SourceRecord(
 | 6 | **Does `sprk_servicerequest` have a direction/outcome model already?** | CM-5 assumed it absorbs Inquiry; unverified |
 | 7 | **What is the second (cross-source) rule, precisely?** Needs a concrete predicate over communication + spend — e.g. *"over budget AND an inbound communication in the last 30 days classified as scope/fee-related with no disposition"* | **This is the differentiated capability (§0.1). Spec it before building the first rule, so `sprk_signal` is shaped by two producers rather than one** |
 | 8 | **Run the §0 differentiation test retroactively** across §8 Wave 2 / Wave 3 modules in the strategy synopsis before any is specced | Several may fail it the same way budget variance did |
+
+---
+
+## 10. Verified against the live dev environment `[2026-09-29]`
+
+Queried directly via Dataverse MCP. These are facts, not inferences — earlier sections that
+contradict them are wrong.
+
+### 10.1 `sprk_triagecategory` — the taxonomy is data, not code
+
+The table has **only** `sprk_name`, `sprk_enabled`, `sprk_priorityweight`. **No description column.**
+Nine rows after this session's additions:
+
+| Weight | Name | Added |
+|---|---|---|
+| 10 | Marketing / Noise | seeded |
+| 30 | Administrative | seeded |
+| 50 | Scheduling | seeded |
+| 60 | Invoice / Billing | seeded — *reactive: a bill arrived* |
+| 70 | Opposing counsel | seeded |
+| **75** | **Fee / rate change** | **2026-09-29** — `8b62dd84-1fbc-f111-aaaf-3833c5e9614d` |
+| 80 | Client instruction | seeded |
+| **85** | **Scope / budget change** | **2026-09-29** — `8d62dd84-1fbc-f111-aaaf-3833c5e9614d` |
+| 100 | Court / Filing | seeded |
+
+Two rows, not four. The category is a **single-select**: an email proposing extra depositions is
+simultaneously a scope change *and* a budget request, so splitting those would scatter one signal
+across two categories and weaken the rule's bounded set. The new rows are *leading* (a commitment
+about future cost); `Invoice / Billing` stays *reactive* (a bill arrived).
+
+> **`sprk_enabled` defaults to FALSE on create.** Both new rows were created disabled with a null
+> weight and had to be corrected. Any future taxonomy row MUST set `sprk_enabled = true` and a
+> weight, or it is invisible to the classifier.
+
+### 10.2 The rows live in the ENVIRONMENT, never in the repo
+
+`ActionRunner.ResolveLookupChoicesAsync` queries the taxonomy **per run** and injects the names two ways:
+
+1. into the rendered **prompt**, and
+2. as a JSON-Schema **`enum`** on the output property, so Azure OpenAI structured-output decoding
+   cannot emit a non-existent value.
+
+A new row is live on the next enrichment — no build, no deploy, no repo change. **This is the
+"declared" test passing on the most load-bearing part of the design.**
+
+Residual risk: resolution is best-effort per NFR-04. A Dataverse read failure degrades **silently**
+to the pre-fix behaviour (below), logged only at Warning. Needs a monitor.
+
+### 10.3 The 100%-null incident — evidence the mechanism matters
+
+Before 2026-09-04, `structuredOutput: true` meant output fields never rendered into the prompt, so
+`$choices` had no path to the model; emitted labels matched no row and
+`CommunicationEnrichmentService` left the field unset ("category null on 100% of captures").
+
+Live data confirms the fix: of **270** communications, **28** carry a triage priority but only **15**
+carry a category — and **all 13** gap cases predate the fix, newest `2026-09-03T21:20`.
+
+### 10.4 `sprk_communicationrule` — the reach-out path was dark
+
+**Zero rows existed.** The gate fail-closes to `no-matching-rule` then DENY, so
+`CommunicationRiActionService` had never been invoked. Created 2026-09-29:
+
+```
+sprk_communicationrule  dc423a8b-1fbc-f111-aaaf-3833c5e9614d
+  sprk_name                "Default - all matters, 0.70 confidence"
+  sprk_tenant              (blank)  -> matches all tenants
+  sprk_matter              (empty)  -> matches all matters
+  sprk_confidencethreshold 0.70
+  sprk_enabled             true     sprk_priority 500     sprk_flagprivilege false
+```
+
+**0.70 is a guess, and that is the point.** Nothing today can say whether it is right. Once Decision
+Records exist, the confidence distribution of *confirmed* vs *dismissed* sets it from evidence. This
+is the clearest single instance of the record feeding back into the process (section 12.2).
+
+### 10.5 What "the system reaching out" actually is — ALL SHIPPED
+
+Four writes, composed from existing seams by `CommunicationRiActionService`. **Nothing here is
+proposed; only the rule row was missing.**
+
+| # | Write | Seam |
+|---|---|---|
+| 1 | `sprk_event` (event type = task), owner = `sprk_communication.ownerid` | `IActionSeam.CreateTaskAsync` |
+| 2 | Outbox row `kind=communication-assessed`, written FIRST | `OutboxService` |
+| 3 | SignalR ping, best-effort, AFTER the outbox | `SignalRDeliveryService` |
+| 4 | App-notification | `NotificationService` |
+
+Recipient is the communication's owner; matter-team fan-out is a documented future enhancement.
+
+### 10.6 Live end-to-end test — 2026-09-29
+
+One real email sent through the capture path 20 minutes after the two taxonomy rows were created.
+Communication `3449bd41-24bc-f111-aaaf-3833c5e9614d`, subject
+*"EMPL-307998 Intellectual Asset Management Lifecycle Optimization"*, body proposing two additional
+depositions at roughly $40-45k beyond budget, one PDF attachment.
+
+**What worked — the whole classification chain, including the brand-new row:**
+
+| Stage | Result |
+|---|---|
+| Association | **Auto-filed, `Resolved`.** `sprk_regardingmatter = 9f6f23e4-…`. Deterministic 0.90 / reinforced 0.997 vs auto-file threshold 0.85. Five rungs fired: ExplicitReference (`EMPL-307998` reverse lookup), RecordNameMatch (0.97), ParticipantCorrelation, DocumentAssociation, AiClassification |
+| Attachment | **Captured** — `sprk_attachmentcount = 1`; `Invoice-10044725.pdf` drove the DocumentAssociation rung, surfacing three additional candidate matters and an invoice, all correctly left unwritten |
+| Rung-5 classification | freeform `category = budget-discussion`, `urgency = elevated`, `obligations = [budget-approval]`, `actions = [confirm-budget-increase, link-to-matter]` |
+| Triage mapping | **`budget-discussion` → "Scope / budget change"** — the row created 20 minutes earlier, live with **zero deployment**. §10.2 proven end to end |
+| Triage output | priority **High**, reviewOutcome **Update**, summary: *"The email requests confirmation of a budget increase of approximately $40-45k for two additional depositions. It requires approval and linkage to the relevant matter."* |
+
+**What did NOT fire, and why it matters more than what did:** `sprk_riconfidence = 0.68` against the
+rule's `0.70` threshold → gate **DENIED** (`rule-matched-confidence-below-threshold`). No `sprk_event`,
+no ping, no notification. Verified: zero `sprk_event` rows created after `2026-09-29T12:00`.
+
+**A high-priority, correctly-classified, correctly-filed, genuinely important email produced no
+outreach — because a threshold was set by guess, two hundredths too high.** This is §12.2 item 2, in
+production data, on the first attempt. Threshold lowered to **0.60** on `dc423a8b-…`; the rule is now
+named *"Default - all matters, 0.60 confidence"*. 0.60 is still a guess — just a better-informed one.
+Only Decision Records turn it into evidence.
+
+> ⚠️ **Reported as two failures, and neither was one.** The owner observed "it did not match to related
+> record or include the attachment". Both had in fact succeeded — the match auto-filed at 0.997 and the
+> attachment was captured. Enrichment is asynchronous (received `12:38:15`, row created `12:38:56`), so a
+> surface read too early, or not refreshed, shows neither. **A UI that cannot distinguish "not yet
+> enriched" from "enrichment found nothing" will keep generating false defect reports** — worth a visible
+> pending state on the reconciliation surfaces.
+
+---
+
+## 11. The cross-source predicate `[PROPOSED]`
+
+### 11.1 Why the first attempt was wrong
+
+The rule first drafted here was *"over budget AND at least one pending-review email in 30 days."*
+**That is two unrelated facts sharing a matter id.** An over-budget matter has many emails; none need
+have any bearing on the money. The conjunction established correlation by coincidence.
+
+It was also **lagging**: "over budget" means the money is already spent, and every e-billing vendor
+reports it.
+
+### 11.2 The signal that works — leading, not lagging
+
+> **A commitment with financial consequence was made in correspondence, and the budget does not
+> reflect it yet.**
+
+Worked case: counsel emails *"given the new claims we need two more depositions, roughly $40-45k
+beyond budget."* The e-billing system shows the matter at $180k of $250k — on budget, silent, and it
+stays silent for 30-60 days until the invoice lands.
+
+**Differentiation test (section 0)**: the commitment is in the mail; the budget is in e-billing. Only
+a system holding both can compare them. Legal Tracker cannot produce this at any price because it
+never sees the email.
+
+### 11.3 Every join already exists
+
+```
+sprk_communication.sprk_regardingmatter  -> sprk_matter   (populated by association rungs 0-3)
+sprk_communication.sprk_triagecategory   -> sprk_triagecategory row
+sprk_spendsnapshot.sprk_matter           -> sprk_matter
+sprk_spendsnapshot.sprk_budgetamount / .sprk_invoicedamount
+```
+
+**No new relationships are required.** The graph is connected; what is missing is a rule that walks it.
+
+### 11.4 The predicate, v1 — deliberately unquantified
+
+Bounded set = the literal rows `{Fee / rate change, Scope / budget change}` (section 10.1), named by
+id in the rule body. Not a prompt instruction, not a heuristic — stored ids, editable without deploy.
+
+```
+subject: sprk_matter
+where:   EXISTS sprk_communication c
+           c.sprk_regardingmatter   = subject
+       AND c.sprk_triagecategory   IN {8b62dd84-..., 8d62dd84-...}
+       AND c.sprk_receiveddate     >= now - 30d
+       AND c.sprk_reviewoutcome    <> 100000003        -- not Dismiss
+then:    signal "a spend-relevant commitment on this matter is unreconciled against its budget"
+```
+
+**v1 does not quantify the amount.** Extracting "$45k" from prose is new extraction work that is
+sometimes wrong; the human judges the amount. Still differentiated, because **the join is the
+differentiator, not the arithmetic.** Quantification is v2.
+
+### 11.5 Two placements = two different products
+
+| | Subject | Surface | Value |
+|---|---|---|---|
+| **(a)** | communication | A column/badge in the four shipped reconciliation grids, via the existing `DataGridOverrides.columnRenderers` seam | "why this email matters" — *on-ramp; proves the mechanism inside a surface users already open* |
+| **(b)** | matter | A new `sprk_gridconfiguration` worklist | "why this matter needs attention" — *the differentiated one* |
+
+Today triage says *what kind* of email this is. It never says *this email conflicts with something
+else you know*. **(a) closes that gap cheaply; the data and the render seam already ship.**
+
+---
+
+## 12. Decision Record — corrected `[PROPOSED]`
+
+### 12.1 It already exists as a value and is thrown away
+
+`CommunicationRuleGate.EvaluateAsync` returns `CommunicationRuleDecision` — authorize, matched rule
+id, confidence, threshold, privilege flag, reason — **on both the authorize and deny paths**,
+fail-closed, with deny as a value rather than an exception. Then `LogDecision` writes it to
+`ILogger` and it is gone.
+
+**The Decision Record is not a new concept to design. It is this value, given a table.**
+
+### 12.2 How it loops back to the process
+
+Strongest first:
+
+1. **Suppression.** Three dismissals of the same signal on the same matter, then stop raising it. A
+   functional requirement, impossible without reading prior decisions. It is the difference between
+   a signal system people keep on and one they mute.
+2. **Threshold tuning.** Sets `sprk_confidencethreshold` (section 10.4) from the confirmed/dismissed
+   confidence distribution instead of by guess.
+3. **Rule scorecard.** Per policy: fired N, confirmed X, dismissed Y, never-acted Z — a Dataverse
+   rollup, zero C#. A rule at 90% dismissal is visibly noise. **This is what makes "configurable
+   platform" true rather than a brochure claim.**
+4. **Dismiss reasons become new rules.** "Already approved offline" forty times is a missing *fact*
+   (approval), not a bad rule.
+
+### 12.3 One general table, typed payload
+
+The decision *facts* are identical for every producer — subject, rule + version, facts-as-of,
+proposed action, decider, decision, reason. Only the **evidence** differs, so that goes in a JSON
+payload column.
+
+Rejected: specialized per-producer tables. *"Show me everything decided about this matter"* is the
+ontology's reason to exist, and specialized tables make it a union of N queries that grows with every
+producer. Suppression and scorecards likewise only work against one place to look.
+
+### 12.4 Blast radius is one line — NOT the gate
+
+`RuleGatedAssessedConsumer.PublishAsync` **already holds** the `decision` object and merely branches
+on it. Persisting it is a line **before** `if (decision.Authorize)`. `CommunicationRuleGate` is not
+touched, its logic does not change, and the fail-closed behaviour is preserved.
+
+`sprk_emailreviewlog` stays as-is and becomes a **producer into** the general record — not a migration.
+
+---
+
+## 13. Signal sources `[PROPOSED]`
+
+| Source | State | MVP |
+|---|---|---|
+| **Email** | Ready — classify, triage, bounded category, persisted | yes |
+| **`sprk_memo`** | **No classification at all.** Polymorphic across 15 parents (matter, budget, invoice, communication, document, agreement, contact, project, service request, timekeeper, work assignment, event, organization, analysis, report card); `sprk_memobody` + `sprk_searchprofile` | **yes — in MVP** |
+| **Documents** | Extraction yes, **bounded classification no** — `agreement-classify` uses a bespoke C# assembler (`AgreementTypeRegistryPromptAssembler`), not `$choices` | yes |
+| Messages (Teams/ACS) | Channel modelled (`sprk_acsmessageid`/`sprk_acsthreadid`); triage coverage unverified | later |
+| `sprk_event` (calendar) | Commitments with dates | later |
+| `sprk_servicerequest` | Inbound requests (Front Door) | later |
+| `sprk_externalevent` | Spaarke Connect change feed from bound systems | later |
+| Document revisions | A redline is a change in commitment, not just a file | later |
+
+**`sprk_memo` is the strongest second source**: human-authored (so accuracy is high), and it covers
+the case where the commitment was made on a phone call rather than in writing — *"client agreed to
+expand scope on today's call"* is a leading indicator no email will ever contain.
+
+**The extensibility mechanism already exists**: ADR-024 polymorphic `sprk_regarding*` +
+`sprk_recordtype_ref`. Every source resolves to the same parent set, so a rule written against
+"a classified thing regarding this matter" does not care which source produced it.
+
+> **One bounded-classification contract, applied per source.** `$choices` +
+> `LookupChoicesResolver` is the contract. The `agreement-classify` bespoke assembler is the
+> **anti-pattern not to repeat** — a third implementation would fragment the mechanism the whole
+> design rests on.
+
+---
+
+## 14. Taxonomy classifier guidance `[PROPOSED]`
+
+**The problem**: `sprk_triagecategory` has no description column (section 10.1), so the model receives
+**bare labels** and must infer meaning from the words alone. Nothing tells it how
+`Fee / rate change` differs from `Invoice / Billing`. With nine categories and two newly added
+near-neighbours, this is the accuracy risk in the design.
+
+**The fix, fitting the existing pattern**:
+
+1. ✅ **DONE 2026-09-29** — added `sprk_classifier_guidance` (MULTILINE TEXT, 2000) to
+   `sprk_triagecategory`, and populated **all nine rows** with contrastive guidance.
+2. ⬜ **CODE CHANGE REQUIRED** — `LookupChoicesResolver` must emit `name — guidance` pairs into the
+   **prompt**. It currently resolves `lookup:sprk_triagecategory.sprk_name`, i.e. the **name attribute
+   only**.
+3. ⬜ The schema `enum` stays **names only**, so constrained decoding is unchanged.
+
+> 🔴 **The guidance is INERT until step 2 ships.** The column exists and is populated, but the resolver
+> reads only `sprk_name`, so the model still sees bare labels today. Do not mistake populated data for a
+> live improvement.
+
+**What the guidance is written to do**: the definitions matter less than the **tie-breakers**. Each row
+names what belongs *and* redirects the near-neighbour case, because that is where a single-select
+classifier actually fails. The three-way money boundary is the one that earns its keep:
+
+| Row | Boundary it defends |
+|---|---|
+| `Invoice / Billing` | money **already billed** — redirects future cost away |
+| `Fee / rate change` | the **price** per unit of work — redirects quantity away |
+| `Scope / budget change` | the **quantity** of work / a budget revision — redirects already-billed away |
+
+Others carry dominance rules: a court-set date beats `Scheduling`; an asserted obligation, deadline or
+cost beats `Administrative`; a court deadline beats `Opposing counsel`.
+
+Definitions become data: editable without a deploy, same "declared" property as the rows themselves.
+Small change, large accuracy payoff, and it generalises to every future taxonomy.
+
+---
+
+## 15. Documentation obligations — facts that must not be re-broken
+
+Each of these was *already* got wrong once, by code or by this spec.
+
+| # | Fact | Why it gets broken |
+|---|---|---|
+| 1 | **Spaarke does NOT use OOB `task` / `activitypointer`.** Tasks are `sprk_event` with `sprk_eventtype_ref`. `TaskActionCore` writes `new Entity("sprk_event")`; zero OOB task writes exist in `src/` | **The facade lies.** `IActionSeam.CreateTaskAsync` returns `CreateTaskResult.TaskId` — the API says "task", the write is `sprk_event`. An earlier implementation *did* write `new Entity("task")` and was fixed in email-communication-intelligence-r2 |
+| 2 | **Daily Briefing is deterministic-query-based.** `DailyBriefingCollector` line 4: *"no appNotification dependency, no scheduled playbooks."* Six channels: `sprk_event`, `sprk_todo`, `sprk_document`, `sprk_matter`, `sprk_project`, `sprk_monitor`. The `NotificationCategoryDto` references are **output** shape (counts), not input | `CommunicationRiActionService`'s own docstring claims the app-notification *"mirrors the action so it surfaces in Daily Briefing"* — **false as written.** The RI action DOES reach the briefing, but via the `sprk_event` it creates, not via the notification |
+| 3 | **Taxonomy rows live in Dataverse only** (section 10.2) — never add them to the repo | The seeded rows are absent from `infra/`, which reads like an omission rather than the design |
+| 4 | **`sprk_enabled` defaults to false** on `sprk_triagecategory` create (section 10.1) | Silent: a disabled row is simply invisible to the classifier |
+| 5 | **`sprk_signaltype` / `sprk_signalvalue` are TAKEN** — they are columns on `sprk_affinity` (`AffinityStore`), unrelated to spend | Section 2.5 proposed a generic `sprk_signal` using those exact field names |
+
+Items 1 and 2 are repo-wide and belong in `.claude/FAILURE-MODES.md`, not only here.

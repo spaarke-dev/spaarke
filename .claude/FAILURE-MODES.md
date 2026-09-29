@@ -931,6 +931,7 @@ something isn't wired**. Those are exactly the claims that (a) cannot be checked
 | A hook's docstring named a privilege route and a compound role model | The route never existed; `/status` already returned the privilege, and the filter already mapped three roles | An **unnecessary escalation to the owner** for a decision that had already been made in code |
 | `TokenProvider`: "authentication handled by browser session / Dataverse authentication" | Returns `''`, and the caller then omits the `Authorization` header entirely | Describes auth that **cannot work** against a `RequireAuthorization` BFF. Survived because the path has zero callers |
 | A retirement note described a 4 MiB ceiling on a path it was itself deleting | Same phantom constant | Propagated the fiction into a *new* file while removing the old one |
+| `CommunicationRiActionService`: the app-notification "mirrors the action so it surfaces in Daily Briefing (spec Success Criterion 2)" *(added 2026-09-29, `spaarke-ontology-platform-r1`)* | Daily Briefing has **no appNotification dependency at all** — `DailyBriefingCollector.cs:4` says so in terms: *"no appNotification dependency, no scheduled playbooks."* It queries six channels deterministically: `sprk_event`, `sprk_todo`, `sprk_document`, `sprk_matter`, `sprk_project`, `sprk_monitor`. The `NotificationCategoryDto` references are the **output** shape (per-category counts), not an input source | Invites a design that treats the notification table as the briefing's input. The RI action *does* reach the briefing — but via the `sprk_event` it creates, not the notification. **Right outcome, wrong mechanism**, which is worse than a plain error because the observable behaviour appears to confirm the false claim |
 
 **Why it is so durable.** Deleting code is loud — the build breaks. Deleting a *claim* is silent, so
 nobody does it. Worse, prose accretes authority with age: a comment that has survived several refactors
@@ -961,6 +962,48 @@ would refute it.
 `68eb58ad0` (phantom route in a docstring), `09025ab39` (third copy of the phantom cap), `524a32fd3`
 (conflictBehavior claim + the additive-only framing, both corrected with do-not-re-derive notes) ·
 `projects/unified-access-control-r2/current-task.md` § "the five things that will bite a fresh session".
+
+---
+
+### AP-13: A facade method NAMED for an entity it does not write
+
+> **Added 2026-09-29** by `spaarke-ontology-platform-r1`. **Class**: naming drift across an abstraction
+> boundary. Sibling of [AP-12](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes):
+> where AP-12 is a *comment* that outlived its mechanism, this is an *identifier* that never matched it —
+> and identifiers are trusted more than comments, because they look like contract rather than commentary.
+
+**The shape.** A facade method borrows a name from the platform's vocabulary. The implementation writes
+a different, Spaarke-specific entity. Callers read the facade, believe the name, and build downstream
+functionality against a table the system never touches.
+
+**The live instance.** `IActionSeam.CreateTaskAsync` returns `CreateTaskResult.TaskId`. Its
+implementation, `TaskActionCore`, writes `new Entity("sprk_event")` with an `sprk_eventtype_ref` of
+type *task*. An earlier version of that very core **did** write `new Entity("task")` and was corrected
+by `email-communication-intelligence-r2`; a comment at the top of the file records the fix. The name
+was never corrected with it.
+
+**🔴 Binding rule — do not re-derive.** **Spaarke does not use OOB `task` or `activitypointer`.** Zero
+such writes exist anywhere in `src/`. Tasks are **`sprk_event`** rows discriminated by
+`sprk_eventtype_ref`. To-dos are **`sprk_todo`**, a separate first-class entity
+([`docs/architecture/spaarke-todo-architecture.md`](../docs/architecture/spaarke-todo-architecture.md)).
+Never create, query, subgrid, or design against OOB activity tables.
+
+**Why the name is load-bearing.** `DailyBriefingCollector` queries `sprk_event` and `sprk_todo`; it does
+not query `task`. Anything that "creates a task" against an OOB table is invisible to the briefing, to
+the Navigator, and to every `sprk_event` grid — and it **fails silently rather than erroring**, because
+writing to `task` succeeds. Nothing in the build, the tests, or the runtime objects.
+
+**Prevention.**
+- **Read the core, not the seam.** A `*ActionCore` implementation names the entity; the facade names
+  only an intent. `grep 'new Entity("'` before asserting which table a path writes.
+- **Treat a platform-vocabulary name in a Spaarke facade as suspect.** "Task", "activity", "note",
+  "appointment" all collide with OOB tables Spaarke deliberately does not use.
+- **If the name cannot change, make the facade's own docstring say what it writes.** The name is what
+  readers trust; leave the correction where the trust is placed.
+
+**Evidence**: `Services/Ai/Nodes/ActionCore/TaskActionCore.cs:13,42,97` (the recorded fix, the
+`sprk_event` constant, the write) · `Services/Ai/PublicContracts/IActionSeam.cs:44` (the misleading
+signature) · `projects/spaarke-ontology-platform-r1/notes/mvp-technical-spec.md` §15.
 
 ---
 

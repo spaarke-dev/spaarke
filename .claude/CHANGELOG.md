@@ -8,6 +8,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-29 — `spaarke-ontology-platform-r1`: new `FAILURE-MODES.md` **AP-13** (facade named for an entity it does not write) + an **AP-12** instance (Daily Briefing)
+
+- **New `FAILURE-MODES.md` AP-13: a facade method NAMED for an entity it does not write.** Sibling of
+  AP-12, separated because an *identifier* is trusted more than a *comment* — it reads as contract
+  rather than commentary. Live instance: `IActionSeam.CreateTaskAsync` returns
+  `CreateTaskResult.TaskId`, while its implementation `TaskActionCore` writes
+  `new Entity("sprk_event")` with an `sprk_eventtype_ref` of type task. An earlier version of that core
+  **did** write `new Entity("task")` and was fixed by `email-communication-intelligence-r2`; the name
+  was never corrected with it.
+- **🔴 Binding rule recorded: Spaarke does not use OOB `task` / `activitypointer`.** Zero such writes
+  exist in `src/`. Tasks are `sprk_event` discriminated by `sprk_eventtype_ref`; to-dos are `sprk_todo`.
+  The rule is load-bearing because `DailyBriefingCollector` queries `sprk_event`/`sprk_todo` and never
+  `task` — so a write to an OOB activity table **succeeds and is then invisible** to the briefing, the
+  Navigator, and every `sprk_event` grid. It fails silently; nothing in the build, tests, or runtime
+  objects. Prevention: read the `*ActionCore`, not the seam; `grep 'new Entity("'` before asserting
+  which table a path writes; treat any platform-vocabulary name in a Spaarke facade as suspect.
+- **New AP-12 worked instance: `CommunicationRiActionService`'s Daily Briefing claim.** Its docstring
+  states the app-notification "mirrors the action so it surfaces in Daily Briefing (spec Success
+  Criterion 2)". Daily Briefing has **no appNotification dependency at all** —
+  `DailyBriefingCollector.cs:4` says so explicitly — and queries six channels deterministically
+  (`sprk_event`, `sprk_todo`, `sprk_document`, `sprk_matter`, `sprk_project`, `sprk_monitor`); the
+  `NotificationCategoryDto` references are the **output** shape, not an input source. The action *does*
+  reach the briefing, but via the `sprk_event` it creates. **Right outcome, wrong mechanism** — worse
+  than a plain error, because the observable behaviour appears to confirm the false claim.
+
 ###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
 
 - **New `FAILURE-MODES.md` AP-12: prose outlives the mechanism it describes.** Promoted from a single
