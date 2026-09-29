@@ -692,3 +692,115 @@ Each of these was *already* got wrong once, by code or by this spec.
 | 5 | **`sprk_signaltype` / `sprk_signalvalue` are TAKEN** — they are columns on `sprk_affinity` (`AffinityStore`), unrelated to spend | Section 2.5 proposed a generic `sprk_signal` using those exact field names |
 
 Items 1 and 2 are repo-wide and belong in `.claude/FAILURE-MODES.md`, not only here.
+
+---
+
+## 16. Findings from the live tests and the prompt-structure work `[2026-09-29]`
+
+### 16.1 🔴 RI confidence multiplies by deterministic agreement — a structural zero
+
+`RiConfidenceScorer`: **`confidence = urgencyWeight × deterministicAgreement`**, each clamped to [0,1].
+Urgency weights: Urgent 1.0 · High 0.75 · Medium 0.5 · Low 0.25 (unrecognised → 0.5).
+
+Two live emails, same formula:
+
+| Email | Association | urgency | × deterministic | RI confidence | Gate |
+|---|---|---|---|---|---|
+| `3449bd41…` *EMPL-307998…* | **Resolved** (auto-filed, det 0.90) | High 0.75 | 0.90 | **0.675** | DENY at 0.70 |
+| `4cded5d5…` *Form D - 2023…* | **Suggested** (no matter number in subject) | High 0.75 | **0.0** | **0.000** | DENY at 0.60 |
+
+**The reach-out path can never fire for a communication that did not deterministically associate.**
+`deterministicAgreement` is a multiplicative factor, so a zero there zeroes the product regardless of
+how urgent the message is. The scorer's own docstring states it plainly: *"the deterministic-agreement
+factor (which is 0 when no association has resolved yet)"*.
+
+Those unresolved communications are **exactly the ones a human most needs to be told about** — the
+system could not file them, so nobody is going to stumble across them. The second email asked for
+approval of 100 extra hours at ~$140–145k and produced no outreach of any kind.
+
+**The defect is conceptual, not arithmetic.** One number is carrying two unrelated questions:
+
+- *How sure am I **which matter** this belongs to?* → `deterministicAgreement`
+- *How much does this **matter**?* → `urgencyWeight`
+
+A $145k budget request is important whether or not we know where to file it. Multiplying makes filing
+confidence a veto over importance.
+
+**Also a ceiling**: with High = 0.75, **any threshold above 0.75 is unreachable** at High priority no
+matter how perfect the association. Only `Urgent` (1.0) can clear it. A threshold of 0.70 was therefore
+satisfiable only by Urgent, or by High with deterministic ≥ 0.933 — which is why the first email, at a
+near-ideal 0.90 deterministic, still failed.
+
+**Options, in order of preference:**
+
+1. **Two numbers, two decisions.** Keep RI confidence for *filing* confidence; add a separate
+   *significance* score for notification-worthiness. They answer different questions and should not be
+   multiplied.
+2. **Additive blend** — `w₁·urgency + w₂·deterministic` — so neither factor can veto the other.
+3. **Floor the deterministic factor** (e.g. `max(det, 0.3)`). Cheapest, but keeps the conflation.
+
+Until one lands, the shipped behaviour is: **notify only about mail we already filed confidently.**
+
+### 16.2 🔴 `Deploy-ActionMirrors.ps1` cannot deploy a JPS mirror — and reports `UNCHANGED`
+
+The script's `$fieldMap` reads top-level **`systemPrompt`**, `outputSchema`, `inputSchema`, `name`,
+`description`, `tags`. A JPS-shaped mirror such as `triage-email.action.json` has **none of the first
+three** — its prompt *is* the document (`instruction` / `input` / `output` / `examples`), which the
+file's own `$comment` states is deliberately *"UNLIKE the flat-systemPrompt sibling files in this
+directory."*
+
+The loop `continue`s on every absent key, `$body` ends up empty, and the script prints:
+
+```
+  UNCHANGED    triage-email
+```
+
+Verified: reordering `output.fields` and adding three examples produced `Changed: 0`.
+
+**This is the same failure class the script's own header documents** — compose-r8 added
+`target_para_id` to four actions, the mirror never reached Dataverse, the model was still asked for
+`target_text`, and every AI edit arrived with no anchor; it reached UAT on 2026-08-26. The difference
+is that the gap is now **hidden behind a green success message**, which is worse than the original
+missing deployer.
+
+**What the runtime actually stores**: `sprk_systemprompt` holds the JPS subset — exactly the keys
+`$schema`, `$version`, `instruction`, `input`, `output`, `examples`, `metadata`, indented, with no
+`$comment*` keys and none of the row-level fields (`actionCode`, `name`, `description`, `actionType`,
+`modelTier`, `temperature`). **Fix**: for a mirror with no `systemPrompt` key, serialize that subset.
+
+### 16.3 `triage-email`'s output schema is not version-controlled
+
+`infra/dataverse/outputschemas/` holds ten-plus schemas; there is **no `triage-email.schema.json`**.
+The contract that governs structured-output emission order therefore exists **only in Dataverse** —
+unversioned, unreviewable, invisible to code review. It should be added to the repo, and
+`Deploy-ActionMirrors.ps1` extended to own it.
+
+### 16.4 Prompt-structure changes implemented `[LIVE]`
+
+All applied to Action row `c1fa96bf-2697-f111-b8dc-7ced8ddc4a05` **and** the repo mirror.
+
+| # | Change | State |
+|---|---|---|
+| 1 | **Field order: evidence before conclusions.** `summary → obligations → category → priority → reviewOutcome` (was `category` first) | ✅ live in **both** `sprk_systemprompt` *and* `sprk_outputschemajson` |
+| 2 | **Explicit abstain**: `Unclassified` taxonomy row, weight 40, guidance framing it as abstention rather than a default — `92066a73-2abc-f111-aaaf-3833c5e9614d` | ✅ live |
+| 3 | **Boundary examples**: 1 → 4, adding the three-way money boundary (Scope / budget change · Invoice / Billing · Fee / rate change) | ✅ live |
+| 4 | `sprk_classifier_guidance` populated on all ten rows | ⚠️ **inert** — `LookupChoicesResolver` reads `sprk_name` only (§14 step 2) |
+
+> 🚩 **The schema is the lever, not the prompt.** Structured-output decoding emits properties in the
+> order the **schema** declares them; the JPS `output.fields` list governs the rendered prompt and the
+> `$choices` mapping. Reordering only the prompt would have been cosmetic. Both `properties` **and**
+> `required` were reordered in `sprk_outputschemajson`.
+
+**Why field order is load-bearing**: decoding is autoregressive, so a field emitted earlier conditions
+every field after it. Leading with `category` made the model commit to a taxonomy row *before*
+articulating what the email said. Leading with `summary` and `obligations` lets the classification
+condition on the model's own reading. The `$comment-field-order` key in the mirror records this so the
+order is not "tidied" back.
+
+### 16.5 Not yet verified
+
+The reorder is **theoretically motivated and untested**. Its value is measurable — the same corpus
+re-triaged before and after — and the honest position is that no measurement has been taken. The
+boundary examples added in §16.4 are the beginning of that corpus; the first email
+(`EMPL-307998…`, an invoice PDF attached *and* future scope proposed, classified `Scope / budget
+change`) should be pinned as the first eval case, since it is a real confusable that resolved correctly.
