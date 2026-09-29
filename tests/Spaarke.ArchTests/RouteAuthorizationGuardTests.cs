@@ -530,8 +530,9 @@ public class RouteAuthorizationGuardTests
         //
         // NINE Pending entries and ONE Permanent landed together, which is unusual enough to say why: this
         // is not nine new holes, it is one blind spot being opened. (This header said TEN until 2026-09-29
-        // — a miscount in the very file whose job is to prevent drift, found by the task-126 audit. As of
-        // 2026-09-29 /search/entities is RESOLVED, leaving EIGHT Pending and TWO Permanent.)
+        // — a miscount in the very file whose job is to prevent drift, found by the task-126 audit.
+        // As of 2026-09-29, tasks 126 and 127 resolved FOUR of them — /search/entities and the three
+        // /communications reads — leaving FIVE Pending and FIVE Permanent.)
         // Api/Office/* was never in GovernedFiles, so
         // the whole surface was classified "serves neither document nor Dataverse content" by omission —
         // and FilterMarker could not have recognised its gates even if it had been, because the Office
@@ -543,18 +544,34 @@ public class RouteAuthorizationGuardTests
         // "someone must fix this" into "this is fine" to make a build green is the one move this list
         // forbids outright.
 
-        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}", WaiverKind.Pending, "#1020",
-            "ZERO endpoint filters — the only gate is the group's bare .RequireAuthorization(). Reads "
-            + "sprk_communication app-only on a caller-supplied message id; the caller's object id is "
-            + "resolved and then used EXCLUSIVELY as a log argument."),
+        // ✅ RESOLVED 2026-09-29 by task 127. Permanent rather than deleted: the SHAPE of the control
+        // is what a future reader needs before "simplifying" it back. There is still no endpoint
+        // filter, and correctly so — the record is not known until the query resolves it, so the
+        // DELEGATED QUERY ITSELF is the authorization boundary. Denial returns the ordinary 404, never
+        // a 403: answering 403 would confirm the record exists, trading an IDOR for an existence
+        // oracle (the separation task 022 removed from bulk download).
+        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): reads through IDataverseUserClient under the CALLER's Dataverse "
+            + "security context, so a communication the caller may not read simply does not return and "
+            + "the handler 404s. Previously read app-only on a caller-supplied message id with the "
+            + "caller's object id used EXCLUSIVELY as a log argument."),
 
-        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}/suggestions", WaiverKind.Pending, "#1020",
-            "ZERO endpoint filters. Same unscoped app-only lookup, then reconstructs the email envelope and "
-            + "retrieves the display names of arbitrary candidate records."),
+        // ✅ RESOLVED 2026-09-29 by task 127 — and this one needed TWO fixes, not one. Trimming only
+        // the communication lookup would have left the worse leak intact behind a route that looked
+        // fixed: candidate DISPLAY NAMES were resolved app-only, so even an entitled caller received
+        // the names of candidate records they had no right to see.
+        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}/suggestions", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): BOTH the communication lookup AND the candidate display-name "
+            + "resolution now run under the caller's context. A candidate the caller cannot read is "
+            + "DROPPED rather than merely unnamed — returning the id alone would still disclose that "
+            + "the record exists and was associated with the email."),
 
-        new Waiver("GET /api/office/communications/{commId:guid}/linked-todos", WaiverKind.Pending, "#1020",
-            "ZERO endpoint filters. Returns sprk_todo rows filtered solely on the caller-supplied commId, "
-            + "app-only, with no ownership or owner filter."),
+        // ✅ RESOLVED 2026-09-29 by task 127.
+        new Waiver("GET /api/office/communications/{commId:guid}/linked-todos", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): the sprk_todo query runs under the caller's context, so Dataverse "
+            + "returns only to-dos they may see. A communication the caller cannot see yields an empty "
+            + "list — indistinguishable from one that simply has no to-dos, which is the intended "
+            + "conflation. Previously filtered solely on the caller-supplied commId, app-only."),
 
         // ✅ RESOLVED 2026-09-29 by task 126 — kept as Permanent, NOT deleted, because the shape of the
         // control is exactly what a future reader needs to know before "simplifying" it.

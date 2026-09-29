@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="127" project="unified-access-control-r2">
+  <metadata>
+    <title>Close the IDOR on the three /api/office/communications reads — holding an identifier currently substitutes for authorization</title>
+    <phase>Register-driven (authored 2026-09-29, session 26; GitHub #1020, from the task 120 census)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Closes three live disclosure holes on authenticated endpoints and changes what a shipped Outlook add-in receives.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>One of the three has a SECOND-ORDER leak (candidate display names resolved app-only) whose fix changes response content, and the not-found/denied conflation has to be preserved deliberately to avoid trading an IDOR for an existence oracle.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches CommunicationsEndpoints.cs and the arch-test waiver list, both of which task 126 just changed.</parallel-reason>
+    <deps>126</deps>
+    <tags>bff-api, auth, dataverse, security</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>GitHub #1020, filed by task 120's route census. Ranked #2 of five live holes by the session-26 waiver audit.</origin>
+  </metadata>
+
+  <prompt>Three reads resolve the caller's identity and then use it only to write log lines. Make holding an identifier stop being the same thing as being allowed to see what it points at.</prompt>
+
+  <role>SPAARKE platform developer — Office communications endpoints. Task 126 built the pattern; this applies it, plus one leak 126 did not have.</role>
+
+  <goal>All three routes return data only when the caller may read the underlying record, with denial indistinguishable from absence, and with the suggestions response carrying no record the caller cannot see.</goal>
+
+  <context>
+    <background>🔴 ALL THREE ARE LIVE. Verified 2026-09-29 against source.
+
+The group (`Api/Office/CommunicationsEndpoints.cs:62-64`) carries a bare `.RequireAuthorization()` and
+ZERO endpoint filters. Bare `RequireAuthorization()` means "any authenticated caller" — there is no
+`DefaultPolicy`/`FallbackPolicy` override anywhere in the BFF.
+
+Every read goes through `IGenericEntityService`, which is an **app-only singleton**
+(`Infrastructure/DI/GraphModule.cs:97`) and therefore cannot carry per-request user context. In all
+three handlers `CallerResolution.ResolveObjectId(context.User)` IS called — and the result is used
+EXCLUSIVELY as a log argument.
+
+| Route | Keyed on | Leaks |
+|---|---|---|
+| `GET /by-message-id/{internetMessageId}` (`:72-81`) | caller-supplied message id | communicationId + subject |
+| `GET /by-message-id/{internetMessageId}/suggestions` (`:93-103`) | same | ⚠️ the most — see below |
+| `GET /{commId:guid}/linked-todos` (`:108-116`) | caller-supplied comm GUID | todo names + state |
+
+`QueryCommunicationByMessageIdAsync` filters on `sprk_internetmessageid` alone — no user predicate.
+`GetLinkedTodosAsync` filters on `sprk_regardingcommunication eq {commId}` alone.
+
+🔴 SUGGESTIONS HAS A SECOND-ORDER LEAK THE OTHER TWO DO NOT, and fixing only the communication lookup
+would leave it open. After resolving the communication it calls
+`ResolveCandidateNamesAsync(entityService, suggestions.Candidates, ...)` — the **app-only** service —
+to resolve the DISPLAY NAMES of candidate records (matters, projects, …). So even a caller legitimately
+entitled to the communication receives the names of candidate records they may not be entitled to, and
+a caller who should see nothing receives them too.
+
+WHO CAN EXPLOIT IT: any email participant holds the internetMessageId, and comm GUIDs appear in
+client-side payloads. The realistic attacker is an INTERNAL user reading the Spaarke filing of a matter
+they have no rights to — not an anonymous outsider.
+
+✅ THE PATTERN ALREADY EXISTS — task 126 built it. `IDataverseUserClient`
+(`Infrastructure/Dataverse/`, relocated there by task 126 under CLAUDE.md §6.5 path C) issues OData
+GETs under the CALLER's Dataverse security context with no app-only fallback. It is registered
+UNCONDITIONALLY in `AddSpaarkeCore` — task 126 moved it out of the compound AI gate precisely so
+non-AI routes like these could depend on it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/IDataverseUserClient.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>🔴 DENIAL MUST BE INDISTINGUISHABLE FROM ABSENCE. A caller denied the record gets the SAME 404 as a caller naming one that does not exist. Returning 403 would trade an IDOR for an existence oracle — `CallerRecordAccessProbe` conflates the two deliberately, and task 022 removed exactly that separation from bulk download.</constraint>
+    <constraint>🔴 Fix the SECOND-ORDER leak too. A candidate record the caller cannot read must not appear in the suggestions response — not its name, and not its id. Returning the id alone still discloses that a record exists and was associated with the email.</constraint>
+    <constraint>ADR-003 fail closed: no app-only fallback on any of these paths. If the delegated context is unavailable the request fails; it must never quietly fall back, which would restore the hole with every test green.</constraint>
+    <constraint>Do NOT swallow an authorization fault into an empty result — the same distinction task 126 drew between a DATA fault and an AUTH fault.</constraint>
+    <constraint>Preserve the 404-when-not-captured contract: the add-in opens the picker with no pre-selection on 404 (FR-B2 fallback). Do not turn that into an error.</constraint>
+    <constraint>Do not fork the Association Engine evaluate path — ADR-045 / §11 require reuse, not a parallel candidate model.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/tasks/126-office-entity-search-security-trimming.poml</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-verify all three exposures against current source before changing anything — task 126's own premise turned out to be wrong, so do not trust this background either.</step>
+    <step>Route the communication lookup and the linked-todos query through the delegated client so Dataverse trims them.</step>
+    <step>Close the candidate-name leak in suggestions, dropping candidates the caller cannot read rather than merely omitting their names.</step>
+    <step>Keep denial and absence indistinguishable on every path.</step>
+    <step>Move the three waivers from Pending to resolved, recording the mechanism.</step>
+    <step>Add guards that fail if any of these paths reaches the app-only service again, and prove each bites by seeding.</step>
+    <step>Close #1020 with the outcome.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Dropping unreadable candidates measurably breaks the add-in's pre-selection contract (FR-B2) rather than merely narrowing it — that is a product decision about what the picker may offer, not a security implementation detail.</trigger>
+    <trigger>The Association Engine's evaluate path itself requires app-only access to produce a decision at all. Reworking the engine is out of scope here; surface it rather than weakening the route.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>A caller who cannot read a communication gets the same 404 as for a non-existent one — demonstrated, not asserted.</criterion>
+    <criterion>The suggestions response contains no candidate the caller cannot read — neither name nor id.</criterion>
+    <criterion>Linked-todos returns only todos the caller may see.</criterion>
+    <criterion>No path on these three routes reaches `IGenericEntityService`; a guard fails if one does.</criterion>
+    <criterion>An authorization fault is distinguishable from "no matches" and is not swallowed.</criterion>
+    <criterion>The three waivers are resolved with the mechanism recorded; the Pending count in the header is updated.</criterion>
+    <criterion>BFF unit suite green; NetArchTest green; publish-size delta reported per CLAUDE.md §10.</criterion>
+    <criterion>#1020 closed with the outcome recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 26) immediately after task 126, which built the delegated-read pattern and made the client unconditionally available. The one genuinely new problem here is the second-order candidate-name leak in /suggestions: a fix that only trims the communication lookup would look complete and leave the worst disclosure of the three intact.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29 (session 26). All three reads now run under the CALLER's Dataverse
+    security context via `IDataverseUserClient`: the communication lookup, the linked-todos query, and
+    the candidate display-name resolution. Denial is indistinguishable from absence on every path — a
+    communication the caller may not read simply does not return and the handler 404s, and a
+    communication they cannot see yields an empty to-do list. `IGenericEntityService` no longer appears
+    in any code path on this surface. BFF unit 12,674 pass / 0 fail; NetArchTest 330/330.</outcome>
+
+    <finding>THE SECOND-ORDER LEAK WAS THE WORST OF THE THREE, and a fix that only trimmed the
+    communication lookup would have closed the route's obvious hole while leaving it wide open.
+    `ResolveCandidateNamesAsync` resolved candidate record display names through the APP-ONLY service,
+    so even a caller legitimately entitled to the communication received the names of candidate
+    matters/projects they had no right to. Candidates the caller cannot read are now DROPPED, not merely
+    left unnamed: returning the id alone still discloses that the record exists and was associated with
+    the email. Note the old `catch` swallowed every resolution failure into "no name" — under a
+    delegated client that would have silently converted a denial into an omission.</finding>
+
+    <finding>The contract tests failed as soon as the seam moved, which is correct, but two of them then
+    failed for a DIFFERENT reason: the fixture is shared across the class, so a setup matching only on
+    the entity set leaked a row into every later test and made the "not captured" cases return the
+    previous test's data. Matchers now discriminate on the message id / comm id. The fixture also gained
+    an empty-but-SUCCESSFUL default for unprogrammed queries — defaulting to a failure would have made
+    unprogrammed tests exercise the delegated-context-broken branch instead of the not-found one.</finding>
+
+    <finding>`RegardingNameFields` gained an `EntitySetName` map rather than a new helper class
+    (CLAUDE.md §11 reuse). Written as an explicit map, not by pluralising the logical name: Dataverse's
+    pluralisation is not a suffix rule (`sprk_analysis` → `sprk_analyses`), and a wrong guess would have
+    surfaced as a 404 indistinguishable from "the caller may not read this record" — silently dropping
+    a candidate the caller was entitled to see.</finding>
+
+    <deviation>Three waivers moved Pending → Permanent rather than being deleted. There is still no
+    endpoint filter on these routes and correctly so: the record is not known until the query resolves
+    it, so the delegated query IS the authorization boundary. Keeping the entry records that shape for
+    whoever next reads the guard list and wonders why the routes look ungated.</deviation>
+  </execution>
+</task>
