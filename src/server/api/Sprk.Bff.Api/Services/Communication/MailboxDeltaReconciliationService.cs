@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// that — unlike the coarse <c>receivedDateTime ge</c> time-window <c>InboundPollingBackupService</c>
 /// — reconciliation uses Graph server-side change tracking and survives restarts.
 ///
-/// ADR-001 BackgroundService + PeriodicTimer. All Graph access flows through
+/// Hand-rolled timer BackgroundService + PeriodicTimer (existing debt, ADR-052 §1). All Graph access flows through
 /// <see cref="GraphMailFolderDeltaReader"/> (ADR-028 central auth). Reconciliation is best-effort and
 /// non-fatal (NFR-06): a failure never crashes the service or the inbound path.
 /// </summary>

@@ -262,7 +262,7 @@ internal sealed class ComposeCreateOnSavePromoter
                     // source would stop the two appearing together, which is the whole point.
                     var links = Documents.DocumentLinkFieldMap.ProjectForCopy(field =>
                     {
-                        var reference = sourceEntity.GetAttributeValue<EntityReference>(field.Attribute);
+                        var reference = sourceEntity.GetAttributeValue<EntityReference>(field.LogicalName);
                         return reference is null || reference.Id == Guid.Empty ? null : reference;
                     });
 

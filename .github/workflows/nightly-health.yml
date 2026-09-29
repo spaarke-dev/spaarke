@@ -200,6 +200,27 @@ jobs:
           npm run build
           ls -la dist/ || true
 
+      # unified-access-control-r2 (2026-09-04): LegalWorkspace's standalone Vite
+      # build was RED from 2026-07-02 to 2026-09-04 — two months — and NOTHING
+      # reported it. `tsc --noEmit` passed the whole time, because TypeScript
+      # resolves through tsconfig paths while Rollup resolves through Vite
+      # aliases, and the two lists had drifted. A green typecheck is not
+      # evidence that a Vite solution builds; only the build is.
+      #
+      # LW transpiles Spaarke.Compose.Components, so it silently inherits every
+      # dependency Compose acquires. That is the recurrence risk this step
+      # exists to catch: the next such dependency fails HERE, within a day,
+      # instead of hiding until someone happens to build the solution by hand.
+      #
+      # Verified from a clean checkout on 2026-09-04: rm -rf node_modules,
+      # npm install (335 packages), npm run build → exit 0.
+      - name: Build LegalWorkspace solution
+        run: |
+          cd src/solutions/LegalWorkspace
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+          ls -la dist/ || true
+
       - name: Measure + compare to baseline
         id: measure
         shell: bash
@@ -211,6 +232,8 @@ jobs:
           declare -A current
           current["SemanticSearch_code_page"]=$(stat -c%s src/client/code-pages/SemanticSearch/out/sprk_semanticsearch.html 2>/dev/null || echo 0)
           current["CreateMatterWizard_solution"]=$(stat -c%s src/solutions/CreateMatterWizard/dist/index.html 2>/dev/null || echo 0)
+          # LegalWorkspace's build script renames index.html → corporateworkspace.html.
+          current["LegalWorkspace_solution"]=$(stat -c%s src/solutions/LegalWorkspace/dist/corporateworkspace.html 2>/dev/null || echo 0)
 
           summary=""
           regressions=0

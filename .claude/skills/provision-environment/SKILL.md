@@ -191,8 +191,22 @@ Collect the 4 inputs the L2 REST API requires. If the operator passed `{customer
 #### 1c. `tenancyModel` (required)
 
 Choice:
-- `Model1Shared` — shared trial / SMB tier (multi-tenant BFF, shared Dataverse, per-customer container in SPE)
-- `Model2Dedicated` — dedicated Azure subscription + dedicated Dataverse env + admin-consent flow required
+
+> 🔴 **AMENDED 2026-09-28 (owner decision D-12).** Both models are **dedicated stamps** — dedicated
+> Dataverse environment, dedicated Azure resources, and **one Azure subscription per customer**. They differ
+> **only** in which **Azure tenant** owns that subscription. The shared trial/SMB tier is **RETIRED** (it was
+> documented and partly built in Bicep but **never implemented in the engine** — `H5DataverseEnvCreationHandler`
+> creates a Dataverse environment unconditionally). The BFF **Entra app registration is per customer in both
+> models** (D-13, BINDING).
+>
+> ⚠️ **The live L2 enum has NOT yet been migrated**, so the literals below are still what the API accepts.
+> Read them as: `Model1Shared` → retired, `Model2Dedicated` → both new models. Migration is D-12 §6 items 2–3.
+
+- ~~`Model1Shared`~~ — 🔴 **RETIRED**. Do not provision. No successor value; the old value `0` has none.
+- `Model2Dedicated` — the **only** currently-valid value, and it covers **both** new models. 🔴 This is the
+  2:1 overload D-12 §5 (P-2) identifies as a live defect: `H1SubscriptionReadinessHandler` maps it to
+  `CustomerOwned` and therefore **demands Azure Lighthouse delegation even for subscriptions Spaarke already
+  owns**. Until the migration lands, expect that for a new **Model 1** customer.
 
 Explain the trade-off to the operator if they ask.
 
@@ -204,22 +218,40 @@ Choice: `dev` / `demo` / `prod` — determines which L2 API base + which Bicep p
 
 Choice — MUST match one of these three literal strings exactly (any drift triggers an L2 400 response):
 
-- `spaarke-hosted-model1-trial` — shared trial / SMB (Model 1 shared BFF; per-customer container in SPE; shared Dataverse or per-tenant Dataverse depending on config).
-- `spaarke-hosted-model2` — dedicated stamp hosted in Spaarke's subscription (Model 2 with Spaarke as the cloud landlord).
-- `customer-owned-model2` — dedicated stamp in the customer's own Azure subscription (Model 2 with customer as landlord + admin-consent flow).
+- ~~`spaarke-hosted-model1-trial`~~ — 🔴 **RETIRED (D-12). Never select this.** It provisions the shared
+  trial tier, which no longer exists as a product and was never implemented in the engine.
+- `spaarke-hosted-model2` — 🔴 **this is the new MODEL 1**: a dedicated stamp in the customer's **own Azure
+  subscription**, inside **Spaarke's** Azure tenant. Lighthouse: **not needed**. H0.5 consent: **not needed**.
+- `customer-owned-model2` — 🔴 **this is the new MODEL 2**: the same dedicated stamp in the **customer's own
+  Azure tenant**. Lighthouse: **required**. H0.5 consent: **required**.
+
+⚠️ **The profile names still encode the retired vocabulary.** They are the literals the live L2 API accepts,
+so they are correct to *send* until the enum migration (D-12 §6 items 2–3) renames them to
+`spaarke-tenant-model1` / `customer-tenant-model2`. Do not "fix" them locally — L2 rejects unknown values
+with a 400.
 
 **Reject any other value BEFORE POST /api/runs**. Do not silently substitute or ask the operator to "just try one" — surface the failure with the exact enum choices.
 
 ```powershell
+# NOTE (2026-09-28, D-12): 'spaarke-hosted-model1-trial' is RETIRED but is still accepted by the live L2
+# API, so it stays in $validProfiles until the enum migration. It is rejected SEPARATELY below so an
+# operator cannot select it by accident.
 $validProfiles = @('spaarke-hosted-model1-trial', 'spaarke-hosted-model2', 'customer-owned-model2')
 if ($profile -notin $validProfiles) {
   Write-Error "❌ Invalid profile '$profile'. Must be one of: $($validProfiles -join ', '). Per DS-5 c6-1: L2 API rejects any other value with 400."
   # HARD STOP — do not proceed to Step 2
   exit 1
 }
+if ($profile -eq 'spaarke-hosted-model1-trial') {
+  Write-Error "❌ Profile 'spaarke-hosted-model1-trial' is RETIRED (owner decision D-12, 2026-09-28). The shared trial/SMB tier no longer exists and was never implemented in the engine. Use 'spaarke-hosted-model2' (= the new Model 1, Spaarke's Azure tenant) or 'customer-owned-model2' (= the new Model 2, customer's Azure tenant)."
+  # HARD STOP — do not proceed to Step 2
+  exit 1
+}
 ```
 
-Cross-check: `tenancyModel` × `profile` MUST be consistent — `Model1Shared` pairs only with `spaarke-hosted-model1-trial`; `Model2Dedicated` pairs with either `spaarke-hosted-model2` or `customer-owned-model2`. Mismatch → reject before POST.
+Cross-check: `tenancyModel` × `profile` MUST be consistent. **Currently**: `Model2Dedicated` pairs with either `spaarke-hosted-model2` or `customer-owned-model2`; `Model1Shared` is retired and rejected above. Mismatch → reject before POST.
+
+⚠️ **This cross-check is the mechanism behind the P-2 defect** (D-12 §5): one `tenancyModel` value spanning two profiles with **opposite subscription ownership** is exactly why `H1SubscriptionReadinessHandler` cannot tell them apart and demands Lighthouse for Spaarke-owned subscriptions. After the enum migration the mapping becomes **1:1** — Model 1 ↔ Spaarke tenant, Model 2 ↔ customer tenant — and the defect closes.
 
 #### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
 
@@ -325,7 +357,7 @@ PREFLIGHT (H0) RESULT
   [PASS] App Service plan tier available in westus2
   [PASS] SPE container-type headroom OK (7,442 of 10,000 remaining)
   [PASS] DNS pre-check: trial-acme-2026-08-18.spaarke.com not reserved
-  [PASS] Customer tenant reachable (Model 1 shared)
+  [PASS] Spaarke tenant reachable (Model 1)
   [PASS] Estimated cost: $412/mo (within $430 Model 1 marginal envelope)
   [PASS] Estimated duration: 42 min (H1-H14, no lead-time gates)
 
@@ -471,8 +503,9 @@ RUN PLAN
   tenancyModel:  Model1Shared
   profile:       dev
 
-  Handlers to execute (13 for Model1Shared / 17 for Model2Dedicated):
-    H0.5      consent-callback (Model 2 only — skipping for Model 1)
+  Handlers to execute (17 — one handler set for both models; *amended 2026-09-28, D-12: the 13-handler
+  Model1Shared set is retired*):
+    H0.5      consent-callback (Model 2 only — skipped for Model 1, which is in Spaarke's own tenant)
     H1        resource-group provisioning
     H2a       Bicep infra apply (30-min timeout)
     H2b       AI Search index deploy (7 canonical indexes)

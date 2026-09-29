@@ -168,7 +168,7 @@ These 12 decisions are baked into spec.md and tasks. Re-read spec.md "Owner Clar
 
 | ADR | Title | Relevance |
 |---|---|---|
-| **ADR-001** | BFF Minimal API + BackgroundService | `Spaarke.Scheduling` stays in-process; no Azure Functions |
+| **ADR-001** | BFF Minimal API runtime | BFF endpoints in Minimal API; where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) (`Spaarke.Scheduling` is the in-BFF mechanism, ADR-036) |
 | **ADR-007** | SpeFileStore facade | N/A (no SPE file ops in R3) |
 | **ADR-008** | Endpoint-filter auth | Membership + admin endpoints follow filter convention |
 | **ADR-009** | Redis caching | Identity normalization + membership cache + metadata cache + pub/sub invalidation |

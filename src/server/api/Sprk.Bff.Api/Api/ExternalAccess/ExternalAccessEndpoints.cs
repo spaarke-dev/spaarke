@@ -131,6 +131,22 @@ public static class ExternalAccessEndpoints
         // POST /api/v1/external-access/revoke — Revoke Contact access from a Secure Project
         adminGroup.MapRevokeExternalAccessEndpoint();
 
+        // POST /api/v1/external-access/set-record-share-expiry — one expiry on every active share of a
+        // record, all-or-nothing (spec FR-33, task 098: the Manage Access toolbar Expiration).
+        adminGroup.MapSetRecordShareExpiryEndpoint();
+
+        // GET /api/v1/external-access/can-manage-access — the delegation question, ASKED rather than guessed
+        // (spec FR-07, task 118 / owner decision D-1 option C: the server's rule, with the server's fail
+        // direction, is what the Manage Access affordance gates on). On this group deliberately: the answer is
+        // the group filter's own verdict, so the client cannot be told something the enforcement point would
+        // contradict. Detaching the filter would make it answer "yes" to everyone — see the endpoint's remarks.
+        adminGroup.MapRecordAccessGateEndpoint();
+
+        // POST /share-user · POST /unshare-user · GET /user-shares — internal system-user shares on a record
+        // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so
+        // they inherit the same Write-on-the-record delegation gate as every route above.
+        adminGroup.MapInternalShareEndpoints();
+
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();
 
@@ -154,6 +170,9 @@ public static class ExternalAccessEndpoints
 
         // POST /api/v1/external-access/provision-project — Provision infrastructure for Secure Project
         adminGroup.MapProvisionProjectEndpoint();
+
+        // POST /api/v1/external-access/unsecure-project — reverse the Secure Project designation (task 061)
+        adminGroup.MapUnsecureProjectEndpoint();
     }
 
 }

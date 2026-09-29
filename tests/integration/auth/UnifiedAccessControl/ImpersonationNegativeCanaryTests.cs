@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///   <item><b>Perturbation (always runs, no tenant).</b> Feeds the invariant the exact fail-OPEN state
 ///   and asserts it reports failure. This is what makes the gate real on every CI run: an assertion
 ///   nobody has watched fail is an assertion nobody has verified.</item>
-///   <item><b>Live tenant (Tests 1–3).</b> The actual row-set comparison against a provisioned canary
+///   <item><b>Live tenant (Tests 1–4).</b> The actual row-set comparison against a provisioned canary
 ///   user. FAILS — never quietly passes — when the canary is absent AND the gate is open (spec
 ///   NFR-01); see <c>TryAcquireCanary</c> for how "open" is decided.</item>
 ///   <item><b>Config tripwire (always runs, no tenant).</b> The FR-20 flag cannot be turned on in
@@ -223,7 +223,7 @@ public class ImpersonationNegativeCanaryTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
-    // Layer 2 — LIVE TENANT. Tests 1–3 from investigation 08 §3d.
+    // Layer 2 — LIVE TENANT. Tests 1–3 from investigation 08 §3d; Test 4 (the helper path) from task 104.
     //
     // These require the provisioned canary user. See TryAcquireCanary for how "must not skip"
     // (spec NFR-01) is honored without turning every credential-less CI run permanently red.
@@ -309,6 +309,36 @@ public class ImpersonationNegativeCanaryTests
         (await act.Should().ThrowAsync<ArgumentException>(
                 "an impersonated read MUST NOT degrade to an app-only org-wide query"))
             .And.ParamName.Should().Be("callerSystemUserId");
+    }
+
+    /// <summary>
+    /// TEST 4 — the helper path (task 104). The same comparison as Test 1, but the impersonated request is built
+    /// with <see cref="DataverseImpersonation.ApplyAsSystemUser"/> directly instead of through
+    /// <c>RetrieveMultipleImpersonatedAsync</c>: the path a new call site takes (ADR-052 §6). If the helper stops
+    /// stamping its header, the read returns the app identity's org-wide rows and the verdict is Inert.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "LiveDataverseCanary")]
+    public async Task HelperStampedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows()
+    {
+        var canary = TryAcquireCanary();
+        if (canary is null)
+        {
+            return; // NOT RUN — see TryAcquireCanary.
+        }
+
+        var appOnlyIds = await ReadAppOnlyMatterIdsAsync(canary);
+        var helperIds = await ReadMatterIdsDirectlyAsync(
+            canary,
+            request => DataverseImpersonation.ApplyAsSystemUser(request, canary.CanarySystemUserId));
+
+        appOnlyIds.Count.Should().BeLessThan(
+            PageCap,
+            "the app-only baseline hit the single-page cap, so the comparison would be truncation-contaminated");
+
+        var outcome = ImpersonationNegativeCanary.Evaluate(appOnlyIds, helperIds);
+
+        outcome.Passed.Should().BeTrue(outcome.Message);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -507,12 +537,22 @@ public class ImpersonationNegativeCanaryTests
     }
 
     /// <summary>
-    /// The app-only side — the CONTROL, issued directly so it shares no code path with the impersonated
-    /// read beyond the credential. Same entity set, same <c>$select</c>, same <c>$top</c>; the ONLY
+    /// The app-only side — the CONTROL. Against Test 1 it shares no code path with the impersonated read (which
+    /// goes through <c>RetrieveMultipleImpersonatedAsync</c>) beyond the credential; against Test 4 it shares the raw
+    /// read with the helper-path read, so the two differ only by the header the helper writes. Same entity set, same <c>$select</c>, same <c>$top</c>; the ONLY
     /// difference is the absent <c>MSCRMCallerID</c> header.
     /// </summary>
-    private static async Task<IReadOnlyCollection<Guid>> ReadAppOnlyMatterIdsAsync(
-        ImpersonationCanaryEnvironment canary)
+    private static Task<IReadOnlyCollection<Guid>> ReadAppOnlyMatterIdsAsync(
+        ImpersonationCanaryEnvironment canary) => ReadMatterIdsDirectlyAsync(canary, stampImpersonation: null);
+
+    /// <summary>
+    /// Issues the id-only matter query on a raw client. With <paramref name="stampImpersonation"/> null it is the
+    /// app-only CONTROL; with a stamp it is Test 4's helper-path read. The two differ by exactly one call: the
+    /// header the helper writes.
+    /// </summary>
+    private static async Task<IReadOnlyCollection<Guid>> ReadMatterIdsDirectlyAsync(
+        ImpersonationCanaryEnvironment canary,
+        Action<HttpRequestMessage>? stampImpersonation)
     {
         var options = new DefaultAzureCredentialOptions();
         if (!string.IsNullOrWhiteSpace(canary.ManagedIdentityClientId))
@@ -533,8 +573,11 @@ public class ImpersonationNegativeCanaryTests
         http.DefaultRequestHeaders.Add("OData-Version", "4.0");
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        using var response = await http.GetAsync(
-            $"{ImpersonationCanaryEnvironment.EntitySetName}?{IdOnlyQuery}");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, $"{ImpersonationCanaryEnvironment.EntitySetName}?{IdOnlyQuery}");
+        stampImpersonation?.Invoke(request);
+
+        using var response = await http.SendAsync(request);
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadFromJsonAsync<AppOnlyCollection>();

@@ -22,6 +22,21 @@ public class RegistrationDataverseService : IDisposable
     /// </summary>
     public const string HttpClientName = "RegistrationDataverse";
 
+    /// <summary>
+    /// The Dataverse environment this service writes registration requests to,
+    /// without a trailing slash. From DATAVERSE_URL.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so that anything building a link to a record it created uses the
+    /// environment the record is actually in. The admin notification used to take
+    /// that URL from the default <c>sprk_dataverseenvironment</c> row instead, which
+    /// describes where demos are provisioned and is a different environment. With no
+    /// row flagged as default the selection fell to the first by name, "Demo 1", so
+    /// every notification deep-linked into spaarke-demo for a record that only exists
+    /// in spaarkedev1, and the link opened "Record Is Unavailable".
+    /// </remarks>
+    public string DataverseBaseUrl { get; }
+
     private readonly HttpClient _httpClient;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _apiUrl;
@@ -60,7 +75,8 @@ public class RegistrationDataverseService : IDisposable
                 "RegistrationDataverseService requires DATAVERSE_URL configuration.");
         }
 
-        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+        DataverseBaseUrl = dataverseUrl.TrimEnd('/');
+        _apiUrl = $"{DataverseBaseUrl}/api/data/v9.2";
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         // Factory-created client (pooled handler per ADR-010). BaseAddress + default Prefer

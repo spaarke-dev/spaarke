@@ -35,7 +35,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 
 ```xml
 <hot-path-declaration>
-  <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints -->
+  <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints; scheduler lease + admin jobs trigger (task 103) -->
   <spaarke-ai>N</spaarke-ai>
   <ci-workflows>N</ci-workflows>
   <skill-directives>N</skill-directives>
@@ -52,7 +52,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 | Access evaluator | `AccessibleRecordSetService` (fail-closed, principal-agnostic, ADR-sanctioned decision point) | **Extend in place** — change return type to carry rights; add veto terms | Two evaluators keep diverging; the broader one guards the weaker surface |
 | Impersonated root-set source | `DataverseWebApiService.RetrieveMultipleImpersonatedAsync` + `DataverseImpersonation` — **already built and live** | **Reuse** — new thin `ImpersonatedRootSetSource` calling it | Type 1 SPA access keeps disagreeing with the MDA in both directions |
 | POA share seam | `IDataverseAccessGrantService` (systemuser-only, no revoke) **and** a duplicate client in `PlaybookSharingService` (does teams + revoke) | **Consolidate the two**, parameterize principal | A third POA client; internal shares unrevocable from the UI |
-| Membership resolver | `MembershipResolverService` (ADR-034) | **Reuse unchanged** for the contact term; other consumers need `byRole` | — |
+| Membership resolver | `MembershipResolverService` (ADR-034) | **Extend additively** (was "Reuse unchanged" — corrected 2026-09-17, task 043): task 041 added the `AccessConferringOnly` registry gate and task 043 added `OrganizationIds` binding plus the `HashOptions` cache-key fix. Both are backward-compatible additions inside the canonical resolver (ADR-034 M1 — no parallel engine), so the *spirit* of "reuse" holds, but the row as written contradicted the diff | — |
 | Attestation log | none | **New** — smallest possible append-only table | "Who could see this matter on 3 March?" is unanswerable; required for privilege logs and breach inquiry |
 
 No new NuGet packages. Publish-size delta expected ≈0; measured per CLAUDE.md §10 bullet 4 (ceiling 60 MB, baseline ~44.96 MB incl. PDBs).
@@ -100,10 +100,30 @@ Types 2 and 3 are **identical** on record permission; they differ only by creden
 
 ### 4.3 Records: core vs child
 
-| Class | Entities | Access |
-|---|---|---|
-| **Core** | `sprk_project`, `sprk_matter`, `sprk_workassignment`, `sprk_servicerequest` | Direct grants required |
-| **Child** | `sprk_invoice`, `sprk_communication`, `sprk_document`, `sprk_event`, `sprk_todo`, analysis | **Inherit** from parent |
+| Class | Entities | Access | Externally grantable? |
+|---|---|---|---|
+| **Core** | `sprk_project`, `sprk_matter`, `sprk_workassignment` | Direct grants required | **Yes** — `sprk_externalrecordaccess` carries a lookup for each |
+| **Core, internal-only** | `sprk_servicerequest` | Direct access required; **scoped by REQUESTER, not by grant** | 🔴 **No — never** |
+| **Child** | `sprk_invoice`, `sprk_communication`, `sprk_document`, `sprk_event`, `sprk_todo`, analysis | **Inherit** from parent | n/a |
+
+🔴 **The row split above is the correction, and it matters** (owner-confirmed 2026-09-09, task 028).
+This table previously listed all four core types in one row, which read as *"all four are externally
+grantable"*. **Service requests are submitted by internal workforce users through the SPA and must
+never be reachable by an external contact** (a law firm, opposing counsel, a vendor). Accordingly:
+
+- `sprk_externalrecordaccess` carries lookups for **project, matter, work assignment, invoice and
+  organization — and deliberately NO service request** (verified live 2026-09-09). There is no way to
+  grant one, by construction.
+- `CallerPrincipal` therefore composes exactly **three** externally-grantable root sets. A fourth
+  would compose from grants that cannot exist — an always-empty set that *looks* like a fix.
+- Service-request scoping **already exists**, by a different and correct mechanism: the
+  `service-requests` external module scopes on `sprk_requestedby == caller contact` and returns an
+  empty set for any non-workforce plane (server-side fail-closed, not reliant on the client hiding
+  the tab). Shipped by `spaarke-SPA-external-access-platform-r2` #028, 2026-08-10.
+
+Note also that the grant table's lookup list is **not** the root-set list in either direction: it
+carries `sprk_invoice` (a *child*) and `sprk_organization` (which drives the org-expansion term).
+"Grantable type" and "accessible root" were never the same concept.
 
 **One hop, by construction.** `RegardingResolver` denormalizes the *ultimate core-record ancestor* onto each child, so a To Do regarding an Email regarding a Matter carries `sprk_regardingmatter` directly. Chains never need traversal; ADR-034's 1-hop cap holds unamended. The ancestor stamp must be re-applied on reparent.
 

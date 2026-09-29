@@ -15,10 +15,11 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// (impersonated set == app-only set) on every CI run, with no tenant, and assert that it reports
 /// failure. That perturbation check is what makes the gate real today.</para>
 ///
-/// <para><b>The failure it exists to catch</b> (investigation 08 §3): <c>DataverseImpersonation.Apply</c>
-/// silently no-ops on a null caller BY DESIGN, and <c>impersonateSystemUserId</c> is an OPTIONAL
-/// parameter throughout <c>DataverseWebApiService</c> — so app-only is the silent default of the whole
-/// client. A call path that forgets the header compiles, runs, and returns the System-Administrator row
+/// <para><b>The failure it exists to catch</b> (investigation 08 §3): <c>impersonateSystemUserId</c> is an
+/// OPTIONAL parameter throughout <c>DataverseWebApiService</c>, so app-only is the default of the whole
+/// client. (Until task 104 the helper also silently added no header for an EMPTY id; it now refuses one, but a
+/// call path that simply omits the id is still app-only by construction.) A call path that forgets the
+/// header compiles, runs, and returns the System-Administrator row
 /// set with HTTP 200 and no error. There is no exception to catch and no log line to grep. The ONLY
 /// signal is that the impersonated answer stopped being smaller than the app-only answer.</para>
 ///

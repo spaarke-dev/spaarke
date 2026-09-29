@@ -97,7 +97,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │                                                                      │
 │  1. Download artifacts from CI                                      │
 │  2. Deploy API to staging App Service                               │
-│  3. Deploy plugins via PAC CLI (if enabled)                         │
+│  3. (no plugin deploy — Spaarke ships no plugins, ADR-002)          │
 │  4. Run integration tests                                           │
 │  5. Health check verification                                       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -145,7 +145,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `adr-audit.yml` | ADR Architecture Audit | Full ADR compliance scan with tracking issue |
 | `deploy-bff-api.yml` | Deploy BFF API | Staging slot swap deployment with auto-rollback |
 | `deploy-infrastructure.yml` | Deploy Bicep Infrastructure | Validate, what-if, deploy Bicep templates |
-| `deploy-platform.yml` | Deploy Platform Infrastructure | Shared platform resources via `Deploy-Platform.ps1` |
+| `deploy-platform.yml` | Deploy Platform Infrastructure | Spaarke's own non-customer-serving platform resources via `Deploy-Platform.ps1`; **not** a customer-onboarding prerequisite |
 | `deploy-promote.yml` | Environment Promotion | Cascade deployment: dev -> staging -> prod |
 | `deploy-slot-swap.yml` | Deploy via Slot Swap | Zero-downtime slot swap deployment |
 | `deploy-office-addins.yml` | Deploy Office Add-ins | Build and deploy to Azure Static Web App |
@@ -259,7 +259,6 @@ Follow **Conventional Commits** format:
 |-------|------|
 | `api` | BFF API changes |
 | `pcf` | PCF control changes |
-| `plugin` | Dataverse plugin changes |
 | `dataverse` | Dataverse configuration |
 | `infra` | Infrastructure/Bicep |
 | `docs` | Documentation |
@@ -435,7 +434,7 @@ Before merging any PR to master, verify all of the following:
 - [ ] **Build succeeds** — Both Debug and Release configurations compile without warnings (`-warnaserror`)
 - [ ] **Tests pass** — All unit tests pass with coverage collected
 - [ ] **Client quality** — Prettier format check and ESLint strict (`--max-warnings 0`) pass
-- [ ] **Code quality** — `dotnet format --verify-no-changes` passes; ADR architecture tests pass; plugin size under 1MB
+- [ ] **Code quality** — `dotnet format --verify-no-changes` passes; ADR architecture tests pass (incl. ADR-002 zero-plugin guard)
 
 ### Manual Checks (Reviewer Responsibility)
 
@@ -476,7 +475,7 @@ Before merging any PR to master, verify all of the following:
 | `security-scan` | Trivy vulnerability scan | ~1 min | Yes |
 | `build-test` | Build + run tests (Debug & Release) | ~3-4 min | Yes |
 | `client-quality` | Prettier format check + ESLint strict | ~1-2 min | Yes |
-| `code-quality` | Format check, ADR tests, plugin size | ~2 min | Yes |
+| `code-quality` | Format check, ADR tests, vulnerable packages | ~2 min | Yes |
 | `integration-readiness` | Package artifacts | ~1 min | Yes |
 | `adr-pr-comment` | Post ADR violations to PR | ~30s | No |
 | `summary` | Generate summary report | ~10s | No |
@@ -503,7 +502,6 @@ code-quality:
   • dotnet format --verify-no-changes
   • ADR architecture tests (NetArchTest) — blocking
   • ADR policy check (Legacy PowerShell) — advisory (continue-on-error)
-  • Plugin assembly size (<1MB per ADR-002)
   • Vulnerable package detection
 
 integration-readiness:
@@ -543,16 +541,23 @@ integration-readiness:
 | `deploy` | Deploy infrastructure (manual dispatch only with `deploy: true`) |
 | `summary` | Pipeline summary |
 
-**Supports**: Model 1 (shared multi-tenant) and Model 2 (customer-dedicated) stacks. PR triggers only validate (no deployment).
+**Supports**: the **full per-customer stack**, which is the same in both deployment models. PR triggers only validate (no deployment).
+
+> 🟡 **Corrected 2026-09-28 (owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))** — this line previously read *"Supports: Model 1 (shared multi-tenant) and Model 2 (customer-dedicated) stacks."* **There is no shared Model 1 stack.** The two models differ in **one axis only: which Azure tenant owns the customer's subscription** (Model 1 = Spaarke's, Model 2 = the customer's). **Every Azure resource is dedicated per customer in both**, in that customer's own subscription and resource group. `model1-shared.bicep` and `model1-customer.bicep` are **retired artifacts** (retirement is a coordinated multi-surface change tracked in D-12 §6). The only model-dependent difference in the deployment path: **Model 2 additionally requires H0.5 admin consent and Azure Lighthouse delegation**; Model 1 requires neither.
 
 ### Platform Infrastructure Deployment: `deploy-platform.yml`
 
 **Triggers**: Manual dispatch only
 
+> ⚠️ **This is not a customer-onboarding step.** It deploys Spaarke's own non-customer-serving platform
+> resources. **Do not run it as "step 1" before provisioning a customer** — under D-12 there is no shared
+> platform layer that customer stacks sit on top of. Onboarding a customer is: create that customer's Azure
+> subscription + resource group, then deploy the full per-customer stack into it.
+
 | Job | Purpose |
 |-----|---------|
 | `what-if` | What-if preview via `Deploy-Platform.ps1 -WhatIf` |
-| `deploy` | Deploy platform infrastructure (requires environment approval) |
+| `deploy` | Deploy Spaarke's own platform infrastructure (requires environment approval) |
 | `verify` | Verify resource group, App Service health, Key Vault access |
 
 ### Environment Promotion: `deploy-promote.yml`
@@ -782,10 +787,11 @@ After merging to master:
 1. CI Pipeline runs on master
 2. If successful, deploy-staging.yml triggers
 3. API deployed to staging App Service
-4. Plugins deployed (if enabled)
-5. Integration tests run
-6. Health check verifies deployment
+4. Integration tests run
+5. Health check verifies deployment
 ```
+
+(Plugin deployment step removed 2026-09-25 — Spaarke ships no plugins, ADR-002.)
 
 **Monitor staging deployment:**
 ```powershell
@@ -848,7 +854,6 @@ gh workflow run deploy-to-azure.yml -f artifact_id={id}
 | `client-quality` ESLint | ESLint rule violation | Run `cd src/client/pcf && npx eslint . --fix` |
 | `code-quality` format | C# style violation | Run `dotnet format` |
 | `code-quality` ADR | Architecture violation | Run `/adr-check`, fix violations |
-| `code-quality` size | Plugin >1MB | Reduce dependencies per ADR-002 |
 
 ### Viewing CI Logs
 

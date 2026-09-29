@@ -1,157 +1,128 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+using FluentAssertions;
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Documents;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Documents;
 
 /// <summary>
-/// Pins the <c>sprk_document</c> record-link vocabulary and the copy-forward semantics.
+/// Tests for the Compose-side POLICY over the <c>sprk_document</c> link vocabulary.
+///
+/// <para><b>Rewritten 2026-09-29 at the master merge.</b> This class used to pin the column LIST, because
+/// <c>DocumentLinkFieldMap</c> used to declare it. It no longer does — <c>unified-access-control-r2</c>
+/// hoisted the vocabulary to <c>Spaarke.Dataverse.DocumentLinkFields</c> (a better home: shared library,
+/// case-sensitive <c>SchemaName</c> carried), and this file's column tests would now be a second
+/// hand-maintained copy of a closed set, which is the exact drift the hoist ended. Column coverage and
+/// casing belong to <c>DocumentLinkFieldsTests</c>; what is tested here is the policy that has no
+/// equivalent there — legacy mapping and copy-forward semantics.</para>
 /// </summary>
-/// <remarks>
-/// The defect these guard against: the vocabulary used to be declared twice and both copies had drifted
-/// to 6 of the table's 17 link columns, so Compose create-on-save silently dropped a document's filing
-/// for ten link types. Nothing failed — the new document was simply not where the user filed the source.
-/// </remarks>
-public sealed class DocumentLinkFieldMapTests
+public class DocumentLinkFieldMapTests
 {
+    [Fact]
+    public void TheFourUnprefixedColumns_AreMappedToTheSiblingThatSupersedesThem()
+    {
+        DocumentLinkFieldMap.SupersededBy.Should().HaveCount(4);
+        DocumentLinkFieldMap.SupersededBy["sprk_matter"].Should().Be("sprk_relatedmatter");
+        DocumentLinkFieldMap.SupersededBy["sprk_project"].Should().Be("sprk_relatedproject");
+        DocumentLinkFieldMap.SupersededBy["sprk_invoice"].Should().Be("sprk_relatedinvoice");
+        DocumentLinkFieldMap.SupersededBy["sprk_workassignment"].Should().Be("sprk_relatedworkassignment");
+    }
+
     /// <summary>
-    /// The live column set from <c>describe('tables/sprk_document')</c>, 2026-09-04. Pinned as data so a
-    /// drop or a silent rename is a red test rather than a quiet behaviour change.
+    /// A legacy mapping that named a column the schema does not have would be a migration plan that
+    /// cannot run. Both ends are checked against the shared vocabulary, not a list re-typed here.
     /// </summary>
-    private static readonly string[] LiveLinkColumns =
-    [
-        "sprk_relatedagreement", "sprk_relatedcommunication", "sprk_relatedcontact", "sprk_relatedevent",
-        "sprk_relatedinvoice", "sprk_relatedmatter", "sprk_relatedorganization", "sprk_relatedproject",
-        "sprk_relatedservicerequest", "sprk_relatedtodo", "sprk_relatedvendororg",
-        "sprk_relatedworkassignment", "sprk_email",
-        "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment",
-    ];
-
     [Fact]
-    public void Map_CoversEveryLinkColumnOnTheLiveSchema()
+    public void EveryLegacyMapping_NamesRealColumnsOnBothEnds()
     {
-        Assert.Equal(
-            LiveLinkColumns.OrderBy(x => x, StringComparer.Ordinal),
-            DocumentLinkFieldMap.AllAttributes.OrderBy(x => x, StringComparer.Ordinal));
-    }
+        var known = DocumentLinkFields.LogicalNames;
 
-    [Fact]
-    public void TheFourUnprefixedColumns_AreMarkedLegacy_AndNameTheSiblingThatSupersedesThem()
-    {
-        // Recorded, not acted on: nothing redirects writes (see ProjectForCopy). This states WHICH column
-        // replaces each retired one, so a future deliberate migration has the mapping and does not have to
-        // re-derive it from names — sprk_relatedvendororg would defeat a name-based guess.
-        var expected = new Dictionary<string, string?>(StringComparer.Ordinal)
+        foreach (var (legacy, successor) in DocumentLinkFieldMap.SupersededBy)
         {
-            ["sprk_matter"] = "sprk_relatedmatter",
-            ["sprk_project"] = "sprk_relatedproject",
-            ["sprk_invoice"] = "sprk_relatedinvoice",
-            ["sprk_workassignment"] = "sprk_relatedworkassignment",
-        };
-
-        var legacy = DocumentLinkFieldMap.All
-            .Where(f => f.IsLegacy)
-            .ToDictionary(f => f.Attribute, f => f.SupersededBy, StringComparer.Ordinal);
-
-        Assert.Equal(expected, legacy);
-    }
-
-    [Fact]
-    public void EverySupersedingColumn_IsItselfACurrentColumn()
-    {
-        // A pointer at a column that is absent (or itself legacy) would misdirect that future migration.
-        var current = DocumentLinkFieldMap.Current.Select(f => f.Attribute).ToHashSet(StringComparer.Ordinal);
-
-        foreach (var field in DocumentLinkFieldMap.All.Where(f => f.IsLegacy))
-        {
-            Assert.Contains(field.SupersededBy!, current);
+            known.Should().Contain(legacy, $"the legacy column {legacy} must exist to be superseded");
+            known.Should().Contain(successor, $"the successor {successor} must exist to supersede {legacy}");
+            DocumentLinkFieldMap.IsLegacy(successor).Should().BeFalse(
+                $"{successor} supersedes something, so it must not itself be marked legacy");
         }
     }
 
     [Fact]
-    public void TwoLookupsMayShareATargetEntity_SoTheVocabularyIsNeverKeyedByTarget()
+    public void IsLegacy_IsCaseInsensitive_BecauseDataverseLogicalNamesArriveInMixedCase()
     {
-        // sprk_relatedorganization and sprk_relatedvendororg both point at sprk_organization in different
-        // roles. Keying this map by target entity would silently drop one of them.
-        var orgLinks = DocumentLinkFieldMap.Current
-            .Where(f => f.TargetEntity == "sprk_organization")
-            .Select(f => f.Attribute)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(new[] { "sprk_relatedorganization", "sprk_relatedvendororg" }, orgLinks);
+        DocumentLinkFieldMap.IsLegacy("sprk_matter").Should().BeTrue();
+        DocumentLinkFieldMap.IsLegacy("SPRK_MATTER").Should().BeTrue();
+        DocumentLinkFieldMap.IsLegacy("sprk_relatedmatter").Should().BeFalse();
     }
 
+    // -----------------------------------------------------------------------
+    // ProjectForCopy — the create-on-save link inheritance
+    // -----------------------------------------------------------------------
+
+    private static EntityReference Ref(string entity) => new(entity, Guid.NewGuid());
+
+    /// <summary>
+    /// THE LOAD-BEARING TEST. An earlier cut redirected legacy → related on write, to migrate rows as
+    /// they were touched. A Dataverse subgrid binds to ONE relationship, so if the Matter form's
+    /// Documents subgrid is bound to <c>sprk_matter</c> and the source PDF sits there, re-filing the copy
+    /// under <c>sprk_relatedmatter</c> means the two never appear together — silently defeating "files
+    /// alongside the source", the whole point of the feature.
+    /// </summary>
     [Fact]
-    public void AssociationCandidates_ExcludeTheInboundCommunicationOnly()
+    public void ProjectForCopy_CopiesColumnForColumn_NeverRedirectingALegacyColumn()
     {
-        var excluded = DocumentLinkFieldMap.AllAttributes
-            .Except(DocumentLinkFieldMap.AssociationCandidateFields.Select(f => f.Attribute), StringComparer.Ordinal)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .ToArray();
+        var source = new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matter"] = Ref("sprk_matter"),
+        };
 
-        // The rung matches FROM a communication; surfacing it back as a candidate is circular. Everything
-        // else — notably Agreement, which the old hard-coded list missed — must be scannable.
-        Assert.Equal(new[] { "sprk_email", "sprk_relatedcommunication" }, excluded);
-        Assert.Contains(
-            DocumentLinkFieldMap.AssociationCandidateFields,
-            f => f.Attribute == "sprk_relatedagreement");
-    }
+        var copied = DocumentLinkFieldMap.ProjectForCopy(f =>
+            source.TryGetValue(f.LogicalName, out var r) ? r : null);
 
-    [Fact]
-    public void ProjectForCopy_CopiesColumnForColumn_IncludingLegacyOnes()
-    {
-        // A first cut REDIRECTED sprk_matter -> sprk_relatedmatter to migrate rows as they were touched.
-        // That broke the feature's actual guarantee: a subgrid binds to ONE relationship, so re-filing the
-        // copy under a different column than its source stops the two appearing together. Two existing
-        // tests caught it. Copying is reproducing where the source lives, not creating a new association.
-        var projected = DocumentLinkFieldMap.ProjectForCopy<string>(
-            field => field.Attribute == "sprk_matter" ? "legacy-matter" : null);
-
-        Assert.Equal(new Dictionary<string, string> { ["sprk_matter"] = "legacy-matter" }, projected);
+        copied.Should().ContainKey("sprk_matter");
+        copied.Should().NotContainKey("sprk_relatedmatter",
+            "redirecting the copy to a different relationship would stop it appearing beside its source");
     }
 
     [Fact]
     public void ProjectForCopy_KeepsBothForms_WhenTheSourceCarriesLegacyAndModernSeparately()
     {
-        // Old rows can carry both, pointing at different records. Neither is dropped and neither is
-        // merged: the copy mirrors the source exactly.
-        var projected = DocumentLinkFieldMap.ProjectForCopy<string>(field => field.Attribute switch
+        var legacy = Ref("sprk_matter");
+        var modern = Ref("sprk_matter");
+        var source = new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase)
         {
-            "sprk_matter" => "legacy-matter",
-            "sprk_relatedmatter" => "modern-matter",
-            _ => null,
-        });
-
-        Assert.Equal("legacy-matter", projected["sprk_matter"]);
-        Assert.Equal("modern-matter", projected["sprk_relatedmatter"]);
-    }
-
-    [Fact]
-    public void ProjectForCopy_CarriesTheLinkTypesTheOldHardCodedListDropped()
-    {
-        // The regression this whole change exists for: a PDF filed under an Agreement produced a Word
-        // document with no Agreement link, silently.
-        var dropped = new[]
-        {
-            "sprk_relatedagreement", "sprk_relatedservicerequest", "sprk_relatedtodo",
-            "sprk_relatedevent", "sprk_relatedcontact", "sprk_relatedorganization",
-            "sprk_relatedvendororg", "sprk_relatedinvoice", "sprk_relatedworkassignment",
+            ["sprk_matter"] = legacy,
+            ["sprk_relatedmatter"] = modern,
         };
 
-        var projected = DocumentLinkFieldMap.ProjectForCopy<string>(
-            field => dropped.Contains(field.Attribute, StringComparer.Ordinal) ? field.Attribute : null);
+        var copied = DocumentLinkFieldMap.ProjectForCopy(f =>
+            source.TryGetValue(f.LogicalName, out var r) ? r : null);
 
-        Assert.Equal(
-            dropped.OrderBy(x => x, StringComparer.Ordinal),
-            projected.Keys.OrderBy(x => x, StringComparer.Ordinal));
+        copied["sprk_matter"].Should().BeSameAs(legacy);
+        copied["sprk_relatedmatter"].Should().BeSameAs(modern);
+    }
+
+    /// <summary>
+    /// The regression this whole area exists for: the two prior hard-coded copies knew 6 columns, so a
+    /// PDF filed under an Agreement produced a Word document with no Agreement link and no error. Asserted
+    /// against the shared vocabulary so it cannot pass by re-listing what the code happens to do.
+    /// </summary>
+    [Fact]
+    public void ProjectForCopy_CarriesEveryColumnTheSharedVocabularyDeclares()
+    {
+        var copied = DocumentLinkFieldMap.ProjectForCopy(f => Ref(f.TargetEntityLogicalName));
+
+        copied.Keys.Should().BeEquivalentTo(DocumentLinkFields.LogicalNames);
+        copied.Should().ContainKey("sprk_relatedagreement",
+            "the Agreement link was one of the ten the old hard-coded lists missed");
+        copied.Should().ContainKey("sprk_email",
+            "the email link was the 17th column the 2026-09-05 hoist itself missed");
     }
 
     [Fact]
     public void ProjectForCopy_OmitsEmptyLinks()
     {
-        Assert.Empty(DocumentLinkFieldMap.ProjectForCopy<string>(_ => null));
+        var copied = DocumentLinkFieldMap.ProjectForCopy<EntityReference>(_ => null);
+        copied.Should().BeEmpty("a source with no links yields no attributes to write");
     }
 }

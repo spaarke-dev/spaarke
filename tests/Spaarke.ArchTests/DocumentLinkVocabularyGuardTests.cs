@@ -31,14 +31,28 @@ namespace Spaarke.ArchTests;
 /// </para>
 /// <para>
 /// <b>If this fails</b>, you have hard-coded document link columns somewhere. Reference
-/// <c>Services/Documents/DocumentLinkFieldMap</c> instead. If your consumer needs a SUBSET, add it there
-/// as a named projection with its exclusions written down — an exclusion expressed as silent omission is
+/// <c>Spaarke.Dataverse.DocumentLinkFields</c> instead. If your consumer needs a SUBSET, express it as a
+/// named projection with its exclusions written down — an exclusion expressed as silent omission is
 /// indistinguishable from the oversight above.
+/// <para>
+/// <b>The canonical home MOVED on 2026-09-29.</b> It was this project's BFF-local
+/// <c>Services/Documents/DocumentLinkFieldMap</c>; <c>unified-access-control-r2</c> had independently
+/// hoisted the same closed set to <c>Spaarke.Dataverse</c> a day later, which is the better home (a
+/// shared library, carrying the case-sensitive <c>SchemaName</c>). Both were right about the problem and
+/// neither could see the other. The guard now protects the shared home, and still scans BFF sources —
+/// which is where every copy so far has appeared.
+/// </para>
 /// </para>
 /// </remarks>
 public sealed class DocumentLinkVocabularyGuardTests
 {
-    private const string CanonicalFile = "DocumentLinkFieldMap.cs";
+    /// <summary>
+    /// The canonical declaration, in the SHARED library — deliberately outside the BFF tree this guard
+    /// scans, so it is not an allowlist entry but a separate positive assertion (see
+    /// <see cref="TheCanonicalDeclaration_StillCarriesTheVocabulary"/>).
+    /// </summary>
+    private static readonly string CanonicalPath =
+        Path.Combine(SourceScan.RepoRoot, "src", "server", "shared", "Spaarke.Dataverse", "Models.cs");
 
     /// <summary>
     /// Files allowed to name several link columns without being the canonical declaration. Every entry
@@ -46,7 +60,13 @@ public sealed class DocumentLinkVocabularyGuardTests
     /// </summary>
     private static readonly Dictionary<string, string> Allowed = new(StringComparer.OrdinalIgnoreCase)
     {
-        [CanonicalFile] = "the single source of truth this guard exists to protect",
+        ["DocumentLinkFieldMap.cs"] =
+            "Declares the legacy→successor MAPPING (4 entries), which necessarily names its 4 successor " +
+            "columns. That is not a vocabulary copy and cannot drift into one: it holds no full list, " +
+            "derives every column-shaped member from Spaarke.Dataverse.DocumentLinkFields, and names 4 of " +
+            "12 Related* columns — below any plausible copy. The distinction matters: a mapping that could " +
+            "not name its own targets would be useless, whereas the failure this guard prevents is a " +
+            "SECOND ENUMERATION of the closed set.",
     };
 
     /// <summary>
@@ -98,25 +118,24 @@ public sealed class DocumentLinkVocabularyGuardTests
 
         Assert.True(
             offenders.Count == 0,
-            "the sprk_document link vocabulary must be declared ONCE, in Services/Documents/DocumentLinkFieldMap. " +
+            "the sprk_document link vocabulary must be declared ONCE, in Spaarke.Dataverse.DocumentLinkFields. " +
             "A second copy drifts silently: the last pair diverged to 6 of 17 columns and Compose quietly " +
             "dropped a document's filing for ten link types. Reference the map, or add a named projection to " +
             "it with your exclusions written down. Offending files: " + string.Join(", ", offenders));
     }
 
     [Fact]
-    public void TheCanonicalMap_StillDeclaresTheVocabulary()
+    public void TheCanonicalDeclaration_StillCarriesTheVocabulary()
     {
-        // Without this, deleting the map's contents would make the guard above pass vacuously — "no file
+        // Without this, emptying the canonical list would make the guard above pass vacuously — "no file
         // declares the vocabulary twice" is trivially true when no file declares it at all.
-        var canonical = BffSourceFiles().SingleOrDefault(f => Path.GetFileName(f) == CanonicalFile);
-        Assert.NotNull(canonical);
+        Assert.True(File.Exists(CanonicalPath), $"the canonical declaration must exist at {CanonicalPath}");
 
-        var count = DistinctLinkLiterals(File.ReadAllText(canonical!));
+        var count = DistinctLinkLiterals(File.ReadAllText(CanonicalPath));
         Assert.True(
             count >= 12,
-            $"the canonical map must still carry the full Related* vocabulary (found {count} of 12) — " +
-            "if columns were removed from the schema, update DocumentLinkFieldMapTests' pinned list too");
+            $"Spaarke.Dataverse.DocumentLinkFields must still carry the full Related* vocabulary (found " +
+            $"{count} of 12) — if columns were removed from the schema, update DocumentLinkFieldsTests too");
     }
 
     [Fact]

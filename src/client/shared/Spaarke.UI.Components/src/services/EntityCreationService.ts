@@ -508,9 +508,13 @@ export class EntityCreationService {
    * ⚠️ **Only for the flows that cannot create the record first.** If a record exists, use
    * {@link uploadFilesToSpe} — sending the bytes here stores them in the caller's business-unit
    * container instead of the record's, which for a secure record is the wrong container and is not
-   * reversible. There are exactly three such flows (EmailComposer local attachment, the Analysis
-   * wizard's standalone document, and DocumentUploadWizard's "skip associate"); reordering them so
-   * the record exists first is task 093, after which this method should lose callers.
+   * reversible. At HEAD there are exactly TWO such flows — `createXrmEmailComposeHandlers.ts`
+   * (EmailComposer local attachment) and `CreateAnalysisWizardWidget.tsx` (Analysis wizard standalone
+   * document) — and task 076's classification (`notes/task-076-client-cutover-and-supplier-
+   * classification.md:54-55`) reads both as **parentless**: an email attachment on an unsent draft
+   * and a standalone analysis document genuinely have no record to belong to when the bytes move.
+   * (A third flow, DocumentUploadWizard's "skip associate", was cut over to {@link uploadFilesToSpe}
+   * by task 076 and is no longer a caller here.)
    *
    * Note this is still NOT a client-named container: the client supplies nothing, and a caller can
    * only ever write into their own BU's container, which they are entitled to anyway.

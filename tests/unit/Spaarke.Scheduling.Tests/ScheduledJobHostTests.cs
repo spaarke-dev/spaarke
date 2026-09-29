@@ -417,8 +417,12 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
 
-        // Act — fire twice.
+        // Act — fire twice, the second after the first completes: two runs of one job never overlap
+        // (ADR-036 A1 rule 1 — an overlapping trigger is refused; see ScheduledJobLeaseTests).
         var first = await host.TriggerNowAsync("nfr08-job", parameters: null, CancellationToken.None);
+        await WaitUntilAsync(
+            () => store.RunRecords.Any(r => r.RunId == first.RunId && r.CompletedAtUtc is not null),
+            TimeSpan.FromSeconds(5));
         var second = await host.TriggerNowAsync("nfr08-job", parameters: null, CancellationToken.None);
 
         // Wait for both background tasks to complete.

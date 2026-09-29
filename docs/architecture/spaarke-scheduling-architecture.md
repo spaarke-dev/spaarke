@@ -8,6 +8,15 @@
 
 ---
 
+> ⚠️ **Runtime as built — read first** ([ADR-036 A1 §2](../adr/ADR-036-background-job-infrastructure.md), verified in code
+> 2026-09-12). The only store is `InMemoryBackgroundJobStore`: no Dataverse-backed store exists, so the "one-line swap"
+> mentioned below is not available and `sprk_backgroundjob*` are deployed but unused. Run history, admin enable/disable
+> and the `HasRunForScheduledTimeAsync` probe are process-local and lost on restart. `ScheduledJobHost` runs on every
+> instance, but each tick runs once. Dispatch takes a distributed lease in Redis that also records the last dispatched
+> occurrence, and non-production slots run no ticks (`unified-access-control-r2` task 103). Where scheduled work runs at all is
+> [ADR-052](../../.claude/adr/ADR-052-workload-placement.md), and migration of the remaining timer services is "when next
+> touched" (ADR-052 §1), no longer opportunistic.
+
 ## Overview (plain language)
 
 `Spaarke.Scheduling` is a small shared .NET library that provides **one** uniform way to write, schedule, monitor, retry, and manually trigger a cron-driven background job inside the BFF.
@@ -43,25 +52,27 @@ The two reference consumers shipping in R3 (`PlaybookSchedulerJob`, `MembershipR
 |---|---|---|
 | `IScheduledJob` | [`IScheduledJob.cs:11-27`](../../src/server/shared/Spaarke.Scheduling/IScheduledJob.cs#L11) | Contract every job implements: `JobId`, `DisplayName`, `Description`, `ExecuteAsync(JobRunContext, CancellationToken)`. Permitted as an interface under ADR-010 as a testing/swap seam. |
 | `JobRunContext` | [`JobRunContext.cs:11-15`](../../src/server/shared/Spaarke.Scheduling/JobRunContext.cs#L11) | Per-run input record — `RunId`, `CorrelationId` (NFR-08), `Trigger`, `Parameters` (sourced from `sprk_backgroundjob.sprk_configjson` or admin-trigger request body). |
-| `JobRunResult` | [`JobRunResult.cs:29-34`](../../src/server/shared/Spaarke.Scheduling/JobRunResult.cs#L29) | Per-run outcome — `Success`, `ErrorMessage?`, `ProcessedItems?`, `Duration`, `ResultJson?` (R3 task 023 / FR-2.8 — opaque per-handler JSON for admin UI). |
+| `JobRunResult` | [`JobRunResult.cs`](../../src/server/shared/Spaarke.Scheduling/JobRunResult.cs) | Per-run outcome — `Success`, `ErrorMessage?`, `ProcessedItems?`, `Duration`, `ResultJson?` (R3 task 023 / FR-2.8 — opaque per-handler JSON for admin UI), `Skipped` (set by the host only: the tick was not dispatched because another run held the lease or another instance ran it — task 103). |
 | `JobRunTrigger` (enum) | [`JobRunTrigger.cs:8-18`](../../src/server/shared/Spaarke.Scheduling/JobRunTrigger.cs#L8) | `Scheduled = 1`, `ManualAdmin = 2`, `OnStartup = 3`. |
-| `ScheduledJobHost` | [`ScheduledJobHost.cs:47-917`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs#L47) | The single `BackgroundService` that owns the cron loop. One scheduling loop computes the next fire across all enabled jobs via Cronos and sleeps until the earliest (one timer, not N — see "Design choices" in the class XML doc). Hourly definition refresh (FR-2.3). 30-second graceful drain (NFR-07). Per-tick idempotency probe via `HasRunForScheduledTimeAsync` (FR-2.3). `TriggerNowAsync` ([`L200-283`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs#L200)) backs the admin "Run Now" endpoint with fire-and-track semantics. `RefreshDefinitionsAsync` ([`L573`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs#L573)) is public so admin enable/disable forces immediate re-evaluation without waiting for the hourly refresh. |
-| `ScheduledJobHostOptions` | [`ScheduledJobHostOptions.cs:12-31`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobHostOptions.cs#L12) | POCO knobs: `RefreshInterval` (default 1h), `ShutdownDrainTimeout` (default 30s), `MaxLoopSleep`, `RetryPolicy`. No `IOptions` wrapper (ADR-010). |
-| `ScheduledJobRegistry` | [`ScheduledJobRegistry.cs:20-49`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobRegistry.cs#L20) | Singleton in-memory `ConcurrentDictionary<JobId, IScheduledJob>`. O(1) lookup; duplicate-id register throws. Populated at startup by feature-module bootstrap hosted services. |
+| `ScheduledJobHost` | [`ScheduledJobHost.cs`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs) | The single `BackgroundService` that owns the cron loop. One scheduling loop computes the next fire across all enabled jobs via Cronos and sleeps until the earliest (one timer, not N — see "Design choices" in the class XML doc). Hourly definition refresh (FR-2.3). 30-second graceful drain (NFR-07). Every dispatch — scheduled or manual — runs under the `IScheduledJobLease` (task 103). `TriggerNowAsync` backs the admin "Run Now" endpoint with fire-and-track semantics. `RefreshDefinitionsAsync` is public so admin enable/disable forces immediate re-evaluation without waiting for the hourly refresh. |
+| `ScheduledJobHostOptions` | [`ScheduledJobHostOptions.cs`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobHostOptions.cs) | POCO knobs: `RefreshInterval` (default 1h), `ShutdownDrainTimeout` (default 30s), `MaxLoopSleep`, `RetryPolicy`, `RunScheduledJobs` (the slot guard, default true), `LeaseDuration` (default 2 min, renewed every third). No `IOptions` wrapper (ADR-010). |
+| `ScheduledJobRegistry` | [`ScheduledJobRegistry.cs`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobRegistry.cs) | Singleton in-memory `ConcurrentDictionary<JobId, IScheduledJob>`. O(1) lookup; duplicate-id register throws. Its DI constructor registers every `AddScheduledJob` registration. |
 | `IBackgroundJobStore` | [`IBackgroundJobStore.cs:21-150`](../../src/server/shared/Spaarke.Scheduling/IBackgroundJobStore.cs#L21) | Persistence seam — `LoadJobsAsync`, `RecordRunStartAsync`, `RecordRunCompleteAsync`, `HasRunForScheduledTimeAsync` (idempotency probe), `GetRecentRunsAsync`, `SetEnabledAsync`. ADR-010 justified by ≥2 implementations from day one. |
 | `BackgroundJobDefinition` (record) | [`IBackgroundJobStore.cs:203-209`](../../src/server/shared/Spaarke.Scheduling/IBackgroundJobStore.cs#L203) | Immutable view of one `sprk_backgroundjob` row — `JobId`, `DisplayName`, `Description`, `Enabled`, `CronSchedule`, `ConfigJson?`. |
 | `BackgroundJobRunRecord` (record) | [`IBackgroundJobStore.cs:180-191`](../../src/server/shared/Spaarke.Scheduling/IBackgroundJobStore.cs#L180) | Stable projection of one `sprk_backgroundjobrun` row surfaced to admin tooling. Includes `ResultJson` (R3 task 023). |
-| `InMemoryBackgroundJobStore` | [`InMemoryBackgroundJobStore.cs:23-100+`](../../src/server/shared/Spaarke.Scheduling/InMemoryBackgroundJobStore.cs#L23) | Current backing store on spaarkedev1. Two `ConcurrentDictionary` instances — `_jobs` for definitions, `_runs` for history. Seeded at startup by feature-module bootstrap hosted services via `AddOrReplaceJob`. Run history is process-local (lost on App Service restart) — acceptable for the R3 P3 admin-surface validation goal; the Dataverse-backed swap (tasks 015/016 entities now deployed) is a one-line change in `SchedulingModule`. |
+| `InMemoryBackgroundJobStore` | [`InMemoryBackgroundJobStore.cs:23-100+`](../../src/server/shared/Spaarke.Scheduling/InMemoryBackgroundJobStore.cs#L23) | Current backing store on spaarkedev1. Two `ConcurrentDictionary` instances — `_jobs` for definitions, `_runs` for history. Its DI constructor seeds the definition of every `AddScheduledJob` registration. Run history is process-local (lost on App Service restart) — acceptable for the R3 P3 admin-surface validation goal; the Dataverse-backed swap (tasks 015/016 entities now deployed) is a one-line change in `SchedulingModule`. |
 | `JobRetryPolicy` | [`JobRetryPolicy.cs:29-70`](../../src/server/shared/Spaarke.Scheduling/JobRetryPolicy.cs#L29) | POCO: `MaxAttempts = 3`, `BaseDelay = 5s`, `MaxDelay = 2min`. Formula: `BaseDelay × 2^(attemptNumber-2)`, capped at `MaxDelay`. No jitter (in-process single-caller-per-tick — deterministic delays are easier to reason about for tests + ops than the HTTP-jitter case Polly addresses). |
 | `JobNotFoundException` | [`JobNotFoundException.cs`](../../src/server/shared/Spaarke.Scheduling/JobNotFoundException.cs) | Thrown by `TriggerNowAsync` when the JobId is unknown to the registry; mapped to 404 ProblemDetails by the admin endpoint. |
+| `IScheduledJobLease` / `ProcessLocalScheduledJobLease` | [`IScheduledJobLease.cs`](../../src/server/shared/Spaarke.Scheduling/IScheduledJobLease.cs) | The dispatch lease the host takes around every run, scheduled or manual, held through every retry (ADR-036 A1 rule 1). It also records the last dispatched occurrence, so a short run cannot finish and let a slower instance run the same tick again. The process-local implementation is used when Redis is off (Development/Testing). A job that is already running refuses a trigger with `ScheduledJobBusyException` (409); a store that is down raises `ScheduledJobLeaseUnavailableException`. |
+| `AddScheduledJob<TJob>` / `ScheduledJobRegistration` | [`ScheduledJobRegistration.cs`](../../src/server/shared/Spaarke.Scheduling/ScheduledJobRegistration.cs) | The only way a job reaches the scheduler (ADR-036 A1 rule 6). `ScheduledJobRegistry` and `InMemoryBackgroundJobStore` read every registration in their constructors — no bootstrap hosted service, and no dependence on start order. |
 
 ### BFF wiring — `src/server/api/Sprk.Bff.Api/`
 
 | Component | Path | Purpose |
 |---|---|---|
-| `SchedulingModule.AddSchedulingModule` | [`Infrastructure/DI/SchedulingModule.cs:75-131`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs#L75) | DI registration for the framework primitives + `PlaybookSchedulerJob`. **Unconditional** per bff-extensions.md §F.1 asymmetric-registration rule (admin endpoints map unconditionally; their dependencies must too). Registers `ScheduledJobHost` as `Singleton` + forwards to `AddHostedService` so admin trigger and cron loop share the same `_inFlight` state. |
-| `SchedulingModule.SchedulingBootstrapHostedService` | [`Infrastructure/DI/SchedulingModule.cs:157-213`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs#L157) | One-shot startup hosted service that (1) registers `PlaybookSchedulerJob` with `ScheduledJobRegistry` and (2) seeds the `notification-playbook-scheduler` definition row with cron `0 * * * *`. Inserted at index 0 of the hosted-services list so it runs BEFORE `ScheduledJobHost`'s first tick. Idempotent on host restart. |
-| `MembershipModule.MembershipReconciliationBootstrapHostedService` | [`Infrastructure/DI/MembershipModule.cs:313-369`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/MembershipModule.cs#L313) | One-shot startup hosted service for `MembershipReconciliationJob`. Mirrors the scheduling-module bootstrap pattern; seeds `membership-reconciliation` with cron `0 2 * * *` (daily 02:00 UTC). Honors `MembershipReconciliationOptions.Enabled` (true by default). Independent of Service Bus topic deploy. |
+| `SchedulingModule.AddSchedulingModule` | [`Infrastructure/DI/SchedulingModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/SchedulingModule.cs) | DI registration for the framework primitives, the dispatch lease, the slot guard (`Scheduling:RunScheduledJobs`) and `PlaybookSchedulerJob` (`0 * * * *`). **Unconditional** per bff-extensions.md §F.1 asymmetric-registration rule (admin endpoints map unconditionally; their dependencies must too). Registers `ScheduledJobHost` as `Singleton` + forwards to `AddHostedService` so admin trigger and cron loop share the same `_inFlight` state. |
+| `RedisScheduledJobLease` | [`Infrastructure/Scheduling/RedisScheduledJobLease.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Scheduling/RedisScheduledJobLease.cs) | `IScheduledJobLease` over the BFF's existing Redis connection: a `SET NX PX` lease (`LockTakeAsync`), extended and released only by its holder, plus the last-dispatched-occurrence marker. Redis failures surface as "unavailable" → the tick is not dispatched (ADR-036 A1.1). |
+| Job registrations | `MembershipModule` · `ExternalAccessModule` | `AddScheduledJob<MembershipReconciliationJob>` (cron + enabled from `Membership:Reconciliation`, default `0 2 * * *`) and `AddScheduledJob<GrantExpiryReminderJob>` (daily 06:00 UTC). The per-job bootstrap hosted services they used were deleted by task 103. |
 | `JobsEndpoints.MapAdminJobsEndpoints` | [`Api/Admin/JobsEndpoints.cs:49-153`](../../src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs#L49) | Maps the 6 admin endpoints under `/api/admin/jobs` with `RequireAuthorization("SystemAdmin")`. Endpoint mapping is unconditional. |
 
 ### Reference consumers (shipping in R3)
@@ -136,15 +147,11 @@ The pattern: inject `IServiceScopeFactory` into the singleton job, and call `Cre
 │                            HOST STARTUP                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
    │
-   ├── SchedulingBootstrapHostedService (index 0)
-   │      ├── ScheduledJobRegistry.Register(PlaybookSchedulerJob)
-   │      └── InMemoryBackgroundJobStore.AddOrReplaceJob("notification-playbook-scheduler", cron="0 * * * *")
-   │
-   ├── MembershipReconciliationBootstrapHostedService
-   │      ├── ScheduledJobRegistry.Register(MembershipReconciliationJob)
-   │      └── InMemoryBackgroundJobStore.AddOrReplaceJob("membership-reconciliation", cron="0 2 * * *")
+   ├── DI builds ScheduledJobRegistry + InMemoryBackgroundJobStore from every
+   │   AddScheduledJob<TJob>(cron, enabled) registration  (no bootstrap hosted service)
    │
    └── ScheduledJobHost (BackgroundService.StartAsync)
+          ├── RunScheduledJobs = false (slot guard) → log + return: no cron loop on this host
           └── ExecuteAsync ──► RefreshDefinitionsAsync (initial load)
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -161,19 +168,24 @@ The pattern: inject `IServiceScopeFactory` into the singleton job, and call `Cre
    │                       ├── for each enabled job whose NextFireUtc ≤ now:
    │                       │      └── DispatchAndAdvance ──► Task.Run(RunJobAsync)
    │                       │                                    │
-   │                       │                                    ├── HasRunForScheduledTimeAsync (idempotency probe)
+   │                       │                                    ├── HasRunForScheduledTimeAsync (process-local probe)
    │                       │                                    │      └── if duplicate → skip (no run row written)
+   │                       │                                    │
+   │                       │                                    ├── lease.TryAcquireAsync(jobId, occurrence)  (ADR-036 A1 rule 1)
+   │                       │                                    │      ├── held / occurrence already dispatched → run row "Skipped"
+   │                       │                                    │      └── store down after the retries → run row "Failed" (A1.1)
    │                       │                                    │
    │                       │                                    ├── RecordRunStartAsync
    │                       │                                    │      └── (jobId, trigger=Scheduled, correlationId, scheduledFireUtc)
    │                       │                                    │
-   │                       │                                    ├── ExecuteWithRetryAsync (JobRetryPolicy)
+   │                       │                                    ├── ExecuteWithRetryAsync (JobRetryPolicy; lease renewed throughout)
    │                       │                                    │      ├── attempt 1: handler.ExecuteAsync(JobRunContext, ct)
    │                       │                                    │      ├── on exception → ComputeDelay(2) = 5s wait
    │                       │                                    │      ├── attempt 2: handler.ExecuteAsync(JobRunContext, ct)
    │                       │                                    │      ├── on exception → ComputeDelay(3) = 10s wait
    │                       │                                    │      └── attempt 3 final → JobRunResult.Failure(lastException.Message)
    │                       │                                    │
+   │                       │                                    ├── release the lease
    │                       │                                    └── RecordRunCompleteAsync(runId, JobRunResult)
    │                       │
    │                       └── sleep until earliest future fire (capped at MaxLoopSleep)
@@ -187,9 +199,11 @@ The pattern: inject `IServiceScopeFactory` into the singleton job, and call `Cre
    │
    └── ScheduledJobHost.TriggerNowAsync
          ├── registry.Resolve(jobId) (404 on miss via JobNotFoundException)
+         ├── lease.TryAcquireAsync(jobId) — held → 409 (ScheduledJobBusyException); store down → 503
          ├── RecordRunStartAsync (trigger=ManualAdmin, scheduledFireUtc=null)
          ├── Task.Run(RunManualTriggerAsync) ──► tracked in _inFlight
-         │      ├── ExecuteHandlerWithRetryAsync (same JobRetryPolicy)
+         │      ├── ExecuteWithRetryAsync (same JobRetryPolicy; lease renewed throughout)
+         │      ├── release the lease
          │      └── RecordRunCompleteAsync
          └── return 202 + {runId, "Running", startedAt}    (BEFORE handler completes)
 
@@ -206,10 +220,14 @@ The pattern: inject `IServiceScopeFactory` into the singleton job, and call `Cre
 
 Key invariants enforced by the host:
 
-- **Idempotency** — `HasRunForScheduledTimeAsync(jobId, scheduledFireUtc)` is the probe; a host restart mid-tick does NOT re-execute a scheduled run that already wrote a `sprk_backgroundjobrun` row for the same `(jobId, scheduledFireUtc)` pair. Manual triggers do NOT participate (admin chose to retrigger).
+- **One dispatch per schedule** (ADR-036 A1 rule 1)
+  - **How:** the per-job lease plus its last-dispatched-occurrence marker. Each tick runs on one instance, and the others record `Skipped`.
+  - **Scope:** a run holds the lease through every retry, so a manual trigger and a scheduled tick never overlap.
+  - **Redis down:** the tick is not run, and is recorded as failed (A1.1).
+  - **Not this:** `HasRunForScheduledTimeAsync` is process-local and inert across instances and restarts (ADR-036 A1 §2).
 - **Correlation (NFR-08)** — every scheduled dispatch + every manual trigger generates a fresh `Guid.NewGuid().ToString("N")` correlation id. Fan-out children (e.g., 7 playbooks under one parent) each receive a fresh child correlationId recorded in the parent's `JobRunResult.ResultJson`.
 - **Cancellation (NFR-07)** — every async hop observes `CancellationToken`; `StopAsync` drains in-flight jobs within 30s.
-- **Single host identity** — `ScheduledJobHost` is registered as `Singleton` AND forwarded to `AddHostedService` (`SchedulingModule.cs:96,102`). Admin trigger + cron loop MUST share the same `_inFlight` dictionary, otherwise the drain logic would miss runs.
+- **Single host identity** — `ScheduledJobHost` is registered as `Singleton` AND forwarded to `AddHostedService` (`SchedulingModule.AddSchedulingModule`). Admin trigger + cron loop MUST share the same `_inFlight` dictionary, otherwise the drain logic would miss runs.
 
 ---
 
@@ -226,7 +244,7 @@ R3 ships the framework + 2 reference consumers. The remaining 26 ad-hoc `Backgro
 A follow-up project `scheduled-jobs-migration` will be scoped in Wave 28 (this repo): its `design.md` will inventory the 26 workers, classify each (cron-driven → migrate; channel-driven → skip; one-shot migration → skip), define the migration recipe (preserve cadence + per-worker tests), and slot the migrations across waves. Until that project lands, the canonical pattern for any new cron-driven work is:
 
 1. Implement `IScheduledJob`.
-2. Add a `*BootstrapHostedService` to your feature module's DI module that registers the handler in `ScheduledJobRegistry` + seeds the `sprk_backgroundjob` row (see `SchedulingModule.SchedulingBootstrapHostedService` and `MembershipModule.MembershipReconciliationBootstrapHostedService` as worked examples).
+2. Register it in your feature module's DI module with `services.AddScheduledJob<TJob>(cron, enabled)` (ADR-036 A1 rule 6) — no bootstrap hosted service; see `MembershipModule` and `ExternalAccessModule`.
 3. Do NOT create a new `BackgroundService` for cron-style work — ADR-036 MUST.
 
 ---
@@ -242,7 +260,7 @@ The following deliberately do NOT migrate to `Spaarke.Scheduling`:
 | One-time migration services (`DocumentVectorBackfillService`, `EmbeddingMigrationService`) | Opt-in run-once-and-exit pattern; cron is the wrong abstraction. | Existing `BackgroundService` per [`background-workers-architecture.md`](background-workers-architecture.md) §4 |
 | Startup validation (`StartupValidationService`) | Not periodic — runs once at host start. | Existing `IHostedService` per [`background-workers-architecture.md`](background-workers-architecture.md) §5 |
 
-External schedulers (Hangfire, Quartz.NET, Azure Functions, Logic Apps) are NOT considered — ADR-001 prefers in-process workers; the volume + cadence requirements are met comfortably by a single in-process `BackgroundService`. See ADR-036 "Alternatives Considered" for the full rejection rationale.
+Where scheduled work runs — the BFF, a Functions timer, or a Container Apps job — is decided per workload under [ADR-052](../../.claude/adr/ADR-052-workload-placement.md); this document covers the in-BFF mechanism (ADR-036). Third-party in-process schedulers (Hangfire, Quartz.NET) are not used — see ADR-036 "Alternatives Considered".
 
 ---
 
@@ -252,8 +270,9 @@ External schedulers (Hangfire, Quartz.NET, Azure Functions, Logic Apps) are NOT 
 
 - **Framework library** — `Spaarke.Scheduling` ships in every BFF deployment.
 - **Entities** — `sprk_backgroundjob` + `sprk_backgroundjobrun` deployed to **spaarkedev1**; idempotent re-creation scripts at `scripts/Create-BackgroundJobEntity.ps1` and `scripts/Create-BackgroundJobRunEntity.ps1`.
-- **Backing store** — `InMemoryBackgroundJobStore` is wired on spaarkedev1. Run history is process-local (lost on App Service restart). The Dataverse-backed swap is a one-line change in `SchedulingModule.AddSchedulingModule`.
-- **Seeded jobs** — `notification-playbook-scheduler` (cron `0 * * * *`, enabled) and `membership-reconciliation` (cron `0 2 * * *`, enabled by default; honors `Membership:Reconciliation:Enabled` appsettings override).
+- **Backing store** — `InMemoryBackgroundJobStore` is wired on spaarkedev1. Run history is process-local (lost on App Service restart). No Dataverse-backed store exists yet (ADR-036 A1 §2, §6); the entities are deployed but unused.
+- **Instances** — the host runs on every instance, but each tick runs once: Redis lease, and the others record `Skipped`. Non-production slots run no ticks (`Scheduling__RunScheduledJobs=false`, slot-sticky, set before the deploy by `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`, `deploy-bff-api.yml` and the L2 control plane's H9 provisioning deploy). Admin enable/disable and run history below are per instance. (`unified-access-control-r2` task 103.)
+- **Seeded jobs** — `notification-playbook-scheduler` (cron `0 * * * *`, enabled), `membership-reconciliation` (cron `0 2 * * *`, enabled by default; honors `Membership:Reconciliation:Enabled` appsettings override) and `external-grant-expiry-reminders` (daily 06:00 UTC; `unified-access-control-r2` task 100).
 - **Admin endpoints** — `/api/admin/jobs/*` (all 6) live and unconditional.
 
 **Operator runbook**:
@@ -270,7 +289,8 @@ External schedulers (Hangfire, Quartz.NET, Azure Functions, Logic Apps) are NOT 
 ## Related
 
 - [ADR-036](../../.claude/adr/ADR-036-background-job-infrastructure.md) — Background-job infrastructure (binding decision record, concise) + [full ADR](../adr/ADR-036-background-job-infrastructure.md)
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API + in-process workers (no Azure Functions)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API for every BFF endpoint
+- [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) — Where scheduled work runs (the BFF, a Functions timer, or a Container Apps job)
 - [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) — Endpoint-filter authorization (admin endpoints follow this pattern)
 - [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) — DI minimalism (justifies `IScheduledJob` + `IBackgroundJobStore` interfaces with ≥2 implementations from day one)
 - [ADR-012](../../.claude/adr/ADR-012-shared-components.md) — Shared library convention (`Spaarke.Scheduling` follows this)

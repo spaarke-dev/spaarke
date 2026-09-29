@@ -37,13 +37,13 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
@@ -429,17 +429,21 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         createdEntity.GetAttributeValue<EntityReference>("sprk_project")!.Id.Should().Be(projectId);
         createdEntity.Contains("sprk_invoice").Should().BeFalse(
             "lookups the source does not carry are NOT invented on the new record");
-        // 2026-09-04: this previously pinned SIX columns as "the ADR-024 document link vocabulary". That
-        // was the defect written down as an assertion — the live table carries 17, so the inheritance
-        // silently dropped ten link types and a PDF filed under an Agreement produced an unfiled Word doc.
-        // It now asserts the endpoint reads THE MAP; the map itself is pinned against the live schema by
-        // DocumentLinkFieldMapTests, so this stays honest without re-listing the columns in a second place.
+        // Widened 2026-09-05 (unified-access-control-r2) from the prior 6-entry list to the full,
+        // live-metadata-verified Spaarke.Dataverse.DocumentLinkFields vocabulary.
+        //
+        // 2026-09-29 (spaarkeai-compose-r8): asserts against the TYPE, not a re-typed copy of its
+        // contents. The re-typed list was already stale — it held 16 entries and the table carries 17
+        // (`sprk_email` was missing) — which is the same drift this vocabulary was hoisted to end. A
+        // second hand-maintained copy of a closed set inside its own regression test cannot detect the
+        // set changing; DocumentLinkFieldsTests pins the columns and casings against live metadata,
+        // and this asserts the endpoint reads all of them.
         retrievedColumns.Should().BeEquivalentTo(
-            Sprk.Bff.Api.Services.Documents.DocumentLinkFieldMap.AllAttributes,
-            "the inheritance reads the whole sprk_document link vocabulary, not a subset of it");
+            Spaarke.Dataverse.DocumentLinkFields.LogicalNames,
+            "the inheritance reads the WHOLE shared Spaarke.Dataverse.DocumentLinkFields vocabulary, not a subset");
         retrievedColumns.Should().Contain(
-            "sprk_relatedagreement",
-            "the Agreement link was one of the ten the old hard-coded list missed");
+            "sprk_email",
+            "the email link was the 17th column the 2026-09-05 hoist missed");
     }
 
     // Task 041 B-MED-3: link-inheritance is BEST-EFFORT — a failed source read must not fail the save.

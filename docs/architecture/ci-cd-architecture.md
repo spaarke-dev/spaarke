@@ -20,7 +20,7 @@ The key design decision is separating CI (build/test/quality) from CD (deploymen
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **SDAP CI** | `sdap-ci.yml` | Push to master, PRs | Core CI: security scan, build/test (Debug+Release matrix), client quality (Prettier+ESLint), code quality (format, ADR tests, plugin size, dependency audit), integration readiness, ADR PR comment |
+| **SDAP CI** | `sdap-ci.yml` | Push to master, PRs | Core CI: security scan, build/test (Debug+Release matrix), client quality (Prettier+ESLint), code quality (format, ADR tests, dependency audit), integration readiness, ADR PR comment |
 | **Claude Code Architecture Review** | `claude-code-review.yml` | PR opened/synchronized | Advisory AI code review using Claude Sonnet; checks ADR compliance, security, patterns; posts PR comment (non-blocking) |
 
 ### Deployment
@@ -36,9 +36,22 @@ The key design decision is separating CI (build/test/quality) from CD (deploymen
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **Deploy Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch | Validate Bicep -> what-if preview (PR comment) -> deploy on approval; supports Model 1 (shared) and Model 2 (dedicated) stacks |
-| **Deploy Platform Infrastructure** | `deploy-platform.yml` | Manual dispatch | Deploy shared platform via `Deploy-Platform.ps1`; what-if preview -> deploy -> verify (resource group, App Service health, Key Vault) |
+| **Deploy Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch | Validate Bicep -> what-if preview (PR comment) -> deploy on approval. Deploys the **full per-customer stack**, which is the same in both deployment models (see the note below) |
+| **Deploy Platform Infrastructure** | `deploy-platform.yml` | Manual dispatch | Deploys Spaarke's own non-customer-serving platform resources via `Deploy-Platform.ps1`; what-if preview -> deploy -> verify (resource group, App Service health, Key Vault). ⚠️ **Not a prerequisite for onboarding a customer** — see the note below |
 | **Provision Customer** | `provision-customer.yml` | Manual dispatch | End-to-end customer provisioning via `Provision-Customer.ps1`; input validation -> provision (with approval) -> post-provisioning verification; supports dry run |
+
+> 🟡 **Deployment-model note (2026-09-28, owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))**
+> — this table previously said the Bicep workflow *"supports Model 1 (shared) and Model 2 (dedicated)
+> stacks"*. **There is no shared Model 1 stack.** Spaarke has **two deployment models that differ in one
+> axis only: which Azure tenant owns the customer's subscription** (Model 1 = Spaarke's; Model 2 = the
+> customer's). **Every Azure resource is dedicated per customer in both**, in that customer's own Azure
+> subscription and resource group, so infrastructure CI deploys **one full stack per customer** — there is
+> no shared-platform step to run first and no per-customer overlay on top of it. The `model1-shared.bicep`
+> and `model1-customer.bicep` stacks are **retired artifacts**; retiring them is a coordinated
+> multi-surface change (stacks, parameter files, `bicep-e2e-dry-run.ps1`, the provisioning ARM manifest
+> schema and the publish workflow) tracked in D-12 §6. The only model-dependent CI behaviour is that
+> **Model 2 additionally requires H0.5 admin consent and Azure Lighthouse delegation**; Model 1 requires
+> neither.
 
 ### Quality & Monitoring
 
@@ -103,7 +116,6 @@ For automatic triggers (workflow_run from SDAP CI), only dev is deployed. Manual
 | ESLint strict check | Yes | `--max-warnings 0` on PCF code |
 | `dotnet format` verification | Yes | No formatting changes allowed |
 | ADR NetArchTest suite | No (warning) | Violations posted as PR comment |
-| Plugin size validation | Yes | Must be under 1MB (ADR-002) |
 | Dependency vulnerability audit | Yes | Fails on vulnerable packages |
 | Claude Code AI review | No (advisory) | Architecture review posted as PR comment |
 
@@ -166,4 +178,4 @@ Collects artifacts from 5 nightly runs (Mon-Fri) and builds a trend table tracki
 
 - [CI/CD Workflow Procedure](../procedures/ci-cd-workflow.md) -- Operational procedures for the CI/CD system
 - [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API + BackgroundService (health check endpoint)
-- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- Thin plugins (size validation in CI)
+- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- No Dataverse plugins; enforced by the `ADR002_PluginTests` zero-plugin arch test (plugin size validation is dead — no plugin exists; job removal deferred to post-cutover, see ci-cd-unit-test-remediation-r1 notes)

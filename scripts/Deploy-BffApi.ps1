@@ -274,6 +274,22 @@ if ($UseSlotDeploy) {
     Write-Host "[$stepNum/$totalSteps] Deploying to staging slot '$SlotName'..." -ForegroundColor Yellow
     Write-Host "  This may take 30-60 seconds..."
 
+    # ADR-036 A1 rule 2: a non-production slot runs no scheduled jobs. Set the guard on the slot and mark it
+    # slot-sticky (--slot-settings), so a swap never carries it into production. Idempotent.
+    $ErrorActionPreference = "Continue"
+    $guardOutput = az webapp config appsettings set `
+        --resource-group $ResourceGroupName `
+        --name $AppServiceName `
+        --slot $SlotName `
+        --slot-settings "Scheduling__RunScheduledJobs=false" `
+        --output none 2>&1 | Out-String
+    $ErrorActionPreference = "Stop"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host $guardOutput
+        throw "Could not set the scheduled-jobs slot guard on slot '$SlotName'"
+    }
+    Write-Host "  Slot guard set: Scheduling__RunScheduledJobs=false (slot-sticky)" -ForegroundColor Gray
+
     $ErrorActionPreference = "Continue"
     $deployOutput = az webapp deploy `
         --resource-group $ResourceGroupName `

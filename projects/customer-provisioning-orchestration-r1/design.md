@@ -1,5 +1,23 @@
 # Customer Provisioning & Deployment Orchestration — Design Specification
 
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Status**: **Draft v3.7 — §4.2a sidecar base image amended to the .NET 10 LTS runtime + pwsh 7.6.5 (the named `powershell:7.4-mariner` pin had gone EOL); sidecar size claim now measured at 212 MB compressed. Owner-approved 2026-08-27.** v3.6 content otherwise carried forward. Prior: **v3.6 — task 128b Redis Model 1/Model 2 reconciliation (E2): Redis reinstated as per-customer for Model 2 (dedicated) only, reversing v3.2's blanket-shared decision for that case; Model 1 (shared) unchanged. Owner-confirmed 2026-08-19.** v3.5 content otherwise carried forward.
 > **Created**: 2026-06-15
 > **Revised**:
@@ -82,17 +100,39 @@ These are inputs, not proposals. The design conforms to them. D1-D11 from `disco
 
 ## 3A. D3 Two-Tier Rationale (added v3, 2026-08-12)
 
-**Why D3 (v3) has two tiers rather than one dedicated model.** The v2 formulation of D3 was "no shared resources between customers, ever." That's correct for regulated legal customers requiring physical isolation, and it dissolves cost-allocation (Azure Cost Management + tags = native per-customer bill = zero metering infra + honest usage-passthrough pricing). But the 2026-08-12 assessment identified three resources that carry a **fixed monthly floor regardless of usage** — App Service Plan, Azure OpenAI (provisioned TPM), Azure AI Search (fixed tier) — that make a strict per-customer stamp uneconomic for trial/SMB prospects. Rather than force every prospect through the dedicated-stamp cost floor (or refuse to serve them), D3 (v3) explicitly covers both:
+🔴 **D3 v4 (2026-09-28, owner decision D-12) — the two-tier split is RETIRED. v2 is restored and
+generalised: no shared resources between customers, ever.**
 
-- **Model 2 (dedicated stamp)** — default for regulated/enterprise. Honest usage-passthrough pricing; regulated-legal-grade isolation; Azure Cost Management + tags for per-customer billing without additional metering infra.
-- **Model 1 (shared trial/SMB tier)** — for prospects where the fixed floor is uneconomic. Shares the three fixed-floor resources; keeps everything else per-customer dedicated; adds per-tenant token metering (D19) so allocation is fair.
+- **Model 1** — dedicated Dataverse environment + dedicated Azure resources per customer, in **Spaarke's**
+  Azure tenant, in that customer's **own Azure subscription**.
+- **Model 2** — the same dedicated stamp, in the **customer's own** Azure tenant.
+
+**Why v3's reasoning no longer holds.** v3 traded isolation for cost on three fixed-floor resources. Three
+things changed:
+
+1. 🔴 **The shared tier was never implemented.** `H5DataverseEnvCreationHandler` creates a Dataverse
+   environment **unconditionally**, keyed `dvenv-{customerId}`. There is no code path in which two customers
+   share an environment — so the tier existed in docs, Bicep, schema and an Azure subscription, but never in
+   the engine.
+2. 🔴 **Its isolation story could not have worked.** Sharing was to be made safe by `tenantId`-keyed
+   controls. Under Model 1 **every customer presents the same `tenantId`** (Spaarke's), so those controls
+   separate nothing **and their tests pass**. The safeguard the tier depended on was the defect.
+3. **Cost allocation is solved differently now.** ADR-027 (amended 2026-09-28) gives each customer their own
+   **Azure subscription**, which is Azure's billing boundary — so per-customer billing is native and the
+   APIM/token-metering layer v3 required for fairness is no longer needed for that purpose.
+
+The fixed-floor cost is **accepted**, chiefly the App Service Plan — which is now *forced* regardless, since
+an App Service app cannot use a plan in another subscription.
+
+⚠️ **This supersedes v3 rather than editing it.** The v3 text above is retained as history below; do not
+implement from it.
 
 **Three supporting decisions that pair with D3 (v3):**
 
 | # | Decision | Purpose |
 |---|---|---|
-| A1 (Bicep composition) | `model1-shared.bicep` first-class alongside `model2-full.bicep`; control plane selects stack per tier | Materializes both models in IaC without a code fork |
-| A2 (metering layer, ties to D19) | Per-tenant token-metering layer — APIM gateway or app-level custom metric keyed on `tenantId` | Fair allocation for Model 1 shared tier; runaway-loop guardrail for Model 2; powers usage-passthrough pricing for either |
+| ~~A1 (Bicep composition)~~ | 🔴 **RETIRED (D-12).** `model1-shared.bicep` is a retired artifact — one per-customer stamp stack serves both models. ⚠️ Deleting it is a **six-surface atomic change**: the stack + its `.json`, `model1-customer.bicep`, `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam`, the `dev`/`prod`/`staging.bicepparam` files that bind it via `using`, an **inverted-polarity assertion** in `bicep-e2e-dry-run.ps1` that passes only while the build fails, and `.github/workflows/publish-provisioning-arm-artifacts.yml` + its manifest schema, which declares `model1-shared` a **required** key. | — |
+| A2 (metering layer, ties to D19) | Per-customer token metering — app-level custom metric. ⚠️ **Amended (D-12)**: the *fair-allocation* purpose is gone (per-customer subscriptions bill natively) and keying on `tenantId` would not distinguish Model 1 customers anyway. The **runaway-loop guardrail** purpose survives and should key on `customerId`. | — |
 | A3 (architectural cost controls) | Prompt caching (~50–90% off cached input), model tiering (route simple tasks to `gpt-4o-mini`), retrieval + context compression, per-tenant budgets, batch API, PAYG-first-then-PTU | Cost-efficient defaults; documented in the deployment guide (Gap 4); runtime BFF concerns |
 
 **Reference**:
@@ -599,7 +639,7 @@ The r1 entity has 16 columns deployed. Extend with provisioning infrastructure f
 | `sprk_containertypeid` | Text(100) | SPE container type | v2 |
 | `sprk_provisionedon` | DateTime | When validation first passed | v2 |
 | **`sprk_currentrunid`** | Text(40) | **v3 (I5)** — active ProvisioningRun ID; concurrency guard: L2 optimistically sets `null → newRunId`, conflict = 409. Cleared when the run reaches a terminal state. | v3 |
-| **`sprk_tenancymodel`** | Choice | **v3 (§3A A1)** — `Model1Shared` (trial/SMB, shared platform floors) or `Model2Dedicated` (regulated, dedicated stamp per D3). Drives Bicep stack composition. | v3 |
+| **`sprk_tenancymodel`** | Choice | 🔴 **MIGRATE, DO NOT RELABEL (D-12 §6).** Today: `Model1Shared`=0, `Model2Dedicated`=1. Value **`1` holds BOTH** old-2a (Spaarke subscription) and old-2b (customer subscription), which now split across **different** models — so re-pointing the labels silently misclassifies every existing dedicated customer, and the two halves need **opposite** Lighthouse answers. The migration must fan value `1` out by the run's `Profile`. Value `0` has **no successor**. | v3 / 🔴 v4 pending |
 | **`sprk_tenantid`** | Text(40) | **v3 (D18)** — Entra tenant ID. For Model 1: Spaarke tenant. For Model 2: customer tenant, captured via H0.5 consent-callback. | v3 |
 
 ### 6.2 ProvisioningRun — Cosmos DB Serverless (D13)
@@ -1275,9 +1315,9 @@ Named profiles set default parameter bundles. Every parameter is individually ov
 
 | Profile | Tenancy Model | Bicep Stack | Identity Preset | Subscription Target | Default SKUs | Notable Gates |
 |---------|--------------|------------|----------------|-------------------|-------------|---------------|
-| `spaarke-hosted-model2` *(was `spaarke-hosted`)* | Model2Dedicated | model2-full | B2BGuest | SpaarkeOwned | S1/Standard | Lighthouse: skip |
-| `customer-owned-model2` *(was `customer-owned`)* | Model2Dedicated | model2-full | NativeAccount | CustomerOwned | Customer-specified | Lighthouse: required |
-| **`spaarke-hosted-model1-trial`** *(v3, new — §3A A1)* | Model1Shared | model1-shared | B2BGuest | SpaarkeOwned | Free/Basic on fixed-floor resources (App Service Plan, OpenAI, AI Search shared with platform); dedicated on everything else | Per-tenant token budget (D19) enforced |
+| `spaarke-hosted-model2` → 🔴 **becomes the new MODEL 1** (D-12) | ~~Model2Dedicated~~ → Model 1 | per-customer stamp | B2BGuest | SpaarkeOwned | S1/Standard | Lighthouse: **skip**; H0.5 consent: **not needed** |
+| `customer-owned-model2` → 🔴 **becomes the new MODEL 2** (D-12) | ~~Model2Dedicated~~ → Model 2 | per-customer stamp | NativeAccount | CustomerOwned | Customer-specified | Lighthouse: **required**; H0.5 consent: **required** |
+| ~~**`spaarke-hosted-model1-trial`**~~ | 🔴 **RETIRED (D-12)** — the shared tier does not exist. No successor profile; it was never implemented in the engine. | — | — | — | — | — |
 | `demo` | model2-full (reduced) | B2BGuest | SpaarkeOwned | B1/Basic/Free | Lightweight validation |
 | `trial` | model2-full (time-limited) | B2BGuest | SpaarkeOwned | B1/Basic | Expiry date gate |
 
