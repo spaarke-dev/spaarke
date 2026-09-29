@@ -4,7 +4,51 @@
     <title>Retire drifted SPE certificate `spe-app-cert` + `spe-app-cert-pass` — deprecate live consumers → grep-verify → KV soft-delete</title>
     <phase>Post-Live-Fire cleanup — SPE cert lifecycle hygiene (follow-on to task 214 H8-B rewrite)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-09-28</completed>
+    <completion-notes>
+      SESSION 24 (2026-09-28) — expanded scope per owner Option A during FR-35 pre-check.
+
+      (1) Grep sweep (Step 1): 10 matches, all expected. Two foreign-project historical docs
+          (x-ai-document-intelligence-r1 env-vars baseline, spaarke-redis-cache-remediation-r1
+          dev-cutover baseline) are inert snapshots from completed projects — safe to leave.
+
+      (2) Fate chosen for Import-And-Register.ps1 = Option A (git mv to scripts/_archive/ +
+          retirement header + `throw` guard). Rationale: cleanest signal, aligns with
+          scripts/_archive/Register-BffApi-WithCertificate.ps1 precedent, matches task 213.3
+          topology-obsolete-script retirement pattern. Preserves history via git-mv.
+
+      (3) FR-35 pre-check FIRED an escalation (POML lines 114-115): live App Service refs
+          discovered on spaarke-bff-dev — 4 dead-config keys (Graph__CertificateSource,
+          Graph__CertificateThumbprint=269691A5..., Graph__KeyVaultCertName=spe-app-cert,
+          Graph__KeyVaultUrl). Proven dead via
+          Graph__Credentials__Order__0=ManagedIdentityFederated (single entry) +
+          RequireSecretFreeIdentity=true + zero code consumers in src/server/** (grep for
+          KeyVaultCertName/CertificateThumbprint/CertificateSource/spe-app-cert/SpeAppCert).
+          Escalated to owner via AskUserQuestion; owner chose Option A (expand scope: clean
+          settings first, then soft-delete). Task 215 scope expanded to +4 App Service key deletes.
+
+      (4) Operator (Ralph) executed 3 az commands (all under own AAD identity per NFR-11):
+            - az webapp config appsettings delete --setting-names Graph__CertificateSource
+              Graph__CertificateThumbprint Graph__KeyVaultCertName Graph__KeyVaultUrl
+              (verified post-run: 0 matches on spaarke-bff-dev)
+            - az keyvault secret delete --name spe-app-cert
+              (soft-deleted 2026-09-29T03:03:06Z; scheduled_purge 2026-12-28T03:03:06Z)
+            - az keyvault secret delete --name spe-app-cert-pass
+              (soft-deleted 2026-09-29T03:03:07Z; scheduled_purge 2026-12-28T03:03:07Z)
+
+      (5) Confirmed spe-owning-app-secret UNTOUCHED (E-1 exception per ADR-028; `enabled: true`).
+          Per KV credential-lifecycle rule (§KV credential lifecycle in provisioning.md),
+          this secret carries never_delete: true indefinitely for per-customer SpeAdmin
+          container-type rotation lifecycle.
+
+      Does NOT block task 186 (E2E dispatch blockers stay {213.7, 207, 208, 209}). This was
+      hygiene cleanup.
+
+      Next task per session-23 BINDING sequence in current-task.md:
+        STEP 1 completion — bring ArchTest to 326/326 (fix 4 failures: FR-F1, FR-F2, FR-B4,
+        FR-27). File as its own task via task-create; FULL rigor.
+    </completion-notes>
     <rigor>STANDARD</rigor>
     <rigor-reason>Configuration + script cleanup — no C# code changes, no test-modification. Touches config/**, scripts/**, and Azure Key Vault operator commands. Sub-agent-safe (no `.claude/**` edits expected). Rigor STANDARD per task-execute Step 0.5 decision tree (new file creation NOT expected; constraint-load required for KV lifecycle rules).</rigor-reason>
     <model-tier>sonnet</model-tier>

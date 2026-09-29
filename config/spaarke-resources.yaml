@@ -22,6 +22,40 @@ $schema-doc: |
 # Manifest changelog (top-level chronology of significant changes)
 # ============================================================================
 _changelog:
+  - 2026-09-28:
+      action: customer-provisioning-orchestration-r1-task-215-spe-cert-retirement
+      summary: |
+        customer-provisioning-orchestration-r1 task 215 — retired drifted SPE bootstrap cert:
+          - environments.dev.spe.containers.cert_secrets: `certificate` (was: kv:spe-app-cert)
+            and `certificate_password` (was: kv:spe-app-cert-pass) marked RETIRED-2026-09-28
+            with _meta status=partial-retirement + history. `owning_app_secret`
+            (kv:spe-owning-app-secret) UNTOUCHED — E-1 exception per ADR-028, retained
+            indefinitely for per-customer SpeAdmin container-type rotation lifecycle.
+          - environments.dev.keyvault_inventory: `spe-app-cert` + `spe-app-cert-pass` moved
+            from `referenced:` into new `retired_soft_deleted:` subsection with 90-day
+            recoverable_until dates.
+        Rationale: H8-B (task 214, commit a26e30dd2 SESSION 21) removed the last C# consumer
+        of the pre-H8-B cert convention. New `SpeConfidentialClientGraphFactory` reads cert
+        from `SPE-OwnerCert-Pfx` per topology doc §3A E-1. Cert drift was empirically
+        confirmed 2026-08-30 during task 213.2 H8 live-test (KV thumbprint 269691A5... NOT
+        registered on any Spaarke app-reg).
+        Consumer archival: `scripts/Import-And-Register.ps1` (bootstrap script) archived to
+        `scripts/_archive/` in the same commit.
+        Scope expansion (owner-approved 2026-09-28 during FR-35 pre-check): 4 dead-config
+        App Service settings on `spaarke-bff-dev` removed alongside KV soft-delete —
+        `Graph__CertificateSource`, `Graph__CertificateThumbprint`, `Graph__KeyVaultCertName`,
+        `Graph__KeyVaultUrl`. Proven dead: `Graph__Credentials__Order__0=ManagedIdentityFederated`
+        (single entry, no cert fallback) + `Graph__Credentials__RequireSecretFreeIdentity=true`
+        + zero code consumers in src/server/** (grep). Aligns with ADR-028 A4 secret-free
+        contract already active on dev.
+        Operator actions (Ralph runs manually):
+          1. `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev
+              --setting-names Graph__CertificateSource Graph__CertificateThumbprint
+              Graph__KeyVaultCertName Graph__KeyVaultUrl`
+          2. `az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert`
+          3. `az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass`
+        Soft-delete NOT purge — 90-day recovery window.
+      author: Claude Code
   - 2026-07-19:
       action: external-access-platform-r1-phase0
       summary: |
@@ -450,9 +484,16 @@ environments:
           purpose: File storage container; mapped to `spaarke-files-index` (canonical plural) search index for document RAG
           ai_search_index: spaarke-files-index # canonical per spaarke-ai-azure-setup-dev-r1 FR-11 (was spaarke-file-index singular)
       cert_secrets:
-        certificate: kv:spe-app-cert
-        certificate_password: kv:spe-app-cert-pass
-        owning_app_secret: kv:spe-owning-app-secret # SPE owning app (170c98e1-...) client secret
+        _meta:
+          status: partial-retirement
+          retired: 2026-09-28
+          reason_retained: "H8-B (task 214, 2026-08-30) reads cert from SPE-OwnerCert-Pfx per topology doc §3A E-1. `certificate` + `certificate_password` entries below are the retired pre-H8-B references (soft-deleted in KV; retained here for archival per file's convention). `owning_app_secret` is E-1 (per-customer SpeAdmin container-type secret rotation lifecycle per ADR-028) and remains ACTIVE indefinitely."
+          history:
+            - 2026-08-30: cert `spe-app-cert` thumbprint 269691A5A60536050FA76C0163BD4A942ECD724D found NOT registered on any Spaarke app-reg (drift detected during task 213.2 H8 live-test).
+            - 2026-09-28: retired `spe-app-cert` + `spe-app-cert-pass` via KV soft-delete (task 215). `spe-owning-app-secret` preserved as E-1 exception per ADR-028.
+        certificate: RETIRED-2026-09-28 # was: kv:spe-app-cert — soft-deleted in KV `spaarke-spekvcert` per task 215; H8-B does NOT consume
+        certificate_password: RETIRED-2026-09-28 # was: kv:spe-app-cert-pass — soft-deleted in KV `spaarke-spekvcert` per task 215; H8-B does NOT consume
+        owning_app_secret: kv:spe-owning-app-secret # SPE owning app (170c98e1-...) client secret — E-1 exception per ADR-028, retained indefinitely
 
     external_spa:
       # External Secure Project Workspace SPA — Azure Static Web App (task 003).
@@ -489,10 +530,17 @@ environments:
         - application-insights-key
         - Redis-ConnectionString
         - ServiceBus-ConnectionString
-        - spe-app-cert
-        - spe-app-cert-pass
         - spe-owning-app-secret
         - ciam-graph-provisioner-cert # CIAM graph-provisioner app cert (added 2026-07-19, external-access-platform-r1 task 002)
+      retired_soft_deleted: # Secrets retired via KV soft-delete; recoverable during 90-day retention window (do NOT purge — soft-delete is reversible)
+        - name: spe-app-cert
+          retired: 2026-09-28 # task 215 — H8-B (task 214) does NOT consume; cert drifted 2026-08-30 (thumbprint 269691A5... not registered on any Spaarke app-reg)
+          deleted_utc: 2026-09-29T03:03:06Z # actual az-recorded softDelete timestamp
+          scheduled_purge_utc: 2026-12-28T03:03:06Z # 90 days from soft-delete per vault default; DO NOT purge before this date
+        - name: spe-app-cert-pass
+          retired: 2026-09-28 # task 215 — paired cert password for retired spe-app-cert
+          deleted_utc: 2026-09-29T03:03:07Z # actual az-recorded softDelete timestamp
+          scheduled_purge_utc: 2026-12-28T03:03:07Z # 90 days from soft-delete per vault default; DO NOT purge before this date
       not_secret_but_stored_as_secret: # These are GUIDs/URLs — should live in YAML, not KV
         - bff-api-tenant-id # = tenant.id
         - DATAVERSE-URL # = environments.dev.dataverse.env_url

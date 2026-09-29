@@ -36,10 +36,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **POST-COMPACT SEQUENCE ITEM #1 = T215 SPE cert retirement** (concrete steps in "SESSION 23 Owner Decisions" below). Then STEP 1 completion (bring ArchTest 326/326). Then Items 1-4 per incoming doc. |
-| **Step** | SESSION 23 landed: (1) master merged (commit `92b480500`) — 11 conflicts resolved per INCOMING-D12-D13-REMEDIATION.md rules; (2) 1 auto-merge compile cascade fixed (`CustomerRunGuardModule.cs` — took master); build 0/0; (3) ArchTest 322/4 — STEP 1 gate NOT green; (4) owner (Ralph) provided binding answers to incoming doc §9 three open questions + confirmed 215/216/217/218 dispositions; (5) this handoff captures all decisions for post-compact continuation. |
-| **Status** | Working tree CLEAN after SESSION 23 handoff commit. Branch pushed as `92b480500` (merge) → this handoff commit next. Divergence from master: 100 ahead / 0 behind. `T215` filed (POML exists) but code work not yet done. `T216` DROPPED (superseded by Item 4). `T217` FOLDED into `T218` (with expanded scope per owner). `T218` still HARD BLOCKER before task 186 dispatch. |
-| **Next Action** | Fresh session post-compact: **START with T215 concrete steps** (see "T215 Concrete Execution Plan" section below). All other decisions locked in — proceed without re-litigation. |
+| **Task** | **POST-COMPACT SEQUENCE ITEM #2 = STEP 1 completion (bring ArchTest 326/326)**. T215 ✅ DONE (SESSION 24, 2026-09-28). Then Items 1-4 per incoming doc. |
+| **Step** | SESSION 24 landed: **T215 ✅ complete** with scope expansion. Agent: yaml `_meta:partial-retirement` + inventory split + `_changelog` + script archived to `_archive/` + FR-35 pre-check ESCALATED (owner Option A). Operator (Ralph): `az webapp config appsettings delete` for 4 dead-config Graph__Certificate*/KeyVault* keys on spaarke-bff-dev + `az keyvault secret delete` spe-app-cert + spe-app-cert-pass (soft-deleted 2026-09-29T03:03Z, scheduled_purge 2026-12-28). Verified: 4 keys gone from App Service, 2 KV secrets in soft-deleted list, spe-owning-app-secret UNTOUCHED (E-1 preserved, enabled: true). SESSION 23 pre-existing: master merge (`92b480500`) + ArchTest 322/4 + owner decisions locked in. |
+| **Status** | Working tree modified (T215 changes pending commit). Divergence from master: 101 ahead / 2 behind (per SESSION 23; 2 behind = fe253d737 + 4d5619ebd = UAC-r2 PR + docs Item 4 SIX→SEVEN fix). `T215` ✅ DONE. Next: **STEP 1 completion task** to bring ArchTest 326/326 (4 failures: FR-F1, FR-F2, FR-B4, FR-27). Then Items 1-4. `T216` DROPPED (superseded by Item 4). `T217` FOLDED into `T218` (expanded scope). `T218` still HARD BLOCKER before task 186. |
+| **Next Action** | Fresh session: file STEP 1 completion task via `task-create` (FULL rigor per POML §8 test-modifying override — touches `tests/Spaarke.ArchTests/`). Also consider pulling the 2 new master commits before starting Item 4 (`4d5619ebd` fixes Item 4 heading SIX→SEVEN surfaces — non-conflicting). |
 | **Task 186 dispatch blocker list (post-SESSION-23, post-D-12/D-13 merge)** | **HARD blockers**: STEP 1 completion (ArchTest 326/326), Items 1-4 from INCOMING doc §5, Section 6 six-items sweep, T218 (managed solution runbook + full solution package definition — owner-clarified scope). **Pre-existing (still relevant)**: 213.7 operator SPE runbook + constants, 207 placeholder-substitution, 208 validator CI wiring, 209 branch protection restore. **Non-blocking hygiene**: T215 (SPE cert retirement — run first post-compact per owner). **DROPPED**: T216 (superseded by Item 4). **FOLDED**: T217 → T218. |
 
 ## 📋 SESSION 23 Owner Decisions (2026-09-28) — LOCKED IN
@@ -74,13 +74,30 @@ Per owner Ralph, in this session. Do NOT re-litigate:
 
 ## 📋 SESSION 23 Task Dispositions (2026-09-28) — LOCKED IN
 
-### T215 — SPE cert retirement → **RUN FIRST POST-COMPACT** (owner directive)
+### T215 — SPE cert retirement → ✅ **COMPLETED SESSION 24 (2026-09-28) with scope expansion**
 
 Owner directive verbatim: "unless a reason to not run this now, otherwise run it now so that the issue is removed."
 
-Deferred from THIS session to post-compact FRESH session only because /compact is next — same effective outcome, cleaner context.
+**SESSION 24 outcome — landed with owner-approved scope expansion**:
 
-**T215 Concrete Execution Plan (FIRST post-compact action)**:
+Agent work (all committed): (a) `config/spaarke-resources.yaml` — cert_secrets `_meta: partial-retirement` with history; keyvault_inventory split (`referenced:` minus 2 entries + new `retired_soft_deleted:` subsection with deleted_utc/scheduled_purge_utc from actual az command output); `_changelog` entry dated 2026-09-28. (b) `scripts/Import-And-Register.ps1` → git mv to `scripts/_archive/Import-And-Register.ps1` (Option A) + retirement header + `throw` guard. (c) FR-35 pre-check FIRED escalation — LIVE App Service refs on spaarke-bff-dev found: `Graph__CertificateSource`, `Graph__CertificateThumbprint=269691A5...`, `Graph__KeyVaultCertName=spe-app-cert`, `Graph__KeyVaultUrl`. Proven dead-config: `Graph__Credentials__Order__0=ManagedIdentityFederated` (single entry) + `RequireSecretFreeIdentity=true` + zero code consumers in src/server/**. Owner via AskUserQuestion chose **Option A: expand scope**. Yaml `_changelog` extended to record the expansion.
+
+Operator (Ralph) executed 3 az commands under own AAD identity (NFR-11):
+```
+az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names \
+  Graph__CertificateSource Graph__CertificateThumbprint Graph__KeyVaultCertName Graph__KeyVaultUrl
+az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert
+az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass
+```
+
+Post-run verification (agent, in same session):
+- App Service `spaarke-bff-dev`: query for the 4 keys returns `[]` ✅
+- KV soft-deleted list: `spe-app-cert` (2026-09-29T03:03:06Z, scheduled_purge 2026-12-28T03:03:06Z) ✅ + `spe-app-cert-pass` (2026-09-29T03:03:07Z, scheduled_purge 2026-12-28T03:03:07Z) ✅
+- `spe-owning-app-secret` `enabled: true` — UNTOUCHED (E-1 preserved) ✅
+
+TASK-INDEX row 215 → ✅. POML `<status>` → completed.
+
+**Historical execution plan (preserved for reference)**:
 
 The POML already exists at `projects/customer-provisioning-orchestration-r1/tasks/215-cert-retirement-spe-app-cert.poml` (filed SESSION 21, commit `1d1f6fd61`). Fresh session executes it via `task-execute 215`, which will:
 

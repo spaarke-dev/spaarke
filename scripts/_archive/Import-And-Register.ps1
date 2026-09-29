@@ -1,3 +1,26 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# RETIRED 2026-09-28 (customer-provisioning-orchestration-r1 task 215)
+# ─────────────────────────────────────────────────────────────────────────────
+# This script is ARCHIVED and no longer functional. Do NOT invoke.
+#
+# Why retired:
+#   - Targets cert `spe-app-cert` (thumbprint 269691A5A60536050FA76C0163BD4A942ECD724D)
+#     which drifted 2026-08-30 (task 213.2 H8 live-test evidence) — the KV thumbprint
+#     is NOT registered on any Spaarke app-reg, so the downstream Register-BffApi
+#     call would fail with app-only-auth 403.
+#   - H8-B (task 214, commit a26e30dd2 SESSION 21) removed the pre-H8-B cert
+#     convention entirely. New SpeConfidentialClientGraphFactory reads cert from
+#     `SPE-OwnerCert-Pfx` per topology doc §3A E-1 per-owning-app-cert convention.
+#   - KV `spe-app-cert` + `spe-app-cert-pass` scheduled for soft-delete under
+#     task 215 (operator-run az command; 90-day recovery window). After soft-delete
+#     the `az keyvault secret download` in Step 1 of this script would 404.
+#
+# Preserved for historical reference of the pre-H8-B bootstrap flow only.
+# See: projects/customer-provisioning-orchestration-r1/tasks/215-cert-retirement-spe-app-cert.poml
+# ═════════════════════════════════════════════════════════════════════════════
+
+throw "Import-And-Register.ps1 is RETIRED (task 215, 2026-09-28). See header comment. Use H8-B provisioning flow via /provision-environment L3 skill instead."
+
 # Import Certificate and Register BFF API
 # This script combines all steps for convenience
 
