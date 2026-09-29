@@ -208,7 +208,12 @@ public class RouteAuthorizationGuardTests
             + "/quickcreate write it; /share/* mints document links. /save carries AddEntityAccessFilter "
             + "and the two /jobs routes carry AddJobOwnershipFilter — neither of which this guard could "
             + "SEE before task 120 widened FilterMarker, so the gates that do exist were invisible at the "
-            + "same time as the holes."),
+            + "same time as the holes. ⚠️ /save's gate is CONDITIONAL and Rule A cannot express that: "
+            + "EntityAccessFilter returns next(context) untouched when the request carries no TargetEntity "
+            + "(EntityAccessFilter.cs:218-227), so a document-only save reaches the handler with no "
+            + "per-record check. Rule A is a structural rule about the registration chain and correctly "
+            + "reports the route as gated; whether the pass-through is right is a design question, "
+            + "tracked on #1025. Recorded here so a reader does not take 'gated' as 'gated in every case'."),
 
         new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/communications/* — three routes reading sprk_communication, candidate record "
