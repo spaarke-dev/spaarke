@@ -268,48 +268,82 @@ per-customer — sharing hits an unraisable Entra limit at customer 21.)*
   first-class on every index"* (4 sites, 2 of them MUSTs) → `D-IE-12`. A third namespace in
   `HOW-TO-INITIATE-NEW-PROJECT.md` → `D-DEVOPS-12`.
 
-### ▶ 🔴 STATE AS OF 2026-09-28 END OF SESSION 24
+### ▶ 🔴 STATE AS OF 2026-09-29 END OF SESSION 25
 
 | | |
 |---|---|
-| **PR #950** | ✅ **MERGED** to master — `38f48723e`, 228 commits, 2026-09-28T18:32:44Z |
-| Branch | in sync with master + **1 commit ahead** (the cpo-r1 handoff note) |
-| Tree | clean, all pushed |
-| Tier 1 CI | ✅ all 8 blocking gates green. ⚠️ **Trivy fails repo-wide** (`"1 configuration not found"`, 5s) — scanner-config issue, `skipping` on other PRs, **not ours**, now on master's head too |
+| **PR #950** | ✅ MERGED — `38f48723e`, 228 commits |
+| **PR #1018** | ✅ MERGED — `a1590ed34`, the cpo-r1 handoff note |
+| **PR #1019** | ✅ MERGED — `fe253d737`, item 4 surface count SIX → SEVEN |
+| **Task 120 (#1015)** | ✅ **DONE** — `e25dff77d` + `6a15b1a28`, not yet pushed at time of writing |
+| Branch | fast-forwarded to master, then 2 commits ahead |
+| Verification | ArchTests **330/330**, `Sprk.Bff.Api.Tests` **12625 passed / 0 failed**, build clean |
 
-✅ **The D-12/D-13 decisions and all six amended ADRs are ON MASTER.** That was the prerequisite for
-`cpo-r1` to proceed.
+✅ **The D-12/D-13 decisions and all six amended ADRs are ON MASTER**, and the cpo-r1 directive has been
+handed to the owner to dispatch.
+
+### ▶ ✅ TASK 120 (#1015) — DONE. What it turned out to be.
+
+The handover framed it as two changes. It was **four**, and it surfaced **eleven** issues.
+
+1. Classified both `Api/Office/*` files as `GovernedFiles/RouteLevelGate`. File count unchanged (120) —
+   `EndpointFiles()` already globbed them; only the classification was missing.
+2. Widened `FilterMarker` for `EntityAccessFilter` + `JobOwnershipFilter` as an **allow-list**. The obvious
+   `\.Add\w*Filter\s*\(` would have credited `OfficeAuthFilter` (authn), `OfficeRateLimitFilter` and
+   `IdempotencyFilter`, marking **six ungated routes authorized**.
+3. 🔴 **Rule B's discovery had the same gap** — it globs `*AuthorizationFilter.cs`, which neither Office
+   filter matches. Rule A and Rule B now derive from **ONE list**, so drift is impossible. (First draft had
+   two lists + a test they agreed; that test was **vacuous** — it iterated the list it checked.)
+4. Nested `MapGroup` resolution. `var jobs = group.MapGroup("/jobs")` reported `GET /jobs/{jobId}` — a
+   **fragment**. Route keys are what waivers match on.
+
+**Ten Pending waivers + one Permanent**, issues filed: **#1020** communications trio (ZERO filters, caller
+oid used only as a log argument, app-only reads) · **#1021** `/search/entities` tenant-wide enumeration ·
+**#1022** `/todo` regarding-record · **#1023** the two stubs · **#1024** share pair (hardcoded `true`).
+`/quickcreate` is the only Permanent.
+
+**Three production fixes**: `JobOwnershipFilter` fail-OPEN on blank `CreatedBy` (ADR-003) · `/save-debug`
+anonymous raw-body logging + 500-char echo · 🔴 a **hardcoded synthetic job on a well-known GUID in
+production code**, found because closing the fail-open turned two tests red — they were green *because* of
+the defect.
+
+**Code review found one more**: **#1025** — `/save`'s gate is **conditional**. `EntityAccessFilter` returns
+`next(context)` untouched when `TargetEntity` is absent, so a document-only save gets no per-record check.
+Rule A structurally cannot express that; it is recorded in the `GovernedFiles` reason instead.
+
+⚠️ **Publish-size**: not measured. Zero packages added (no `.csproj` touched), net code deletion. Flagged
+to the owner rather than silently skipped (root CLAUDE.md §10 bullet 4).
 
 ### ▶ 🔴 NEXT — in this order (owner-set 2026-09-28)
 
-**1. #1015 — Office route census in `RouteAuthorizationGuardTests`** (handed over by
-`spaarkeai-word-add-in-r1`, owner-approved). ✅ **Both halves verified by us:**
-- `Api/Office/*` appears **zero times** in `GovernedFiles` (`:111-252`), so `:581` counts the whole Office
-  surface as *"serves no document or Dataverse content"* — **false** for `/save`, `/search/entities`,
-  `/todo`, `/generate-profile`. No test would notice those routes losing a filter.
-- 🔴 **The trap**: `FilterMarker` is at **`:1528-1531`** (not 1408) and matches only
-  `\.Add\w*AuthorizationFilter\s*[<(]` or `\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>`.
-  `.AddEntityAccessFilter(` matches **neither**. **`AddJobOwnershipFilter` is the worst case — "Ownership"
-  is not in the alternation at all**, so a widening that only adds `Access` still misses it.
-- 🔴 **Both changes must land together**, and the widening needs a **negative control** or it will look
-  like it works while still missing `Ownership`.
-
-**2. Item 5 — `Secure Project` → `Secure Record`** BU rename. One coordinated change (live BU + code default
+**1. Item 5 — `Secure Project` → `Secure Record`** BU rename. One coordinated change (live BU + code default
 `DefaultSecureBusinessUnitName` + config key `SecureProject:BusinessUnitName` + pinning test + docs) or
 provisioning stops. Code: `Sprk.Bff.Api/Api/ExternalAccess/*`, `tests/integration/data-mutation/ExternalAccess/*`.
 
-**3. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
+**2. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
 `AgentServiceClient` (`agent-thread:thread` — 🔴 cross-**USER**, latent: `Enabled` defaults false),
 `AgentConfigurationService` (`exposed-playbooks`, `capabilities`), `ModuleEntitlementResolver`
 (`approle-module-map:all`). **Required regardless** of the Redis dedication decision — dedication does not
 fix the cross-user case.
 
-### ▶ ⚠️ ONE OPEN ITEM THE OWNER MUST DECIDE
+### ▶ ✅ RESOLVED 2026-09-29 — the cpo-r1 note reached master
 
-🔴 **`projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` is NOT on master.**
-It is on this branch only (1 commit ahead). **`cpo-r1` merges master — so it will NOT see the note** unless
-it is fast-tracked to master or this branch merges again first. Either open a small PR for that one commit,
-or let it ride on the next uac-r2 merge and tell cpo-r1 to wait.
+`INCOMING-D12-D13-REMEDIATION.md` is on master via **PR #1018** (`a1590ed34`), with READ FIRST pointers in
+that project's `CLAUDE.md` and `current-task.md`. **PR #1019** (`fe253d737`) then corrected its §5 Item 4
+heading, which said "SIX-surface" while enumerating **seven** — the seventh being the ARM-artifact workflow
+the note itself calls "the harder blocker". A reader trusting the heading would have stopped one short.
+
+The owner has the dispatch directive for cpo-r1 (worktree merge gated on 326/326 before any item starts;
+then items 1–4 in order via `task-create` → `task-execute`, not implemented straight off the note).
+
+### ▶ ⚠️ COORDINATION — `spaarkeai-word-add-in-r1` shares `OfficeService.cs`
+
+Task 120 **deleted** the hardcoded synthetic job at `OfficeService.cs:663-693` (well-known GUID
+`00000000-0000-0000-0000-000000000001`, ownerless, reachable by any authenticated caller). That project is
+active in the same file. If their branch still contains the block, a merge may reintroduce it silently —
+this is a *different-lines* change, so it is a candidate for the incoherent auto-merge that has already bitten
+this project once. **Nothing guards it**: the guard tests do not assert the block's absence, because a test
+asserting "this code is gone" is the shape that rots. Flag it at merge time instead.
 
 ### ▶ Handed to `spaarkeai-word-add-in-r1` (replied 2026-09-28)
 

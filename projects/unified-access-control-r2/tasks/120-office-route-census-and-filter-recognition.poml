@@ -4,7 +4,7 @@
     <title>Bring the Office route surface inside RouteAuthorizationGuardTests — classify it, teach the guard the three filter names it cannot see, and record the gaps that surfaces as Pending waivers</title>
     <phase>Register-driven (authored 2026-09-29, session 25; inbound handover GitHub #1015 from spaarkeai-word-add-in-r1, owner-approved)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** (TEST-MODIFYING override row, root CLAUDE.md §8, forces code-review + adr-check unconditionally) AND modifies .cs on an authorization filter. Tags include auth.</rigor-reason>
     <model-tier>opus</model-tier>
