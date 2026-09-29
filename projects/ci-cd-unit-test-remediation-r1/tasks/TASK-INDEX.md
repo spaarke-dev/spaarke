@@ -130,7 +130,7 @@
 | # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
 |---|---|---|---|---|---|---|
 | 070 | pre-cutover-branch-protection-snapshot | FULL | ✅ (2026-06-26 12:55Z; pre-cutover state = DISABLED captured) | **false** | 053c, 040, 041, 042, 043, 044, 060, 061, 062 | 071 |
-| 071 | cutover-window | FULL | 🔲 | **false** | 070, **085** (per Phase 2.5 scope expansion 2026-06-26 — cutover GATED on deep cleanup complete) | 075 |
+| 071 | cutover-window | FULL | ✅ | **false** | 070, **085** (per Phase 2.5 scope expansion 2026-06-26 — cutover GATED on deep cleanup complete) | 075 | **Complete 2026-09-29.** No config changed: protection already done 2026-08-29 (verified); Release matrix WITHDRAWN to 075 per spec MUST NOT; merge queue DECLINED by owner (batch=1 = 5-7.5h to drain 17 PRs vs north star #2). Stability measured over a month: Tier1 0.0% fail, master 100% green. See notes/cutover-success.md. |
 | 075 | soak-7day-gate | STANDARD | 🔲 | **false** (gate: cutover+7d) | 071 | 077 |
 | 077 | retire-sdap-ci-yml | STANDARD | 🔲 | **false** (gate: cutover+14d) | 075 | — |
 | 076 | 30day-success-criteria-measurements | STANDARD | 🔲 | **false** (gate: cutover+30d) | 071 | 090 |
