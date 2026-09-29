@@ -105,6 +105,47 @@ public class OfficeEndpointAuthorizationContractTests : IClassFixture<OfficeTest
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    /// <summary>
+    /// Task 120 (GitHub #1015) — an UNKNOWN owner is a denial, not an exemption.
+    ///
+    /// <para>The ownership condition used to be
+    /// <c>!string.IsNullOrEmpty(jobStatus.CreatedBy) &amp;&amp; !string.Equals(...)</c>, which skipped the
+    /// comparison entirely when <c>CreatedBy</c> was null or empty — so a job whose owner could not be
+    /// determined was readable by ANY authenticated caller, from a route that reads
+    /// <c>.AddJobOwnershipFilter()</c> at the call site. Job status carries document filenames, progress
+    /// and failure detail.</para>
+    ///
+    /// <para>These two cases are the regression guard: revert the filter to the short-circuit form and
+    /// both go green-to-red. The owner-match and wrong-owner cases above are unaffected, which is what
+    /// makes this a fix rather than a behaviour change.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Get_OfficeJobStatus_WhenOwnerIsUnknown_Returns403(string? createdBy)
+    {
+        var jobId = Guid.NewGuid();
+        using var factory = new OfficeJobOwnershipTestWebAppFactory();
+
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildJob(jobId, createdBy: createdBy!));
+
+        // Deliberately ALSO wired for the handler overload. If the filter were to let the request
+        // through, the request would reach the handler and return 200 — so a 403 here proves the filter
+        // denied, rather than the handler happening to fail for some unrelated reason.
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildJob(jobId, createdBy: createdBy!));
+
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/office/jobs/{jobId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
     private static JobStatusResponse BuildJob(Guid jobId, string createdBy) => new()
     {
         JobId = jobId,

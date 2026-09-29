@@ -109,23 +109,62 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #region Job Status Endpoint Tests
 
+    /// <summary>
+    /// REWRITTEN 2026-09-29 by task 120 (GitHub #1015). This used to GET the well-known job id
+    /// 00000000-0000-0000-0000-000000000001, which <c>OfficeService</c> answered with a hardcoded
+    /// synthetic job whose owner was null. The test passed only because <c>JobOwnershipFilter</c> failed
+    /// OPEN on a blank owner — so it asserted 200 on a route bypassing the very check it was next to.
+    /// Both the synthetic job and the fail-open are gone; the job is now seeded with a REAL owner
+    /// matching the test caller, so a 200 here means the ownership check ran and passed.
+    /// </summary>
     [Fact]
-    public async Task Get_OfficeJobStatus_WithKnownJob_Returns200()
+    public async Task Get_OfficeJobStatus_WhenCallerOwnsTheJob_Returns200()
     {
         // Arrange
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var jobId = Guid.NewGuid();
+        using var factory = new OfficeJobOwnershipTestWebAppFactory();
+
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildOwnedJob(jobId));
+
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildOwnedJob(jobId));
+
+        var client = factory.CreateClient();
 
         // Act
-        var response = await _client.GetAsync($"/api/office/jobs/{testJobId}");
+        var response = await client.GetAsync($"/api/office/jobs/{jobId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var result = await response.Content.ReadFromJsonAsync<JobStatusResponse>();
         result.Should().NotBeNull();
-        result!.JobId.Should().Be(testJobId);
+        result!.JobId.Should().Be(jobId);
         result.Status.Should().Be(JobStatus.Running);
     }
+
+    /// <summary>An SSE stream that yields nothing and completes — enough to assert the content type.</summary>
+    private static async IAsyncEnumerable<byte[]> EmptyStream()
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    /// <summary>A job owned by the test caller ("test-user-oid", per the test auth handler).</summary>
+    private static JobStatusResponse BuildOwnedJob(Guid jobId) => new()
+    {
+        JobId = jobId,
+        Status = JobStatus.Running,
+        JobType = JobType.EmailSave,
+        Progress = 50,
+        CurrentPhase = "FileUploaded",
+        CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
+        CreatedBy = "test-user-oid",
+        StartedAt = DateTimeOffset.UtcNow.AddSeconds(-8)
+    };
 
     [Fact]
     public async Task Get_OfficeJobStatus_WithUnknownJob_Returns404()
@@ -504,16 +543,40 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #region SSE Stream Endpoint Tests
 
+    /// <summary>
+    /// REWRITTEN 2026-09-29 by task 120 (GitHub #1015) for the same reason as the job-status test above:
+    /// it relied on the hardcoded ownerless synthetic job and therefore on JobOwnershipFilter failing
+    /// open. The stream route carries the same ownership filter, so the job is now seeded with a real
+    /// owner and the assertion means what it says.
+    /// </summary>
     [Fact]
     public async Task Get_OfficeJobStream_ReturnsSSEContentType()
     {
         // Arrange
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var jobId = Guid.NewGuid();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var factory = new OfficeJobOwnershipTestWebAppFactory();
+
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildOwnedJob(jobId));
+
+        factory.OfficeServiceMock
+            .Setup(s => s.GetJobStatusAsync(jobId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildOwnedJob(jobId));
+
+        // The stream itself must be seeded too: this assertion is about the SSE content type on an
+        // AUTHORIZED request, so the enumerable only has to terminate. A loose mock returns null here,
+        // which surfaces as a 500 and would make a green run mean nothing.
+        factory.OfficeServiceMock
+            .Setup(s => s.StreamJobStatusAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(EmptyStream());
+
+        var client = factory.CreateClient();
 
         // Act
-        var response = await _client.GetAsync(
-            $"/api/office/jobs/{testJobId}/stream",
+        var response = await client.GetAsync(
+            $"/api/office/jobs/{jobId}/stream",
             HttpCompletionOption.ResponseHeadersRead,
             cts.Token);
 

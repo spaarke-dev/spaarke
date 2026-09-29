@@ -152,10 +152,18 @@ public class JobOwnershipFilter : IEndpointFilter
                 });
         }
 
-        // Verify ownership - compare job's creator with current user
-        // Note: JobStatusResponse.CreatedBy should contain the userId who created the job
-        if (!string.IsNullOrEmpty(jobStatus.CreatedBy) &&
-            !string.Equals(jobStatus.CreatedBy, userId, StringComparison.OrdinalIgnoreCase))
+        // Verify ownership - compare job's creator with current user.
+        //
+        // FAILS CLOSED ON AN UNKNOWN OWNER (task 120, GitHub #1015, per ADR-003). This condition used to
+        // read `!string.IsNullOrEmpty(jobStatus.CreatedBy) && !string.Equals(...)`, which SKIPPED the
+        // comparison entirely when CreatedBy was null or empty and let the request through — so a job
+        // whose owner could not be determined was readable by any authenticated caller. That is the
+        // opposite of the intended behaviour for a filter whose entire purpose is ownership, and it is
+        // invisible at the call site: the route still reads as `.AddJobOwnershipFilter()`.
+        //
+        // An unknown owner is now a denial, not an exemption. Job status carries document filenames,
+        // progress and failure detail, so "we cannot tell whose this is" must not resolve to "yours".
+        if (!string.Equals(jobStatus.CreatedBy, userId, StringComparison.OrdinalIgnoreCase))
         {
             _logger?.LogWarning(
                 "Job ownership check failed: User {UserId} attempted to access job {JobId} " +

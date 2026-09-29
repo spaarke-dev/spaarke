@@ -660,37 +660,19 @@ public class OfficeService : IOfficeService
             return job;
         }
 
-        // Also check for hardcoded test job ID for backwards compatibility
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        if (jobId == testJobId)
-        {
-            return new JobStatusResponse
-            {
-                JobId = jobId,
-                Status = JobStatus.Running,
-                JobType = JobType.EmailSave,
-                Progress = 50,
-                CurrentPhase = "FileUploaded",
-                CompletedPhases = new List<CompletedPhase>
-                {
-                    new CompletedPhase
-                    {
-                        Name = "RecordsCreated",
-                        CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-5),
-                        DurationMs = 250
-                    },
-                    new CompletedPhase
-                    {
-                        Name = "FileUploaded",
-                        CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-2),
-                        DurationMs = 1500
-                    }
-                },
-                CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
-                CreatedBy = userId,
-                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-8)
-            };
-        }
+        // REMOVED 2026-09-29 by task 120 (GitHub #1015): a hardcoded synthetic job on the well-known id
+        // 00000000-0000-0000-0000-000000000001, kept "for backwards compatibility".
+        //
+        // It answered any authenticated caller with a fabricated Running job, and it set
+        // CreatedBy = userId — which, through the ownership-check overload below that passes userId: null,
+        // produced a job with NO OWNER. JobOwnershipFilter's then-fail-open skipped the comparison on a
+        // blank owner, so the synthetic job was readable by everyone and two contract tests asserted 200
+        // on exactly that path. Closing the fail-open turned those tests red, which is how this was found:
+        // the tests were green BECAUSE of the defect.
+        //
+        // The dev affordance it provided is preserved where it belongs — OfficeJobOwnershipTestWebAppFactory
+        // mocks IOfficeService and seeds a job with a real owner, so the tests exercise the ownership
+        // contract instead of a bypass of it.
 
         // Job not found in memory - query Dataverse
         _logger.LogDebug("Job {JobId} not found in memory store, querying Dataverse", jobId);
