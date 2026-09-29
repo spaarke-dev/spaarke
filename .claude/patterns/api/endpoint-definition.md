@@ -14,7 +14,7 @@ Creating or modifying Minimal API endpoints in the BFF API.
 4. `src/server/api/Sprk.Bff.Api/Program.cs` — Endpoint registration (MapGroup, MapXxxEndpoints calls)
 
 ## Constraints
-- **ADR-001**: Minimal API + BackgroundService — no Azure Functions
+- **ADR-001**: Minimal API — BFF endpoints are never hosted in Azure Functions
 - **ADR-008**: Use endpoint filters for auth — no global middleware
 
 ## Key Rules

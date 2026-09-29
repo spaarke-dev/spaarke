@@ -691,7 +691,9 @@ Each of these was *already* got wrong once, by code or by this spec.
 | 4 | **`sprk_enabled` defaults to false** on `sprk_triagecategory` create (section 10.1) | Silent: a disabled row is simply invisible to the classifier |
 | 5 | **`sprk_signaltype` / `sprk_signalvalue` are TAKEN** — they are columns on `sprk_affinity` (`AffinityStore`), unrelated to spend | Section 2.5 proposed a generic `sprk_signal` using those exact field names |
 
-Items 1 and 2 are repo-wide and belong in `.claude/FAILURE-MODES.md`, not only here.
+Items 1 and 2 are repo-wide and live in `.claude/FAILURE-MODES.md` — item 1 as **AP-14** (authored as
+AP-13, renumbered on merge: `unified-access-control-r2` had already published an AP-13 to master), item 2
+as a new worked instance in **AP-12**.
 
 ---
 

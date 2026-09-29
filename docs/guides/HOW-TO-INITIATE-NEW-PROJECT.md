@@ -443,14 +443,19 @@ If the idea is already mature enough to be a project, skip Step 0 and start at S
 
 ### Epic ↔ Project mechanics
 
-Every Project must have an Epic parent (per D-12). Epics are the portfolio rollup; Projects are the unit of work.
+Every Project must have an Epic parent (per **D-DEVOPS-12**). Epics are the portfolio rollup; Projects are the unit of work.
+
+> ⚠️ **Decision-ID note (2026-09-28)**: this document's `D-12` is a local `spaarke-devops-project-tracking-r1`
+> decision about GitHub project boards. It is **unrelated** to the platform-level **D-12**
+> (deployment-model redefinition, `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`).
+> Renamed **`D-DEVOPS-12`** here so unqualified `D-12` always means the platform decision.
 
 - **Create an Epic**: `/devops-epic-create --title "AI Platform & Chat" --objectives "..." --scope "..." --success "..." --timeframe "H2 2026"`
 - **Attach a Project to its Epic**: the `Parent issue` field on the Project Issue (set automatically by `/devops-idea-promote --epic #E` and `/devops-project-start`)
 
 ### Idea → Project promotion
 
-Two paths per D-12:
+Two paths per **D-DEVOPS-12**:
 
 **Path A** (1 → 1): a single Idea matures into a single Project:
 
@@ -536,7 +541,7 @@ Hooks are silent on success (single `✅ Portfolio synced: #N` line) and degrade
 - `/devops-project-archive` refuses by default (safety contract). Either commit/stash first, OR re-run with `--force` (uncommitted work will be LOST).
 
 **Q: Multiple projects on Project #2 board have the same Type=Project but no Parent issue.**
-- D-12 violation — every Project must have an Epic parent. Set `Parent issue` manually in GitHub UI, OR re-run `/devops-project-register --epic #E` for each orphan.
+- **D-DEVOPS-12** violation — every Project must have an Epic parent. Set `Parent issue` manually in GitHub UI, OR re-run `/devops-project-register --epic #E` for each orphan.
 
 ---
 

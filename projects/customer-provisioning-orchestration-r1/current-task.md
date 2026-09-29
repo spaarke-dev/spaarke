@@ -1,5 +1,36 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> # 🔴 READ FIRST — [`INCOMING-D12-D13-REMEDIATION.md`](INCOMING-D12-D13-REMEDIATION.md)
+>
+> **The deployment model this project was built around has CHANGED** (owner decisions **D-12** + **D-13**,
+> merged to master 2026-09-28 in `38f48723e`). The "Model 1 = shared trial/SMB tier" is **RETIRED**; both
+> models are dedicated stamps differing only in which **Azure tenant** owns the customer's subscription, and
+> the BFF Entra app registration is **per customer in both models (BINDING)**.
+>
+> 🔴 **Four required code changes are in THIS project**, including one where `H3EntraAppRegHandler` currently
+> does the opposite of what D-13 requires. This branch is **812 commits behind master**.
+> **Do not start work, and do not resolve a merge conflict, before reading that file.**
+
+
+
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Last Updated**: 2026-08-25 SESSION 8 END — **🎯 SESSION 8 accomplishments**: Task **203a COMPLETE** in a single main session (~3h actual vs 15h estimate). All 9 in-scope Class-A rows resolved via verify-first pattern (7 applied + 2 already-applied). Sub-Agent Write Boundary honored: all `.claude/**` writes from main session. Build sanity: ControlPlane.Core succeeded 0 warnings / 0 errors. See "SESSION 8 Quick Recovery" block below. Prior session block (SESSION 7) retained below for reference.
 
 ## 🎯 SESSION 8 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)

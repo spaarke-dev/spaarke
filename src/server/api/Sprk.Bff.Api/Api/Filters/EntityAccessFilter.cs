@@ -108,7 +108,18 @@ public class EntityAccessFilter : IEndpointFilter
     private static readonly IReadOnlyDictionary<string, string> EntitySetByType =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["account"] = "accounts",
+            // ⚠️ LOCKSTEP INVARIANT (unified-access-control-r2, 2026-09-04): a type belongs in THIS
+            // map and in Spaarke.Dataverse.DocumentAssociationMap, or in NEITHER. A type authorized
+            // here but with no sprk_document lookup column authorizes an upload that can only ever
+            // land unassociated — the user believes the file is filed and it is not. Three consumers
+            // depend on this table: EntityAccessFilter itself, RecordRouteAccessAuthorizationFilter
+            // (the record-keyed upload route), and ComposeService.
+            //
+            // "account" REMOVED 2026-09-04 (owner decision). sprk_document has NO account lookup in
+            // either column family, so account was the one entry that violated the invariant. Removal
+            // is a NARROWING — the safe direction — and costs nothing at the other call sites: the
+            // Office save endpoint already refuses "account", and ComposeService resolves a constant.
+            // Spaarke's organization analogue is sprk_organization; do not re-add "account".
             ["contact"] = "contacts",
             ["sprk_matter"] = "sprk_matters",
             ["matter"] = "sprk_matters",
@@ -124,11 +135,16 @@ public class EntityAccessFilter : IEndpointFilter
             ["sprk_workassignment"] = "sprk_workassignments",
             ["workassignment"] = "sprk_workassignments",
             ["sprk_event"] = "sprk_events",
-            ["event"] = "sprk_events"
-            // ⚠️ sprk_todo is deliberately ABSENT. The Q4 note listed it alongside these two, but
-            // sprk_document has NO sprk_todo lookup column, so a document cannot be associated to a
-            // to-do at all. Adding it here would authorize record-keyed access for a type whose
-            // upload can only ever land unassociated. Needs a schema change first.
+            ["event"] = "sprk_events",
+            // sprk_todo ADDED 2026-09-04, correcting the note that used to sit here. That note said
+            // "sprk_document has NO sprk_todo lookup column ... needs a schema change first" — and the
+            // Q4 note and the inbound email-r2 coordination doc said the same. All three were wrong in
+            // the same way: they searched the bare `sprk_{type}` family and never looked at
+            // `sprk_related*`. `SELECT sprk_relatedtodo FROM sprk_document` SUCCEEDS; the column always
+            // existed, so this needed CODE, not schema. The lockstep invariant is now satisfied — todo
+            // is in this map AND in DocumentAssociationMap.
+            ["sprk_todo"] = "sprk_todos",
+            ["todo"] = "sprk_todos"
         };
 
     /// <summary>

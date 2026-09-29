@@ -692,64 +692,18 @@ pac solution check --path Y             # Validate solution before import
 
 ## CI/CD Integration
 
-### Automated Plugin Deployment via GitHub Actions
+### No Plugin Deployment (ADR-002, 2026-09-25)
 
-Plugin deployments can be automated via the `deploy-staging.yml` workflow:
+Spaarke ships **no Dataverse plugins**, so there is no plugin deployment — manual or automated. (A `deploy-staging.yml` / `deploy-plugins` job and a `Spaarke.Plugins.dll` were previously documented here; neither ever existed.) Do not run `pac plugin push` or register plugin steps against Spaarke environments. The only permitted Dataverse step registrations are **no-code service-endpoint/webhook steps** used as async change signals (ADR-002 WP-5) — see [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../../../docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
 
-| Workflow | Trigger | What It Deploys |
-|----------|---------|-----------------|
-| `deploy-staging.yml` | Auto (after CI passes on master) or Manual | Dataverse plugins via PAC CLI |
-
-### Workflow Plugin Deployment
-
-The `deploy-plugins` job in `deploy-staging.yml`:
-
-1. Downloads build artifacts from CI
-2. Authenticates with Power Platform using service principal
-3. Deploys plugin assembly via PAC CLI
-
-```yaml
-pac auth create --url $POWER_PLATFORM_URL --applicationId $CLIENT_ID --clientSecret $SECRET
-pac plugin push --path ./artifacts/publish/plugins/Spaarke.Plugins.dll
-```
-
-### When to Use Manual vs Automated
+### When to Use This Skill
 
 | Scenario | Use |
 |----------|-----|
-| Plugin code changes merged to master | Automated (`deploy-staging.yml`) |
-| PCF control iterative development | Manual (this skill - Quick Dev Deploy) |
-| Production solution release | Manual (this skill - Scenario 1d) |
-| Custom Page updates | Manual (this skill - Scenario 1c) |
-| Emergency hotfix | Manual (this skill) |
-
-### Required Secrets for Automated Deployment
-
-| Secret | Purpose |
-|--------|---------|
-| `POWER_PLATFORM_URL` | Dataverse environment URL |
-| `POWER_PLATFORM_CLIENT_ID` | Service principal app ID |
-| `POWER_PLATFORM_CLIENT_SECRET` | Service principal secret |
-
-### Monitor Automated Deployments
-
-```powershell
-# View staging deployment status
-gh run list --workflow=deploy-staging.yml
-
-# View specific deployment run
-gh run view {run-id}
-
-# Check deploy-plugins job
-gh run view {run-id} --log --job=deploy-plugins
-```
-
-### Manual Trigger of Plugin Deployment
-
-```powershell
-# Trigger staging deployment with plugins
-gh workflow run deploy-staging.yml -f deploy_plugins=true
-```
+| PCF control iterative development | This skill - Quick Dev Deploy |
+| Production solution release | This skill - Scenario 1d |
+| Custom Page updates | This skill - Scenario 1c |
+| Emergency hotfix | This skill |
 
 ## Related ADRs
 

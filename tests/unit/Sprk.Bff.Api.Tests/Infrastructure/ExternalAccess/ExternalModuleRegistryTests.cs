@@ -40,7 +40,7 @@ public class ExternalModuleRegistryTests
         Email = "external@test.com",
         Oid = Guid.NewGuid().ToString(),
         ProjectAccess = projects
-            .Select(id => new CallerProjectAccess { ProjectId = id, AccessLevel = ExternalAccessLevel.Collaborate })
+            .Select(id => CallerProjectAccess.FromLevel(id, ExternalAccessLevel.Collaborate))
             .ToList(),
     };
 
@@ -51,11 +51,13 @@ public class ExternalModuleRegistryTests
         SystemUserId = Guid.NewGuid(),
         Email = "staff@contoso.com",
         Oid = Guid.NewGuid().ToString(),
+        // Task 033: the blanket per-plane stamp is deleted. A workforce caller's membership-derived
+        // rights come from the evaluator's term instead.
         ProjectAccess = projects
             .Select(id => new CallerProjectAccess
             {
                 ProjectId = id,
-                AccessLevel = WorkforcePrincipalStrategy.WorkforceProjectAccessLevel,
+                Rights = AccessibleRecordSetService.MembershipTermRights,
             })
             .ToList(),
     };
@@ -263,9 +265,15 @@ public class ExternalModuleRegistryTests
             Email = "external@test.com",
             Oid = Guid.NewGuid().ToString(),
             ProjectAccess = (projects ?? Array.Empty<Guid>())
-            .Select(id => new CallerProjectAccess { ProjectId = id, AccessLevel = ExternalAccessLevel.Collaborate }).ToList(),
-            AccessibleMatterIds = (matters ?? Array.Empty<Guid>()).ToHashSet(),
-            AccessibleWorkAssignmentIds = (was ?? Array.Empty<Guid>()).ToHashSet(),
+            .Select(id => CallerProjectAccess.FromLevel(id, ExternalAccessLevel.Collaborate)).ToList(),
+            // Task 033: AccessibleMatterIds / AccessibleWorkAssignmentIds are DERIVED views over the
+            // rights maps, so scope is expressed by populating the rights — ids and rights cannot
+            // disagree. These read-scoping tests only need membership, so Collaborate is used
+            // uniformly; per-record rights fidelity is covered in CallerPrincipalTests.
+            MatterAccess = (matters ?? Array.Empty<Guid>())
+                .ToDictionary(id => id, _ => AccessibleRecordSetService.MembershipTermRights),
+            WorkAssignmentAccess = (was ?? Array.Empty<Guid>())
+                .ToDictionary(id => id, _ => AccessibleRecordSetService.MembershipTermRights),
         };
 
     // A document row projecting its typed parent lookups as EntityReference (the SDK's shape).

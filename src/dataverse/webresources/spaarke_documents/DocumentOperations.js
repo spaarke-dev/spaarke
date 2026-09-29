@@ -27,12 +27,78 @@ Spaarke.Documents = window.Spaarke.Documents;
 Spaarke.Documents.Config = {
     // API Configuration
     apiBaseUrl: null, // Set dynamically based on environment
+    // =========================================================================
+    // ⚠️ EVERY SPE FILE ENDPOINT BELOW IS RETIRED. THIS FILE'S FILE OPERATIONS
+    //    CANNOT WORK, AND COULD NOT WORK EVEN BEFORE THEY WERE RETIRED.
+    //    Annotated 2026-09-07 by unified-access-control-r2 task 083.
+    // =========================================================================
+    //
+    // TWO INDEPENDENT REASONS, either of which is sufficient:
+    //
+    // 1. THE ROUTES ARE GONE. All five SPE endpoints this block used to build were deleted from the
+    //    BFF as unauthorized app-only (managed-identity) surface, in two waves:
+    //      · GET /api/containers/{containerId}/drive        — deleted 2026-08-25 (auth-v4 task 090)
+    //      · GET /api/drives/{driveId}/items/{itemId}       — deleted 2026-08-25 (auth-v4 task 090)
+    //      · GET /api/drives/{driveId}/items/{itemId}/content — deleted 2026-08-25 (auth-v4 task 090)
+    //      · PUT /api/drives/{driveId}/upload               — deleted 2026-09-07 (uac-r2 task 083)
+    //      · DELETE /api/drives/{driveId}/items/{itemId}    — deleted 2026-09-07 (uac-r2 task 083)
+    //    Each took an SPE container or drive id straight off the route and read, wrote, or DESTROYED as
+    //    the managed identity, so SharePoint Embedded applied no caller-side check.
+    //
+    // 2. THIS FILE CANNOT AUTHENTICATE AGAINST THE BFF AT ALL. getAuthToken below returns null (see its
+    //    own comment: "Will use credentials: 'include' instead of bearer token") and apiCall sends only
+    //    cookies with no Authorization header. The BFF's authentication schemes are JwtBearer + ApiKey +
+    //    Ciam; there is NO cookie scheme. Every call 401s before any route or policy is reached. That
+    //    was already true before the deletions — this file's README predates Spaarke Auth v2.
+    //
+    // So the builders below THROW rather than returning a URL. A thrown error at the call site names the
+    // supported replacement; a returned URL would produce a 401 or 404 that reads as an outage.
+    //
+    // ⚠️ NOT DELETED OUTRIGHT because whether this web resource is deployed is not determinable from the
+    // repo (manual portal deploy, per its README), and removing a possibly-deployed form script is a
+    // different decision from closing a server-side authorization hole. If it IS deployed, its file
+    // buttons are already broken and have been since 2026-08-25.
+    //
+    // THE SUPPORTED SURFACES, for whoever picks this up:
+    //   · upload → the task-076 record-keyed route (authorizes the OWNING RECORD, then derives the
+    //     container server-side via RecordContainerResolver — the caller never names a container)
+    //   · delete → Api/DocumentOperationsEndpoints.cs -> DocumentCheckoutService, which reads
+    //     DriveId/ItemId off the AUTHORIZED sprk_document row rather than off the request
+    //   · read/download → the document-id-keyed routes in Api/FileAccessEndpoints.cs and
+    //     Api/DocumentVersionEndpoints.cs
+    // All of them key on a RECORD, which is the point: the container follows the record, not the caller.
     apiEndpoints: {
-        getContainerDrive: (containerId) => `/api/containers/${containerId}/drive`,
-        uploadFile: (driveId, fileName) => `/api/drives/${driveId}/upload?fileName=${encodeURIComponent(fileName)}`,
-        downloadFile: (driveId, itemId) => `/api/drives/${driveId}/items/${itemId}/content`,
-        getFileMetadata: (driveId, itemId) => `/api/drives/${driveId}/items/${itemId}`,
-        deleteFile: (driveId, itemId) => `/api/drives/${driveId}/items/${itemId}`,
+        getContainerDrive: () => {
+            throw new Error(
+                "GET /api/containers/{containerId}/drive was retired 2026-08-25 (auth-v4 task 090). It " +
+                "resolved a drive for a caller-named container app-only. There is no replacement that " +
+                "takes a container id: use a record-keyed document route instead.");
+        },
+        uploadFile: () => {
+            throw new Error(
+                "PUT /api/drives/{driveId}/upload was retired 2026-09-07 (unified-access-control-r2 " +
+                "task 083). It wrote bytes into a caller-named drive as the managed identity. Use the " +
+                "record-keyed upload route, which authorizes the owning record and derives the " +
+                "container server-side.");
+        },
+        downloadFile: () => {
+            throw new Error(
+                "GET /api/drives/{driveId}/items/{itemId}/content was retired 2026-08-25 (auth-v4 task " +
+                "090). Use the document-id-keyed download in Api/FileAccessEndpoints.cs.");
+        },
+        getFileMetadata: () => {
+            throw new Error(
+                "GET /api/drives/{driveId}/items/{itemId} was retired 2026-08-25 (auth-v4 task 090). " +
+                "Read the SPE pointer off the authorized sprk_document row instead.");
+        },
+        deleteFile: () => {
+            throw new Error(
+                "DELETE /api/drives/{driveId}/items/{itemId} was retired 2026-09-07 " +
+                "(unified-access-control-r2 task 083). It destroyed a caller-named drive item as the " +
+                "managed identity. Use the document-id-keyed delete in " +
+                "Api/DocumentOperationsEndpoints.cs, which reads DriveId/ItemId off the authorized row.");
+        },
+        // These two remain live: /api/v1/documents/{id} is document-id-keyed, i.e. it names a RECORD.
         getDocument: (docId) => `/api/v1/documents/${docId}`,
         updateDocument: (docId) => `/api/v1/documents/${docId}`
     },

@@ -48,6 +48,8 @@ max( dataverse-answer, explicit-grant, derived-member, org-expansion, inherited 
 
 **Records**: *core* (project, matter, work assignment, service request) need direct grants. *Child* (invoice, communication, document, event, to-do, analysis) inherit **1 hop** via a denormalized core ancestor. **Matter does NOT inherit from Project** — both are core.
 
+🔴 **"Core" and "externally grantable" are NOT the same list** (owner-confirmed 2026-09-09, task 028). Service request is **core** — nothing else confers access to it — but it is **never grantable to an external contact**. Service requests are submitted by internal workforce users through the SPA; a law firm must never reach one. The grant table `sprk_externalrecordaccess` therefore carries lookups for **project, matter, work assignment, invoice and organization — and deliberately no service request**, and `CallerPrincipal` composes exactly three externally-grantable root sets. Service-request scoping already exists and is a **different mechanism**: the `service-requests` external module scopes by *requester* (`sprk_requestedby == caller`) and returns an empty set for any non-workforce plane, shipped by `spaarke-SPA-external-access-platform-r2` #028 on 2026-08-10. **Do not "complete the fourth root" by adding an accessible service-request set** — it would compose from grants that cannot exist and would encode service requests as externally grantable. See [`notes/task-028-service-request-root.md`](notes/task-028-service-request-root.md).
+
 ## Reuse, do not fork
 
 | Need | Use this — it exists |

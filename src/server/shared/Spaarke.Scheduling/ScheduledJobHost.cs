@@ -25,7 +25,14 @@ namespace Spaarke.Scheduling;
 ///     (default 30s) for in-flight jobs to observe cancellation and complete.</item>
 ///   <item>NFR-08 — Every run carries a fresh GUID-derived correlation id passed to the handler
 ///     via <see cref="JobRunContext.CorrelationId"/>.</item>
-///   <item>ADR-001 — Pure in-process <see cref="BackgroundService"/>; no Azure Functions / external scheduler.</item>
+///   <item>ADR-052 / ADR-036 — Where scheduled work runs is ADR-052; this host is the in-BFF mechanism (ADR-036).</item>
+///   <item>ADR-036 A1 rule 1 — every dispatch, scheduled or manual, runs under an <see cref="IScheduledJobLease"/>
+///     held for the whole run (retries included): a job runs on one instance at a time, and each cron occurrence
+///     is dispatched once across instances and slots. A tick that does not get the lease is recorded
+///     <c>Skipped</c>. A configured lease store that stays unreachable through the acquire retries means the tick
+///     is NOT dispatched and is recorded as failed (owner decision 2026-09-14, task 103).</item>
+///   <item>ADR-036 A1 rule 2 — <see cref="ScheduledJobHostOptions.RunScheduledJobs"/> = <c>false</c> (the
+///     slot-sticky guard on non-production slots) runs no scheduled tick.</item>
 ///   <item>ADR-010 — Registered as Singleton via <c>AddHostedService</c>; constructor takes concretes / minimal interfaces.</item>
 /// </list>
 /// <para><b>Design choices (departures from the POML wording):</b></para>
@@ -51,37 +58,84 @@ public sealed class ScheduledJobHost : BackgroundService
     // logged + skipped; the host continues serving other jobs.
     private static readonly TimeSpan MinLoopSleep = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>Error recorded for a tick not dispatched because the lease store stayed unreachable.</summary>
+    internal const string LeaseUnavailableMessage =
+        "Scheduler lease store unavailable — tick not dispatched (ADR-036 A1 rule 1)";
+
+    /// <summary>Error recorded for a run cancelled because another holder took its lease.</summary>
+    internal const string LeaseLostMessage =
+        "Cancelled: another holder took the scheduler lease during the run (ADR-036 A1 rule 1)";
+
+    private const string ShutdownCancelledMessage = "Cancelled by host shutdown (NFR-07)";
+    private const string ManualCancelledMessage = "Cancelled (manual trigger)";
+
     private readonly ScheduledJobRegistry _registry;
     private readonly IBackgroundJobStore _store;
     private readonly ScheduledJobHostOptions _options;
     private readonly ILogger<ScheduledJobHost> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IScheduledJobLease _lease;
 
     private readonly ConcurrentDictionary<Guid, Task> _inFlight = new();
+
+    // Cancelled by StopAsync. Manual runs deliberately ignore the admin's request token, but they must stop on host
+    // shutdown — otherwise a run (and its lease) outlives the drain and swallows the next tick on another instance.
+    private readonly CancellationTokenSource _stopping = new();
     private DateTimeOffset _lastRefreshUtc = DateTimeOffset.MinValue;
     private IReadOnlyDictionary<string, ScheduledJobState> _state =
         new Dictionary<string, ScheduledJobState>(StringComparer.Ordinal);
+    private int _leaseWarningLogged;
 
+    /// <param name="registry">Handlers by job id.</param>
+    /// <param name="store">Definitions and run history.</param>
+    /// <param name="options">Operational knobs.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="timeProvider">Clock for every sleep, retry delay and lease renewal; <see cref="TimeProvider.System"/> when <c>null</c>.</param>
+    /// <param name="lease">The dispatch lease; a <see cref="ProcessLocalScheduledJobLease"/> (not distributed) when <c>null</c>.</param>
     public ScheduledJobHost(
         ScheduledJobRegistry registry,
         IBackgroundJobStore store,
         ScheduledJobHostOptions options,
         ILogger<ScheduledJobHost> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IScheduledJobLease? lease = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _lease = lease ?? new ProcessLocalScheduledJobLease();
+
+        if (_options.LeaseDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options), _options.LeaseDuration, "ScheduledJobHostOptions.LeaseDuration must be positive.");
+        }
+
+        if (_options.MaxRunDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options), _options.MaxRunDuration, "ScheduledJobHostOptions.MaxRunDuration must be positive.");
+        }
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "ScheduledJobHost starting — refresh interval {RefreshInterval}, drain timeout {DrainTimeout}",
-            _options.RefreshInterval, _options.ShutdownDrainTimeout);
+            "ScheduledJobHost starting — refresh interval {RefreshInterval}, drain timeout {DrainTimeout}, lease {LeaseScope} ({LeaseDuration})",
+            _options.RefreshInterval, _options.ShutdownDrainTimeout,
+            _lease.IsDistributed ? "distributed" : "process-local", _options.LeaseDuration);
+
+        if (!_options.RunScheduledJobs)
+        {
+            _logger.LogWarning(
+                "ScheduledJobHost: scheduled dispatch is OFF on this host (RunScheduledJobs=false — the non-production deployment-slot guard, ADR-036 A1 rule 2). No cron tick runs here; manual admin triggers still run, under the same lease.");
+            return;
+        }
+
+        WarnIfLeaseNotDistributed();
 
         // Initial load. If this fails the host still keeps running so subsequent refresh ticks
         // can recover (e.g., transient Dataverse hiccup at boot). Empty registry / empty store
@@ -127,6 +181,10 @@ public sealed class ScheduledJobHost : BackgroundService
             "ScheduledJobHost stopping — waiting up to {DrainTimeout} for {InFlightCount} in-flight job(s)",
             _options.ShutdownDrainTimeout, _inFlight.Count);
 
+        // Manual runs are linked to _stopping (scheduled runs to the stopping token below), so every in-flight run
+        // observes cancellation.
+        _stopping.Cancel();
+
         // Triggers ExecuteAsync to exit; the per-job tokens are linked to it, so in-flight jobs
         // observe cancellation through their context tokens.
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -169,20 +227,20 @@ public sealed class ScheduledJobHost : BackgroundService
     /// immediately; admin clients poll <c>GET /api/admin/jobs/{jobId}/status</c> for outcome.</para>
     /// <para><b>Trigger</b>: <see cref="JobRunTrigger.ManualAdmin"/>. Per the
     /// <see cref="IBackgroundJobStore.RecordRunStartAsync"/> contract, <c>scheduledFireUtc</c> is
-    /// <c>null</c> for manual triggers — these don't participate in tick-level idempotency
-    /// (the admin chose to retrigger; duplicate-fire dedupe doesn't apply).</para>
+    /// <c>null</c> for manual triggers — these don't participate in tick-level idempotency.</para>
+    /// <para><b>Lease (ADR-036 A1 rule 1)</b>: the trigger takes the job's lease before it writes the run row, and
+    /// holds it for the whole run, so a manual run and a scheduled tick of the same job — or two manual runs — never
+    /// overlap. A job already running throws <see cref="ScheduledJobBusyException"/> (409); a lease store that cannot
+    /// be reached throws <see cref="ScheduledJobLeaseUnavailableException"/> (503) after one attempt — the admin is
+    /// waiting on this request and can retry. The lease is released before the completion record is written, so a
+    /// completed run means the job is free again.</para>
     /// <para><b>Correlation id (NFR-08)</b>: every trigger gets a fresh GUID-derived correlation id
     /// distinct from any other run (scheduled or manual).</para>
     /// <para><b>Cancellation (NFR-07)</b>: <paramref name="cancellationToken"/> cancels the
-    /// <i>dispatch path</i> (registry lookup, run-start record). Once the background task is
-    /// kicked off, it observes the host's <c>stoppingToken</c> instead — caller cancellation
-    /// does NOT interrupt the in-flight job (that would lose the run on a Ctrl-C from the admin
-    /// client). The host's shutdown drain (NFR-07: 30s) is the correct cancellation surface
-    /// for in-flight runs.</para>
-    /// <para><b>Idempotency</b>: NOT applied to manual triggers. If an admin double-clicks the
-    /// trigger button, two run records are written and the handler runs twice — this is the
-    /// admin's explicit choice. Scheduled idempotency (<see cref="IBackgroundJobStore.HasRunForScheduledTimeAsync"/>)
-    /// only kicks in for tick-level dedup after host restart.</para>
+    /// <i>dispatch path</i> (registry lookup, lease, run-start record). Once the background task is
+    /// kicked off, caller cancellation does NOT interrupt the in-flight job (that would lose the run on a Ctrl-C
+    /// from the admin client). The run is cancelled by host shutdown (then drained, NFR-07: 30s) or by its lease
+    /// hold (lost lease, renewal failing for a full lease duration, or <see cref="ScheduledJobHostOptions.MaxRunDuration"/>).</para>
     /// <para><b>Background task tracking</b>: the dispatched task is added to <see cref="_inFlight"/>
     /// so <see cref="StopAsync"/>'s drain logic waits for it (NFR-07).</para>
     /// </remarks>
@@ -197,6 +255,8 @@ public sealed class ScheduledJobHost : BackgroundService
     /// </returns>
     /// <exception cref="JobNotFoundException">Thrown if <paramref name="jobId"/> is not registered
     /// with <see cref="ScheduledJobRegistry"/>. The admin endpoint maps this to 404.</exception>
+    /// <exception cref="ScheduledJobBusyException">The job is already running.</exception>
+    /// <exception cref="ScheduledJobLeaseUnavailableException">The lease store cannot be reached.</exception>
     /// <exception cref="OperationCanceledException">Thrown if <paramref name="cancellationToken"/>
     /// is cancelled before the run row is written.</exception>
     public async Task<TriggerResult> TriggerNowAsync(
@@ -213,43 +273,65 @@ public sealed class ScheduledJobHost : BackgroundService
             ?? throw new JobNotFoundException(jobId);
 
         cancellationToken.ThrowIfCancellationRequested();
+        WarnIfLeaseNotDistributed();
 
-        // Look up the (optional) definition so any persisted ConfigJson flows into the run
-        // context. If the definition is missing, parameters still get the synthetic jobId key
-        // (mirrors ParametersFor's contract for scheduled runs).
-        var definitions = await _store.LoadJobsAsync(cancellationToken).ConfigureAwait(false);
-        var definition = definitions.FirstOrDefault(d => string.Equals(d.JobId, jobId, StringComparison.Ordinal));
-        var contextParameters = BuildManualTriggerParameters(jobId, definition, parameters);
+        var acquisition = await AcquireLeaseAsync(jobId, occurrenceUtc: null, maxAttempts: 1, cancellationToken)
+            .ConfigureAwait(false);
+        switch (acquisition.Outcome)
+        {
+            case LeaseOutcome.Cancelled:
+                throw new OperationCanceledException(cancellationToken);
+            case LeaseOutcome.Skipped:
+                throw new ScheduledJobBusyException(jobId);
+            case LeaseOutcome.Unavailable:
+                throw new ScheduledJobLeaseUnavailableException(
+                    $"Cannot run '{jobId}' now: the scheduler lease store is unavailable (ADR-036 A1 rule 1).",
+                    acquisition.Error);
+        }
 
+        var hold = acquisition.Hold!;
         var runId = Guid.NewGuid();
-        var correlationId = Guid.NewGuid().ToString("N"); // NFR-08: fresh per trigger.
-        var context = new JobRunContext(
-            RunId: runId,
-            CorrelationId: correlationId,
-            Trigger: JobRunTrigger.ManualAdmin,
-            Parameters: contextParameters);
-
-        var startedAt = _timeProvider.GetUtcNow();
-
-        // Persist the run-start row BEFORE returning so admin clients can poll
-        // /api/admin/jobs/{jobId}/status and see the row immediately. scheduledFireUtc=null
-        // because manual triggers don't participate in tick-level idempotency
-        // (per IBackgroundJobStore.RecordRunStartAsync contract).
+        JobRunContext context;
+        DateTimeOffset startedAt;
         Guid persistedRunId;
         try
         {
-            persistedRunId = await _store
-                .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc: null, cancellationToken)
-                .ConfigureAwait(false);
+            // Look up the (optional) definition so any persisted ConfigJson flows into the run
+            // context. If the definition is missing, parameters still get the synthetic jobId key
+            // (mirrors ParametersFor's contract for scheduled runs).
+            var definitions = await _store.LoadJobsAsync(cancellationToken).ConfigureAwait(false);
+            var definition = definitions.FirstOrDefault(d => string.Equals(d.JobId, jobId, StringComparison.Ordinal));
+
+            context = new JobRunContext(
+                RunId: runId,
+                CorrelationId: Guid.NewGuid().ToString("N"), // NFR-08: fresh per trigger.
+                Trigger: JobRunTrigger.ManualAdmin,
+                Parameters: BuildManualTriggerParameters(jobId, definition, parameters));
+
+            startedAt = _timeProvider.GetUtcNow();
+
+            // Persist the run-start row BEFORE returning so admin clients can poll
+            // /api/admin/jobs/{jobId}/status and see the row immediately.
+            try
+            {
+                persistedRunId = await _store
+                    .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc: null, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Persistence failure on a manual trigger is fatal — we can't return a runId the
+                // admin can poll on. Bubble up; endpoint layer maps to ProblemDetails 500.
+                _logger.LogError(
+                    ex,
+                    "ScheduledJobHost.TriggerNowAsync failed to record run start for '{JobId}' (correlationId {CorrelationId})",
+                    jobId, context.CorrelationId);
+                throw;
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch
         {
-            // Persistence failure on a manual trigger is fatal — we can't return a runId the
-            // admin can poll on. Bubble up; endpoint layer maps to ProblemDetails 500.
-            _logger.LogError(
-                ex,
-                "ScheduledJobHost.TriggerNowAsync failed to record run start for '{JobId}' (correlationId {CorrelationId})",
-                jobId, context.CorrelationId);
+            await hold.DisposeAsync().ConfigureAwait(false);
             throw;
         }
 
@@ -257,14 +339,8 @@ public sealed class ScheduledJobHost : BackgroundService
             "Manual admin trigger dispatched for job '{JobId}' runId={RunId} correlationId={CorrelationId}",
             jobId, persistedRunId, context.CorrelationId);
 
-        // Fire-and-track on a background task. We use the host's stoppingToken (not the
-        // caller's cancellationToken) so admin client cancellation doesn't kill an in-flight
-        // run. We still need a token for the handler — use a CancellationTokenSource that
-        // ties to the host's lifetime via a captured field. The simplest correct mechanism
-        // is to use CancellationToken.None for the dispatch wrapper (the in-flight task is
-        // tracked in _inFlight and drained by StopAsync per NFR-07).
         var task = Task.Run(
-            () => RunManualTriggerAsync(handler, context, persistedRunId, CancellationToken.None),
+            () => RunManualTriggerAsync(handler, context, persistedRunId, hold),
             CancellationToken.None);
         _inFlight[runId] = task;
 
@@ -285,31 +361,31 @@ public sealed class ScheduledJobHost : BackgroundService
     }
 
     /// <summary>
-    /// Background-task body for a manual-admin trigger. Invokes the handler via the same
-    /// retry policy as scheduled runs (so transient errors are retried consistently) and
-    /// writes the run-completion record.
+    /// Background-task body for a manual-admin trigger: runs the handler under the held lease with the same retry
+    /// policy as scheduled runs, releases the lease, then writes the run-completion record.
     /// </summary>
     private async Task RunManualTriggerAsync(
         IScheduledJob handler,
         JobRunContext context,
         Guid persistedRunId,
-        CancellationToken cancellationToken)
+        ScheduledJobLeaseHold hold)
     {
         var jobId = handler.JobId;
         var sw = Stopwatch.StartNew();
 
-        // Reuse the per-attempt retry behavior from scheduled runs. To do so without
-        // forcing a ScheduledJobState (which requires a definition + parsed cron), call
-        // a small inline executor that mirrors ExecuteWithRetryAsync's contract minus the
-        // ScheduledJobState dependency.
         JobRunResult result;
         try
         {
-            result = await ExecuteHandlerWithRetryAsync(handler, context, cancellationToken).ConfigureAwait(false);
+            // A lost lease or host shutdown cancels a manual run — never the admin's request (see TriggerNowAsync).
+            using var runCts = CancellationTokenSource.CreateLinkedTokenSource(hold.LostToken, _stopping.Token);
+            result = await ExecuteWithRetryAsync(
+                    handler, context, "manual-trigger job", runCts.Token,
+                    () => hold.LostReason ?? (_stopping.IsCancellationRequested ? ShutdownCancelledMessage : ManualCancelledMessage))
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // Defensive: ExecuteHandlerWithRetryAsync converts all caught exceptions into
+            // Defensive: ExecuteWithRetryAsync converts all caught exceptions into
             // JobRunResult.Failure; anything thrown out is unexpected.
             sw.Stop();
             _logger.LogError(
@@ -321,6 +397,10 @@ public sealed class ScheduledJobHost : BackgroundService
                 ErrorMessage: ex.Message,
                 ProcessedItems: null,
                 Duration: sw.Elapsed);
+        }
+        finally
+        {
+            await hold.DisposeAsync().ConfigureAwait(false);
         }
 
         try
@@ -335,107 +415,6 @@ public sealed class ScheduledJobHost : BackgroundService
                 "ScheduledJobHost failed to record manual-trigger completion for '{JobId}' runId={RunId} (correlationId {CorrelationId})",
                 jobId, persistedRunId, context.CorrelationId);
         }
-    }
-
-    /// <summary>
-    /// Retry-wrapped handler invocation for manual triggers — equivalent shape to
-    /// <see cref="ExecuteWithRetryAsync"/> but operates on an <see cref="IScheduledJob"/> directly
-    /// (no <see cref="ScheduledJobState"/> required, because manual triggers don't need cron state).
-    /// </summary>
-    private async Task<JobRunResult> ExecuteHandlerWithRetryAsync(
-        IScheduledJob handler,
-        JobRunContext context,
-        CancellationToken cancellationToken)
-    {
-        var jobId = handler.JobId;
-        var policy = _options.RetryPolicy;
-        var maxAttempts = Math.Max(1, policy.MaxAttempts);
-        var overallSw = Stopwatch.StartNew();
-
-        Exception? lastException = null;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                overallSw.Stop();
-                return new JobRunResult(
-                    Success: false,
-                    ErrorMessage: "Cancelled (manual trigger)",
-                    ProcessedItems: null,
-                    Duration: overallSw.Elapsed);
-            }
-
-            if (attempt > 1)
-            {
-                var delay = policy.ComputeDelay(attempt);
-                try
-                {
-                    await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    overallSw.Stop();
-                    return new JobRunResult(
-                        Success: false,
-                        ErrorMessage: "Cancelled (manual trigger)",
-                        ProcessedItems: null,
-                        Duration: overallSw.Elapsed);
-                }
-            }
-
-            try
-            {
-                _logger.LogInformation(
-                    "Dispatching manual-trigger job '{JobId}' runId={RunId} correlationId={CorrelationId} attempt={Attempt}/{MaxAttempts}",
-                    jobId, context.RunId, context.CorrelationId, attempt, maxAttempts);
-
-                var result = await handler.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
-
-                _logger.LogInformation(
-                    "Manual-trigger job '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms attempt={Attempt}",
-                    jobId, context.RunId, result.Success, result.ProcessedItems, (long)result.Duration.TotalMilliseconds, attempt);
-
-                return result;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                overallSw.Stop();
-                _logger.LogWarning(
-                    "Manual-trigger job '{JobId}' runId={RunId} cancelled on attempt {Attempt}",
-                    jobId, context.RunId, attempt);
-                return new JobRunResult(
-                    Success: false,
-                    ErrorMessage: "Cancelled (manual trigger)",
-                    ProcessedItems: null,
-                    Duration: overallSw.Elapsed);
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-                if (attempt < maxAttempts)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Manual-trigger job '{JobId}' runId={RunId} attempt {Attempt}/{MaxAttempts} failed — retrying after backoff",
-                        jobId, context.RunId, attempt, maxAttempts);
-                }
-                else
-                {
-                    _logger.LogError(
-                        ex,
-                        "Manual-trigger job '{JobId}' runId={RunId} exhausted {MaxAttempts} attempts — recording final failure",
-                        jobId, context.RunId, maxAttempts);
-                }
-            }
-        }
-
-        overallSw.Stop();
-        return new JobRunResult(
-            Success: false,
-            ErrorMessage: lastException?.Message ?? "Manual trigger exhausted retries with no captured exception",
-            ProcessedItems: null,
-            Duration: overallSw.Elapsed);
     }
 
     /// <summary>
@@ -652,8 +631,8 @@ public sealed class ScheduledJobHost : BackgroundService
     private void DispatchAndAdvance(ScheduledJobState entry, DateTimeOffset firingUtc, CancellationToken stoppingToken)
     {
         // Snapshot the scheduled fire time BEFORE advancing — this is the value the idempotency
-        // probe + run-start record key off, and it must match the cron occurrence the loop just
-        // observed (not the post-advance NextFireUtc).
+        // probe, the lease's occurrence marker and the run-start record key off, and it must match
+        // the cron occurrence the loop just observed (not the post-advance NextFireUtc).
         var scheduledFireUtc = entry.NextFireUtc ?? firingUtc;
 
         // Advance the next-fire time eagerly so we don't double-fire if the dispatch task
@@ -690,12 +669,10 @@ public sealed class ScheduledJobHost : BackgroundService
         CancellationToken stoppingToken)
     {
         var jobId = entry.Definition.JobId;
-        Guid persistedRunId = default;
 
         // ── Idempotency probe (FR-2.3) ────────────────────────────────────────────────────
-        // On host restart, the in-memory advance state is lost but the persistent store
-        // remembers prior runs. If a row already exists for this (jobId, scheduledFireUtc),
-        // skip dispatch entirely — do NOT re-execute and do NOT record a duplicate start row.
+        // Process-local, so inert across instances and restarts (ADR-036 A1 §2); the lease's
+        // occurrence marker below is what makes a tick run once across the fleet.
         try
         {
             var duplicate = await _store
@@ -715,29 +692,78 @@ public sealed class ScheduledJobHost : BackgroundService
         }
         catch (Exception ex)
         {
-            // Probe failure is non-fatal — log and proceed. The risk of a duplicate run is
-            // strictly less bad than the risk of silently dropping a scheduled tick.
+            // Probe failure is non-fatal — log and proceed; the lease still guards the dispatch.
             _logger.LogWarning(
                 ex,
-                "ScheduledJobHost idempotency probe failed for '{JobId}' tick {ScheduledFireUtc:o} — proceeding with dispatch (may risk duplicate)",
+                "ScheduledJobHost idempotency probe failed for '{JobId}' tick {ScheduledFireUtc:o} — proceeding to the lease",
                 jobId, scheduledFireUtc);
         }
 
-        try
+        // ── One dispatch per schedule (ADR-036 A1 rule 1) ────────────────────────────────
+        var acquisition = await AcquireLeaseAsync(
+                jobId, scheduledFireUtc, _options.RetryPolicy.MaxAttempts, stoppingToken)
+            .ConfigureAwait(false);
+        switch (acquisition.Outcome)
         {
-            persistedRunId = await _store
-                .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc, stoppingToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "ScheduledJobHost failed to record run start for '{JobId}' (correlationId {CorrelationId}) — running anyway",
-                jobId, context.CorrelationId);
+            case LeaseOutcome.Cancelled:
+                return;
+
+            case LeaseOutcome.Skipped:
+                _logger.LogInformation(
+                    "Scheduled job '{JobId}' tick at {ScheduledFireUtc:o} skipped — {Reason} (ADR-036 A1 rule 1)",
+                    jobId, scheduledFireUtc, acquisition.SkipReason);
+                await RecordUndispatchedTickAsync(
+                        jobId, context, scheduledFireUtc,
+                        new JobRunResult(
+                            Success: true, ErrorMessage: null, ProcessedItems: 0, Duration: TimeSpan.Zero,
+                            ResultJson: acquisition.SkipResultJson, Skipped: true))
+                    .ConfigureAwait(false);
+                return;
+
+            case LeaseOutcome.Unavailable:
+                _logger.LogError(
+                    acquisition.Error,
+                    "Scheduled job '{JobId}' tick at {ScheduledFireUtc:o} NOT dispatched — the scheduler lease store stayed unavailable through {Attempts} attempt(s); recorded as failed (ADR-036 A1 rule 1)",
+                    jobId, scheduledFireUtc, acquisition.Attempts);
+                await RecordUndispatchedTickAsync(
+                        jobId, context, scheduledFireUtc,
+                        new JobRunResult(
+                            Success: false, ErrorMessage: LeaseUnavailableMessage, ProcessedItems: null,
+                            Duration: TimeSpan.Zero))
+                    .ConfigureAwait(false);
+                return;
         }
 
-        var result = await ExecuteWithRetryAsync(entry, context, stoppingToken).ConfigureAwait(false);
+        var hold = acquisition.Hold!;
+        Guid persistedRunId = default;
+        JobRunResult result;
+        try
+        {
+            try
+            {
+                persistedRunId = await _store
+                    .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc, stoppingToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "ScheduledJobHost failed to record run start for '{JobId}' (correlationId {CorrelationId}) — running anyway",
+                    jobId, context.CorrelationId);
+            }
+
+            using var runCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, hold.LostToken);
+            result = await ExecuteWithRetryAsync(
+                    entry.Handler, context, "scheduled job", runCts.Token,
+                    () => hold.LostReason ?? ShutdownCancelledMessage)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // Released BEFORE the completion record, so a completed run means the job is free again.
+            await hold.DisposeAsync().ConfigureAwait(false);
+        }
 
         if (persistedRunId != default)
         {
@@ -759,17 +785,19 @@ public sealed class ScheduledJobHost : BackgroundService
 
     /// <summary>
     /// Invokes <see cref="IScheduledJob.ExecuteAsync"/> with exponential-backoff retry per
-    /// <see cref="ScheduledJobHostOptions.RetryPolicy"/>. Cancellation by
-    /// <paramref name="stoppingToken"/> short-circuits the retry loop (no sleep, no further attempts)
-    /// per NFR-07. Final result is the outcome of the last attempt — success on any successful
-    /// attempt, otherwise the captured exception from the last failed attempt.
+    /// <see cref="ScheduledJobHostOptions.RetryPolicy"/> — the one executor for scheduled and manual runs.
+    /// Cancellation of <paramref name="runToken"/> short-circuits the retry loop (no sleep, no further attempts)
+    /// per NFR-07; <paramref name="cancelledMessage"/> says why. Final result is the outcome of the last attempt —
+    /// success on any successful attempt, otherwise the captured exception from the last failed attempt.
     /// </summary>
     private async Task<JobRunResult> ExecuteWithRetryAsync(
-        ScheduledJobState entry,
+        IScheduledJob handler,
         JobRunContext context,
-        CancellationToken stoppingToken)
+        string jobKind,
+        CancellationToken runToken,
+        Func<string> cancelledMessage)
     {
-        var jobId = entry.Definition.JobId;
+        var jobId = handler.JobId;
         var policy = _options.RetryPolicy;
         var maxAttempts = Math.Max(1, policy.MaxAttempts);
         var overallSw = Stopwatch.StartNew();
@@ -778,60 +806,46 @@ public sealed class ScheduledJobHost : BackgroundService
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            if (stoppingToken.IsCancellationRequested)
+            if (runToken.IsCancellationRequested)
             {
-                overallSw.Stop();
-                return new JobRunResult(
-                    Success: false,
-                    ErrorMessage: "Cancelled by host shutdown (NFR-07)",
-                    ProcessedItems: null,
-                    Duration: overallSw.Elapsed);
+                return Cancelled(overallSw, cancelledMessage());
             }
 
             // Inter-attempt delay (only attempts >= 2 sleep).
             if (attempt > 1)
             {
-                var delay = policy.ComputeDelay(attempt);
                 try
                 {
-                    await Task.Delay(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(policy.ComputeDelay(attempt), _timeProvider, runToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (runToken.IsCancellationRequested)
                 {
-                    overallSw.Stop();
-                    return new JobRunResult(
-                        Success: false,
-                        ErrorMessage: "Cancelled by host shutdown (NFR-07)",
-                        ProcessedItems: null,
-                        Duration: overallSw.Elapsed);
+                    return Cancelled(overallSw, cancelledMessage());
                 }
             }
 
             try
             {
                 _logger.LogInformation(
-                    "Dispatching scheduled job '{JobId}' runId={RunId} correlationId={CorrelationId} attempt={Attempt}/{MaxAttempts}",
-                    jobId, context.RunId, context.CorrelationId, attempt, maxAttempts);
+                    "Dispatching {JobKind} '{JobId}' runId={RunId} correlationId={CorrelationId} attempt={Attempt}/{MaxAttempts}",
+                    jobKind, jobId, context.RunId, context.CorrelationId, attempt, maxAttempts);
 
-                var result = await entry.Handler.ExecuteAsync(context, stoppingToken).ConfigureAwait(false);
+                // Same run, same correlation id; the attempt number tells the job which retry this is (A1 rule 5).
+                var result = await handler.ExecuteAsync(context with { Attempt = attempt }, runToken).ConfigureAwait(false);
 
                 _logger.LogInformation(
-                    "Scheduled job '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms attempt={Attempt}",
-                    jobId, context.RunId, result.Success, result.ProcessedItems, (long)result.Duration.TotalMilliseconds, attempt);
+                    "{JobKind} '{JobId}' completed runId={RunId} success={Success} processedItems={ProcessedItems} duration={DurationMs}ms attempt={Attempt}",
+                    jobKind, jobId, context.RunId, result.Success, result.ProcessedItems, (long)result.Duration.TotalMilliseconds, attempt);
 
                 return result;
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (runToken.IsCancellationRequested)
             {
-                overallSw.Stop();
+                var message = cancelledMessage();
                 _logger.LogWarning(
-                    "Scheduled job '{JobId}' runId={RunId} cancelled by host shutdown on attempt {Attempt}",
-                    jobId, context.RunId, attempt);
-                return new JobRunResult(
-                    Success: false,
-                    ErrorMessage: "Cancelled by host shutdown (NFR-07)",
-                    ProcessedItems: null,
-                    Duration: overallSw.Elapsed);
+                    "{JobKind} '{JobId}' runId={RunId} cancelled on attempt {Attempt} — {Reason}",
+                    jobKind, jobId, context.RunId, attempt, message);
+                return Cancelled(overallSw, message);
             }
             catch (Exception ex)
             {
@@ -840,15 +854,15 @@ public sealed class ScheduledJobHost : BackgroundService
                 {
                     _logger.LogWarning(
                         ex,
-                        "Scheduled job '{JobId}' runId={RunId} attempt {Attempt}/{MaxAttempts} failed — retrying after backoff",
-                        jobId, context.RunId, attempt, maxAttempts);
+                        "{JobKind} '{JobId}' runId={RunId} attempt {Attempt}/{MaxAttempts} failed — retrying after backoff",
+                        jobKind, jobId, context.RunId, attempt, maxAttempts);
                 }
                 else
                 {
                     _logger.LogError(
                         ex,
-                        "Scheduled job '{JobId}' runId={RunId} exhausted {MaxAttempts} attempts — recording final failure",
-                        jobId, context.RunId, maxAttempts);
+                        "{JobKind} '{JobId}' runId={RunId} exhausted {MaxAttempts} attempts — recording final failure",
+                        jobKind, jobId, context.RunId, maxAttempts);
                 }
             }
         }
@@ -859,6 +873,125 @@ public sealed class ScheduledJobHost : BackgroundService
             ErrorMessage: lastException?.Message ?? "Job exhausted retries with no captured exception",
             ProcessedItems: null,
             Duration: overallSw.Elapsed);
+    }
+
+    private static JobRunResult Cancelled(Stopwatch sw, string message)
+    {
+        sw.Stop();
+        return new JobRunResult(Success: false, ErrorMessage: message, ProcessedItems: null, Duration: sw.Elapsed);
+    }
+
+    /// <summary>
+    /// Takes the job's lease, retrying only while the store is unreachable — with the job retry policy's backoff
+    /// (no delay, then 5s, 10s by default), so a brief outage such as a Redis failover does not cost the tick.
+    /// Being refused the lease is not retried: someone else has the job.
+    /// </summary>
+    private async Task<LeaseAcquisition> AcquireLeaseAsync(
+        string jobId,
+        DateTimeOffset? occurrenceUtc,
+        int maxAttempts,
+        CancellationToken cancellationToken)
+    {
+        var attempts = Math.Max(1, maxAttempts);
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            if (attempt > 1)
+            {
+                try
+                {
+                    await Task.Delay(_options.RetryPolicy.ComputeDelay(attempt), _timeProvider, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return new LeaseAcquisition(LeaseOutcome.Cancelled);
+                }
+            }
+
+            try
+            {
+                var grant = await _lease
+                    .TryAcquireAsync(jobId, occurrenceUtc, _options.LeaseDuration, cancellationToken)
+                    .ConfigureAwait(false);
+
+                switch (grant.Status)
+                {
+                    case ScheduledJobLeaseStatus.Granted:
+                    {
+                        var token = grant.Token ?? throw new InvalidOperationException(
+                            $"{_lease.GetType().Name} granted the lease for '{jobId}' without a holder token.");
+                        return new LeaseAcquisition(
+                            LeaseOutcome.Acquired,
+                            Hold: new ScheduledJobLeaseHold(
+                                _lease, jobId, token, _options.LeaseDuration, _options.MaxRunDuration,
+                                _timeProvider, _logger));
+                    }
+
+                    case ScheduledJobLeaseStatus.OccurrenceAlreadyDispatched:
+                        return new LeaseAcquisition(
+                            LeaseOutcome.Skipped,
+                            SkipReason: "another instance already dispatched this occurrence",
+                            SkipResultJson: "{\"skipped\":\"occurrence-already-dispatched\"}");
+
+                    default:
+                        return new LeaseAcquisition(
+                            LeaseOutcome.Skipped,
+                            SkipReason: "another run of this job holds its lease",
+                            SkipResultJson: "{\"skipped\":\"lease-held-elsewhere\"}");
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return new LeaseAcquisition(LeaseOutcome.Cancelled);
+            }
+            catch (Exception ex)
+            {
+                // Any failure to reach the store counts as unavailable — including one an implementation did not wrap.
+                lastError = ex;
+                _logger.LogWarning(
+                    ex,
+                    "Scheduler lease store unavailable for '{JobId}' (attempt {Attempt}/{MaxAttempts})",
+                    jobId, attempt, attempts);
+            }
+        }
+
+        return new LeaseAcquisition(LeaseOutcome.Unavailable, Error: lastError, Attempts: attempts);
+    }
+
+    /// <summary>Records a tick that was not dispatched (skipped, or the lease store was down) as a completed run row.</summary>
+    private async Task RecordUndispatchedTickAsync(
+        string jobId,
+        JobRunContext context,
+        DateTimeOffset scheduledFireUtc,
+        JobRunResult result)
+    {
+        try
+        {
+            var runId = await _store
+                .RecordRunStartAsync(jobId, context.Trigger, context.CorrelationId, scheduledFireUtc, CancellationToken.None)
+                .ConfigureAwait(false);
+            await _store.RecordRunCompleteAsync(runId, result, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "ScheduledJobHost failed to record the undispatched tick of '{JobId}' at {ScheduledFireUtc:o}",
+                jobId, scheduledFireUtc);
+        }
+    }
+
+    private void WarnIfLeaseNotDistributed()
+    {
+        if (_lease.IsDistributed || Interlocked.Exchange(ref _leaseWarningLogged, 1) == 1)
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "ScheduledJobHost: no distributed lease store is configured, so a job is exclusive within this process only — on more than one instance, every instance dispatches every tick. Acceptable for single-instance development; configure Redis for any multi-instance deployment (ADR-036 A1 rule 1).");
     }
 
     /// <summary>
@@ -889,6 +1022,22 @@ public sealed class ScheduledJobHost : BackgroundService
         parameters["jobId"] = def.JobId;
         return parameters;
     }
+
+    private enum LeaseOutcome
+    {
+        Acquired,
+        Skipped,
+        Unavailable,
+        Cancelled,
+    }
+
+    private readonly record struct LeaseAcquisition(
+        LeaseOutcome Outcome,
+        ScheduledJobLeaseHold? Hold = null,
+        string? SkipReason = null,
+        string? SkipResultJson = null,
+        Exception? Error = null,
+        int Attempts = 0);
 
     /// <summary>Per-job scheduling state. Mutable <see cref="NextFireUtc"/> via <see cref="AdvanceNextFire"/>.</summary>
     internal sealed class ScheduledJobState

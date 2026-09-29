@@ -20,8 +20,14 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // -----------------------------------------------------------------------------
-// Mock @spaarke/ui-components so we control the catalog + resolver writes +
-// the shared PolymorphicPicker. Tests assert on the mock's call log.
+// Mock the shared library so we control the catalog + resolver writes + the
+// shared PolymorphicPicker. Tests assert on the mocks' call logs.
+//
+// ⚠️ These mock the DEEP `@spaarke/ui-components/dist/...` specifiers, which are
+// what the control actually imports (ADR-012 PCF import rule). Until 2026-09-04
+// this file mocked the `@spaarke/ui-components` BARREL — a specifier the control
+// stopped importing when it moved to deep imports — so every mock here was inert
+// and the whole suite failed to load. See jest.config.js for the mapping.
 // -----------------------------------------------------------------------------
 
 const mockApplyResolverFields = jest.fn().mockResolvedValue({ recordNumber: null, recordNumberSourceField: null });
@@ -33,7 +39,71 @@ const mockResolveRecordDisplayNameFieldName = jest.fn().mockResolvedValue(null);
 const mockResolveRecordNumberFieldName = jest.fn().mockResolvedValue(null);
 const mockPolymorphicPicker = jest.fn();
 
-jest.mock('@spaarke/ui-components', () => {
+/**
+ * FR-26 (task 051) — core-ancestor derivation stub used by the CREATE-mode
+ * auto-detect path. Default behaviour mirrors the real taxonomy closely enough
+ * for these UI tests: a CORE target stamps itself, anything else derives nothing.
+ * Tests that care about a derived grandparent override with
+ * `mockResolvedValueOnce`.
+ */
+const mockDeriveCoreAncestorStamps = jest.fn(async (_webApi: unknown, entityType: string, recordId: string) => {
+  const core: Record<string, string> = {
+    sprk_project: 'sprk_projects',
+    sprk_matter: 'sprk_matters',
+    sprk_workassignment: 'sprk_workassignments',
+    sprk_servicerequest: 'sprk_servicerequests',
+  };
+  if (core[entityType]) {
+    return {
+      status: 'core-target',
+      stamps: [
+        {
+          entityType,
+          entitySet: core[entityType],
+          lookupAttribute: `sprk_regarding${entityType.replace('sprk_', '')}`,
+          recordId: String(recordId).replace(/[{}]/g, '').toLowerCase(),
+        },
+      ],
+    };
+  }
+  return { status: 'no-ancestor', stamps: [] };
+});
+
+/**
+ * FR-26 (task 051) — the combined payload builder the write handler now
+ * delegates to. This stub DELEGATES to `mockApplyResolverFields` exactly the way
+ * the real implementation does (same argument positions), so every existing
+ * assertion on that mock — including the `mockResolvedValueOnce` shaping the
+ * CREATE-bridge tests rely on — keeps its meaning.
+ */
+const mockBuildRegardingSelectionPayload = jest.fn(
+  async (
+    webApi: unknown,
+    hostNavProps: unknown,
+    _catalog: unknown,
+    target: { entityType: string; entitySet: string; lookupAttribute: string; navPropHint: string },
+    recordId: string,
+    recordName: string,
+    options?: unknown
+  ) => {
+    const payload: Record<string, unknown> = {};
+    const resolverResult = await mockApplyResolverFields(
+      webApi,
+      payload,
+      hostNavProps,
+      target.entityType,
+      target.entitySet,
+      recordId,
+      recordName,
+      target.navPropHint,
+      options
+    );
+    const ancestor = await mockDeriveCoreAncestorStamps(webApi, target.entityType, recordId);
+    return { success: true, payload, ancestor, resolverResult, unstampable: [] };
+  }
+);
+
+jest.mock('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder', () => {
   const TODO_REGARDING_CATALOG = [
     {
       entityType: 'sprk_matter',
@@ -97,53 +167,78 @@ jest.mock('@spaarke/ui-components', () => {
       navPropHint: 'document',
     },
   ];
-  return {
-    TODO_REGARDING_CATALOG,
-    applyResolverFields: mockApplyResolverFields,
-    resolveRecordType: mockResolveRecordType,
-    resolveRecordDisplayNameFieldName: mockResolveRecordDisplayNameFieldName,
-    resolveRecordNumberFieldName: mockResolveRecordNumberFieldName,
-    buildRecordUrl: (entityType: string, id: string) => `https://test/main.aspx?etn=${entityType}&id=${id}`,
-    // spaarke-modal-system P7 task 090 (FR-11/FR-18): RegardingResolverApp.tsx
-    // imports OOB_MODAL_SIZES from `@spaarke/ui-components` for its
-    // `handleRecordNumberClick` navigateTo call. Mirror the real module's
-    // values exactly — see utils/adapters/oobModalSizes.ts.
-    OOB_MODAL_SIZES: {
-      record: {
-        width: { value: 85, unit: '%' as const },
-        height: { value: 85, unit: '%' as const },
-      },
-      createForm: {
-        width: { value: 70, unit: '%' as const },
-        height: { value: 80, unit: '%' as const },
-      },
-      wizard: {
-        width: { value: 60, unit: '%' as const },
-        height: { value: 70, unit: '%' as const },
-      },
-    },
-    // PolymorphicPicker mock — records catalog + onSelect + title so tests
-    // can trigger onSelect programmatically and inspect the props received.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    PolymorphicPicker: (props: any) => {
-      mockPolymorphicPicker(props);
-      return (
-        <div data-testid="polymorphic-picker-mock">
-          <span data-testid="polymorphic-picker-mock-title">{props.title}</span>
-          <span data-testid="polymorphic-picker-mock-catalog-count">{props.catalog?.length ?? 0}</span>
-          {!props.readOnly && (
-            <button
-              data-testid="polymorphic-picker-trigger"
-              onClick={() => props.onSelect('sprk_matter', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Smith v. Jones')}
-            >
-              trigger
-            </button>
-          )}
-        </div>
-      );
-    },
-  };
+  return { TODO_REGARDING_CATALOG };
 });
+
+jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () => ({
+  applyResolverFields: mockApplyResolverFields,
+  resolveRecordType: mockResolveRecordType,
+  resolveRecordDisplayNameFieldName: mockResolveRecordDisplayNameFieldName,
+  resolveRecordNumberFieldName: mockResolveRecordNumberFieldName,
+  buildRecordUrl: (entityType: string, id: string) => `https://test/main.aspx?etn=${entityType}&id=${id}`,
+  cleanGuid: (id: string) =>
+    String(id ?? '')
+      .replace(/[{}]/g, '')
+      .trim()
+      .toLowerCase(),
+  // FR-26 (task 051) — the ancestor-stamp surface the control now consumes.
+  deriveCoreAncestorStamps: mockDeriveCoreAncestorStamps,
+  buildRegardingSelectionPayload: mockBuildRegardingSelectionPayload,
+  // Consumed by `clearRegarding`. The real helper resolves a lookup column to
+  // its nav-prop name; with an empty nav-prop table (jest.setup's fetch returns
+  // no relationships) the honest answer is "the host has no such column".
+  findHostNavPropForLookup: () => undefined,
+  CORE_ANCESTOR_LOOKUPS: [
+    { entityType: 'sprk_project', entitySet: 'sprk_projects', lookupAttribute: 'sprk_regardingproject' },
+    { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter' },
+    {
+      entityType: 'sprk_workassignment',
+      entitySet: 'sprk_workassignments',
+      lookupAttribute: 'sprk_regardingworkassignment',
+    },
+    {
+      entityType: 'sprk_servicerequest',
+      entitySet: 'sprk_servicerequests',
+      lookupAttribute: 'sprk_regardingservicerequest',
+    },
+  ],
+}));
+
+// spaarke-modal-system P7 task 090 (FR-11/FR-18): RegardingResolverApp.tsx
+// imports OOB_MODAL_SIZES for its `handleRecordNumberClick` navigateTo call.
+// Mirror the real module's values exactly — see utils/adapters/oobModalSizes.ts.
+jest.mock('@spaarke/ui-components/dist/utils/adapters/oobModalSizes', () => ({
+  OOB_MODAL_SIZES: {
+    record: { width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } },
+    createForm: { width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } },
+    wizard: { width: { value: 60, unit: '%' }, height: { value: 70, unit: '%' } },
+  },
+}));
+
+// PolymorphicPicker mock — records catalog + onSelect + title so tests can
+// trigger onSelect programmatically and inspect the props received. Stubbing the
+// picker also keeps the real shared component (and its own React 19 Fluent tree)
+// out of this suite entirely.
+jest.mock('@spaarke/ui-components/dist/components/PolymorphicPicker/PolymorphicPicker', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  PolymorphicPicker: (props: any) => {
+    mockPolymorphicPicker(props);
+    return (
+      <div data-testid="polymorphic-picker-mock">
+        <span data-testid="polymorphic-picker-mock-title">{props.title}</span>
+        <span data-testid="polymorphic-picker-mock-catalog-count">{props.catalog?.length ?? 0}</span>
+        {!props.readOnly && (
+          <button
+            data-testid="polymorphic-picker-trigger"
+            onClick={() => props.onSelect('sprk_matter', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Smith v. Jones')}
+          >
+            trigger
+          </button>
+        )}
+      </div>
+    );
+  },
+}));
 
 import { RegardingResolverApp } from '../RegardingResolver/RegardingResolverApp';
 
@@ -1344,7 +1439,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       }
     });
 
-    test('CREATE-mode seam key set matches the presave v1.2.0 contract exactly', async () => {
+    test('CREATE-mode seam key set matches the presave v1.3.0 contract exactly', async () => {
       const restore = withCreateModeXrm();
       try {
         mockApplyResolverFields.mockResolvedValueOnce({
@@ -1371,14 +1466,20 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const seam = (window as any).__sprk_regarding_pending__;
-        // Keys presave v1.2.0 actually consumes:
+        // Keys presave v1.3.0 actually consumes:
         //   - hostEntity, entityType, entitySet, recordId, recordName,
         //     recordUrl, recordNumber, lookupAttribute
+        //   - FR-26 (task 051): ancestorStamps + clearLookups — the access edge
+        //     and its reparent clear, staged so they ride the INSERT.
         // navProp is documented in the presave docstring as an optional future
         // key but the runtime derives lookup attr from `lookupAttribute` or
-        // `entityType` (see sprk_todo_regarding_presave.js line 217:
+        // `entityType` (see sprk_todo_regarding_presave.js:
         // `pending.lookupAttribute || deriveLookupAttribute(pending.entityType)`).
         // See notes/task-032-inventory.md for the navProp divergence rationale.
+        //
+        // This is an EXACT key-set pin on purpose: the presave handler reads
+        // named keys, so a key the PCF renames or drops fails silently at
+        // runtime — and for `ancestorStamps` that silence is an access hole.
         const expectedKeys = [
           'hostEntity',
           'entityType',
@@ -1388,11 +1489,101 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           'recordName',
           'recordUrl',
           'recordNumber',
+          'ancestorStamps',
+          'clearLookups',
         ].sort();
         expect(Object.keys(seam).sort()).toEqual(expectedKeys);
       } finally {
         restore();
       }
+    });
+
+    // ---------------------------------------------------------------------------
+    // FR-26 (unified-access-control-r2 task 051) — the ancestor stamp on the
+    // CREATE-mode bridge.
+    //
+    // A child record's access is a one-hop membership test against a denormalized
+    // core-ancestor lookup the child row carries. On CREATE that lookup must ride
+    // the INSERT, so it has to reach `__sprk_regarding_pending__` — the presave
+    // handler reads named keys, and a key the PCF forgets to publish fails
+    // silently at runtime as an under-grant.
+    // ---------------------------------------------------------------------------
+
+    describe('FR-26 — CREATE-mode bridge carries the core-ancestor stamp', () => {
+      test('the derived stamp reaches the seam so it can ride the INSERT', async () => {
+        const restore = withCreateModeXrm();
+        try {
+          const { context } = buildContext();
+          renderWithProvider(
+            <RegardingResolverApp
+              context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+              readOnly={false}
+              onRecordTypeChanged={() => undefined}
+              version="1.5.0"
+            />
+          );
+
+          // The stub picker selects a Matter — a CORE target, so the stamp is the
+          // target itself.
+          fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+          await waitFor(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            expect((window as any).__sprk_regarding_pending__).toBeDefined();
+          });
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const seam = (window as any).__sprk_regarding_pending__;
+          expect(seam.ancestorStamps).toEqual([
+            expect.objectContaining({
+              entityType: 'sprk_matter',
+              lookupAttribute: 'sprk_regardingmatter',
+              recordId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            }),
+          ]);
+          expect(Array.isArray(seam.clearLookups)).toBe(true);
+        } finally {
+          restore();
+        }
+      });
+
+      test('a derivation error publishes NO seam at all — nothing partial is staged', async () => {
+        const restore = withCreateModeXrm();
+        try {
+          // Fail-closed (NFR-01): the shared builder refuses, so the write handler
+          // returns unsuccessfully and the bridge must stay empty. A seam carrying
+          // the regarding fields but no stamp would create an unscoped child.
+          mockBuildRegardingSelectionPayload.mockResolvedValueOnce({
+            success: false,
+            ancestor: { status: 'error', stamps: [], error: 'ancestor read failed' },
+            unstampable: [],
+            error: 'ancestor read failed',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any);
+
+          const { context } = buildContext();
+          renderWithProvider(
+            <RegardingResolverApp
+              context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+              readOnly={false}
+              onRecordTypeChanged={() => undefined}
+              version="1.5.0"
+            />
+          );
+
+          fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+          // The control surfaces the failure to the user…
+          await waitFor(() => {
+            expect(screen.getByTestId('regarding-resolver-error')).toBeInTheDocument();
+          });
+          // …and stages nothing.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expect((window as any).__sprk_regarding_pending__).toBeUndefined();
+        } finally {
+          restore();
+        }
+      });
     });
   });
 
@@ -2127,6 +2318,211 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
         // Picker still renders (empty starting state).
         expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
+      } finally {
+        restore();
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // FR-26 Phase 2d (task 051) — the auto-detect path must stamp too.
+    //
+    // Dataverse's subgrid relationship mapping populates ONE
+    // `sprk_regarding{X}` lookup. When X is a CHILD record that lookup is a
+    // relationship, NOT an access edge — the new record inherits nothing until
+    // X's ultimate CORE ancestor is denormalized onto it. Before task 051 this
+    // path derived nothing at all, so every child created from a subgrid under a
+    // child parent was invisible to the people who should see it.
+    // -------------------------------------------------------------------------
+
+    test('FR-26 — a pre-populated CHILD lookup derives and stages its CORE ancestor', async () => {
+      const { attrCalls, restore } = buildCreateModeXrmWithPrePopulated({
+        sprk_regardingcommunication: {
+          id: '{cccccccc-cccc-cccc-cccc-cccccccccccc}',
+          name: 'Re: discovery',
+          entityType: 'sprk_communication',
+        },
+        // Present on the form but empty — this is where the stamp must land.
+        sprk_regardingmatter: null,
+      });
+      try {
+        // A Communication is CHILD-class: its ancestor is a Matter one hop up.
+        mockDeriveCoreAncestorStamps.mockResolvedValueOnce({
+          status: 'derived',
+          stamps: [
+            {
+              entityType: 'sprk_matter',
+              entitySet: 'sprk_matters',
+              lookupAttribute: 'sprk_regardingmatter',
+              recordId: 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm',
+            },
+          ],
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+
+        const { context } = buildContext();
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.5.0"
+          />
+        );
+
+        // The ancestor lookup is staged onto the form so it rides the INSERT.
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingmatter).toBeDefined();
+        });
+        expect(attrCalls.sprk_regardingmatter[attrCalls.sprk_regardingmatter.length - 1]).toEqual([
+          expect.objectContaining({
+            id: 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm',
+            entityType: 'sprk_matter',
+          }),
+        ]);
+
+        // …and republished on the bridge so the presave handler re-stages it.
+        await waitFor(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expect((window as any).__sprk_regarding_pending__?.ancestorStamps).toEqual([
+            expect.objectContaining({ lookupAttribute: 'sprk_regardingmatter' }),
+          ]);
+        });
+      } finally {
+        restore();
+      }
+    });
+
+    test('FR-26 — a derivation error stages NO stamp and says so loudly', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { attrCalls, restore } = buildCreateModeXrmWithPrePopulated({
+        sprk_regardingcommunication: {
+          id: '{cccccccc-cccc-cccc-cccc-cccccccccccc}',
+          name: 'Re: discovery',
+          entityType: 'sprk_communication',
+        },
+        sprk_regardingmatter: null,
+      });
+      try {
+        mockDeriveCoreAncestorStamps.mockResolvedValueOnce({
+          status: 'error',
+          stamps: [],
+          error: 'ancestor read failed',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+
+        const { context } = buildContext();
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.5.0"
+          />
+        );
+
+        // The rest of the auto-detect still runs — we degrade, we never block the
+        // host form (FR-24) — but no unverified stamp is invented…
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingrecordid).toBeDefined();
+        });
+        expect(attrCalls.sprk_regardingmatter).toBeUndefined();
+
+        // …and the under-grant is announced rather than swallowed.
+        await waitFor(() => {
+          expect(errorSpy.mock.calls.some(c => /FR-26|core-ancestor/i.test(String(c[0])))).toBe(true);
+        });
+      } finally {
+        restore();
+        errorSpy.mockRestore();
+      }
+    });
+    // -------------------------------------------------------------------------
+    // C-1 (task 051 code review) — auto-detect must NOT clobber a user's pick.
+    //
+    // Phase 2d awaits two network round-trips, then (a) writes ancestor lookups
+    // straight onto the form and (b) republishes __sprk_regarding_pending__
+    // WHOLESALE with clearLookups: []. A pick landing inside that window has
+    // already published the correct bridge; without a supersession guard the
+    // auto-detected ancestor wins and the INSERT lands under the WRONG core
+    // record — the old ancestor's principals gain access, the intended ones do
+    // not, and nothing surfaces an error.
+    //
+    // autoDetectFiredRef does not cover this (it guards effect re-entry, not
+    // supersession). pickerSelectGenerationRef does, and is what the fix uses.
+    // -------------------------------------------------------------------------
+
+    test('C-1 — a pick during auto-detect derivation is NOT overwritten by the auto-detected stamp', async () => {
+      const { restore } = buildCreateModeXrmWithPrePopulated({
+        sprk_regardingcommunication: {
+          id: '{cccccccc-cccc-cccc-cccc-cccccccccccc}',
+          name: 'Re: discovery',
+          entityType: 'sprk_communication',
+        },
+        sprk_regardingmatter: null,
+      });
+      try {
+        // Auto-detect's derivation is held open so a pick can land mid-flight.
+        let releaseAutoDetect!: () => void;
+        mockDeriveCoreAncestorStamps.mockImplementationOnce(
+          () =>
+            new Promise(resolve => {
+              releaseAutoDetect = () =>
+                resolve({
+                  status: 'derived',
+                  stamps: [
+                    {
+                      entityType: 'sprk_matter',
+                      entitySet: 'sprk_matters',
+                      lookupAttribute: 'sprk_regardingmatter',
+                      recordId: 'aaaaaaaa-0000-0000-0000-00000000auto',
+                    },
+                  ],
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } as any);
+            })
+        );
+        // The pick's own derivation resolves immediately, to a DIFFERENT ancestor.
+        mockDeriveCoreAncestorStamps.mockResolvedValue({
+          status: 'derived',
+          stamps: [
+            {
+              entityType: 'sprk_matter',
+              entitySet: 'sprk_matters',
+              lookupAttribute: 'sprk_regardingmatter',
+              recordId: 'bbbbbbbb-0000-0000-0000-00000000pick',
+            },
+          ],
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+
+        const { context } = buildContext();
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.5.0"
+          />
+        );
+
+        // The user picks while auto-detect is still awaiting.
+        fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+        await waitFor(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          expect((window as any).__sprk_regarding_pending__?.ancestorStamps?.[0]?.recordId).toBe(
+            'bbbbbbbb-0000-0000-0000-00000000pick'
+          );
+        });
+
+        // Now let the stale auto-detect finish. It must abandon its result.
+        releaseAutoDetect();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const bridge = (window as any).__sprk_regarding_pending__;
+        expect(bridge?.ancestorStamps?.[0]?.recordId).toBe('bbbbbbbb-0000-0000-0000-00000000pick');
+        expect(bridge?.ancestorStamps?.[0]?.recordId).not.toBe('aaaaaaaa-0000-0000-0000-00000000auto');
       } finally {
         restore();
       }

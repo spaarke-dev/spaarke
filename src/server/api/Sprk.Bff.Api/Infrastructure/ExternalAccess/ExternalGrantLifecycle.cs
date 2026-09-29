@@ -86,6 +86,22 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("statecode")]
     public int? StateCode { get; set; }
 
+    /// <summary>
+    /// The row's current expiry, or <c>null</c> for an unbounded grant.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Added by task 023 (finding H1).</b> The upsert's match path could not read this column —
+    /// it was not in <c>RowSelect</c> — so it could neither write a new expiry nor notice that the row it
+    /// was "re-granting" had already expired. Both are silent wrong answers: the caller gets a 200 and a
+    /// record id either way.</para>
+    ///
+    /// <para><c>sprk_expiresdate</c> is <b>Date Only</b> in live metadata, which is why this is
+    /// <see cref="DateOnly"/> and not <see cref="DateTime"/> — and why the expiry read filter compares
+    /// with bare <c>yyyy-MM-dd</c> (task 007's <c>ExpiryPredicate</c>).</para>
+    /// </remarks>
+    [JsonPropertyName("sprk_expiresdate")]
+    public DateOnly? ExpiresDate { get; set; }
+
     [JsonPropertyName("_sprk_contact_value")]
     public Guid? ContactId { get; set; }
 
@@ -129,8 +145,121 @@ internal static class ExternalGrantLifecycle
 {
     internal const string EntitySet = "sprk_externalrecordaccesses";
 
+    /// <summary>The table's logical name — what an SDK write (<c>IGenericEntityService</c>) addresses, as opposed to the Web API <see cref="EntitySet"/>.</summary>
+    internal const string EntityLogicalName = "sprk_externalrecordaccess";
+
+    /// <summary>
+    /// Days a grant lasts when the request names no expiry (spec FR-33; owner decision 2026-09-10,
+    /// "Server fills +90").
+    /// </summary>
+    /// <remarks>
+    /// A constant, not a setting — the owner removed the tenant cap. The Manage Access Expiration picker
+    /// (task 099, not yet built) is specified to default to the same 90 days, so a grant from a surface
+    /// with no date field (e.g. the TrackingFieldTrio PCF) matches what the picker would produce.
+    /// </remarks>
+    internal const int DefaultExpiryDays = 90;
+
+    /// <summary>
+    /// "Today" for every grant-expiry decision on the write path: the <b>UTC</b> calendar date — the same
+    /// calendar the read filter compares against (task 007, <c>ExternalParticipationService.ExpiryPredicate</c>),
+    /// so a grant the writer accepts as "expires today" is still live to the reader today.
+    /// </summary>
+    internal static DateOnly TodayUtc(TimeProvider timeProvider)
+        => DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+
+    /// <summary>The expiry an absent request value becomes: <paramref name="today"/> + <see cref="DefaultExpiryDays"/>.</summary>
+    internal static DateOnly DefaultExpiry(DateOnly today) => today.AddDays(DefaultExpiryDays);
+
+    /// <summary>
+    /// The expiry one row would carry after a request naming <paramref name="requestedExpiry"/> — the
+    /// value BOTH the survivor election and the "confers no access" decision judge.
+    /// </summary>
+    /// <remarks>
+    /// <para>ONE definition, two uses (task 106). The precedence mirrors the upsert's write rule exactly:
+    /// an explicitly requested date wins; otherwise a date someone already set is KEPT (a re-grant from a
+    /// surface with no date field must never move it — task 097); otherwise an unbounded row is bounded at
+    /// the FR-33 default.</para>
+    ///
+    /// <para><b>This answers a per-request question and MUST NOT be used to rank rows</b> — see
+    /// <see cref="ConferralRank"/> for why. Use it for the one elected row, to decide what that row will
+    /// carry and whether it confers access.</para>
+    /// </remarks>
+    internal static DateOnly EffectiveExpiry(DateOnly? explicitExpiry, DateOnly? rowExpiry, DateOnly today)
+        => explicitExpiry ?? rowExpiry ?? DefaultExpiry(today);
+
+    /// <summary>
+    /// A row's rank in the survivor election: the date it would confer access until if this request named
+    /// none. <b>Deliberately independent of the request.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the request is excluded, and this is load-bearing</b> (task 106 review finding V1/F1,
+    /// caught by BOTH Step 9.5 gates). An election parameterised by a per-request value is not a total
+    /// order two callers share, and a shared order is the entire point — see
+    /// <see cref="QueryActiveRowsAsync"/>. With rows A (lower id, expiring in 10 days) and B (200 days):
+    /// a request naming NO date ranks B first, while a request naming 30 days makes both ranks equal so
+    /// the id tie-break elects A. Two such requests reading the same rows then collapse onto DIFFERENT
+    /// survivors and deactivate each other, leaving <b>ZERO active rows while both callers receive
+    /// 200</b>. The grantee loses all access on the key, there is no conditional update to stop it, and it
+    /// does not self-heal. That is strictly worse than the false 409 task 106 set out to fix: the original
+    /// defect was inert, this one destroys access.</para>
+    ///
+    /// <para><b>Why the default and not <see cref="DateOnly.MaxValue"/>.</b> An unbounded row ranks at
+    /// today + <see cref="DefaultExpiryDays"/>, NOT at infinity. Ranking <c>null</c> highest would elect
+    /// the unbounded row, FR-33 would then bound it to that same default, and a sibling dated LATER would
+    /// be collapsed away — access leaving the call SHORTER than it arrived.</para>
+    ///
+    /// <para><b>What it preserves.</b> A row confers access exactly when its rank is on or after
+    /// <paramref name="today"/>, so a conferring row always outranks a non-conferring one. The elected row
+    /// therefore confers whenever any row does — which is what lets the caller judge the whole key from
+    /// the survivor alone, and what keeps the duplicate collapse from deactivating the row access rests
+    /// on.</para>
+    /// </remarks>
+    internal static DateOnly ConferralRank(DateOnly? rowExpiry, DateOnly today)
+        => rowExpiry ?? DefaultExpiry(today);
+
+    /// <summary>
+    /// Elects the row a grant upsert applies to: the one that will confer access LONGEST after this
+    /// request, ties broken by ascending id. <paramref name="rows"/> must be non-empty.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Task 106 (ISS-008 / #973).</b> The election was previously "lowest id", which produced two
+    /// distinct wrong answers on a key carrying duplicates. (1) An expired lowest-id row returned 409
+    /// <c>sdap.grant.expired_not_restored</c> — "still confers no access" — while a live duplicate meant the
+    /// grantee DID have access. (2) <c>CollapseDuplicatesAsync</c> then deactivates every row but the
+    /// survivor, so the naive fix — suppress the 409 and fall through — would have REVOKED the live access
+    /// it had just correctly detected. The bug's current form is at least inert; that fix would not be.</para>
+    ///
+    /// <para>Electing by effective expiry makes both properties structural rather than checked: the elected
+    /// row is a conferring row whenever ANY row confers, so an expired survivor PROVES every row on the key
+    /// is expired — judging the survivor becomes judging the whole key — and the collapse cannot deactivate
+    /// the row that confers access, because that row IS the survivor.</para>
+    ///
+    /// <para><b>Determinism</b> — the property <see cref="QueryActiveRowsAsync"/>'s ordering exists for.
+    /// The rank comes from <see cref="ConferralRank"/>, which depends only on the ROW and
+    /// <paramref name="today"/>, so every caller computes the same total order over the same rows and two
+    /// racers cannot elect different survivors. ⚠️ It deliberately takes NO request value: an earlier
+    /// version ranked by <see cref="EffectiveExpiry"/> and was therefore request-dependent, which let two
+    /// concurrent grants deactivate each other and leave zero active rows (V1/F1). Request-independence is
+    /// structural here — there is no parameter through which to reintroduce it. Do not add one.</para>
+    /// </remarks>
+    internal static ExternalGrantRow ElectSurvivor(IReadOnlyList<ExternalGrantRow> rows, DateOnly today)
+    {
+        // The precondition was prose-only until the review (F11/W7). Both call sites guard, so this is
+        // unreachable today; a third would inherit an opaque InvalidOperationException instead of a clear
+        // contract violation.
+        ArgumentOutOfRangeException.ThrowIfZero(rows.Count);
+
+        return rows
+            .OrderByDescending(r => ConferralRank(r.ExpiresDate, today))
+            .ThenBy(r => r.Id)
+            .First();
+    }
+
+    // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
+    // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
+    // that had already expired. Verified DATE ONLY in live metadata (task 007).
     private const string RowSelect =
-        "sprk_externalrecordaccessid,sprk_accesslevel,statecode," +
+        "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
         "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value";
 
@@ -142,6 +271,11 @@ internal static class ExternalGrantLifecycle
     /// same duplicate set must elect the SAME survivor, or they would deactivate each other's row and
     /// leave zero grants. Ascending id is stable and clock-independent, unlike <c>createdon</c> which can
     /// tie.</para>
+    ///
+    /// <para><b>Since task 106 this ordering is the TIE-BREAK, not the election itself</b> —
+    /// <see cref="ElectSurvivor"/> ranks by effective expiry first and falls back to ascending id. It is
+    /// still exactly what makes the outcome deterministic, because two racers applying the same total order
+    /// reach the same row; it is no longer, on its own, what decides which row survives.</para>
     ///
     /// <para><b>Rows without a usable id are discarded.</b> A row whose
     /// <c>sprk_externalrecordaccessid</c> did not materialise is not addressable — it cannot be updated
@@ -163,6 +297,53 @@ internal static class ExternalGrantLifecycle
             .OrderBy(r => r.Id)
             .ToList();
     }
+
+    /// <summary>
+    /// The OData <c>$filter</c> selecting every ACTIVE row held at one root record — contact grants AND
+    /// organization grants alike, since the grantee is deliberately not constrained (task 098).
+    /// </summary>
+    /// <remarks>
+    /// The root half is the same value column <see cref="ExternalGrantKey.ToActiveRowsFilter"/> uses; the two
+    /// must never disagree about which rows belong to a record.
+    /// </remarks>
+    internal static string ActiveRowsForRootFilter(ExternalGrantRootType rootType, Guid rootId)
+        => $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
+
+    /// <summary>
+    /// Every ACTIVE row held at one root record, in the same shape as <see cref="QueryActiveRowsAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>WRITE-PATH ONLY.</b> It carries no expiry predicate — by design, so that lapsed shares are
+    /// selected and can be renewed (task 098, owner decision 2026-09-11). A READ that decides who has access
+    /// must use <c>ExternalParticipationService</c>'s filters, which apply <c>ExpiryPredicate</c>; reusing this
+    /// one there would silently stop enforcing expiry.</para>
+    /// <para>Unlike <see cref="QueryActiveRowsAsync"/>, rows without a usable id are NOT discarded here: a caller
+    /// updating every row of a record must refuse rather than silently skip one (task 098). Exceptions
+    /// propagate. <paramref name="top"/> bounds the single page <c>QueryAsync</c> reads, so an over-bound
+    /// record is detectable instead of silently truncated.</para>
+    /// </remarks>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsForRootAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, int top, CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: ActiveRowsForRootFilter(rootType, rootId),
+            select: RowSelect,
+            top: top,
+            cancellationToken: ct);
+
+    /// <summary>
+    /// Shapes a <see cref="DateOnly"/> for an SDK write to <c>sprk_expiresdate</c> / <c>sprk_granteddate</c>:
+    /// midnight, <see cref="DateTimeKind.Unspecified"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Both columns are <b>Format = DateOnly, Behavior = TimeZoneIndependent</b> (read from live metadata
+    /// 2026-09-11, task 098): Dataverse stores the value it is given with no time-zone conversion. An
+    /// UNSPECIFIED kind carries no offset for anything between here and Dataverse to act on — whereas a
+    /// <c>Local</c> value would be converted to UTC on a machine west or east of UTC, and midnight can land on
+    /// the neighbouring date. The Web API path writes the same column as a bare <c>yyyy-MM-dd</c> string
+    /// (<c>GrantExternalAccessEndpoint.FormatDateOnly</c>); this is the SDK equivalent.</para>
+    /// </remarks>
+    internal static DateTime ToSdkDateOnly(DateOnly value) => value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
 
     /// <summary>
     /// Reads one row by id, or <c>null</c> when it does not exist.

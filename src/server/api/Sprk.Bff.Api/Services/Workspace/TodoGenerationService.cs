@@ -117,7 +117,7 @@ internal sealed class TaskScanRecord
 /// <para><strong>Error handling</strong>: Each candidate is wrapped in its own try/catch.
 /// A single failure never blocks the remaining items.</para>
 ///
-/// <para>Per ADR-001: BackgroundService only — no Azure Functions.</para>
+/// <para>Runs in the BFF as a BackgroundService, governed by ADR-052 (legacy hand-rolled timer, ratchet-listed — migrates when next touched).</para>
 /// <para>Per ADR-010: Registered via <see cref="Infrastructure.DI.WorkspaceModule"/> extension method.</para>
 /// <para>Per ADR-024: All regarding fields applied via <see cref="TodoRegardingBuilder"/>.</para>
 /// </remarks>

@@ -1,9 +1,14 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 1 · **Last Updated**: 2026-08-24
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml)
+> **Version**: 2 · **Last Updated**: 2026-09-28
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 2)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v2 (2026-09-28, `unified-access-control-r2`)**: `PRQ-T-07` **retired** per D-12 + D-13 — there is no
+> shared/multitenant BFF app registration in either deployment model; the BFF app registration is per
+> customer and is created by H3 during the run. `PRQ-C-05` wording corrected. Applied to the YAML manifest
+> in the same change.
 
 ---
 
@@ -40,7 +45,7 @@ Prereqs are grouped by **scope**:
 
 | Scope | Count | IDs |
 |---|---|---|
-| `once_per_tenant` | 7 | `PRQ-T-01` … `PRQ-T-07` |
+| `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
 | `once_per_env` | 13 | `PRQ-E-01` … `PRQ-E-13` |
 | `once_per_customer` | 7 | `PRQ-C-01` … `PRQ-C-07` |
@@ -62,7 +67,7 @@ Owner enumeration: "SPE container-types, Office add-in apps, Copilot bot apps, P
 | OpenAI TPM bumps for frontier models | `PRQ-C-01` (per-run headroom check) |
 | Resource-provider registration on fresh subs | `PRQ-S-03` |
 
-Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-prod-standup-2026-08-22.md` F1-F20 + `post-authoring-audit-2026-08-20.md` audit gaps + `r1-gap-analysis-2026-08-18.md` c-series gaps): 20 more entries covering multitenant BFF app-reg (Model 1 shared), operator + L2 UAMI RBAC coverage, platform artifacts storage + ACR, Graph app-role grants, Path X Dataverse App User, per-run env quotas, Dataverse org-settings + required applications.
+Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-prod-standup-2026-08-22.md` F1-F20 + `post-authoring-audit-2026-08-20.md` audit gaps + `r1-gap-analysis-2026-08-18.md` c-series gaps): 20 more entries covering the BFF app-reg (since **retired** as `PRQ-T-07` — see below), operator + L2 UAMI RBAC coverage, platform artifacts storage + ACR, Graph app-role grants, Path X Dataverse App User, per-run env quotas, Dataverse org-settings + required applications.
 
 ---
 
@@ -70,7 +75,7 @@ Additional prereqs surfaced during task 202 audit (from `lessons-learned-model1-
 
 Grouped by scope. Programmatic check recipes in the YAML.
 
-### Once-per-tenant (7)
+### Once-per-tenant (6 active, 1 retired)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -80,7 +85,23 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-T-04 | Office Word add-in Entra app-reg | Spaarke platform admin | Word add-in deploy fails |
 | PRQ-T-05 | Copilot bot Entra app-reg (optional per profile) | Spaarke platform admin | M365 Copilot surface non-functional |
 | PRQ-T-06 | Power BI service principal (if Power BI Embedded used) | Power BI tenant admin | Power BI Embedded reports unauthorized |
-| PRQ-T-07 | Multitenant BFF app-reg (Model 1 tier only) | Spaarke platform admin | Model 1 customers cannot authenticate. **never_delete: true** |
+| ~~PRQ-T-07~~ | 🔴 **RETIRED 2026-09-28 (D-12 + D-13)** — was *"Multitenant BFF app-reg (Model 1 tier only)"*, `never_delete: true` | — | **None.** See the retirement note below. |
+
+> **PRQ-T-07 retirement note (2026-09-28, `unified-access-control-r2`)**
+>
+> `PRQ-T-07` required a **shared multitenant BFF app registration** for a "Model 1 tier" and protected it
+> with `never_delete: true`. **D-13 forbids exactly that artifact**: the BFF Entra app registration is **per
+> customer in both models** — in Spaarke's tenant under Model 1, in the customer's own tenant under Model 2.
+> `SharedBffAppRegistrationId` is a retired artifact. A shared app registration would put **one credential
+> behind every customer's Dataverse application user**, and would hit the unraisable 20-federated-identity-
+> credential cap at customer 21.
+>
+> The per-customer app registration is **created by provisioning automation (H3) on every run**, so by this
+> guide's own definition it belongs in the handler catalog, not here — it is not re-homed to another prereq
+> scope. The ID is retained in the manifest, marked `status: retired`, so references do not dangle.
+>
+> Machine-readable source updated in the same change: `scripts/provisioning-prereqs/prereqs.yaml`
+> (manifest_version 2).
 
 ### Once-per-subscription (5)
 
@@ -118,7 +139,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-02 | OpenAI model GA per region for pinned versions | Spaarke admin | `ServiceModelDeprecated` at H2a deploy |
 | PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
 | PRQ-C-04 | Dataverse env-creation rate quota | Spaarke admin | H5 fails with rate-limit; waits for quota window |
-| PRQ-C-05 | Customer admin consent for BFF multitenant app (M2) | Customer tenant admin | H0.5 timeout; H10 verification fails |
+| PRQ-C-05 | Customer admin consent for that customer's BFF app registration (**Model 2 only** — Model 1 requires no H0.5 consent) | Customer tenant admin | H0.5 timeout; H10 verification fails |
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
 

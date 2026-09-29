@@ -42,10 +42,27 @@
     false greens that are nothing of the sort, and the window can never close.
     Verified empirically on first run: 5 such rows, all dated 08-18 to 08-26.
 
-    Default is immediately after PR #841 (router concurrency keyed per-SHA)
-    merged, which is the last change to the CI configuration under observation.
-    Starting earlier would measure a configuration that no longer exists --
-    the same reason the window must not be edited while it runs.
+    Default is immediately after the LAST change to the CI configuration under
+    observation. Starting earlier would measure a configuration that no longer
+    exists -- the same reason the window must not be edited while it runs.
+
+    Window-start history (each entry is a configuration change, not a reset of
+    convenience -- moving this date without a corresponding config change would
+    be laundering a failure):
+
+      2026-08-27T20:47Z  PR #841 -- router concurrency keyed per-SHA.
+      2026-09-04T22:13Z  PR #944 -- Tier 1 `compile` widened from the single
+                         BFF csproj to the whole solution. THIS IS A CHANGE TO
+                         THE BLOCKING SCOPE OF THE SYSTEM UNDER OBSERVATION, so
+                         by the rule above the window restarts here.
+
+                         It is also the fix for the window's only false green
+                         (PR #934, 2026-09-03): a test project stopped compiling,
+                         legacy caught it because it builds the solution, Tier 1
+                         did not because it built one csproj. Proven by re-seeding
+                         the break -- old scope "Build succeeded", new scope CS1503.
+                         That false green is EXCLUDED here because it cannot occur
+                         under the current configuration, not because time passed.
 
 .EXAMPLE
     pwsh scripts/ci/shadow-window-status.ps1
@@ -63,7 +80,9 @@ param(
     [int] $Limit = 60,
 
     # See .PARAMETER Since -- do not lower this casually.
-    [datetime] $Since = '2026-08-27T20:47:00Z'
+    # 2026-09-04T22:13Z = immediately after PR #944 (Tier 1 compile widened to
+    # the whole solution), the last change to the configuration under observation.
+    [datetime] $Since = '2026-09-04T22:13:09Z'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,7 +91,31 @@ $ErrorActionPreference = 'Stop'
 $LegacyWorkflow = 'SDAP CI'
 $NewWorkflow    = 'CI'
 
-$TargetPrs  = 20
+# TARGET: 20 -> 8, owner decision 2026-09-29. This is a judgment about sufficient
+# evidence, not a calculation -- recorded here so it can be challenged later.
+#
+# WHY 20 STOPPED MAKING SENSE. 20 was chosen to see enough variety of change
+# shapes. It assumed a comparable-PR rate roughly 3x what this repo produces
+# (measured: 0.33/day -- most merges are docs-only and never compare), which put
+# the close date at ~2026-11-05.
+#
+# WHAT WAS BOUGHT INSTEAD. The decisive fact is that CUTOVER DOES NOT DELETE
+# sdap-ci.yml. The chain is 071 cutover -> 075 soak (7 days) -> 077 retire, so
+# the legacy oracle keeps running through the soak. The soak IS this comparison,
+# run after the flip -- same two systems, same disagreement check -- so waiting
+# five more weeks buys an observation the soak provides anyway, while paying
+# 56 job-minutes per master push to run sdap-ci in parallel (vs 15 for the real
+# gate) and holding the merge queue, #894 and #869.
+#
+# EVIDENCE AT THE DECISION. 8/8 agreeing, 0 false greens, 0 false reds, 24.1
+# calendar days -- all against the post-#944 configuration. The window's only
+# false green was root-caused, fixed, and PROVEN by re-seeding the break. And
+# the riskiest step of the cutover (branch protection -> required check `Router`)
+# already shipped 2026-08-29 and has run clean for a month.
+#
+# THE TRADE, STATED HONESTLY: 8 PRs is less variety than 20. The soak plus the
+# 30-day measurements (076) are what cover that, and sdap-ci stays live for both.
+$TargetPrs  = 8
 $MinDaySpan = 5
 
 Write-Host ''
@@ -150,13 +193,19 @@ $falseGreens = @($rows | Where-Object Verdict -eq 'FALSE-GREEN')
 $falseReds   = @($rows | Where-Object Verdict -eq 'false-red')
 $agreed      = @($rows | Where-Object Verdict -eq 'agree')
 
-# A false green resets the count: only PRs merged AFTER the most recent one
-# count toward the target.
-$countingFrom = if ($falseGreens.Count -gt 0) {
-    ($falseGreens | Sort-Object MergedAt | Select-Object -Last 1).MergedAt
-} else { [datetime]::MinValue }
-
-$counting = @($agreed | Where-Object { $_.MergedAt -gt $countingFrom })
+# A false green inside the CURRENT configuration window is disqualifying, and
+# waiting does not cure it -- see the block below. Everything that agreed in this
+# window counts, because the window is already scoped to one configuration.
+#
+# HISTORY (2026-09-29): this block used to reset the count to "only PRs merged
+# after the most recent false green", which read as a path to closing the window
+# by waiting. It was not one: $ready (below) required $falseGreens.Count -eq 0
+# computed over the WHOLE window, so a single false green wedged the gate
+# permanently -- the script would have printed "Window still open" at 20/20,
+# forever. The reset moved the displayed number and never the verdict. The two
+# halves are now consistent: a false green means fix-the-config-and-restart,
+# which is what actually happened for PR #934 (fixed by #944; see .PARAMETER Since).
+$counting = @($agreed)
 $daySpan  = if ($counting.Count -gt 0) {
     [math]::Round((( $counting | Measure-Object MergedAt -Maximum).Maximum -
                    ( $counting | Measure-Object MergedAt -Minimum).Minimum).TotalDays, 1)
@@ -172,8 +221,15 @@ Write-Host ('  FALSE GREENS            : {0}' -f $falseGreens.Count) -Foreground
 if ($falseGreens.Count -gt 0) {
     Write-Host ''
     Write-Host '  A false green is DISQUALIFYING -- the new tier passed a commit the' -ForegroundColor Red
-    Write-Host '  legacy system failed. Diagnose before continuing; the count above' -ForegroundColor Red
-    Write-Host '  restarts from the most recent one.' -ForegroundColor Red
+    Write-Host '  legacy system failed.' -ForegroundColor Red
+    Write-Host ''
+    Write-Host '  WAITING DOES NOT CURE THIS. The remedy is:' -ForegroundColor Red
+    Write-Host '    1. Root-cause it. Name the blocking scope the new tier is missing.' -ForegroundColor Red
+    Write-Host '    2. Fix the configuration, and PROVE the fix by re-seeding the break' -ForegroundColor Red
+    Write-Host '       (it must fail after the fix and have passed before it).' -ForegroundColor Red
+    Write-Host '    3. Restart the window: set -Since to just after the fix merged, and' -ForegroundColor Red
+    Write-Host '       record it in the .PARAMETER Since history block.' -ForegroundColor Red
+    Write-Host '  Moving -Since WITHOUT a config fix launders the failure. Do not.' -ForegroundColor Red
     $falseGreens | Sort-Object MergedAt -Descending |
         Select-Object Pr, MergedAt, Legacy, Router, Title -First 5 | Format-Table -AutoSize
 }
@@ -184,6 +240,23 @@ if ($falseReds.Count -gt 0) {
     Write-Host '  reds" goal and must be understood before branch protection:' -ForegroundColor Yellow
     $falseReds | Sort-Object MergedAt -Descending |
         Select-Object Pr, MergedAt, Legacy, Router, Title -First 5 | Format-Table -AutoSize
+}
+
+# Projection. The 20-PR target is only meaningful if COMPARABLE PRs actually
+# arrive; most merges are docs-only and never compare. Without this line the
+# gate can sit "nearly done" for months with nobody able to see it -- which is
+# exactly what happened: the target was calibrated for a comparable-PR rate
+# roughly 3x what the repo produces, and nothing reported that.
+if ($counting.Count -gt 0 -and $daySpan -gt 0 -and $counting.Count -lt $TargetPrs) {
+    $perDay     = $counting.Count / [math]::Max($daySpan, 0.1)
+    $remaining  = $TargetPrs - $counting.Count
+    $daysLeft   = [math]::Ceiling($remaining / [math]::Max($perDay, 0.01))
+    Write-Host ''
+    Write-Host ('  Comparable-PR rate      : {0:N2}/day ({1} in {2} days)' -f $perDay, $counting.Count, $daySpan)
+    Write-Host ('  PROJECTED CLOSE         : ~{0} more day(s) -- about {1}' -f `
+        $daysLeft, (Get-Date).AddDays($daysLeft).ToString('yyyy-MM-dd')) -ForegroundColor Yellow
+    Write-Host '  If that date is unacceptable, the lever is the TARGET (a judgment' -ForegroundColor Yellow
+    Write-Host '  about sufficient evidence), not the window start (see above).' -ForegroundColor Yellow
 }
 
 $ready = ($counting.Count -ge $TargetPrs) -and ($daySpan -ge $MinDaySpan) -and ($falseGreens.Count -eq 0)

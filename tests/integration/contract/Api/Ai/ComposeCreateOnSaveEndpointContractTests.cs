@@ -429,9 +429,20 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         createdEntity.GetAttributeValue<EntityReference>("sprk_project")!.Id.Should().Be(projectId);
         createdEntity.Contains("sprk_invoice").Should().BeFalse(
             "lookups the source does not carry are NOT invented on the new record");
+        // Widened 2026-09-05 (unified-access-control-r2) from the prior 6-entry list to the full,
+        // live-metadata-verified Spaarke.Dataverse.DocumentLinkFields vocabulary — see
+        // DocumentAssociationMapTests' sibling DocumentLinkFieldsTests for the per-column casing pins.
         retrievedColumns.Should().BeEquivalentTo(
-            new[] { "sprk_matter", "sprk_relatedmatter", "sprk_project", "sprk_relatedproject", "sprk_invoice", "sprk_workassignment" },
-            "the inheritance reads exactly the ADR-024 document link vocabulary");
+            new[]
+            {
+                "sprk_matter", "sprk_relatedmatter",
+                "sprk_project", "sprk_relatedproject",
+                "sprk_invoice", "sprk_relatedinvoice",
+                "sprk_workassignment", "sprk_relatedworkassignment",
+                "sprk_relatedagreement", "sprk_relatedcommunication", "sprk_relatedcontact", "sprk_relatedevent",
+                "sprk_relatedorganization", "sprk_relatedservicerequest", "sprk_relatedtodo", "sprk_relatedvendororg",
+            },
+            "the inheritance reads exactly the shared Spaarke.Dataverse.DocumentLinkFields vocabulary");
     }
 
     // Task 041 B-MED-3: link-inheritance is BEST-EFFORT — a failed source read must not fail the save.

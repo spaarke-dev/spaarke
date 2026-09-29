@@ -62,6 +62,64 @@
  * `defaultAccessLevel`): the gating logic below only ever touches candidate/
  * named-contact/standing-grant availability, never `effectiveAccessLevel` or
  * the level sent in a grant's request body.
+ *
+ * "+ USER" — INTERNAL SYSTEM-USER SHARES (task 065, unified-access-control-r2,
+ * spec FR-29). A FOURTH write path alongside the three above: picking a
+ * `systemuser` (native advanced lookup, {@link IAccessGrantModalProps.pickUser})
+ * stages it into the SAME "Add Access Permissions" list (its own per-row level
+ * dropdown), and `Add (N)` commits it via `POST
+ * /api/v1/external-access/share-user` — a Dataverse POA share, NOT a
+ * `sprk_externalrecordaccess` row, and NOT the `/grant` core the contact/org
+ * flows use (task 063 built a dedicated share/unshare/list surface exactly
+ * because a POA share is a different write). Existing shares are read via
+ * `GET /api/v1/external-access/user-shares` (called directly by this modal,
+ * not host-injected — the endpoint is already entity-agnostic given
+ * `{recordType, recordId}`, same as grant/revoke) and merged into Current
+ * Access with `provenance: 'share'`; revoke uses `POST
+ * /api/v1/external-access/unshare-user`, not `/revoke` (a share carries no
+ * `accessRecordId`).
+ *
+ * DELEGATION GATE (task 008 FR-07 / task 063 — HARD PREREQUISITE for this
+ * button, design.md §6): every route this modal calls under
+ * `/api/v1/external-access/*` — including the three pre-existing ones — is
+ * now behind `DelegationRuleFilter` (group-level on `ExternalAccessEndpoints.
+ * MapInternalManagementEndpoints`), which requires the CALLER (OBO, not
+ * app-only) to hold Write on the target record. This modal MUST NOT try to
+ * PREDICT that outcome client-side — no privilege pre-check, no re-derivation
+ * of the rule from Dataverse privileges. Server truth only.
+ *
+ * Task 118 sharpened that rule rather than relaxing it: the host may now ASK
+ * the server the same question ahead of time (`GET /api/v1/external-access/
+ * can-manage-access`, whose 200/403 IS this filter's verdict) and pass the
+ * answer down as `canGrantAccess`. Asking is server truth; guessing from a
+ * table-level `hasEntityPrivilege` — which is what the host did until
+ * v1.0.31 — was not. A 403 with a `sdap.access.deny.delegation_*`
+ * reason code is rendered as a persistent, dismissable-only-by-reopening
+ * banner (`accessDenyState` below) that disables every write action (+User,
+ * +Contact, +Organization, Add, Revoke) — never a toast, never a raw error.
+ * A 401 (expired sign-in) gets its own distinct banner for the same reason.
+ *
+ * M8 / M2 (task-024 finding, transferred to this task 2026-09-09; owner
+ * directive 2026-09-10). `postJson`/`getJson` below now check `res.ok` before
+ * parsing the body as success (M8 — previously `(await res.json()) as T` read
+ * a failed response's ProblemDetails as if it were the success shape). Revoke
+ * renders one of three distinct outcomes: fully revoked, grant revoked but SPE
+ * removal could not be confirmed (the person may retain file access — retry/
+ * escalate), or nothing was revoked — built by {@link buildRevokeNotice}.
+ *
+ * M2 landed alongside M8 (binding order — see the task-024 constraint: flipping
+ * `/revoke`'s status to 500 without M8's `res.ok` check would have traded one
+ * silent wrong answer for a runtime throw). `RevokeExternalAccessEndpoint.cs`
+ * now returns 500 + ProblemDetails (`sdap.revoke.incomplete.container_not_cleared`,
+ * aligned with `/close-project`'s `ClosureIncomplete`) for the
+ * `SpeContainerOutcome.Failed` case ONLY — `NotAttempted`/`PermissionRemoved`/
+ * `NoPermissionFound` are unchanged 200s. `AccessGrantModalApiError` carries the
+ * ProblemDetails' `deactivatedCount`/`speContainerOutcome` extensions (see
+ * {@link AccessGrantModalApiError.fromResponse}), and `confirmRevoke`'s catch
+ * block recognizes this ONE reason code and routes it through the SAME
+ * {@link buildRevokeNotice} the 200 path uses — so a 500 still produces the
+ * owner's three-outcome message, never a generic "please try again" that
+ * silently drops `deactivatedCount`.
  */
 
 import * as React from 'react';
@@ -82,18 +140,21 @@ import {
   tokens,
   shorthands,
 } from '@fluentui/react-components';
-import { PersonRegular, DismissCircleRegular, BuildingRegular } from '@fluentui/react-icons';
+import { PersonRegular, PersonAccountsRegular, DismissCircleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
 // Record picker (task 073 v1.0.24) — "+ Contact" / "+ Organization" open the host's
 // NATIVE Dataverse advanced-lookup side pane (Xrm.Utility.lookupObjects, injected as
 // pickContact/pickOrganization) — the same advanced-find surface the wizards use. The
 // modal renders `nonBlocking` so that page-level pane is not covered by a backdrop.
+// "+ User" (task 065, FR-29) mirrors the same pattern via pickUser.
 import type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
   IAccessGrantRecord,
   IContactSearchResult,
   IOrganizationPick,
+  IUserPick,
+  ISecureOwnerInfo,
 } from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
 
@@ -213,6 +274,16 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
   },
+  // Secure-record owner/BU read-only row (task 065, design.md §6).
+  secureOwnerRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginBottom: tokens.spacingVerticalM,
+  },
 });
 
 /** Formats an ISO date string for display; falls back to the raw value when
@@ -224,12 +295,219 @@ function formatGrantDate(iso: string | undefined): string {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/** Mirrors the BFF's `SpeContainerRevokeOutcome` enum (camelCase-serialized
+ * PascalCase member names via `JsonStringEnumConverter`, no naming policy).
+ * Shared by {@link AccessGrantModalApiError} and {@link IRevokeAccessResponseBody}
+ * so both read the SAME set of values regardless of which HTTP status carried
+ * them (task 065 M2). */
+type SpeContainerRevokeOutcome = 'NotAttempted' | 'PermissionRemoved' | 'NoPermissionFound' | 'Failed';
+
+/** M2 (task 024 → task 065): the one reason code `/revoke` uses for its single
+ * incomplete shape — the Dataverse grant WAS deactivated, but the SPE
+ * container permission could not be confirmed removed. MUST match
+ * `RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason` exactly;
+ * deliberately its OWN leaf on the `sdap.*.incomplete.*` family
+ * `/close-project` established, not closure's literal code — a single-grant
+ * revoke and a project closure must stay distinguishable to a caller
+ * switching on the code. */
+const REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE = 'sdap.revoke.incomplete.container_not_cleared';
+
+/**
+ * Thrown by {@link postJson}/{@link getJson} for a non-OK BFF response (task-024
+ * finding M8, transferred to task 065). Carries the parsed RFC 7807
+ * ProblemDetails `reasonCode` (ADR-003/ADR-019) so callers can distinguish a
+ * delegation deny from an ordinary failure without re-parsing the body.
+ */
+class AccessGrantModalApiError extends Error {
+  readonly status: number;
+  readonly reasonCode?: string;
+  readonly detail: string;
+  /** M2 (task 024 → task 065): present ONLY when the ProblemDetails carried it
+   * (currently: the `/revoke` SPE-cleanup-incomplete 500). Never discarded —
+   * owner directive 2026-09-10 — so `confirmRevoke`'s catch block can still
+   * build the three-outcome notice via {@link buildRevokeNotice}. */
+  readonly deactivatedCount?: number;
+  readonly speContainerOutcome?: SpeContainerRevokeOutcome;
+
+  constructor(
+    status: number,
+    detail: string,
+    reasonCode?: string,
+    deactivatedCount?: number,
+    speContainerOutcome?: SpeContainerRevokeOutcome
+  ) {
+    super(`AccessGrantModal request failed (${status}): ${detail}`);
+    this.name = 'AccessGrantModalApiError';
+    this.status = status;
+    this.detail = detail;
+    this.reasonCode = reasonCode;
+    this.deactivatedCount = deactivatedCount;
+    this.speContainerOutcome = speContainerOutcome;
+    // Restore the prototype chain (extending built-ins across ES5/ts-jest
+    // transpilation targets can otherwise break `instanceof` checks) — same
+    // fix as communicationApi.ts's SendCommunicationError.
+    Object.setPrototypeOf(this, AccessGrantModalApiError.prototype);
+  }
+
+  /** Builds an error from a non-OK {@link Response}. Never throws while parsing. */
+  static async fromResponse(response: Response): Promise<AccessGrantModalApiError> {
+    const status = response.status;
+    try {
+      const body = (await response.json()) as {
+        reasonCode?: string;
+        detail?: string;
+        title?: string;
+        // M2 (task 024 → task 065): only `/revoke`'s incomplete-SPE-cleanup 500
+        // carries these today; every other ProblemDetails leaves them undefined.
+        deactivatedCount?: number;
+        speContainerOutcome?: string;
+      };
+      const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
+      const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
+      const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
+      const speContainerOutcome =
+        typeof body?.speContainerOutcome === 'string'
+          ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
+          : undefined;
+      return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome);
+    } catch {
+      return new AccessGrantModalApiError(status, `HTTP ${status}`);
+    }
+  }
+}
+
+/**
+ * Classifies a write/read failure as one of the modal's two designed deny
+ * states, or `null` for an ordinary failure the caller should handle its own
+ * way (network error, 500, validation 400, etc.). Only
+ * {@link AccessGrantModalApiError} instances are ever classified — a thrown
+ * `TypeError` (offline, DNS) is never mistaken for a server-issued deny.
+ *
+ * `'delegation'` covers EVERY `sdap.access.deny.delegation_*` reason code
+ * `DelegationRuleFilter` can return (no caller token, unresolvable target, the
+ * Write check itself failing, or the ordinary Write-required deny) — all four
+ * mean the same thing to this UI: "you cannot manage access on this record
+ * right now," which is the one designed banner state the project constraint
+ * requires (not a raw error, not a retry loop).
+ */
+function classifyAccessFailure(err: unknown): { kind: 'delegation' | 'unauthenticated'; message: string } | null {
+  if (!(err instanceof AccessGrantModalApiError)) return null;
+  if (err.status === 401) {
+    return { kind: 'unauthenticated', message: 'Your sign-in has expired. Refresh the page and try again.' };
+  }
+  if (err.status === 403 && err.reasonCode?.startsWith('sdap.access.deny.delegation_')) {
+    return {
+      kind: 'delegation',
+      message: 'You need Write access on this record to change who else can access it.',
+    };
+  }
+  return null;
+}
+
+/** The `RevokeAccessResponse` fields this modal reads (task-024 finding M2 /
+ * owner directive 2026-09-10) — camelCase per the BFF's default STJ naming.
+ * `speContainerOutcome` mirrors `SpeContainerRevokeOutcome`; only the values
+ * a per-contact/org revoke from THIS modal can produce are named (an
+ * organization-member breakdown is `speOrgMemberCleanup`, unused here). */
+interface IRevokeAccessResponseBody {
+  speContainerOutcome?: SpeContainerRevokeOutcome;
+  deactivatedCount?: number;
+}
+
+/**
+ * Builds the revoke notice from the response body — the owner's 2026-09-10
+ * directive: distinguish fully revoked / grant-revoked-but-file-access-may-
+ * remain / nothing-revoked, and never discard `deactivatedCount`. Uses fields
+ * the endpoint ALREADY returns today (no server change required).
+ */
+function buildRevokeNotice(
+  fullName: string,
+  data: IRevokeAccessResponseBody
+): { intent: 'success' | 'warning' | 'error'; text: string } {
+  if (data.speContainerOutcome === 'Failed') {
+    return {
+      intent: 'warning',
+      text:
+        `Revoked ${fullName}'s access record, but their file access could not be confirmed removed — ` +
+        `they may still be able to open files on this record. Retry the revoke, and escalate if it persists.`,
+    };
+  }
+  if ((data.deactivatedCount ?? 0) === 0) {
+    return { intent: 'warning', text: `${fullName} already had no active access record to revoke.` };
+  }
+  return { intent: 'success', text: `Revoked access for ${fullName}.` };
+}
+
+/** Outcome tally from one `handleGrantSelected` batch — pure input to
+ * {@link buildGrantBatchNotice}, kept separate from the component so the
+ * notice text is independently reasoned about and testable, the same
+ * decomposition already applied to revoke via {@link buildRevokeNotice}. */
+interface IGrantBatchOutcome {
+  granted: number;
+  selectedCount: number;
+  failures: number;
+  denied: boolean;
+  anyNotifyPending: boolean;
+  anyNarrowed: boolean;
+}
+
+/** Builds the post-batch notice for `Add (N)` — six distinct shapes ordered by
+ * priority (a denial or a failure dominates a narrowed/notify-pending
+ * success). Denial and failure are reported separately because they call for
+ * different next actions: a failure invites retry; a denial does not (retrying
+ * without Write on the record fails the same way). */
+function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
+  const { granted, selectedCount, failures, denied, anyNotifyPending, anyNarrowed } = outcome;
+
+  if (denied) {
+    return {
+      intent: 'error',
+      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.`,
+    };
+  }
+  if (failures > 0) {
+    return {
+      intent: 'error',
+      text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.`,
+    };
+  }
+  if (anyNotifyPending && anyNarrowed) {
+    return {
+      intent: 'warning',
+      text: `Granted access to ${granted} item(s). Some were narrowed to your own access level, and internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
+    };
+  }
+  if (anyNotifyPending) {
+    return {
+      intent: 'warning',
+      text: `Granted access to ${granted} item(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
+    };
+  }
+  if (anyNarrowed) {
+    return {
+      intent: 'warning',
+      text: `Granted access to ${granted} item(s). Some were narrowed to your own access level on this record (you can only grant what you hold).`,
+    };
+  }
+  return { intent: 'success', text: `Granted access to ${granted} item(s).` };
+}
+
+/** A pending revoke confirmation — either a `sprk_externalrecordaccess` grant
+ * (contact/organization, `/revoke`) or an internal system-user POA share
+ * (task 065, `/unshare-user`). The two use different endpoints and different
+ * identifying fields, so the confirm dialog branches on `kind`. */
+type PendingRevoke =
+  | { kind: 'grant'; accessRecordId: string; contactId: string; fullName: string }
+  | { kind: 'share'; systemUserId: string; fullName: string };
+
 export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   open,
   onClose,
   recordId,
   recordType = 'project',
-  canGrantAccess = true,
+  // 🔴 Fail CLOSED (task 118). Was `= true`; an omitted prop now renders the not-authorized
+  // state rather than the full grant UI. See the prop's doc in ./types.ts.
+  canGrantAccess = false,
   authenticatedFetch,
   fetchCandidates,
   fetchExistingGrants,
@@ -239,6 +517,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // advanced-lookup pickers below (task 073 UAT v1.0.24 #1/#4).
   pickContact,
   pickOrganization,
+  // "+ User" native picker (task 065, FR-29) — mirrors pickContact/pickOrganization.
+  pickUser,
   onOpenContact,
   isInternalContact,
   // onSetStandingGrant remains in the props contract but is unused: the standing
@@ -247,6 +527,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   accessLevelOptions = DEFAULT_ACCESS_LEVEL_OPTIONS,
   defaultAccessLevel,
   accessPermissionState = 'standard',
+  fetchSecureOwnerInfo,
 }) => {
   const styles = useStyles();
 
@@ -266,48 +547,135 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // "+ Contact"/"+ Organization" buttons so a double-click can't open two panes.
   const [picking, setPicking] = React.useState(false);
 
-  // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId).
+  // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId/systemUserId).
   // NO default: a row is not grantable until the admin picks its level ("Pick access level").
   const [rowLevels, setRowLevels] = React.useState<Record<string, number>>({});
-  // Contacts + organizations staged via the native "+ Contact" / "+ Organization"
-  // advanced lookup — appended into the "Add Access Permissions" list as selectable rows.
+  // Contacts + organizations + users staged via the native "+ Contact" /
+  // "+ Organization" / "+ User" advanced lookup — appended into the "Add
+  // Access Permissions" list as selectable rows.
   const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
   const [lookedUpOrgs, setLookedUpOrgs] = React.useState<IOrganizationPick[]>([]);
+  const [lookedUpUsers, setLookedUpUsers] = React.useState<IUserPick[]>([]);
 
-  const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
+  const [pendingRevoke, setPendingRevoke] = React.useState<PendingRevoke | null>(null);
   const [revoking, setRevoking] = React.useState(false);
 
   const [notice, setNotice] = React.useState<{ intent: 'success' | 'warning' | 'error'; text: string } | null>(null);
+
+  // The designed 401/403 deny states (task 008 FR-07 delegation gate; project
+  // constraint "the 403 delegation deny is a designed UI state, not a toast").
+  // Persists across the SAME modal session (not per-call) so once the server
+  // has said "no", every write action stays disabled until the modal is
+  // reopened — reset alongside the rest of the transient state below.
+  const [accessDenyState, setAccessDenyState] = React.useState<{
+    kind: 'delegation' | 'unauthenticated';
+    message: string;
+  } | null>(null);
+
+  // Secure-record owner/BU read-only display (task 065, design.md §6).
+  const [secureOwnerInfo, setSecureOwnerInfo] = React.useState<ISecureOwnerInfo | null>(null);
+
+  /** GETs a relative BFF path via the host `authenticatedFetch` and returns
+   * the parsed JSON body. Throws {@link AccessGrantModalApiError} on a non-OK
+   * response (task-024 finding M8) instead of reading the failure body as a
+   * success. */
+  const getJson = React.useCallback(
+    async <T,>(path: string): Promise<T> => {
+      const res = await authenticatedFetch(path, { method: 'GET' });
+      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
+      return (await res.json()) as T;
+    },
+    [authenticatedFetch]
+  );
+
+  /** Reads this record's internal system-user shares (task 063/065, FR-29) —
+   * a direct BFF call (not host-injected, unlike fetchCandidates/
+   * fetchExistingGrants): `GET /user-shares` is already entity-agnostic given
+   * {recordType, recordId}, the same shape every write on this modal already
+   * sends, so no new TrackingFieldTrio wiring is needed to read it. Mapped
+   * into {@link IAccessGrantRecord} shape with `provenance: 'share'` so it
+   * merges into the SAME Current Access list (task 066 owns full provenance
+   * rendering; here the row only needs to exist, be labeled, and be
+   * revocable). The Dataverse `contactId` field is reused to carry the
+   * systemUserId for row-keying — the same convention this file already uses
+   * for organization-grant rows (see fetchExistingGrants' `isOrgGrant`
+   * comment) — since a share has no contact at all.
+   *
+   * This read is ALSO behind the delegation gate (task 063: "the group is a
+   * closed access-management surface — mutations, plus one read... which
+   * discloses who can reach a record"), so a caller without Write on this
+   * record sees the deny banner as soon as the modal opens, before they ever
+   * attempt a write — a stricter, earlier surfacing of the same designed
+   * state the write paths hit, never a silent failure. */
+  const fetchUserShares = React.useCallback(async (): Promise<IAccessGrantRecord[]> => {
+    const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
+    const data = await getJson<{
+      shares: Array<{
+        systemUserId: string;
+        fullName?: string | null;
+        accessLevel?: number | null;
+        modifiedOn?: string;
+      }>;
+    }>(`/api/v1/external-access/user-shares?${query}`);
+    return (data.shares ?? []).map(s => ({
+      contactId: s.systemUserId,
+      fullName: s.fullName ?? '(unknown user)',
+      // Unmapped mask (a share holding rights outside the three levels) reads
+      // as `null` server-side; 0 is a safe sentinel — it matches none of the
+      // fixed ExternalAccessLevel option values, so the row falls through to
+      // the "Custom" display below rather than rendering a raw `null`.
+      accessLevel: s.accessLevel ?? 0,
+      grantedDate: s.modifiedOn,
+      provenance: 'share' as const,
+    }));
+  }, [getJson, recordType, recordId]);
 
   const loadData = React.useCallback(async () => {
     setLoading(true);
     setNotice(null);
     try {
-      const [candidateList, grantList, standingList] = await Promise.all([
+      const [candidateList, grantList, standingList, userShareList, ownerInfo] = await Promise.all([
         fetchCandidates(),
         fetchExistingGrants(),
         // Standing-grant members (task 073 UAT #2) — optional; a host that
         // hasn't wired the flag omits it. Failing soft so a standing-read
         // problem (e.g. field-level-security denial) never blocks the modal.
         fetchStandingContacts ? fetchStandingContacts().catch(() => [] as IAccessGrantRecord[]) : Promise.resolve([]),
+        // Internal system-user shares (task 065). A delegation 403 here is a
+        // designed state (see fetchUserShares' doc comment above), not a
+        // load failure — recorded via accessDenyState and the read fails
+        // soft to an empty list so the rest of the modal still loads.
+        fetchUserShares().catch(err => {
+          const deny = classifyAccessFailure(err);
+          if (deny) setAccessDenyState(deny);
+          return [] as IAccessGrantRecord[];
+        }),
+        // Secure-record owner/BU (task 065, design.md §6) — optional; a host
+        // that hasn't wired it, or a non-secure record, resolves to null.
+        // Fails soft: this is a read-only display, never a blocking concern.
+        fetchSecureOwnerInfo ? fetchSecureOwnerInfo().catch(() => null) : Promise.resolve(null),
       ]);
-      // Union standing rows into Current Access, deduped by contactId — an
-      // explicit per-record `sprk_externalrecordaccess` grant (which carries an
-      // accessRecordId and IS revocable) wins over a standing row for the same
-      // contact, so a contact with both shows once and stays revocable.
+      // Union standing + user-share rows into Current Access, deduped by
+      // contactId — an explicit per-record `sprk_externalrecordaccess` grant
+      // (which carries an accessRecordId and IS revocable) wins over a
+      // standing row for the same contact, so a contact with both shows once
+      // and stays revocable. User-share rows key on a DIFFERENT id space
+      // (systemUserId, reusing the `contactId` field per the doc comment
+      // above) so they never collide with contact-keyed rows.
       const grantedContactIds = new Set(grantList.map(g => g.contactId));
       const standingOnly = standingList.filter(s => !grantedContactIds.has(s.contactId));
-      setExistingGrants([...grantList, ...standingOnly]);
+      setExistingGrants([...grantList, ...standingOnly, ...userShareList]);
       // Exclude both explicitly-granted AND standing members from the
       // candidate-approve list (they already have access).
       const currentAccessContactIds = new Set([...grantedContactIds, ...standingOnly.map(s => s.contactId)]);
       setCandidates(candidateList.filter(c => !currentAccessContactIds.has(c.contactId)));
+      setSecureOwnerInfo(ownerInfo);
     } catch {
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
     } finally {
       setLoading(false);
     }
-  }, [fetchCandidates, fetchExistingGrants, fetchStandingContacts]);
+  }, [fetchCandidates, fetchExistingGrants, fetchStandingContacts, fetchUserShares, fetchSecureOwnerInfo]);
 
   React.useEffect(() => {
     if (open && canGrantAccess) {
@@ -315,6 +683,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setRowLevels({});
       setLookedUpContacts([]);
       setLookedUpOrgs([]);
+      setLookedUpUsers([]);
+      setPendingRevoke(null);
+      // A prior session's deny/notice is not this session's — a fresh open
+      // gets a fresh chance to load and write (server truth only; no
+      // client-side memory of "you were denied last time").
+      setAccessDenyState(null);
       void loadData();
     }
     // Only re-run when the modal transitions open (and once per open), not on every render.
@@ -322,8 +696,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   }, [open, canGrantAccess]);
 
   /** Posts a JSON body to a relative BFF path via the host `authenticatedFetch`
-   * and returns the parsed response body. Throws (message-bearing) on failure —
-   * callers wrap with a try/catch that surfaces a non-blocking notice. */
+   * and returns the parsed response body. Throws {@link AccessGrantModalApiError}
+   * on a non-OK response (task-024 finding M8) — callers wrap with a try/catch
+   * that classifies the failure (see {@link classifyAccessFailure}) and surfaces
+   * either the designed deny banner or a non-blocking notice. */
   const postJson = React.useCallback(
     async <T,>(path: string, body: unknown): Promise<T> => {
       const res = await authenticatedFetch(path, {
@@ -331,6 +707,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) throw await AccessGrantModalApiError.fromResponse(res);
       return (await res.json()) as T;
     },
     [authenticatedFetch]
@@ -404,16 +781,20 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [isInternalContact, postJson, recordId, recordType]
   );
 
-  // Unified "Available Contacts & Organizations" list (task 073 v1.0.23): role-based membership
-  // candidates + any contacts/organizations staged via the "+ Contact" / "+ Organization" side pane.
-  // Each item carries its own per-row access level. Granted contacts are excluded by loadData().
+  // Unified "Available Contacts & Organizations & Users" list (task 073 v1.0.23; task
+  // 065 adds the 'user' kind): role-based membership candidates + any contacts/
+  // organizations/users staged via the "+ Contact" / "+ Organization" / "+ User"
+  // side pane. Each item carries its own per-row access level. Granted contacts are
+  // excluded by loadData() (user shares are not — a user with no share is simply
+  // absent from Current Access, so nothing to exclude here).
   interface IAvailableItem {
-    id: string; // contactId (contact) or organizationId (organization)
+    id: string; // contactId (contact) or organizationId (organization) or systemUserId (user)
     name: string;
     meta: string;
-    kind: 'contact' | 'organization';
+    kind: 'contact' | 'organization' | 'user';
     contact?: { contactId: string; fullName: string; email?: string };
     org?: IOrganizationPick;
+    user?: IUserPick;
   }
   const availableItems = React.useMemo<IAvailableItem[]>(() => {
     const byId = new Map<string, IAccessGrantCandidate>();
@@ -436,8 +817,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     for (const o of lookedUpOrgs) {
       items.push({ id: o.id, name: o.name, meta: 'All organization contacts', kind: 'organization', org: o });
     }
+    for (const u of lookedUpUsers) {
+      items.push({ id: u.id, name: u.name, meta: 'Internal system user', kind: 'user', user: u });
+    }
     return items;
-  }, [candidates, lookedUpContacts, lookedUpOrgs]);
+  }, [candidates, lookedUpContacts, lookedUpOrgs, lookedUpUsers]);
 
   /** Writes a first-class ORGANIZATION grant (task 073 #7) — access for all contacts at the org.
    * `contactId` is omitted so the BFF treats (empty contact + organizationId) as an org grant; every
@@ -450,6 +834,26 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         accessLevel: level,
         organizationId: org.id,
       });
+    },
+    [postJson, recordType, recordId]
+  );
+
+  /** Writes an internal system-user POA SHARE (task 065, FR-29) via the task-063
+   * endpoint — NOT the `/grant` core the contact/org flows above use (a share is a
+   * different write; see the module doc comment). `narrowed: true` means the
+   * caller's own rights on the record were narrower than the requested level, so
+   * the share carries the intersection (owner decision 2026-09-16) — reported back
+   * so the caller can build one combined notice, same pattern as grantContact's
+   * `notifyPending`. */
+  const shareUser = React.useCallback(
+    async (user: IUserPick, level: number): Promise<{ narrowed: boolean }> => {
+      const data = await postJson<{ narrowed?: boolean }>('/api/v1/external-access/share-user', {
+        recordType,
+        recordId,
+        systemUserId: user.id,
+        accessLevel: level,
+      });
+      return { narrowed: data?.narrowed === true };
     },
     [postJson, recordType, recordId]
   );
@@ -471,6 +875,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let failures = 0;
     let granted = 0;
     let anyNotifyPending = false;
+    let anyNarrowed = false;
+    let denied = false;
     for (const it of selected) {
       const level = rowLevels[it.id];
       try {
@@ -479,9 +885,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           anyNotifyPending = anyNotifyPending || outcome.notifyPending;
         } else if (it.kind === 'organization' && it.org) {
           await grantOrganization(it.org, level);
+        } else if (it.kind === 'user' && it.user) {
+          const outcome = await shareUser(it.user, level);
+          anyNarrowed = anyNarrowed || outcome.narrowed;
         }
         granted += 1;
-      } catch {
+      } catch (err) {
+        // The delegation deny (project constraint: "a designed UI state ...
+        // scope: all three write actions") is NOT counted as an ordinary
+        // failure — it stops the batch and renders the persistent banner
+        // instead of "N failed, try again" (retrying without Write would
+        // just fail the same way for every remaining item).
+        const deny = classifyAccessFailure(err);
+        if (deny) {
+          setAccessDenyState(deny);
+          denied = true;
+          break;
+        }
         failures += 1;
       }
     }
@@ -491,25 +911,24 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setRowLevels({});
     setLookedUpContacts([]);
     setLookedUpOrgs([]);
+    setLookedUpUsers([]);
     await loadData();
 
-    if (failures > 0) {
-      setNotice({
-        intent: 'error',
-        text: `Granted access to ${granted} of ${selected.length}; ${failures} failed. Please try again.`,
-      });
-    } else if (anyNotifyPending) {
-      setNotice({
-        intent: 'warning',
-        text: `Granted access to ${granted} item(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
-      });
-    } else {
-      setNotice({ intent: 'success', text: `Granted access to ${granted} item(s).` });
-    }
-    // Success (for Save's close decision) iff nothing failed — a notify-pending
-    // grant still succeeded (the record-access row was written).
-    return failures === 0;
-  }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, loadData]);
+    setNotice(
+      buildGrantBatchNotice({
+        granted,
+        selectedCount: selected.length,
+        failures,
+        denied,
+        anyNotifyPending,
+        anyNarrowed,
+      })
+    );
+    // Success (for Save's close decision) iff nothing failed and access was not
+    // denied partway — a notify-pending or narrowed grant still succeeded (the
+    // access row/share was written).
+    return !denied && failures === 0;
+  }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, shareUser, loadData]);
 
   // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
   // them (respecting the level-required guard), then close on success; otherwise
@@ -563,29 +982,90 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
   }, [pickOrganization]);
 
-  const confirmRevoke = React.useCallback(async () => {
-    const target = existingGrants.find(g => g.accessRecordId === revokeTargetId);
-    if (!target) {
-      setRevokeTargetId(null);
-      return;
+  /** Opens the host's NATIVE advanced-lookup side pane for a single `systemuser`
+   * (task 065, FR-29) — mirrors {@link openContactPicker}/{@link openOrgPicker}. */
+  const openUserPicker = React.useCallback(async () => {
+    if (!pickUser) return;
+    setPicking(true);
+    try {
+      const picked = await pickUser();
+      if (!picked) return;
+      setLookedUpUsers(prev => (prev.some(u => u.id === picked.id) ? prev : [...prev, picked]));
+      setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
+    } finally {
+      setPicking(false);
     }
+  }, [pickUser]);
+
+  /** Confirms the pending revoke (task 065 extends this to branch on
+   * {@link PendingRevoke}'s `kind`: a contact/organization grant goes through
+   * `/revoke`; an internal system-user share goes through `/unshare-user` —
+   * a share carries no `accessRecordId`, so it cannot use the same call). A
+   * delegation/auth deny is the designed banner state (project constraint),
+   * not the per-target error notice this previously always showed. */
+  const confirmRevoke = React.useCallback(async () => {
+    if (!pendingRevoke) return;
     setRevoking(true);
     try {
-      // Revoke is root-agnostic (task 070): it deactivates by accessRecordId +
-      // contactId and no longer requires a root id, so no recordType/recordId is sent.
-      await postJson('/api/v1/external-access/revoke', {
-        accessRecordId: target.accessRecordId,
-        contactId: target.contactId,
-      });
-      setRevokeTargetId(null);
-      await loadData();
-      setNotice({ intent: 'success', text: `Revoked access for ${target.fullName}.` });
-    } catch {
-      setNotice({ intent: 'error', text: `Failed to revoke access for ${target.fullName}. Please try again.` });
+      if (pendingRevoke.kind === 'grant') {
+        // Revoke is root-agnostic (task 070): it deactivates by accessRecordId +
+        // contactId and no longer requires a root id, so no recordType/recordId is sent.
+        const data = await postJson<IRevokeAccessResponseBody>('/api/v1/external-access/revoke', {
+          accessRecordId: pendingRevoke.accessRecordId,
+          contactId: pendingRevoke.contactId,
+        });
+        const fullName = pendingRevoke.fullName;
+        setPendingRevoke(null);
+        await loadData();
+        setNotice(buildRevokeNotice(fullName, data));
+      } else {
+        // Internal user share (task 063/065): unshare-user, not /revoke.
+        await postJson('/api/v1/external-access/unshare-user', {
+          recordType,
+          recordId,
+          systemUserId: pendingRevoke.systemUserId,
+        });
+        const fullName = pendingRevoke.fullName;
+        setPendingRevoke(null);
+        await loadData();
+        setNotice({ intent: 'success', text: `Removed ${fullName}'s share.` });
+      }
+    } catch (err) {
+      const deny = classifyAccessFailure(err);
+      if (deny) {
+        setAccessDenyState(deny);
+        setPendingRevoke(null);
+      } else if (
+        pendingRevoke.kind === 'grant' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode === REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE
+      ) {
+        // M2 (task 024 -> task 065): /revoke now returns 500 + ProblemDetails for this exact
+        // shape (aligned with /close-project) instead of 200 + Failed-in-body. The Dataverse
+        // grant WAS deactivated server-side even though the SPE half failed, so the SAME
+        // three-outcome message + deactivatedCount the 200 path renders must still reach the
+        // person — a 500 must never regress into a generic "please try again" that drops
+        // deactivatedCount (owner directive 2026-09-10: "the status code is for the client,
+        // the MESSAGE is for the person").
+        const fullName = pendingRevoke.fullName;
+        setPendingRevoke(null);
+        await loadData();
+        setNotice(
+          buildRevokeNotice(fullName, {
+            speContainerOutcome: err.speContainerOutcome ?? 'Failed',
+            deactivatedCount: err.deactivatedCount,
+          })
+        );
+      } else {
+        setNotice({
+          intent: 'error',
+          text: `Failed to revoke access for ${pendingRevoke.fullName}. Please try again.`,
+        });
+      }
     } finally {
       setRevoking(false);
     }
-  }, [existingGrants, loadData, postJson, revokeTargetId]);
+  }, [pendingRevoke, loadData, postJson, recordType, recordId]);
 
   const toggleCandidateSelected = (contactId: string) => {
     setSelectedCandidateIds(prev => {
@@ -596,7 +1076,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     });
   };
 
-  const revokeTarget = existingGrants.find(g => g.accessRecordId === revokeTargetId) ?? null;
+  // Actions blocked by EITHER the Access-Permission sharing gate (task 043,
+  // 'restricted' — unrelated to delegation) OR a server-confirmed 401/403 deny
+  // (task 008/065 — the delegation gate). Both render their own banner below;
+  // this union is only for disabling the interactive GRANT controls.
+  const actionsBlocked = grantsBlocked || accessDenyState !== null;
+  // Revoke is intentionally NOT gated by `grantsBlocked` — 'restricted' blocks
+  // NEW grants only; reviewing + revoking EXISTING access stays available
+  // (task 073 UAT #4's "still allows reviewing and revoking existing access").
+  // The delegation/auth deny DOES block revoke — it is one of the "three write
+  // actions" the project constraint names explicitly.
+  const revokeBlocked = revoking || accessDenyState !== null;
 
   return (
     <>
@@ -662,15 +1152,41 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   </MessageBar>
                 )}
 
-                {/* Add Access Permissions (task 073 UAT v1.0.24 #2) — role-based members + looked-up
-                    contacts/orgs. "+ Contact" / "+ Organization" (icon-only, #4) open the NATIVE
-                    advanced-lookup pane. Select, choose a level, Add. */}
+                {/* Delegation/auth deny banner (task 008 FR-07 / task 065) — a
+                    DESIGNED state per the project constraint, never a toast or
+                    raw error. Disables every write action below via
+                    actionsBlocked until the modal is reopened. */}
+                {accessDenyState && (
+                  <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
+                    <MessageBarBody>
+                      <MessageBarTitle>
+                        {accessDenyState.kind === 'delegation' ? 'Write access required' : 'Sign-in expired'}
+                      </MessageBarTitle>
+                      {accessDenyState.message}
+                    </MessageBarBody>
+                  </MessageBar>
+                )}
+
+                {/* Secure-record owner/BU read-only display (task 065, design.md §6). */}
+                {secureOwnerInfo && (
+                  <div className={styles.secureOwnerRow}>
+                    <Text>
+                      Secure record — Owner: <strong>{secureOwnerInfo.ownerName}</strong> · Business Unit:{' '}
+                      <strong>{secureOwnerInfo.businessUnitName}</strong>
+                    </Text>
+                  </div>
+                )}
+
+                {/* Add Access Permissions (task 073 UAT v1.0.24 #2; task 065 adds "+ User") —
+                    role-based members + looked-up contacts/orgs/users. "+ Contact" / "+ Organization" /
+                    "+ User" (icon-only, #4) open the NATIVE advanced-lookup pane. Select, choose a
+                    level, Add. */}
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
                   <div className={styles.sectionHeaderRow}>
                     <Text className={styles.sectionTitle}>Add Access Permissions</Text>
                     <div className={styles.sectionHeaderActions}>
-                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4) — open the native
-                          advanced-lookup pane (pickContact/pickOrganization). */}
+                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4; task 065 adds "+ User") —
+                          open the native advanced-lookup pane (pickContact/pickOrganization/pickUser). */}
                       {pickContact && (
                         <Tooltip content="Add contact" relationship="label">
                           <Button
@@ -678,7 +1194,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             size="small"
                             icon={<PersonRegular />}
                             onClick={() => void openContactPicker()}
-                            disabled={grantsBlocked || picking}
+                            disabled={actionsBlocked || picking}
                             aria-label="Add contact"
                           >
                             +
@@ -692,8 +1208,22 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             size="small"
                             icon={<BuildingRegular />}
                             onClick={() => void openOrgPicker()}
-                            disabled={grantsBlocked || picking}
+                            disabled={actionsBlocked || picking}
                             aria-label="Add organization"
+                          >
+                            +
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {pickUser && (
+                        <Tooltip content="Add user" relationship="label">
+                          <Button
+                            appearance="secondary"
+                            size="small"
+                            icon={<PersonAccountsRegular />}
+                            onClick={() => void openUserPicker()}
+                            disabled={actionsBlocked || picking}
+                            aria-label="Add user"
                           >
                             +
                           </Button>
@@ -706,7 +1236,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <div className={styles.listArea}>
                     {availableItems.length === 0 ? (
                       <Text className={styles.emptyState}>
-                        No contacts or organizations yet. Use “+ Contact” or “+ Organization” to add.
+                        No contacts, organizations or users yet. Use “+ Contact”, “+ Organization” or “+ User” to add.
                       </Text>
                     ) : (
                       availableItems.map(item => (
@@ -715,11 +1245,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             checked={selectedCandidateIds.has(item.id)}
                             onChange={() => toggleCandidateSelected(item.id)}
                             aria-label={`Select ${item.name}`}
-                            disabled={grantsBlocked}
+                            disabled={actionsBlocked}
                           />
                           <div className={styles.rowMain}>
                             {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6);
-                                organization rows show a building glyph + plain name. */}
+                                organization rows show a building glyph; user rows (task 065) show a
+                                person-accounts glyph — both render plain (no open-record link). */}
                             {item.kind === 'contact' && item.contact && onOpenContact ? (
                               <Link
                                 className={styles.contactLink}
@@ -729,7 +1260,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               </Link>
                             ) : (
                               <Text className={styles.rowName}>
-                                {item.kind === 'organization' ? <BuildingRegular /> : null} {item.name}
+                                {item.kind === 'organization' ? (
+                                  <BuildingRegular />
+                                ) : item.kind === 'user' ? (
+                                  <PersonAccountsRegular />
+                                ) : null}{' '}
+                                {item.name}
                               </Text>
                             )}
                             <Text className={styles.rowMeta}>{item.meta}</Text>
@@ -745,7 +1281,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                   : ''
                               }
                               selectedOptions={rowLevels[item.id] !== undefined ? [String(rowLevels[item.id])] : []}
-                              disabled={grantsBlocked}
+                              disabled={actionsBlocked}
                               onOptionSelect={(_, data) => {
                                 if (data.optionValue) {
                                   const v = Number(data.optionValue);
@@ -768,7 +1304,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <div className={styles.levelRow}>
                     <Button
                       appearance="primary"
-                      disabled={selectedCandidateIds.size === 0 || approving || grantsBlocked}
+                      disabled={selectedCandidateIds.size === 0 || approving || actionsBlocked}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
                       onClick={handleGrantSelected}
                     >
@@ -785,33 +1321,46 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       <Text className={styles.emptyState}>No active grants for this record.</Text>
                     ) : (
                       existingGrants.map(grant => {
+                        // Internal system-user POA share (task 065) — checked FIRST: a share also
+                        // carries no accessRecordId, so it must not fall into the standing branch below.
+                        const isUserShare = grant.provenance === 'share';
                         // Standing-grant rows (task 073 UAT #2) confer ongoing
                         // membership via the contact's global `sprk_standinggrant`
                         // flag — there is NO per-record `sprk_externalrecordaccess`
                         // row to revoke here, so they render non-revocable with a
                         // "Standing" badge instead of an access-level + Revoke.
-                        const isStanding = grant.provenance === 'standing' || !grant.accessRecordId;
+                        const isStanding = !isUserShare && (grant.provenance === 'standing' || !grant.accessRecordId);
                         // Organization grant (task 073 #7): everyone at the firm inherits access. Unlike a
                         // standing grant it IS a real per-record row, so it keeps the level badge + Revoke.
                         const isOrg = grant.provenance === 'organization';
+                        const rowKey = grant.accessRecordId
+                          ? grant.accessRecordId
+                          : isUserShare
+                            ? `share-${grant.contactId}`
+                            : `standing-${grant.contactId}`;
                         return (
-                          <div className={styles.row} key={grant.accessRecordId ?? `standing-${grant.contactId}`}>
+                          <div className={styles.row} key={rowKey}>
                             <div className={styles.rowMain}>
                               {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6).
-                                Org grants key on the org id (not a contact), so they stay plain text. */}
-                              {!isOrg && onOpenContact ? (
+                                Org grants key on the org id (not a contact); user-share rows key on a
+                                systemUserId (not a contact) — both stay plain text. */}
+                              {!isOrg && !isUserShare && onOpenContact ? (
                                 <Link className={styles.contactLink} onClick={() => onOpenContact(grant.contactId)}>
                                   {grant.fullName}
                                 </Link>
                               ) : (
-                                <Text className={styles.rowName}>{grant.fullName}</Text>
+                                <Text className={styles.rowName}>
+                                  {isUserShare ? <PersonAccountsRegular /> : null} {grant.fullName}
+                                </Text>
                               )}
                               <Text className={styles.rowMeta}>
-                                {isStanding
-                                  ? 'Standing grant — ongoing access to assigned records'
-                                  : isOrg
-                                    ? 'Organization grant — all organization contacts have access'
-                                    : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                                {isUserShare
+                                  ? `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}`
+                                  : isStanding
+                                    ? 'Standing grant — ongoing access to assigned records'
+                                    : isOrg
+                                      ? 'Organization grant — all organization contacts have access'
+                                      : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
                               </Text>
                             </div>
                             <div className={styles.rowActions}>
@@ -819,6 +1368,29 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                 <Badge appearance="tint" color="success">
                                   Standing
                                 </Badge>
+                              ) : isUserShare ? (
+                                <>
+                                  <Badge appearance="tint" color="brand">
+                                    {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ?? 'Custom'}
+                                  </Badge>
+                                  <Badge appearance="outline" size="small">
+                                    User (share)
+                                  </Badge>
+                                  <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    onClick={() =>
+                                      setPendingRevoke({
+                                        kind: 'share',
+                                        systemUserId: grant.contactId,
+                                        fullName: grant.fullName,
+                                      })
+                                    }
+                                    disabled={revokeBlocked}
+                                  >
+                                    Revoke
+                                  </Button>
+                                </>
                               ) : (
                                 <>
                                   <Badge appearance="tint" color="informative">
@@ -828,8 +1400,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                   <Button
                                     appearance="subtle"
                                     size="small"
-                                    onClick={() => setRevokeTargetId(grant.accessRecordId!)}
-                                    disabled={revoking}
+                                    onClick={() =>
+                                      setPendingRevoke({
+                                        kind: 'grant',
+                                        accessRecordId: grant.accessRecordId!,
+                                        contactId: grant.contactId,
+                                        fullName: grant.fullName,
+                                      })
+                                    }
+                                    disabled={revokeBlocked}
                                   >
                                     Revoke
                                   </Button>
@@ -850,16 +1429,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       {/* Revoke confirm — a second, stacked Fluent Dialog is supported (unlike
           the OOB-navigateTo-inside-a-Fluent-dialog anti-pattern, which mixes
-          chrome families; this nests two proprietary Fluent v9 dialogs). */}
+          chrome families; this nests two proprietary Fluent v9 dialogs). Task
+          065: works for either PendingRevoke kind (grant or share) via the
+          shared confirmRevoke handler. */}
       <SprkModal
-        open={revokeTarget !== null}
-        onClose={() => setRevokeTargetId(null)}
+        open={pendingRevoke !== null}
+        onClose={() => setPendingRevoke(null)}
         title="Revoke access?"
         size="xs"
         dismiss="alert"
         maximizable={false}
         footerStart={
-          <Button appearance="secondary" onClick={() => setRevokeTargetId(null)} disabled={revoking}>
+          <Button appearance="secondary" onClick={() => setPendingRevoke(null)} disabled={revoking}>
             Cancel
           </Button>
         }
@@ -875,7 +1456,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
       >
         <Text>
-          Revoke access for <strong>{revokeTarget?.fullName}</strong>? They will immediately lose access to this record
+          Revoke access for <strong>{pendingRevoke?.fullName}</strong>? They will immediately lose access to this record
           (unless a standing grant or other membership still applies).
         </Text>
       </SprkModal>

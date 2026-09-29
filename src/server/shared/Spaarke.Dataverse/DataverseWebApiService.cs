@@ -20,8 +20,8 @@ namespace Spaarke.Dataverse;
 /// <para><b>Runtime surface (RED-4 hardening, 2026-08-16):</b> this class serves ONLY the narrow
 /// interfaces <see cref="IEventDataverseService"/> and <see cref="IFieldMappingDataverseService"/>
 /// (wired in <c>GraphModule.cs</c>), plus the concrete-injected impersonation/POA methods
-/// (<c>RetrieveMultipleImpersonatedAsync</c>, <c>GrantAccessAsync</c>, <c>GetSharedSystemUserIdsAsync</c>)
-/// reached via the <c>IImpersonatedCommunicationQuery</c> / <c>IDataverseAccessGrantService</c> seams in
+/// (<c>RetrieveMultipleImpersonatedAsync</c>, <c>GrantAccessAsync</c>, <c>RevokeAccessAsync</c>, <c>GetPrincipalAccessAsync</c>)
+/// reached via the <c>IImpersonatedCommunicationQuery</c> / <c>IDataverseRecordShareService</c> seams in
 /// <c>CommunicationModule.cs</c>. Document / analysis / generic-entity / processing-job / KPI /
 /// communication-query / health capability all resolve to <see cref="DataverseServiceClientImpl"/>
 /// (SDK) — the former implementations of those surfaces here were runtime-dead and were removed.
@@ -47,6 +47,25 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
         IConfidentialClientProvider? confidentialClients = null)
+        : this(httpClient, configuration, logger, confidentialClients, credential: null)
+    {
+    }
+
+    /// <summary>
+    /// Test seam (unified-access-control-r2 task 104). A non-null <paramref name="credential"/> bypasses
+    /// credential SELECTION: neither the managed-identity nor the ordered-provider branch runs. Tests use it to
+    /// send a real request through the production request builder without a network token.
+    /// <para><b>Protected on purpose.</b> Dependency injection only considers public constructors, so the
+    /// container's singleton <c>TokenCredential</c> (<c>Program.cs</c>) can never be injected here, however this
+    /// type is registered. The public optional parameter on <see cref="DataverseWebApiClient"/> does not have
+    /// that protection. Tests reach this constructor through a subclass.</para>
+    /// </summary>
+    protected DataverseWebApiService(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<DataverseWebApiService> logger,
+        IConfidentialClientProvider? confidentialClients,
+        TokenCredential? credential)
     {
         _httpClient = httpClient;
         _logger = logger;
@@ -63,7 +82,14 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var useManagedIdentity = string.Equals(
             configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (useManagedIdentity)
+        if (credential is not null)
+        {
+            // Explicitly supplied (tests only): selection is bypassed. See this protected ctor's summary.
+            _credential = credential;
+            _logger.LogInformation(
+                "DataverseWebApiService using an injected TokenCredential (selection bypassed) for {ApiUrl}", _apiUrl);
+        }
+        else if (useManagedIdentity)
         {
             var miClientId = configuration["ManagedIdentity:ClientId"]
                 ?? configuration["Graph:ManagedIdentity:ClientId"];
@@ -160,23 +186,41 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// </summary>
     /// <param name="impersonateSystemUserId">
     /// OPTIONAL Dataverse <c>systemuserid</c> to impersonate for this request (adds the <c>MSCRMCallerID</c>
-    /// header via <see cref="DataverseImpersonation"/>). <c>null</c>/<see cref="Guid.Empty"/> (the default) leaves
-    /// the request app-only and byte-unchanged — existing consumers pass nothing and are unaffected. Added for the
-    /// messaging read path (messaging-communication-app-r1), where Dataverse does row-level filtering natively.
+    /// header via <see cref="DataverseImpersonation.ApplyAsSystemUser"/>). <c>null</c> (the default) leaves the
+    /// request app-only and byte-unchanged — existing consumers pass nothing and are unaffected.
+    /// <see cref="Guid.Empty"/> is REFUSED (task 104, fail closed): it used to be read as "no impersonation",
+    /// which turned a missing caller id into a silent app-only request. Added for the messaging read path
+    /// (messaging-communication-app-r1), where Dataverse does row-level filtering natively.
     /// </param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="impersonateSystemUserId"/> is <see cref="Guid.Empty"/>. Thrown before a token is acquired
+    /// or anything is sent.
+    /// </exception>
     private async Task<HttpRequestMessage> CreateAuthenticatedRequestAsync(
         HttpMethod method, string url, CancellationToken cancellationToken = default, Guid? impersonateSystemUserId = null)
     {
-        var token = await GetAccessTokenAsync(cancellationToken);
         var request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        DataverseImpersonation.Apply(request, impersonateSystemUserId);
-        return request;
+        try
+        {
+            // Impersonation first, so an empty caller id is refused before any I/O.
+            if (impersonateSystemUserId is { } callerSystemUserId)
+                DataverseImpersonation.ApplyAsSystemUser(request, callerSystemUserId);
+
+            var token = await GetAccessTokenAsync(cancellationToken);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return request;
+        }
+        catch
+        {
+            request.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
-    /// Sends a GET request with per-request auth headers. When <paramref name="impersonateSystemUserId"/> is a real
-    /// user id the request runs AS that Dataverse user (MSCRMCallerID impersonation); otherwise it is app-only.
+    /// Sends a GET request with per-request auth headers. When <paramref name="impersonateSystemUserId"/> is
+    /// supplied the request runs AS that Dataverse user (MSCRMCallerID impersonation; <see cref="Guid.Empty"/> is
+    /// refused). When it is null the request is app-only.
     /// </summary>
     private async Task<HttpResponseMessage> SendGetAsync(string url, CancellationToken ct = default, Guid? impersonateSystemUserId = null)
     {
@@ -198,7 +242,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// Sends a PATCH request with JSON body and per-request auth headers. When
     /// <paramref name="impersonateSystemUserId"/> is a real Dataverse <c>systemuserid</c>, the PATCH runs AS that
     /// user (<c>MSCRMCallerID</c> impersonation — effective privileges = intersection of app user + impersonated
-    /// user, honest <c>modifiedby</c>); null/empty = app-only (existing callers byte-unchanged). This is the
+    /// user, honest <c>modifiedby</c>); null = app-only (existing callers byte-unchanged); <see cref="Guid.Empty"/>
+    /// is refused (task 104). This is the
     /// write-plane counterpart of the impersonated read (<see cref="RetrieveMultipleImpersonatedAsync"/>), added
     /// for the Job B apply path (task 031).
     /// </summary>
@@ -1050,18 +1095,63 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <summary>
-    /// Grants POA access on a record to a <c>systemuser</c> principal — the OOB "Manage access" (GrantAccess)
-    /// mechanism, app-only. <paramref name="accessRightsCsv"/> is the Dataverse <c>AccessMask</c> literal (e.g.
+    /// Grants POA access on a record to a principal — the OOB "Manage access" (GrantAccess) mechanism,
+    /// app-only. <paramref name="accessRightsCsv"/> is the Dataverse <c>AccessMask</c> literal (e.g.
     /// <c>"ReadAccess"</c> or <c>"ReadAccess,AppendAccess"</c>).
     /// </summary>
+    /// <remarks>
+    /// <para>unified-access-control-r2 task 060: generalized from systemuser-only to any
+    /// <see cref="DataversePrincipalKind"/>. This is the ONE place a <c>GrantAccess</c> payload is built —
+    /// <c>PlaybookSharingService</c>'s private team-grant duplicate was deleted in favour of it.</para>
+    ///
+    /// <para><b>Creates a share; do not use it to change one</b> (task 063). Microsoft Learn does not document what
+    /// GrantAccess does to a principal that already holds a share on the record, so it cannot be relied on to LOWER
+    /// rights. A caller that means "this principal's rights are now exactly X" reads the shares first
+    /// (<see cref="GetPrincipalAccessOrThrowAsync"/>) and calls <see cref="ModifyAccessAsync"/> for an existing
+    /// share.</para>
+    /// </remarks>
     public async Task GrantAccessAsync(
         string entitySetName,
         Guid recordId,
-        Guid principalSystemUserId,
+        DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
     {
-        var payload = new Dictionary<string, object>
+        var response = await SendPostAsJsonAsync(
+            "GrantAccess", PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Replaces the rights of a principal's EXISTING POA share on a record — the OOB <c>ModifyAccess</c> action,
+    /// app-only. Same key and payload shape as
+    /// <see cref="GrantAccessAsync(string, Guid, DataversePrincipalRef, string, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 063. Microsoft Learn documents ModifyAccess as REPLACING the principal's access
+    /// mask, which is what a level change needs: a downgrade from Full Access to View Only must leave Read, not Read
+    /// plus the Write and Delete a GrantAccess might keep. It does not document ModifyAccess for a principal that
+    /// holds no share; use <see cref="GrantAccessAsync"/> for that.
+    /// </remarks>
+    public async Task ModifyAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        string accessRightsCsv,
+        CancellationToken ct = default)
+    {
+        var response = await SendPostAsJsonAsync(
+            "ModifyAccess", PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// The <c>Target</c> + <c>PrincipalAccess</c> body that GrantAccess and ModifyAccess both take — built once, so
+    /// the two actions cannot address a record or a principal differently.
+    /// </summary>
+    private static Dictionary<string, object> PrincipalAccessPayload(
+        string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv)
+        => new()
         {
             ["Target"] = new Dictionary<string, object>
             {
@@ -1071,55 +1161,227 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             {
                 ["Principal"] = new Dictionary<string, object>
                 {
-                    ["@odata.id"] = $"systemusers({principalSystemUserId})",
+                    ["@odata.id"] = $"{principal.Kind.ToEntitySet()}({principal.Id})",
                 },
                 ["AccessMask"] = accessRightsCsv,
             },
         };
 
-        var response = await SendPostAsJsonAsync("GrantAccess", payload, ct);
+    /// <summary>
+    /// Revokes a principal's POA share on a record — the OOB <c>RevokeAccess</c> action, app-only.
+    /// </summary>
+    /// <remarks>
+    /// <para>unified-access-control-r2 task 060. Takes the SAME key shape as
+    /// <see cref="GrantAccessAsync(string, Guid, DataversePrincipalRef, string, CancellationToken)"/>
+    /// (entity set + record id + principal) — the A-13/FR-16 matcher lesson: a revoke keyed differently
+    /// from its grant silently fails to match the row it was meant to remove.</para>
+    ///
+    /// <para><b>Not documented as idempotent</b> (corrected by task 063). This comment used to promise that revoking a
+    /// share that does not exist is a Dataverse no-op; Microsoft Learn does not document that case. A caller that must
+    /// be idempotent reads the shares first (<see cref="GetPrincipalAccessOrThrowAsync"/>) and skips the call when
+    /// there is nothing to revoke.</para>
+    /// </remarks>
+    public async Task RevokeAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        CancellationToken ct = default)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["Target"] = new Dictionary<string, object>
+            {
+                ["@odata.id"] = $"{entitySetName}({recordId})",
+            },
+            ["Revokee"] = new Dictionary<string, object>
+            {
+                ["@odata.id"] = $"{principal.Kind.ToEntitySet()}({principal.Id})",
+            },
+        };
+
+        var response = await SendPostAsJsonAsync("RevokeAccess", payload, ct);
         response.EnsureSuccessStatusCode();
     }
 
     /// <summary>
-    /// Reads the principals with an ACTIVE POA share on a record, as <c>systemuser</c> ids. Assumes every
-    /// share on the record was written by a Spaarke systemuser-only grant flow (R1 Direct-thread scope is
-    /// internal-only per <c>notes/access-model-decision.md</c> config prerequisite #3 — no team/contact
-    /// shares are written by this path, so no <c>principaltypecode</c> filter is needed to disambiguate).
-    /// Fails soft: a lookup error returns an empty list rather than throwing (callers treat "no shares" as
-    /// the safe default — see <see cref="Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService"/>).
+    /// Reads the principals with an ACTIVE POA share on a record, with the kind and rights mask of each
+    /// share. Fails soft: a lookup error returns an empty list rather than throwing (callers treat
+    /// "no shares" as the safe default — see
+    /// <see cref="Sprk.Bff.Api.Services.Access.IDataverseRecordShareService"/>).
     /// </summary>
-    public async Task<IReadOnlyList<Guid>> GetSharedSystemUserIdsAsync(
+    /// <remarks>
+    /// unified-access-control-r2 task 060: replaces <c>GetSharedSystemUserIdsAsync</c>, which selected only
+    /// <c>principalid</c> and ASSUMED every share on the record was a systemuser. Now that teams are shared
+    /// through this same seam, the assumption is unsafe, so <c>principaltypecode</c> is selected and the
+    /// principal is returned typed — callers filter for the kind they mean. Rows whose principal type this
+    /// seam does not model are skipped rather than guessed at.
+    ///
+    /// <para><b>Never decide a write from this read</b> (task 063). Its empty answer means "no shares" OR "the read
+    /// failed", and a caller writing on it cannot tell which. Use <see cref="GetPrincipalAccessOrThrowAsync"/>.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
         string entityLogicalName,
         Guid recordId,
         CancellationToken ct = default)
     {
-        var objectTypeCode = await GetEntityObjectTypeCodeAsync(entityLogicalName, ct);
-        if (objectTypeCode == 0)
-            return Array.Empty<Guid>();
-
-        var url = $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq {objectTypeCode}&$select=principalid";
-        var response = await SendGetAsync(url, ct);
+        // No object-type-code lookup: POA's objecttypecode holds the LOGICAL NAME (see PrincipalAccessQuery),
+        // which the caller already supplied. This also removes a failure mode — the metadata read that
+        // returned 0 and silently produced an empty share list.
+        var response = await SendGetAsync(PrincipalAccessQuery(recordId, entityLogicalName), ct);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "GetSharedSystemUserIdsAsync failed for {Entity}({RecordId}): {StatusCode}",
+                "GetPrincipalAccessAsync failed for {Entity}({RecordId}): {StatusCode}",
                 entityLogicalName, recordId, response.StatusCode);
-            return Array.Empty<Guid>();
+            return Array.Empty<DataversePrincipalAccess>();
         }
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
         if (data?.Value is null)
-            return Array.Empty<Guid>();
+            return Array.Empty<DataversePrincipalAccess>();
 
-        return data.Value
-            .Select(row => row.TryGetValue("principalid", out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g)
-                ? g
-                : (Guid?)null)
-            .Where(g => g.HasValue)
-            .Select(g => g!.Value)
-            .Distinct()
-            .ToList();
+        return ReadPrincipalAccessRows(data.Value, entityLogicalName, recordId, strict: false);
+    }
+
+    /// <summary>
+    /// Reads every principal with a POA share on a record — the same rows as <see cref="GetPrincipalAccessAsync"/> —
+    /// but THROWS when it cannot give the complete answer, instead of answering with an empty list.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a second read</b> (unified-access-control-r2 task 063). The soft read's empty list is safe for a
+    /// caller that only displays shares. It is not safe for one that decides a WRITE from them: "no share" picks
+    /// GrantAccess for a principal who already holds one — and GrantAccess on an existing share is not documented to
+    /// replace its rights — and reports "nothing to remove" for a share that exists. Here the answer is complete, or
+    /// it is an exception.</para>
+    ///
+    /// <para><b>Incomplete counts as failed</b>: the table's object type code or the rows could not be read; a row has
+    /// no readable principal or rights mask (to a caller deciding a write, an unreadable row is a share it cannot
+    /// see); or the response continues on another page (<c>@odata.nextLink</c>), whose rows could include the very
+    /// principal being changed. Rows naming a principal kind this seam does not model are skipped, as in the soft
+    /// read: they are complete answers about principals no caller here asks about.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The shares could not be read completely.</exception>
+    public async Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        // No object-type-code lookup: POA's objecttypecode holds the LOGICAL NAME (see PrincipalAccessQuery),
+        // which the caller already supplied. The "object type code could not be read" refusal is retired with
+        // it — that metadata read is no longer on this path, so it can no longer fail it.
+        using var response = await SendGetAsync(PrincipalAccessQuery(recordId, entityLogicalName), ct);
+        if (!response.IsSuccessStatusCode)
+            throw ShareReadFailed(entityLogicalName, recordId,
+                $"Dataverse answered {(int)response.StatusCode} {response.StatusCode}");
+
+        var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        if (data?.Value is null)
+            throw ShareReadFailed(entityLogicalName, recordId, "the response carried no rows");
+
+        if (data.NextLink is not null)
+            throw ShareReadFailed(entityLogicalName, recordId, "the shares continue on another page");
+
+        return ReadPrincipalAccessRows(data.Value, entityLogicalName, recordId, strict: true);
+    }
+
+    /// <summary>The query both share reads issue: every POA row of one record.</summary>
+    /// <remarks>
+    /// 🔴 <b>Three faults were fixed here on 2026-09-22, each masking the next</b> — found because
+    /// <c>GET /api/v1/external-access/user-shares</c> answered 500 for every caller, admin included, and
+    /// verified one at a time against live Dataverse:
+    /// <list type="number">
+    /// <item><c>modifiedon</c> <b>does not exist on POA</b> — the column is <c>changedon</c>. Dataverse answered
+    /// <c>400 "Could not find a property named 'modifiedon' on type Microsoft.Dynamics.CRM.principalobjectaccess"</c>.</item>
+    /// <item><c>objecttypecode</c> on POA is <b><c>Edm.String</c></b>, not an integer. An unquoted numeric operand gave
+    /// <c>400 "A binary operator with incompatible types … Found operand types 'Edm.String' and 'Edm.Int32'"</c>.</item>
+    /// <item>The string it holds is the <b>LOGICAL NAME</b>, not the numeric type code rendered as text. Quoting the
+    /// number gave <c>400 "The entity with a name = '10473' … was not found in the MetadataCache"</c>.</item>
+    /// </list>
+    /// <para>So the entity's numeric object-type code is <b>not an input to this query at all</b>; the logical name
+    /// the caller already holds is. Verified: the corrected query answers <c>200</c>.</para>
+    /// <para><b>Why this went unnoticed</b>: the SOFT read (<see cref="GetPrincipalAccessAsync"/>) shares this query
+    /// and turns any non-success into an EMPTY LIST, so every share read in this environment reported "no shares"
+    /// rather than failing. That is exactly the defect task 108 exists to remove, sitting inside the very query task
+    /// 108's strict read depends on — the strict read is what finally surfaced it, by refusing instead of inventing
+    /// an empty answer.</para>
+    /// </remarks>
+    private static string PrincipalAccessQuery(Guid recordId, string entityLogicalName)
+        => $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq '{entityLogicalName}'"
+            + "&$select=principalid,principaltypecode,accessrightsmask,changedon";
+
+    /// <summary>
+    /// Turns POA rows into typed shares. Rows naming a principal kind this seam does not model are skipped in both
+    /// modes. A row whose principal or rights mask cannot be read is skipped (principal) or read as mask 0 when
+    /// <paramref name="strict"/> is false — the soft read's long-standing behaviour — and THROWS when it is true.
+    /// </summary>
+    private static List<DataversePrincipalAccess> ReadPrincipalAccessRows(
+        List<Dictionary<string, JsonElement>> rows, string entityLogicalName, Guid recordId, bool strict)
+    {
+        var results = new List<DataversePrincipalAccess>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (!TryReadGuid(row, "principalid", out var principalId)
+                || !TryReadInt(row, "principaltypecode", out var principalTypeCode))
+            {
+                if (strict)
+                    throw ShareReadFailed(entityLogicalName, recordId, "a share row has no readable principal");
+
+                continue;
+            }
+
+            var kind = DataversePrincipalRefExtensions.FromPrincipalTypeCode(principalTypeCode);
+            if (kind is null)
+                continue;
+
+            if (!TryReadInt(row, "accessrightsmask", out var mask) && strict)
+                throw ShareReadFailed(entityLogicalName, recordId, $"the share of {principalId} has no readable rights mask");
+
+            // changedon is in the $select, so a value that cannot be read means an anomalous response. The soft
+            // read keeps its long-standing fallback — its callers only display the value. The strict read refuses:
+            // "incomplete counts as failed" must not carry an exception that reports a share as changed just now.
+            // 🔴 The column is changedon, NOT modifiedon: POA has no modifiedon (see PrincipalAccessQuery). While
+            // this read asked for modifiedon, the $select itself 400'd, so no row ever reached this branch.
+            DateTimeOffset modifiedOn;
+            if (row.TryGetValue("changedon", out var modifiedElement)
+                && modifiedElement.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(modifiedElement.GetString(), out var parsedModified))
+            {
+                modifiedOn = parsedModified;
+            }
+            else if (strict)
+            {
+                throw ShareReadFailed(
+                    entityLogicalName, recordId, $"the share of {principalId} has no readable changedon");
+            }
+            else
+            {
+                modifiedOn = DateTimeOffset.UtcNow;
+            }
+
+            results.Add(new DataversePrincipalAccess(
+                new DataversePrincipalRef(kind.Value, principalId), mask, modifiedOn));
+        }
+
+        return results;
+    }
+
+    private static InvalidOperationException ShareReadFailed(string entityLogicalName, Guid recordId, string reason)
+        => new($"The shares on {entityLogicalName}({recordId}) could not be read completely: {reason}.");
+
+    private static bool TryReadGuid(Dictionary<string, JsonElement> row, string property, out Guid value)
+    {
+        value = Guid.Empty;
+        return row.TryGetValue(property, out var element)
+            && element.ValueKind == JsonValueKind.String
+            && Guid.TryParse(element.GetString(), out value);
+    }
+
+    private static bool TryReadInt(Dictionary<string, JsonElement> row, string property, out int value)
+    {
+        value = 0;
+        return row.TryGetValue(property, out var element)
+            && element.ValueKind == JsonValueKind.Number
+            && element.TryGetInt32(out value);
     }
 
     public async Task UpdateRecordFieldsAsync(
@@ -1129,7 +1391,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         CancellationToken ct = default,
         Guid? impersonateSystemUserId = null)
     {
-
+        // An empty caller id is refused by CreateAuthenticatedRequestAsync (task 104) before the PATCH is sent. That
+        // request builder is the single enforcement point for every impersonated request, so there is deliberately
+        // no second guard here to mask it; only the app-only EntitySetName lookup below may run first.
         if (fields.Count == 0)
         {
             _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);
@@ -1471,6 +1735,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     {
         [JsonPropertyName("value")]
         public List<Dictionary<string, JsonElement>> Value { get; set; } = new();
+
+        /// <summary>
+        /// Present when more rows exist than this page returned. Read only by callers that must know the answer is
+        /// complete (<see cref="GetPrincipalAccessOrThrowAsync"/>); every other reader keeps ignoring it.
+        /// </summary>
+        [JsonPropertyName("@odata.nextLink")]
+        public string? NextLink { get; set; }
     }
 
     private class ODataCountResponse

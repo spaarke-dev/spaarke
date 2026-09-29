@@ -73,7 +73,7 @@ because it converts an unknown into a gate signature on a merge.
 | Layer | Needs a tenant? | Runs in CI today? | What it proves |
 |---|---|---|---|
 | **Perturbation** (`Evaluate_*`, `Require_*`) | No | **Yes — blocking** | The invariant reports FAILURE for the inert case, the not-a-subset case, the duplicate-row case, the vacuous-baseline case, and the empty-impersonated case; and that missing canary config throws with the provisioning contract. Weakening "strictly fewer" to "fewer or equal" turns these red. |
-| **Live tenant** (Tests 1–3) | Yes | No — see below | The actual row-set comparison against the provisioned canary user. |
+| **Live tenant** (Tests 1–4) | Yes | No — see below | The actual row-set comparison against the provisioned canary user. |
 | **Config tripwire** (`Fr20ImpersonatedRootSetFlag_*`) | No | **Yes — blocking** | The FR-20 flag cannot be enabled in checked-in configuration while the canary is unprovisioned. |
 
 ## Provisioning the canary user (once per environment)
@@ -86,7 +86,7 @@ Performed by a Dataverse System Administrator.
    comparison meaningful; a canary that can read the org proves nothing.
 2. **Create (or designate) a dedicated, enabled `systemuser`** and assign it that role, and only that
    role. Record its **`systemuserid`** — the Dataverse row id, *not* the Entra object id. (The oid/
-   systemuserid confusion is documented at `Spaarke.Dataverse/DataverseImpersonation.cs:20-21`.)
+   systemuserid confusion is documented in the header contract of `Spaarke.Dataverse/DataverseImpersonation.cs`.)
 3. **Seed exactly K > 0 `sprk_matter` rows owned by that user**, and confirm the org holds **strictly
    more** matters than K that it cannot read. If the org has only the canary's own matters, "strictly
    fewer" is unsatisfiable and the canary cannot pass no matter how well impersonation works.
@@ -119,7 +119,7 @@ secret in a test is what auth-v4 removed.
 ## The blocking-gate wiring
 
 `SPAARKE_CANARY_REQUIRED` is what a canary run asserts about itself. Without it — and without the FR-20
-flag being on — the three live tests **halt as NOT RUN** rather than fail, because xUnit 2.9 offers no
+flag being on — the four live tests **halt as NOT RUN** rather than fail, because xUnit 2.9 offers no
 dynamic skip and a permanently red test is a deleted test.
 
 The gate is instead held by `Fr20ImpersonatedRootSetFlag_WhenEnabledInCheckedInConfiguration_RequiresAProvisionedCanary`,
@@ -139,7 +139,7 @@ canary being provisioned and run. That is the mechanical half of "034 is a block
 
 **No pipeline in this repo can reach Dataverse.** `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml` and
 `nightly-health.yml` hold no environment credential, no canary identity, and no seeded org. So the LIVE
-canary (Tests 1–3) runs **only when an operator runs it**, and the automated gate is limited to the
+canary (Tests 1–4) runs **only when an operator runs it**, and the automated gate is limited to the
 perturbation layer plus the config tripwire.
 
 Two options, neither of which task 034 may choose unilaterally:
