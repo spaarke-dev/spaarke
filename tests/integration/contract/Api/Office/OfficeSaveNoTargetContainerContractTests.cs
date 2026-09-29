@@ -238,27 +238,29 @@ public class OfficeSaveNoTargetContainerContractTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // §3 account / contact — the two target types sprk_document cannot be filed to.
+    // §3 contact — an accepted target sprk_document cannot be filed to.
+    //    (account USED to belong here; see the account test below for why it moved.)
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <c>account</c> and <c>contact</c> are accepted association targets that <c>sprk_document</c> has
-    /// no lookup column for. Their DEFINED behaviour, pinned here: they are authorized like any other
-    /// target, and their container comes from that record — they do NOT fall into the record-less
-    /// branch.
+    /// <c>contact</c> is an accepted association target that <c>sprk_document</c> has no lookup column
+    /// for. Its DEFINED behaviour, pinned here: it is authorized like any other target, and its
+    /// container comes from that record — it does NOT fall into the record-less branch.
     /// </summary>
     /// <remarks>
     /// <para>The association itself is dropped at persistence (<c>DocumentAssociationMap</c> has no
     /// column to write), which <c>OfficeEndpoints.ValidateSaveRequest</c> records as a standing owner
     /// decision — accept and log loudly, rather than silently reject a user-visible flow. Task 065 does
     /// NOT change that decision; it pins the half that was undefined, which is where the bytes go.</para>
-    /// <para>Why it matters that this is stated rather than assumed: a reading of F4 that "account and
-    /// contact have no lookup column, so they behave like a no-target save" would be wrong in both
-    /// halves — they ARE gated (the probe is consulted) and they do NOT reach the tenant default. The
-    /// test exists because the wrong reading is the plausible one.</para>
+    /// <para>Why it matters that this is stated rather than assumed: a reading of F4 that "contact has
+    /// no lookup column, so it behaves like a no-target save" would be wrong in both halves — it IS
+    /// gated (the probe is consulted) and it does NOT reach the tenant default. The test exists because
+    /// the wrong reading is the plausible one.</para>
+    /// <para>⚠️ <b>This was a <c>[Theory]</c> over <c>account</c> AND <c>contact</c> until 2026-09-29.</b>
+    /// It was narrowed to <c>contact</c> when <c>unified-access-control-r2</c> removed <c>account</c>
+    /// from the accepted set — see <see cref="PostOfficeSave_TargetingAccount_IsNowRefused"/>.</para>
     /// </remarks>
     [Theory]
-    [InlineData("account", "accounts")]
     [InlineData("contact", "contacts")]
     public async Task PostOfficeSave_TargetingAccountOrContact_IsStillGated_AndDoesNotTakeTheRecordLessBranch(
         string entityType, string expectedEntitySet)
@@ -271,11 +273,55 @@ public class OfficeSaveNoTargetContainerContractTests
 
         factory.ProbedRecords.Should().Contain((expectedEntitySet, recordId),
             "a document that cannot be ASSOCIATED to the record can still be FILED against it, so the "
-            + "AppendTo gate is the right one and must not be skipped for these two types");
+            + "AppendTo gate is the right one and must not be skipped for this type");
         factory.UploadedToContainers.Should().NotContain(TestActingUserBusinessUnit.ContainerId,
-            "these carry a record, so ResolveForRecordAsync answers and the record-less branch is never "
-            + "reached — the failure this assertion exists to catch is them falling through to it "
+            "this carries a record, so ResolveForRecordAsync answers and the record-less branch is never "
+            + "reached — the failure this assertion exists to catch is it falling through to it "
             + "'because there is no lookup column anyway'");
+    }
+
+    /// <summary>
+    /// <c>account</c> is NO LONGER an accepted association target: the save is refused at validation,
+    /// so it never reaches the authorization probe and never uploads anywhere.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this test exists in this shape.</b> It replaces the <c>account</c> half of the
+    /// <c>[Theory]</c> above, which asserted the opposite — that an <c>account</c> target IS gated and
+    /// its container follows the record. That assertion was correct when task 065 wrote it and became
+    /// false on 2026-09-29, when <c>unified-access-control-r2</c> removed <c>"account"</c> from
+    /// <c>validEntityTypes</c> in <c>OfficeEndpoints.cs</c>. Their reason: <c>sprk_document</c> has no
+    /// account lookup in either column family, so every account-filed save was persisted
+    /// <i>unassociated</i> — the user believed the file was filed and it was not.</para>
+    /// <para><b>This is a semantic merge conflict that git could not see.</b> Their allow-list edit and
+    /// this test live in different files, so the merge was clean and the suite went red — which is the
+    /// gate working. The fix is to re-pin the behaviour, not to delete the coverage: the original test's
+    /// purpose was to stop <c>account</c>/<c>contact</c> being mistaken for a no-target save, and that
+    /// purpose still holds for <c>account</c> — it must not fall into the record-less branch either, it
+    /// must be refused outright.</para>
+    /// <para>The <c>contact</c> case keeps the old behaviour and the old assertions, because
+    /// <c>contact</c> remains in the accepted set for the same reason it always was: it is a real
+    /// user-visible filing target even though the association column does not exist.</para>
+    /// </remarks>
+    [Fact]
+    public async Task PostOfficeSave_TargetingAccount_IsNowRefused()
+    {
+        var recordId = Guid.NewGuid();
+        using var factory = new NoTargetSaveFactory(NoTargetSaveFactory.CallerOid.Resolvable);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("account", recordId));
+
+        response.IsSuccessStatusCode.Should().BeFalse(
+            "account was removed from validEntityTypes because sprk_document has no account lookup, so "
+            + "an account-filed save could only ever persist unassociated");
+
+        factory.ProbedRecords.Should().NotContain(("accounts", recordId),
+            "the refusal happens at validation, ahead of the authorization probe — so no probe is made");
+
+        factory.UploadedToContainers.Should().BeEmpty(
+            "a refused save must upload NOWHERE. This is the assertion the original account case existed "
+            + "to protect in its own way: account must not silently take the record-less branch and land "
+            + "in the acting user's business-unit container");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
