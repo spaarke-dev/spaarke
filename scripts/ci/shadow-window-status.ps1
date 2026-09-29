@@ -91,7 +91,31 @@ $ErrorActionPreference = 'Stop'
 $LegacyWorkflow = 'SDAP CI'
 $NewWorkflow    = 'CI'
 
-$TargetPrs  = 20
+# TARGET: 20 -> 8, owner decision 2026-09-29. This is a judgment about sufficient
+# evidence, not a calculation -- recorded here so it can be challenged later.
+#
+# WHY 20 STOPPED MAKING SENSE. 20 was chosen to see enough variety of change
+# shapes. It assumed a comparable-PR rate roughly 3x what this repo produces
+# (measured: 0.33/day -- most merges are docs-only and never compare), which put
+# the close date at ~2026-11-05.
+#
+# WHAT WAS BOUGHT INSTEAD. The decisive fact is that CUTOVER DOES NOT DELETE
+# sdap-ci.yml. The chain is 071 cutover -> 075 soak (7 days) -> 077 retire, so
+# the legacy oracle keeps running through the soak. The soak IS this comparison,
+# run after the flip -- same two systems, same disagreement check -- so waiting
+# five more weeks buys an observation the soak provides anyway, while paying
+# 56 job-minutes per master push to run sdap-ci in parallel (vs 15 for the real
+# gate) and holding the merge queue, #894 and #869.
+#
+# EVIDENCE AT THE DECISION. 8/8 agreeing, 0 false greens, 0 false reds, 24.1
+# calendar days -- all against the post-#944 configuration. The window's only
+# false green was root-caused, fixed, and PROVEN by re-seeding the break. And
+# the riskiest step of the cutover (branch protection -> required check `Router`)
+# already shipped 2026-08-29 and has run clean for a month.
+#
+# THE TRADE, STATED HONESTLY: 8 PRs is less variety than 20. The soak plus the
+# 30-day measurements (076) are what cover that, and sdap-ci stays live for both.
+$TargetPrs  = 8
 $MinDaySpan = 5
 
 Write-Host ''
