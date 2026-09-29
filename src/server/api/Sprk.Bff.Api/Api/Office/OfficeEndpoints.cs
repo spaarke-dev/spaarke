@@ -796,7 +796,12 @@ public static class OfficeEndpoints
         var search = group.MapGroup("/search");
 
         // GET /office/search/entities - Search for association targets
-        // Authorization: OfficeAuthFilter validates user authentication
+        // Authentication: OfficeAuthFilter (authentication ONLY — it reaches no resource).
+        // Authorization: IN THE SERVICE, by construction (#1021 / task 126). The query runs under
+        //   the caller's Dataverse security context via IDataverseUserClient, so Dataverse trims the
+        //   result set. There is no endpoint filter because there is no target record to authorize
+        //   against before the query — the query IS the boundary. Do not "simplify" this by moving
+        //   back to the app-only client.
         // Rate Limit: 30 requests/minute/user (per spec.md)
         search.MapGet("/entities", SearchEntitiesAsync)
             .WithName("SearchOfficeEntities")
@@ -836,6 +841,20 @@ public static class OfficeEndpoints
     /// - Support filtering by entity type via 'type' parameter
     /// - Support pagination via 'skip' and 'top' parameters
     /// - Only return entities the user has access to (Dataverse security roles)
+    /// </para>
+    /// <para>
+    /// 🔴 The last bullet was UNMET from task 026 until 2026-09-29 (GitHub #1021, task 126). The
+    /// search queried Dataverse app-only, so it returned every matching Matter, Project, Invoice,
+    /// Account and Contact in the tenant — name, number and description — to any authenticated
+    /// Office caller, walkable with a 2-character substring plus paging. It is now enforced by
+    /// running the query under the caller's own security context via <c>IDataverseUserClient</c>
+    /// (see <c>OfficeService.QuerySearchEntityAsync</c>), so Dataverse does the trimming and the
+    /// counts below are derived from the trimmed set.
+    /// </para>
+    /// <para>
+    /// Note that authorization for THIS route lives in the service, not in an endpoint filter:
+    /// there is no target record to authorize against before the query runs — the query itself is
+    /// the authorization boundary. <c>AddOfficeAuthFilter</c> establishes authentication only.
     /// </para>
     /// </remarks>
     /// <param name="q">Search query string (min 2 chars).</param>

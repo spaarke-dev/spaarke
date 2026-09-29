@@ -528,8 +528,11 @@ public class RouteAuthorizationGuardTests
 
         // ---------- task 120 (GitHub #1015): the Office surface, first time it is inside the guard ----------
         //
-        // TEN Pending entries and ONE Permanent land together, which is unusual enough to say why: this is
-        // not ten new holes, it is one blind spot being opened. Api/Office/* was never in GovernedFiles, so
+        // NINE Pending entries and ONE Permanent landed together, which is unusual enough to say why: this
+        // is not nine new holes, it is one blind spot being opened. (This header said TEN until 2026-09-29
+        // — a miscount in the very file whose job is to prevent drift, found by the task-126 audit. As of
+        // 2026-09-29 /search/entities is RESOLVED, leaving EIGHT Pending and TWO Permanent.)
+        // Api/Office/* was never in GovernedFiles, so
         // the whole surface was classified "serves neither document nor Dataverse content" by omission —
         // and FilterMarker could not have recognised its gates even if it had been, because the Office
         // filters are named without the word "Authorization". The routes below have been in this state
@@ -553,13 +556,26 @@ public class RouteAuthorizationGuardTests
             "ZERO endpoint filters. Returns sprk_todo rows filtered solely on the caller-supplied commId, "
             + "app-only, with no ownership or owner filter."),
 
-        new Waiver("GET /api/office/search/entities", WaiverKind.Pending, "#1021",
-            "Carries AddOfficeAuthFilter, which is AUTHENTICATION ONLY. No per-user security trimming — "
-            + "OfficeService.cs:804-805 says so in code ('app-only read (no per-user security trimming "
-            + "yet)'), so any authenticated Office caller can enumerate every matter, project, invoice, "
-            + "account and contact name in the tenant. NOT the GET /api/v1/documents shape above: that one "
-            + "is Permanent because trimming IS the control and is owned elsewhere; here the trimming does "
-            + "not exist and its own WithDescription claims it does."),
+        // ✅ RESOLVED 2026-09-29 by task 126 — kept as Permanent, NOT deleted, because the shape of the
+        // control is exactly what a future reader needs to know before "simplifying" it.
+        //
+        // This route has no endpoint filter and correctly so: there is no target record to authorize
+        // against before the query runs, so the QUERY ITSELF is the authorization boundary. It now runs
+        // under the caller's Dataverse security context via IDataverseUserClient, so Dataverse trims the
+        // result set, and TotalCount/HasMore are derived from the trimmed set rather than from the raw
+        // match count (a count over untrimmed matches is the same disclosure, restated).
+        //
+        // The previous Pending text is worth preserving as the record of what was actually wrong: it read
+        // "no per-user security trimming — OfficeService.cs:804-805 says so in code", and any authenticated
+        // Office caller could enumerate every matter, project, invoice, account and contact in the tenant
+        // from a 2-character substring plus paging. Note the code comment it cited pointed at the WRONG
+        // issue (#919); that is corrected too.
+        new Waiver("GET /api/office/search/entities", WaiverKind.Permanent, "#1021",
+            "RESOLVED (task 126): authorization is the delegated query itself, not an endpoint filter. "
+            + "OfficeService.QuerySearchEntityAsync runs under the caller's security context via "
+            + "IDataverseUserClient and FAILS CLOSED — there is deliberately no app-only fallback, because "
+            + "falling back would restore the tenant-wide enumeration while every test stayed green. A "
+            + "per-resource filter is not applicable: the route names no single resource to check."),
 
         new Waiver("GET /api/office/search/documents", WaiverKind.Pending, "#1023",
             "Authentication filter only. Returns STUB data today (GenerateStubDocumentResults), so the "

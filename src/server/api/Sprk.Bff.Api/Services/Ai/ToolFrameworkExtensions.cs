@@ -43,7 +43,13 @@ public static class ToolFrameworkExtensions
         // (CLAUDE.md §10 F.1). Typed HttpClient per the AnalysisToolService sibling precedent.
         // The implementation is user-OBO ONLY (fail-closed; no app-only fallback) per the
         // spec MUST rule audited by task 012.
-        services.AddHttpClient<Infrastructure.Dataverse.IDataverseUserClient, Infrastructure.Dataverse.DataverseUserClient>();
+        // IDataverseUserClient is registered UNCONDITIONALLY in AddSpaarkeCore (task 126 / #1021).
+        // It used to be registered here, inside the compound AI gate. That was fine while only the
+        // Dataverse* tool handlers consumed it, and became a defect the moment a non-AI caller did:
+        // GET /api/office/search/entities maps unconditionally and needs per-user trimming, so with
+        // the AI gate off the client would have been missing and the endpoint's fail-closed check
+        // would have taken entity search down. See CLAUDE.md §10 F.1 (RB-T028-03..06).
+        // The handlers below still resolve it — it is now strictly more available, never less.
 
         // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
         // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent
@@ -91,7 +97,13 @@ public static class ToolFrameworkExtensions
 
         // Task 008 (FR-P0-07) — same registration as the primary overload so both entry points
         // produce a resolvable handler graph (Dataverse* handlers ctor-require this client).
-        services.AddHttpClient<Infrastructure.Dataverse.IDataverseUserClient, Infrastructure.Dataverse.DataverseUserClient>();
+        // IDataverseUserClient is registered UNCONDITIONALLY in AddSpaarkeCore (task 126 / #1021).
+        // It used to be registered here, inside the compound AI gate. That was fine while only the
+        // Dataverse* tool handlers consumed it, and became a defect the moment a non-AI caller did:
+        // GET /api/office/search/entities maps unconditionally and needs per-user trimming, so with
+        // the AI gate off the client would have been missing and the endpoint's fail-closed check
+        // would have taken entity search down. See CLAUDE.md §10 F.1 (RB-T028-03..06).
+        // The handlers below still resolve it — it is now strictly more available, never less.
 
         // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
         // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent

@@ -52,6 +52,13 @@ public class OfficeService : IOfficeService
     // GenerateStubResults hardcoded fixtures). App-only read (ADR-028); singleton REST client.
     // Optional/null-tolerant so bare test constructions keep compiling; null → stub fallback.
     private readonly DataverseWebApiClient? _dataverseClient;
+
+    /// <summary>
+    /// Delegated (user-OBO) Dataverse client — every request executes under the CALLING USER's
+    /// security context, so Dataverse itself trims the result set. Entity search (#1021) uses this
+    /// and only this; see <see cref="QuerySearchEntityAsync"/>.
+    /// </summary>
+    private readonly IDataverseUserClient? _userClient;
     // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Matter/Project).
     // Registered singleton (→ IDataverseService, GraphModule.cs); optional/null-tolerant so bare test
     // ctors keep compiling; null → quick-create returns null (endpoint 403s).
@@ -75,7 +82,12 @@ public class OfficeService : IOfficeService
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null,
         DataverseWebApiClient? dataverseClient = null,
-        IGenericEntityService? genericEntityService = null)
+        IGenericEntityService? genericEntityService = null,
+        // #1021 / task 126: the DELEGATED (user-OBO) Dataverse client. Entity search runs through
+        // THIS, never through _dataverseClient — the latter is app-only and returns every row in the
+        // tenant regardless of who asked. Optional only so the existing bare test constructions keep
+        // compiling; SearchEntitiesAsync refuses to run without it rather than falling back.
+        IDataverseUserClient? userClient = null)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -92,6 +104,7 @@ public class OfficeService : IOfficeService
         _emailUploadCapture = emailUploadCapture;
         _dataverseClient = dataverseClient;
         _genericEntityService = genericEntityService;
+        _userClient = userClient;
         _logger = logger;
     }
 
@@ -767,6 +780,19 @@ public class OfficeService : IOfficeService
         // Determine which entity types to search
         var typesToSearch = GetEntityTypesToSearch(request.EntityTypes);
 
+        // 🔴 #1021 / task 126 — FAIL CLOSED. Search runs under the CALLER's Dataverse security
+        // context or it does not run. There is deliberately no app-only fallback: the previous
+        // implementation queried app-only, which returned every matching row in the tenant to any
+        // authenticated Office caller. Falling back here would restore exactly that hole while every
+        // test stayed green — the shape of the JobOwnershipFilter fail-open task 120 closed.
+        if (_userClient is null && _dataverseClient is not null)
+        {
+            throw new InvalidOperationException(
+                "Office entity search requires the delegated (user-OBO) Dataverse client so results "
+                + "are trimmed to the caller's permissions. It is not registered, and the app-only "
+                + "client must not be used for this search (GitHub #1021).");
+        }
+
         // Real Dataverse search (task 026 / #229). When no client is injected (bare test
         // constructions), fall back to the legacy stub so those tests keep their shape.
         if (_dataverseClient is null)
@@ -781,10 +807,16 @@ public class OfficeService : IOfficeService
             };
         }
 
-        // Query each requested entity type with a name/number 'contains' filter. Each type is
-        // best-effort — one entity's failure (missing table, transient 4xx) is logged and skipped,
-        // never fails the whole picker. NOTE: app-only read (no per-user security trimming yet) —
-        // tracked as a follow-up on #919.
+        // Query each requested entity type with a name/number 'contains' filter, UNDER THE CALLER'S
+        // SECURITY CONTEXT (#1021 / task 126) — Dataverse applies the caller's own model, so the
+        // trim happens at the source rather than in a post-filter. That matters: post-filtering an
+        // app-only result set would still leak through TotalCount/HasMore below, which are derived
+        // from the combined set — a record-enumeration oracle of the shape task 022 removed from
+        // bulk download.
+        //
+        // Each type stays best-effort for DATA faults (missing table, transient 5xx) so one entity
+        // cannot break the whole picker — but an AUTHORIZATION fault is NOT swallowed into an empty
+        // result that reads as "no matches"; see QuerySearchEntityAsync.
         var combined = new List<EntitySearchResult>();
         var perTypeTop = Math.Clamp(request.Top, 5, 50);
         foreach (var type in typesToSearch)
@@ -793,7 +825,12 @@ public class OfficeService : IOfficeService
             {
                 combined.AddRange(await QuerySearchEntityAsync(type, request.Query, perTypeTop, cancellationToken));
             }
-            catch (Exception ex)
+            // 🔴 Deliberately NOT caught here: the InvalidOperationException QuerySearchEntityAsync
+            // throws on 401/403. Swallowing it would empty EVERY type and present a broken delegated
+            // context as a successful search with no matches — a silent failure indistinguishable
+            // from a legitimate empty result. Data faults stay best-effort; authorization faults
+            // propagate (#1021 / task 126).
+            catch (Exception ex) when (ex is not InvalidOperationException)
             {
                 _logger.LogWarning(ex, "Entity search failed for type {EntityType}; skipping", type);
             }
@@ -828,8 +865,20 @@ public class OfficeService : IOfficeService
 
     /// <summary>
     /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API and
-    /// maps rows to <see cref="EntitySearchResult"/>. App-only read.
+    /// maps rows to <see cref="EntitySearchResult"/>.
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>DELEGATED (user-OBO) read — #1021 / task 126.</b> This goes through
+    /// <see cref="IDataverseUserClient"/>, so Dataverse evaluates the CALLER's security model and
+    /// returns only rows they may read. It previously used the app-only client, which returned every
+    /// matching row in the tenant to any authenticated Office caller — names, numbers and
+    /// descriptions for Matter, Project, Invoice, Account and Contact, walkable with a 2-character
+    /// substring plus paging.
+    /// <para>
+    /// Do NOT "fix" a permissions complaint here by switching back to the app-only client. If a user
+    /// cannot see a record, that is the control working.
+    /// </para>
+    /// </remarks>
     private async Task<List<EntitySearchResult>> QuerySearchEntityAsync(
         AssociationEntityType type,
         string query,
@@ -850,16 +899,46 @@ public class OfficeService : IOfficeService
         if (meta.RefField is not null) selectFields.Add(meta.RefField);
         if (meta.DescField is not null) selectFields.Add(meta.DescField);
 
-        var rows = await _dataverseClient!.QueryAsync<Dictionary<string, JsonElement>>(
-            meta.EntitySet,
-            filter: filter,
-            select: string.Join(",", selectFields),
-            top: top,
-            cancellationToken: cancellationToken);
+        var relativePath =
+            $"{meta.EntitySet}?$select={Uri.EscapeDataString(string.Join(",", selectFields))}"
+            + $"&$filter={filter}&$top={top}";
 
-        var results = new List<EntitySearchResult>(rows.Count);
-        foreach (var row in rows)
+        var response = await _userClient!.GetAsync(relativePath, cancellationToken);
+
+        if (!response.IsSuccess)
         {
+            // An authorization failure must not read as "no matches". The caller loop treats a thrown
+            // exception as a per-type skip for DATA faults; a 401/403 means the delegated context
+            // itself is broken, which would silently empty EVERY type and look like a working search
+            // returning nothing.
+            if (response.StatusCode is 401 or 403)
+            {
+                throw new InvalidOperationException(
+                    $"Office entity search could not run under the caller's Dataverse security context "
+                    + $"(HTTP {response.StatusCode}, {response.ErrorCode}). Refusing rather than "
+                    + "returning an empty result that would read as 'no matches'.");
+            }
+
+            _logger.LogWarning(
+                "Entity search for {EntityType} failed: HTTP {StatusCode} {ErrorCode}",
+                type, response.StatusCode, response.ErrorCode);
+            return [];
+        }
+
+        var results = new List<EntitySearchResult>();
+        if (response.Body is not { } body || !body.TryGetProperty("value", out var rows))
+        {
+            return results;
+        }
+
+        foreach (var element in rows.EnumerateArray())
+        {
+            var row = new Dictionary<string, JsonElement>();
+            foreach (var prop in element.EnumerateObject())
+            {
+                row[prop.Name] = prop.Value;
+            }
+
             var mapped = MapSearchRow(type, meta, row);
             if (mapped is not null)
                 results.Add(mapped);

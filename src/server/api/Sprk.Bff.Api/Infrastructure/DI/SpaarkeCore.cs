@@ -77,6 +77,23 @@ public static class SpaarkeCore
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // 🔴 UNCONDITIONAL — the delegated (user-OBO) Dataverse client (task 126 / #1021).
+        //
+        // MOVED HERE from AddToolFramework (Services/Ai/ToolFrameworkExtensions.cs), which runs INSIDE
+        // the compound AI gate. That made this an asymmetrically-registered dependency the moment a
+        // non-AI caller needed it: GET /api/office/search/entities maps UNCONDITIONALLY, and with the
+        // AI gate off the client would have been absent, so the endpoint's fail-closed check would
+        // have taken entity search down entirely rather than trimming it.
+        //
+        // That is exactly the Tier-1.5 anti-pattern in CLAUDE.md §10 F.1 / RB-T028-03..06:
+        // "endpoints that map unconditionally must have unconditional service registration."
+        //
+        // The AI tool handlers still resolve it — strictly MORE available than before, never less —
+        // which is why the registration could move rather than being duplicated. A second
+        // AddHttpClient registration would have left two competing descriptors for one interface.
+        services.AddHttpClient<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient,
+                               Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClient>();
+
         // Step 2: Decorate with CachedAccessDataSource (ADR-009: Redis-first caching for auth data)
         // Caches authorization DATA (roles, teams, resource access) while decisions are computed fresh.
         // TTLs: roles/teams = 2 min, resource access = 60s (ADR-003 compliance)
