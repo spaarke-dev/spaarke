@@ -211,19 +211,78 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | App Insights | `spaarke-demo-insights` | Demo monitoring |
 | Log Analytics | `spaarke-demo-logs` | Demo log aggregation |
 
-### Per-Customer Resources (Future — Production Multi-Tenant)
+### Per-Customer Resources
 
-When production supports multiple paying customers, each gets isolated data resources within the prod subscription:
+Each customer gets its own resource group — and per [ADR-027](../adr/ADR-027-azure-subscription-topology.md)
+as amended, its own **subscription**. Patterns below are taken from the deploying Bicep, not from intent:
 
-| Resource Type | Pattern | Example (Acme) |
-|--------------|---------|----------------|
-| Resource Group | `rg-spaarke-prod-{customer}` | `rg-spaarke-prod-acme` |
-| Storage Account | `sprk{customer}sa` | `sprkacmesa` |
-| Key Vault | `sprk-{customer}-kv` | `sprk-acme-kv` |
-| Service Bus Namespace | `spaarke-{customer}-sbus` | `spaarke-acme-sbus` |
-| Redis Cache | `spaarke-{customer}-cache` | `spaarke-acme-cache` |
+| Resource Type | Pattern | Example (`acme`, prod) | Source |
+|---|---|---|---|
+| Resource Group | `rg-spaarke-{customerId}-{env}` | `rg-spaarke-acme-prod` | `stacks/model2-full.bicep:62` |
+| Storage Account | `sprk{customerId}{env}sa` | `sprkacmeprodsa` | `:66` (hyphens stripped, lowercased, capped 24) |
+| Key Vault | `sprk{customerId}{env}-kv` | `sprkacmeprod-kv` | `:101` |
+| Redis Cache | `sprk-{customerId}-{env}-redis` | `sprk-acme-prod-redis` | `customer.json:229` |
+| UAMI | `sprk-{env}-{customerId}-uami` | `sprk-prod-acme-uami` | `model2-full.bicep:47` |
 
-> These customer resources share the environment-level AI services and BFF API from `rg-spaarke-prod`.
+> ⚠️ **Corrected 2026-09-29 (task 124).** This table previously gave `rg-spaarke-prod-{customer}` — env
+> BEFORE customer — which is the reverse of what the Bicep deploys, and omitted `{env}` from the other
+> patterns. It also closed with *"These customer resources share the environment-level AI services and BFF
+> API from `rg-spaarke-prod`"*, which **D-12 retired**: there is no shared tier. Each customer's stamp
+> includes its own BFF, Redis, OpenAI and Search.
+>
+> ⚠️ **Two Key Vault forms exist** and they are not interchangeable: `stacks/model2-full.bicep` composes
+> `sprk{customerId}{env}-kv` (no separators), while `customer.bicep` composes
+> `take('sprk-{customerId}-{env}-kv', 24)`. The second is what sets the length limit below.
+
+---
+
+### The `customerId` standard
+
+**`customerId` is 3–8 characters, lowercase letters and digits, starting with a letter.**
+
+It is the identifier of record for a customer and the root of every per-customer resource name. Assigned at
+provisioning intake and stored on `sprk_dataverseenvironment.sprk_customerid`; Bicep **consumes** it and
+never mints one.
+
+#### Why 8 — the derivation, not a preference
+
+`customer.bicep` composes its Key Vault name as `take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24)`.
+Azure Key Vault names are 3–24 characters and **may not begin or end with a hyphen**. The binding case is
+`environmentName = 'staging'`, the longest allowed value:
+
+| `customerId` length | Resulting name | Outcome |
+|---|---|---|
+| 8 | `sprk-xxxxxxxx-staging-kv` | ✅ complete, exactly 24 |
+| 9 | `sprk-xxxxxxxxx-staging-k` | ⚠️ truncated — loses the `v` |
+| **10** | `sprk-xxxxxxxxxx-staging-` | 🔴 **INVALID — trailing hyphen; Azure rejects it and the deployment fails** |
+
+The parameter previously allowed 10, so it admitted a value that cannot deploy. `take()` concealed it: the
+name was silently shortened rather than the template refusing, so the failure surfaced from Azure rather
+than from the template.
+
+#### Why lowercase letters and digits only
+
+The storage-account name is `take(toLower(replace('sprk{customerId}{env}sa', '-', '')), 24)` — it **strips
+hyphens**. So `acme-x` and `acmex` resolve to the *same* storage account name, and nothing detects the
+collision.
+
+🔴 **This rule cannot be enforced in Bicep.** ARM has no regex constraint on parameters — there is no
+`@pattern` decorator, and this repo has no `bicepconfig.json` enabling the experimental assertions feature.
+Only the **length** is enforceable in the template, and it is. The character rule is therefore enforced
+**where the value is assigned** — at provisioning intake — and the Bicep parameter documents it so the two
+cannot drift apart unnoticed.
+
+The leading-letter rule is a **readability convention, not an Azure requirement**: every composed name
+already begins with the `sprk` prefix, which satisfies the platform's start-character rules on its own.
+
+#### Recommended form
+
+```
+^[a-z][a-z0-9]{2,7}$        acme · contoso · fabrikam · nwind
+```
+
+Names longer than 8 characters are abbreviated at intake — `northwind` → `nwind`. The abbreviation is a
+decision made once, at onboarding, and recorded on the registry row; it is not re-derived anywhere.
 
 ---
 

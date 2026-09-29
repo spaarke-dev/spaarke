@@ -27,9 +27,32 @@ targetScope = 'subscription'
 // PARAMETERS
 // ============================================================================
 
-@description('Customer identifier (lowercase, alphanumeric only). Drives all resource naming.')
+// CUSTOMER IDENTIFIER — the canonical standard. See
+// docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "The customerId standard" for the derivation.
+//
+// 🔴 THE LIMIT IS 8, NOT 10, AND IT IS DERIVED — NOT A PREFERENCE. THIS file composes its Key Vault name as
+// take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24). Key Vault names are 3-24 chars and MAY
+// NOT END IN A HYPHEN. With environmentName = 'staging' (the longest allowed value):
+//     len  8 -> 'sprk-xxxxxxxx-staging-kv'  (24) complete
+//     len  9 -> 'sprk-xxxxxxxxx-staging-k'  (24) truncated, loses the 'v'
+//     len 10 -> 'sprk-xxxxxxxxxx-staging-'  (24) INVALID — trailing hyphen, Azure REJECTS it
+// So the previous @maxLength(10) admitted a value that FAILS TO DEPLOY. take() hid it: the name was
+// silently shortened rather than the deployment refusing, so the error surfaced from Azure, not from here.
+//
+// 🔴 THE CHARACTER RULE CANNOT BE ENFORCED HERE. Bicep/ARM has NO regex constraint on parameters — there
+// is no @pattern decorator, and this repo has no bicepconfig.json enabling the experimental assertions
+// feature. Only the LENGTH is enforceable at this layer, and it is, above.
+//
+// That matters because the character rule is not cosmetic: the storage-account name strips hyphens
+// (replace(...,'-','')), so 'acme-x' and 'acmex' resolve to the SAME storage account with nothing
+// validating it. The rule is therefore enforced where the value is ASSIGNED — at provisioning intake —
+// and this parameter documents it so the two cannot drift apart silently.
+//
+// Leading letter is a READABILITY convention, not an Azure rule — the 'sprk' prefix already satisfies the
+// platform's start-character requirements.
+@description('Customer identifier. 3-8 chars, lowercase letters and digits, starting with a letter. Drives all resource naming; the 8-char limit comes from the Key Vault name composed below (see AZURE-RESOURCE-NAMING-CONVENTION.md).')
 @minLength(3)
-@maxLength(10)
+@maxLength(8)
 param customerId string
 
 @description('Environment name')
