@@ -182,7 +182,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         /// <para><b>Why it cannot become a loophole.</b> It is admissible ONLY where no record exists.
         /// Secure content can never arrive this way: secure records resolve through the record-keyed route
         /// and fail closed, and for a secure record the acting user's BU is provably the WRONG container —
-        /// users sit in the Operations subtree while secure records are owned in <c>Secure Projects</c>.
+        /// users sit in the Operations subtree while secure records are owned in <c>Secure Record</c>.
         /// A site claiming this provenance from a route that also accepts a record id is misclassified.</para>
         ///
         /// <para>🔴 <b>Known residual, accepted and separately filed.</b> Content placed in a BU container

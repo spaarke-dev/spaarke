@@ -15,25 +15,25 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 ///   reads an account (firms are <c>sprk_organization</c>), and the column it was aimed at,
 ///   <c>sprk_externalaccount</c>, is the project's CLIENT lookup. Both the creation and the write are
 ///   gone.</item>
-///   <item><c>WasUmbrellaBu</c> — there is one canonical Secure Project business unit, so there is no
+///   <item><c>WasUmbrellaBu</c> — there is one canonical Secure Record business unit, so there is no
 ///   longer a create-vs-reuse distinction to report.</item>
 /// </list>
 /// <para>Two members were added: the owner team that now holds the record, which is the thing that
 /// actually makes the project secure (design.md §5.1a).</para>
 /// </remarks>
 /// <param name="BusinessUnitId">
-/// The canonical Secure Project business unit this project now belongs to, RESOLVED by name — not
+/// The canonical Secure Record business unit this project now belongs to, RESOLVED by name — not
 /// created. Reported for operator confirmation; it is not written to the project record. The retired
 /// <c>sprk_securitybu</c> stamp existed to record a per-project business unit, and there is no longer
 /// a per-project business unit to record.
 /// </param>
 /// <param name="BusinessUnitName">
-/// The configured name that resolved (<c>SecureProject:BusinessUnitName</c>, default
+/// The configured name that resolved (<c>SecureRecord:BusinessUnitName</c>, default
 /// <c>Secure Project</c>).
 /// </param>
 /// <param name="OwnerTeamId">
 /// The business unit's default owner team, which now owns the project. This is the security-relevant
-/// outcome: the record sits in the Secure Project business unit because a team there owns it, and no
+/// outcome: the record sits in the Secure Record business unit because a team there owns it, and no
 /// human holds access through that ownership.
 /// </param>
 /// <param name="OwnerTeamName">Display name of the owner team.</param>

@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// <c>POST /api/v1/external-access/provision-project</c> — the re-scoped provisioning contract
 /// (task 021, 2026-08-25).
 ///
-/// <para><b>What provisioning now does:</b> resolves the ONE canonical Secure Project business unit by
+/// <para><b>What provisioning now does:</b> resolves the ONE canonical Secure Record business unit by
 /// name from configuration, assigns the project to that business unit's default owner team, creates the
 /// project's own SPE container, and records it on <c>sprk_containerid</c>. It creates no business unit,
 /// no account, and never writes <c>sprk_externalaccount</c>.</para>
@@ -201,7 +201,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     }
 
     /// <summary>
-    /// An absent Secure Project business unit fails closed — and provisions nothing.
+    /// An absent Secure Record business unit fails closed — and provisions nothing.
     /// </summary>
     /// <remarks>
     /// The alternative behaviours are both disclosures: falling back to the ROOT business unit (what
@@ -255,7 +255,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The project ends up owned by the Secure Project business unit's default owner team.
+    /// The project ends up owned by the Secure Record business unit's default owner team.
     /// </summary>
     /// <remarks>
     /// Design.md §5.1a: the default owner team, NOT a service account. Every business unit is created
@@ -285,7 +285,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     /// </summary>
     /// <remarks>
     /// Ownership is the SECURITY step; the container is the storage step. If the container step fails
-    /// after ownership, the project is at least correctly owned inside the Secure Project business
+    /// after ownership, the project is at least correctly owned inside the Secure Record business
     /// unit. Reversed, the same failure leaves a secure project owned by its creating user in an
     /// Operations business unit — strictly the worse posture. So the order is load-bearing, not
     /// incidental, and is pinned here.
@@ -303,7 +303,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         response.IsSuccessStatusCode.Should().BeFalse("a container that was not created is not a success");
         _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId,
             "ownership is assigned first precisely so a storage failure does not leave the record " +
-            "outside the Secure Project business unit");
+            "outside the Secure Record business unit");
     }
 
     /// <summary>
@@ -540,21 +540,58 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     }
 
     /// <summary>
-    /// The default Secure Project business-unit name matches the deployed environment.
+    /// The default Secure Record business-unit name matches the deployed environment.
     /// </summary>
     /// <remarks>
-    /// <b>SINGULAR.</b> design.md §5.1 and this task's own POML both specified "Secure Projects"
-    /// (plural); live Dataverse metadata (2026-08-25) says the business unit is named
-    /// <c>Secure Project</c>. Shipping the plural would have failed closed on every call — the correct
-    /// direction, but for a fabricated reason, and it would have looked like a missing environment
-    /// rather than a wrong string. Pinned here because a default that is wrong is worse than no
-    /// default: it fails only at runtime, in an environment nobody is watching.
+    /// <b>RENAMED 2026-09-29 (task 121, D-12 §2):</b> the deployed BU is now <c>Secure Record</c>. It
+    /// was renamed from <c>Secure Project</c> because the BU holds secure rows of THREE entity types
+    /// (<c>sprk_project</c>, <c>sprk_matter</c>, <c>sprk_workassignment</c> all carry
+    /// <c>sprk_issecure</c>), so naming it after one of them described the topology wrongly.
+    ///
+    /// <para><b>The lesson that put this test here, restated against the new name.</b> design.md §5.1
+    /// and the authoring POML both said "Secure Projects" (plural); live Dataverse metadata
+    /// (2026-08-25) said <c>Secure Project</c> — singular. Shipping the plural would have failed closed
+    /// on every call: the correct DIRECTION, for a fabricated reason, looking like a missing
+    /// environment rather than a wrong string. A default that is wrong is worse than no default —
+    /// it fails only at runtime, in an environment nobody is watching.</para>
+    ///
+    /// <para>So this test pins the EXACT deployed string, and the guard assertions below encode the two
+    /// ways this constant has been observed to go wrong: a pluralised variant, and a stale name left
+    /// behind by a half-finished rename. Both are spelled out rather than covered by a single equality
+    /// check, because the equality check alone reports "expected X, found Y" without saying which
+    /// mistake was made.</para>
     /// </remarks>
     [Fact]
     public void DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed()
     {
-        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().Be("Secure Project");
-        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().NotEndWith("Projects",
-            "the deployed business unit is singular; the plural came from a design doc, not from metadata");
+        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().Be("Secure Record");
+
+        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().NotEndWith("s",
+            "the deployed business unit is SINGULAR; the plural came from a design doc, not from metadata");
+
+        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().NotContain("Project",
+            "the BU was renamed Secure Project -> Secure Record (task 121). A 'Project' here means the "
+            + "rename was only half applied — and because the name is a fail-closed lookup key, the "
+            + "symptom is 'business unit not found', which reads like a missing environment");
+    }
+
+    /// <summary>
+    /// The config key that overrides the default lives in the same section as its sibling.
+    /// </summary>
+    /// <remarks>
+    /// Task 121 renamed the config section <c>SecureProject:</c> → <c>SecureRecord:</c>. There are TWO
+    /// keys in it — this one and <c>UnsecureOwnerUserId</c> on
+    /// <see cref="UnsecureProjectEndpoint"/> — and renaming one without the other would split a single
+    /// section in two, leaving an operator to set half their configuration under each name. Nothing in
+    /// the repo set either key, so the rename orphaned nothing; this test is what stops them drifting
+    /// apart later.
+    /// </remarks>
+    [Fact]
+    public void SecureRecordConfigKeys_ShareOneSection()
+    {
+        const string section = "SecureRecord:";
+
+        ProvisionProjectEndpoint.SecureBusinessUnitNameConfigKey.Should().StartWith(section);
+        UnsecureProjectEndpoint.UnsecureOwnerUserIdConfigKey.Should().StartWith(section);
     }
 }

@@ -104,7 +104,7 @@ public class OfficeSaveContainerProvenanceTests
     /// <remarks>
     /// The acting-user derivation was this task's original brief and was deliberately not implemented:
     /// <c>RecordContainerResolver</c>'s own contract argues against it, because users sit in the
-    /// Operations subtree while secure records are owned in Secure Projects — so acting-user resolution
+    /// Operations subtree while secure records are owned in Secure Record — so acting-user resolution
     /// writes a secure record's content into the general Operations container, the exact isolation
     /// failure this project exists to close.
     /// </remarks>

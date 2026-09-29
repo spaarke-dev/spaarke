@@ -454,7 +454,7 @@ public class RouteAuthorizationGuardTests
         //   - Secure content can never arrive here: secure records resolve through the RECORD-keyed
         //     route and fail closed. Acting-user BU is admissible ONLY where no record exists — for a
         //     secure record it is provably the WRONG container, since users sit in the Operations
-        //     subtree while secure records are owned in `Secure Projects`.
+        //     subtree while secure records are owned in `Secure Record`.
         //
         // If someone later adds a record id to this route "for convenience", this waiver is wrong and
         // the route needs the record-keyed filter instead. That is the only way it becomes stale.

@@ -143,7 +143,7 @@ This is exactly the right shape: **host-context, single-entity, read-only, no AI
 ## Worked example — BFF (`provisioningService.ts`, shared `CreateProjectWizard`)
 
 **Surface**: the Create Project wizard (shared library; LegalWorkspace and the other hosts consume the same component).
-**Need**: Provision a Secure Project — reassign the project to the canonical Secure Project business unit's owner team, provision an SPE container, and record that container on the project. Three ordered steps across two systems; the ordering is a security property, not a preference.
+**Need**: Provision a Secure Project — reassign the project to the canonical Secure Record business unit's owner team, provision an SPE container, and record that container on the project. Three ordered steps across two systems; the ordering is a security property, not a preference.
 
 ```ts
 // src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts (excerpt)
@@ -165,7 +165,7 @@ export async function provisionSecureProject(
 
 > **Contract changed 2026-08-25** (BFF task 021), and this section previously described the old one.
 > The backend no longer creates a business unit per project and no longer creates an External Access
-> Account: there is **one** canonical `Secure Project` business unit, resolved by name from server
+> Account: there is **one** canonical `Secure Record` business unit, resolved by name from server
 > configuration. `umbrellaBuId`, `accountId`, `accountName` and `wasUmbrellaBu` are gone.
 
 **Why BFF is correct here** (mapped to the criteria above):
@@ -178,7 +178,7 @@ export async function provisionSecureProject(
 6. **Concurrency / rate limits** — provisioning is throttled by the BFF rate-limit policy.
 7. **Streaming** — no, but the wizard shows step-by-step progress via `PROVISIONING_STEPS` while the single BFF call runs.
 
-**The ordering is the point.** `PROVISIONING_STEPS` runs ownership **first**, then container, then storing — because ownership is the security step. If the container call fails after ownership succeeded, the record is still owned inside the Secure Project business unit; the reverse order would leave a record holding a secure container while owned outside the secure BU. A client-side chain of `Xrm.WebApi` calls could not enforce that ordering across a browser refresh, would need Graph access the client is not allowed, and would bypass the structured audit.
+**The ordering is the point.** `PROVISIONING_STEPS` runs ownership **first**, then container, then storing — because ownership is the security step. If the container call fails after ownership succeeded, the record is still owned inside the Secure Record business unit; the reverse order would leave a record holding a secure container while owned outside the secure BU. A client-side chain of `Xrm.WebApi` calls could not enforce that ordering across a browser refresh, would need Graph access the client is not allowed, and would bypass the structured audit.
 
 **Companion pattern**: `workspaceLayoutMutations.ts` (SpaarkeAi) — uses BFF for layout writes because they require server-side validation, concurrency safety (B-5 PATCH + ETag), and audit. The file's header comment explicitly cites CLAUDE.md §10 BFF Hygiene as the standard.
 

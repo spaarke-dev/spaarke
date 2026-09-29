@@ -3,7 +3,7 @@
  * BFF API client for Secure Project infrastructure provisioning.
  *
  * Calls POST /api/v1/external-access/provision-project to orchestrate:
- *   - Assignment of the project to the canonical Secure Project business unit's owner team
+ *   - Assignment of the project to the canonical Secure Record business unit's owner team
  *   - The explicit share back to the creating user (and any named colleagues)
  *   - SPE container provisioning
  *   - Recording the container on the project record
@@ -59,7 +59,7 @@ export interface IProvisionProjectRequest {
 }
 
 export interface IProvisionProjectResponse {
-  /** The canonical Secure Project business unit — resolved by name, not created. */
+  /** The canonical Secure Record business unit — resolved by name, not created. */
   businessUnitId: string;
   businessUnitName: string;
   /** The business unit's default owner team, which now owns the project. */
@@ -169,7 +169,7 @@ const REASON_CONTAINER_NOT_RECORDED = 'sdap.provision.container_not_recorded';
 /**
  * Maps a reason code to the designed state to render, with its authored copy.
  *
- * The environment message names the missing setup explicitly ("the Secure Project business unit")
+ * The environment message names the missing setup explicitly ("the Secure Record business unit")
  * because that is the one thing an administrator needs to hear to fix it — and because "provisioning
  * failed: HTTP 500" tells the person in front of the wizard nothing they can act on.
  */
@@ -198,7 +198,7 @@ export function classifyProvisioningFailure(reasonCode?: string): {
     return {
       failureKind: 'environment-not-configured',
       errorMessage:
-        'Secure projects are not set up in this environment yet — the Secure Project business unit and its owner team have to exist before a project can be secured. The project was created as a normal project and nothing was moved; an administrator can secure it once the setup is in place.',
+        'Secure projects are not set up in this environment yet — the Secure Record business unit and its owner team have to exist before a project can be secured. The project was created as a normal project and nothing was moved; an administrator can secure it once the setup is in place.',
     };
   }
 
@@ -262,7 +262,7 @@ export function classifyProvisioningFailure(reasonCode?: string): {
  * Mirrors what the backend actually does, in order. The retired 'bu' and 'account' steps described
  * creating a business unit and an External Access Account per project; neither happens any more.
  * Ownership is listed first because it is done first — it is the security step, so a container
- * failure must not leave the record owned outside the Secure Project business unit.
+ * failure must not leave the record owned outside the Secure Record business unit.
  */
 export const PROVISIONING_STEPS = [
   { key: 'ownership', label: 'Securing project ownership\u2026' },
@@ -339,10 +339,9 @@ export async function provisionSecureProject(
     // change ships as success and the wizard tells the user the project is "shared with you" on no
     // evidence — the record would be unopenable and the UI would say otherwise. Fail closed instead.
     if (!data?.sharedToCreatorSystemUserId) {
-      console.error(
-        '[ProvisioningService] 2xx response did not report the creator share; treating as failure.',
-        { received: data }
-      );
+      console.error('[ProvisioningService] 2xx response did not report the creator share; treating as failure.', {
+        received: data,
+      });
       const { failureKind, errorMessage } = classifyProvisioningFailure();
       return { success: false, errorMessage, failureKind };
     }

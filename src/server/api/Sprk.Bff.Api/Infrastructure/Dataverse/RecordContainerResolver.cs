@@ -106,7 +106,7 @@ public sealed class RecordContainerResolver
     /// person uploading, not the thing being uploaded to. Two users uploading to the same matter put
     /// its documents in two different containers. Worse for isolation specifically: per
     /// <c>notes/secure-project-workflow-review-2026-08-24.md</c> §A, users sit in the Operations
-    /// subtree while secure records are owned in <c>Secure Projects</c>, so acting-user resolution
+    /// subtree while secure records are owned in <c>Secure Record</c>, so acting-user resolution
     /// writes a secure record's content into the general Operations container. Ownership is a
     /// property of the record, so the container follows the record.</para>
     ///

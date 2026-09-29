@@ -160,7 +160,7 @@ public class SecureBuRoleDepthAssertionTests
     }
 
     /// <summary>
-    /// <c>Secure Project Owner</c> at User depth on the owner team is the design §5.1a steady state and
+    /// <c>Secure Record Owner</c> at User depth on the owner team is the design §5.1a steady state and
     /// must pass. It is exempted STRUCTURALLY (Basic reaches no business unit), never by name — see the
     /// next test for why that distinction is load-bearing.
     /// </summary>
@@ -169,8 +169,8 @@ public class SecureBuRoleDepthAssertionTests
     {
         var census = new SecureBuRoleDepthCensus(
             BusinessUnits,
-            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Project team", isHuman: false) },
-            new[] { new SecureOwnerRoleHolder("Secure Project", IsSecureOwnerTeam: true) },
+            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record team", isHuman: false) },
+            new[] { new SecureOwnerRoleHolder("Secure Record", IsSecureOwnerTeam: true) },
             Array.Empty<string>());
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
@@ -191,7 +191,7 @@ public class SecureBuRoleDepthAssertionTests
             new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Local, SecureBu, "Contract Paralegal", isHuman: true) },
             new[]
             {
-                new SecureOwnerRoleHolder("Secure Project", IsSecureOwnerTeam: true),
+                new SecureOwnerRoleHolder("Secure Record", IsSecureOwnerTeam: true),
                 new SecureOwnerRoleHolder("Contract Paralegal", IsSecureOwnerTeam: false)
             },
             Array.Empty<string>());
@@ -215,8 +215,8 @@ public class SecureBuRoleDepthAssertionTests
     {
         var census = new SecureBuRoleDepthCensus(
             BusinessUnits,
-            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Project team", isHuman: false) },
-            new[] { new SecureOwnerRoleHolder("Secure Project", IsSecureOwnerTeam: true) },
+            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record team", isHuman: false) },
+            new[] { new SecureOwnerRoleHolder("Secure Record", IsSecureOwnerTeam: true) },
             new[] { "Contract Paralegal" });
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
@@ -300,7 +300,7 @@ public class SecureBuRoleDepthAssertionTests
         outcome.IsInert.Should().BeTrue();
         outcome.Passed.Should().BeFalse("inert is not a pass");
         outcome.Message.Should().Contain(
-            "Secure Projects BU not found — NFR-05 assertion inert; UAT environment setup pending");
+            "Secure Record BU not found — NFR-05 assertion inert; UAT environment setup pending");
     }
 
     /// <summary>
@@ -815,7 +815,7 @@ public class SecureBuRoleDepthAssertionTests
     private static readonly BusinessUnitNode[] BusinessUnits =
     {
         new(RootBu, "Spaarke", null),
-        new(SecureBu, "Secure Project", RootBu),
+        new(SecureBu, "Secure Record", RootBu),
         new(SiblingBu, "Spaarke Business Unit 1", RootBu)
     };
 

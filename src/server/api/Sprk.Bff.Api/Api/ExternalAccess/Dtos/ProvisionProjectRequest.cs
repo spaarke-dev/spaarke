@@ -3,7 +3,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <summary>
 /// Request body for POST /api/v1/external-access/provision-project.
 ///
-/// Provisioning assigns the project to the canonical Secure Project business unit's default owner
+/// Provisioning assigns the project to the canonical Secure Record business unit's default owner
 /// team and creates the project's own SPE container. It creates no business unit and no account.
 /// </summary>
 /// <remarks>

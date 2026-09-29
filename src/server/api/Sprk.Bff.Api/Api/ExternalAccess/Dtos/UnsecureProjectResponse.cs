@@ -5,7 +5,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </summary>
 /// <param name="ProjectId">The project whose secure designation was removed.</param>
 /// <param name="NewOwnerSystemUserId">
-/// The <c>systemuser</c> that now owns the record. Ownership moving off the Secure Project business
+/// The <c>systemuser</c> that now owns the record. Ownership moving off the Secure Record business
 /// unit's owner team is what actually ends the isolation — the <c>sprk_issecure</c> flag is a label,
 /// the ownership is the mechanism.
 /// </param>

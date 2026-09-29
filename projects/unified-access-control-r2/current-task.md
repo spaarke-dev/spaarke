@@ -314,13 +314,46 @@ Rule A structurally cannot express that; it is recorded in the `GovernedFiles` r
 ⚠️ **Publish-size**: not measured. Zero packages added (no `.csproj` touched), net code deletion. Flagged
 to the owner rather than silently skipped (root CLAUDE.md §10 bullet 4).
 
+### ▶ ✅ TASK 121 (item 5) — DONE. `Secure Project` → `Secure Record`.
+
+🔴 **The owner renamed the live BU in dev mid-task**, which INVERTED the cutover window: the live side moved
+first, so dev provisioning was failing closed until this code landed. Deploy this.
+
+**The hazard was that the string has FIVE meanings**, and a find-replace would have wrecked three of them:
+
+| Meaning | Renamed? |
+|---|---|
+| The **business unit** | ✅ yes — the decided change |
+| The **security role** `Secure Project Owner` | ✅ yes (owner decision) — never a runtime lookup key |
+| The **SPA product name** `Secure Project Workspace` | ❌ **no** — owner-confirmed, user-facing |
+| The **domain concept** "a Secure Project" (`sprk_issecure = true`) | ❌ no — `ProvisionSecureProject`, the toggle, container display names |
+| **Dated historical records** in `projects/**` | ❌ no — rewriting them falsifies the record |
+
+**Found during execution, not in the plan:** a **second config key** in the same section
+(`SecureProject:UnsecureOwnerUserId` on `UnsecureProjectEndpoint`). Renaming one key and not the other
+would have split one config section in two. Both moved to `SecureRecord:`, and a **new test**
+(`SecureRecordConfigKeys_ShareOneSection`) stops them drifting apart.
+
+**Also fixed**: the fixture's decoy team names were hard-coded `"Secure Project Access"` / `"Extra Owners"`.
+They exist to be NEAR-MISSES of the real team name — left hard-coded they would have survived the rename and
+silently stopped being decoys. Now derived from `SecureBuName`.
+
+`SecureBuRoleDepthAssertion` went from accepting **two** spellings to **one**, deliberately: the owner chose a
+hard cutover because a tolerant list nobody prunes is how the original `Secure Project`/`Secure Projects`
+ambiguity arrived. Its inert-message now tells an operator to rename the live BU rather than widen the list.
+
+Runbook §3a carries the ordered operator steps, what breaks between them, and the zero-downtime alternative.
+Coupling proven by seeding a half-applied rename → the pinning test fails.
+
+Verification: ArchTests **330/330** · BFF unit **12626/0** · client Jest **96/96** · build clean.
+
+⚠️ **CONFIRM WITH OWNER**: they said they renamed the *Business Unit*. Did the **`Secure Project Owner` role**
+also get renamed to `Secure Record Owner` in dev? `SecureBuRoleDepthAssertion.SecureOwnerRoleName` now expects
+the new name.
+
 ### ▶ 🔴 NEXT — in this order (owner-set 2026-09-28)
 
-**1. Item 5 — `Secure Project` → `Secure Record`** BU rename. One coordinated change (live BU + code default
-`DefaultSecureBusinessUnitName` + config key `SecureProject:BusinessUnitName` + pinning test + docs) or
-provisioning stops. Code: `Sprk.Bff.Api/Api/ExternalAccess/*`, `tests/integration/data-mutation/ExternalAccess/*`.
-
-**2. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
+**1. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
 `AgentServiceClient` (`agent-thread:thread` — 🔴 cross-**USER**, latent: `Enabled` defaults false),
 `AgentConfigurationService` (`exposed-playbooks`, `capabilities`), `ModuleEntitlementResolver`
 (`approle-module-map:all`). **Required regardless** of the Redis dedication decision — dedication does not

@@ -272,7 +272,7 @@ public class OfficeService : IOfficeService
             // ⚠️ Deliberately NOT the acting user's business unit. That was this task's brief, and the
             // resolver's own contract argues against it (RecordContainerResolver §"Why the RECORD's
             // business unit and not the ACTING USER's"): users sit in the Operations subtree while
-            // secure records are owned in Secure Projects, so acting-user resolution writes a secure
+            // secure records are owned in Secure Record, so acting-user resolution writes a secure
             // record's content into the general Operations container — the exact isolation failure this
             // project exists to close. The owner's Q1 answer sanctioned acting-user BU for the three
             // upload-before-a-record-exists client paths in task 076, which are a different surface;
