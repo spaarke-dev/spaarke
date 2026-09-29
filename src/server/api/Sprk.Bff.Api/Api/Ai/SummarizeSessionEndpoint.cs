@@ -121,6 +121,7 @@ public static class SummarizeSessionEndpoint
             .WithTags("AI Chat");
 
         group.MapPost("/sessions/{sessionId}/summarize", SummarizeAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SummarizeChatSession")
             .WithSummary("Summarize files uploaded into a chat session (catalog-driven, FR-P1-01)")

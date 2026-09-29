@@ -73,16 +73,12 @@ export function useComposeHeartbeatGate(
       }
       try {
         const url = `${bffBaseUrl}/api/compose/document/${sprkDocumentId}/heartbeat`;
-        const response = await authenticatedFetch(url, { method: 'POST' });
-        if (!response.ok) {
-          // Defensive: 404 = endpoint not deployed yet (W7-052 lands later);
-          // 401/403 = auth issue (upstream concern); 5xx = transient.
-          // eslint-disable-next-line no-console
-          console.info(
-            `[ComposeWorkspace] heartbeat returned ${response.status} for document ${sprkDocumentId} — swallowing (W7-052 wires endpoint)`
-          );
-        }
+        await authenticatedFetch(url, { method: 'POST' });
       } catch (err) {
+        // FR-S09 sweep (r8 task 016): the `if (!response.ok)` log that used to sit above could not
+        // execute — `authenticatedFetch` throws on every non-2xx, so 404 (endpoint not deployed yet),
+        // 401/403 and 5xx ALL land here. Behaviour is unchanged (both branches swallowed); what
+        // changes is that there is now one description of it instead of two, one of them fictional.
         // Network errors: log + swallow. The 15-min stale-sweep on the BFF
         // side handles orphan locks regardless of client-side success.
         // eslint-disable-next-line no-console

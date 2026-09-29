@@ -74,11 +74,39 @@ public sealed class MembershipResolverService : IMembershipResolverService
     internal const string CacheResource = "membership-resolved";
 
     /// <summary>
-    /// Cache schema version per ADR-009. Bumped to 3 (r5 2026-07-09) alongside the
-    /// distinct='true' completeness fix (see <see cref="BuildFetchXml"/>) so that empty
-    /// membership results cached under the buggy query are orphaned rather than served.
+    /// Cache schema version per ADR-009. Bumped to 4 (unified-access-control-r2 task 015,
+    /// finding A-10 / spec FR-14) alongside the paging-determinism fix: the continuation-token
+    /// format changed from a bare skip-count to a versioned <c>(page, paging-cookie)</c> pair,
+    /// and page contents changed shape (a stable <c>&lt;order&gt;</c> + real page/count paging
+    /// replaced the malformed top+page/count mix). Entries cached under the OLD query shape
+    /// carry silently-truncated id sets, so they must be orphaned rather than served.
+    /// <para>
+    /// Prior bump: 3 (r5 2026-07-09) for the distinct='true' completeness fix.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
+    /// question came up and the answer was non-obvious). This constant and
+    /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
+    /// a bump:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>Bump REQUIRED</b> when the cached VALUE's shape or the query's semantics change while
+    /// the options-hash composition stays the same — because old entries then remain ADDRESSABLE under
+    /// an unchanged key and will be served as valid answers. That is exactly the 3→4 case above: the
+    /// key was identical, so only the version could orphan the silently-truncated id sets.</item>
+    /// <item><b>Bump NOT required</b> when the change alters the options-hash composition itself, as
+    /// task 043 did by adding <c>AccessConferringOnly</c> and <c>OrganizationIds</c> to
+    /// <see cref="HashOptions"/>. Every post-change hash carries the new fields, so no running code can
+    /// compute the key of a pre-change entry: they are unreachable and expire on their own TTL. The
+    /// changed composition IS the orphaning mechanism, and a bump would be redundant.</item>
+    /// </list>
+    /// <para>
+    /// The distinction matters in the unsafe direction: getting it wrong the FIRST way serves a stale
+    /// answer to a new question, which on this path means serving an unfiltered descriptor set to an
+    /// authorization decision.
+    /// </para>
     /// </summary>
-    private const int CacheVersion = 3;
+    private const int CacheVersion = 4;
 
     /// <summary>Phase 1A per-user cache TTL (FR-1A.8).</summary>
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
@@ -113,10 +141,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _cache = cache;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
-        _options = options.Value; // Consumed by ResolveByContactAsync's
-                                  // access-conferring role allowlist (NFR-05).
-                                  // Resolving here surfaces binding errors at
-                                  // construction rather than first call.
+        _options = options.Value; // Consumed by the access-conferring column registry filter
+                                  // (ADR-034 A1 / FR-24, NFR-05) — ResolveByContactAsync always;
+                                  // ResolveAsync when AccessConferringOnly is requested. Resolving
+                                  // here surfaces binding errors at construction, not first call.
     }
 
     /// <summary>
@@ -215,7 +243,19 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── a) Discovery ────────────────────────────────────────────────────
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var descriptors = FilterDescriptors(discovery.DiscoveredFields, effectiveOptions);
+
+        // ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041): when the caller opts
+        // in via AccessConferringOnly, apply the SAME registry filter ResolveByContactAsync always
+        // applies — BEFORE the Roles/IdentityTypes narrowing below, mirroring that method's order.
+        // Default false (the untouched path) makes this line a no-op — candidateFields IS
+        // discovery.DiscoveredFields, the same reference — so scoping output stays byte-identical to
+        // pre-task-041 behavior (AC pinned by ResolveAsync_AccessConferringOnlyDefaultsFalse_* tests).
+        // includePlatformOwnership: true — the SYSTEMUSER plane, the only plane where owning a record is
+        // possible (task 043 C-1, owner decision 2026-09-17). See PlatformOwnershipColumns.
+        var candidateFields = effectiveOptions.AccessConferringOnly
+            ? FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: true)
+            : discovery.DiscoveredFields;
+        var descriptors = FilterDescriptors(candidateFields, effectiveOptions);
 
         // ── c) Identity normalization (started in parallel with discovery
         //     would also be valid, but discovery is typically cache-hot;
@@ -251,17 +291,17 @@ public sealed class MembershipResolverService : IMembershipResolverService
         }
 
         // ── d) Build FetchXml ──────────────────────────────────────────────
-        // Strategy: <fetch top='{limit + 1}' distinct='true'> select id + each
-        // descriptor's lookup field, OR-joined conditions over (field, identity-value).
-        // top = limit + 1 lets us detect "has more" without a separate count query.
+        // Strategy: <fetch count='{limit}' page='{n}' [paging-cookie]> selecting the row id
+        // + each descriptor's lookup field, ordered by the primary id, with OR-joined
+        // conditions over (field, identity-value). See BuildFetchXml for the A-10 rationale.
         var effectiveLimit = ClampLimit(effectiveOptions.Limit);
-        var fetchSkip = DecodeContinuationSkip(effectiveOptions.ContinuationToken);
+        var cursor = DecodeContinuation(effectiveOptions.ContinuationToken);
         var (fetchXml, fetchSummary) = BuildFetchXml(
             normalizedEntity,
             descriptors,
             identity,
             effectiveLimit,
-            fetchSkip,
+            cursor,
             systemUserId);
 
         if (fetchSummary.ConditionCount == 0)
@@ -293,17 +333,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
             .ConfigureAwait(false);
 
         // ── f) Materialize: dedupe + sort + byRole map ──────────────────────
-        var (ids, byRole, hasMore) = MaterializeResults(
-            entityCollection,
-            descriptors,
-            effectiveLimit);
+        var (ids, byRole) = MaterializeResults(entityCollection, descriptors);
 
         // ── g) Paging — emit continuationToken if more rows exist ──────────
-        string? nextToken = null;
-        if (hasMore)
-        {
-            nextToken = EncodeContinuationSkip(fetchSkip + effectiveLimit);
-        }
+        var nextToken = BuildNextContinuationToken(
+            entityCollection, cursor, effectiveLimit, normalizedEntity);
 
         // ── R3 Part 1D — transitive expansion (only when requested) ────────
         // Validation + per-related-entity FetchXml join. Throws
@@ -337,9 +371,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _logger.LogInformation(
             "MembershipResolverService resolved systemUserId={SystemUserId} entity={EntityType} " +
             "in {ElapsedMs}ms (descriptors={DescriptorCount}, conditions={ConditionCount}, " +
-            "rows={RowCount}, roles={RoleCount}, hasMore={HasMore}, relatedEntities={RelatedCount})",
+            "rows={RowCount}, roles={RoleCount}, page={Page}, hasMore={HasMore}, relatedEntities={RelatedCount})",
             systemUserId, normalizedEntity, sw.ElapsedMilliseconds,
-            descriptors.Count, fetchSummary.ConditionCount, ids.Count, byRole.Count, hasMore,
+            descriptors.Count, fetchSummary.ConditionCount, ids.Count, byRole.Count,
+            cursor.Page, nextToken is not null,
             relatedByRole?.Count ?? 0);
 
         return response;
@@ -371,17 +406,32 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var effectiveOptions = options ?? new MembershipResolveOptions();
 
         // ── Contact-only principal (ADR-034 Path C — no systemuser) ─────────
-        // A PersonIdentity carrying ONLY the contactId. SystemUserId is
-        // Guid.Empty so BuildFetchXml's SystemUser branch (and every other
-        // non-Contact branch — Team/BusinessUnit/Account/Organization) emits
-        // zero conditions (AppendCondition guards Guid.Empty; the identity's
-        // team/org collections are empty). Only the Contact branch can bind —
-        // and we further constrain the descriptors to the access-conferring
-        // allowlist below, so this path can NEVER resolve via a non-contact or
-        // adverse lookup. We deliberately bypass IIdentityNormalizationService
-        // (which is hard-keyed to a systemuserid) — that is exactly the gap
-        // this entry point closes.
-        var identity = new PersonIdentity(SystemUserId: Guid.Empty, ContactId: contactId);
+        // A PersonIdentity carrying the contactId and, when the caller supplies them, the
+        // organizations that contact actively belongs to. SystemUserId is Guid.Empty so
+        // BuildFetchXml's SystemUser branch (and the Team/BusinessUnit/Account branches) emit
+        // zero conditions (AppendCondition guards Guid.Empty; those identity collections are
+        // empty). So exactly two branches can bind — Contact, and Organization when org ids were
+        // supplied — and we further constrain the descriptors to the access-conferring registry
+        // below, so this path can NEVER resolve via a non-registry or adverse lookup. We
+        // deliberately bypass IIdentityNormalizationService (which is hard-keyed to a
+        // systemuserid) — that is exactly the gap this entry point closes.
+        //
+        // ORG EXPANSION (design §4.5 term 4 / FR-24 + FR-25, task 043): binding org ids is what
+        // makes registry-listed org-typed descriptors emit conditions at all. Before this, the
+        // identity's OrganizationIds was always empty here, so those descriptors survived the
+        // registry filter and then matched nothing — investigation 02 §3's "org-typed descriptors
+        // emit zero conditions today".
+        //
+        // ⚠️ The ids are the CALLER's to resolve, and the caller is expected to pair them with
+        // IdentityTypes: ["Organization"] when it wants the org-derived records ALONE. ContactId is
+        // bound unconditionally on this path, so an unnarrowed call with org ids returns the UNION
+        // of contact- and org-derived records with no way to tell them apart — and the evaluator
+        // credits org-derived records at the ORGANIZATION's baseline, which would then be applied
+        // to the contact's own assignments too. See MembershipResolveOptions.OrganizationIds.
+        var identity = new PersonIdentity(
+            SystemUserId: Guid.Empty,
+            ContactId: contactId,
+            OrganizationIds: effectiveOptions.OrganizationIds);
 
         // ── Cache lookup (contact-namespaced id, disjoint from systemuser path) ─
         var tenantId = GetTenantId();
@@ -406,7 +456,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // contact roles before any options narrowing. Reuses the SAME metadata
         // discovery mechanism as the systemuser path — no second discovery engine.
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var allowlisted = FilterToAccessConferringContactRoles(discovery.DiscoveredFields);
+        // includePlatformOwnership: FALSE — a contact can never own a Dataverse record, so ownership
+        // descriptors would bind nothing here and merely widen the query (task 043 C-1; NFR-05, pinned
+        // by ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords).
+        var allowlisted = FilterToAccessConferringRoles(
+            normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: false);
         var descriptors = FilterDescriptors(allowlisted, effectiveOptions);
 
         // No access-conferring contact roles → empty response (NOT an error).
@@ -425,13 +479,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── b) Build FetchXml via the EXISTING engine (reuse, not fork) ─────
         var effectiveLimit = ClampLimit(effectiveOptions.Limit);
-        var fetchSkip = DecodeContinuationSkip(effectiveOptions.ContinuationToken);
+        var cursor = DecodeContinuation(effectiveOptions.ContinuationToken);
         var (fetchXml, fetchSummary) = BuildFetchXml(
             normalizedEntity,
             descriptors,
             identity,
             effectiveLimit,
-            fetchSkip,
+            cursor,
             systemUserId: Guid.Empty);
 
         if (fetchSummary.ConditionCount == 0)
@@ -454,16 +508,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
             .RetrieveMultipleAsync(fetch, ct)
             .ConfigureAwait(false);
 
-        var (ids, byRole, hasMore) = MaterializeResults(
-            entityCollection,
-            descriptors,
-            effectiveLimit);
+        var (ids, byRole) = MaterializeResults(entityCollection, descriptors);
 
-        string? nextToken = null;
-        if (hasMore)
-        {
-            nextToken = EncodeContinuationSkip(fetchSkip + effectiveLimit);
-        }
+        var nextToken = BuildNextContinuationToken(
+            entityCollection, cursor, effectiveLimit, normalizedEntity);
 
         // ── d) Build + cache response. RelatedByRole stays null — the
         // contact-anchored path does not do transitive expansion (task 022
@@ -490,42 +538,124 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return response;
     }
 
-    // ── Access-conferring role allowlist (NFR-05 — security-load-bearing) ───
+    // ── Access-conferring column registry (ADR-034 Amendment A1 / spec FR-24 — security-load-bearing,
+    //    NFR-05) ────────────────────────────────────────────────────────────────────────────────────
     /// <summary>
-    /// Reduces discovered descriptors to ONLY the access-conferring contact
-    /// roles for the contact-anchored entry point. A descriptor qualifies when
-    /// ALL hold:
-    ///   (1) its <see cref="MembershipDescriptor.IdentityType"/> is
-    ///       <c>Contact</c> — org/systemuser/team/BU/account lookups (and
-    ///       polymorphic <c>sprk_regardingrecord*</c> fields resolved to a
-    ///       non-contact target) never confer contact-anchored access;
-    ///   (2) its logical field name starts with the configured convention
-    ///       prefix (default <c>sprk_assigned</c>, case-insensitive) — adverse
-    ///       contact lookups such as an opposing-counsel field fail here;
-    ///   (3) it is NOT on the config/data-driven exclusion list.
-    /// The allowlist is therefore derived from live metadata discovery + a
-    /// naming convention + a config exclusion list — never a hardcoded field
-    /// allowlist — so a newly-added <c>sprk_assigned*</c> contact lookup
-    /// auto-qualifies with no code change (NFR-05).
+    /// Reduces discovered descriptors to ONLY the access-conferring columns registered for
+    /// <paramref name="entityType"/> — consumed by the systemuser-plane opt-in gate
+    /// (<see cref="ResolveAsync"/>, when <see cref="MembershipResolveOptions.AccessConferringOnly"/> is
+    /// requested) AND the contact-anchored entry point (<see cref="ResolveByContactAsync"/>,
+    /// unconditionally). A descriptor qualifies when ALL hold:
+    ///   (1) <paramref name="entityType"/> has a registry entry naming its
+    ///       <see cref="MembershipDescriptor.Field"/> (<see cref="MembershipOptions.AccessConferringRoles"/>);
+    ///   (2) that entry's declared identity type is <c>Contact</c> or <c>Organization</c> — the two
+    ///       identity types the registry covers per ADR-034 Amendment A1 (org-typed lookups are
+    ///       allow-listed too, closing the disclosure where unrestricted org expansion would confer
+    ///       access from ANY organization referenced on the record, including opposing counsel);
+    ///   (3) that declared type matches what live metadata discovery ACTUALLY resolved for the field
+    ///       (<see cref="MembershipDescriptor.IdentityType"/>) — a mismatch is a stale/malformed entry.
+    /// Conferral is registry membership ONLY — there is no naming-convention fallback; the prefix check
+    /// is DELETED, not layered under the registry. An entity with NO registry entries (or an empty list)
+    /// confers NOTHING (fail-closed, spec NFR-01); a malformed entry (missing field, unsupported
+    /// identity type, or a declared type that disagrees with live discovery) is logged and ignored —
+    /// never widened. Adding a conferring column is therefore a reviewed registry edit; renaming a
+    /// column — or a maker naming a brand-new column to merely LOOK like an assignment field — has zero
+    /// effect on access, because only an explicit registry entry does.
     /// </summary>
-    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringContactRoles(
-        IReadOnlyList<MembershipDescriptor> discovered)
+    /// <summary>
+    /// The Dataverse PLATFORM ownership columns, which confer access structurally rather than by
+    /// registry entry (owner decision 2026-09-17 — task 043 finding C-1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>Restoring these is not a convenience; omitting them caused a production outage once
+    /// already.</b> <c>MembershipFieldDiscoveryService</c>'s own rationale block records R7 W12 task 130
+    /// (2026-06-30): <i>"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid …
+    /// verified via raw SQL. Only ownerid matches those 44 rows for that user; the assigned* fields do
+    /// not."</i> Task 043's registry filter would have reproduced that exact symptom on the systemuser
+    /// plane, because the registry can only declare Contact/Organization types.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b><c>owningteam</c> is the load-bearing one, not <c>ownerid</c></b> — records in this
+    /// deployment are owned primarily at team / business-unit level (owner, 2026-09-17). Discovery binds
+    /// the FIRST target matching <c>IncludedIdentityTables</c>, whose order starts at
+    /// <c>systemuser</c>, so a polymorphic Owner column always resolves to <b>SystemUser</b> and is bound
+    /// against the caller's own <c>SystemUserId</c>. On a team-owned record <c>ownerid</c> holds the
+    /// TEAM's id, so that condition never matches; the access arrives via <c>owningteam</c> →
+    /// <c>Team</c> → <c>identity.TeamIds</c>. Keying on <c>ownerid</c> alone would look like a fix and
+    /// confer nothing.
+    /// </para>
+    /// <para>
+    /// Residual worth knowing: <c>TeamIds</c> comes from the <c>teammembership</c> query in
+    /// <c>IdentityNormalizationService</c>, which fails <b>soft</b> to an empty list ("TeamIds will be
+    /// empty"). So on team-owned records a transient failure of that read is indistinguishable from "no
+    /// access" — the same read-fault-looks-like-absence shape recorded as ISS-019.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> PlatformOwnershipColumns =
+        new(StringComparer.OrdinalIgnoreCase) { "ownerid", "owningteam", "owningbusinessunit" };
+
+    /// <param name="includePlatformOwnership">
+    /// Whether <see cref="PlatformOwnershipColumns"/> may confer. <c>true</c> on the SYSTEMUSER plane
+    /// only; <c>false</c> on the contact plane.
+    /// <para>
+    /// ⚠️ <b>Not a toggle — a plane invariant, and a pre-existing test caught it being violated.</b> A
+    /// contact can never own a Dataverse record, so on the contact plane these descriptors bind nothing
+    /// (<c>SystemUserId</c> is <see cref="Guid.Empty"/>, <c>TeamIds</c> empty, <c>BusinessUnitId</c>
+    /// null) and admitting them only widens the descriptor set and the emitted FetchXml. When task 043
+    /// first added the ownership allowance unconditionally,
+    /// <c>ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords</c> failed with
+    /// <c>ByRole</c> = <c>{["owner"] = {empty}, ["assignedAttorney"] = {…}}</c> — the role present and
+    /// contributing zero records — against its own reason, "SystemUser lookups are not access-conferring
+    /// on the contact path" (NFR-05). Keeping this <c>false</c> there preserves the contact plane's
+    /// byte-identical output, which several tests deliberately pin.
+    /// </para>
+    /// </param>
+    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringRoles(
+        string entityType,
+        IReadOnlyList<MembershipDescriptor> discovered,
+        bool includePlatformOwnership)
     {
         if (discovered.Count == 0)
         {
             return Array.Empty<MembershipDescriptor>();
         }
 
-        var config = _options.AccessConferringRoles ?? new AccessConferringRoleOptions();
-        var prefix = string.IsNullOrWhiteSpace(config.ConventionPrefix)
-            ? AccessConferringRoleOptions.DefaultConventionPrefix
-            : config.ConventionPrefix.Trim();
+        var registry = _options.AccessConferringRoles ?? new AccessConferringRegistry();
+        registry.Entities.TryGetValue(entityType, out var columns);
 
-        var exclusions = new HashSet<string>(
-            (config.ExcludedFields ?? new List<string>())
-                .Where(f => !string.IsNullOrWhiteSpace(f))
-                .Select(f => f.Trim()),
-            StringComparer.OrdinalIgnoreCase);
+        // An entity absent from the registry confers nothing via the maker-authored axis (fail-closed,
+        // NFR-01) — but it still confers through PLATFORM OWNERSHIP below, so this is no longer an
+        // early return. Ownership is not a registry concern; see PlatformOwnershipColumns.
+        columns ??= new List<AccessConferringColumn>();
+
+        // Validate + index the registry's declared columns for this entity. A malformed entry (blank
+        // Field, or an IdentityType outside {Contact, Organization}) is logged and dropped here — never
+        // widened, per NFR-01. NOTE: the Contact/Organization restriction applies to the REGISTRY only.
+        // The ownership axis is admitted structurally, not by declaring a type here.
+        var byField = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in columns)
+        {
+            if (string.IsNullOrWhiteSpace(column.Field))
+            {
+                _logger.LogWarning(
+                    "MembershipResolverService: malformed AccessConferringRoles entry for entity={EntityType} " +
+                    "(blank Field) — ignored (fail-closed, never widened).",
+                    entityType);
+                continue;
+            }
+            if (!string.Equals(column.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(column.IdentityType, "Organization", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "MembershipResolverService: malformed AccessConferringRoles entry for entity={EntityType} " +
+                    "field={Field}: IdentityType={IdentityType} is neither Contact nor Organization — " +
+                    "ignored (fail-closed, never widened).",
+                    entityType, column.Field, column.IdentityType);
+                continue;
+            }
+            byField[column.Field.Trim()] = column.IdentityType.Trim();
+        }
 
         var result = new List<MembershipDescriptor>(discovered.Count);
         foreach (var d in discovered)
@@ -534,21 +664,52 @@ public sealed class MembershipResolverService : IMembershipResolverService
             {
                 continue;
             }
-            var field = d.Field.Trim();
 
-            // (1) Contact-typed person lookup only.
-            if (!string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase))
+            // ── PLATFORM OWNERSHIP — admitted structurally, ahead of the registry ──────────────────
+            // Owner/team/business-unit ownership confers access without a registry entry, and MUST:
+            // being the owner IS Dataverse access, which is the very thing this filter is approximating
+            // until the FR-20 impersonated read (task 036) replaces it with Dataverse's own answer.
+            //
+            // Why these three are NOT a registry concern (owner decision 2026-09-17, task 043 C-1):
+            // FR-24's entire rationale is that a MAKER-AUTHORED lookup must not confer by naming
+            // accident — a rename could silently grant access, so conferral needs a reviewed entry.
+            // `ownerid` / `owningteam` / `owningbusinessunit` are platform-maintained system columns,
+            // fixed by the Dataverse data model (see MembershipFieldDiscoveryService's
+            // OwnerAttributeTargets, "fixed ... regardless of solution / entity"). Nobody can rename
+            // their way into them, so there is nothing for a review to protect against — and requiring
+            // an entry made them INEXPRESSIBLE, because the loop above rejects any declared type
+            // outside {Contact, Organization} as malformed.
+            //
+            // 🔴 What this deliberately does NOT do: admit every SystemUser/Team/BusinessUnit-typed
+            // lookup. A maker-authored `sprk_reviewer → systemuser` still confers nothing without a
+            // reviewed entry — otherwise register A-8's over-inclusion returns through a different
+            // door. The allowance is keyed on the three platform NAMES, not on the identity type.
+            // Pinned by ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing.
+            if (includePlatformOwnership && PlatformOwnershipColumns.Contains(d.Field.Trim()))
             {
+                result.Add(d);
                 continue;
             }
-            // (2) Access-conferring naming convention.
-            if (!field.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+
+            if (!byField.TryGetValue(d.Field.Trim(), out var registeredType))
             {
+                // Not in the registry — the FR-24 default. Adverse fields (opposing-counsel lookups),
+                // account-typed lookups, maker-authored systemuser/team-typed lookups, and any column
+                // nobody has reviewed onto the registry all end here, regardless of how their name
+                // reads. (Platform ownership is the one exception, handled immediately above.)
                 continue;
             }
-            // (3) Config/data-driven exclusion list.
-            if (exclusions.Contains(field))
+
+            if (!string.Equals(registeredType, d.IdentityType, StringComparison.OrdinalIgnoreCase))
             {
+                // The registry's assertion about this column's type disagrees with what live discovery
+                // just resolved (e.g. the column's target table changed since the registry was last
+                // reviewed). Malformed/stale — log and ignore rather than trust either side blindly.
+                _logger.LogWarning(
+                    "MembershipResolverService: AccessConferringRoles entry for entity={EntityType} " +
+                    "field={Field} declares IdentityType={RegisteredType} but live discovery resolved " +
+                    "{ActualType} — entry ignored (fail-closed, never widened).",
+                    entityType, d.Field, registeredType, d.IdentityType);
                 continue;
             }
 
@@ -627,7 +788,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
         IReadOnlyList<MembershipDescriptor> descriptors,
         PersonIdentity identity,
         int limit,
-        int skip,
+        MembershipPageCursor cursor,
         Guid systemUserId)
     {
         // The set of attributes we need to project — entity id + each descriptor's
@@ -644,13 +805,34 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // even for a user who owns 45 matters. This query has no <link-entity>, so each match
         // is exactly one row (no multiplication), and MaterializeResults already dedupes by id
         // (HashSet). distinct was therefore a no-op for dedup and actively broke id retrieval.
-        sb.Append("<fetch top='").Append(limit + 1).Append('\'');
-        if (skip > 0)
+        //
+        // PAGING (unified-access-control-r2 task 015 — finding A-10 / spec FR-14).
+        // The previous shape was `top='{limit+1}'` PLUS, on continuation, `page='N' count='{limit+1}'`.
+        // Three defects, all fixed here by adopting ONE scheme — Dataverse's documented
+        // page/count paging with a paging cookie:
+        //   (1) MIXING top WITH page/count is malformed FetchXml paging: `top` and the
+        //       page/count pair are mutually exclusive. We now emit count/page ONLY,
+        //       never `top`.
+        //   (2) `top={limit+1}` was used as a has-more SENTINEL, but the sentinel row was
+        //       then discarded by MaterializeResults while the next page started at
+        //       row limit+2 — so exactly one row was silently dropped at every page
+        //       boundary. has-more now comes from the platform's own
+        //       EntityCollection.MoreRecords signal, so NO data row is ever consumed to
+        //       answer "is there more?".
+        //   (3) NO <order> meant Dataverse was free to return an ARBITRARY subset for a
+        //       given page — pages could overlap or skip rows entirely, and which rows a
+        //       capped query returned was not reproducible. We now order by the entity's
+        //       primary id, which is the only guaranteed-unique (total, stable) sort key
+        //       on an arbitrary Dataverse entity. Ordering by a NON-unique column (e.g.
+        //       createdon) would leave ties free to reorder between pages and re-open the
+        //       same defect.
+        sb.Append("<fetch count='").Append(limit).Append('\'');
+        sb.Append(" page='").Append(cursor.Page).Append('\'');
+        if (!string.IsNullOrEmpty(cursor.PagingCookie))
         {
-            // FetchXml paging via 'page' attribute — page is 1-based with fixed
-            // 'count'. Convert skip → page (skip MUST be a multiple of limit).
-            var page = (skip / Math.Max(1, limit)) + 1;
-            sb.Append(" page='").Append(page).Append("' count='").Append(limit + 1).Append('\'');
+            // The cookie is platform-issued XML; it MUST be escaped to embed it in an
+            // attribute value (the SDK's own paging samples do the same).
+            sb.Append(" paging-cookie='").Append(EscapeXml(cursor.PagingCookie)).Append('\'');
         }
         sb.Append("><entity name='").Append(EscapeXml(entityType)).Append("'>");
 
@@ -664,6 +846,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 sb.Append("<attribute name='").Append(EscapeXml(d.Field)).Append("' />");
             }
         }
+
+        // ── Stable total order (FR-14) — MUST precede <filter> per the FetchXml schema
+        // sequence (attribute*, order*, filter*, link-entity*).
+        sb.Append("<order attribute='")
+          .Append(EscapeXml(PrimaryIdAttribute(entityType)))
+          .Append("' descending='false' />");
 
         // OR-joined filter over (field, identity-value) pairs.
         sb.Append("<filter type='or'>");
@@ -754,6 +942,28 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return (sb.ToString(), summary);
     }
 
+    /// <summary>
+    /// The logical name of <paramref name="entityType"/>'s primary-id attribute, used as
+    /// the stable total sort key for paging (FR-14). Dataverse names a table's primary key
+    /// <c>{entityLogicalName}id</c> — this holds by construction for every <c>sprk_*</c>
+    /// custom table (the resolver's actual targets: matter / project / work assignment /
+    /// document / event / …) and for the standard tables the membership resolver touches
+    /// (<c>account</c>, <c>contact</c>).
+    /// <para>
+    /// The convention is NOT universal across the whole Dataverse catalogue — a handful of
+    /// system tables deviate (e.g. <c>activitypointer</c>'s key is <c>activityid</c>). If the
+    /// resolver is ever pointed at such a table, Dataverse REJECTS the query with a 400
+    /// ("invalid attribute in order") and <see cref="IDataverseService.RetrieveMultipleAsync(FetchExpression, CancellationToken)"/>
+    /// throws — the caller then denies (ADR-003 fail-closed) instead of receiving a partial
+    /// set that looks complete. That is the deliberate failure mode: LOUD and safe, not
+    /// silent under-grant. Deriving the key from live metadata instead would require
+    /// extending <c>IMembershipFieldDiscoveryService</c>/<c>DiscoveryResult</c>, which is
+    /// outside this task's file scope — recorded in the task notes as the follow-up.
+    /// </para>
+    /// </summary>
+    internal static string PrimaryIdAttribute(string entityType)
+        => entityType.Trim().ToLowerInvariant() + "id";
+
     private static int AppendCondition(StringBuilder sb, string field, Guid value)
     {
         if (value == Guid.Empty)
@@ -788,17 +998,29 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
     // ── Result materialization ─────────────────────────────────────────────
     /// <summary>
-    /// Walks the EntityCollection and produces:
-    ///   - distinct, sorted ids[] (truncated to limit)
-    ///   - byRole map: role → list of ids the user has that role on
-    ///   - hasMore: true when more rows exist beyond the requested limit
+    /// Walks the EntityCollection for ONE page and produces:
+    ///   - distinct, ascending-sorted ids[] for this page
+    ///   - byRole map: role → list of ids the user has that role on (this page)
+    /// <para>
+    /// A-10 / FR-14 fix: this method NO LONGER truncates the page and NO LONGER derives
+    /// has-more. Both were the off-by-one. Previously it received <c>top = limit + 1</c>
+    /// rows, kept <c>limit</c> of them, and reported <c>hasMore = count &gt; limit</c> — the
+    /// (limit+1)th row was DISCARDED here while the caller advanced the cursor past it, so
+    /// that row was never served by any page. has-more is now the platform's
+    /// <see cref="EntityCollection.MoreRecords"/> flag, read by the caller; a page's rows are
+    /// ALL kept.
+    /// </para>
+    /// <para>
+    /// A page is never trimmed even if the platform over-returns relative to
+    /// <c>count</c>: dropping rows here is precisely the silent under-grant A-10 describes,
+    /// and page/count advances by page NUMBER, so a dropped row would never be re-served.
+    /// Over-return is instead logged by the caller and de-duplicated across pages.
+    /// </para>
     /// </summary>
     private static (IReadOnlyList<Guid> Ids,
-                    IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole,
-                    bool HasMore) MaterializeResults(
+                    IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole) MaterializeResults(
         EntityCollection entityCollection,
-        IReadOnlyList<MembershipDescriptor> descriptors,
-        int limit)
+        IReadOnlyList<MembershipDescriptor> descriptors)
     {
         // Initialize byRole with every role as an empty list — empty buckets help
         // clients distinguish "queried, no matches" from "not in the query".
@@ -833,22 +1055,21 @@ public sealed class MembershipResolverService : IMembershipResolverService
             }
         }
 
-        // Detect "has more" using the top=limit+1 sentinel.
-        var hasMore = allIds.Count > limit;
+        // Sort ids ascending for a deterministic PUBLIC output shape. NOTE: this is a
+        // presentation sort over the rows of ONE page — it is deliberately NOT the paging
+        // sort key. Page boundaries are decided server-side by the <order> on the primary id
+        // under Dataverse's own uniqueidentifier collation, which does NOT match .NET's
+        // Guid.CompareTo byte ordering. The code therefore never re-derives a page boundary
+        // client-side; it only stabilises the order of ids WITHIN the page it was handed.
+        var sortedIds = allIds.OrderBy(g => g).ToList();
 
-        // Sort ids ascending for deterministic output, then truncate to limit.
-        var sortedIds = allIds.OrderBy(g => g).Take(limit).ToList();
-        var keptSet = new HashSet<Guid>(sortedIds);
-
-        // Truncate byRole buckets to only the ids we kept in sortedIds.
         var byRoleFinal = new Dictionary<string, IReadOnlyList<Guid>>(StringComparer.Ordinal);
         foreach (var (role, set) in byRoleAccum)
         {
-            var kept = set.Where(keptSet.Contains).OrderBy(g => g).ToList();
-            byRoleFinal[role] = kept;
+            byRoleFinal[role] = set.OrderBy(g => g).ToList();
         }
 
-        return (sortedIds, byRoleFinal, hasMore);
+        return (sortedIds, byRoleFinal);
     }
 
     /// <summary>
@@ -1055,6 +1276,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
             sb.Append("<attribute name='").Append(EscapeXml(field)).Append("' />");
         }
 
+        // Stable total order (FR-14, same defect class as the primary query). This query is
+        // single-page (top only, no continuation), so <order> does not affect completeness —
+        // but WITHOUT it, `top` selects an ARBITRARY MaxLimit-sized subset when a caller has
+        // more related rows than the cap, and re-running the same request can return a
+        // different subset. Ordering by the primary id makes "which rows the cap kept"
+        // reproducible.
+        sb.Append("<order attribute='")
+          .Append(EscapeXml(PrimaryIdAttribute(relatedEntity)))
+          .Append("' descending='false' />");
+
         sb.Append("<filter type='or'>");
         foreach (var field in backRefLookups)
         {
@@ -1185,49 +1416,132 @@ public sealed class MembershipResolverService : IMembershipResolverService
     }
 
     /// <summary>
-    /// Encodes the skip-count as a base64url continuation token. Opaque to
-    /// callers — they round-trip the value via
-    /// <see cref="MembershipResolveOptions.ContinuationToken"/>.
+    /// Decides whether another page exists and, if so, encodes the cursor for it.
+    /// <para>
+    /// has-more is the platform's <see cref="EntityCollection.MoreRecords"/> flag — the
+    /// authoritative signal, and crucially one that costs no data row (the old
+    /// <c>top = limit + 1</c> sentinel consumed one). The <c>returned &gt;= pageSize</c>
+    /// disjunct is a deliberate belt: a provider that returns a FULL page while reporting
+    /// <c>MoreRecords = false</c> would otherwise silently truncate the caller's set — the
+    /// exact A-10 failure. The cost of the belt is one extra round trip returning zero rows
+    /// when a result set happens to be an exact multiple of the page size; the cost of
+    /// omitting it is an undetectable under-grant, so the trade is not close.
+    /// </para>
     /// </summary>
-    private static string EncodeContinuationSkip(int skip)
+    private string? BuildNextContinuationToken(
+        EntityCollection collection,
+        MembershipPageCursor cursor,
+        int pageSize,
+        string entityType)
     {
-        var bytes = BitConverter.GetBytes(skip);
-        return Convert.ToBase64String(bytes)
+        var returned = collection.Entities.Count;
+
+        if (returned > pageSize)
+        {
+            // Never trimmed (see MaterializeResults) — surfaced so an over-returning
+            // provider is diagnosable rather than silently reshaping the page.
+            _logger.LogWarning(
+                "MembershipResolverService: page {Page} for entity={EntityType} returned {Returned} rows " +
+                "for count={PageSize}. Rows are kept (never trimmed) and de-duplicated across pages.",
+                cursor.Page, entityType, returned, pageSize);
+        }
+
+        var hasMore = collection.MoreRecords || returned >= pageSize;
+        if (!hasMore)
+        {
+            return null;
+        }
+
+        return EncodeContinuation(new MembershipPageCursor(cursor.Page + 1, collection.PagingCookie));
+    }
+
+    /// <summary>
+    /// One position in the membership result stream: the 1-based FetchXml page number plus
+    /// the platform-issued paging cookie for the PREVIOUS page (empty on the first page).
+    /// This replaces the old bare skip-count, which could not express Dataverse paging at all.
+    /// </summary>
+    internal readonly record struct MembershipPageCursor(int Page, string? PagingCookie)
+    {
+        internal static MembershipPageCursor First => new(1, null);
+    }
+
+    /// <summary>Continuation-token format marker. Bumped when the token layout changes.</summary>
+    private const string ContinuationTokenVersion = "v2";
+
+    /// <summary>
+    /// Encodes a cursor as an opaque base64url continuation token. Callers round-trip the
+    /// value via <see cref="MembershipResolveOptions.ContinuationToken"/> and MUST NOT parse it.
+    /// </summary>
+    private static string EncodeContinuation(MembershipPageCursor cursor)
+    {
+        // "v2|{page}|{cookie}" — the cookie may itself contain '|', so it is the LAST
+        // field and is never split.
+        var payload = string.Concat(
+            ContinuationTokenVersion,
+            "|",
+            cursor.Page.ToString(CultureInfo.InvariantCulture),
+            "|",
+            cursor.PagingCookie ?? string.Empty);
+
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(payload))
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
     }
 
     /// <summary>
-    /// Decodes a previously-emitted continuation token back to a skip-count.
-    /// Returns 0 for null/empty/invalid tokens (i.e., treat as "first page").
+    /// Decodes a previously-emitted continuation token.
+    /// <para>
+    /// A-10 / FR-14: a malformed token now THROWS <see cref="ArgumentException"/> (surfaced as
+    /// 400 by <c>MembershipEndpoints</c>) instead of silently decoding to "skip 0". The old
+    /// fail-soft behaviour turned a corrupt or stale cursor into a silent restart at page 1 —
+    /// a paging caller would then re-read page 1 forever, or stop early believing it had seen
+    /// everything. Neither is acceptable for a set that gates authorization: an unusable
+    /// cursor is a caller error and must be reported, never guessed.
+    /// </para>
     /// </summary>
-    private static int DecodeContinuationSkip(string? token)
+    private static MembershipPageCursor DecodeContinuation(string? token)
     {
         if (string.IsNullOrWhiteSpace(token))
         {
-            return 0;
+            return MembershipPageCursor.First;
         }
+
+        static ArgumentException Invalid(string reason) => new(
+            $"continuationToken is not a valid membership continuation token ({reason}). " +
+            "Pass the exact value returned in a prior response's continuationToken, or omit it " +
+            "to start from the first page.",
+            "options");
+
+        string payload;
         try
         {
-            var normalized = token.Replace('-', '+').Replace('_', '/');
+            var normalized = token.Trim().Replace('-', '+').Replace('_', '/');
             switch (normalized.Length % 4)
             {
+                case 1: throw Invalid("bad base64url length");
                 case 2: normalized += "=="; break;
                 case 3: normalized += "="; break;
             }
-            var bytes = Convert.FromBase64String(normalized);
-            if (bytes.Length != sizeof(int))
-            {
-                return 0;
-            }
-            var skip = BitConverter.ToInt32(bytes, 0);
-            return skip < 0 ? 0 : skip;
+            payload = Encoding.UTF8.GetString(Convert.FromBase64String(normalized));
         }
         catch (FormatException)
         {
-            return 0;
+            throw Invalid("not base64url");
         }
+
+        // Split into at most 3 parts so a cookie containing '|' survives intact.
+        var parts = payload.Split('|', 3);
+        if (parts.Length != 3 || !string.Equals(parts[0], ContinuationTokenVersion, StringComparison.Ordinal))
+        {
+            throw Invalid("unrecognised token version");
+        }
+        if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var page) || page < 1)
+        {
+            throw Invalid("page out of range");
+        }
+
+        return new MembershipPageCursor(page, parts[2].Length == 0 ? null : parts[2]);
     }
 
     // ── Cache helpers ──────────────────────────────────────────────────────
@@ -1251,10 +1565,40 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
     /// <summary>
     /// Options hash — deterministic across equivalent option values regardless of
-    /// ordering. Includes Roles, IdentityTypes, IncludeRelated, Limit, and the
-    /// ContinuationToken (so paging requests cache per-page). First 8 bytes →
-    /// 16 hex chars; collision risk negligible at this scope.
+    /// ordering. Covers EVERY option that changes the resolved row set: Roles,
+    /// IdentityTypes, IncludeRelated, Limit, ContinuationToken (so paging requests cache
+    /// per-page), <see cref="MembershipResolveOptions.AccessConferringOnly"/> and
+    /// <see cref="MembershipResolveOptions.OrganizationIds"/>. First 8 bytes → 16 hex chars;
+    /// collision risk negligible at this scope.
     /// </summary>
+    /// <remarks>
+    /// 🚨 <b><c>AccessConferringOnly</c> and <c>OrganizationIds</c> were ADDED to this hash by task
+    /// 043, and the omission was a latent disclosure — not a tidiness fix.</b>
+    /// <para>
+    /// Task 041 introduced <c>AccessConferringOnly</c> as the systemuser plane's registry-filter
+    /// opt-in but did not add it here, which was harmless only because 041 deliberately left the
+    /// flag unset at every call site. Task 043 sets it <c>true</c> in
+    /// <c>AccessibleRecordSetService.ComposeForSystemUserAsync</c>. From that moment the
+    /// AUTHORIZATION caller (filtered, <c>true</c>) and the SCOPING caller
+    /// (<c>Api/Membership/MembershipEndpoints</c>, unfiltered, <c>false</c>) would have shared one
+    /// cache entry — same user, same entity, same Limit, therefore the same
+    /// <c>{systemUserId}:{entityType}:{optionsHash}</c> — for the 5-minute TTL. Whichever call
+    /// arrived first would decide what the other saw, and in the direction that matters: a scoping
+    /// call landing first hands the authorization gate the UNFILTERED descriptor set, which is
+    /// exactly the register A-8 over-inclusion FR-24 exists to close, reintroduced through Redis
+    /// rather than through code.
+    /// </para>
+    /// <para>
+    /// <c>OrganizationIds</c> is the same hazard in a new option: two compositions for one contact
+    /// differ ONLY by which organizations were bound (task 043 resolves one walk per distinct
+    /// standing-grant baseline), so omitting it would serve one baseline's row set as another's.
+    /// </para>
+    /// <para>
+    /// The general rule for this method: an option that can change the returned rows MUST appear
+    /// here. A cache key narrower than the query it stores is not a performance detail — on an
+    /// authorization path it is a way to answer the wrong question quietly.
+    /// </para>
+    /// </remarks>
     private static string HashOptions(MembershipResolveOptions options)
     {
         var sb = new StringBuilder(64);
@@ -1262,7 +1606,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
         sb.Append("i:").Append(HashSorted(options.IdentityTypes)).Append('|');
         sb.Append("x:").Append(HashSorted(options.IncludeRelated)).Append('|');
         sb.Append("l:").Append(options.Limit).Append('|');
-        sb.Append("c:").Append(options.ContinuationToken ?? string.Empty);
+        sb.Append("c:").Append(options.ContinuationToken ?? string.Empty).Append('|');
+        sb.Append("a:").Append(options.AccessConferringOnly ? '1' : '0').Append('|');
+        sb.Append("o:").Append(HashSortedGuids(options.OrganizationIds));
 
         var hashInput = sb.ToString();
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
@@ -1279,6 +1625,25 @@ public sealed class MembershipResolverService : IMembershipResolverService
             .Where(v => !string.IsNullOrWhiteSpace(v))
             .Select(v => v.Trim().ToLowerInvariant())
             .Distinct()
+            .OrderBy(v => v, StringComparer.Ordinal);
+        return string.Join(",", sorted);
+    }
+
+    /// <summary>
+    /// The Guid counterpart of <see cref="HashSorted(IReadOnlyList{string}?)"/> — order-independent
+    /// and duplicate-independent, so two callers that bind the same organizations in a different
+    /// order share a cache entry, and two that bind different ones never do.
+    /// </summary>
+    private static string HashSortedGuids(IReadOnlyList<Guid>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return "*";
+        }
+        var sorted = values
+            .Where(v => v != Guid.Empty)
+            .Select(v => v.ToString("D", CultureInfo.InvariantCulture))
+            .Distinct(StringComparer.Ordinal)
             .OrderBy(v => v, StringComparer.Ordinal);
         return string.Join(",", sorted);
     }

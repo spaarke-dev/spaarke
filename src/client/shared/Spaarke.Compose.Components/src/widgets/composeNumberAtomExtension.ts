@@ -50,6 +50,20 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 /** Same two block types every sibling additive attribute extension targets (paraId, indent, styles). */
 const NUMBER_ATOM_NODE_TYPES = ['paragraph', 'heading'] as const;
 
+/**
+ * UAT round 2 (r8, 2026-09-02) — the LIST-level types carrying `data-projected-list`, the discriminator
+ * `ComposeDocxProjectionBuilder.EnsureList` stamps on a list that came from the SOURCE DOCUMENT.
+ *
+ * Why it exists: `ComposeEditor`'s `useStyles().editorSurface` used to suppress the native `<ol>` marker
+ * UNCONDITIONALLY, so a list the USER created — which has no server-computed label — rendered with no
+ * number at all. The unconditional form was not arbitrary: an unresolvable `numId` must stay bare rather
+ * than take a browser count that would silently disagree with the real legal number (F-3). Both cases
+ * "have no computed number", so they cannot be told apart by the number attribute — only by PROVENANCE.
+ * Registering it here keeps it alive across the `setContent(projection.html)` parse and `getHTML()`
+ * round trip, exactly as `computedNumber` is kept for blocks.
+ */
+const PROJECTED_LIST_NODE_TYPES = ['orderedList', 'bulletList'] as const;
+
 /** CSS class applied to the rendered number-atom widget (styled via ADR-021 semantic tokens in ComposeEditor's useStyles). */
 export const COMPOSE_NUMBER_ATOM_CLASS = 'compose-number-atom';
 
@@ -128,6 +142,18 @@ export const ComposeNumberAtomExtension = Extension.create({
               const value = attributes.numberingLevel as string | null;
               return value !== null && value !== undefined ? { 'data-numbering-level': value } : {};
             },
+          },
+        },
+      },
+      {
+        types: [...PROJECTED_LIST_NODE_TYPES],
+        attributes: {
+          projectedList: {
+            default: false,
+            parseHTML: (element: HTMLElement) => element.hasAttribute('data-projected-list'),
+            // Re-emitted so the CSS selector keeps matching after any getHTML()/setContent() cycle.
+            renderHTML: (attributes: Record<string, unknown>) =>
+              attributes.projectedList ? { 'data-projected-list': '1' } : {},
           },
         },
       },

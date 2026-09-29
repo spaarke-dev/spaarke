@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Xunit;
 
@@ -7,23 +8,28 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// <summary>
 /// Characterization suite for the external-module FetchXML entity guard.
 ///
-/// Pins finding A-17 (unified-access-control-r2 spec NFR-07), rated High: the guard at
-/// <c>ExternalModuleDataEndpoints.ExecuteScopedFetchAsync:160-172</c> rejects a fetch iff
+/// ORIGINALLY pinned finding A-17 (unified-access-control-r2 spec NFR-07), rated High: the guard at
+/// <c>ExternalModuleDataEndpoints.ExecuteScopedFetchAsync</c> rejected a fetch iff
 /// <c>referenced.Count == 0 || referenced.Any(e =&gt; e != module.RecordEntity)</c>. A
 /// <c>&lt;link-entity&gt;</c> whose name equals the module's own record entity — a SELF-JOIN — adds
-/// only that same name to the referenced set, so the guard passes it.
+/// only that same name to the referenced set, so the guard passed it.
 ///
-/// Why that matters: Tier-2 scoping filters only PRIMARY rows
+/// Why that mattered: Tier-2 scoping filters only PRIMARY rows
 /// (<c>Tier2ScopeFilterInjector</c> / <c>ExternalModuleDescriptor.ScopeRows</c>). Aliased columns
 /// pulled through a self-joined link-entity are extra attributes ON an in-scope primary row and are
 /// never scope-checked, and <c>FetchService.ProjectEntity</c> serializes <c>AliasedValue</c> straight
-/// to the client. The result is cross-matter / cross-client field disclosure on a caller-controlled
+/// to the client. The result was cross-matter / cross-client field disclosure on a caller-controlled
 /// FetchXML surface.
 ///
-/// These tests exercise <see cref="FetchXmlEntityExtractor"/> — the guard's load-bearing input — and
-/// then replay the guard's own boolean against that input, so the pinned behavior is the real
-/// decision, not a paraphrase of it. The extractor is <c>internal</c>; the BFF already declares
-/// <c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c>, so no production change is needed to reach it.
+/// STATUS: **A-17 is CLOSED** by task 011 (spec FR-10). The guard now applies a second, structural
+/// check — any <c>&lt;link-entity&gt;</c> at any depth is refused — so the self-join is REJECTED
+/// rather than scoped. The three characterization facts below have been FLIPPED to assert the fixed
+/// behavior; they remain here as the regression anchor for the finding. Full coverage of the fix
+/// (evasion variants, fail-closed paths, per-check perturbation) lives in
+/// <c>FetchXmlGuardSelfJoinTests</c>.
+///
+/// Task 011 also removed this file's hand-transcribed copy of the guard predicate — see
+/// <see cref="GuardRejects"/> for why that mattered.
 /// </summary>
 public class ExternalScopeCharacterizationTests
 {
@@ -33,13 +39,18 @@ public class ExternalScopeCharacterizationTests
         new FetchXmlEntityExtractor().ExtractEntities(fetchXml);
 
     /// <summary>
-    /// The guard's exact predicate, transcribed from
-    /// <c>ExternalModuleDataEndpoints.ExecuteScopedFetchAsync:160-161</c>. Returns true when the
-    /// fetch is REJECTED.
+    /// Invokes the PRODUCTION guard. Returns true when the fetch is REJECTED.
+    ///
+    /// Until task 011 this was a hand-TRANSCRIBED copy of the guard's predicate. A transcription can pin
+    /// a snapshot, but it structurally cannot verify a fix: it does not change when production changes,
+    /// so after the FR-10 fix it would have kept answering for the OLD code and every assertion below
+    /// would have passed VACUOUSLY — green, fast, correctly named, and indistinguishable from a real
+    /// pass. It now calls the real guard, so these facts fail if the fix regresses.
     /// </summary>
-    private static bool GuardRejects(IReadOnlySet<string> referenced, string moduleRecordEntity) =>
-        referenced.Count == 0 ||
-        referenced.Any(e => !string.Equals(e, moduleRecordEntity, StringComparison.OrdinalIgnoreCase));
+    private static bool GuardRejects(string fetchXml, string moduleRecordEntity) =>
+        !ExternalModuleDataEndpoints
+            .EvaluateFetchXmlGuard(fetchXml, moduleRecordEntity, new FetchXmlEntityExtractor())
+            .IsAllowed;
 
     // ─────────────────────────────────────────────────────────────────────────────
     // NEGATIVE — must already hold. The guard DOES stop cross-entity joins.
@@ -65,7 +76,7 @@ public class ExternalScopeCharacterizationTests
 
         // Assert — both entities surface, so the guard rejects. This is the protection that works.
         referenced.Should().BeEquivalentTo(new[] { "sprk_document", "sprk_matter" });
-        GuardRejects(referenced, ModuleRecordEntity).Should().BeTrue();
+        GuardRejects(fetchXml, ModuleRecordEntity).Should().BeTrue();
     }
 
     [Fact]
@@ -87,7 +98,7 @@ public class ExternalScopeCharacterizationTests
         var referenced = Extract(fetchXml);
 
         referenced.Should().BeEquivalentTo(new[] { "sprk_document", "sprk_matter", "contact" });
-        GuardRejects(referenced, ModuleRecordEntity).Should().BeTrue();
+        GuardRejects(fetchXml, ModuleRecordEntity).Should().BeTrue();
     }
 
     [Fact]
@@ -100,17 +111,17 @@ public class ExternalScopeCharacterizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // CHARACTERIZATION — A-17. Flipped by task 011 (FR-10).
+    // A-17 — FLIPPED by task 011 (FR-10). These now assert the FIXED behavior and
+    // stand as the regression anchor for the finding.
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-17 — CURRENT (BROKEN) BEHAVIOR. A SELF-JOIN link-entity contributes only the module's own
-    /// entity name, so the referenced set is indistinguishable from a plain single-entity query and
-    /// the guard cannot tell the two apart.
-    ///
-    /// FLIPPED BY: task 011 (FR-10) — the self-join MUST then be rejected. After that task this test
-    /// asserts the fetch is rejected (or that the extractor surfaces link-entity presence separately
-    /// from entity identity).
+    /// A-17, first half — STILL TRUE and deliberately so: the entity-name analysis remains blind to a
+    /// self-join, because a self-join contributes only the module's own name. Task 011 did NOT change
+    /// <see cref="FetchXmlEntityExtractor"/> (it is shared with <c>DataverseAuthorizationFilter</c>);
+    /// it added a SECOND, structural check to the guard instead. This test therefore documents the
+    /// blind spot, and the flipped assertion at the end shows the guard now refuses anyway — which is
+    /// exactly the separation of concerns FR-10 called for.
     /// </summary>
     [Fact]
     public void Characterization_ExtractEntities_ForSelfJoin_IsIndistinguishableFromSingleEntityQuery()
@@ -141,22 +152,25 @@ public class ExternalScopeCharacterizationTests
         var selfJoinReferenced = Extract(selfJoinFetchXml);
         var plainReferenced = Extract(plainFetchXml);
 
-        // Assert — CURRENT behavior: identical referenced sets. The guard's only input cannot
-        // distinguish an exfiltrating self-join from a benign single-entity read.
+        // Assert — the entity-name sets ARE identical; that blind spot is unchanged by design.
         selfJoinReferenced.Should().BeEquivalentTo(plainReferenced,
-            "A-17 pins the CURRENT broken state: a self-join adds only the module's own entity name, " +
-            "so the guard at ExecuteScopedFetchAsync:160-161 sees exactly what a plain query produces");
+            "a self-join adds only the module's own entity name, so entity-identity analysis alone sees " +
+            "exactly what a plain query produces — this is WHY the guard needs a structural join check");
         selfJoinReferenced.Should().ContainSingle().Which.Should().Be(ModuleRecordEntity);
+
+        // FLIPPED (task 011 / FR-10): identical inputs to check (1), opposite security outcomes.
+        GuardRejects(selfJoinFetchXml, ModuleRecordEntity).Should().BeTrue(
+            "FR-10: the self-join is refused by structural join detection despite the identical name set");
+        GuardRejects(plainFetchXml, ModuleRecordEntity).Should().BeFalse(
+            "a benign single-entity read must still pass — the fix must not break the module grids");
     }
 
     /// <summary>
-    /// A-17 — the decision itself: the guard ADMITS the self-join. This is the assertion task 011
-    /// must invert; it states the security outcome rather than the intermediate set.
-    ///
-    /// FLIPPED BY: task 011 (FR-10) — MUST become BeTrue (rejected).
+    /// A-17 — the decision itself, FLIPPED by task 011 (FR-10). States the security outcome rather than
+    /// the intermediate set: the exfiltrating self-join is now REJECTED.
     /// </summary>
     [Fact]
-    public void Characterization_Guard_AdmitsSelfJoinThatCanExfiltrateOutOfScopeRows()
+    public void Characterization_Guard_RejectsSelfJoinThatCouldExfiltrateOutOfScopeRows()
     {
         const string selfJoinFetchXml = """
             <fetch>
@@ -168,22 +182,18 @@ public class ExternalScopeCharacterizationTests
             </fetch>
             """;
 
-        var referenced = Extract(selfJoinFetchXml);
-
-        GuardRejects(referenced, ModuleRecordEntity).Should().BeFalse(
-            "A-17 pins the CURRENT broken state: the self-join passes the entity guard, and Tier-2 " +
-            "scoping only filters PRIMARY rows — aliased columns from out-of-scope rows ride out to " +
-            "the client. Task 011 rejects the self-join and flips this to BeTrue.");
+        GuardRejects(selfJoinFetchXml, ModuleRecordEntity).Should().BeTrue(
+            "A-17 is CLOSED: Tier-2 scoping filters PRIMARY rows only, so a self-join's aliased columns " +
+            "would carry out-of-scope rows to the client. FR-10 refuses the fetch instead of scoping it.");
     }
 
     /// <summary>
-    /// A-17 — the same hole with a differently-cased entity name, confirming case-insensitivity does
-    /// not incidentally close it. Documents the full shape task 011 must cover.
-    ///
-    /// FLIPPED BY: task 011 (FR-10).
+    /// A-17 — the same shape with a differently-cased entity name. Case normalization does not close the
+    /// hole on its own (the referenced set is still a single name), so this confirms the refusal comes
+    /// from join detection. FLIPPED by task 011 (FR-10).
     /// </summary>
     [Fact]
-    public void Characterization_Guard_AdmitsSelfJoinRegardlessOfCasing()
+    public void Characterization_Guard_RejectsSelfJoinRegardlessOfCasing()
     {
         const string selfJoinFetchXml = """
             <fetch>
@@ -198,6 +208,6 @@ public class ExternalScopeCharacterizationTests
         var referenced = Extract(selfJoinFetchXml);
 
         referenced.Should().ContainSingle("entity names are normalized to lower case by the extractor");
-        GuardRejects(referenced, ModuleRecordEntity).Should().BeFalse();
+        GuardRejects(selfJoinFetchXml, ModuleRecordEntity).Should().BeTrue();
     }
 }

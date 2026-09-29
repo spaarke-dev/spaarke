@@ -28,4 +28,20 @@ public sealed class ScheduledJobHostOptions
     /// final failure. Default: <see cref="JobRetryPolicy"/> defaults (3 attempts, 5s base delay,
     /// 2min cap). Per spec.md FR-2.3.</summary>
     public JobRetryPolicy RetryPolicy { get; set; } = new();
+
+    /// <summary>When <c>false</c> the host runs no scheduled ticks and says so at startup — the guard for
+    /// non-production deployment slots, set there as a slot-sticky app setting (ADR-036 A1 rule 2). Manual admin
+    /// triggers still run, under the same lease. Default: <c>true</c>.</summary>
+    public bool RunScheduledJobs { get; set; } = true;
+
+    /// <summary>How long a job's lease lives unless renewed (ADR-036 A1 rule 1). The host renews it every third of
+    /// this for the whole run, so it only bounds how long a DEAD holder blocks the job, not how long a run may take.
+    /// Default: 2 minutes.</summary>
+    public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>The longest a run may hold its job's lease (ADR-036 A1 rule 1). Past it the host cancels the run and
+    /// stops renewing, so a hung run — one that ignores cancellation — blocks the job for at most this plus one
+    /// <see cref="LeaseDuration"/>, never indefinitely. A job that legitimately runs longer needs a larger value.
+    /// Default: 2 hours.</summary>
+    public TimeSpan MaxRunDuration { get; set; } = TimeSpan.FromHours(2);
 }

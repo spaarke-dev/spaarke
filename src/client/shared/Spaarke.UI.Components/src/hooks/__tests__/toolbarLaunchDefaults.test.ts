@@ -30,19 +30,29 @@ describe('toolbarLaunchDefaults', () => {
   });
 
   describe('NOTEPAD_MODAL', () => {
-    it('matches Notepad specialized-editor sizing (70% x 80%, target=2, position=1)', () => {
+    it('matches Notepad compact-editor sizing (25% x 35%, target=2, position=1)', () => {
+      // R1 v1.0.7 deliberately shrank this from 70% x 80% to 25% x 35% after live
+      // QA ("compact editor" — see MatterHeaderView.tsx's v1.0.7 note). This test
+      // kept asserting the pre-v1.0.7 numbers and had been red ever since, which
+      // made it worse than no test: it described behaviour the product had already
+      // rejected. Corrected 2026-08-25 (record-header-and-notepad-r2 task 024).
       expect(NOTEPAD_MODAL).toEqual({
         target: 2,
         position: 1,
-        width: { value: 70, unit: '%' },
-        height: { value: 80, unit: '%' },
+        width: { value: 25, unit: '%' },
+        height: { value: 35, unit: '%' },
       });
     });
   });
 
   describe('webresource names', () => {
     it('exposes the Notepad code page name', () => {
-      expect(NOTEPAD_WEBRESOURCE_NAME).toBe('sprk_notepad_page');
+      // Re-verified live against spaarkedev1 on 2026-08-25 (task 024):
+      //   webresourceset?$filter=startswith(name,'sprk_notepad') -> sprk_notepad ("Notepad HTML")
+      // The `_page` suffix was assumed by design.md and never shipped — the exact
+      // same trap as the SmartTodo name below, and the one pcf-build-scaffold.md
+      // gotcha #9 warns about. Verify the name; do not infer it.
+      expect(NOTEPAD_WEBRESOURCE_NAME).toBe('sprk_notepad');
     });
 
     it('exposes the SmartTodo code page name', () => {
@@ -59,10 +69,19 @@ describe('toolbarLaunchDefaults', () => {
   });
 
   describe('SUPPORTED_MEMO_PARENTS', () => {
-    it('covers exactly the six parent entities supported by sprk_memo schema', () => {
+    it('covers exactly the seven parent entities supported by sprk_memo schema', () => {
       expect(Object.keys(SUPPORTED_MEMO_PARENTS).sort()).toEqual(
-        ['sprk_budget', 'sprk_event', 'sprk_invoice', 'sprk_matter', 'sprk_project', 'sprk_workassignment'].sort()
+        [
+          'sprk_agreement',
+          'sprk_budget',
+          'sprk_event',
+          'sprk_invoice',
+          'sprk_matter',
+          'sprk_project',
+          'sprk_workassignment',
+        ].sort()
       );
+      expect(Object.keys(SUPPORTED_MEMO_PARENTS)).toHaveLength(7);
     });
 
     it('maps each parent to its entity-specific regarding lookup', () => {
@@ -72,6 +91,9 @@ describe('toolbarLaunchDefaults', () => {
       expect(SUPPORTED_MEMO_PARENTS.sprk_invoice).toBe('sprk_regardinginvoice');
       expect(SUPPORTED_MEMO_PARENTS.sprk_budget).toBe('sprk_regardingbudget');
       expect(SUPPORTED_MEMO_PARENTS.sprk_workassignment).toBe('sprk_regardingworkassignment');
+      // FR-24 (R2 task 024): sprk_agreement added — owner live-verified
+      // sprk_regardingagreement exists on sprk_memo (2026-08-25).
+      expect(SUPPORTED_MEMO_PARENTS.sprk_agreement).toBe('sprk_regardingagreement');
     });
   });
 
@@ -104,13 +126,19 @@ describe('toolbarLaunchDefaults', () => {
     it('is case-sensitive on entity name (Dataverse logical names are lowercase)', () => {
       expect(buildMemoFilterForParent('SPRK_MATTER', 'guid1')).toBeNull();
     });
+
+    it('builds OData filter for sprk_agreement (FR-24 — added R2 task 024)', () => {
+      const filter = buildMemoFilterForParent('sprk_agreement', '00000000-0000-0000-0000-000000000001');
+      expect(filter).toBe('_sprk_regardingagreement_value eq 00000000-0000-0000-0000-000000000001');
+    });
   });
 
-  describe('SUPPORTED_TODO_PARENTS (v1.0.2 fix — sprk_todo has 11 parent lookups, not polymorphic)', () => {
-    it('covers exactly the eleven parent entities supported by sprk_todo schema', () => {
+  describe('SUPPORTED_TODO_PARENTS (v1.0.2 fix — sprk_todo has 12 parent lookups, not polymorphic)', () => {
+    it('covers exactly the twelve parent entities supported by sprk_todo schema', () => {
       expect(Object.keys(SUPPORTED_TODO_PARENTS).sort()).toEqual(
         [
           'contact',
+          'sprk_agreement',
           'sprk_analysis',
           'sprk_budget',
           'sprk_communication',
@@ -123,6 +151,7 @@ describe('toolbarLaunchDefaults', () => {
           'sprk_workassignment',
         ].sort()
       );
+      expect(Object.keys(SUPPORTED_TODO_PARENTS)).toHaveLength(12);
     });
 
     it('maps sprk_todo parents to entity-specific regarding lookups (ADR-024 dual-field)', () => {
@@ -140,6 +169,9 @@ describe('toolbarLaunchDefaults', () => {
       expect(SUPPORTED_TODO_PARENTS.contact).toBe('sprk_regardingcontact');
       expect(SUPPORTED_TODO_PARENTS.sprk_document).toBe('sprk_regardingdocument');
       expect(SUPPORTED_TODO_PARENTS.sprk_organization).toBe('sprk_regardingorganization');
+      // FR-24 (R2 task 024): sprk_agreement added — owner live-verified
+      // sprk_regardingagreement exists on sprk_todo (2026-08-25).
+      expect(SUPPORTED_TODO_PARENTS.sprk_agreement).toBe('sprk_regardingagreement');
     });
 
     it('is a strict superset of SUPPORTED_MEMO_PARENTS', () => {

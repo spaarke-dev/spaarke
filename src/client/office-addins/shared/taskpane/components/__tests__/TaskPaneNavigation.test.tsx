@@ -9,20 +9,29 @@ const renderWithProvider = (ui: React.ReactElement) => {
 };
 
 describe('TaskPaneNavigation', () => {
-  it('renders all navigation tabs', () => {
-    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} />);
+  it('renders the enabled navigation tabs (Save + Create To Do for Outlook)', () => {
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} hostType="outlook" />);
 
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /share/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /search/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /recent/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /create to do/i })).toBeInTheDocument();
+    // Share/Search/Recent are disabled ("V1") — not rendered.
+    expect(screen.queryByRole('tab', { name: /share/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
+  });
+
+  it('renders only the Save tab for Word', () => {
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} hostType="word" />);
+
+    expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
+    // Create To Do is Outlook-only (a To Do is created from an email).
+    expect(screen.queryByRole('tab', { name: /create to do/i })).not.toBeInTheDocument();
   });
 
   it('highlights selected tab', () => {
-    renderWithProvider(<TaskPaneNavigation selectedTab="share" onTabChange={() => {}} />);
+    renderWithProvider(<TaskPaneNavigation selectedTab="createTodo" onTabChange={() => {}} hostType="outlook" />);
 
-    const shareTab = screen.getByRole('tab', { name: /share/i });
-    expect(shareTab).toHaveAttribute('aria-selected', 'true');
+    const createTodoTab = screen.getByRole('tab', { name: /create to do/i });
+    expect(createTodoTab).toHaveAttribute('aria-selected', 'true');
 
     const saveTab = screen.getByRole('tab', { name: /save/i });
     expect(saveTab).toHaveAttribute('aria-selected', 'false');
@@ -30,13 +39,10 @@ describe('TaskPaneNavigation', () => {
 
   it('calls onTabChange when tab is clicked', () => {
     const handleTabChange = jest.fn();
-    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={handleTabChange} />);
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={handleTabChange} hostType="outlook" />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /share/i }));
-    expect(handleTabChange).toHaveBeenCalledWith('share');
-
-    fireEvent.click(screen.getByRole('tab', { name: /recent/i }));
-    expect(handleTabChange).toHaveBeenCalledWith('recent');
+    fireEvent.click(screen.getByRole('tab', { name: /create to do/i }));
+    expect(handleTabChange).toHaveBeenCalledWith('createTodo');
   });
 
   it('disables tabs when disabled prop is true', () => {

@@ -3,7 +3,25 @@
   <metadata>
     <title>Record-keyed upload contract: the server resolves the container from the record it is already authorizing, and the client stops deciding</title>
     <phase>0c Secure Documents — Wave 2</phase>
-    <status>pending</status>
+    <status>completed</status>
+    <completion-note>DONE 2026-09-03, in two passes on the same day. Pass 1: server half (record-keyed
+      PUT + upload-session, `RecordRouteAccessAuthorizationFilter`, `PUT /api/obo/me/files`), then 8
+      client call sites onto `uploadFilesToSpe(entity, recordId, …)` / `uploadFilesWithoutRecord(…)`,
+      W1 + W2 client `sprk_containerid` writes deleted. Pass 2: **DocumentUploadWizard** — the last
+      client on the legacy route — cut over via a `UploadTarget` discriminated union on
+      `FileUploadRequest`, which deleted (not corrected) the fail-OPEN `resolveContainerIdForRecord`
+      in `AssociateToStep.tsx` (finding F-5); then steps 2/3/8 executed: `PUT
+      /api/obo/containers/{id}/files/{*path}` DELETED, its **Pending** waiver DELETED (not converted
+      to Permanent), `SdapApiClient.uploadFile` + `UploadOperation.uploadSmall` DELETED, the legacy
+      sink entry DELETED with ordinals renumbered 2→1 / 3→2, OBOEndpoints route count 4→3.
+      Acceptance evidence (the before/after absence-grep proving no client supplies a container to an
+      upload route and no client `sprk_containerid` write survives) is in
+      `notes/task-076-client-cutover-and-supplier-classification.md` §8.3.
+      🔴 **SHIP-TOGETHER: client + BFF must deploy together** — either half alone 404s every upload.
+      ⚠️ NOT closed by this task: the 5 other wizard-host `speContainerId` prop chains (vestigial,
+      non-upload consumers), and `DocumentOperations.js` — which supplies a drive to the **MI** route
+      `PUT /api/drives/{driveId}/upload` but is already dead (its `GET /api/containers/{id}/drive`
+      hop is mapped nowhere). Both recorded in notes §5 item 2 and §8.3.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a live client↔BFF route contract on the path that decides where secure content is stored, and converts three ungated upload routes into gated ones. Both a security boundary and a deploy-ordering hazard.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>SECURITY - remove the spoofable X-Tenant-Id fallback from tenant resolution, or bound it to a trusted caller</title>
+    <phase>6 Track B - Durable Session Files</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tenant resolution IS the authorization boundary. A change here can silently widen or break every tenant-scoped read and write in the BFF.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the risk is not writing the fix, it is knowing what depends on the fallback. It is reachable from four handlers plus the auth path, and some callers may legitimately have no tid claim (service-to-service, local dev, test fixtures). Removing it blindly breaks them; keeping it blindly leaves a spoofable partition key. Enumerating the real callers and deciding per caller is the work.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the auth/tenant path shared by every endpoint.</parallel-reason>
+    <deps>060</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Owner decision 2026-08-25: fix this in R8, as its own task.
+
+    Tenant resolution today is three-tier: tid claim, then schema-URI claim, then the X-Tenant-Id HTTP
+    header. The header tier is spoofable by any caller who can reach the endpoint.
+
+    This is PRE-EXISTING and repo-wide. Task 060 neither introduced it nor changed it - what 060 changed is
+    its CONSEQUENCE. The same value that was a 4-hour cache key is now a durable 90-day blob partition key
+    (tenantId is the leading path segment of every stored session file). A spoofed header no longer poisons
+    a short-lived cache; it places user document bytes permanently in another tenant's prefix. 060 added a
+    warning log at both write sites (TenantCameFromSpoofableHeader) so the condition is at least visible.
+
+    The work is ENUMERATION BEFORE MODIFICATION. Find every caller that relies on the header tier - four
+    handlers plus the auth path are known, and there may be more (service-to-service callers, local dev,
+    test fixtures). Decide PER CALLER: does it have a real principal with a tid claim, and if not, what is
+    the legitimate trust basis? Then either remove the tier, or bound it to callers authenticated by some
+    other means that cannot choose their own tenant.
+
+    Do not "fix" this by deleting the fallback and letting the test suite tell you what broke. A tenant
+    boundary that fails closed in production but was only ever exercised by tests is not verified.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in the BFF authentication pipeline, ClaimsPrincipal handling, and tenant-scoped storage/caching.</role>
+
+  <goal>
+    No request can choose its own tenant by setting a header. Callers with a legitimate reason to lack a tid
+    claim are enumerated and served by a mechanism that does not let them name an arbitrary tenant.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-014/015">Tenant is the authorization boundary. It MUST derive from the authenticated principal, not from caller-supplied input, unless a documented trust basis says otherwise.</constraint>
+    <constraint source="CLAUDE.md section 6">Security-sensitive - requires human sign-off before merge.</constraint>
+    <constraint source="project">MUST enumerate the real callers before changing resolution. A silent break of a service-to-service path is as bad as the hole.</constraint>
+    <constraint source="ADR-038">Tests belong in tests/integration/tenant/** - a REAL cross-tenant reachability attempt, not an assertion about a resolved string. That is the standard task 060 set in that directory's README.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Read tests/integration/tenant/README.md and task 060's TenantCameFromSpoofableHeader.</step>
+    <step order="1">ENUMERATE every caller of the header tier, with file and line. Do not modify anything yet.</step>
+    <step order="2">Decide per caller. Record the trust basis for any that keeps a non-claim path.</step>
+    <step order="3">Failing tenant-reachability test FIRST, observed to fail, then implement.</step>
+    <step order="4">Prove no legitimate caller regressed - including any service-to-service or local-dev path found in step 1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a production caller legitimately has no tid claim and no alternative trust basis, STOP and escalate. Inventing one silently is worse than the current documented hole.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/</output>
+    <output type="test">tests/integration/tenant/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/059-tenant-header-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A request cannot select its tenant via X-Tenant-Id - proven by a real cross-tenant reachability test that fails without the fix.</criterion>
+    <criterion>Every caller of the old tier is enumerated with file and line, and given an explicit decision.</criterion>
+    <criterion>No legitimate caller regressed; any retained non-claim path has a documented trust basis.</criterion>
+    <criterion>Every test observed to FAIL before its fix.</criterion>
+    <criterion>Human sign-off obtained before merge (CLAUDE.md section 6, security-sensitive).</criterion>
+  </acceptance-criteria>
+</task>

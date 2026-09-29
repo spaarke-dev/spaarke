@@ -54,6 +54,32 @@ ENUMERATE test files touched during the project:
 IF no test files touched: report "No test changes — diet not applicable" and exit
 ```
 
+#### Touch-radius expansion (added 2026-08-28)
+
+Classify **every test method in a touched FILE**, not only the methods the diff changed.
+
+If a task edits one method in an existing test file, the other methods in that file are swept by
+the same pass. The file is already open and already parsed, so the marginal cost is close to zero —
+and it is the only mechanism that reaches legacy tests as a side effect of ordinary development,
+without a stop-the-world audit nobody has time to run.
+
+Report untouched-but-swept methods in a **separate column or section** from methods the project
+actually wrote. The distinction matters at review time: *"you added this, defend it"* and *"this
+was already here, we noticed it in passing"* deserve different scrutiny, and conflating them makes
+the report feel like blame for code the author never touched.
+
+**Also check the reliability registry.** For each method in scope, look it up in
+[`tests/.reliability-registry.json`](../../../tests/.reliability-registry.json). Two findings:
+
+- **Listed, and the diff removed its timing/concurrency dependence** → the entry is now stale and
+  MUST be deleted in the same PR (the registry's own `_exitRule`). Report it as a required action,
+  not a suggestion. A stale entry buys a deterministic test a free CI retry, which can mask a real
+  regression — exactly what happened to three entries before PR #884.
+- **Listed, and still timing-dependent** → legitimate; no action.
+
+This is the cheap, mechanical half of the isolation checks proposed in the test-suite improvement
+review — a registry lookup, not a heuristic, so it has no false-positive surface.
+
 ### Step 2: Load build-vs-maintain criteria
 
 ```

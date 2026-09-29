@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -73,11 +74,16 @@ internal sealed class TaskActionCore
         };
 
     private readonly IGenericEntityService _entityService;
+    private readonly CoreAncestorResolver _coreAncestors;
     private readonly ILogger _logger;
 
-    public TaskActionCore(IGenericEntityService entityService, ILogger logger)
+    public TaskActionCore(
+        IGenericEntityService entityService,
+        CoreAncestorResolver coreAncestors,
+        ILogger logger)
     {
         _entityService = entityService;
+        _coreAncestors = coreAncestors;
         _logger = logger;
     }
 
@@ -104,6 +110,28 @@ internal sealed class TaskActionCore
             if (RegardingFieldByEntity.TryGetValue(input.RegardingObjectType, out var regardingField))
             {
                 entity[regardingField] = new EntityReference(input.RegardingObjectType, input.RegardingObjectId.Value);
+
+                // FR-26 core-ancestor stamp (task 052) - applied after the typed lookup. Four of the
+                // regarding types above are child-class (invoice, analysis, event, communication), so a
+                // playbook can already create a task regarding a communication; without the stamp that
+                // task inherits nothing from the communication's matter and is invisible to everyone
+                // whose access comes from there.
+                var stamp = await _coreAncestors
+                    .StampAsync(entity, input.RegardingObjectType, input.RegardingObjectId.Value, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!stamp.Succeeded)
+                {
+                    // NFR-01 fail-closed, expressed in THIS class's existing error contract: the
+                    // "degraded success" Guid.Empty that a Dataverse rejection already returns. The task
+                    // is NOT created - an unstamped task would be silently unreachable rather than
+                    // visibly absent.
+                    _logger.LogWarning(
+                        "CreateTask: core-ancestor derivation failed for {RegardingType} {RegardingId}; " +
+                        "refusing to create an unstamped sprk_event (FR-26 / NFR-01). {Error}",
+                        input.RegardingObjectType, input.RegardingObjectId.Value, stamp.Error);
+                    return Guid.Empty;
+                }
             }
             else
             {

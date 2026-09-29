@@ -120,8 +120,8 @@ az account show --query "{Name:name, Id:id}" -o table
 | Stack | Path | Purpose |
 |-------|------|---------|
 | AI Foundry | `infrastructure/bicep/stacks/ai-foundry-stack.bicep` | AI Hub, Project, Storage, KV |
-| Model 1 Shared | `infrastructure/bicep/stacks/model1-shared.bicep` | Shared infrastructure |
-| Model 2 Full | `infrastructure/bicep/stacks/model2-full.bicep` | Full customer deployment |
+| ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12)** — do not deploy. The shared tier does not exist, and this stack has not compiled since 2026-08-17. |
+| Customer stamp (**both models**) | `infrastructure/bicep/stacks/model2-full.bicep` | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). |
 
 ### Deploy Infrastructure
 

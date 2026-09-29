@@ -94,10 +94,16 @@ public class SessionRestoreServiceUploadedFilesTests
         projected.FileName.Should().Be("NDA.pdf");
         projected.ContentType.Should().Be("application/pdf");
         projected.SizeBytes.Should().Be(12345);
-        // ADR-015 Tier-2 minimisation: the projected record type carries no enriched surface at all
-        // (RestoredUploadedFile has exactly four members). This asserts the contract stays minimal.
+        // No availability collaborator is wired into this fixture, so the FR-B05 signal is UNKNOWN —
+        // which is the required degradation. It must never render as "unavailable".
+        projected.ContentAvailable.Should().BeNull();
+        // ADR-015 Tier-2 minimisation: the projected record type carries no enriched surface at all.
+        // spaarkeai-compose-r8 FR-B05 (task 062) added ContentAvailable — deliberately, and it does not
+        // weaken the rule this assertion protects: it is a boolean saying WHETHER content still exists,
+        // never any of the content itself (no SummaryText / Sections / Citations / ExtractedText).
+        // Anything beyond these five is a regression.
         typeof(RestoredUploadedFile).GetProperties().Select(p => p.Name)
-            .Should().BeEquivalentTo("FileId", "FileName", "ContentType", "SizeBytes");
+            .Should().BeEquivalentTo("FileId", "FileName", "ContentType", "SizeBytes", "ContentAvailable");
     }
 
     [Fact]

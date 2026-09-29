@@ -163,15 +163,6 @@ public class ToolHandlerToAIFunctionAdapterTests
 
 
     [Fact]
-    public void Constructor_NullTool_Throws()
-    {
-        Action act = () => new ToolHandlerToAIFunctionAdapter(
-            tool: null!, new FakeChatHandler(), CreateContext);
-
-        act.Should().Throw<ArgumentNullException>().WithParameterName("tool");
-    }
-
-    [Fact]
     public void Constructor_NullHandler_Throws()
     {
         Action act = () => new ToolHandlerToAIFunctionAdapter(

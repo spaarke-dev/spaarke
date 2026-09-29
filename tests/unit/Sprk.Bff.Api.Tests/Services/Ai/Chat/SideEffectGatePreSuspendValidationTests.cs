@@ -171,7 +171,7 @@ public class SideEffectGatePreSuspendValidationTests
             PlaybookId: null,
             CreatedAt: now,
             LastActivity: now,
-            Messages: new List<global::Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())).GetAwaiter().GetResult();
+            Messages: new List<global::Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid }).GetAwaiter().GetResult();
 
         // Root provider from which the gate resolves a fresh-scope PendingPlanManager over the
         // SAME cache + session manager, so ledger writes land in the session read back above.

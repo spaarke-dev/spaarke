@@ -6,9 +6,11 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -25,6 +27,19 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// SpeFileStore facade (ADR-007 — no bypass). The SPE facade + canonical <see cref="IGenericEntityService"/>
 /// are mocked at the module boundary (no live SPE/Dataverse/ACS is provisioned in R1) — the side effects have
 /// no other observable surface.
+///
+/// <para>⚠️ <b>DELETED 2026-08-28 with the class, RESTORED 2026-08-29.</b> These five tests are the reason the
+/// deletion was a mistake and not merely a judgement call. Assertions (2) and (3) below are the
+/// CHAT-ATTACHMENT-POLICY.md gate — the 25 MB binary cap and the four-type MIME allow-list, each asserted with
+/// <see cref="MockBehavior.Strict"/> collaborators so that "nothing was uploaded and no record was created"
+/// is proven rather than described. That is a POLICY gate protecting a documented binding standard, i.e.
+/// maintain-class under ADR-038 §7, not scaffolding. A deletion review that counted only production callers
+/// never weighed them. See the class under test for the full rule this produced.</para>
+///
+/// <para><b>What is NOT asserted here, deliberately:</b> the flat upload path. Path flatness and
+/// collision survival live in <c>tests/integration/data-mutation/SpeUploadPaths/SpeFlatUploadPathTests.cs</c>
+/// with the other twelve upload sites, because they are one contract shared across sites rather than a
+/// property of this class — and that file has the fake SPE drive that can actually observe an overwrite.</para>
 /// </summary>
 public class MessageAttachmentMaterializerTests
 {
@@ -71,7 +86,56 @@ public class MessageAttachmentMaterializerTests
                 WebhookSigningKey = "key",
                 ArchiveContainerId = archiveContainerId,
             }),
-            Mock.Of<ILogger<MessageAttachmentMaterializer>>());
+            Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
+            NonSecureContainerResolver());
+
+    /// <summary>
+    /// A real <see cref="CommunicationContainerResolver"/> wired to answer "this communication regards
+    /// nothing secure", which is the pre-existing behaviour every assertion in this file was written
+    /// against: the fallback (<c>request.DriveId</c> ?? <c>ArchiveContainerId</c>) is used.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by unified-access-control-r2 task 076, which routed
+    /// <see cref="MessageAttachmentMaterializer.MaterializeAsync"/> through the record-aware container
+    /// decision so a chat attachment on a message regarding a SECURE matter no longer lands in the
+    /// shared archive container. The materializer now REFUSES when the resolver is absent (an absent
+    /// isolation seam must not degrade to "use the shared container"), so these tests must supply one.</para>
+    ///
+    /// <para>A REAL resolver, not a mock: <see cref="CommunicationContainerResolver"/> and
+    /// <see cref="RecordContainerResolver"/> are concrete-by-ADR-010 with non-virtual members, so there
+    /// is nothing to mock. Its two collaborators ARE interfaces and are stubbed at that module boundary.
+    /// The <see cref="IGenericEntityService"/> here is a SEPARATE mock from the one the tests assert
+    /// against, deliberately — sharing it would add <c>RetrieveAsync</c> traffic to mocks two tests
+    /// configure as <see cref="MockBehavior.Strict"/> and to their <c>Verify</c> expectations.</para>
+    ///
+    /// <para>The securable-entity set must be NON-EMPTY: the resolver treats an empty set as "securability
+    /// could not be determined" and refuses, which is its fail-closed contract and not something to work
+    /// around here.</para>
+    /// </remarks>
+    private static CommunicationContainerResolver NonSecureContainerResolver()
+    {
+        var securableEntities = new Mock<ISecurableEntityRegistry>();
+        securableEntities
+            .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_matter" });
+
+        // The communication row exists but carries NO regarding, so no securable regarding is found and
+        // the decision falls through to the fallback container.
+        var resolverEntities = new Mock<IGenericEntityService>();
+        resolverEntities
+            .Setup(s => s.RetrieveAsync(
+                "sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_communication") { Id = CommunicationId });
+
+        return new CommunicationContainerResolver(
+            new RecordContainerResolver(
+                securableEntities.Object,
+                resolverEntities.Object,
+                Mock.Of<ILogger<RecordContainerResolver>>()),
+            resolverEntities.Object,
+            securableEntities.Object,
+            Mock.Of<ILogger<CommunicationContainerResolver>>());
+    }
 
     [Fact]
     public async Task MaterializeAsync_WithValidFile_UploadsToSpeAndCreatesGovernedDocumentAndIntersection()

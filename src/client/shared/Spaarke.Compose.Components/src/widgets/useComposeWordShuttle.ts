@@ -24,7 +24,7 @@
 import * as React from 'react';
 import { useAuth } from '@spaarke/auth';
 
-import type { AnchoredAnnotation } from '../types/compose-contracts';
+import type { AnchoredAnnotation, ImportedComment, ImportedRevision } from '../types/compose-contracts';
 import type { PriorAnchorInput } from './ComposeReanchor.types';
 
 // ---------------------------------------------------------------------------
@@ -94,15 +94,18 @@ export function selectSaveRedlineAnnotations(opts: {
   return opts.getRedlineAnnotations();
 }
 
+// R8 UAT item 8: these two were `{ [key: string]: unknown }` placeholders — the endpoints were wired
+// (task 103) but the only consumer summed `.length`, so the payload's real shape was never described.
+// The Document Revision Report reads the fields, so they are typed now, and typed BY REUSE rather than
+// re-declaration: the server's `RecoveredRevision`/`RecoveredComment` are exactly the `ImportedRevision`/
+// `ImportedComment` vocabulary MINUS `paraId`, which the Load projection adds and this endpoint does not.
+// Forking the shape here is explicitly forbidden by the contract comment on those types.
+
 /** A native comment recovered from the current SPE document (mirror of BFF `RecoveredComment`). */
-export interface RecoveredComment {
-  [key: string]: unknown;
-}
+export type RecoveredComment = Omit<ImportedComment, 'paraId'>;
 
 /** A native revision recovered from the current SPE document (mirror of BFF `RecoveredRevision`). */
-export interface RecoveredRevision {
-  [key: string]: unknown;
-}
+export type RecoveredRevision = Omit<ImportedRevision, 'paraId'>;
 
 /** BFF response for `POST /api/compose/document/{id}/pull-annotations` (FR-25). */
 export interface PullAnnotationsResult {

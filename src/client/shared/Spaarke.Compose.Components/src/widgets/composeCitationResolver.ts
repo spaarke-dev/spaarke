@@ -28,12 +28,26 @@
  *     section — the exact ambiguity class DEF-01 (task 012) diagnoses (a should-be-unique target
  *     matching more than one location in the document).
  *
- * PARITY: `composeCitationResolver.test.ts`'s "structured map" cases are ported verbatim (same input
- * maps, same citations, same expected paraIds) from
- * `tests/integration/seam/Compose/ComposeCitationResolverSeamTests.cs` — the letter/roman sub-item +
- * decoy-neighbor, section-prefix tolerance, and bullet-exclusion cases (the ones that construct an
- * in-memory `ParaIdMapEntry[]` rather than loading a real corpus `.docx`, so they translate directly
- * without a server-only fixture loader).
+ * PARITY — HOW IT IS ENFORCED (#699, 2026-09-01). It used to rest on ported test cases and the `@see`
+ * links below: `composeCitationResolver.test.ts`'s "structured map" cases were transcribed by hand from
+ * `tests/integration/seam/Compose/ComposeCitationResolverSeamTests.cs`. Two hand-kept copies of the same
+ * expectations cannot detect drift BETWEEN them — change the server parser without touching this file
+ * and both suites stay green, because each only ever checks its own copy. Two mechanisms now close that:
+ *
+ *  1. BEHAVIOUR — `tests/fixtures/compose-citation-parity/cases.json`, READ (never imported) by BOTH
+ *     `./composeCitationResolver.parity.test.ts` and `ComposeCitationParityCorpusTests.cs`. One set of
+ *     expectations, two parsers; a divergence fails on whichever side lags.
+ *  2. SURFACE — `tests/Spaarke.ArchTests/ComposeCitationResolverParityGuardTests.cs` pins the leading-
+ *     label vocabulary, the `CitationShape` set and the range-separator characters across both source
+ *     files, because a corpus cannot catch a shape nobody wrote a case for.
+ *
+ * WHY THE STAKES ARE ANCHORING AND NOT TIDINESS: `placeAdvisoryComments` tries the DETERMINISTIC leg
+ * first, so a citation this file cannot parse but the server can makes that leg return null — and the
+ * finding falls through to TEXT search, which is where a note lands on the wrong clause (#699). ADDING
+ * A SHAPE HERE OR ON THE SERVER MEANS ADDING A CASE TO THE SHARED CORPUS.
+ *
+ * The older ported cases (letter/roman sub-item + decoy-neighbor, section-prefix tolerance, bullet
+ * exclusion) remain in `composeCitationResolver.test.ts` alongside the paraId-stability coverage.
  *
  * SCOPE: forward resolution only (citation string → paraId(s)). The server's reverse
  * (`ResolveCitation`, paraId → canonical number) is NOT ported — nothing in this project's acceptance

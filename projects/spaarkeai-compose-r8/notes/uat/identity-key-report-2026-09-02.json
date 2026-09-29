@@ -1,0 +1,12 @@
+{
+  "RanAtUtc": "2026-09-02T04:17:44.4532495Z",
+  "DataverseUrl": "https://spaarkedev1.crm.dynamics.com",
+  "Mode": "report-only",
+  "RowsInspected": 479,
+  "DuplicateKeys": 0,
+  "ExcessRows": 0,
+  "CanonicalRule": "active first, then oldest createdon, then lowest sprk_documentid (matches the runtime self-heal)",
+  "Groups": [],
+  "Applied": [],
+  "Failures": []
+}

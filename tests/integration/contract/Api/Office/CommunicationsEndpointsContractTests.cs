@@ -325,7 +325,7 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -385,6 +385,9 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Add the test authentication scheme. When _disableAuth is true, we register
             // a deny-all handler so that hitting an authenticated endpoint without a
             // bearer token results in a 401, exercising the .RequireAuthorization()

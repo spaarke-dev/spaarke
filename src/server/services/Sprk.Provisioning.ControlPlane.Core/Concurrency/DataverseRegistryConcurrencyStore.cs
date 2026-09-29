@@ -1,4 +1,4 @@
-// -----------------------------------------------------------------------------
+﻿// -----------------------------------------------------------------------------
 // DataverseRegistryConcurrencyStore.cs
 //
 // L2 CONTROL-PLANE production IRegistryConcurrencyStore impl (task 059).
@@ -7,17 +7,20 @@
 // sprk_dataverseenvironment row to read + PATCH sprk_currentrunid with
 // If-Match ETag guarding.
 //
-// AUTH — PATH X (REG-02 migration, 2026-08-27, Wave 2 pre-dispatch remediation):
-//   DefaultAzureCredential pinned to the L2 UAMI via
-//   `ManagedIdentityClientId`, scoped to `{TargetDataverseUrl}/.default` —
-//   VERBATIM shape of DataverseEnvironmentRegistryClient.AcquireTokenAsync.
-//   The L2 UAMI is registered as a Dataverse Application User on the admin
-//   env by task 111's Grant-ControlPlaneIdentity.ps1 — the exact prerequisite
-//   already in place for the sibling registry client — so no new grant is
-//   required. NO ClientSecret. See CustomerRunGuardOptions.cs REG-02 header
-//   for the failure-mode this closes (secret-free deployments could not
-//   Enable the guard, forcing the ADR-032 kill-switch and defeating the
-//   entire I5 concurrency invariant).
+// AUTH:
+//   The L2 App Service's user-assigned managed identity, via
+//   DefaultAzureCredential pinned with ManagedIdentityClientId — identical to
+//   DataverseEnvironmentRegistryClient.AcquireTokenAsync, which reaches the same
+//   admin environment with the same identity.
+//
+//   MIGRATED 2026-08-27. Was a confidential client on the BFF app-reg + client
+//   secret, which ADR-028 A4 forbids (E-3, the transitional carve-out, CLOSED
+//   2026-08-24). The FUTURE MIGRATION note gated the swap on the L2 UAMI holding
+//   a systemuser record on the admin env — verified satisfied:
+//   sprk-controlplane-dev-uami (app id 965a4a01-...) is the enabled application
+//   user '# sprk-controlplane-dev-uami' with the Spaarke Provisioning Registry
+//   role. The precondition had been met without the code following, so the
+//   comment above described a blocker that no longer existed.
 //
 // DATAVERSE SEMANTICS:
 //   - Lookup by alt-key: GET /{entitySet}?$filter=sprk_customerid eq '{id}'
@@ -80,6 +83,7 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
+
     }
 
     /// <inheritdoc/>
@@ -295,13 +299,23 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         return true;
     }
 
-    // REG-02 (2026-08-27) — Path X token acquisition. Matches
-    // DataverseEnvironmentRegistryClient.AcquireTokenAsync verbatim: pin
-    // DefaultAzureCredential to the L2 UAMI via ManagedIdentityClientId (the
-    // UAMI is the same identity registered as an admin-env Application User
-    // by task 111's Grant-ControlPlaneIdentity.ps1). NO ClientSecret. On
-    // local dev without a UAMI attached the DefaultAzureCredential chain
-    // falls through to AzureCliCredential.
+    // Path X token acquisition: DefaultAzureCredential pinned via ManagedIdentityClientId (the L2
+    // UAMI). NO TenantId set — the L2 UAMI and the admin Dataverse env both live in the SPAARKE
+    // platform tenant, so token issuance targets the UAMI's own tenant intrinsically.
+    //
+    // Deliberately IDENTICAL to DataverseEnvironmentRegistryClient.AcquireTokenAsync, which hits
+    // the same admin environment with the same identity. That method was already on managed
+    // identity; this one was still on ClientSecretCredential, so the two disagreed about how the
+    // control plane authenticates to one environment. Keeping them character-for-character the
+    // same is the point — a second, subtly different credential path is how "fixable in one place"
+    // stops being true (ADR-028 A4).
+    //
+    // Was: new ClientSecretCredential(TenantId, ClientId, ClientSecret) — the BFF's own app
+    // registration bound to a secret. The FUTURE MIGRATION note in CustomerRunGuardOptions gated
+    // the swap on "the L2 App Service's UAMI is granted a systemuser record on the admin env".
+    // Verified satisfied 2026-08-27: sprk-controlplane-dev-uami (app id 965a4a01-…) is the enabled
+    // application user "# sprk-controlplane-dev-uami" holding the Spaarke Provisioning Registry
+    // role. The precondition had been met without the code following.
     private async Task<AccessToken> AcquireTokenAsync(Uri envUri, CancellationToken cancellationToken)
     {
         var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
@@ -315,6 +329,7 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         return await credential.GetTokenAsync(
             new TokenRequestContext(new[] { scope }), cancellationToken).ConfigureAwait(false);
     }
+
 
     private static string BuildPatchBody(string? currentRunIdValue)
     {

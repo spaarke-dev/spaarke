@@ -177,3 +177,66 @@ describe('SprkChat — pin new user message to top on send (Phase 0 FIX 1)', () 
     expect(messageList.scrollTop).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// spaarkeai-compose-r8 UAT round 1 #7 — an INJECTED turn pins too
+// ---------------------------------------------------------------------------
+
+describe('SprkChat — pin an INJECTED turn to top (compose-r8 UAT round 1 #7)', () => {
+  let restoreOffsetTop: () => void;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.endsWith('/sessions') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ sessionId: 'session-inject-1', createdAt: '2026-09-02T00:00:00Z' }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    restoreOffsetTop = stubOffsetTop(777);
+  });
+
+  afterEach(() => {
+    restoreOffsetTop();
+    jest.restoreAllMocks();
+  });
+
+  it('pins a host-injected ASSISTANT turn to the top, the same as a typed send', async () => {
+    // The reported symptom: an inline Compose AI action returns a result, and it is "difficult to know
+    // what in the Assistant pane applies to the latest change" — because injected turns appended at the
+    // bottom while typed turns pinned to the top. Injected turns are ASSISTANT-role and have no user
+    // message in front of them, so the typed path's last-USER-message anchor cannot serve them.
+    const injected = {
+      role: 'Assistant' as const,
+      content: 'I made that clause more concise.',
+      timestamp: '2026-09-02T00:00:00Z',
+    };
+
+    // The host drives this as a null -> non-null TRANSITION (useInjectionQueue), and the effect's
+    // identity guard is written for exactly that, so the test mounts without it and then supplies it.
+    const view = await act(async () => renderWithProviders(<SprkChat {...defaultProps} />));
+
+    const messageList = screen.getByTestId('chat-message-list') as HTMLDivElement;
+    expect(messageList.scrollTop).toBe(0);
+
+    await act(async () => {
+      view.rerender(<SprkChat {...defaultProps} injectLocalMessage={injected} />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText('I made that clause more concise.')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(messageList.scrollTop).toBe(777);
+    });
+  });
+
+  it('stays at the top with no injection and no send (the pin is armed, never ambient)', async () => {
+    await act(async () => {
+      renderWithProviders(<SprkChat {...defaultProps} />);
+    });
+    const messageList = screen.getByTestId('chat-message-list') as HTMLDivElement;
+    // Guards the other direction: if the pin fired on every render the first test would pass for the
+    // wrong reason, and the transcript would jump while the user reads history.
+    expect(messageList.scrollTop).toBe(0);
+  });
+});

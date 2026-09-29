@@ -60,8 +60,6 @@ builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.IDocumentStorag
 // absent resolver means callers silently fall back to a shared container. There is no acceptable null
 // object here, so no ADR-032 kill-switch applies.
 builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry, Sprk.Bff.Api.Infrastructure.Dataverse.SecurableEntityRegistry>();
-// Concrete per ADR-010: no second implementation, no test double. Its collaborator
-// ISecurableEntityRegistry stays an interface (it IS substituted, and it reads live Dataverse metadata).
 builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>();
 
 // Authentication & Authorization (Azure AD JWT + authorization policies)

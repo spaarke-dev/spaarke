@@ -83,10 +83,19 @@ choice means creating a replacement, and (R3) the mistake stays on the books for
 |---|---|---|---|---|---|
 | Development | `Spaarke PAYGO 1` (existing, `8a6ce34c…`) | `170c98e1…` | as-is | Spaarke | internal |
 | Customer trials | `Spaarke Trial 1` | **new** | `standard` | Spaarke | 1 container per prospect |
-| Model 1 (shared, hosted by us) | `Spaarke Model 1` | **new** | `standard` | Spaarke | 1 container per customer |
-| Model 2 (dedicated / customer-tenant) | `Spaarke Model 2` | **new** | `directToCustomer` | **Customer tenants** | **ALL** Model 2 customers |
+| Model 1 (customer's Azure subscription inside **Spaarke's** tenant) | `Spaarke Model 1` | **new** | `standard` | Spaarke | 1 container per customer |
+| Model 2 (customer's Azure subscription inside the **customer's own** tenant) | `Spaarke Model 2` | **new** | `directToCustomer` | **Customer tenants** | **ALL** Model 2 customers |
 
 Four of twenty-five. **Model 2 scales to unlimited customers** through registration (R4).
+
+> 🟡 **Deployment-model note (2026-09-28, owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))**
+> — Model 1 is **not** a shared tier. Every customer gets a **dedicated Dataverse environment and a
+> dedicated set of Azure resources in their own Azure subscription**, in both models; the models differ in
+> **which Azure tenant owns that subscription** (Model 1 = Spaarke's, Model 2 = the customer's). What
+> follows in this section — the **single SPE consuming tenant** under Model 1 — is the one genuine
+> infrastructural difference between the models beyond H0.5 consent and Azure Lighthouse delegation, and
+> it is **unaffected by D-12**. Note the boundary: *one consuming tenant* is not *one container*; each
+> Model 1 customer still gets **their own container**.
 
 ### Why trials and Model 1 are separate types
 
@@ -94,12 +103,17 @@ Settings are **container-type-scoped** — including `maxStoragePerContainerInBy
 would force prospects and paying customers onto the same storage cap and sharing policy, and a
 settings change for one would hit the other. Settings changes take **up to 24 hours** to replicate.
 
-### The Model 1 / Model 2 asymmetry — know this before promising anything
+### 🔴 The one real Model 1 / Model 2 asymmetry — know this before promising anything
 
-- **Model 2** customers each have their **own consuming tenant**, so each can hold **setting
+This is an **SPE-tenancy** asymmetry, not an Azure-resource one. Azure resources are dedicated per
+customer in both models.
+
+- **Model 2** customers each have their **own SPE consuming tenant**, so each can hold **setting
   overrides**, and those overrides *survive* our updates.
-- **Model 1** customers all sit in **our single tenant** — one consuming tenant, therefore **one
-  settings baseline with no per-customer divergence.**
+- **Model 1** customers all sit in **Spaarke's single SPE consuming tenant** — one consuming tenant,
+  therefore **one container-type settings baseline with no per-customer divergence.** Container-type
+  settings (storage cap, sharing and retention behaviour) are scoped to the *registration*, and under
+  Model 1 there is exactly one registration for all of them.
 
 If a Model 1 customer needs different sharing or retention behaviour, the answer is *"move to Model
 2"*, not *"apply an override"*. There is nowhere to put the override.
@@ -153,9 +167,10 @@ They are different things and need not match:
   environment means.
 - **BFF app registration** = an Entra identity. Several instances *can* share one.
 
-For **Model 2, do not share one registration across customers.** Isolation is Model 2's premise, and a
-shared registration means a shared token audience — a token minted for Customer A's BFF is
-structurally valid at Customer B's.
+🔴 **Do not share one BFF registration across customers — in EITHER model.** A shared registration means a
+shared token audience: a token minted for Customer A's BFF is structurally valid at Customer B's. Under
+**Model 1** this matters *more*, not less, because every Model 1 customer presents the **same `tenantId`**
+(Spaarke's), so the token's tenant claim cannot tell them apart either.
 
 ### The registration set
 
@@ -165,11 +180,17 @@ structurally valid at Customer B's.
 | 2 | `Spaarke SPE Model 1 Owner` | Owns `Spaarke Model 1` | 1 — fixed by R1 |
 | 3 | `Spaarke SPE Model 2 Owner` | Owns `Spaarke Model 2`. **Multi-tenant** — customers consent to this | 1 — fixed by R1 |
 | 4 | `Spaarke BFF — Trial 1` | BFF identity, trial environment | 1 |
-| 5 | `Spaarke BFF — Model 1` | BFF identity, shared Model 1 environment | 1 |
-| 6…n | `Spaarke BFF — {Customer}` | BFF identity per Model 2 customer | **1 per customer** |
+| 5…n | `Spaarke BFF — {Customer}` | BFF identity **per customer, in BOTH models** | **1 per customer** |
 
-Ten Model 2 customers ⇒ 15 app registrations and still **4 of 25 container types**. That ratio is the
-point of the split.
+> 🟡 **Corrected 2026-09-28 (D-12).** This table previously carried a singleton row
+> `Spaarke BFF — Model 1` — *"BFF identity, shared Model 1 environment"* — and scoped per-customer BFF
+> identity to Model 2 only. **There is no shared Model 1 environment.** Each customer has their own BFF
+> App Service in their own Azure subscription, so **per-customer BFF identity applies to both models**.
+> The container-type *owning* apps (rows 1–3) are unaffected: they are 1:1 with a container type by R1,
+> and Model 1's single SPE consuming tenant is unchanged.
+
+Ten customers ⇒ 14 app registrations and still **4 of 25 container types**. That ratio is the
+point of the split: **customer growth costs app registrations, not container types.**
 
 ### How a BFF gets container access without owning anything — VERIFIED
 
@@ -192,7 +213,10 @@ customer's BFF app. One customer's grant list is invisible to and independent of
 
 This also confirms the Model 1 / Model 2 asymmetry in §3: `fileStorageContainerTypeRegistration.settings`
 is a distinct property from `fileStorageContainerType.settings` — that is the per-consuming-tenant
-override surface, which Model 1 (single tenant, single registration) does not get.
+override surface, which Model 1 (one SPE consuming tenant, one registration) does not get. ⚠️ Note what
+this does **and does not** say: Model 1 customers share a *container-type registration*, and therefore a
+settings baseline. They do **not** share a container, a BFF, or any Azure resource — those are dedicated
+per customer in both models (D-12).
 
 Grant the BFF app what it needs on the relevant registration; **do not make it an owner.**
 
@@ -335,11 +359,14 @@ provisioning flow is treated as correct:
 
 1. **Handler H8 is unproven** — it inherits the `Create-NewContainerType.ps1` defect (§7). Container-type
    creation cannot be automated with an app-only token.
-2. **The app registration set (§3A) is a provisioning input**, not an afterthought. Each Model 2 customer
-   needs its own BFF app registration and a grant on that customer's container-type registration —
-   **not** a new container type.
-3. **`sprk_containertypeid` on the environment registry** now has a defined meaning per model: shared
-   across all customers of a model, not allocated per customer.
+2. **The app registration set (§3A) is a provisioning input**, not an afterthought. **Every** customer —
+   Model 1 and Model 2 alike — needs **its own BFF app registration** and a grant on the relevant
+   container-type registration (its own under Model 2; Spaarke's single Model 1 registration under Model 1)
+   — **not** a new container type.
+3. **`sprk_containertypeid` on the environment registry** has a defined meaning per model: the **container
+   type** is shared across all customers of a model, not allocated per customer. ⚠️ That is a statement
+   about the container *type* only — each customer still gets their own **container**, and every Azure
+   resource is dedicated per customer in both models (D-12).
 
 ---
 

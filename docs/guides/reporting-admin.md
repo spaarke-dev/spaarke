@@ -229,13 +229,32 @@ Dataverse (sprk_report entity)
 
 ### Deployment Models
 
-The module supports three deployment models:
+> 🔴 **REWRITTEN 2026-09-28 — this section declared its own three deployment models, including one that
+> shares an Entra app registration across customers.** That is forbidden by **D-13** (BINDING) and the
+> three-model framing is retired by **D-12**. Spaarke has **two** deployment models, differing only in which
+> **Azure tenant** owns the customer's subscription.
 
-| Model | Description | Capacity | SP Profiles |
-|-------|-------------|----------|-------------|
-| **Multi-customer (shared)** | Multiple customers share one Entra app registration; each has an isolated workspace via SP profiles | Shared F-SKU pool | One profile per customer |
-| **Dedicated customer** | Large customer gets dedicated F-SKU capacity for performance isolation | Dedicated F-SKU | One profile per customer |
-| **Customer tenant** | Reporting runs inside the customer's own Entra tenant with their own Power BI capacity | Customer-managed | Service principal in customer tenant |
+The module follows Spaarke's two deployment models (D-12). Reporting adds **no** model of its own — the
+Power BI workspace and the service principal are per customer in both.
+
+| Model | Where it runs | Power BI capacity | Service principal |
+|-------|---------------|-------------------|-------------------|
+| **Model 1** | Spaarke's Azure/Entra tenant, in the **customer's own subscription** | 🔴 per customer | per customer |
+| **Model 2** | the **customer's own** Azure/Entra tenant | customer-managed | service principal in the customer tenant |
+
+🔴 **Two things the retired table got wrong, recorded so they are not re-introduced:**
+
+1. *"Multiple customers share one Entra app registration"* — **forbidden by D-13.** The app registration
+   determines the Dataverse application user, which determines the **business unit** a record lands in;
+   sharing one across customers also means one credential whose compromise reaches all of them. An app
+   registration serving customer reports is **not** a fleet-level identity and does not qualify for D-13 §5's
+   exemption. See `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
+2. *"Shared F-SKU pool"* — Power BI capacity holds customer reporting data and is **not** on D-12 §3's closed
+   two-item sharing exception list (Static Web Apps, Content Safety). ⚠️ **If a shared capacity pool is
+   wanted for cost reasons, that is a new owner decision**, not an inherited default — it is not decided here.
+
+⚠️ **Service-principal profiles remain the right mechanism** for isolating workspaces; what changes is that
+the identity they hang off is per customer, not shared.
 
 ### BFF Endpoints
 

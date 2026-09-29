@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-B01 — Durable byte store for session uploads (blob, tenant-partitioned, existing MI RBAC and provisioned container)</title>
+    <phase>6 Track B — Durable Session Files</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF storage surface — the one new component in the project. Tenant isolation is binding (ADR-014/015).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: this is a new store path handling user-uploaded content across tenants. A partitioning mistake is a cross-tenant data exposure that no functional test surfaces — the feature works perfectly while being wrong. ADR-014/015 correctness is the definition of a subtle miss that ships.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `Services/Ai/Sessions` and a new store file — NOT the Compose spine. Track B is the only genuinely parallel-safe track.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, storage, auth, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Uploaded chat files die after 24 hours while their conversation lives for 90 days. The manifest keeps
+    pointing at chunks that no longer exist, so a session reopened on day 2 cannot recall from its own files.
+
+    Persist a durable byte copy of each session upload at upload time, tenant-partitioned, in **blob**.
+
+    The owner verified the placement decision: Cosmos holds JSON documents, not bytes (7 containers checked).
+    Blob infrastructure is ALREADY provisioned — `infrastructure/bicep/modules/storage-account.bicep` defines
+    the containers with managed-identity RBAC and is wired into `customer.bicep:145`. `Azure.Storage.Blobs`
+    12.29.1 is already referenced; its only current consumer (`UploadFinalizationWorker.cs:610`) is a stub
+    (GH #231).
+
+    So this is **no new Azure resource and no new NuGet** — one new service, using infrastructure that exists.
+    SPE is explicitly the wrong home: it is matter/BU-scoped DMS and would pollute it with per-user ephemeral
+    uploads while inheriting its permission and retention model.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in Azure Blob with managed identity, the AI session/chat file path, and tenant-isolation requirements. Follow ADR-014/015 (tenant isolation), ADR-010 (DI budget), ADR-032 (symmetric registration if gated) and ADR-013.</role>
+
+  <goal>
+    Every session upload has a durable, tenant-partitioned byte copy written at upload time via managed
+    identity, with no new Azure resource, no new NuGet, and exactly one new DI registration.
+  </goal>
+
+  <context>
+    <background>
+      This is the project's only genuinely new component and the spec's §11 table justifies it explicitly.
+      The cost-of-doing-nothing is concrete: a conversation reopened after 24h cannot recall from its own
+      uploaded files, and the manifest points at chunks that no longer exist.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/storage-account.bicep</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/ (UploadFinalizationWorker.cs ~:610 — the existing stub)</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="test">tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-014 / ADR-015">Tenant isolation is BINDING on every store path. The blob path MUST be partitioned by tenant, and no read may cross a tenant boundary. This is the single most important property of this task.</constraint>
+    <constraint source="spec NFR-02">NO new NuGet — `Azure.Storage.Blobs` 12.29.1 is already referenced.</constraint>
+    <constraint source="project">NO new Azure resource. Use the provisioned storage account, containers and managed-identity RBAC from `storage-account.bicep`. If a new container is genuinely required, that is a bicep change to justify, not to assume.</constraint>
+    <constraint source="ADR-010">EXACTLY ONE new DI registration (the spec's §11 table allows this one). The ≤15 non-framework budget binds.</constraint>
+    <constraint source="ADR-032">If the store is feature-gated, registration MUST be symmetric — a null-object implementation registered when the flag is off (bff-extensions.md § F.1). MUST NOT register inside an `if (flag)` block without the null-object counterpart.</constraint>
+    <constraint source="project">Authentication MUST use managed identity. MUST NOT use a connection string or account key, and MUST NOT add a secret to configuration (root §9).</constraint>
+    <constraint source="ADR-007">This is NOT SPE. MUST NOT route session uploads through `SpeFileStore` — the placement decision is recorded in the spec's §11 table.</constraint>
+    <constraint source="ADR-013">Lives under `Services/Ai/`; no CRUD→AI direct dependency introduced. Consume via `PublicContracts/` where a boundary is crossed.</constraint>
+    <constraint source="ADR-038">Seam tests including an explicit CROSS-TENANT read attempt that must fail.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>blob storage with MI, tenant isolation, session file lifecycle</topic>
+    <files>
+      <file>.claude/adr/ADR-014-tenant-isolation.md</file>
+      <file>.claude/adr/ADR-015-data-partitioning.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/durable-session-files.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-014/015, bff-extensions.md.</step>
+    <step order="1">Read `storage-account.bicep` and confirm which provisioned container to use and that MI RBAC covers the operations needed.</step>
+    <step order="2">Read the existing `UploadFinalizationWorker.cs` stub (~:610) — understand why it is a stub and whether it is the seam to complete rather than a new one to add.</step>
+    <step order="3">Write the Placement Justification (root §10 bullet 2) citing bff-extensions.md decision criteria, in the task notes and the PR description.</step>
+    <step order="4">Implement the store: write a durable copy at upload time, blob path partitioned by tenant, MI auth.</step>
+    <step order="5">Register once. If feature-gated, register symmetrically with a null-object (ADR-032).</step>
+    <step order="6">Seam tests: an upload produces a durable copy; a cross-tenant read attempt FAILS; MI auth is used (no key/connection string present).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no provisioned container fits and a bicep change is needed, surface it — "no new Azure resource" is a stated constraint and adding one is an owner decision.</trigger>
+    <trigger>If the existing `UploadFinalizationWorker` stub is the intended seam (GH #231), completing it may be better than adding a new service — surface the choice with reasoning rather than defaulting to a new component (root §11).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</output>
+    <output type="test">tests/integration/seam/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every session upload writes a durable byte copy at upload time.</criterion>
+    <criterion>The blob path is partitioned by tenant; a cross-tenant read attempt FAILS (asserted by seam test).</criterion>
+    <criterion>Authentication is managed identity — no connection string, no account key, no new secret in configuration.</criterion>
+    <criterion>Exactly ONE new DI registration was added (ADR-010); if feature-gated, it is symmetric with a null-object (ADR-032).</criterion>
+    <criterion>A Placement Justification citing bff-extensions.md decision criteria is recorded in the notes and the PR description.</criterion>
+    <criterion>NEGATIVE: no new NuGet package.</criterion>
+    <criterion>NEGATIVE: no new Azure resource (or, if unavoidable, it was escalated and approved).</criterion>
+    <criterion>NEGATIVE: session uploads do NOT route through `SpeFileStore`.</criterion>
+    <criterion>NEGATIVE: no asymmetric registration inside an `if (flag)` block.</criterion>
+    <criterion>Publish size reported (absolute + delta vs 44.96 MB); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

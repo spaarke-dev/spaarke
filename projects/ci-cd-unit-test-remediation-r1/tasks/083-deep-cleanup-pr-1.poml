@@ -1,7 +1,7 @@
 <task id="CICD-083" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Deep cleanup PR 1/3 — highest-confidence DELETE bucket (mirror-tests + all-mocks-trivial; ~500-1000 tests expected)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2.5 - Deep cleanup</phase>
     <stream>B - Test reset (extended)</stream>
@@ -49,6 +49,41 @@
     <output type="test-deletion">~500-1000 test methods removed (file count varies; mixed files may keep partial)</output>
     <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/deep-cleanup-pr-1-summary.md (what was removed, count delta, surviving test count)</output>
   </outputs>
+
+  <execution-record date="2026-08-28">
+    <bucket-revision>
+      POML anticipated mirror-tests (B6) + all-mocks-trivial (B7), ~500-1000 methods.
+      Revised per the POML's own "bucket assignment can be revised at task start"
+      clause. B6 is not mechanically detectable (implementation == implementation has
+      no regex signature); B7 yielded 6 rows, all AMBIGUOUS because ADR-038's first
+      remedy for B7 is "integration test", not deletion. Executed bucket: B4
+      constructor null-guard tests.
+    </bucket-revision>
+    <scope-change>
+      Slice was 76 (B4+B3+B8+B1) at task start. Spot-check rounds 3+4 found six
+      classifier over-call bugs and cut it to 54: B1 1->0, B3 13->0, B8 3->0 -- every
+      row in all three buckets was a false positive. See PR #855 and the "Accuracy
+      control" section of notes/test-inventory-broader-summary.md.
+    </scope-change>
+    <result>54 methods removed across 29 files; 506 deletions, 0 insertions.</result>
+    <verification>
+      Pre-deletion: 54/54 verified individually via an independent code path
+      (brace-balanced re-parse, comments stripped, act must be a construction).
+      Post-deletion: dotnet build 0 warnings / 0 errors; full dotnet test suite
+      0 failed / 10,702 passed / 77 skipped. Diff-counted attribute removals = 54.
+      FR-B06 path-check: no protected-path row in the DELETE set.
+    </verification>
+    <constraint-retired source="spec FR-B10">
+      "Combined 083+084+085 target: ~6,695 -> &lt;=3,500" is retired per the owner
+      decision in PR #852 -- unreachable by the sanctioned path (~640 max removals
+      against 7,119 methods). Numeric reduction is a signal, not a gate.
+    </constraint-retired>
+    <downstream-warning task="084">
+      B10 (247 rows) is NOT cleared for mechanical deletion. It has produced a false
+      positive in two separate rounds; round 4's fix was a name heuristic, not
+      verification. 084 requires a per-row pass of the kind these 54 received.
+    </downstream-warning>
+  </execution-record>
 
   <acceptance-criteria>
     <criterion testable="true">All inventory-broader DELETE rows in this PR's bucket removed (file or method-level)</criterion>

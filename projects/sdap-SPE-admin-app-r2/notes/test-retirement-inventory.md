@@ -205,3 +205,59 @@ a regression**. Not a SpeAdmin test; recorded, not fixed.
 
 This is the adjudication two earlier CI runs never delivered — both were cancelled by pushes mid-run.
 Relevant to master's new `classify-and-retry.ps1` determinism work (PR #830).
+
+---
+
+## ✅ RESOLVED 2026-08-27 — the Security gap is closed, so the escalation no longer blocks
+
+The escalation above left `SecurityEndpointTests.cs` (20 tests) in place on one specific ground:
+
+> *"don't zero out a feature's tests before its replacement exists"*
+
+**The replacement now exists**: `tests/integration/contract/SpeAdmin/SpeAdminSecurityContractTests.cs`
+— 11 contract tests on a KEEP path, exercising the real Graph request and response through the HTTP
+boundary rather than round-tripping DTOs.
+
+| Coverage | Before | After |
+|---|---|---|
+| Test *count* on the Security surface | 20 | 20 + 11 |
+| **Real** coverage of `/security/alerts` + `/security/score` | **0** | 11 |
+
+### What the replacement actually protects
+
+The two load-bearing cases are about **absence**, because a security screen that cannot distinguish
+*"nothing is wrong"* from *"I could not check"* manufactures confidence:
+
+1. **`GetSecurityAlerts_WhenAccessDenied_ThrowsRatherThanReportingNoAlerts`** — a swallowed 403 would
+   render "No active alerts" to an administrator whose app registration cannot read alerts at all.
+   Not a degraded answer; a confident wrong one, on the screen where that costs most.
+2. **`GetSecureScore_WhenGraphReturnsNoSnapshot_ReturnsNullRatherThanAZeroScore`** — a default here is
+   a fabricated security posture. `0` reads as catastrophic and triggers work that is not needed; a
+   max value reads as perfect and suppresses work that is. Neither number was ever measured. (The
+   endpoint turns null into **204**, which is honest.)
+
+Plus: both `$select` field sets (the §3.2 wrong-property-name defect class lives in the REQUEST and is
+invisible to a response-only test), `$top`/`$orderby` on alerts, `$top=1` on the score history
+collection, full-field mapping, and negative controls for omitted optional fields.
+
+### What this does NOT do
+
+**It does not delete the 20.** That decision belongs to `/test-diet` at task 090, and 090 has not been
+started. What changed is that the *reason for holding them* is gone — the choice at 090 is now a
+straightforward classification, not a trade-off against leaving a feature uncovered.
+
+### ⚠️ Separately: `SearchItemsTests` is worse than "AMBIGUOUS"
+
+Found while running the suite for this work. `SearchItems_WithToken_ValidConfigIdNotFound_Returns400`
+**makes a real outbound Dataverse call from `tests/unit/**`.** It passed twice earlier the same session
+and then failed with `TaskCanceledException` after ~100 s — the config lookup went from failing fast to
+hanging until the HttpClient timeout.
+
+Proven **pre-existing** (`git stash -u` → identical failure and identical duration), so it is not a
+regression from work in flight. But it is **non-deterministic by construction**, and its ~2-minute
+timeout holds the whole suite's runtime hostage.
+
+For /test-diet this is no longer only "tighten the assertion": the real choice is an offline Dataverse
+double (which would make 400-vs-500 actually decidable) or removal. Tightening the assertion alone
+converts an intermittent pass into an intermittent failure without establishing anything. Evidence is
+recorded in the test file itself, where whoever trips it will find it.

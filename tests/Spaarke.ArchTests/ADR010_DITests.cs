@@ -62,10 +62,7 @@ public class ADR010_DITests
         // Verify IHttpClientFactory is used (not new HttpClient()) in service registrations
         // Check across all server source for direct HttpClient construction
         var serverSourcePath = Path.Combine(SourceRoot, "src", "server", "api", "Sprk.Bff.Api");
-        var serverCsFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
-
-        // Exclude the plugin project from this check
-        var bffFiles = serverCsFiles.Where(f => !f.Contains("CustomApiProxy")).ToList();
+        var bffFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
 
         // Check that IHttpClientFactory is registered somewhere
         var hasHttpClientFactory = allDiSource.Contains("AddHttpClient") ||
@@ -171,7 +168,81 @@ public class ADR010_DITests
         // land unreviewed, which is the opposite of what this ratchet is for. Left at 153.
         // The blind spot is booked onto tasks 060/061 (the forcing-function tasks), where a
         // cross-assembly credential census belongs.
-        const int knownOneToOneCeiling = 153;
+        //
+        // ───────── Ceiling raised 153 → 155, 2026-08-27 (issue #839, spaarkeai-compose-r8) ─────────
+        // This test began FAILING at 155 once the Tier 2 aggregator was repaired and stopped
+        // reporting every ADR line as `pass` regardless of outcome (PR #840). The failure is
+        // inherited from master, not from the branch that raised the ceiling: that branch adds no
+        // interface to any assembly.
+        //
+        // ⚠️ READ THE NET NUMBER CAREFULLY. It is +2, and that is misleading: SEVEN 1:1 interfaces
+        // were added and FIVE were removed. The removals bought headroom that hid five of the
+        // additions from the ratchet entirely. A ceiling on a net count cannot see this; only the
+        // list diff can. Anyone maintaining this number should diff the printed lists, not trust
+        // the delta. (Method: check out the prior ceiling commit, set the ceiling to 0 so the list
+        // prints, capture both lists, `comm` them.)
+        //
+        // Diff vs 5c3652f8d (the 2026-08-12 re-arm):
+        //   ADDED (7):
+        //     IFileSummarizeAi          -> FileSummarizeAi             ADR-013 / CLAUDE.md §10
+        //     IPreferenceMemoryCapture  -> PreferenceMemoryCapture       bullet 3 REQUIRE CRUD→AI
+        //       Both live in Services/Ai/PublicContracts/. These interfaces are not optional
+        //       indirection — the facade boundary is a binding architecture rule, and removing them
+        //       would violate it. 2 impls exist for IPreferenceMemoryCapture.
+        //     IProvisioningEnqueuer     -> ServiceBusProvisioningEnqueuer   test seam (2 doubles)
+        //     ITenantContainerResolver  -> OptionsTenantContainerResolver   test seam (1 double)
+        //     IAdvisoryCapabilityRunner -> AdvisoryCapabilityRunner         test seam (1 double)
+        //       Each is mocked/faked in tests, which is ADR-010's own testing-seam exception.
+        //     ITenantBudgetPolicy       -> TenantBudgetPolicy         ⚠️ WEAKEST — see below
+        //     ITenantTokenLedger        -> InMemoryTenantTokenLedger  ⚠️ WEAKEST — see below
+        //   REMOVED (5): IConfidenceScoringService, IEmailTemplateService, IOwnershipValidator,
+        //     IScopeCopyService, IScopeInheritanceService.
+        //
+        // ⚠️ The two weak seams are grandfathered here but NOT endorsed. Neither has a second
+        // implementation nor a test double today; their justification is documented future
+        // evolution (ITenantTokenLedger's impl is named InMemory* with a Redis successor named per
+        // ADR-009; ITenantBudgetPolicy is a fail-open pre-call gate). "Future flexibility" is
+        // exactly the reasoning CLAUDE.md §11 question 3 rejects. They are grandfathered rather
+        // than fixed because the AI-metering surface belongs to another project and converting it
+        // to concrete registration is a behavior-affecting refactor outside an ArchTest
+        // adjudication branch. Tracked so it is not lost — see the #839 PR description.
+        //
+        // 155 -> 156, same day, on merging master: ISecurableEntityRegistry ->
+        // SecurableEntityRegistry (unified-access-control-r2 task 075). ACCEPTED as an
+        // external-dependency seam: it wraps a live Dataverse metadata retrieval, and its XML doc
+        // states an implementation contract the interface exists to impose — "Implementations MUST
+        // throw rather than return an empty or partial set when the answer cannot be determined",
+        // because "I could not find out whether this entity is securable" read as "it is not
+        // securable" places content in a shared container, where SPE's CONTAINER-level permission
+        // model exposes it to every member with no per-file deny available — and does so silently.
+        // (Corrected 2026-09-02: this said "makes irreversible". Removing the item from the container
+        // does end the access; the hazard is silent exposure until someone notices, not permanence.)
+        // That is a contract, not indirection. Worth noting as the
+        // ratchet behaving correctly: the count moved for a real reason and named the interface.
+        //
+        // ───────── Ceiling raised 156 → 157, 2026-09-09 (unified-access-control-r2) ─────────
+        // IImpersonatedRootSetSource -> ImpersonatedRootSetSource.
+        //
+        // ⚠️ ADDED BY TASK 035, WHICH DID NOT RAISE THE CEILING. Found by task 024 — the branch had
+        // been red here since e38548ce5. It survived CI because Tier 1 runs only the MUST-NOT subset
+        // of Arch Tests and Tier 2 is advisory by design, so nothing blocking ever executed this
+        // test. Worth knowing: this ratchet is effectively local-only enforcement today.
+        //
+        // The seam, assessed honestly rather than asserted:
+        //   FOR  — it mirrors IImpersonatedCommunicationQuery, which is a GENUINE seam (one impl,
+        //          and a real double, StubImpersonatedQuery, in ImpersonatedRootSetSourceTests).
+        //          Task 035's POML mandated the interface explicitly as the ADR-010 testing seam.
+        //   AGAINST — as of today it has ONE implementation, ZERO test doubles and ZERO consumers.
+        //          Its justification is a FUTURE substitution, and "future flexibility" is exactly
+        //          what CLAUDE.md §11 question 3 rejects. It is accepted on the strength of a NAMED
+        //          IMMINENT consumer, not on a general principle.
+        //
+        // 🔴 FALSIFIABLE CONDITION — this is the point of writing it down. Task 036's whole job is
+        // the flag-gated swap that substitutes this interface in the evaluator. If 036 lands and
+        // does NOT substitute it (no double, no second implementation), the interface has no seam,
+        // and the correct action is to register the concrete per ADR-010 and drop this ceiling back
+        // to 156 — NOT to leave it grandfathered because the number already moved.
+        const int knownOneToOneCeiling = 157;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

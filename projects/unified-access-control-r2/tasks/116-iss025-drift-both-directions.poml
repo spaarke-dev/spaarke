@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="116" project="unified-access-control-r2">
+  <metadata>
+    <title>The status-drift check compares POMLs and TASK-INDEX rows as SETS — an unpaired entry on EITHER side is drift (ISS-025 / #1004)</title>
+    <phase>Register-driven — queued 2026-09-18 (wave 0, bookkeeping)</phase>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One repo tooling script; no product code, no new surface, no ADR question. Verification is behavioural — recreate the condition, then perturb the new assertion — not a code-review judgment call.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified change to one 230-line PowerShell script with a closed acceptance set. The one judgment boundary (telling status rows apart from the index's reference tables) is carried as an escalation trigger rather than left to the model.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits scripts/check-task-status-drift.ps1, which task-execute Step 10 and push-to-github Step 1.65 both GATE on. Changing it while another agent is completing a task would move that agent's gate under its feet.</parallel-reason>
+    <deps>none</deps>
+    <tags>tooling, scripts, bookkeeping, governance</tags>
+    <estimated-effort>1–2 hours</estimated-effort>
+    <origin>ISS-025 / #1004, owner-approved for queuing 2026-09-18 as task 116 (115 reserved for the §2 accuracy-repair pass). Found 2026-09-18 by creating the condition while queuing 109–114: six index rows with no POML, and the check printed both counts and still said "No drift".</origin>
+  </metadata>
+
+  <prompt>scripts/check-task-status-drift.ps1 reconciles by iterating the POMLs and looking up each one's index marker, so it only ever examines tasks that exist on BOTH sides. A POML with no index row, and an index row with no POML, are both invisible to it. Make the check compare the two as SETS — equal in both directions — and report every unpaired entry as drift.</prompt>
+  <role>SPAARKE tooling developer — PowerShell, the repo's task-bookkeeping scripts, and the two skills that gate on them.</role>
+  <goal>The check answers "do the POMLs and the index describe the SAME set of tasks, and agree on each one's state?" instead of only the second half. An index row advertising work that no task file backs goes red at the same moment a stale status does, with the same message shape, and both gating callers keep working unchanged.</goal>
+
+  <context>
+    <background>Register entry: notes/defer-issues.md § ISS-025 (GitHub #1004). Sequencing: notes/remediation-and-sequencing-plan-2026-09-18.md § "3. Workstream C" → "A gap in my own session-15 work", wave 0.
+
+WHAT THE SCRIPT DOES TODAY. Invoke-ProjectCheck builds two hashtables — Get-PomlStatuses (id → &lt;status&gt; text) and Get-IndexMarkers (id → row marker) — then reconciles with:
+
+    foreach ($id in ($poml.Keys | Sort-Object)) {
+        if (-not $idx.ContainsKey($id)) { continue }   # no row to compare against
+
+That `continue` is the whole defect. The loop is keyed on the POML side, so an index row with no POML is never visited; and the guarded POML-with-no-row case is SKIPPED rather than reported. Both counts are already printed ("task POMLs parsed" / "index rows parsed"), so the instrument has the evidence on screen and discards it.
+
+DEMONSTRATED, NOT THEORISED (2026-09-18). After six 🔲 [open] rows for 109–114 were added with no task files, the script printed `task POMLs parsed : 105`, `index rows parsed : 111`, then "No drift: every task POML status agrees with its index marker.", rc=0. The verdict was not wrong, it was NARROW — true about what it measured and silent about what had changed.
+
+THIS IS THE MIRROR OF A GUARD IT ALREADY HAS. The `$unparseable` guard (POMLs present but ZERO rows parsed) exists precisely so a parser that reads nothing cannot launder itself into a green check — FAILURE-MODES AP-12. An orphan row is the same class of blind spot one step in.
+
+STATE OF THIS PROJECT (re-verified 2026-09-19, do not trust — re-measure): 111 POMLs, 111 index rows, zero unpaired entries in BOTH directions, rc=0. So the new check MUST still exit 0 here. If your reading says otherwise, stop and report it.
+
+⚠️ A FINDING THE REGISTER DOES NOT CARRY — verify it before writing the set comparison. The current row regex matches 119 LINES but yields only 111 DISTINCT ids: eight ids match twice, and `$map[$id] = ...` keeps the LAST line. The second hit in each pair is not a status row — it comes from the "Dependencies added 2026-09-15" table (`| 055, 064 | 105 | ... |`, matching as id=064 marker='055,') and from the accuracy-audit table (`| **107** | ... |`, matching as id=107 marker='**'). Pairs: 036 (L591/L779), 064 (L628/L761), 082 (L186/L777), 088 (L651/L778), 093 (L194/L776), 094 (L195/L781), 095 (L196/L780), 107 (L715/L775). Those eight are all currently open on both sides, and a marker of '**' carries no done token and no done emoji, so it evaluates as open and nothing goes red TODAY — by luck, not by construction. Two consequences: (a) the set equality that holds today is real, but it is computed by a parser that also matches eight prose rows; (b) the day one of those eight completes, the reference row overrides its real ✅ marker and the EXISTING check reports phantom drift. A set comparison layered on this parser without deciding what a status row is will report a false orphan the first time the audit table names a task with no POML.
+
+ROW SHAPE. Status rows live in the phase tables and look like `| 🔲 [open] 109 | ...description... | FR | Deps | Group | Safe | Tier | Effort |`, with the marker, the optional bracketed ASCII token and the id all in the SAME first cell (bold variants `**020**` occur). The index also holds a dependency table, an execution-sequence table (`| Wave | Order | Notes |`) and the accuracy-audit table — none of which are status rows.
+
+🚨 MATCH THE ASCII TOKEN, NEVER THE EMOJI. grep / Select-String SILENTLY return 0 for characters above U+FFFF: 🔲 is U+1F532 (4 bytes) and matches nothing, while ✅ is U+2705 (3 bytes) and matches fine. That asymmetry is why `[open]`, `[done]`, `[wip]`, `[escalated]`, `[blocked]` exist in the index at all. FAILURE-MODES G-16. PowerShell itself handles non-BMP correctly, so the script's emoji fallback is for ~150 legacy indexes — but no NEW matcher may depend on a glyph above U+FFFF.
+
+CALLERS. task-execute Step 10 ("VERIFY both writes landed", exit 1 = do not proceed) and push-to-github Step 1.65 (exit 0 → continue, exit 1 → stop) both invoke it with no arguments and read only the exit code. `-All` is the repo-wide observation mode and ALWAYS exits 0 by design: repo-wide drift is dominated by archived projects, and gating on that total would make the check red on day one and waived by day two.</background>
+    <relevant-files>
+      <file role="modify">scripts/check-task-status-drift.ps1</file>
+      <file role="reference">projects/unified-access-control-r2/notes/defer-issues.md (§ ISS-025 — the authoritative statement of the gap, incl. its "keep the existing message shape" instruction)</file>
+      <file role="reference">projects/unified-access-control-r2/tasks/TASK-INDEX.md (the row shapes to parse — READ ONLY; this task does not edit the index except its own status row at the end)</file>
+      <file role="reference">.claude/skills/task-execute/SKILL.md Step 10 and .claude/skills/push-to-github/SKILL.md Step 1.65 (the two gating callers — confirm the contract you must not break)</file>
+      <file role="canonical-reference">scripts/check-task-status-drift.ps1 $unparseable guard + its .NOTES block (the existing "an instrument that read nothing is not clean" pattern — copy its shape and its tone)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ISS-025 / #1004">Scope: the comparison. Assert the POML id set and the index row id set are EQUAL, and report unpaired entries on either side as drift with their ids. Keep the existing message shape so the failure stays legible.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: machinery. Extend this script. No new script, no new module, no new parameter that the two callers would have to pass, and no change to how they invoke it.</constraint>
+    <constraint source="FAILURE-MODES G-16">Scope: matching. Key every new marker/row match on the bracketed ASCII token or on structure. No new matcher may depend on a glyph above U+FFFF — 🔲 is U+1F532 and silently matches nothing in grep-class tools.</constraint>
+    <constraint source="FAILURE-MODES AP-12 / the script's own .NOTES">Scope: verdicts. A parser that matched nothing must never report "clean". The existing $unparseable guard must keep firing and keep exiting 1; do not let the new set-diff absorb it or restate it as an orphan report.</constraint>
+    <constraint source="the script's .PARAMETER All">Scope: report mode. `-All` stays NON-BLOCKING — exit 0 unconditionally, even when it now reports unpaired entries across ~151 projects. Gate per-project; report repo-wide.</constraint>
+    <constraint source="probe 2026-09-19 (see background)">Scope: the row parser. Decide DELIBERATELY what counts as a status row before diffing sets — eight ids currently match twice, from the dependency and accuracy-audit tables, and the last match wins. Do not ship a set comparison whose orphan list is a function of prose tables.</constraint>
+    <constraint source="task scope">Scope: this task's edits. scripts/check-task-status-drift.ps1, its own notes file, and its own TASK-INDEX status row. Do NOT reformat TASK-INDEX.md to make parsing easier — that is the escalation below, not a licence.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives. Recreate the 2026-09-18 condition rather than asserting the fix in prose.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read the script end to end. Record the current baseline on this project (expect 111 POMLs / 111 rows / rc=0), then REPRODUCE the blindness in both directions — a temporary index row with no POML, and a temporary POML with no row — and confirm today's script still prints "No drift". Remove both artifacts; leave the tree as you found it.</step>
+    <step order="1">Establish the REAL status-row shape empirically: enumerate every line the current row regex matches and classify each as a status row or a reference row (the dependency, execution-sequence and accuracy-audit tables are not status rows). Decide how the parser tells them apart. If it cannot be done unambiguously without changing the index format, fire the escalation.</step>
+    <step order="2">Implement the set comparison after the pairing loop: POML-with-no-row and row-with-no-POML both reported as drift, naming ids and which side is unpaired, in the existing message shape. Matching keyed on the ASCII token or on structure, never on a glyph above U+FFFF.</step>
+    <step order="3">Preserve both contracts: per-project mode exits 1 on any drift (disagreement OR unpaired entry) and 0 when clean; `-All` exits 0 unconditionally; the $unparseable guard still fires first and still exits 1. Re-run against this project and against `-All`.</step>
+    <step order="4">Perturbations per the closed set (remove the new assertion and watch an orphan go green again; re-seed each direction separately). Write notes; update this task's POML status and its TASK-INDEX row.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the index's status rows cannot be distinguished from its reference tables (dependency table, execution-sequence table, accuracy-audit table) without changing TASK-INDEX.md's format, STOP. Present the options — tighten the row pattern, require the bracketed token on status rows, or restructure the index — with a recommendation, and let the owner choose. Changing the index format to suit the parser, or shipping a parser that guesses, are both out of bounds for this task.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/check-task-status-drift.ps1</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-116-drift-both-directions.md (baseline, the reproduced condition in both directions, the status-row-vs-reference-row decision, and the perturbation results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A POML whose id has no index row is reported as drift, naming the id and saying the index is missing a row — where today it is silently skipped by the `continue`.</criterion>
+    <criterion testable="true">An index status row whose id has no POML is reported as drift, naming the id — the ISS-025 case. Demonstrated by recreating the exact 2026-09-18 condition (rows for ids with no task file) and watching the check go RED where it previously printed "No drift" at rc=0.</criterion>
+    <criterion testable="true">The existing status-disagreement detection still works in BOTH of its directions ("POML is behind" and "INDEX is behind"), and the terminal vocabulary is still not drift: [done]/✅ vs completed, [escalated]/⚠️ vs completed-with-escalation, [blocked]/🟡 vs blocked-shipped.</criterion>
+    <criterion testable="true">Run against `unified-access-control-r2`, the check exits 0 — the criterion is SET EQUALITY, not a number. It was 111 POMLs / 111 rows on 2026-09-18; authoring this POML made it 112 / 111, and task 115's file moves it again, so re-measure and expect equality once every authored POML (115 and 116 included) has its own index row. A red result naming anything OTHER than a task whose row is genuinely still missing is a defect in this task, not a discovery.</criterion>
+    <criterion testable="true">`-All` stays non-blocking: it exits 0 even when it reports unpaired entries across the repo's ~151 projects, and its per-project report lines still render (counts plus a tag).</criterion>
+    <criterion testable="true">Detection works on a row whose marker is 🔲 (U+1F532): the matcher reads the `[open]` token or the row structure, and a perturbation proves the emoji is not load-bearing — replacing 🔲 with any other glyph, or removing it, does not change the orphan verdict.</criterion>
+    <criterion testable="true">The $unparseable guard still fires when POMLs exist and ZERO rows parse, still prints its own message, and still exits 1 — it is not replaced by, or reported as, a list of 111 orphan POMLs.</criterion>
+    <criterion testable="true">Both gating callers still work unchanged: invoked with no arguments (task-execute Step 10, push-to-github Step 1.65) the script exits 1 on drift and 0 on clean. No new required parameter; no change to either skill file.</criterion>
+    <criterion testable="true">The eight ids currently matched on two lines each (036, 064, 082, 088, 093, 094, 095, 107 — second hit from the dependency or accuracy-audit table) are accounted for: either excluded as reference rows or documented as deliberately accepted, and NO phantom orphan or phantom disagreement is reported for any of them.</criterion>
+    <criterion testable="true">Perturbation: removing the new set assertion makes the orphan cases green again (both directions), and re-seeding each direction separately reddens the check independently. Both perturbations reverted before completion.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-09-19 (session 16). Queued per the owner's 2026-09-18 directive — *"we need the issues tracked AND queued to be fixed in this project not deferred"* — which the previous session honoured for ISS-019…ISS-024 (tasks 109–114) and missed for ISS-025.
+
+The irony is exact, and it is the reason this task exists rather than being folded into a cleanup: the ONE tracked-but-never-queued register entry was the entry about a bookkeeping check that cannot see unqueued work. ISS-025 was found by accident — by creating its condition and watching the gate pass — and then reproduced the same way the register says it should be: 105 POMLs against 111 rows, both numbers printed, verdict green.
+
+Same class as this project's recurring root error: an observation taken outside the thing being observed. The register records that the 105/111 mismatch was on screen and nearly accepted.
+
+The register estimates "two or three lines". Treat that as the floor, not the spec: the probe recorded in &lt;background&gt; shows the current row regex matches 119 lines for 111 distinct ids, so the set to diff depends on a parser decision the register did not know it was making. Two or three lines are enough only if that decision is already settled.
+
+Task 090's disposition gate must account for ISS-025 (25+ register entries); closing this task closes #1004.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

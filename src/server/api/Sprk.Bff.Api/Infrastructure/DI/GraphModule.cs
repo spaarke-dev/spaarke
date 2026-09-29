@@ -1,5 +1,6 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -50,7 +51,29 @@ public static class GraphModule
             // auth-v4 task 022: supplies the credential for the managed-identity-disabled branch.
             // GetService (not GetRequiredService) — the provider is optional by contract, and that
             // branch is the only consumer.
-            return new DataverseServiceClientImpl(config, logger, sp.GetService<IConfidentialClientProvider>());
+            //
+            // ADR-028 A4: the managed-identity-ENABLED branch now gets the SAME shared credential
+            // singleton every other outbound consumer injects (registered in Program.cs from
+            // ManagedIdentityCredentialFactory). It used to build its own inline inside
+            // DataverseServiceClientImpl, which had silently drifted from the factory on UAMI-key
+            // precedence, blank-key handling and tenant pinning — see that class's
+            // BuildFallbackManagedIdentityCredential remarks for what each drift would have cost.
+            // Spaarke.Dataverse is the base layer and cannot reference the factory (FR-14), so the
+            // credential is passed IN.
+            //
+            // Resolved from DI rather than by calling the factory again, for three reasons: it is what
+            // the Program.cs registration comment tells every consumer to do; it shares ONE credential
+            // (and therefore one token cache) instead of minting a second identical-but-separate one;
+            // and it puts this path behind the test host's TokenCredential stub, which previously could
+            // not reach it (see the note in Spe.Integration.Tests/IntegrationTestFixture.cs).
+            //
+            // GetService, not GetRequiredService: the impl has its own fallback, and a host that never
+            // registered one should degrade the same way a direct construction does.
+            return new DataverseServiceClientImpl(
+                config,
+                logger,
+                sp.GetService<IConfidentialClientProvider>(),
+                sp.GetService<Azure.Core.TokenCredential>());
         });
 
         // DataverseWebApiService - uses REST/HttpClient (no WCF). Handles event operations

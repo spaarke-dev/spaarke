@@ -31,6 +31,18 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 // ── Fetch boundary (ADR-028) ────────────────────────────────────────────────
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
+  // FR-S09 sweep (r8 task 016): the REAL failure shape. `authenticatedFetch` returns only when
+  // `response.ok` and THROWS a typed `ApiError` on every non-2xx (ADR-028).
+  ApiError: class ApiError extends Error {
+    public readonly status: number;
+    public readonly problemDetails: Record<string, unknown> | null;
+    constructor(message: string, status: number, problemDetails: Record<string, unknown> | null = null) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+      this.problemDetails = problemDetails;
+    }
+  },
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
   useAuth: () => ({
     isAuthenticated: true,
@@ -111,9 +123,14 @@ function renderWorkspace(props: Partial<React.ComponentProps<typeof ComposeWorks
 
 beforeEach(() => {
   authenticatedFetchMock.mockReset();
-  // Benign default for any secondary call (e.g. the FR-04 `compose-outputs` GET fired
-  // when the editor reaches 'loaded' — no AI drafts for a fresh upload).
-  authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [] });
+  // Benign default for any secondary call (e.g. the FR-04 `compose-outputs` GET fired when the editor
+  // reaches 'loaded' — no AI drafts for a fresh upload). FR-S09 sweep (r8 task 016): a REJECTION, not
+  // a `{ ok: false }` Response — the latter is a shape `authenticatedFetch` never produces, and mocking
+  // it is how unreachable branches keep passing their tests.
+  authenticatedFetchMock.mockImplementation(async () => {
+    const { ApiError } = jest.requireMock('@spaarke/auth') as { ApiError: new (m: string, s: number) => Error };
+    throw new ApiError('HTTP 404', 404);
+  });
   editorDocxBytes.current = undefined;
   editorProjection.current = undefined;
 });
@@ -200,11 +217,14 @@ describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
   });
 
   it('surfaces an error banner when the retained bytes are gone (404)', async () => {
-    authenticatedFetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      json: async () => ({}),
-    });
+    // FR-S09 sweep (r8 task 016): this used to mock `{ ok: false, status: 404 }` — a shape
+    // `authenticatedFetch` CANNOT return. It passed only because the workspace still carried an
+    // unreachable `if (!response.ok)` block; delete the dead code and the test goes red, which is
+    // exactly what a test validating unreachable behaviour should do. A real 404 is a THROWN ApiError.
+    const { ApiError } = jest.requireMock('@spaarke/auth') as {
+      ApiError: new (m: string, s: number) => Error;
+    };
+    authenticatedFetchMock.mockRejectedValueOnce(new ApiError('HTTP 404', 404));
 
     renderWorkspace();
 
@@ -223,5 +243,52 @@ describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
     await waitFor(() => expect(authenticatedFetchMock).toHaveBeenCalled());
     const uploadCalls = authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/api/compose/upload'));
     expect(uploadCalls).toHaveLength(0);
+  });
+});
+
+describe('ComposeWorkspace — FR-S09 sweep: the LOAD path routes on the THROWN status', () => {
+  // The load path carried the same dead-`!response.ok` defect FR-S01 removed from the save path and
+  // FR-S09 item 4 removed from the checkout path. Its 404 and 403 copy — the two messages that
+  // actually tell a user what happened — sat inside a branch that could not execute, so every failed
+  // load rendered `Failed to load document: HTTP 404`.
+  const apiError = (status: number): Error => {
+    const { ApiError } = jest.requireMock('@spaarke/auth') as { ApiError: new (m: string, s: number) => Error };
+    return new ApiError(`HTTP ${status}`, status);
+  };
+
+  const renderStoredDoc = () =>
+    renderWorkspace({
+      initialUploadRef: undefined,
+      initialDocumentRef: { speDriveItemId: 'spe-1', fileName: 'contract.docx' },
+      driveId: 'drive-1',
+    });
+
+  it('a 404 says the document was deleted or moved — not "HTTP 404"', async () => {
+    authenticatedFetchMock.mockRejectedValue(apiError(404));
+    renderStoredDoc();
+    const banner = await screen.findByTestId('compose-workspace-error-empty');
+    expect(banner.textContent ?? '').toMatch(/deleted or moved/i);
+    expect(banner.textContent ?? '').not.toMatch(/Failed to load document: HTTP/);
+  });
+
+  it('a 403 says you lack permission — the distinction the generic message erased', async () => {
+    authenticatedFetchMock.mockRejectedValue(apiError(403));
+    renderStoredDoc();
+    const banner = await screen.findByTestId('compose-workspace-error-empty');
+    expect(banner.textContent ?? '').toMatch(/do not have permission/i);
+  });
+
+  it('an unrecognised status still names it, and a transport failure says so instead', async () => {
+    authenticatedFetchMock.mockRejectedValue(apiError(500));
+    const { unmount } = renderStoredDoc();
+    let banner = await screen.findByTestId('compose-workspace-error-empty');
+    expect(banner.textContent ?? '').toMatch(/HTTP 500/);
+    unmount();
+
+    // No HTTP exchange at all (offline / DNS / CORS) — a different thing, said differently.
+    authenticatedFetchMock.mockRejectedValue(new Error('Failed to fetch'));
+    renderStoredDoc();
+    banner = await screen.findByTestId('compose-workspace-error-empty');
+    expect(banner.textContent ?? '').toMatch(/Failed to fetch/);
   });
 });

@@ -108,7 +108,10 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
         var sourceDocumentId = Guid.NewGuid();
         var matterId = Guid.NewGuid();
         var newDocumentId = Guid.NewGuid();
-        const string containerId = "b!container-bu-pdf-seam";
+        // Issue #858: the container is SERVER-derived from the acting user's business unit (fixture-
+        // arranged); aliasing the arranged value keeps the specific ResolveDriveIdAsync matcher below
+        // meaningful — it only matches when the real server-side derivation produced this container.
+        const string containerId = TestActingUserBusinessUnit.ContainerId;
         const string mintedDocxItemId = "spe-item-pdf-docx-seam-001";
         const string mintedDriveId = "drive-pdf-docx-seam-001";
 

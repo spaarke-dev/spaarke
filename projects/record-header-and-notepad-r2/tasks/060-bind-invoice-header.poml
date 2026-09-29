@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Bind Spaarke Record Header to the Invoice main form + acceptance QA (currency renderer)</title>
+    <phase>5 Rollout</phase>
+    <gate>blocked — startable when 034, 050 and 051 are ✅ and the wave-1 soak is accepted by the operator</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operator/maker configuration + QA task — no .cs/.ts/.tsx files are modified. The pcf tag denotes the control under test, not code implementation, so the tag-based FULL trigger is deliberately overridden per plan.md Phase 5 ("Form binding is operator/maker work, not agent work"). task-execute may re-evaluate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified configuration + QA run following the proven R1 maker recipe; no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator/maker task in the live spaarkedev1 environment — sequential human form edits + publishes; not agent-automatable. Wave 2 pairs with task 061 but a single operator executes them one after another.</parallel-reason>
+    <deps>034, 050, 051</deps>
+    <tags>pcf, dataverse, config, deploy</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Bind the Spaarke Record Header PCF to the Invoice (sprk_invoice) main form with the owner-confirmed
+    layoutJson and run the full per-form acceptance QA including the wave-2 bundle + TTI measurement. Invoice
+    is the entity that forces the Money/currency renderer — sprk_totalamount must render as currency, not 12500.
+  </prompt>
+
+  <role>
+    SPAARKE platform operator/maker with Dataverse form-designer access to spaarkedev1. Follow ADRs strictly.
+    Expertise: model-driven-app form configuration, PCF control binding, browser-based UI QA.
+  </role>
+
+  <goal>
+    The "Invoice main form" (93aa1c69-0406-f111-8406-7c1e525abd8b) renders the Spaarke Record Header with the
+    configured 7-field layout including a correctly formatted currency cell; all 9 per-form success criteria
+    plus the renderer-specific currency/optionset criteria pass; QA evidence + wave-2 measurements are recorded
+    in projects/record-header-and-notepad-r2/notes/rollout-sprk_invoice.md.
+  </goal>
+
+  <context>
+    <background>
+      Wave 2 = Invoice + Event (spec FR-25), started only after the wave-1 soak. Invoice is explicitly required
+      in scope because it exercises the NumberField Money path (spec FR-07, Success Criterion 10):
+      sprk_totalamount is Money and must render with the correct currency symbol and precision, right-aligned.
+      sprk_invoicedate (DateOnly) is the entity's ONLY date field — live-verified: NO due-date field exists.
+      sprk_invoicestatus is a Choice with exactly two options (100000000 ToReview / 100000001 Reviewed).
+      Primary name is sprk_name (required).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/spec.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+      <file role="new">projects/record-header-and-notepad-r2/notes/rollout-sprk_invoice.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="034" status="pending">Completed RecordHeader PCF importable as the RecordHeaderPcf solution</dependency>
+      <dependency task="050" status="pending">Wave-1 Project binding complete and soaked</dependency>
+      <dependency task="051" status="pending">Wave-1 Work Assignment binding complete and soaked</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-25 scope: bind ONLY the "Invoice main form" 93aa1c69-0406-f111-8406-7c1e525abd8b — NEVER the legacy "Information" form.</constraint>
+    <constraint source="project">This task modifies form configuration and QA notes only. If QA surfaces a code defect in the control or shared library, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6 so it routes to the owning implementation task.</constraint>
+    <constraint source="ADR-021">All QA visual checks in this task verify Fluent v9 semantic-token theming — dark mode and high contrast must render with no hard-coded colors (NFR-03).</constraint>
+    <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE: bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold. One measurement may be shared across wave-2 tasks 060+061 — cross-reference it in both notes files.</constraint>
+    <constraint source="project">NFR-07: do not alter the Notepad/SmartTodo launch contracts while QA-ing them — regardingEntity/regardingId and action=openTodos&amp;regardingType=…&amp;regardingId=… are external API.</constraint>
+    <constraint source="project">NFR-09: the form GUID above is environment-specific and acceptable in acceptance criteria and notes only — it must not be embedded in any shipped artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF form binding + rollout QA</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Maker binding recipe (proven in R1)" location="projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md">
+        Follow this sequence exactly, substituting Invoice's form/field names. Design.md §5.1.2 is the R2-updated version of the same recipe.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify 034, 050 and 051 are ✅ and the operator has accepted the wave-1 soak.</step>
+    <step order="1">Verify "Spaarke Record Header" appears in the form designer's Add Control gallery in spaarkedev1.</step>
+    <step order="2">Verify the layoutJson below against the shipped RecordHeaderConfiguration v1.0 types (task 030 output) before pasting.</step>
+    <step order="3">make.powerapps.com → Solutions → Tables → sprk_invoice → Forms → "Invoice main form" (93aa1c69-0406-f111-8406-7c1e525abd8b) — NEVER the legacy "Information" form → ⋯ → Edit form → Edit in classic.</step>
+    <step order="4">Click the field the control will replace (sprk_invoicenumber) → Controls tab → Add Control → "Spaarke Record Header" → Add → tick Web (and Phone/Tablet).</step>
+    <step order="5">Leave layoutJson BLANK first: Save → Publish → verify tier-2 derived defaults render on a live record. Then set layoutJson to static value {{{ → Save → Publish → verify console.warn + derived defaults, never blank.</step>
+    <step order="6">Set layoutJson to a static value and paste the final JSON:
+{ "_version": "1.0", "title": "Invoice", "columns": 3,
+  "fields": [
+    { "name": "sprk_invoicenumber", "span": 1 },
+    { "name": "sprk_name", "span": 2, "required": true },
+    { "name": "sprk_totalamount", "span": 1 },
+    { "name": "sprk_invoicedate", "span": 1 },
+    { "name": "sprk_invoicestatus", "span": 1 },
+    { "name": "sprk_highpriority", "span": 1 },
+    { "name": "sprk_description", "span": 3 } ] }
+(summaryField omitted deliberately — it defaults to sprk_recordsummary via RECORDSUMMARY_FIELD.) Set Header title / Show version footer (Yes during QA).</step>
+    <step order="7">MOVE the section other raw fields so they do not render twice; keep sprk_invoicenumber (invisible behind the PCF).  They MUST remain on the form (a separate collapsed section, or controls set not-visible) - do NOT remove them from the form. Inline editing stages through the form buffer via Xrm.Page.getAttribute(name).setValue(v), and getAttribute returns null for a field with no control on the form, so requireFormAttribute throws "Field not on form". Corrected 2026-08-26: the shipped R1 Matter form keeps every edited field on the form; only the read-only sparkle field is absent. Save → Publish.</step>
+    <step order="8">Run the per-form acceptance QA on a live Invoice record (ui-tests below) — pay specific attention to the currency cell and the 2-option status dropdown — including the loud-failure negative test with a real entity field absent from the form.</step>
+    <step order="9">Wave-2 measurement: bundle.js bytes after npm run build:prod; TTI via browser perf trace cold + warm on the Invoice form. May be shared with task 061 — cross-reference in both notes files.</step>
+    <step order="10">Write QA evidence (screenshots light + dark, criterion checklist, measurements) to projects/record-header-and-notepad-r2/notes/rollout-sprk_invoice.md.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the wave-2 measurement breaches NFR-01/NFR-02 (bundle &gt;250 KB minified, or TTI &gt;300 ms warm / &gt;800 ms cold), STOP the rollout — do not bind the next wave — and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If sprk_totalamount renders as a raw number (e.g. 12500) instead of formatted currency, that is a code defect in NumberField — STOP and escalate rather than patching code inside this configuration task.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Configured layout renders at configured spans (currency + date)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_invoice&amp;id={record-id}</url>
+      <steps>
+        <step>Open a live Invoice record with a populated sprk_totalamount on the Invoice main form</step>
+        <step>Verify the header renders exactly the 7 configured fields at spans 1/2/1/1/1/1/3 in a 3-column grid</step>
+        <step>Verify sprk_totalamount renders as currency with the correct symbol and precision, right-aligned — NOT a raw number (spec criterion 10)</step>
+        <step>Verify sprk_invoicedate renders as a locale date and sprk_highpriority as Yes/No</step>
+        <step>Verify the version footer is present and check the console for JavaScript errors</step>
+      </steps>
+      <expected>Layout matches the pasted layoutJson; currency formatted from metadata; no console errors</expected>
+    </test>
+    <test name="Inline edit stages to the form buffer with no re-render flash">
+      <steps>
+        <step>Edit sprk_name inline and commit with Enter</step>
+        <step>Verify the form's Save button activates (dirty) with NO PCF re-render or loading-skeleton flash</step>
+        <step>Edit sprk_invoicestatus via the Fluent Dropdown and verify it offers exactly ToReview / Reviewed (spec criterion 13)</step>
+        <step>Toggle sprk_highpriority; pick a sprk_invoicedate via the Fluent date picker; edit sprk_totalamount and verify the numeric edit stages</step>
+        <step>Click the form's own Save and refresh the page</step>
+      </steps>
+      <expected>All edits persist after form Save; no flash during staging; status dropdown shows exactly 2 options</expected>
+    </test>
+    <test name="Toolbar parity + launch contracts">
+      <steps>
+        <step>Verify the toolbar is identical to Matter's: title, sparkle, To Do badge, Notepad badge</step>
+        <step>Click the sparkle — popover renders "No summary yet" (sprk_recordsummary exists but is unpopulated)</step>
+        <step>Click To Do — SmartTodo opens filtered to this record (action=openTodos&amp;regardingType=sprk_invoice&amp;regardingId=…)</step>
+        <step>Click Notepad — opens scoped to this record in the 25% × 35% modal</step>
+      </steps>
+      <expected>All four toolbar elements present and functional; launch contracts unchanged (NFR-07)</expected>
+    </test>
+    <test name="Config degradation (negative paths)">
+      <steps>
+        <step>With layoutJson absent: header renders tier-2 derived defaults (primary name first, span 2)</step>
+        <step>With layoutJson = {{{ : console.warn logged, derived defaults render, form never blanks, nothing throws</step>
+        <step>With a layout field not on the form: attempted edit throws "Field '…' not on form" — the input is never silently dropped</step>
+      </steps>
+      <expected>Both bad-config paths degrade gracefully (NFR-10); the missing-field path fails loudly (FR-14)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the model-driven app settings</step>
+        <step>Verify header background, text, currency cell, sparkle popover and modals adapt (no white-on-dark, no black-on-light)</step>
+        <step>Verify icons use currentColor; spot-check high contrast mode</step>
+      </steps>
+      <expected>All colors come from Fluent v9 semantic tokens per ADR-021 / NFR-03</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">make.powerapps.com classic form designer + live-record QA (ui-test skill / Chrome integration)</tool>
+    <tool name="pac">Solution verification (pac solution list)</tool>
+    <tool name="npm">Bundle measurement via npm run build:prod in the RecordHeader PCF folder</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/rollout-sprk_invoice.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the published Invoice main form, when a live record opens, then the header renders the 7 configured fields at spans 1/2/1/1/1/1/3 (spec criterion 1).</criterion>
+    <criterion testable="true">sprk_totalamount renders as currency with the correct symbol and precision from metadata, right-aligned — never a raw number (spec criterion 10 / FR-07).</criterion>
+    <criterion testable="true">sprk_invoicestatus is editable via a Fluent Dropdown offering exactly the 2 correct options (ToReview / Reviewed) (spec criterion 13 / FR-09).</criterion>
+    <criterion testable="true">Given an inline edit to any configured field, when committed, then it stages to the form buffer, the form goes dirty with NO PCF re-render flash, and the form's Save persists it (spec criterion 2).</criterion>
+    <criterion testable="true">The toolbar is identical to Matter's — title, sparkle ("No summary yet" from sprk_recordsummary), To Do badge, Notepad badge (spec criterion 3).</criterion>
+    <criterion testable="true">To Do opens SmartTodo filtered to this record; Notepad opens scoped to this record in the 25% × 35% modal (spec criterion 4).</criterion>
+    <criterion testable="true">Negative: malformed layoutJson ({{{) AND absent layoutJson each produce console.warn + derived defaults — never a blank form, never a throw (spec criterion 5).</criterion>
+    <criterion testable="true">Negative: a layoutJson field not present on the form fails loudly on edit with the "Field '…' not on form" throw (spec criterion 6).</criterion>
+    <criterion testable="true">Version footer present (spec criterion 7).</criterion>
+    <criterion testable="true">Bundle ≤250 KB minified and TTI ≤300 ms warm / ≤800 ms cold measured this wave (spec criteria 8-9; shareable with task 061, cross-referenced).</criterion>
+    <criterion testable="true">Dark mode + high contrast render correctly with semantic tokens only (ADR-021 / NFR-03).</criterion>
+    <criterion testable="true">notes/rollout-sprk_invoice.md exists with the criterion checklist, light+dark screenshots, and the wave-2 bundle/TTI numbers.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-25, Success Criteria 1-10 + 13, §9 layout table. Schema notes (live-verified 2026-08-24):
+    Invoice has NO due-date field — do not go looking for one; sprk_invoicedate (DateOnly) is the only date.
+    The entity also carries sprk_visibilitystate (6-option Choice) which is NOT in the shipped default layout —
+    makers can add it later without a code change. Only 10 Invoice records exist in spaarkedev1; pick one with
+    sprk_totalamount populated for the currency check. Wave-2 partner: task 061.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

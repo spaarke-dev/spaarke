@@ -239,9 +239,13 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   canGrantAccess,
 }) => {
   const styles = useStyles();
-  // Fail-open only when the caller hasn't wired an access decision at all
-  // (canGrantAccess omitted); an explicit `false` disables the icon.
-  const grantEnabled = canGrantAccess !== false;
+  // 🔴 FAIL CLOSED (task 118, unified-access-control-r2). Only an explicit `true` enables the
+  // icon: `false`, `undefined` and a prop the host never wired all disable it. This was
+  // `canGrantAccess !== false` until v1.0.31, which meant "enabled unless someone says no" —
+  // so a host that could not evaluate the access question offered the affordance to everyone.
+  // The server's own rule denies what it cannot evaluate (`DelegationRuleFilter` +
+  // `CallerRecordAccessProbe`); this now matches it rather than contradicting it.
+  const grantEnabled = canGrantAccess === true;
 
   // Governance icons (person + email) — rendered EITHER inside the opt-in header
   // row (when `title` is set, task 073 UAT #3) OR in the prior absolute

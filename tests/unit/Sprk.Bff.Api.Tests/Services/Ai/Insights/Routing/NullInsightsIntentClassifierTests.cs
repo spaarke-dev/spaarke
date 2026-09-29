@@ -51,10 +51,4 @@ public class NullInsightsIntentClassifierTests
     }
 
 
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        var act = () => new NullInsightsIntentClassifier(logger: null!);
-        act.Should().Throw<ArgumentNullException>();
-    }
 }

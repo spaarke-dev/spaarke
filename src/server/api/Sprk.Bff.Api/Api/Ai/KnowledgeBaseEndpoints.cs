@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -18,8 +19,8 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </remarks>
 public static class KnowledgeBaseEndpoints
 {
-    // Header name used for tenantId when not resolvable from claims (matches existing API convention)
-    private const string TenantIdHeader = "X-Tenant-Id";
+    // The TenantIdHeader constant ("X-Tenant-Id") was removed by task 059 along with its only read.
+    // Tenant identity comes from the authenticated principal — see TenantResolution.
 
     public static IEndpointRouteBuilder MapKnowledgeBaseEndpoints(this IEndpointRouteBuilder app)
     {
@@ -531,22 +532,13 @@ public static class KnowledgeBaseEndpoints
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Resolves the tenantId from JWT claims (tid or oid) or from the X-Tenant-Id header (ADR-014).
+    /// Resolves the tenantId from the caller's <c>tid</c> claim (ADR-014). The previous summary said
+    /// "tid or oid" — <c>oid</c> is the user's object id, never a tenant, and the code never read it
+    /// that way; the comment was simply wrong. The <c>X-Tenant-Id</c> fallback it also described was
+    /// removed by task 059.
     /// </summary>
     private static string? ResolveTenantId(HttpContext httpContext)
-    {
-        // Prefer the 'tid' (tenant) claim from Azure AD JWT
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        // Fallback to X-Tenant-Id header (admin/service-to-service scenarios)
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers[TenantIdHeader].FirstOrDefault();
-        }
-
-        return tenantId;
-    }
+        => TenantResolution.ResolveTenantId(httpContext.User);
 
 }
 

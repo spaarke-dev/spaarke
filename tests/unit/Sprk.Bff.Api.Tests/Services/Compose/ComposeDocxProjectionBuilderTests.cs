@@ -72,6 +72,14 @@ public sealed class ComposeDocxProjectionBuilderTests
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// Task 049: the text a reader actually SEES — the projection HTML with its tags stripped. Used where a
+    /// test means "this string is not shown to the user", which is not the same claim as "this string does
+    /// not appear in the markup" now that atoms carry `data-*` payloads.
+    /// </summary>
+    private static string VisibleTextOf(string html) =>
+        System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]*>", string.Empty));
+
     private static readonly Regex ParaIdAttr = new("data-paraid=\"([0-9A-Fa-f]+)\"", RegexOptions.Compiled);
 
     private static List<string> EmittedParaIds(string html) =>
@@ -499,8 +507,17 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().NotContain("PAGE", "the field CODE is never editor-visible");
+        // Task 049 sharpened this assertion. It used to be `Html.Should().NotContain("PAGE")` — a PROXY for
+        // "the field code is never editor-visible" that reads the whole markup string, attributes included.
+        // The atom now carries the instruction in a `data-*` attribute so a save can hand the field back, so
+        // the proxy no longer separates "shown to the user" from "present in the markup". The property under
+        // test is unchanged and is now asserted directly: the code is absent from the RENDERED TEXT.
+        VisibleTextOf(projection.Html).Should().NotContain("PAGE", "the field CODE is never editor-visible");
+        VisibleTextOf(projection.Html).Should().Be("1", "only the cached result is shown");
         projection.Html.Should().Contain("data-atom-kind=\"field\"").And.Contain(">1</span>");
+        projection.Html.Should().Contain("data-field-instr=\" PAGE \"",
+            "the instruction is the payload that lets an edited paragraph return the field instead of " +
+            "dropping it (task 049) — asserted here so the read half is a tested contract, not a side effect");
         var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "44440001");
         map.Runs.Should().ContainSingle();
         map.Runs[0].AtomKind.Should().Be(ComposeAtomKind.Field);
@@ -720,7 +737,11 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(docx);
 
-        projection.Html.Should().Contain("<ol>").And.Contain("<li>").And.NotContain("<ul>");
+        // UAT round 2 (r8): the open tag now carries the `data-projected-list` provenance marker, so the
+        // needle is the tag PREFIX. Asserting the marker explicitly — the client CSS keys the native
+        // `<ol>` marker suppression off it, so dropping it here would silently give real document
+        // clauses a browser-invented number (the F-3 violation).
+        projection.Html.Should().Contain("<ol data-projected-list=\"1\">").And.Contain("<li>").And.NotContain("<ul");
     }
 
     [Fact]
@@ -731,7 +752,7 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(docx);
 
-        projection.Html.Should().Contain("<ul>").And.Contain("<li>").And.NotContain("<ol>");
+        projection.Html.Should().Contain("<ul data-projected-list=\"1\">").And.Contain("<li>").And.NotContain("<ol");
     }
 
     [Theory]
@@ -768,6 +789,83 @@ public sealed class ComposeDocxProjectionBuilderTests
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
         projection.Html.Should().NotContain("text-align");
+    }
+
+    // ─── UAT round 2 (spaarkeai-compose-r8, 2026-09-02): document line spacing ────────────────────
+    // The editor showed generic typographic defaults because the projection never carried w:spacing, so a
+    // 1.5-spaced or double-spaced document looked single-spaced. READ PATH ONLY — the renderer still never
+    // authors w:spacing; an edited block keeps its real spacing through InheritProperties as an unmodeled
+    // property, which is what makes this safe to do without touching the write path.
+
+    [Fact]
+    public void Build_ParagraphWithAutoLineSpacing_EmitsUnitlessMultiple()
+    {
+        // w:lineRule="auto" -> w:line is 240ths of a line, so 360 = 1.5x. Emitted UNITLESS so it scales
+        // with the element's own font size.
+        var para = Para("00E00101", "One-and-a-half spaced clause");
+        para.ParagraphProperties = new ParagraphProperties(
+            new SpacingBetweenLines { Line = "360", LineRule = LineSpacingRuleValues.Auto });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("line-height:1.5");
+        projection.Html.Should().NotContain("line-height:1.5pt");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithOmittedLineRule_IsTreatedAsAuto()
+    {
+        // Word OMITS w:lineRule when it means auto. Reading an absent rule as "exact" would render a
+        // double-spaced paragraph at 24pt leading instead of 2x — the failure this pins.
+        var para = Para("00E00102", "Double spaced, rule omitted");
+        para.ParagraphProperties = new ParagraphProperties(new SpacingBetweenLines { Line = "480" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("line-height:2");
+        projection.Html.Should().NotContain("pt\"");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithExactLineSpacing_EmitsPointsNotAMultiple()
+    {
+        // w:lineRule="exact" -> w:line is TWIPS, an absolute height: 360/20 = 18pt. The two readings differ
+        // by more than an order of magnitude (18pt vs 1.5x), so conflating them is not a rounding error.
+        var para = Para("00E00103", "Exactly 18pt leading");
+        para.ParagraphProperties = new ParagraphProperties(
+            new SpacingBetweenLines { Line = "360", LineRule = LineSpacingRuleValues.Exact });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("line-height:18pt");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithSpaceBeforeAndAfter_EmitsMargins()
+    {
+        var para = Para("00E00104", "Spaced clause");
+        para.ParagraphProperties = new ParagraphProperties(
+            new SpacingBetweenLines { Before = "240", After = "120" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("margin-top:12pt");
+        projection.Html.Should().Contain("margin-bottom:6pt");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithNoSpacing_EmitsNoSpacingDeclarations()
+    {
+        // Negative control for the whole family: a paragraph Word never spaced must not acquire spacing
+        // from us. Emitting a default here would overwrite the editor's own typography for every ordinary
+        // paragraph in every document.
+        var para = Para("00E00105", "Ordinary clause");
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().NotContain("line-height");
+        projection.Html.Should().NotContain("margin-top");
+        projection.Html.Should().NotContain("margin-bottom");
     }
 
     [Fact]
@@ -870,11 +968,25 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().Contain("§Confidentiality",
+        // Task 048: the glyph is UNCHANGED — this is still exactly what the user sees, still immediately
+        // before the following run's text — but it is now wrapped in an atom carrying the font + code point,
+        // so a save re-emits the original w:sym instead of the resolved look-alike. § in a legal document is
+        // usually Symbol-font F0A7, not U+00A7, and writing back the look-alike changes the character the
+        // document contains.
+        projection.Html.Should().Contain(
+            "<span class=\"compose-atom\" data-atom-kind=\"symbol\" data-sym-font=\"Symbol\" " +
+            "data-sym-char=\"F0A7\" contenteditable=\"false\">§</span>Confidentiality",
             "WS-2 FR-06: the mapped Symbol-font glyph (section mark, U+00A7) renders immediately before " +
-            "the following run's text, verbatim — no separator invented, no glyph dropped");
+            "the following run's text, verbatim — no separator invented, no glyph dropped — and task 048 " +
+            "carries the source font/char alongside it so the write path never has to guess");
         projection.Warnings.Should().NotContain(w => w.Code == "unmapped-symbol-char",
             "a VERIFIED mapping must never raise the unmapped-glyph warning");
+
+        // The offset space is what everything else is addressed in, so it must not move: one editor-visible
+        // character for the symbol, exactly as before it became an atom.
+        var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "00D00001");
+        map.TotalLength.Should().Be(1 + "Confidentiality".Length,
+            "a w:sym contributes exactly 1 editor-visible character whether or not it is wrapped in an atom");
     }
 
     [Fact]
@@ -892,8 +1004,15 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().Contain("Item � text",
-            "an unmapped w:sym renders a visible U+FFFD placeholder in place — never a silent gap");
+        // Task 048: the placeholder is still shown — that is the READ contract, unchanged — but the atom now
+        // carries the TRUE font + code point beside it. This is the case where the fix matters most: without
+        // it, a save would have written the U+FFFD placeholder into the document as the user's content, so a
+        // marker that exists purely to be honest on screen would have become the glyph itself.
+        projection.Html.Should().Contain(
+            "Item <span class=\"compose-atom\" data-atom-kind=\"symbol\" data-sym-font=\"Wingdings\" " +
+            "data-sym-char=\"F0A8\" contenteditable=\"false\">�</span> text",
+            "an unmapped w:sym renders a visible U+FFFD placeholder in place — never a silent gap — and " +
+            "task 048 keeps the real Wingdings F0A8 on the atom so the write path re-emits it, not the �");
         projection.Warnings.Should().ContainSingle(w => w.Code == "unmapped-symbol-char" && w.Count == 1,
             "FR-10: the intra-run glyph-loss warning must fire exactly once for the one unmapped w:sym run " +
             "— the placeholder and the warning always co-occur, never one without the other");
@@ -959,7 +1078,13 @@ public sealed class ComposeDocxProjectionBuilderTests
         // Note: the compose-tab span's interior character is U+2003 (EM SPACE, not a plain ASCII space) —
         // a deliberate pre-existing choice (predates this task) so the placeholder can never collapse under
         // HTML whitespace rules the way a literal U+0020 could.
-        projection.Html.Should().Contain("before<span class=\"compose-tab\"> </span>after");
+        //
+        // Task 048: the span is now an ATOM as well as a compose-tab. The class and the em space are both
+        // unchanged — it looks exactly as it did — and the only addition is the identity that lets the
+        // mapper tell this em space from a typed one, which is what stopped tabs being flattened on save.
+        projection.Html.Should().Contain(
+            "before<span class=\"compose-atom compose-tab\" data-atom-kind=\"tab\" "
+            + "contenteditable=\"false\"> </span>after");
         var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "66660002");
         map.TotalLength.Should().Be("before".Length + 1 + "after".Length,
             "the ptab contributes exactly 1 editor-visible character, mirroring w:tab");
@@ -1125,7 +1250,7 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
 
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
 
         model.AbstractNumIdByNumId[3].Should().Be(7);
 
@@ -1152,10 +1277,10 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var ms = new MemoryStream(docx);
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
 
-        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+        var resolved = ComposeNumbering.ResolveParagraphNumbering(paragraph, model);
 
         resolved.Should().NotBeNull();
         resolved!.NumId.Should().Be(3);
@@ -1209,10 +1334,10 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var ms = new MemoryStream(docx);
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
 
-        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+        var resolved = ComposeNumbering.ResolveParagraphNumbering(paragraph, model);
 
         resolved.Should().NotBeNull("the paragraph has NO direct w:numPr — resolution must fall back to its pStyle (FR-12)");
         resolved!.NumId.Should().Be(4);
@@ -1261,10 +1386,10 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var ms = new MemoryStream(docx);
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
 
-        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+        var resolved = ComposeNumbering.ResolveParagraphNumbering(paragraph, model);
 
         resolved.Should().NotBeNull("Heading2Sub inherits numbering from its w:basedOn ancestor Heading2");
         resolved!.NumId.Should().Be(6);
@@ -1285,12 +1410,12 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
 
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
 
         // corpus-manifest.md row 10: Heading1 -> level 0 "%1"; Heading2 -> level 1 "%1.%2" — resolved
         // from the STYLE, since document.xml itself carries zero w:numPr (task 001's confirmed fact).
         var resolvedByOrdinal = mainPart.Document!.Body!.Descendants<Paragraph>()
-            .Select(p => ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model))
+            .Select(p => ComposeNumbering.ResolveParagraphNumbering(p, model))
             .ToList();
 
         var heading1Refs = resolvedByOrdinal.Where(r => r is { StyleLinked: true, Ilvl: 0 }).ToList();
@@ -1307,11 +1432,11 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
 
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
 
         // corpus-manifest.md row 11: single abstractNum, 3 levels, "%1." / "%1.%2." / "%1.%2.%3.".
         var directRefs = mainPart.Document!.Body!.Descendants<Paragraph>()
-            .Select(p => ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model))
+            .Select(p => ComposeNumbering.ResolveParagraphNumbering(p, model))
             .Where(r => r is not null)
             .Select(r => r!)
             .ToList();

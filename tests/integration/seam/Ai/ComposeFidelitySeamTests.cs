@@ -125,7 +125,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, documentId: speId);
+            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, TestSessionOwner.Oid, documentId: speId);
             sessionId = session.SessionId;
         }
 
@@ -250,7 +250,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, documentId: null);
+            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, TestSessionOwner.Oid, documentId: null);
             sessionId = session.SessionId;
         }
 
@@ -627,6 +627,13 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         IndexingMock.Reset();
         TemplateSourceMock.Reset();
         PdfIntakeSourceMock.Reset();
+
+        // Issue #858: create-on-save derives its container SERVER-SIDE — for the matter-less sessions
+        // these seams drive, from the acting user's business unit — so the derivation's two Dataverse
+        // reads must be arranged for the caller the fixture authenticates as. Re-applied after every
+        // Reset() (which erases it). Tests assert against TestActingUserBusinessUnit.ContainerId when
+        // they need the resolved container's value.
+        TestActingUserBusinessUnit.Arrange(DataverseMock);
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -648,7 +655,7 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -706,6 +713,9 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -806,7 +816,10 @@ internal sealed class ComposeFidelitySeamFakeAuthHandler : AuthenticationHandler
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

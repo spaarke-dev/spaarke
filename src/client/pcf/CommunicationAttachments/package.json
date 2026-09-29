@@ -24,7 +24,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
-    "@fluentui/react-components": "^9.46.0",
+    "@fluentui/react-components": "9.68.0",
     "@fluentui/react-icons": "^2.0.226",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
     "@testing-library/jest-dom": "^6.9.1",

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -64,7 +65,7 @@ public static class AnalysisChatContextEndpoints
     ///
     /// GET /api/ai/chat/context-mappings/analysis/{analysisId}
     ///
-    /// Extracts tenantId from JWT claims or X-Tenant-Id header (ADR-014 — tenant-scoped cache keys).
+    /// Extracts tenantId from the caller's JWT claims (ADR-014 — tenant-scoped cache keys).
     /// Optionally accepts <c>entityType</c> and <c>entityId</c> query parameters for entity-scoped
     /// context resolution (ADR-013 — ChatHostContext flows through pipeline).
     ///
@@ -92,7 +93,7 @@ public static class AnalysisChatContextEndpoints
             return TypedResults.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogDebug(
@@ -132,21 +133,14 @@ public static class AnalysisChatContextEndpoints
     // =========================================================================
 
     /// <summary>
-    /// Extracts the tenant ID from Azure AD JWT claims (<c>tid</c>) or the
-    /// <c>X-Tenant-Id</c> request header for service-to-service calls.
+    /// Extracts the tenant ID from Azure AD JWT claims (<c>tid</c>, dual-form).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
         // Primary: 'tid' claim from Azure AD JWT token
         // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        // Fallback: X-Tenant-Id request header (service-to-service calls)
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }

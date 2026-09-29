@@ -65,7 +65,9 @@ public sealed class ComposeServiceBornInEditorSaveTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     private static FileHandleDto CreatedDriveItem() => new(
         Id: CreatedSpeItemId,
@@ -82,6 +84,11 @@ public sealed class ComposeServiceBornInEditorSaveTests
     private void ArrangeCreateOnSave(out Func<byte[]> capturedBytesAccessor)
     {
         byte[]? captured = null;
+
+        // Issue #858: the create-on-save container is SERVER-derived, so the request no longer carries
+        // one. This arranges the two reads that derivation makes (systemuser -> business unit), resolving
+        // to the same ContainerId the SPE setup below already expects.
+        ComposeServiceCollaborators.SetupActingUserContainer(_dataverse, ContainerId);
 
         _spe.Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResolvedDriveId);
@@ -119,7 +126,6 @@ public sealed class ComposeServiceBornInEditorSaveTests
         var request = new SaveComposeDocumentRequest
         {
             // Born-in-editor first Save: NO DocumentSpeId, NO Content bytes, NO BaselineVersionId.
-            ContainerId = ContainerId,
             ContentModel = new ComposeContentModel
             {
                 Blocks = new[]
@@ -145,7 +151,7 @@ public sealed class ComposeServiceBornInEditorSaveTests
             TenantId = Tenant,
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var persisted = capturedBytes();
 
@@ -255,7 +261,7 @@ public sealed class ComposeServiceBornInEditorSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // (a) It UPDATED the SAME drive-item via replace — never a create-on-save upload (no duplicate record).
         _spe.Verify(s => s.ReplaceFileContentAsUserAsync(

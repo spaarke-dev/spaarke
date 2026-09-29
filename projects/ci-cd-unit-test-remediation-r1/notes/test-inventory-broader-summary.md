@@ -1,234 +1,136 @@
-# Broader test inventory summary — CICD-082
+# Test inventory — broader build-vs-maintain criteria (task CICD-082)
 
-**Date**: 2026-06-26
-**Scope**: `tests/unit/Sprk.Bff.Api.Tests/` (423 .cs files scanned, 410 with test methods, 6,617 methods classified)
-**Classifier**: ADR-038 §7 17-ban list (B1-B17) applied via PowerShell heuristic script (`c:\tmp\classify-tests.ps1`)
-**Spec target (FR-B10)**: 1,500-3,000 DELETE-scaffolding to reach ≤3,500 surviving BFF unit tests
-**Outcome vs target**: 209 DELETE-scaffolding identified by automated heuristics — **far below spec target**. See §"Reality check" for honest reconciliation.
+> **Generated**: 2026-08-28 · **Spec**: FR-B10 · **Criteria**: [ADR-038 §7](../../../docs/adr/ADR-038-testing-strategy.md#7-build-vs-maintain-criteria-scaffolding-test-bans--added-2026-06-26-per-spec-fr-b08) (17 bans)
+> **Classifier**: [`scripts/Classify-BffUnitTests.ps1`](../scripts/Classify-BffUnitTests.ps1) · **Data**: [`test-inventory-broader.csv`](test-inventory-broader.csv)
+> **Revised 2026-08-28** after spot-check rounds 3 + 4 (see "Accuracy control"). DELETE went 358 → **301**.
 
 ---
 
-## Reality check (actual numbers)
+## Operator decision — recorded, not re-opened
 
-Per `grep -rE "^\s*\[(Fact|Theory|SkippableFact)" tests/unit/Sprk.Bff.Api.Tests`, the actual count is:
+FR-B10 projected **1,500–3,000** DELETE candidates. High-confidence mechanical detection finds **301**.
 
-| Metric | Value | Notes |
-|---|---|---|
-| Test methods (grep attribute count) | 6,685 | Raw `[Fact]/[Theory]/[SkippableFact]` attribute count |
-| Test methods (script-parsed) | 6,617 | After body-extraction; small delta from edge cases (multi-line attrs, parser misses) |
-| Test files | 423 | Excludes `bin/`, `obj/`, `*.archived-*` |
-| Files with at least one parsed test method | 410 | 13 files are fixtures/helpers (no `[Fact]`) |
+Per the owner decision recorded in PR #852, this is **accepted and not a deviation**: FR-B10's own MUST says *"numeric reduction is a signal, not a gate."* The 1,500–3,000 was a projection about what mechanical detection would find, and that projection was wrong. See "What the gap actually means".
 
-The spec's working figure of "~6,695" was from earlier estimation; **6,685 (grep) / 6,617 (script-parsed) is the empirical truth as of 2026-06-26**.
-
----
-
-## Totals
-
-| Class | Count | % of total |
-|---|---|---|
-| **KEEP-maintain** | 6,398 | 96.7% |
-| **DELETE-scaffolding** | 209 | 3.2% |
-| **AMBIGUOUS** | 10 | 0.2% |
-| **KEEP-PROTECTED-PATH** | 0 | 0.0% (no test files under protected paths exist yet — see §"Protected paths") |
-| **Total** | 6,617 | 100% |
-
-Surviving methods after DELETE pass: **6,617 − 209 = 6,408 BFF unit tests**.
-
-### Gap vs spec target
-
-Spec FR-B10 targets ≤3,500 surviving. To reach that, we need **≥3,117 deletions**. Automated heuristics found 209. **The gap (≥2,908 methods) is too large to close from pure pattern-matching** — see §"Sources of risk" for analysis. This finding is consistent with task 020 (file-level inventory), which found only 11 DELETE files using a narrower 5-ban classifier; expanding to 17 bans roughly doubled the catch (to ~68 files, see §"Affected files") but did not reach the order-of-magnitude jump the spec assumes.
+| Classification | Count | % of suite |
+|---|---:|---:|
+| **KEEP-maintain** | 5,325 | 74.8% |
+| **AMBIGUOUS** (human judgement) | 1,493 | 21.0% |
+| **DELETE-scaffolding** (auto-safe) | **301** | 4.2% |
+| **Total classified** | **7,119** | |
 
 ---
 
-## DELETE-scaffolding bucket sizes
+## Scale correction — the POML's numbers are stale
 
-| Ban | Count | Description |
-|---|---|---|
-| **B10** | 85 | Coverage-fillers — only assertion is `NotThrow()` / `NotBeNull()` / `BeOfType()` without value verification |
-| **B1** | 56 | `Mock<HttpMessageHandler>` in shared file setup — transport-level mock (file-level classification: every method in file tainted) |
-| **B8** | 41 | `BindingFlags.NonPublic` reflection — tests internal/private methods via reflection |
-| **B7** | 14 | All-mocks + trivial assertion — 3+ `Mock<>`, ≤2 real assertions, ≥1 `Verify()` |
-| **B4** | 5 | Constructor `ArgumentNullException` tests — tests `ThrowIfNull` production code |
-| **B15** | 4 | Setup-heavy / low-assertion-ratio — ≥40 lines, ≤2 assertions, ≥2 mocks |
-| **B13** | 3 | Test name without scenario+expected — `*_Works`, `*_Bug{N}`, `Test{N}` |
-| **B5** | 1 | SUT-collaborator mocking with only `Verify()` assertions |
-| **B2** | 0 | Typed HttpClient wrappers (e.g., `Mock<IXxxClient>`) — many `new Mock<I*Client>` matches exist (47 occurrences across 30 files) but none classified as B2 by strict heuristic; manual review may upgrade some at PR time |
-| **B3** | 0 | Pure DI-registration assertions — gated by `hasSubstantiveCall` heuristic; existing `GetRequiredService` tests proceed to exercise Null-Object behavior (ADR-032) so are correctly KEEP |
-| **B6** | 0 | Mirror tests — no automated detection (requires production-code cross-reference) |
-| **B9** | 0 | Pass-through wrappers — narrow heuristic matched 0; suspected false-negative |
-| **B11** | 0 | Language-feature redundancy — narrow heuristic matched 0 |
-| **B12** | 0 | `JsonSerializer.Serialize(x).Should().Be(literal)` snapshots — 0 matches in entire repo |
-| **B14** | 0 | Exhaustive-switch coverage tests — no automated detection |
-| **B16** | 0 | Getter/setter round-trip — narrow heuristic matched 0; suspected false-negative |
-| **B17** | 0 | Generated-code field-by-field (record equality, AutoMapper) — no automated detection |
+| | POML says | Actual |
+|---|---:|---:|
+| Test files | 425 | **592** |
+| Test methods | ~6,695 | **7,119** classified (6,951 `[Fact]` + 376 `[Theory]`) |
+| LOC | — | **211,523** |
 
-**Total DELETE-scaffolding**: 209 methods
+The suite **grew ~10%** between the inventory estimate and today. Any "reduce to ≤3,500" target should be restated against 7,119 — and per PR #852 that target is retired as unreachable by the sanctioned path.
 
 ---
 
-## Affected files
+## DELETE-scaffolding — the 301
 
-| Metric | Count |
-|---|---|
-| Total .cs files with parsed test methods | 410 |
-| Files with ≥1 DELETE-scaffolding method | 68 |
-| **All-DELETE files** (whole-file deletion candidates via `git rm`) | **2** |
-| **MIXED files** (some DELETE, some KEEP — require method-level Edit) | **66** |
+| Bucket | Count | Confidence | Owning task |
+|---|---:|---|---|
+| `B10-coverage-filler` | 247 | medium | **084** — needs a review pass |
+| `B4-ctor-null-check` | 54 | **high — 54/54 individually verified** | **083** |
 
-### All-DELETE files (whole-file removal candidates)
+Round 3 emptied three buckets entirely: `B1-http-message-handler-mock` 1 → **0**, `B3-di-registration` 13 → **0**, `B8-private-via-reflection` 3 → **0**. Every row in all three was a false positive. Details below.
 
-| Methods | File |
-|---:|---|
-| 29 | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs` (B1: file uses `Mock<HttpMessageHandler>`) |
-| 27 | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookServiceTests.cs` (B1: file uses `Mock<HttpMessageHandler>`) |
+Top files by DELETE density: `PlaybookRunEndpointsTests.cs` (20), `DuplicateDetectionTests.cs` (14), `SignalEvaluationServiceTests.cs` (10), `NodeEndpointsTests.cs` (10), `OfficeJobStatusServiceTests.cs` (9).
 
-These 2 files total 56 methods — all classifiable as B1 (file-level taint).
+### The 54 in task 083 are verified individually, not sampled
 
-### Top 15 MIXED files (method-level edits required)
+An independent check — separate code path from the classifier — re-parsed each method with brace balance, stripped comments, and required both that the *act* be a construction (`=> new X(…null…)`) and that no instance-method act be present. **54/54 passed.** The two whose names don't begin `Constructor`/`Ctor` were also read by hand:
 
-| DEL/Total | File |
-|---|---|
-| 13/26 | `tests/unit/Sprk.Bff.Api.Tests/Api/Reporting/ReportingEndpointsTests.cs` (B8 reflection) |
-| 7/18  | `tests/unit/Sprk.Bff.Api.Tests/Filters/AnalysisAuthorizationFilterTests.cs` |
-| 6/10  | `tests/unit/Sprk.Bff.Api.Tests/Filters/AiAuthorizationFilterTests.cs` |
-| 6/50  | `tests/unit/Sprk.Bff.Api.Tests/Integration/SpeAdmin/Phase3IntegrationTests.cs` |
-| 6/14  | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/InvokePlaybookDescriptionTests.cs` |
-| 6/33  | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RecordSearch/RecordSearchServiceTests.cs` |
-| 6/14  | `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/InboundPipelineTests.cs` (B7 interaction tests) |
-| 4/29  | `tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ContainerTypeEndpointsTests.cs` |
-| 4/53  | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/WorkingDocumentToolsTests.cs` |
-| 4/10  | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/Events/MembershipEventPublisherTests.cs` |
-| 4/13  | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/OpenAiClientTests.cs` |
-| 4/14  | `tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoSyncModuleTests.cs` |
-| 3/13  | `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs` |
-| 3/23  | `tests/unit/Sprk.Bff.Api.Tests/Filters/IdempotencyFilterTests.cs` |
-| 3/12  | `tests/unit/Sprk.Bff.Api.Tests/Filters/Office/RateLimitFilterTests.cs` |
-
-Full list of 66 MIXED files: filter CSV with `awk -F',' 'NR>1 && $3=="DELETE-scaffolding"{print $1}' | sort | uniq` and cross-reference against per-file totals.
+- `ExternalAccessEndpointTests :: SpeContainerMembershipService_NullGraphClientFactory_ThrowsArgumentNull` — `() => new SpeContainerMembershipService(null!, …)` ✓
+- `MembershipEventPublisherTests :: NullPublisher_Constructor_NullLogger_Throws` — `() => new NullMembershipEventPublisher(logger: null!)` ✓
 
 ---
 
-## PR slicing recommendation (083 / 084 / 085)
+## AMBIGUOUS — 1,493, and why they are NOT auto-DELETE
 
-Given the small total (209 vs spec target 1,500-3,000), the original 3-PR slicing is **vastly oversized** relative to the actual surface. **Recommendation: collapse into 1 or 2 PRs, OR honestly extend the slice criteria with manual selection at PR time.**
+| Bucket | Count | ADR-038's own first remedy |
+|---|---:|---|
+| `B13-name-missing-scenario` | 1,124 | **"Rename per convention** or delete" |
+| `B15-setup-heavy` | 326 | "Integration test with amortized setup" |
+| `B7-all-mocks-trivial` | 6 | "Integration test or delete" |
+| `AMBIGUOUS-b10-absence-contract` | 35 | *(not a ban — see round 4)* |
+| `AMBIGUOUS-adr032-killswitch` | 2 | *(not a ban — see round 3)* |
 
-### Option A (minimal — recommended for closing FR-B10 mechanically)
+For the three real bans, the ADR's *Acceptable replacement* column names a non-delete remedy first. Auto-deleting them would skip the cheaper fix and destroy possibly-good tests.
 
-Single PR (e.g., `083-delete-bff-scaffolding-209-methods`) bundling all 209 DELETE-scaffolding:
-- Whole-file: 2 files via `git rm` (CreateNotificationNodeExecutorTests, PlaybookServiceTests) → 56 methods
-- Method-level: 66 mixed files via `Edit` → 153 methods
-- Code-review at Step 9.5 verifies each deletion against ADR-038 §7 + protected-path rule
+**`B13` is the whole story of the gap.** 1,124 tests — 15.8% of the suite — carry names that do not state scenario + expected result. That is a real, large finding, but the remedy is *rename*. Per the owner decision in PR #852, **a bad name is not grounds for deletion**; task 085 is re-scoped accordingly.
 
-Net effect: 6,617 → 6,408 BFF unit tests (-3.2%). **Does NOT meet ≤3,500 spec target.**
-
-### Option B (slice by ban tier per original plan — for traceability)
-
-#### PR 1 (task CICD-083) — Wiring antipatterns (B1-B5): **76 tests**
-- Buckets: B1 (56) + B2 (0) + B3 (0) + B4 (5) + B5 (1) + B7 wiring-flavored (14) — extended to include B7 since it overlaps B5 conceptually
-- All-DELETE files (whole removal): 2 (`CreateNotificationNodeExecutorTests`, `PlaybookServiceTests`)
-- Mixed-file method edits: ~3-5 files
-- **Confidence**: HIGHEST — signatures are grep-precise
-
-#### PR 2 (task CICD-084) — Scaffolding tests (B6-B10): **126 tests**
-- Buckets: B6 (0) + B7 (already in PR 1) + B8 (41) + B9 (0) + B10 (85)
-- Files: ReportingEndpointsTests (B8 reflection 13), AnalysisAuthorizationFilterTests (7), AiAuthorizationFilterTests (6), and ~30 others with B10 coverage-filler matches
-- **Confidence**: HIGH — B8 signatures grep-precise; B10 has ~10% false-positive rate per spot-check (some `NotBeNull()` tests verify a behavioral contract on type)
-
-#### PR 3 (task CICD-085) — Language/structure bans (B11-B17) + AMBIGUOUS sweep: **17 tests**
-- Buckets: B11 (0) + B12 (0) + B13 (3) + B14 (0) + B15 (4) + B16 (0) + B17 (0) + AMBIGUOUS (10)
-- **Confidence**: MEDIUM — AMBIGUOUS rows need manual review; B13 catches `_Works`-suffix names but some are legitimate "_Works with optional filters" tests
-
-**Combined Options A+B total**: same 209 methods, partitioned for review tractability.
-
-### Option C (extend slice criteria with judgment — to approach spec target)
-
-To get from 209 toward 1,500-3,000, PR authors must apply **judgment** beyond grep heuristics:
-- Whole-class deletion for service-unit-test files where the SUT logic is better covered by an existing integration test under `tests/integration/contract/**`
-- Removal of `[Theory] [InlineData]` parameterizations that exhaust input space without revealing additional contracts
-- Removal of constructor-shape and member-resolution tests added during a project's initial bootstrap that survived later refactors
-- Tests for "the service was successfully constructed" patterns that aren't trivially caught by my B16 regex
-
-**This is a separate work-effort from CICD-082** — it requires per-file judgment by an engineer familiar with the domain. The CSV provides a starting baseline; PR-time review extends it.
+The two `AMBIGUOUS-*` buckets are **not bans at all**. They mark tests a ban would otherwise have eaten, and they can never reach DELETE.
 
 ---
 
-## Spot-check (10 random DELETE-tagged methods)
+## What the gap actually means
 
-Read each method's source and verified the classification:
+Three readings, in order of likelihood:
 
-- [x] `Services/Ai/SemanticSearch/SemanticSearchServiceTests.cs::SearchAsync_AllScope_WithOptionalFilters_Works` (B13) — name ends in `_Works`, fits the no-scenario-no-expected naming-debt ban. ✓
-- [x] `Services/Ai/TextExtractorServiceTests.cs::IsSupported_WithoutDot_Works` (B13) — same `_Works` suffix. ✓
-- [x] `Services/Todo/TodoSyncModuleTests.cs::FlagOff_ResolvesISpaarkeListProvisioner_ToNullObject` (B10) — only assertion is `Should().BeOfType<NullSpaarkeListProvisioner>()`. ⚠️ Edge case: this IS verifying the ADR-032 Null-Object pattern dispatch (legitimate behavior), but the single-IsType assertion fits B10 mechanically. Mark for PR-time review.
-- [x] `Services/Workspace/PriorityScoringServiceTests.cs::NegativePendingInvoiceCount_ReturnsZeroPoints` (B10) — only assertion is `act.Should().NotThrow(...)`. ✓ Textbook B10.
-- [x] `Filters/IdempotencyFilterTests.cs::Constructor_ValidParameters_CreatesInstance` (B10) — `new IdempotencyFilter(...)` then `filter.Should().NotBeNull()`. ✓ Textbook B4+B10.
-- [x] `Services/Ai/RecordSearch/RecordSearchServiceTests.cs::SearchAsync_WithReferenceNumbersFilter_ExecutesSearch` (B10) — needs check; tagged B10 by sole-assertion rule. Reviewer should verify.
-- [x] `Services/Communication/InboundPipelineTests.cs::RecreateSubscription_WhenRenewalFails` (B7) — 110-line test body, 5 mocks, 3 `Verify()` calls, 0 real assertions. ✓ Textbook B7.
-- [x] `Services/Ai/Chat/Tools/WorkingDocumentToolsTests.cs::EditWorkingDocumentAsync_Cancellation_EndIsAlwaysLast` (B10) — only assertion is `_capturedEvents.Last().Should().BeOfType<DocumentStreamEndEvent>()`. ⚠️ False positive: the `Last()...BeOfType` IS asserting the event-ordering contract. Mark for PR-time review.
-- [x] `Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs::Validate_WithValidConfig_ReturnsSuccess` (B1) — file uses `Mock<HttpMessageHandler>`. ✓ Whole-file B1.
-- [x] `Services/Ai/Chat/Tools/AnalysisExecutionToolsTests.cs::Constructor_AcceptsNullOptionalParameters` (B10) — only assertion is `action.Should().NotThrow()` on `new AnalysisExecutionTools(...)`. ✓ Textbook B4+B10.
+1. **The bans are mostly non-mechanical.** 9 of 17 (B2, B5, B6, B9, B11, B12, B14, B17, and most of B7) require reading intent. B6 "mirror tests" in particular — implementation == implementation — cannot be regex-detected at all, and is plausibly the single largest real bucket. **Mechanical detection under-counts by construction.**
+2. **Task 053 already removed the easy wins.** The narrow-criteria pass deleted the most obvious scaffolding; what remains is by definition harder to detect.
+3. **The suite may genuinely be better than FR-B10 assumed.** Possible, but least likely given 1,124 tests cannot state what they assert.
 
-**Result**: 8 of 10 match cleanly; 2 are mechanical-match-but-debatable (B10 false-positive rate ~20%). PR reviewers should expect to upgrade ~5-10% of B10-tagged tests back to KEEP-maintain after reading the assertion.
+**Do NOT tune the classifier until it reaches 1,500.** That inverts the method — picking a number and manufacturing criteria to hit it is how the first run produced 3,411 DELETEs including `LoadSessionAsync_BothMiss_ReturnsNull`.
 
 ---
 
-## Sub-slicing notes (mixed files)
+## Recommended slicing for 083 / 084 / 085
 
-**MIXED files require `Edit` not `git rm`.** A file with 5 KEEP methods + 3 DELETE methods needs targeted method-level deletion via the `Edit` tool, preserving the file's KEEP methods.
+| Task | Scope | Count | Risk |
+|---|---|---:|---|
+| **083** | `B4-ctor-null-check` | **54** | **Low** — ADR-explicit, no judgement, 54/54 verified |
+| **084** | `B10-coverage-filler`, after a review pass | **247** | Medium — see the round-4 warning below |
+| **085** | `B13` naming remediation + `B15`/`B7` | **1,456** | **RE-SCOPED — mostly RENAME.** See PR #852 |
 
-The CSV provides one row per method; cross-reference by `file_path` to find all methods in a file before editing. Workflow for 083/084/085 PRs:
-
-1. Filter CSV: `awk -F',' 'NR>1 && $3=="DELETE-scaffolding" && $4=="B7"' notes/test-inventory-broader.csv` → grouped by file
-2. For each MIXED file: open in editor, delete by line range derived from `[Fact]` attribute → matching `}` brace
-3. For each all-DELETE file: `git rm`
-4. Run `dotnet build` to verify no compilation breakage (e.g., shared private helpers no longer used → delete them too)
-5. Step 9.5 code-review verifies each deletion against protected-path rule (FR-B06) and ADR-038 ban definitions
+⚠️ **084 is not yet safe to execute mechanically.** Round 4 found and fixed one over-call class inside B10 (absence-of-throw contracts) but only via a name heuristic. B10 is the one medium-confidence bucket left, and it has now produced a false positive in two separate rounds. It needs its own verification pass of the kind 083 got — not a sample.
 
 ---
 
-## Protected paths (FR-B06)
+## Accuracy control — four spot-check rounds, four sets of bugs
 
-Per spec: NEVER tag DELETE on files under:
-- `tests/integration/auth/**`
-- `tests/integration/regression/**`
-- `tests/integration/data-mutation/**`
-- `tests/integration/tenant/**`
+Step 8 required 10 random DELETE samples. **Every round so far has found the classifier over-calling**, i.e. about to delete good tests. This is the audit trail.
 
-**Finding**: 0 BFF unit test files live under any of these paths today (path-reorganization task 050 has not yet executed; the 6 canonical KEEP paths do not exist). Therefore 0 KEEP-PROTECTED-PATH rows.
+**Round 1 — 3,411 DELETE.** Sample surfaced `LoadSessionAsync_BothMiss_ReturnsNull`, `DeleteDocumentAsync_NullDocumentId_ThrowsArgumentException`, `ResolveBindingAsync_MalformedChipTransitionsJson_ResolvesWithEmptyChips` — all good behavioral tests.
+**Cause**: the "meaningful assertion" list omitted `Assert.Null` / `Empty` / `Single`, so a test whose entire contract is *returns null* scored as trivial.
+**Fix**: expanded to ~40 xUnit + FluentAssertions + Moq forms; reclassified B13/B15/B7 as AMBIGUOUS. **3,411 → 427.**
 
-After task 050 reorganizes test files into the 6 KEEP paths, the protected-path check becomes the live gate. For CICD-082's scope (today's `tests/unit/Sprk.Bff.Api.Tests/` layout), no files are protected, but **DELETE-scaffolding rows that target tests currently moving into a protected path during 050 MUST be re-checked**.
+**Round 2 — 427 DELETE.** Sample surfaced `ResolveAsync_NoClo**set**_…`, `Render_WithOutOfRangeStartOff**set**_…`, `SaveAsync_…FireAndFor**get**_…`.
+**Cause**: B16's `(get|set)_?` alternation matched substrings inside ordinary words.
+**Fix**: word-boundary anchors + require body corroboration. B16 went 69 → **0**. **427 → 358.**
 
----
+**Round 3 — 358 DELETE. Four distinct bugs, all over-calls.**
 
-## Sources of risk (honest gap analysis)
+| # | Bug | Evidence | Fix |
+|---|---|---|---|
+| A | **Ban detection matched prose, not code** | `AiCompletionNodeExecutorTests` carries the header comment *"ADR-038 compliance: NO `Mock<HttpMessageHandler>`"*. Both the file flag and the body match fired on it — **a file documenting its compliance was classified as violating it.** | `Remove-CsComments` applied before all ban matching; B1 now requires the actual `Mock<HttpMessageHandler>` construction |
+| B | **`GetService` name collision** | `ExportServiceRegistry.GetService(ExportFormat.Docx)` is a domain strategy selector built with `new`. Matched `\bGetService\b` as if it were `IServiceProvider`. | B3 now requires `BuildServiceProvider` in the body |
+| C | **`-match` is case-INSENSITIVE in PowerShell** | `[^)]*null` matched the `Null` in every ADR-032 Null-Object type name, e.g. `new NullMembershipEventPublisher(Mock.Of<ILogger<NullMembershipEventPublisher>>())`. **The entire Null-Object family was a B4 candidate.** | `-cmatch`, so only the C# keyword `null` counts |
+| D | **`JsonElement.GetProperty` read as reflection** | `DailyBriefingResponseShapeTests` — a golden fixture its own header calls *"the load-bearing golden fixture; drift here is a widget-parser break"* — was flagged B8 for navigating JSON. | B8 now requires `BindingFlags.` in the method body |
 
-The 209 DELETE-scaffolding finding is **conservative** — it represents what mechanical grep+heuristics can prove. The 1,500-3,000 spec target requires judgment-based extension because:
+Round 3 also found that **B4 was eating method tests**: `new EffortScoreInput(null!, …)` followed by `_sut.CalculateEffortScore(input)` matched a "constructor" null-check. B4 now requires the *act itself* to be the construction (`=> new X(`).
 
-1. **B1 file-level taint is aggressive but bounded** — only 2 files have `Mock<HttpMessageHandler>` in shared setup. The remaining HttpClient mocking (47 `new Mock<I*Client>` matches) is method-local and not clearly a B2 ban without manual review of each method's purpose.
-2. **B7 "all-mocks + trivial assert" requires assertion-counting precision** — my regex counts `.Should()` chains but doesn't distinguish "behavioral assertions about output state" from "structural assertions about return-type shape". Many tests in the 6,617 corpus have 3+ mocks and 1-2 `Should()...Be()` calls that DO assert real behavior; they look like B7 but aren't.
-3. **B6 mirror tests cannot be grep-detected** — would require cross-referencing each test method's body against the production method it tests (parse tree analysis); 6,617 × cross-reference is out of CICD-082's budget.
-4. **B9 pass-through wrappers and B17 generated-code tests** — similar to B6, require production-code cross-reference.
-5. **B11 / B14 language-feature redundancy** — narrow signatures (`required` keyword, record equality syntax) match 0 in the corpus; the broader category "tests of behaviors the C# compiler guarantees" requires judgment.
-6. **B15 setup-ratio bound (≥40 lines)** is conservative; many 25-39-line tests with 0-1 assertions arguably qualify. I tightened the bound to avoid false positives but at the cost of catch rate.
+Separately, B3 was eating the **ADR-032 Null-Object kill-switch contract** — the 8 `TodoSyncModule` FlagOn/FlagOff tests and the 2 `CacheModule` Redis on/off tests. Those assert *which* implementation resolves under a flag; app start proves only that *something* resolves. Root CLAUDE.md §10 / [`bff-extensions.md` §F.1](../../../.claude/constraints/bff-extensions.md) make this a binding sub-mechanism — it is the regression cover for the RB-T028-03..06 production defect class. **358 → 301** across rounds 3–4.
 
-**Realistic expectation**: PR-time manual review of large heavily-mocked service test files will catch additional 500-1,500 deletions. To approach the spec target of 1,500-3,000, the operator should either:
+**Round 4 — verification of the round-3 fixes.** All 19 rescued rows confirmed landed in KEEP or AMBIGUOUS, none in DELETE. All 54 remaining B4 rows verified individually (above). One **new** over-call class surfaced while checking the rescues:
 
-- **(a)** Run CICD-083/084/085 with the 209-method baseline, accept the gap, and explicitly note in PR descriptions that the FR-B10 numeric target is not achievable from heuristic classification alone, OR
-- **(b)** Extend CICD-082 with a follow-on judgment-based audit (a separate `082b-judgment-extension` task that pairs an engineer with the CSV to upgrade ~1,000-2,500 currently-KEEP rows to DELETE based on file-by-file domain knowledge), OR
-- **(c)** Revise spec FR-B10 to lower the target to match heuristic capacity (e.g., "≤6,400 surviving" — a ~3-5% reduction that matches what mechanical classification proves).
+- `FlagOff_NullTodoGraphSyncHandler_IsQuietNoOp` and `FlagOff_NullTodoSyncBackfiller_IsNoOpButLogsOnce` were sitting in DELETE as `B10-coverage-filler` — they have no assertion because *"completes without throwing"* is precisely the ADR-032 P2 quiet-semantics contract they exist to pin. The same shape covers `LogInteractionAsync_CosmosThrows_DoesNotThrowToCallerAndLogsError` (audit logging must not break its caller — a resilience contract).
+- **This is round 1's failure mode recurring in a different bucket**: a *negative* expected outcome reads as "no expectation" to a counter. 35 rows moved to `AMBIGUOUS-b10-absence-contract`.
 
-The most-defensible path is **(a) + the FR-B10 escalation noted in the next-task POML**. The cultural-reset effect of ADR-038 (binding ≥6 months from 2026-06-26) does most of the work over time as new tests are written under the integration-first template; retroactively reaching ≤3,500 from 6,617 by automated reclassification is not feasible in this project's budget.
+**Every round over-called; none under-called.** The failure mode has been consistently *deleting good tests*. The classifier is deliberately conservative for that reason: ADR-038's rule is *doubt = KEEP*, and an under-call costs a review pass while an over-call destroys regression cover.
 
----
-
-## Files written
-
-- `c:\code_files\spaarke-wt-ci-cd-unit-test-remediation-r1\projects\ci-cd-unit-test-remediation-r1\notes\test-inventory-broader.csv` — 6,618 lines (header + 6,617 data rows)
-- `c:\code_files\spaarke-wt-ci-cd-unit-test-remediation-r1\projects\ci-cd-unit-test-remediation-r1\notes\test-inventory-broader-summary.md` — this file
-- `c:\tmp\classify-tests.ps1` — classifier script (transient; re-runnable via `pwsh -NoProfile -File c:\tmp\classify-tests.ps1`)
-
-CSV columns: `file_path, test_method_name, classification, bucket, rationale, file_lines, method_lines`
+> **The spot-check is load-bearing and must not be skipped.** Four rounds, four sets of real bugs. Do not act on a bucket that has not had a clean verification round.
 
 ---
 
-*Generated from automated PowerShell classifier against the 17-ban list in ADR-038 §7. The classifier is necessarily conservative; PR-time judgment extends the catch. Re-run with `pwsh -NoProfile -File c:\tmp\classify-tests.ps1` after any test churn.*
+## Protected-path safety (FR-B06)
+
+Zero DELETE rows fall under the protected KEEP paths. The classifier hard-codes them (`tests/integration/{auth,regression,data-mutation,tenant,contract}/**` + `tests/Spaarke.ArchTests/**` per Amendment A1) and downgrades any ban firing there to AMBIGUOUS with a `PROTECTED::` prefix. In this run the question was moot — 082 targets `tests/unit/Sprk.Bff.Api.Tests/` only, which contains none of those paths — but the guard stays for reuse.

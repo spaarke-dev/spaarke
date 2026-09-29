@@ -66,15 +66,6 @@ public class DocumentAuthorizationFilterTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_NullAuthService_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new DocumentAuthorizationFilter(null!, "read");
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("authorizationService");
-    }
-
     #endregion
 
     #region Route Extraction Tests

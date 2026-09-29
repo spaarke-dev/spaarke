@@ -90,7 +90,7 @@ public class AdminJobsIntegrationFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -146,6 +146,9 @@ public class AdminJobsIntegrationFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Replace Redis with deterministic in-memory cache (ADR-009).
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();
@@ -171,9 +174,9 @@ public class AdminJobsIntegrationFixture : WebApplicationFactory<Program>
             });
 
             // Strip all hosted services so background workers (ScheduledJobHost cron loop,
-            // ServiceBusJobProcessor, SchedulingBootstrapHostedService) don't run during tests —
-            // the admin endpoints don't need the loop, and the bootstrap is replaced with
-            // direct Registry/Store seeding inside each test for determinism.
+            // ServiceBusJobProcessor) don't run during tests — the admin endpoints don't need the
+            // loop. The registry + store still arrive seeded with the AddScheduledJob registrations;
+            // each test resets them and seeds its own jobs for determinism.
             //
             // Note: removing IHostedService is *the* asymmetric piece of this fixture vs production
             // (per bff-extensions.md §F.1) — see also DataverseIntegrationTestFixture L#229 for

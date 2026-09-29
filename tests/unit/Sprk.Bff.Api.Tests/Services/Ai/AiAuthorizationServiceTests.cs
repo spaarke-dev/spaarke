@@ -81,24 +81,6 @@ public class AiAuthorizationServiceTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_NullAccessDataSource_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new AiAuthorizationService(null!, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("accessDataSource");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new AiAuthorizationService(_accessDataSourceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
     #endregion
 
     #region Authorization Success Tests

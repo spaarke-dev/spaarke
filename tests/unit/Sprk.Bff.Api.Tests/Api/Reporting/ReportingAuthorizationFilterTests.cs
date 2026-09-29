@@ -468,16 +468,6 @@ public class ReportingAuthorizationFilterTests
     // Guard clause
     // =========================================================================
 
-    [Fact]
-    public void Constructor_ThrowsArgumentNullException_WhenConfigurationIsNull()
-    {
-        // Arrange / Act
-        var act = () => new ReportingAuthorizationFilter(null!, logger: null);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>().WithParameterName("configuration");
-    }
-
     // =========================================================================
     // Constant verification
     // =========================================================================

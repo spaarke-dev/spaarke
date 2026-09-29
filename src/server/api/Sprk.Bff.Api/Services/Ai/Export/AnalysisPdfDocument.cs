@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Services.Ai.Export;
 /// <summary>
 /// QuestPDF document composer for analysis exports.
 /// Generates professionally styled PDF documents with branding support.
-/// Runs in-process following ADR-001 (no Azure Functions for core processing).
+/// Runs in-process within the BFF export request (ADR-001; placement per ADR-052).
 /// </summary>
 public class AnalysisPdfDocument : IDocument
 {

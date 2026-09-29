@@ -846,8 +846,13 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           if (!context.documentContentBase64) {
             throw new Error('Document content is required. Please ensure the document is captured before saving.');
           }
+          // Ensure a real .docx extension — SPE preview, Word open, Compose mount, and AI text
+          // extraction all key off it. Without it the file is stored extensionless and treated as
+          // an unknown/unsupported type (email-communication-intelligence-r2 UAT 2026-09-03).
+          const rawDocName = (effectiveDocumentName || 'document').trim() || 'document';
+          const docFileName = /\.docx$/i.test(rawDocName) ? rawDocName : `${rawDocName}.docx`;
           serverRequest.document = {
-            fileName: effectiveDocumentName || 'document.docx',
+            fileName: docFileName,
             title: effectiveDocumentName,
             contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             contentBase64: context.documentContentBase64,

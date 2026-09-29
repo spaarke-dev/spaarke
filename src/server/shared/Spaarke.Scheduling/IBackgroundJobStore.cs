@@ -159,7 +159,8 @@ public interface IBackgroundJobStore
 /// Per R3 spec.md FR-2.6. The Dataverse-backed store (task 023+) populates this from
 /// <c>sprk_backgroundjobrun</c>. <see cref="ErrorMessage"/> + <see cref="ProcessedItems"/> are
 /// nullable because they're only known after run completion (and not every job reports an item
-/// count). <see cref="Status"/> is canonicalized to <c>"Succeeded"</c> / <c>"Failed"</c> /
+/// count). <see cref="Status"/> is canonicalized to <c>"Succeeded"</c> / <c>"Failed"</c> / <c>"Skipped"</c> (the host
+/// did not dispatch the tick — ADR-036 A1 rule 1) /
 /// <c>"InProgress"</c> by implementations.
 /// </remarks>
 /// <param name="RunId">Persistent run identifier from the run-history store.</param>
@@ -168,7 +169,7 @@ public interface IBackgroundJobStore
 /// <param name="CorrelationId">Distributed-trace correlation id per NFR-08.</param>
 /// <param name="StartedOn">When the run started executing.</param>
 /// <param name="CompletedOn">When the run completed, or <c>null</c> if still running.</param>
-/// <param name="Status">Canonical run outcome (<c>"Succeeded"</c>, <c>"Failed"</c>, or <c>"InProgress"</c>).</param>
+/// <param name="Status">Canonical run outcome (<c>"Succeeded"</c>, <c>"Failed"</c>, <c>"Skipped"</c>, or <c>"InProgress"</c>).</param>
 /// <param name="ErrorMessage">Final failure message, or <c>null</c> on success or while in-progress.</param>
 /// <param name="ProcessedItems">Optional item-processing count (per <see cref="JobRunResult.ProcessedItems"/>).</param>
 /// <param name="Duration">Run duration. <see cref="TimeSpan.Zero"/> while in-progress.</param>

@@ -2,26 +2,29 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://spaarke.com/schemas/analysisaction/compose-draft-alternative.schema.json",
   "title": "Compose — Draft Alternative — Output Schema (compose-draft-alternative)",
-  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-draft-alternative' (spaarkeai-compose-r2 task 042, FR-09). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-draft-alternative.action.json (the systemPrompt/schema author surface). The STRUCTURED-EDIT PAYLOAD (adeu Pattern §6.1) that becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; match_mode is a closed set via the `enum` keyword (NOT a property-level boolean required, which is FORBIDDEN).",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-draft-alternative' (spaarkeai-compose-r2 task 042, FR-09). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-draft-alternative.action.json (the systemPrompt/schema author surface). The STRUCTURED-EDIT PAYLOAD (adeu Pattern §6.1) that becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; spaarkeai-compose-r8 task 052: target_text and match_mode are RETIRED — target_para_id is the targeting field and no placement path searches document text (ADR-049 I-7). spaarkeai-compose-r8 task 052: target_text and match_mode are RETIRED — target_para_id is the targeting field and no placement path searches document text (ADR-049 I-7). spaarkeai-compose-r8 task 052: target_text and match_mode are RETIRED — target_para_id is the targeting field and no placement path searches document text (ADR-049 I-7).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["target_text", "new_text", "match_mode", "rationale", "sources"],
-  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator). match_mode's closed set is expressed via the `enum` keyword.",
+  "required": [
+    "target_para_id",
+    "new_text",
+    "rationale",
+    "sources"
+  ],
+  "$comment-required": "Object-level required array (ALL four fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. spaarkeai-compose-r8 task 052 RETIRED target_text and match_mode from this Action: text matching is no longer a placement channel for an AI edit (ADR-049 I-7), so the model is no longer asked for either. target_para_id is the targeting field. It stays NULLABLE via the type union [\"string\",\"null\"] — required as a KEY (Structured Outputs demands it) but legitimately null when the caller supplied no anchor, in which case the edit is REFUSED rather than text-searched.",
   "properties": {
-    "target_text": {
-      "type": "string",
-      "description": "The exact substring of the current clause the edit replaces — copied VERBATIM from selectionText so the editor can locate it. The whole selection when rewriting it as a unit.",
-      "maxLength": 16000
+    "target_para_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The document's own stable Word paragraph identifier (w14:paraId) for the clause this edit targets — copied VERBATIM from the targetParaId input when one was supplied, otherwise null. This is the ONLY placement channel (spaarkeai-compose-r8 task 052, ADR-049 I-7): the editor resolves the paragraph by this identifier and NEVER searches the document text for the edit's wording. A null identifier means the edit cannot be placed and is refused — there is no prose fallback. Never invent, alter, abbreviate, or reformat this value.",
+      "maxLength": 64
     },
     "new_text": {
       "type": "string",
-      "description": "The proposed replacement clause language — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). Inserted as a pending track-change.",
+      "description": "The proposed replacement clause language — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). The FULL revised text of the paragraph target_para_id names; the editor diffs it against that paragraph's current text and marks only what changed, inserted as a pending track-change.",
       "maxLength": 16000
-    },
-    "match_mode": {
-      "type": "string",
-      "description": "How the editor locates target_text: 'strict' (replace the whole selection — default), 'first' (first occurrence of a fragment), or 'all' (every occurrence, e.g. a defined-term change).",
-      "enum": ["strict", "first", "all"]
     },
     "rationale": {
       "type": "string",
@@ -30,11 +33,15 @@
     },
     "sources": {
       "type": "array",
-      "description": "Grounding for the proposal — each entry is { type, id, snippet }. Empty array when the retrieval layer supplied no grounding — never fabricated.",
+      "description": "Grounding for the proposal. Empty array when the retrieval layer supplied no grounding — never fabricated.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "id", "snippet"],
+        "required": [
+          "type",
+          "id",
+          "snippet"
+        ],
         "properties": {
           "type": {
             "type": "string",
@@ -53,5 +60,6 @@
         }
       }
     }
-  }
+  },
+  "$comment-mirror": "Task 052: RE-PROJECTED from the seed's outputSchema (these three mirrors had drifted — they never received task 051's target_para_id). The DEPLOYED source is infra/dataverse/actions/compose-draft-alternative.action.json (Deploy-AnalysisAction.ps1 reads that file, not this one) — this mirror exists for CI schema validation."
 }

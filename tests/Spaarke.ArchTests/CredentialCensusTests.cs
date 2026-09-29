@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -116,6 +116,42 @@ public class CredentialCensusTests
                 "Workstream D deferred 2026-08-19 -- Power BI not yet adopted at Spaarke; "
                 + "PowerBi:ClientSecret is a separate secret from BFF-API-ClientSecret and does not gate "
                 + "the OBO migration. Revisit when Power BI is adopted (tasks 040-042)."),
+
+        new CensusEntry(
+            FileName: "DataverseWebApiEnvVarValuesWriter.cs",
+            Sites: 1,
+            Identity: "The CUSTOMER's own Entra app registration (per-request), not the BFF's",
+            CredentialSource: "TenantId/ClientId/ClientSecret supplied on the handler request record, resolved from Key Vault upstream",
+            Reason:
+                "ADR-028 E-1. Writes environment-variable values into the customer env (H7). L2 provisions into an environment owned by the customer's "
+                + "tenant, so the identity is theirs; MI-FIC would have to be federated onto each "
+                + "customer's registration. Added to the census 2026-08-27 — it had been absent since "
+                + "the sites landed 2026-08-19, which is why FR-F1/FR-F2 were red from the day the "
+                + "guard shipped (issue #839)."),
+
+        new CensusEntry(
+            FileName: "DataverseWebApiSolutionImporter.cs",
+            Sites: 1,
+            Identity: "The CUSTOMER's own Entra app registration (per-request), not the BFF's",
+            CredentialSource: "TenantId/ClientId/ClientSecret supplied on the handler request record, resolved from Key Vault upstream",
+            Reason:
+                "ADR-028 E-1. Imports solutions into the customer env (H6). L2 provisions into an environment owned by the customer's "
+                + "tenant, so the identity is theirs; MI-FIC would have to be federated onto each "
+                + "customer's registration. Added to the census 2026-08-27 — it had been absent since "
+                + "the sites landed 2026-08-19, which is why FR-F1/FR-F2 were red from the day the "
+                + "guard shipped (issue #839)."),
+
+        new CensusEntry(
+            FileName: "DataverseWebApiSolutionVerifier.cs",
+            Sites: 1,
+            Identity: "The CUSTOMER's own Entra app registration (per-request), not the BFF's",
+            CredentialSource: "TenantId/ClientId/ClientSecret supplied on the handler request record, resolved from Key Vault upstream",
+            Reason:
+                "ADR-028 E-1. Verifies imported solutions in the customer env (H6). L2 provisions into an environment owned by the customer's "
+                + "tenant, so the identity is theirs; MI-FIC would have to be federated onto each "
+                + "customer's registration. Added to the census 2026-08-27 — it had been absent since "
+                + "the sites landed 2026-08-19, which is why FR-F1/FR-F2 were red from the day the "
+                + "guard shipped (issue #839)."),
 
         new CensusEntry(
             FileName: "ReportingProfileManager.cs",

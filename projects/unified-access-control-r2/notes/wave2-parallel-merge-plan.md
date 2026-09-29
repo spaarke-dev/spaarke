@@ -1307,3 +1307,49 @@ means doing it twice. Order: merge master → verify → then this.
 (`SseStreamingIntegrationTests.cs`, `FinancialCalculationToolHandlerTests.cs`). So 075 did not introduce a
 banned library — the directive is stale. Moq is genuinely dominant; the parenthetical overstates it to a
 ban. Fix the directive's wording, not the tests.
+
+---
+
+## A19. 🔴 A18 IS RETRACTED — and the reason is a merge error of mine, not a claim of 075's
+
+**A18 said merge plan §4c was wrong that 075 "deleted `IRecordContainerResolver` and registered the
+concrete class". §4c was RIGHT.** 075's branch tip did exactly that. What was wrong was the tree I
+measured against, because **I merged 075 by COMMIT SHA (`615304927`) rather than by BRANCH TIP
+(`7900d84b0`)** — 8 commits short.
+
+**A18's measurements were all accurate for the tree I had** (ceiling 153 · pre-075 155 · post-075 157) and
+its two-way classification of the interfaces was sound reasoning. It was just reasoning about a tree that
+should never have existed. The ADR-010 refactor it prescribed was therefore duplicate work, differing from
+075's own only in where `OwningSecureRecord` lives. 075's layout wins — it is the author's, and it carries
+the fuller fail-closed contract docs (four error codes, including
+`container_ownership_indeterminate`, which my shortened version silently dropped).
+
+### What the commit-vs-branch error actually cost, and why it is worth a numbered entry
+
+The 8 missing commits included **three code fixes**:
+
+| Commit | What it fixed |
+|---|---|
+| `7db13debf` | **3 FAIL-OPEN defects** found by the Step 9.5 gates — all in the FETCH layer |
+| `ff458474a` | 4 defects the C-1/C-2 restructure introduced, **and 2 LYING TEST DOUBLES** |
+| `3289844ef` | D-1 the double ignored `TopCount`; D-2 a one-word equality fix on the byte path |
+
+Fail-open defects in the container-isolation component are the exact class this wave exists to remove, and
+they reached master. Corrected in the same session, but only because the pre-compact handoff enumerated
+branches and noticed the tail.
+
+### The generalizable rule — this is the part to carry forward
+
+> **`git log --grep` finds A commit. The branch tip is the DELIVERABLE. Merge by BRANCH, never by SHA.**
+
+The failure mode is specific to how this project works: a worktree agent's FIRST commit is the feature, and
+then **Step 9.5's quality gates make it iterate**. So the first commit is reliably the *pre-gate* version —
+the one with the defects the gates were about to find. Merging by grep-then-SHA does not merely lose polish;
+it systematically selects the version before review.
+
+**Audited the siblings immediately** — 073 (`worktree-agent-a088c001ee9c915f9`) and 079
+(`worktree-agent-aaa745a0a240a67bd`) both report **0 commits not in master**. They were merged by branch
+name and are correct. The error was 075-only.
+
+**And the risk is live for what remains**: of the six branches still to merge, **013 has 5 unmerged commits
+and 081 has 4**. Both iterated well past their first commit. Merge them by branch name.

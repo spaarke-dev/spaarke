@@ -24,6 +24,12 @@ import type { IHeaderToolbarProps } from '../HeaderToolbar';
  *   card chrome remains visually stable during load. Defaults to `false`.
  * - `children` — the body content, typically a `FieldGrid` composing 3–5
  *   field renderers. Not rendered while `loading === true`.
+ * - `columns` — drives ONLY the loading-skeleton grid (FR-18): `2` renders a
+ *   2×2 skeleton, `3` (default) renders the original 3×2 skeleton. Pass the
+ *   same value the caller's `FieldGrid columns` will resolve to, so the
+ *   skeleton's footprint matches the loaded layout and no reflow occurs on
+ *   load. Optional and backward-compatible — omitting it preserves the
+ *   original 3-column skeleton exactly.
  */
 export interface IRecordHeaderShellProps {
   toolbar: IHeaderToolbarProps;
@@ -37,4 +43,13 @@ export interface IRecordHeaderShellProps {
    * Defaults to `false` (backward-compatible with the R1 card look).
    */
   borderless?: boolean;
+  /**
+   * Number of columns the loading skeleton grid renders (FR-18). `2` renders
+   * a 2-column × 2-row skeleton (4 cells); `3` (the default) renders the
+   * original 3-column × 2-row skeleton (6 cells). Affects ONLY the loading
+   * skeleton — the loaded `children` layout is entirely the caller's
+   * responsibility (typically a `FieldGrid columns={…}` of the same value).
+   * Defaults to `3` (backward-compatible with the R1 skeleton).
+   */
+  columns?: 2 | 3;
 }

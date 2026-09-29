@@ -21,6 +21,16 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "Microsoft.Graph"
         update-types: ["version-update:semver-major"]
+      # FluentAssertions 8.x moved from Apache-2.0 to the Xceed Community License,
+      # which requires a PAID licence for commercial use. Spaarke is commercial, so
+      # this is a licensing decision, not a dependency bump — it must not arrive as a
+      # routine automated PR that looks like all the others. PR #287 proposed exactly
+      # this bump (6.12.0 -> 8.9.0) and sat open for ~5 months.
+      #
+      # Ignoring MAJOR only: 6.x patch/minor security updates still flow normally.
+      # If the licence is ever purchased, delete this entry and say so in the PR.
+      - dependency-name: "FluentAssertions"
+        update-types: ["version-update:semver-major"]
 
   # Enable security updates for GitHub Actions
   - package-ecosystem: "github-actions"

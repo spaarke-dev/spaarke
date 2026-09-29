@@ -250,6 +250,163 @@ public sealed class ContextBinderActionRunnerSeamTests
             "an Action with no sprk_modeltier MUST default deterministically to the Standard tier");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // (v) DECLARED COMPANION INPUTS — spaarkeai-compose-r8 task 051, FR-C03 "link 3".
+    //
+    //     The operand channel is SINGLE-VALUED by construction: TryFindDeclaredOperandField
+    //     returns on the FIRST vocabulary match and ResolveOperand builds a one-key object. That
+    //     answers "what content do I run over?" — it was never able to answer "and WHERE did that
+    //     content come from?". So a deterministic anchor (a w14:paraId captured at selection time)
+    //     had nowhere to ride: the client sent it, the server accepted it, and it was silently
+    //     dropped before the prompt. The model was then asked to name its edit target and could
+    //     only do so by QUOTING PROSE BACK — which is a generation step, and generation is lossy.
+    //     That is the root of Compose's "wording differs slightly" dead end.
+    //
+    //     The fix is not to widen the operand vocabulary (adding a 4th name would make the anchor
+    //     COMPETE with selectionText, not accompany it — first match wins, so one would vanish).
+    //     It is to make the Action's declared input schema mean what it says: a property the Action
+    //     DECLARES and the caller SUPPLIES reaches the model, alongside the operand.
+    //
+    //     These three tests pin the whole contract: it arrives, undeclared args still do not, and
+    //     the operand itself is unchanged.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Input schema declaring the operand AND a companion identifier (the compose edit shape).</summary>
+    private const string ComposeAnchoredInputSchema =
+        """{"type":"object","required":["selectionText"],"properties":{"selectionText":{"type":"string"},"targetParaId":{"type":"string"}}}""";
+
+    [Fact]
+    public async Task DispatchAsync_DeclaredCompanionInput_ReachesThePromptAlongsideTheOperand()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeAnchoredInputSchema);
+        h.GivenFlatTextAction("ROLE: Rewrite the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        const string clause = "The Provider total liability is capped at fees paid.";
+        const string paraId = "A1B2C3D4";
+
+        var chunks = await h.DispatchAsync(new { selectionText = clause, targetParaId = paraId });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastPrompt.Should().Contain("## Input").And.Contain(clause);
+        h.OpenAi.LastPrompt.Should().Contain(paraId,
+            "a DECLARED, SUPPLIED input MUST reach the model — otherwise the model cannot echo an "
+            + "identifier and is forced to quote prose back, which is the lossy step this removes");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_UndeclaredArg_DoesNotReachThePrompt()
+    {
+        // The bound on the rule above: DECLARATION is the contract, not "everything in args".
+        // Without this, any caller-supplied field would silently become prompt content.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeInputSchema); // declares selectionText ONLY
+        h.GivenFlatTextAction("ROLE: Explain the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        var chunks = await h.DispatchAsync(
+            new { selectionText = "Liability is capped.", targetParaId = "SHOULDNOTAPPEAR" });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastPrompt.Should().NotContain("SHOULDNOTAPPEAR",
+            "an arg the Action never declared is still accepted-and-ignored");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_CompanionInput_DoesNotDisplaceTheOperand()
+    {
+        // Non-regression for the single-valued operand: the companion rides ALONGSIDE, and the
+        // resolved operand kind is still SelectionText. A 4th vocabulary entry would have failed here.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeAnchoredInputSchema);
+        h.GivenFlatTextAction("ROLE: Rewrite the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        const string clause = "Liability is capped at fees paid.";
+        await h.DispatchAsync(new { selectionText = clause, targetParaId = "A1B2C3D4" });
+
+        h.OpenAi.LastPrompt.Should().Contain(clause,
+            "the operand is still the content the completion runs over — the companion does not replace it");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // (vi) The WHOLE-DOCUMENT compose shape (spaarkeai-compose-r8 task 054, FR-C03)
+    //
+    //      The whole-document revise pass dispatches into a session that HAS a registered file. Before
+    //      task 054 its args were `{revisionIntent}` alone — no operand-vocabulary member — so
+    //      HasStructuredOperand was false and the dispatch took the FILE-operand path. That path builds
+    //      its ContextBindingRequest from the resolved DocumentText only: it passes NO Args and NO
+    //      InputSchemaJson, so `revisionIntent` was accepted at the endpoint and dropped before the
+    //      prompt. The Action's four INSTRUCTIONS-BY-INTENT branches could not be selected, and
+    //      flag-risks (comments-only, empty edits by contract) was indistinguishable from
+    //      improve-clarity.
+    //
+    //      Task 054 supplies `documentText` — the editor's own text with each paragraph's paraId
+    //      prefixed, which is simultaneously the operand and the CLOSED SET the model must choose an id
+    //      from. That flips the branch. These tests pin the flip itself, because it is the link that
+    //      makes every other part of the whole-document anchor chain reachable.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The whole-document Action's declared inputs: the operand plus its two companions.</summary>
+    private const string ReviseDocumentInputSchema =
+        """{"type":"object","required":["revisionIntent","documentText"],"properties":{"documentText":{"type":"string"},"revisionIntent":{"type":"string"},"instruction":{"type":"string"}}}""";
+
+    [Fact]
+    public async Task DispatchAsync_WholeDocumentOperand_WinsOverTheSessionFile_AndCarriesTheIntent()
+    {
+        // The session has a file registered — exactly the real condition. The supplied operand must
+        // still win, because the file path would silently discard both the closed set and the intent.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession(fileId: "file-1"));
+        h.GivenBinding(inputSchema: ReviseDocumentInputSchema);
+        h.GivenFlatTextAction("ROLE: Revise the whole document per the supplied revisionIntent.");
+        h.GivenSessionFileText("RAG-EXTRACTED TEXT — a different projection of the same file.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        const string annotated = "[AAAA0001] 1. Definitions\n[AAAA0002] The receiving party shall indemnify.";
+        var chunks = await h.DispatchAsync(new { revisionIntent = "flag-risks", documentText = annotated });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+
+        // The closed set reached the model, ids beside the content they name.
+        h.OpenAi.LastPrompt.Should().Contain("## Input").And.Contain("[AAAA0002] The receiving party shall indemnify");
+
+        // The intent reached the model as a declared companion. Without this the model cannot tell
+        // flag-risks (comments only) from improve-clarity, and task 055's comments[] half has nothing
+        // reliable to place.
+        h.OpenAi.LastPrompt.Should().Contain("flag-risks",
+            "the declared intent must reach the prompt — the file-operand path drops it entirely");
+
+        // And the RAG extract did NOT come along: one document, one coordinate system. Sending both
+        // would let the model quote from a text the editor cannot place an edit into.
+        h.OpenAi.LastPrompt.Should().NotContain("RAG-EXTRACTED TEXT",
+            "the supplied operand replaces the file projection — the model must quote from the same "
+            + "text the redline is placed into, which is the editor's, not the search index's");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_WholeDocumentWithoutOperand_StillTakesTheFilePath_Unregressed()
+    {
+        // The degradation path: no Compose tab open / no stamped ids ⇒ the client omits documentText and
+        // the dispatch is exactly what it was before task 054. Pinned so the fallback stays a KNOWN
+        // shape rather than an accident.
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession(fileId: "file-1"));
+        h.GivenBinding(inputSchema: ReviseDocumentInputSchema);
+        h.GivenJpsAction(SummarizeSystemPromptJps, SummarizeOutputSchema);
+        h.GivenSessionFileText("RAG-EXTRACTED TEXT — a different projection of the same file.");
+        h.OpenAi.RawJsonToReturn = """{"summary":"ok"}""";
+
+        var chunks = await h.DispatchAsync(new { revisionIntent = "flag-risks" });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastPrompt.Should().Contain("## Document").And.Contain("RAG-EXTRACTED TEXT");
+    }
+
     // ─── Harness ─────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string? fileId = null)
@@ -273,7 +430,7 @@ public sealed class ContextBinderActionRunnerSeamTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files);
+            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
     }
 
     private sealed class Harness

@@ -187,6 +187,20 @@ public sealed class ComposeReadFidelityHarnessSeamTests
                     var content = sdtRun.GetFirstChild<SdtContentRun>();
                     if (content is not null) AppendGoldenInline(content, sb);
                     break;
+                case SimpleField simpleField:
+                    // `w:fldSimple` — the SIMPLE field form (a REF/PAGEREF instruction). Its child runs are
+                    // the field's CACHED RESULT: the text Word actually displays and the projection
+                    // legitimately emits inside a field atom. It was falling through `default:` and being
+                    // dropped from the golden, so a projection that CORRECTLY rendered the cached result
+                    // read as a text-exactness failure.
+                    //
+                    // Found 2026-08-21 by `spaarkeai-compose-r8` task 022, the first corpus document to
+                    // contain a `w:fldSimple` (`ref-cross-references.docx`). The complex three-part form
+                    // (`fldChar`/`instrText`/cached result) was already correct — its cached result sits in
+                    // a plain `w:r` that `AppendGoldenRun` already walks. This is a correction to the
+                    // GOLDEN model, not a relaxation: the assertion now demands text it previously ignored.
+                    AppendGoldenInline(simpleField, sb);
+                    break;
                 default:
                     break;
             }
@@ -381,7 +395,7 @@ public sealed class ComposeReadFidelityHarnessSeamTests
         // closes the <ol> at every interruption and opens a fresh one — a naive browser auto-count
         // would show 1,2,3 then 1,2,3 again, not 4,5,6. Pinning that CURRENT shape (2 separate <ol>
         // blocks, 3 <li> each) so WS-3 landing a continuous 6-item list is a visible, intentional diff.
-        CountOccurrences(projection.Html, "<ol>").Should().Be(2,
+        CountOccurrences(projection.Html, "<ol ").Should().Be(2,
             "WS-3 target (FR-11): today the reader restarts a fresh <ol> after each interruption instead of " +
             "replaying one continuous per-numId counter — see corpus-manifest.md row 9");
         CountOccurrences(projection.Html, "<li>").Should().Be(6, "3 clauses before + 3 after the interruption");
@@ -416,7 +430,7 @@ public sealed class ComposeReadFidelityHarnessSeamTests
         // <ol> (a browser would auto-count 1..7, losing the hierarchy), and RenderParagraph raises a
         // "multi-level-numbering" warning once per level>0 paragraph instead of computing the nested
         // label. 5 of the 7 items are at ilvl>0 (Background, History, Current State, Scope, Key Terms).
-        CountOccurrences(projection.Html, "<ol>").Should().Be(1,
+        CountOccurrences(projection.Html, "<ol ").Should().Be(1,
             "WS-3 target (FR-11): today all ilvl 0/1/2 items land in a single flat <ol> — see corpus-manifest.md row 11");
         CountOccurrences(projection.Html, "<li>").Should().Be(7);
         projection.Warnings.Should().ContainSingle(w => w.Code == "multi-level-numbering" && w.Count == 5,
@@ -434,7 +448,7 @@ public sealed class ComposeReadFidelityHarnessSeamTests
         // form). TODAY: the same per-interruption <ol> restart as nda-interrupted-clauses.docx — 4
         // separate <ol> blocks (Parties=2, Jurisdiction and Venue=2, Factual Allegations=4, First
         // Cause of Action=4), each a naive browser auto-count would show restarting at 1.
-        CountOccurrences(projection.Html, "<ol>").Should().Be(4,
+        CountOccurrences(projection.Html, "<ol ").Should().Be(4,
             "WS-3 target (FR-11): today the reader opens a fresh <ol> per section heading instead of one " +
             "continuous 1..12 run — see corpus-manifest.md row 13");
         CountOccurrences(projection.Html, "<li>").Should().Be(12, "2 + 2 + 4 + 4 numbered paragraphs across the 4 sections");

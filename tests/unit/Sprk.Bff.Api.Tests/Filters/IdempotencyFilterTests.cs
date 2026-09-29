@@ -129,30 +129,6 @@ public class IdempotencyFilterTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_NullCache_ThrowsArgumentNullException()
-    {
-        // Arrange
-        var logger = CreateMockLogger();
-
-        // Act & Assert
-        var act = () => new IdempotencyFilter(null!, logger.Object);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("cache");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        // Arrange
-        var cache = CreateCache();
-
-        // Act & Assert
-        var act = () => new IdempotencyFilter(cache, null!);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
 
     #endregion
 

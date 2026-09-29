@@ -210,6 +210,17 @@ export function entityLabel(entity: string): string {
 }
 
 /**
+ * True when a string is a bare Dataverse GUID (8-4-4-4-12 hex, optional braces). Used to detect a
+ * candidate whose display name fell back to the raw target id — the engine records only a GUID for
+ * thread/attachment matches (no embedded `name="…"`), so the card shows the match reason + entity type
+ * instead of an opaque GUID (email-communication-intelligence-r2 R3-CARD-1). Host `resolveDisplayName`
+ * wiring for real names on those cards is deferred to r3.
+ */
+export function looksLikeGuid(value: string | null | undefined): boolean {
+  return !!value && /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/.test(value);
+}
+
+/**
  * One-sentence rationale for a candidate, e.g.:
  * "Suggested because it continues an email thread already filed here and the
  *  sender and recipients are known participants."
@@ -343,7 +354,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       field,
       entity: primary.targetEntity,
       slotLabel: meta.label,
-      targetName: primary.targetName ?? primary.targetId,
+      targetName: primary.targetName ?? candidateDisplayName(primary) ?? primary.targetId,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
       status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
@@ -721,6 +732,14 @@ export interface PrimaryReviewModel {
   state: PrimaryReviewState;
   /** Up to `PRIMARY_CANDIDATE_SLOTS` candidates (≥ min confidence), highest first. */
   candidates: PrimaryCandidate[];
+  /**
+   * ALL above-floor candidates (≥ min confidence, highest first), BEFORE the top-3
+   * (`PRIMARY_CANDIDATE_SLOTS`) cap the strip renders — `candidates` is its head slice.
+   * Feeds the "See all" modal so a reviewer can file a genuine 4th+ candidate that the
+   * top-3 truncation hid (email-communication-intelligence-r2 R3-CARD-2: the reconcile
+   * strip showed only 3 while a real match, e.g. PAT-942404 at 96.5%, sat off-strip).
+   */
+  allCandidates: PrimaryCandidate[];
   /** The auto-matched (yellow) or confirmed (green) primary, when one exists. */
   primary?: PrimaryCandidate;
 }
@@ -798,13 +817,15 @@ export function derivePrimaryReview(
 ): PrimaryReviewModel {
   const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
   const ranked = flattenPrimaryCandidates(doc);
-  const candidates = ranked.filter(c => c.confidence >= PRIMARY_MATCH_MIN_CONFIDENCE).slice(0, PRIMARY_CANDIDATE_SLOTS);
+  // The full above-floor list feeds the "See all" modal; `candidates` is its top-3 slice.
+  const allCandidates = ranked.filter(c => c.confidence >= PRIMARY_MATCH_MIN_CONFIDENCE);
+  const candidates = allCandidates.slice(0, PRIMARY_CANDIDATE_SLOTS);
   const filedList = filed ?? [];
 
   // 🟢 Confirmed — a human resolved it (status Resolved).
   if (associationStatus === ASSOCIATION_STATUS_RESOLVED_VALUE) {
     const primary = resolveConfirmedPrimary(ranked, filedList, denorm);
-    if (primary) return { state: 'confirmed', candidates, primary };
+    if (primary) return { state: 'confirmed', candidates, allCandidates, primary };
   }
 
   // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
@@ -814,11 +835,11 @@ export function derivePrimaryReview(
   const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
   if (autoMatched && top) {
     const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
-    return { state: 'needs-confirmation', candidates, primary };
+    return { state: 'needs-confirmation', candidates, allCandidates, primary };
   }
 
   // 🔴 Requires review — the reviewer picks from candidates (or links another record).
-  return { state: 'requires-review', candidates };
+  return { state: 'requires-review', candidates, allCandidates };
 }
 
 /** Section status dot (🔴/🟡/🟢) + one-line label for the single-primary model. */

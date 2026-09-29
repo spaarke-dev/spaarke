@@ -3,7 +3,6 @@ import {
   makeStyles,
   tokens,
   Text,
-  ProgressBar,
   Skeleton,
   SkeletonItem,
   Badge,
@@ -53,12 +52,39 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
-  /** Score display row: large score number + denominator + percentage badge */
+  /**
+   * Score numbers, now INSIDE the header row (UAT 2026-08-28: "move the score number so it is
+   * aligned with the header"). Baseline alignment keeps "114.8" and "/ 265" sitting on one line
+   * despite the large size difference.
+   */
   scoreRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "baseline",
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+
+  /** Donut + caption block, replacing the old linear bar and the duplicate % badge. */
+  gaugeRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalL,
+  },
+
+  gaugeCaption: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+
+  gaugeCaptionText: {
+    color: tokens.colorNeutralForeground2,
+  },
+
+  gaugeSubText: {
+    color: tokens.colorNeutralForeground3,
   },
 
   scoreValue: {
@@ -72,23 +98,6 @@ const useStyles = makeStyles({
 
   scoreMax: {
     color: tokens.colorNeutralForeground2,
-  },
-
-  /** Progress bar row */
-  progressRow: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXS,
-  },
-
-  progressLabel: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
-  progressLabelText: {
-    color: tokens.colorNeutralForeground3,
   },
 
   /** Control scores breakdown — shown only when available */
@@ -146,16 +155,6 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Determine ProgressBar color based on percentage.
- * Low scores use warning/danger semantic colors via the appearance prop pattern.
- */
-function scoreColor(pct: number): "brand" | "warning" | "error" {
-  if (pct >= 70) return "brand";
-  if (pct >= 40) return "warning";
-  return "error";
-}
-
-/**
  * Map score percentage to a Badge color token.
  * Uses Fluent v9 semantic colors — adapts automatically to dark mode.
  */
@@ -171,6 +170,92 @@ function scoreBadgeColor(pct: number): "brand" | "warning" | "danger" {
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
+
+/**
+ * Resolve the arc colour to a Fluent semantic token. These are CSS custom properties, so they are
+ * valid SVG `stroke` values AND they re-resolve on theme change — the donut follows dark mode for
+ * free, which a hard-coded hex would not (ADR-021).
+ */
+function arcStroke(pct: number): string {
+  if (pct >= 70) return tokens.colorPaletteGreenForeground1;
+  if (pct >= 40) return tokens.colorPaletteYellowForeground1;
+  return tokens.colorPaletteRedForeground1;
+}
+
+/**
+ * ScoreDonut — the percentage as a ring with the number in the middle.
+ *
+ * Replaces the old linear ProgressBar + separate "43%" Badge. UAT 2026-08-28 asked for a chart and
+ * noted the two were redundant ("replace the 43% or combine the two"), which they were: the bar, the
+ * badge and the "Security posture" caption were three renderings of one number.
+ *
+ * Hand-rolled SVG on purpose — the app has no chart library, and a ~30-line ring is not worth a new
+ * dependency (CLAUDE.md §11: default to reuse, and justify new surface).
+ *
+ * Accessibility: the ring is aria-hidden decoration; the accessible value lives on the role="img"
+ * wrapper, so a screen reader hears one sentence instead of stray numbers.
+ */
+const ScoreDonut: React.FC<{ pct: number; current: number; max: number }> = ({
+  pct,
+  current,
+  max,
+}) => {
+  const SIZE = 108;
+  const STROKE = 12;
+  const radius = (SIZE - STROKE) / 2;
+  const circumference = 2 * Math.PI * radius;
+  // Clamp: a Graph anomaly (current > max) must not draw an arc wrapping past 12 o'clock, which
+  // would read as a LOWER score than it is.
+  const safePct = Math.max(0, Math.min(100, pct));
+  const filled = (safePct / 100) * circumference;
+
+  return (
+    <div
+      role="img"
+      aria-label={`Secure Score ${safePct}% — ${fmt(current)} of ${fmt(max)} points`}
+      style={{ flexShrink: 0, lineHeight: 0 }}
+    >
+      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} aria-hidden="true" focusable="false">
+        {/* Track */}
+        <circle
+          cx={SIZE / 2}
+          cy={SIZE / 2}
+          r={radius}
+          fill="none"
+          stroke={tokens.colorNeutralStroke2}
+          strokeWidth={STROKE}
+        />
+        {/* Value arc — rotated so it starts at 12 o'clock rather than 3 o'clock */}
+        <circle
+          cx={SIZE / 2}
+          cy={SIZE / 2}
+          r={radius}
+          fill="none"
+          stroke={arcStroke(safePct)}
+          strokeWidth={STROKE}
+          strokeLinecap="round"
+          strokeDasharray={`${filled} ${circumference - filled}`}
+          transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
+        />
+        {/* Centre label */}
+        <text
+          x="50%"
+          y="50%"
+          textAnchor="middle"
+          dominantBaseline="central"
+          fill={tokens.colorNeutralForeground1}
+          style={{
+            fontSize: tokens.fontSizeBase600,
+            fontWeight: tokens.fontWeightSemibold,
+            fontFamily: tokens.fontFamilyBase,
+          }}
+        >
+          {safePct}%
+        </text>
+      </svg>
+    </div>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -244,8 +329,6 @@ export const SecureScoreCard: React.FC<SecureScoreCardProps> = ({
     score.maxScore > 0
       ? Math.round((score.currentScore / score.maxScore) * 100)
       : 0;
-  const color = scoreColor(pct);
-  const badgeColor = scoreBadgeColor(pct);
 
   // Top 5 control scores (sorted by name alphabetically for deterministic order)
   const topControls = score.controlScores
@@ -257,14 +340,29 @@ export const SecureScoreCard: React.FC<SecureScoreCardProps> = ({
   // ── Main render ────────────────────────────────────────────────────────
   return (
     <div className={styles.card}>
-      {/* Card header */}
+      {/*
+        ONE header row. It previously duplicated the section header SecurityPage already renders
+        above this card, so "Secure Score" appeared twice on screen (UAT 2026-08-28). SecurityPage
+        now renders no section header for this card, and the score numbers moved up here so the
+        header reads: [icon] Secure Score — 114.8 / 265.
+      */}
       <div className={styles.cardHeader}>
         <span className={styles.cardIcon}>
           <ShieldCheckmark20Regular />
         </span>
-        <Text size={400} weight="semibold" className={styles.cardTitle}>
+        <Text size={400} weight="semibold">
           Secure Score
         </Text>
+        <div className={styles.scoreRow}>
+          <Text size={600} weight="semibold" className={styles.scoreValue}>
+            {fmt(score.currentScore)}
+          </Text>
+          <Text size={400} className={styles.scoreDivider}>/</Text>
+          <Text size={400} className={styles.scoreMax}>
+            {fmt(score.maxScore)}
+          </Text>
+        </div>
+        <span className={styles.cardTitle} />
         <Tooltip
           content="Microsoft Secure Score measures your organization's security posture. A higher score indicates better security controls."
           relationship="description"
@@ -275,30 +373,21 @@ export const SecureScoreCard: React.FC<SecureScoreCardProps> = ({
         </Tooltip>
       </div>
 
-      {/* Score numbers row */}
-      <div className={styles.scoreRow}>
-        <Text size={800} weight="semibold" className={styles.scoreValue}>
-          {fmt(score.currentScore)}
-        </Text>
-        <Text size={400} className={styles.scoreDivider}>/</Text>
-        <Text size={400} className={styles.scoreMax}>
-          {fmt(score.maxScore)}
-        </Text>
-        <Badge
-          color={badgeColor}
-          appearance="filled"
-          size="medium"
-          style={{ marginLeft: tokens.spacingHorizontalS }}
-        >
-          {pct}%
-        </Badge>
-      </div>
-
-      {/* Progress bar */}
-      <div className={styles.progressRow}>
-        <div className={styles.progressLabel}>
-          <Text size={200} className={styles.progressLabelText}>
+      {/*
+        The donut carries the percentage. It replaces BOTH the old linear ProgressBar and the
+        separate "43%" Badge — per UAT those were the same number rendered twice, under a
+        "Security posture" label that did not say what it measured. The caption now explains the
+        measure instead of just naming it.
+      */}
+      <div className={styles.gaugeRow}>
+        <ScoreDonut pct={pct} current={score.currentScore} max={score.maxScore} />
+        <div className={styles.gaugeCaption}>
+          <Text size={300} weight="semibold" className={styles.gaugeCaptionText}>
             Security posture
+          </Text>
+          <Text size={200} className={styles.gaugeSubText}>
+            {fmt(score.currentScore)} of {fmt(score.maxScore)} available security points earned
+            across this tenant&apos;s Microsoft 365 controls.
           </Text>
           {/*
             The endpoint does not return a snapshot date, so this rendered "As of Invalid Date" —
@@ -307,17 +396,11 @@ export const SecureScoreCard: React.FC<SecureScoreCardProps> = ({
           */}
           {score.createdDateTime &&
           !Number.isNaN(new Date(score.createdDateTime).getTime()) ? (
-            <Text size={200} className={styles.progressLabelText}>
+            <Text size={200} className={styles.gaugeSubText}>
               As of {new Date(score.createdDateTime).toLocaleDateString()}
             </Text>
           ) : null}
         </div>
-        <ProgressBar
-          value={score.currentScore / score.maxScore}
-          color={color}
-          thickness="large"
-          aria-label={`Secure Score: ${pct}% (${fmt(score.currentScore)} of ${fmt(score.maxScore)})`}
-        />
       </div>
 
       {/* Control scores breakdown (when available) */}

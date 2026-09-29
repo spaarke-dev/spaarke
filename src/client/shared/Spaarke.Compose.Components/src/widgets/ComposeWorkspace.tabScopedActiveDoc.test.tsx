@@ -65,6 +65,9 @@ jest.mock('../context/composeActionBridge', () => ({
   // spaarkeai-compose-r2 FIX #1b/#7a — Save trigger + save-completed conduits; inert doubles.
   useRegisterComposeSaveHandler: () => undefined,
   useComposeSaveCompleted: () => null,
+  // Task 054 — the anchored-document-text provider conduit; inert double (this suite does not
+  // exercise the whole-document closed set).
+  useRegisterComposeAnchoredDocumentTextProvider: () => undefined,
 }));
 
 // ── Heavy workspace hooks — inert doubles ───────────────────────────────────

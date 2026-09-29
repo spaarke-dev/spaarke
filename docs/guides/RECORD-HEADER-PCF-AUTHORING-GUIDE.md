@@ -1,353 +1,266 @@
-# Record Header PCF Authoring Guide
+# Record Header — Configuration Guide
 
-> **Status**: Published (this project's Phase 4 deliverable)
-> **Last Updated**: 2026-07-03
-> **Related project**: [`projects/record-header-and-notepad-r1/`](../../projects/record-header-and-notepad-r1/)
-> **Related shared library**: [`@spaarke/ui-components`](../../src/client/shared/Spaarke.UI.Components/) — `HeaderToolbar`, `RecordHeaderShell`, `FieldGrid`, field renderers, `useRecordFieldValues`, `useRelatedCount`, `useRecordHeaderToolbarActions`
+> **Status**: Published · rewritten 2026-08-27 from shipped code (`record-header-and-notepad-r2`)
+> **Control**: `Spaarke.Records.RecordHeader` — solution `RecordHeaderPcf`, currently **v1.1.11**
+> **Source**: [`src/client/pcf/RecordHeader/`](../../src/client/pcf/RecordHeader/) · shared primitives in [`@spaarke/ui-components`](../../src/client/shared/Spaarke.UI.Components/)
+
+---
+
+## ⚠️ If you came here to build a per-entity header PCF — stop
+
+**There is ONE Record Header control, and it works on every entity.** You do not write code to put a
+header on a new table; you paste JSON into a form property.
+
+The previous version of this guide taught the opposite: a `ProjectHeaderPcf` / `InvoiceHeaderPcf` /
+`EventHeaderPcf` recipe, one thin PCF cloned per entity. **That approach was withdrawn on
+2026-08-21** — it would have duplicated ~180 lines of identical machinery four-plus times, and each
+clone would need its own build, solution, version and deployment. The re-scope is recorded in
+[`projects/record-header-and-notepad-r2/design.md`](../../projects/record-header-and-notepad-r2/design.md).
+
+If you find other docs describing per-entity header PCFs, they are stale — see the staleness table in
+[the project CLAUDE.md](../../projects/record-header-and-notepad-r2/CLAUDE.md).
 
 ---
 
 ## Purpose
 
-Explains how to ship a new per-entity Record Header PCF (`ProjectHeaderPcf`, `InvoiceHeaderPcf`, `EventHeaderPcf`, etc.) that composes the shared primitives added to `@spaarke/ui-components` in `record-header-and-notepad-r1`. Each new per-entity PCF is ~80 LOC of thin composition — a manifest, a ~20-LOC PCF class, and a ~40-LOC view file that wires the shared toolbar hook to the shared field grid.
+How to put the Spaarke Record Header on a Dataverse table's main form, and how to configure what it
+shows. **This is maker work — no code, no build, no new solution.**
 
-This guide is the sustained value of the project. Follow it and you can ship a new entity's header card without re-reading `spec.md`.
+Adding the header to a new entity is: bind the control to a field on the form, paste a `layoutJson`
+layout, move the raw fields into a hidden section, publish.
 
-For the design rationale (why a shared primitive set, why one PCF per entity, why the sparkle popover reads inline), see [`spec.md`](../../projects/record-header-and-notepad-r1/spec.md).
+---
+
+## What the header gives you
+
+A card at the top of the form with:
+
+- a **title** and a **toolbar** — identical on every entity: AI-summary sparkle, To Do launcher, Notepad launcher
+- a **field grid** (2 or 3 columns) whose contents you configure
+- **inline editing** on every field, staged into the form buffer so the form's own Save commits it
+
+Field renderers are chosen automatically from each attribute's Dataverse type, and can be overridden:
+
+| renderer | used for | notes |
+|---|---|---|
+| `text` | String | the only renderer that shows a required `*` marker |
+| `textarea` | Memo | `maxLines` controls height before it scrolls |
+| `lookup` | Lookup | inline type-ahead + **Advanced** dialog — see [`inline-lookup-field.md`](../../.claude/patterns/ui/inline-lookup-field.md) |
+| `optionset` | Picklist / Status / State | dropdown fed from metadata |
+| `date` / `datetime` | DateTime | mode read from the form's own `getFormat()` |
+| `number` / `currency` | Integer / Decimal / Double / Money | currency symbol per record |
+| `boolean` | TwoOptions | always-visible Switch when editable |
 
 ---
 
 ## Prerequisites
 
-- Node 18+ and npm
-- PAC CLI installed (`pac`) — see [`PCF-DEPLOYMENT-GUIDE.md`](PCF-DEPLOYMENT-GUIDE.md)
-- Workspace-level shared library present at `src/client/shared/Spaarke.UI.Components/` and built (`npm install && npm run build` inside that folder)
-- Familiarity with Fluent UI v9 semantic tokens per [ADR-021](../adr/ADR-021-fluent-ui-design-system.md) — no hex/rgb literals allowed
-- Familiarity with the PCF platform-library React 16/17 boundary per [ADR-022](../adr/ADR-022-pcf-platform-libraries.md) — shared components consumed by PCFs are constrained to React 16-safe APIs
-- Understanding of the ADR-024 dual-field polymorphic pattern per [ADR-024](../adr/ADR-024-polymorphic-resolver-pattern.md) — memo/todo creates go through `PolymorphicResolverService.applyResolverFields()`; consumers of the Record Header don't need to know the details, but the Notepad launch contract sits on top of that pattern
+- The `RecordHeaderPcf` solution imported into the environment ([`/pcf-deploy`](../../.claude/skills/pcf-deploy/SKILL.md))
+- Form-designer access, including the **classic** designer (the modern designer cannot edit a static `Multiple` property comfortably)
+- The attributes you want to show already exist on the table
 
 ---
 
-## Shared Primitives Overview
+## Bind the header to a form
 
-All primitives live under `src/client/shared/Spaarke.UI.Components/src/`. Consume them via deep-path imports (see [Bundle Optimization](#bundle-optimization--mandatory-for-consuming-pcfs) below).
+### 1. Add the control
 
-| Primitive | Path | Purpose |
-|---|---|---|
-| `HeaderToolbar` | `components/HeaderToolbar/` | Fluent v9 flex container: title (left, ellipsis) + right-icon slots with `<CounterBadge>` overlays. Every slot is wrapped in `<Tooltip relationship="label">` for a11y. |
-| `RecordHeaderShell` | `components/RecordHeader/` | Fluent v9 card container with `HeaderToolbar` on top and a body slot; renders Skeleton placeholders when `loading===true`. |
-| `FieldGrid` | `components/RecordHeader/` | CSS grid (`grid-template-columns: repeat(columns, 1fr)`) supporting 2 or 3 columns; children carry a `span` prop (1..3). A `span=3` field starts a new row. |
-| `TextField`, `LookupField` (top-level barrel exports it as `RecordHeaderLookupField` due to a name collision with the pre-existing top-level `LookupField`), `OptionSetField`, `TextareaField` | `components/RecordHeader/fields/` | Field renderers; each takes `label`, `value`, `span`. `LookupField` opens the target via `Xrm.Navigation.navigateTo({ pageType: "entityrecord", ... })`; `TextareaField` clamps `max-height` and offers a Fluent v9 "show more" popover for the full body. |
-| `useRecordFieldValues(entity, recordId, fields)` | `hooks/useRecordFieldValues.ts` | `Xrm.WebApi.retrieveRecord` wrapper. Returns `{ values, loading, error }`. Stable dep key — refetches only when `recordId` or `fields` change. |
-| `useRelatedCount(relatedEntity, filter)` | `hooks/useRelatedCount.ts` | `Xrm.WebApi.retrieveMultipleRecords` with `$count=true&$top=0`. Filter-agnostic — the consumer builds the OData filter (e.g. `_regardingobjectid_value eq {guid}` for `sprk_todo`, `_sprk_regardingmatter_value eq {guid}` for `sprk_memo` on Matter per the ADR-024 dual-field pattern). Re-queries on mount and on window-focus. |
-| `useRecordHeaderToolbarActions({ entity, recordId, recordSummary })` | `hooks/useRecordHeaderToolbarActions.ts` | The linchpin hook. Returns `{ toolbarProps, sparklePopoverOpen, setSparklePopoverOpen, sparklePopoverContent }` — three wired icon slots (sparkle / checkmark / annotation) with per-slot badge counts, popover state for sparkle (renders the record summary body inline; empty-state when null), and `Xrm.Navigation.navigateTo` calls for the SmartTodo modal (85%×85%) and Notepad code page (70%×80%). Consumers pass `recordSummary` from `useRecordFieldValues` so the hook never issues a second Xrm call for the summary. |
+Open the table's **main form** → **Edit** → **Edit in classic**. Click the field the header will
+replace — conventionally the **primary name attribute** — then **Controls → Add Control → Spaarke
+Record Header**, and tick **Web** (plus Phone/Tablet if you want it there).
 
-The design constraint per [ADR-012](../adr/ADR-012-shared-component-library.md) and [ADR-011](../adr/ADR-011-dataset-pcf.md): shared primitives are typed components — no runtime schemas, no per-entity conditionals inside the hook. Per-entity thin PCFs specialize by passing an `entity` logical name and a field list.
+### 2. Paste the layout
 
----
-
-## Per-Entity Thin PCF Pattern
-
-The thin PCF has three files: a manifest, a `control/index.ts` class, and a `control/<Entity>HeaderView.tsx` view. `MatterHeader` (this project's reference) totals 90 LOC (verified in `notes/bundle-size.md` — 10 LOC of headroom under NFR-02's ≤100 ceiling). A new entity's PCF is structurally identical.
-
-### 1. Manifest — `control/ControlManifest.Input.xml`
-
-```xml
-<?xml version="1.0" encoding="utf-8" ?>
-<manifest>
-  <control namespace="Spaarke.Records" constructor="ProjectHeader" version="1.0.0"
-           display-name-key="Project Header"
-           description-key="Compact summary card + 3-action toolbar for Project records."
-           control-type="virtual">
-
-    <!-- Optional recordId override; defaults to context.mode.contextInfo.entityId -->
-    <property name="recordId" display-name-key="Record ID (override)"
-              description-key="Optional override for the record GUID."
-              of-type="SingleLine.Text" usage="input" required="false" />
-
-    <resources>
-      <code path="index.ts" order="1"/>
-      <platform-library name="React" version="16.14.0" />
-      <platform-library name="Fluent" version="9.46.2" />
-    </resources>
-
-    <feature-usage>
-      <uses-feature name="WebAPI" required="true" />
-      <uses-feature name="Utility" required="true" />
-      <uses-feature name="Navigation" required="true" />
-    </feature-usage>
-  </control>
-</manifest>
-```
-
-Key points:
-
-- `constructor="<Entity>Header"` — one word, capitalized. Namespace is always `Spaarke.Records`.
-- `version="1.0.0"` — the version number appears in **four** locations (manifest, `control/version.ts`, Solution manifest, Solution Control Manifest). Per [`PCF-DEPLOYMENT-GUIDE.md`](PCF-DEPLOYMENT-GUIDE.md), keep them in sync.
-- **Exactly one** input property (`recordId`, optional override). Do NOT add `entity` or `fieldSchema` properties — the entity is compile-time-fixed in the view file. This is what makes the PCF "per-entity" and thin (per [ADR-006](../adr/ADR-006-pcf-over-webresources.md) + [ADR-011](../adr/ADR-011-dataset-pcf.md)).
-- `control-type="virtual"` + `<platform-library>` entries enable platform-library modern theming — Fluent v9 auto-applies the host theme without a manual `FluentProvider` wrap.
-- Manifest lives at `control/ControlManifest.Input.xml` (co-located with `index.ts`). `pcf-scripts` places `generated/` next to the manifest, so this layout is required.
-
-### 2. PCF class — `control/index.ts` (~20 LOC)
-
-```ts
-import { IInputs, IOutputs } from './generated/ManifestTypes';
-import * as React from 'react';
-import { ProjectHeaderView } from './ProjectHeaderView';
-
-export class ProjectHeader implements ComponentFramework.ReactControl<IInputs, IOutputs> {
-  public init(
-    _context: ComponentFramework.Context<IInputs>,
-    _notifyOutputChanged: () => void,
-    _state: ComponentFramework.Dictionary
-  ): void {
-    // No async init; host-context Xrm.WebApi only (no @spaarke/auth).
-  }
-
-  public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
-    // context.mode.contextInfo exists at runtime but is not in @types/powerapps-component-framework.
-    // Type-cast pattern mirrors SemanticSearchControl / ScopeConfigEditor.
-    const contextInfo = (context.mode as unknown as { contextInfo?: { entityId?: string } }).contextInfo;
-    const recordId = context.parameters.recordId?.raw || contextInfo?.entityId || '';
-    return React.createElement(ProjectHeaderView, { recordId });
-  }
-
-  public getOutputs(): IOutputs {
-    return {};
-  }
-
-  public destroy(): void {
-    // No cleanup — no listeners, no timers, no auth handles.
-  }
-}
-```
-
-Use `ComponentFramework.ReactControl<IInputs, IOutputs>` (not `StandardControl`). Rationale (task 021 D-01):
-
-1. Matches every other Spaarke PCF (`SemanticSearchControl`, `DocumentRelationshipViewer`).
-2. Platform-library auto-theming with `control-type="virtual"` — no manual `FluentProvider` needed (approach 1 in `.claude/patterns/pcf/fluent-v9-modern-theming.md`).
-3. React 16-API compatible per [ADR-022](../adr/ADR-022-pcf-platform-libraries.md) — no `createRoot`, no `react-dom/client`, no concurrent APIs. Grep verifies.
-4. Saves ~5 LOC over the `StandardControl` + `ReactDOM.render()` pattern.
-
-### 3. View — `control/<Entity>HeaderView.tsx` (~40 LOC)
-
-The heart of the per-entity PCF. Below is a hypothetical `ProjectHeaderView.tsx` template modeled on the `MatterHeaderView.tsx` reference:
-
-```tsx
-import * as React from 'react';
-import { Popover, PopoverSurface } from '@fluentui/react-components';
-
-// Deep-path imports to bypass the top-level `@spaarke/ui-components` barrel
-// (drags EntityCreationService → mammoth chain, ~550 KiB). This is the
-// convention for ALL PCFs consuming @spaarke/ui-components until the shared
-// lib grows a public `exports` field. See "Bundle optimization" section.
-import {
-  FieldGrid,
-  RecordHeaderShell,
-  TextField,
-  TextareaField,
-} from '@spaarke/ui-components/dist/components/RecordHeader';
-import { LookupField as RecordHeaderLookupField } from '@spaarke/ui-components/dist/components/RecordHeader/fields';
-import { useRecordFieldValues, useRecordHeaderToolbarActions } from '@spaarke/ui-components/dist/hooks';
-
-const ENTITY = 'sprk_project';
-const FIELDS = [
-  'sprk_projectnumber',
-  'sprk_projectname',
-  'sprk_manager',        // lookup
-  'sprk_status',         // optionset (or lookup, depending on schema)
-  'sprk_description',
-  'sprk_recordsummary',  // fetched inline for the sparkle popover (FR-08)
-];
-
-export interface IProjectHeaderViewProps {
-  /** Record GUID (no braces). Empty string = "no record selected". */
-  recordId: string;
-}
-
-export const ProjectHeaderView: React.FC<IProjectHeaderViewProps> = ({ recordId }) => {
-  const { values, loading } = useRecordFieldValues(ENTITY, recordId, FIELDS);
-  const { toolbarProps, sparklePopoverOpen, setSparklePopoverOpen, sparklePopoverContent } =
-    useRecordHeaderToolbarActions({
-      entity: ENTITY,
-      recordId,
-      recordSummary: (values?.sprk_recordsummary ?? null) as string | null,
-    });
-
-  return (
-    <>
-      <RecordHeaderShell toolbar={toolbarProps} loading={loading}>
-        <FieldGrid columns={3}>
-          <TextField span={1} label="Project Number" value={values?.sprk_projectnumber as string} required />
-          <TextField span={2} label="Project Name" value={values?.sprk_projectname as string} />
-          <RecordHeaderLookupField span={1} label="Manager" value={values?.sprk_manager as never} />
-          <RecordHeaderLookupField span={1} label="Status" value={values?.sprk_status as never} />
-          <TextareaField span={3} label="Description" value={values?.sprk_description as string} />
-        </FieldGrid>
-      </RecordHeaderShell>
-      <Popover open={sparklePopoverOpen} onOpenChange={(_, d) => setSparklePopoverOpen(d.open)}>
-        <PopoverSurface>{sparklePopoverContent}</PopoverSurface>
-      </Popover>
-    </>
-  );
-};
-```
-
-Notes:
-
-- The consumer owns the `<Popover>` shell so the sparkle button rendered inside `HeaderToolbar` remains the anchor.
-- The view is compile-time-fixed on `ENTITY = 'sprk_project'`. Per [ADR-011](../adr/ADR-011-dataset-pcf.md), we prefer typed per-entity components over runtime schema resolution.
-- Pass `recordSummary` to `useRecordHeaderToolbarActions` so the sparkle popover reads the summary body inline — no separate `Xrm.WebApi` call. If the entity doesn't have `sprk_recordsummary` populated yet, the popover renders "No summary yet" (empty-state per FR-08).
-- The refresh icon in the sparkle popover is **rendered but unwired** in R1 per FR-08a. A follow-on project will wire it to a new BFF endpoint; do NOT add BFF code here per NFR-07.
-- Version footer (task 022 pattern from `MatterHeaderView.tsx`) is optional — MatterHeader renders one via `makeStyles` at bottom-right; add it to your view or skip it. In dev/harness mode it's helpful for QA; production may hide it via a build flag.
-
----
-
-## Bundle Optimization — MANDATORY for Consuming PCFs
-
-Discovered in task 024 (see [`notes/bundle-size.md`](../../projects/record-header-and-notepad-r1/notes/bundle-size.md)): the shared library's top-level barrel (`dist/index.js`) re-exports `EntityCreationService`, which imports `@spaarke/sdap-client`, which pulls in `mammoth` (docx-to-HTML converter) plus `xmldom`, `bluebird`, `xmlbuilder`, `dingbat-to-unicode`, `lop` — **~550 KiB of pre-minified source** that a header card doesn't need. Webpack cannot tree-shake through the CommonJS barrel emit.
-
-The fix is three coordinated changes. **All three must be present** or the bundle bloats past NFR-04's 250 KB ceiling. Post-fix `MatterHeaderPcf` measures 38 KB ungzipped / 10 KB gzipped — a 43× reduction.
-
-### Fix 1 — `featureconfig.json` at PCF root
+Set **Layout JSON** to a *static value*:
 
 ```json
 {
-  "pcfReactPlatformLibraries": "on",
-  "pcfAllowCustomWebpack": "on"
+  "_version": "1.0",
+  "title": "Project Information",
+  "columns": 3,
+  "summaryField": "sprk_recordsummary",
+  "fields": [
+    { "name": "sprk_projectnumber", "span": 1, "required": true },
+    { "name": "sprk_projectname", "span": 2 },
+    { "name": "sprk_projecttype_ref", "span": 1 },
+    { "name": "sprk_openeddate", "span": 1 },
+    { "name": "sprk_highpriority", "span": 1 },
+    { "name": "sprk_projectdescription", "span": 3, "renderer": "textarea" }
+  ]
 }
 ```
 
-Without this, `<platform-library>` entries in the manifest are declared but not enforced — React + Fluent still get bundled.
+**Leave it blank** and the header derives a sensible layout from form metadata instead — primary name
+first, then up to four more non-system fields in form order. Good for a quick trial.
 
-### Fix 2 — `webpack.config.js` at PCF root
+### 3. 🚨 MOVE the raw fields — do NOT delete them
 
-```javascript
-module.exports = {
-  optimization: {
-    usedExports: true,
-    sideEffects: true,
-    innerGraph: true,
-    providedExports: true,
-  },
-  module: {
-    rules: [
-      {
-        // Mark @fluentui/react-icons as side-effect-free for tree-shaking
-        test: /[\\/]node_modules[\\/]@fluentui[\\/]react-icons[\\/]/,
-        sideEffects: false,
-      },
-    ],
-  },
-};
-```
+The fields your layout names **must stay on the form**. Put them in a collapsed section, or set their
+controls to not-visible — but do not remove them.
 
-Marks `@fluentui/react-icons` as side-effect-free so webpack drops unused icon chunks (~6.8 MB otherwise).
+**Why**: inline edits stage through the form buffer via `Xrm.Page.getAttribute(name).setValue(v)`,
+and `getAttribute` returns `null` for a field with no control on the form. Delete the field and every
+edit to it throws `Field '<name>' not on form`. This cost a full UAT round to diagnose; the shipped
+R1 Matter form keeps every edited field present for exactly this reason.
 
-### Fix 3 — deep-path imports in the view file
+### 4. Save → Publish
 
-```typescript
-// GOOD — targeted sub-barrels; no EntityCreationService drag-in
-import { FieldGrid, RecordHeaderShell, TextField, TextareaField }
-  from '@spaarke/ui-components/dist/components/RecordHeader';
-import { LookupField as RecordHeaderLookupField }
-  from '@spaarke/ui-components/dist/components/RecordHeader/fields';
-import { useRecordFieldValues, useRecordHeaderToolbarActions }
-  from '@spaarke/ui-components/dist/hooks';
-
-// BAD — top-level barrel pulls the docx pipeline into your bundle
-// import { RecordHeaderShell, FieldGrid, ... } from '@spaarke/ui-components';
-```
-
-`SemanticSearchControl` and `DocumentRelationshipViewer` follow this same convention. Encode it in your view file and it stays there until the shared lib grows a public `exports` field.
+Then open a record and confirm the header renders.
 
 ---
 
-## Notepad Launch Contract
+## 🚨 Edit the layout in ALL THREE form factors
 
-The Notepad code page ships in this project at `src/solutions/Notepad/` and deploys as the `sprk_notepad_page` webresource. Any Spaarke surface can launch it via a URL contract (spec NFR-09 — external API surface; breaking changes require a migration plan).
+The classic designer stores a **separate copy of `layoutJson` per form factor** — Web, Tablet and
+Phone each get their own `<customControl>` block with its own full copy.
+
+Edit one and the others silently diverge, which presents as "the layout is wrong, but only on
+tablet". Verified 2026-08-27 against the live `sprk_project` form: three copies, currently
+byte-identical. Change one, change all three.
+
+---
+
+## Configuration reference
+
+Full schema: [`RecordHeaderConfiguration.ts`](../../src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts).
+
+| key | type | notes |
+|---|---|---|
+| `_version` | `"1.0"` | required — the validity discriminator |
+| `title` | string | header caption; the manifest `title` property outranks it |
+| `columns` | `2 \| 3` | grid width. Default 3 |
+| `summaryField` | string | column behind the sparkle. Defaults to `sprk_recordsummary` |
+| `fields[]` | array | required, in render order |
+| `fields[].name` | string | attribute logical name |
+| `fields[].span` | `1..3` | clamped to `columns` |
+| `fields[].label` | string | overrides the form label |
+| `fields[].renderer` | see table above | overrides the type-derived renderer |
+| `fields[].readOnly` | boolean | renders without an edit affordance |
+| `fields[].required` | boolean | `*` marker — **text renderer only** |
+| `fields[].maxLines` | number | `textarea` height before scrolling |
+
+**Bad config never blanks the form.** Malformed JSON, a wrong `_version`, or an absent property each
+produce a `console.warn` and fall back to derived defaults. That is a hard requirement (NFR-10), not
+best-effort.
+
+### Manifest properties
+
+| property | type | purpose |
+|---|---|---|
+| `boundField` | bound | the field the control replaces |
+| `title` | SingleLine.Text | title override; outranks `layoutJson.title` |
+| `showVersion` | TwoOptions | version footer — useful during QA |
+| `layoutJson` | **Multiple** | the layout |
+
+`layoutJson` is `of-type="Multiple"` deliberately: the classic designer caps a static
+`SingleLine.Text` at **100 characters**, and a real layout is ~400 bytes. Verified end-to-end
+including solution transport — see [`spike-layoutjson-ergonomics.md`](../../projects/record-header-and-notepad-r2/notes/spike-layoutjson-ergonomics.md).
+
+---
+
+## The sparkle (AI summary)
+
+Shown when `summaryField` names an attribute that **exists** — not when it is populated. An
+existing-but-empty column shows the sparkle with "No summary yet"; a separate project populates
+these columns. When the attribute is absent the affordance is omitted entirely rather than rendered
+dead.
+
+The refresh icon is deliberately **absent** — it needs a BFF endpoint that is out of scope (DEF-01).
+
+---
+
+## Notepad launch contract
+
+Unchanged, and it is **external API** — breaking changes need a migration plan (NFR-09).
 
 ```typescript
 Xrm.Navigation.navigateTo(
-  {
-    pageType: 'webresource',
-    webresourceName: 'sprk_notepad_page',
-    data: `regardingEntity=${entity}&regardingId=${recordId}`,
-  },
+  { pageType: 'webresource', webresourceName: 'sprk_notepad_page',
+    data: `regardingEntity=${entity}&regardingId=${recordId}` },
   { target: 2, position: 1, width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } }
 );
 ```
 
-Contract:
+Supported parents: `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_invoice`, `sprk_budget`,
+`sprk_workassignment`. An unsupported entity gets a warning MessageBar and no CRUD. To extend, add
+the lookup + resolver fields to `sprk_memo` per [ADR-024](../../.claude/adr/ADR-024-polymorphic-resolver-pattern.md)
+and extend `SUPPORTED_MEMO_PARENTS` in `toolbarLaunchDefaults` — extend, don't fork (CLAUDE.md §11).
 
-- **`regardingEntity`** — logical name. Supported (schema-verified via Dataverse MCP in task 001): `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_invoice`, `sprk_budget`, `sprk_workassignment`.
-- **`regardingId`** — record GUID (with or without braces).
-- **Unsupported entity** — Notepad renders a Fluent v9 `MessageBar` warning ("Notepad does not support memos for entity type '{X}'. Contact your admin.") and does not attempt CRUD.
-- **Missing params** — Notepad renders a `MessageBar` error ("Missing regarding context") with a Close button that dismisses the modal.
-
-Consumers today: `useRecordHeaderToolbarActions` (annotation icon at 70%×80%). Consumers tomorrow: ribbon buttons, workspace widgets, any surface that regards a Matter/Project/Event/Invoice/Budget/WorkAssignment.
-
-Under the hood, Notepad memo-create uses `PolymorphicResolverService.applyResolverFields()` from `@spaarke/ui-components` per [ADR-024](../adr/ADR-024-polymorphic-resolver-pattern.md). The URL contract is entity-agnostic; memo-create is schema-limited to the 6 supported parents. This is fine — the launch surface doesn't need to know.
+SmartTodo uses `action=openTodos&regardingType=…&regardingId=…`, also external API.
 
 ---
 
-## Testing + Deploying
+## For developers
 
-### Testing
+Most changes to this control are **maker** changes. If you are editing code:
 
-Unit tests for field renderers and hooks per [ADR-038](../adr/ADR-038-testing-strategy.md); integration test composing all four field renderers in a `FieldGrid`; integration test asserting `useRecordHeaderToolbarActions` returns three wired slots. The Notepad code page uses a jsdom + `react-dom/client` harness — `@testing-library/react` is intentionally NOT in devDeps to keep the bundle lean.
+### Bundle optimization — still MANDATORY
 
-Any test file that hits `Xrm.WebApi` should mock it via a Jest `jest.fn()` shim (SmartTodo + MatterHeader integration tests are the canonical references).
+The triad below is unchanged from R1 and still load-bearing. Without all three the bundle blows past
+the 250 KB ceiling; with it, v1.1.11 measures **116 KB** (47%).
+
+1. **`featureconfig.json`** at PCF root — `pcfReactPlatformLibraries: "on"`, `pcfAllowCustomWebpack: "on"`. Without it the `<platform-library>` declarations are ignored and React + Fluent get bundled.
+2. **`webpack.config.js`** at PCF root — marks `@fluentui/react-icons` side-effect-free (~6.8 MB of icon chunks otherwise).
+3. **Deep-path imports** — `@spaarke/ui-components/dist/components/RecordHeader`, never the top-level barrel, which drags `EntityCreationService` → `mammoth` (~1.6 MB vs ~40 KB).
+
+⛔ **Two "clever" bundle fixes have already failed. Do not re-derive them.** Lazy-loading a renderer
+measured *larger* (`pcf-scripts` emits one chunk, so `import()` inlines back). Externalising granular
+`@fluentui/*` packages built clean, passed static verification, then **crashed at runtime with
+minified React error #31** — it splits Fluent's slot machinery across two live copies. A successful
+build proves nothing about a PCF's runtime.
+
+### Rules that bit us
+
+- **`npm run build:prod`**, never `npm run build` — the default is a dev build 10–15× larger ([AP-1](../../.claude/FAILURE-MODES.md)).
+- **Rebuild the shared library first.** PCFs bundle `dist/`, not source; a stale `dist/` silently ships old code. The `ensure-dist-fresh` prebuild guard handles this for wired PCFs.
+- **Version bumps hit 5 locations**, not 4 — `pack.ps1` is the fifth and it names the emitted zip.
+- **Call `Xrm` methods directly on their namespace object.** `const f = xrm.Utility.lookupObjects` detaches the receiver and throws on `this._clientApiExecutor`. This has bitten twice, on two different namespaces — [G-14](../../.claude/FAILURE-MODES.md).
+- **`Xrm.Utility.getEntityMetadata` returns the CLIENT API shape** — numeric `AttributeType`, string `DisplayName`, and **no `Format` or `Targets` at all**. Those two are filled from the live form via `getFormat()` / `getEntityTypes()`. Read the shipped `@types/xrm` before assuming a field exists — [G-13](../../.claude/FAILURE-MODES.md).
+- **A `$select` is all-or-nothing.** One unrecognised column fails the whole retrieve and blanks every cell — [G-12](../../.claude/FAILURE-MODES.md). This is why the sparkle column is existence-gated before it joins the select.
+
+### Two components named `LookupField`
+
+| path | what | used for |
+|---|---|---|
+| `components/LookupField/LookupField.tsx` | inline type-ahead | **editable** lookups |
+| `components/RecordHeader/fields/LookupField.tsx` (aliased `RecordHeaderLookupField`) | display + navigate | read-only / target-less lookups |
+
+Importing the wrong one is the easiest mistake in this area. See [`inline-lookup-field.md`](../../.claude/patterns/ui/inline-lookup-field.md).
 
 ### Deploying
 
-Standard PCF flow per the `/pcf-deploy` skill and [`PCF-DEPLOYMENT-GUIDE.md`](PCF-DEPLOYMENT-GUIDE.md):
-
-1. `npm run build:prod` in the PCF folder. **NOT** `npm run build` — see `.claude/FAILURE-MODES.md#AP-1`.
-2. Copy `out/controls/control/{bundle.js, ControlManifest.xml}` to `Solution/Controls/sprk_Spaarke.Records.<Entity>Header/`.
-3. Run `pack.ps1` from `Solution/` — produces the zipped solution.
-4. `pac solution import --path Solution/bin/<Entity>HeaderPcf_v1_0_0.zip --publish-changes`.
-5. Bind the PCF to the entity form's header section via the form designer (maker task).
-
-For the Notepad code page, use `/code-page-deploy` per [ADR-026](../adr/ADR-026-full-page-custom-page-standard.md).
+Per [`/pcf-deploy`](../../.claude/skills/pcf-deploy/SKILL.md): bump 5 locations → `npm run build:prod`
+→ copy `out/controls/control/{bundle.js,ControlManifest.xml}` into
+`Solution/Controls/sprk_Spaarke.Records.RecordHeader/` → `pack.ps1` → `pac solution import
+--publish-changes` → hard-refresh (Ctrl+Shift+R) and check the version footer.
 
 ---
 
 ## Troubleshooting
 
-Gotchas caught during this project (root causes documented in `notes/task-021-deviations.md` + `notes/bundle-size.md`):
+The control logs two diagnostics to the console on every load. Read them before theorising — they
+were added precisely because three UAT rounds were spent guessing at platform behaviour.
 
-| Symptom | Root Cause | Fix |
+- **`[RecordHeader] form/metadata diagnostic`** — what it READ: Xrm.Page availability, control count, resolved formats/targets, and **`notOnForm`**.
+- **`[RecordHeader] field decisions`** — what it DECIDED per field: renderer, attributeType, format, targets, readOnly, editable, and `picker: 'inline' | 'display'`.
+
+| symptom | cause | fix |
 |---|---|---|
-| Bundle > 1 MB | Missing one of the three bundle-optimization fixes | Apply all three: `featureconfig.json` + `webpack.config.js` + deep-path imports. |
-| `TS2339: Property 'contextInfo' does not exist on type 'Mode'` | `@types/powerapps-component-framework@1.3.18` gap | Cast: `(context.mode as unknown as { contextInfo?: { entityId?: string } }).contextInfo?.entityId`. |
-| `TS5083: Cannot read file '.../tsconfig_base.json'` | Missing `tsconfig.json` at PCF root | Copy from `SemanticSearchControl/tsconfig.json`. |
-| `Cannot find module 'ajv/dist/compile/codegen'` at build | `pcf-scripts` pins `ajv@6`, but `ajv-keywords@5.1.0` needs `ajv@^8` | `npm install ajv@^8.12.0 --save-dev --legacy-peer-deps` in the PCF folder. |
-| `Can't resolve '@spaarke/sdap-client'` from `EntityCreationService.js` | `Spaarke.SdapClient` symlink target has no `dist/` | `npm install && npm run build` inside `src/client/shared/Spaarke.SdapClient/` first. |
-| `Cannot find module './generated/ManifestTypes'` | Manifest at PCF root but code under `control/` — `pcf-scripts` puts `generated/` next to the manifest | Move `ControlManifest.Input.xml` into `control/` and use `<code path="index.ts">` relative to the manifest. |
-| SmartTodo modal opens the wrong page | Wrong webresource name in `toolbarLaunchDefaults` | The name is `sprk_smarttodo` (verified via Dataverse MCP in task 020) — NOT `sprk_smarttodo_page`. |
-
----
-
-## FAQ
-
-1. **Can I add a 6th field?** Yes — increase `FieldGrid` rows or use `span=2`/`span=3` wisely. It's a CSS grid; adding rows is natural. Compact cards look best at 5–7 visible fields.
-2. **Can I use a `LookupField` twice?** Yes — repeat as needed. If you need `OptionSetField` instead (e.g., for `sprk_status`), just swap the renderer. Both are exported from `components/RecordHeader/fields/`.
-3. **Do I need a `webpack.config.js`?** YES. Without it, Fluent icons alone bloat the bundle past the 250 KB ceiling. Copy the one from `MatterHeader/`.
-4. **Can I add a 4th toolbar action?** Only by extending `useRecordHeaderToolbarActions` in the shared lib (a separate project). Do not fork the hook per [CLAUDE.md §11 (Component Justification)](../../CLAUDE.md). The three actions (sparkle / checkmark / annotation) are the current contract; a 4th would need a spec change and a follow-on shared-lib update.
-5. **What if my entity isn't in the Notepad supported list?** Notepad shows a warning `MessageBar` and no CRUD. To extend: (a) add the entity-specific lookup + resolver fields to `sprk_memo` per [ADR-024](../adr/ADR-024-polymorphic-resolver-pattern.md), (b) extend the `SUPPORTED_MEMO_PARENTS` map in `@spaarke/ui-components` `toolbarLaunchDefaults`, (c) update `PolymorphicResolverService` nav-prop discovery if needed. This is a follow-on project per §11 (extend existing, don't fork).
-6. **Should I use `@spaarke/auth` for Dataverse reads?** NO — per NFR-05 and [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md), Record Header PCFs are host-context surfaces. Use `Xrm.WebApi` exclusively (which the shared hooks already do). Grep at code review time verifies. Same rule applies to [ADR-032](../adr/ADR-032-bff-nullobject-kill-switch.md) — no BFF surface means no null-object kill-switch concerns here.
+| Every cell is an em-dash | The `$select` 400'd — usually one bad column | Check the console; a lookup rendered as `text` gets selected by its bare name |
+| Edits throw `Field '<n>' not on form` | The field was deleted rather than hidden | Put it back on the form — see step 3 |
+| A date shows a time picker | `format` didn't resolve | Check `formatsResolved` in the diagnostic; the field must be on the form |
+| A lookup renders but won't open | No `targets` | `picker: 'display'` in the diagnostic means a required half is missing — read `readOnly` and `targets` on the same line |
+| Layout right on desktop, wrong on tablet | Only one form factor was edited | Update all three |
+| Layout truncated at 100 chars | The property is `SingleLine.Text` | It must be `Multiple` |
+| Changes don't appear after import | Cached bundle | Hard-refresh; confirm the version footer |
 
 ---
 
 ## References
 
-- **Spec + notes**: [`projects/record-header-and-notepad-r1/spec.md`](../../projects/record-header-and-notepad-r1/spec.md); notes in `projects/record-header-and-notepad-r1/notes/`.
-- **ADRs cited**: [ADR-006](../adr/ADR-006-pcf-over-webresources.md), [ADR-011](../adr/ADR-011-dataset-pcf.md), [ADR-012](../adr/ADR-012-shared-component-library.md), [ADR-021](../adr/ADR-021-fluent-ui-design-system.md), [ADR-022](../adr/ADR-022-pcf-platform-libraries.md), [ADR-024](../adr/ADR-024-polymorphic-resolver-pattern.md), [ADR-026](../adr/ADR-026-full-page-custom-page-standard.md), [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md), [ADR-032](../adr/ADR-032-bff-nullobject-kill-switch.md), [ADR-038](../adr/ADR-038-testing-strategy.md).
-- **Skills**: `/pcf-deploy`, `/code-page-deploy`, `/fluent-v9-component`.
-- **Reference PCF**: [`src/client/pcf/MatterHeader/`](../../src/client/pcf/MatterHeader/) — the copy-and-adapt starting point for a new entity.
-- **Companion guides**: [`SHARED-UI-COMPONENTS-GUIDE.md`](SHARED-UI-COMPONENTS-GUIDE.md), [`PCF-DEPLOYMENT-GUIDE.md`](PCF-DEPLOYMENT-GUIDE.md).
-
----
-
-*Maintained by the `record-header-and-notepad-r1` project team. Extend this guide as new per-entity PCFs are shipped.*
+- **Design + spec**: [`projects/record-header-and-notepad-r2/`](../../projects/record-header-and-notepad-r2/) — `design.md` §5 (config), §6.5a (lookups)
+- **Patterns**: [`record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) · [`inline-lookup-field.md`](../../.claude/patterns/ui/inline-lookup-field.md) · [`pcf-build-scaffold.md`](../../.claude/patterns/pcf/pcf-build-scaffold.md)
+- **ADRs**: [006](../adr/ADR-006-prefer-pcf-over-webresources.md), [012](../adr/ADR-012-shared-component-library.md), [021](../adr/ADR-021-fluent-ui-design-system.md), [022](../adr/ADR-022-pcf-platform-libraries.md), [024](../../.claude/adr/ADR-024-polymorphic-resolver-pattern.md), [028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [038](../adr/ADR-038-testing-strategy.md)
+- **Skills**: `/pcf-deploy`, `/code-page-deploy`, `/fluent-v9-component`
+- **Companions**: [`SHARED-UI-COMPONENTS-GUIDE.md`](SHARED-UI-COMPONENTS-GUIDE.md) · [`PCF-DEPLOYMENT-GUIDE.md`](PCF-DEPLOYMENT-GUIDE.md)

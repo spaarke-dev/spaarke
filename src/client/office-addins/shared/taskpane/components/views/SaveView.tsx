@@ -46,6 +46,8 @@ export interface SaveViewProps {
   apiBaseUrl?: string;
   /** Callback when save is complete */
   onComplete?: (documentId: string, documentUrl: string) => void;
+  /** Callback fired once on a successful save with the selected "Related to" record (§C). */
+  onSaved?: (entity: EntitySearchResult) => void;
   /** Callback when Quick Create is triggered */
   onQuickCreate?: (entityType: EntityType, searchQuery: string) => void;
   /** Callback when view document is clicked */
@@ -83,6 +85,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   getAccessToken,
   apiBaseUrl = '',
   onComplete,
+  onSaved,
   onQuickCreate,
   onViewDocument,
   onNavigate,
@@ -265,6 +268,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         getAccessToken={getAccessToken || defaultGetAccessToken}
         apiBaseUrl={apiBaseUrl}
         onComplete={onComplete}
+        {...(onSaved ? { onSaved } : {})}
         onQuickCreate={onQuickCreate}
         onViewDocument={handleViewDocument}
         onNavigate={onNavigate}

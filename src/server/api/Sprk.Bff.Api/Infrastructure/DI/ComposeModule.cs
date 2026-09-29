@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -25,9 +26,18 @@ public static class ComposeModule
 
         // R2 W1 edit/annotation services — pure deterministic text logic (ADR-013:
         // NO AI-internal injection; stateless concretes registered per ADR-010).
-        services.AddSingleton<IComposeEditValidator, ComposeEditValidator>();   // FR-19 (task 020)
-        services.AddSingleton<ComposeEditBatch>();                              // FR-20 (task 021)
-        services.AddSingleton<ComposeEditTransaction>();                       // FR-21 (task 022) — snapshot/rollback wrapper; holds no per-operation instance state (see class remarks), safe as a singleton
+        // IComposeEditValidator/ComposeEditValidator RETIRED (task 052, FR-C04): the whole-document
+        // target_text search was the last PLACEMENT path that located an edit by prose (ADR-049 I-7).
+        // Placement is now anchor-only (ComposeEditAnchorPass -> ComposeAnchorResolver); an edit with no
+        // anchor is refused deterministically (EditErrorKind.NoAnchor), never searched for.
+        // ComposeEditBatch (FR-20, task 021) + ComposeEditTransaction (FR-21, task 022) RETIRED (task 064,
+        // owner decision 2026-08-25): they applied edits by CHARACTER OFFSET into a plaintext projection,
+        // and their only span producer was the validator deleted above — so after task 052 they could
+        // never apply anything again. Both were injected NOWHERE (DI-registered and unconsumed), and the
+        // /edit-batch/validate endpoint they backed had zero client callers, so nothing observable changes.
+        // ALL THREE removed registrations were UNCONDITIONAL (never inside an `if (flag)`), so their
+        // removal leaves NO asymmetric registration behind (bff-extensions.md §F.1): there is no endpoint
+        // or service left that resolves any of them, and no feature gate that could make one reappear.
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)
         services.AddSingleton<CriticMarkupRenderer>();                          // FR-22 (task 023)
         // DocxAnnotationWriter RETIRED (task 036, §6.5 Path B): the text-anchored push-annotations WRITE
@@ -46,11 +56,34 @@ public static class ComposeModule
         services.AddSingleton<ComposeDocxProjectionBuilder>();                // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — pure single-walk DOCX->editor projection (byte[]->paraId-tagged HTML + ordered paraId map + status/warnings): the ONE server engine that assigns w14:paraId and emits the editor block from the same paragraph instance, eliminating the mammoth-vs-OOXML two-engine drift. No external NuGet (DocumentFormat.OpenXml already referenced). Consumed by ComposeService.LoadAsync (supersedes ParaIdPreParser on the Load path); thread-safe stateless singleton (ADR-010); registered UNCONDITIONALLY (symmetric per bff-extensions.md §F.1)
 
         // R2 W1 SPE change-detection (FR-26, task 052) — subscription state machine +
-        // BackgroundService renewal (ADR-001 hosted service; ADR-007 Graph stays behind
+        // hand-rolled timer BackgroundService renewal (existing debt, ADR-052 §1; ADR-007 Graph stays behind
         // the SpeFileStore facade; ADR-009 Redis state). Orchestrator is Scoped (injects
         // scoped ISpeFileOperations); the hosted service resolves it via CreateScope.
         services.AddScoped<SpeSyncOrchestrator>();
         services.AddHostedService<SpeWebhookRenewalHostedService>();
+
+        // #781 item 4b — save-identity key health. ONE class on TWO surfaces, mirroring
+        // RoutingConsumerTypeHealthCheck (RoutingModule): the hosted service logs the key's status at
+        // startup, and the same instance answers /healthz/catalog continuously.
+        //
+        // Registered as a singleton FIRST so both surfaces share one instance — AddHostedService and
+        // AddCheck would otherwise each construct their own, and a test subclass registered over this
+        // would only replace one of them.
+        //
+        // DEGRADED, never Unhealthy, and tagged "catalog" so it lands on /healthz/catalog and NOT on
+        // the /healthz liveness probe (which filters on !Tags.Contains("catalog")). Both choices say
+        // the same thing: a broken identity key must not take instances out of rotation or fail a
+        // deploy gate. The platform compensates — existing documents still save via the item-2
+        // self-heal; only the creation of a NEW document is affected. See the class doc for why this
+        // deliberately differs from its Unhealthy-on-drift sibling.
+        services.AddSingleton<ComposeIdentityKeyHealthCheck>();
+        services.AddHostedService(sp => sp.GetRequiredService<ComposeIdentityKeyHealthCheck>());
+        services.AddHealthChecks()
+            .AddCheck<ComposeIdentityKeyHealthCheck>(
+                "compose-identity-key",
+                failureStatus: HealthStatus.Degraded,
+                tags: new[] { "compose", "identity-key", "catalog" });
+
         return services;
     }
 }

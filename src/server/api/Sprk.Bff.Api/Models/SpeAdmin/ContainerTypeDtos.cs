@@ -294,9 +294,30 @@ public sealed record CreateContainerTypeRequest
 
     /// <summary>
     /// Optional billing classification for the container type.
-    /// Accepted values: "standard", "premium".
-    /// When null or omitted, Graph API defaults to "standard".
+    /// Accepted values: <c>standard</c>, <c>trial</c>, <c>directToCustomer</c>.
+    /// When null or omitted, Graph defaults to <c>standard</c>.
     /// </summary>
+    /// <remarks>
+    /// The doc here previously said <c>"standard", "premium"</c>. Graph has no "premium"
+    /// classification; its enum is standard · trial · directToCustomer (beta CSDL). The choice is
+    /// <b>permanent</b> — a trial type can never be converted to standard, nor standard to
+    /// passthrough. Corrected UAT 2026-08-28.
+    /// </remarks>
     [JsonPropertyName("billingClassification")]
     public string? BillingClassification { get; init; }
+
+    /// <summary>
+    /// Optional application (client) id of the Entra app registration that will OWN this container
+    /// type. When omitted, the owning app registered on the config is used, falling back to the
+    /// config's own client id.
+    /// </summary>
+    /// <remarks>
+    /// Graph REQUIRES <c>owningAppId</c> on create (<c>Nullable="false"</c> in the beta CSDL) and
+    /// rejects the request with an opaque "One of the provided arguments is not acceptable" when it
+    /// is absent — the UAT 2026-08-28 failure. Supply this only to point the new container type at a
+    /// DIFFERENT app than the config's; one app registration may own several container types, so a
+    /// new type does not require a new registration.
+    /// </remarks>
+    [JsonPropertyName("owningAppId")]
+    public string? OwningAppId { get; init; }
 }

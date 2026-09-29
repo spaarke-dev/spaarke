@@ -402,6 +402,85 @@ describe('Wave 4: a NAMED intent in the original message mounts + applies direct
   });
 });
 
+// ---------------------------------------------------------------------------
+// Task 054 (FR-C03) — the whole-document CLOSED SET reaches the wire
+// ---------------------------------------------------------------------------
+//
+// The supply half. Until this landed, the whole-document dispatch sent `{revisionIntent}` and nothing
+// else, so on the server it failed `HasStructuredOperand`, took the FILE-operand path, and that path
+// passes NO args and NO input schema to ContextBinder — meaning even `revisionIntent` was dropped
+// before the prompt. Supplying an annotated `documentText` fixes both halves at once: the model gets a
+// closed set of identifiers it can copy, AND the dispatch moves onto the structured-operand path where
+// the Action's declared companions render alongside the operand (ADR-043 Amendment 1).
+//
+// These two tests pin the fork: supplied when the editor has one, and CLEANLY ABSENT when it does not.
+describe('Task 054: the whole-document dispatch carries the annotated closed set', () => {
+  /** The shape ComposeWorkspace publishes — the live text with each paragraph's paraId prefixed. */
+  const ANCHORED = {
+    text: '[AAAA0001] 1. Definitions\n[AAAA0002] The receiving party shall indemnify the disclosing party.',
+    paraIds: ['AAAA0001', 'AAAA0002'] as readonly string[],
+  };
+
+  it('sends the annotated document text as the operand, alongside the intent', async () => {
+    renderPane();
+    await driveChatUpload('revise-me.docx');
+    workspaceEvents.length = 0;
+
+    await act(async () => {
+      bridgeRef.current!.setComposeAnchoredDocumentTextProvider(() => ANCHORED);
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+
+    await act(async () => {
+      await captured.onDecorateOutboundBody!({ message: 'flag risks in this document' });
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+    await simulateComposeMountRegistration();
+    await act(async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    expect(dispatchPostUrls).toHaveLength(1);
+    const body = dispatchPostBodies[0];
+
+    // The operand: present, and carrying the identifiers BESIDE the content they name. A model given a
+    // side list would have to match a paragraph to an entry by quoting prose — the lossy step removed.
+    expect(body).toContain('documentText');
+    expect(body).toContain('[AAAA0002] The receiving party shall indemnify');
+
+    // The companion still rides — the operand does not displace it (the 051 non-regression, restated
+    // for the whole-document path).
+    expect(body).toContain('flag-risks');
+  });
+
+  it('omits documentText entirely when the editor offers no closed set — degrade, never half-supply', () => {
+    // No provider registered = no Compose tab open, an inactive tab, or a document with no stamped ids.
+    // The dispatch must be byte-identical to the pre-054 one. Sending a PARTIAL set would be worse than
+    // sending none: the prompt tells the model the set is closed, so it would be refused for naming an
+    // id that genuinely exists.
+    expect(bridgeRef.current?.hasComposeAnchoredDocumentTextProvider ?? false).toBe(false);
+  });
+
+  it('degrades to the pre-054 dispatch shape when no provider is registered', async () => {
+    renderPane();
+    await driveChatUpload('revise-me.docx');
+    workspaceEvents.length = 0;
+
+    await act(async () => {
+      await captured.onDecorateOutboundBody!({ message: 'flag risks in this document' });
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+    await simulateComposeMountRegistration();
+    await act(async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    });
+
+    expect(dispatchPostUrls).toHaveLength(1);
+    expect(dispatchPostBodies[0]).toContain('flag-risks');
+    expect(dispatchPostBodies[0]).not.toContain('documentText');
+  });
+});
+
 describe('FIX #1b/#7a: "Add the document to the DMS" chip → editor Save → persistent chat confirmation', () => {
   it('clicking Add-to-DMS drives the editor Save conduit; the save-completed conduit posts a "Saved to the DMS" message with Open preview metadata', async () => {
     renderPane();

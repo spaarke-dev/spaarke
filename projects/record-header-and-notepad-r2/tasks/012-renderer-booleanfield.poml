@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>BooleanField renderer — Yes/No read, Fluent Switch edit (FR-08)</title>
+    <phase>1 Renderers</phase>
+    <gate>after-001-002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a new shared-library .tsx component consumed by PCF surfaces (Step 3.5.5: modifies/creates code files = FULL).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component implementation with an explicit canonical reference to copy (TextField.tsx renderer contract).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason></parallel-reason>
+    <deps>001, 002</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Create the `BooleanField` record-header renderer in the shared library covering `Boolean`/`TwoOptions`
+    attributes: read mode shows the Yes/No label (overridable with the metadata option labels), edit mode
+    uses a Fluent `Switch`. Copy the TextField.tsx contract verbatim (FR-10) — including draft/commit
+    semantics, which for a Switch means toggling changes the DRAFT and Enter/blur commits it.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 + Griffel and React 16/17-safe shared components.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/BooleanField.tsx exists
+    exporting `BooleanField` + `IBooleanFieldProps`, with a passing unit-test file
+    __tests__/BooleanField.test.tsx, the shared library building green — and NO edit to fields/index.ts or
+    __tests__/fields.test.tsx (task 015 owns those).
+  </goal>
+
+  <context>
+    <background>
+      FR-08: `sprk_highpriority` (present in all four confirmed entity layouts per the owner's D-9
+      clarification) must render as Yes/No, not `true`/`false`, and be toggleable. Today boolean values
+      fall through TextField's `String(value)` (TextField.tsx:117). The renderer is context-agnostic
+      (ADR-012): true/false display labels default to Yes/No and can be overridden by the consumer with
+      the TwoOptions metadata labels.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/BooleanField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/BooleanField.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Phase 0 gate (spike decision; no direct input to this task)</dependency>
+      <dependency task="002" status="pending">Parity baseline captured — code changes are barred until it exists</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every color, typography, spacing, and radius value in BooleanField.tsx comes from Fluent v9 semantic tokens (`tokens.*`); zero hex/rgb/hsl literals anywhere in the new files.</constraint>
+    <constraint source="ADR-022">BooleanField.tsx must be React 16/17-safe: no `use()`, no `useSyncExternalStore`, no `createRoot`, no React-18-only APIs.</constraint>
+    <constraint source="ADR-012">BooleanField is context-agnostic: no `ComponentFramework` types, no `Xrm` access, no metadata calls. Display labels arrive as props with Yes/No defaults.</constraint>
+    <constraint source="project">FR-10 contract, copied verbatim from TextField.tsx: props `{ label, value, span: 1|2|3, required?, onSave?, disabled? }` (plus optional trueLabel/falseLabel); self-applied `gridColumn: span N`; `editable = typeof onSave === 'function' AND disabled !== true`; on save rejection revert draft and STAY in edit mode; Enter commits / Escape cancels; blur commits; tiny `Spinner` + disabled control while saving; module-scope `makeStyles`.</constraint>
+    <constraint source="project">D-10 / FR-11: the `required` prop exists for contract-shape parity but renders NOTHING — the `*` marker is deliberately TextField-only.</constraint>
+    <constraint source="project">Parallel-safety (scope: this task): MUST NOT edit src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx — those are task 015's; group-A tasks racing on them cost R1 real time.</constraint>
+    <constraint source="project">FR-11: `null`, `undefined`, and `''` render the em-dash `—`. The value `false` is a REAL value and MUST render its label (`No` by default) — the empty check is strict, never falsy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-header field renderers; Fluent v9 Switch; React 16/17 shared components</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical renderer contract" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx">THE reference implementation. Copy its structure end-to-end: props shape, EMPTY_VALUE_PLACEHOLDER, editable gate, draft/commit/cancel, revert-on-reject-stay-in-edit (lines 139-157), keyboard handling, data-testid conventions, makeStyles layout.</pattern>
+      <pattern name="Fluent v9 authoring conventions" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Component structure, token usage, JSDoc conventions.</pattern>
+      <pattern name="React version boundary" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">What is safe under the React 16/17 platform-library boundary.</pattern>
+      <pattern name="control initialization" location=".claude/patterns/pcf/control-initialization.md">Consumer-side context; renderer stays props-only.</pattern>
+      <pattern name="theme reach" location=".claude/patterns/pcf/theme-management.md">Host-provided FluentProvider; renderer assumes tokens only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read TextField.tsx fully; read the FR-08/FR-10/FR-11 spec sections.</step>
+    <step order="1">Define `IBooleanFieldProps`: `{ label: string; value: boolean | '' | null | undefined; span: 1 | 2 | 3; trueLabel?: string; falseLabel?: string; required?: boolean; onSave?: (newValue: boolean) =&gt; Promise&lt;void&gt;; disabled?: boolean }`. JSDoc: trueLabel/falseLabel default 'Yes'/'No'; the consumer may pass the TwoOptions metadata option labels; onSave payload is renderer-domain (boolean), contract semantics identical to TextField.</step>
+    <step order="2">Read mode: `true` renders trueLabel, `false` renders falseLabel, `null`/`undefined`/`''` render `—`. Same label/value cell layout as TextField (label typography per TextField.tsx:56-69; value cell per TextField.tsx:74-96).</step>
+    <step order="3">Edit mode: clicking the value enters edit; render a Fluent `Switch` whose checked state is the DRAFT (toggling flips the draft only); Enter commits the draft via onSave, Escape cancels (draft discarded, edit exited), blur commits; rejection reverts the draft and STAYS in edit; tiny Spinner + disabled Switch while saving. autoFocus the Switch on entry.</step>
+    <step order="4">Author __tests__/BooleanField.test.tsx (new file) using `renderWithProviders` from `../../../__mocks__/pcfMocks`: cover the acceptance criteria including the `false`-is-not-empty case and the rejected-save negative path.</step>
+    <step order="5">Run `npm test` and `npm run build` in src/client/shared/Spaarke.UI.Components. Verify zero edits to fields/index.ts, components/RecordHeader/index.ts, and __tests__/fields.test.tsx via `git status`.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">If any deviations from plan occurred, document in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the draft-then-commit Switch semantics prove untestable or genuinely hostile in Fluent v9 (e.g. Switch cannot hold focus for Enter/Escape handling under the platform-library React 16 build), STOP and escalate per root CLAUDE.md §6 with the evidence — weakening the FR-10 contract (e.g. commit-on-toggle) is a contract change the operator and task 015's shared suite must agree to, not a local improvisation.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Boolean renders Yes/No and toggles (any wave-1 entity)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_project&amp;id={record-id}</url>
+      <steps>
+        <step>Open a record whose header layout includes sprk_highpriority (executes at Phase 5 tasks 050/051/060, once the RecordHeader control is bound)</step>
+        <step>Verify the value renders as `Yes` or `No`, NOT `true`/`false`</step>
+        <step>Click the value; verify the Fluent Switch appears; toggle it; commit; verify the form goes dirty with no re-render flash and Save persists</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Yes/No display; Switch edit stages to the form buffer; zero console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app</step>
+        <step>Verify BooleanField label, value cell, and the Switch (both states) adapt with no hard-coded colors</step>
+        <step>Verify the em-dash empty state is legible in dark mode</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <justification>
+    <existing>TextField — src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx:117 (`String(value)` is its entire display transform); verified in the spec §11 gate table.</existing>
+    <extension>No — TextField would render `true`/`false` and its string-input edit path cannot host a Switch without forking its contract internally. The sibling-renderer file pattern is the established seam.</extension>
+    <cost-of-doing-nothing>Live-verified (spec §11): `sprk_highpriority` — present in ALL FOUR confirmed rollout layouts — shows as raw `true`/`false` text on every one of them, failing FR-08 acceptance and spec success criterion 12 (renders Yes/No and toggles).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build + test the shared library</tool>
+    <tool name="terminal">git status verification of the untouched-files constraint</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/BooleanField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/BooleanField.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given value=true the read mode renders `Yes` (or trueLabel when provided); given value=false it renders `No` (or falseLabel) — `false` NEVER renders the em-dash.</criterion>
+    <criterion testable="true">Given `null`, `undefined`, or `''`, the renderer shows `—`.</criterion>
+    <criterion testable="true">The root div carries `gridColumn: span N` matching the span prop for spans 1, 2, and 3 (self-applied).</criterion>
+    <criterion testable="true">With no `onSave` the value is read-only; with `onSave` and `disabled=true` it is read-only; with `onSave` alone, clicking enters edit mode showing a Fluent Switch checked per the current value.</criterion>
+    <criterion testable="true">In edit mode: toggling the Switch changes ONLY the draft (onSave not yet called); Enter commits the draft via onSave; Escape cancels with zero onSave calls; blur commits; while saving the Switch is disabled and a tiny Spinner shows.</criterion>
+    <criterion testable="true">Negative: when onSave rejects, the draft reverts to the prior value AND the component STAYS in edit mode.</criterion>
+    <criterion testable="true">Negative (D-10): with `required=true`, NO `*` marker renders.</criterion>
+    <criterion testable="true">Grep of BooleanField.tsx and BooleanField.test.tsx for hex/rgb/hsl returns nothing (ADR-021); grep for `use(`, `useSyncExternalStore`, `createRoot` returns nothing (ADR-022).</criterion>
+    <criterion testable="true">`git status` shows NO modification to fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx.</criterion>
+    <criterion testable="true">All unit tests pass and `npm run build` in Spaarke.UI.Components exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-08, FR-10, FR-11 (+ D-10), NFR-03, NFR-04, spec §11 gate row "BooleanField", success
+    criterion 12. Consumer wiring (metadata labels, form-buffer boolean payload) is later tasks (022/031)
+    — do not build it here. Do not export from the barrel (task 015). The `''` member in the value union
+    exists so the FR-11 em-dash contract (015's shared suite passes `''` to every renderer) type-checks
+    without casts.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

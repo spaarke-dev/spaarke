@@ -66,9 +66,24 @@ Load when:
 
 ### Dataset PCF (ADR-011)
 
-- ✅ **MUST** use Dataset PCF for list-based document UX on forms
-- ✅ **MUST** implement/extend `src/client/pcf/UniversalDatasetGrid/`
-- ✅ **MUST** achieve 80%+ test coverage on PCF controls
+- ✅ **MUST** use the **DataGrid framework** for list-based record/document UX:
+  `<DataGrid configId=… />` from `@spaarke/ui-components` + a `sprk_gridconfiguration` Dataverse record.
+  See [`docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md)
+  and the maker recipe in [`docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../../docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md).
+
+  > 🔴 **Corrected 2026-09-01** (`unified-access-control-r2`). This read: *"**MUST**
+  > implement/extend `src/client/pcf/UniversalDatasetGrid/`"* — **a directory that does not exist.**
+  > `UniversalDatasetGrid` was deleted when the DataGrid framework superseded it. A binding **MUST**
+  > commanding a dead path is worse than a missing rule: an agent either invents the folder or stalls,
+  > and either way the DataGrid framework gets bypassed. This is
+  > [`FAILURE-MODES.md` AP-1](../FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong) in a constraints
+  > file. Six `.claude/patterns/` files carried the same dead path as their primary exemplar and are
+  > corrected alongside this.
+- ⚠️ **Coverage is an OBSERVATION, never a gate.** The former *"MUST achieve 80%+ test coverage on PCF
+  controls"* contradicted [ADR-038](../../docs/adr/ADR-038-testing-strategy.md), which makes coverage
+  non-gating and **binds directives not to reintroduce coverage-% targets** (binding ≥6 months from
+  2026-06-26). Chasing a percentage on a PCF is what produces the B10 coverage-filler tests ADR-038 §7
+  bans. Test the behaviour that would break; do not test to a number.
 
 ### Shared Components (ADR-012)
 

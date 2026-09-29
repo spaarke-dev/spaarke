@@ -494,7 +494,12 @@ describe('ComposeFormatToolbar — Save / Save As dropdown + Auto Save (FR-01 ta
 
     await user.click(screen.getByRole('button', { name: /save options/i }));
     const toggle = await screen.findByTestId('compose-format-autosave-toggle');
-    expect(toggle).toHaveTextContent(/auto save/i);
+    // UAT round 2 #6: the label is "Keep recovery draft", NOT "Auto Save". The toggle controls a
+    // localStorage recovery draft that never reaches the BFF, and sat directly under Save/Save As
+    // where the old wording read as a third save mode. Asserting the literal copy is deliberate —
+    // a /save/i-style regex would pass on a relapse to the misleading label.
+    expect(toggle).toHaveTextContent('Keep recovery draft');
+    expect(toggle).not.toHaveTextContent(/auto ?save/i);
     expect(toggle).toHaveAttribute('aria-checked', 'true'); // reflects autoSaveEnabled
     await user.click(toggle);
     expect(onAutoSaveToggle).toHaveBeenCalledWith(false); // toggling an ON item turns it OFF
@@ -528,34 +533,57 @@ describe('ComposeFormatToolbar — Save / Save As dropdown + Auto Save (FR-01 ta
 // 6a. Refresh Profile button (G10 task 040)
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Refresh Profile button (G10 task 040)', () => {
-  it('is not rendered when no onRefreshProfile handler is wired (unpromoted doc)', () => {
-    renderFormatToolbar();
+describe('ComposeFormatToolbar — Refresh profile (UAT round 2 #5h: moved into the Save menu)', () => {
+  /** Open the Save split-button's caret menu, where Refresh profile now lives. */
+  async function openSaveMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+  }
+
+  it('is not rendered when no onRefreshProfile handler is wired (unpromoted doc)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn() } });
+    await openSaveMenu(user);
     expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
   });
 
-  it('renders and fires onRefreshProfile when clicked (promoted doc)', async () => {
+  it('renders inside the Save menu and fires onRefreshProfile when clicked (promoted doc)', async () => {
     const user = userEvent.setup();
     const onRefreshProfile = jest.fn();
-    renderFormatToolbar({}, { props: { onRefreshProfile } });
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), onRefreshProfile } });
 
-    const btn = screen.getByTestId('compose-format-refresh-profile');
-    expect(btn).toBeInTheDocument();
-    await user.click(btn);
+    // Not on the toolbar row any more — it is a Save-menu item now.
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
+    await openSaveMenu(user);
+    const item = screen.getByTestId('compose-format-refresh-profile');
+    expect(item).toHaveTextContent('Refresh profile');
+    await user.click(item);
     expect(onRefreshProfile).toHaveBeenCalledTimes(1);
   });
 
-  it('ADR-021: renders under a dark theme', () => {
-    renderFormatToolbar({}, { theme: webDarkTheme, props: { onRefreshProfile: jest.fn() } });
+  it('ADR-021: renders under a dark theme', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { onSave: jest.fn(), onRefreshProfile: jest.fn() } });
+    await openSaveMenu(user);
     expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
   });
 
-  it('UAT #9 (task 054): disables the button and shows a spinner while a refresh is in flight', () => {
-    renderFormatToolbar({}, { props: { onRefreshProfile: jest.fn(), isRefreshingProfile: true } });
-    const btn = screen.getByTestId('compose-format-refresh-profile');
-    expect(btn).toBeInTheDocument();
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute('aria-label', 'Refreshing document profile');
+  it('UAT #9 (task 054): disables the item and shows the in-flight label while a refresh is running', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), onRefreshProfile: jest.fn(), isRefreshingProfile: true } });
+    await openSaveMenu(user);
+    const item = screen.getByTestId('compose-format-refresh-profile');
+    expect(item.getAttribute('aria-disabled') === 'true' || (item as HTMLButtonElement).disabled).toBe(true);
+    expect(item).toHaveTextContent('Refreshing profile…');
+  });
+
+  it('DOCUMENTED COUPLING: moving it into the Save menu makes it unreachable without a wired onSave', async () => {
+    // Recorded rather than hidden. The Save menu is the container, so a host that wires
+    // onRefreshProfile but NOT onSave now has no way to reach the action. ComposeWorkspace always wires
+    // both, so this is not a live defect — but if that ever stops being true, this test says why the
+    // action vanished instead of leaving someone to find it the hard way.
+    renderFormatToolbar({}, { props: { onRefreshProfile: jest.fn() } });
+    expect(screen.queryByRole('button', { name: /save options/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
   });
 });
 
@@ -581,9 +609,18 @@ describe('ComposeFormatToolbar — Reload from source button (UAT #5 task 053)',
     expect(onReloadFromSource).toHaveBeenCalledTimes(1);
   });
 
-  it('is distinct from the Refresh-Profile button (both can render together)', () => {
-    renderFormatToolbar({}, { props: { onReloadFromSource: jest.fn(), onRefreshProfile: jest.fn() } });
+  it('is distinct from Refresh profile — Reload stays a toolbar button, Refresh moved into the Save menu', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar(
+      {},
+      { props: { onSave: jest.fn(), onReloadFromSource: jest.fn(), onRefreshProfile: jest.fn() } }
+    );
+    // UAT round 2 #5b/#5h: the owner's order names Reload alongside Word and Save, so it stays a button;
+    // Refresh profile is a save-adjacent action and moved into the menu. Both still reachable, and the
+    // two are still separate actions — the confusion this test has always guarded against.
     expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /save options/i }));
     expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
   });
 
@@ -601,32 +638,108 @@ describe('ComposeFormatToolbar — Reload from source button (UAT #5 task 053)',
 //     onRefreshProfile / onReloadFromSource gating pattern.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Open Document button', () => {
-  it('is not rendered when no onOpenDocument handler is wired (no previewable document)', () => {
-    renderFormatToolbar();
+describe('ComposeFormatToolbar — Open in preview (UAT round 2 #5f: moved into the Word menu)', () => {
+  const wordProps = { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn() };
+
+  async function openWordMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+  }
+
+  it('is not rendered when no onOpenDocument handler is wired (no previewable document)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { ...wordProps } });
+    await openWordMenu(user);
     expect(screen.queryByTestId('compose-format-open-document')).not.toBeInTheDocument();
   });
 
-  it('renders and fires onOpenDocument when clicked (doc with a preview source)', async () => {
+  it('renders inside the Word menu as "Open in preview" and fires onOpenDocument', async () => {
     const user = userEvent.setup();
     const onOpenDocument = jest.fn();
-    renderFormatToolbar({}, { props: { onOpenDocument } });
+    renderFormatToolbar({}, { props: { ...wordProps, onOpenDocument } });
 
-    const btn = screen.getByTestId('compose-format-open-document');
-    expect(btn).toBeInTheDocument();
-    expect(btn).toHaveAttribute('aria-label', 'Open document');
-    await user.click(btn);
+    // The three ways to open this document now sit together — that grouping IS the fix.
+    await openWordMenu(user);
+    const item = screen.getByTestId('compose-format-open-document');
+    expect(item).toHaveTextContent('Open in preview');
+    expect(item).toHaveAttribute('aria-label', 'Open in preview');
+    await user.click(item);
     expect(onOpenDocument).toHaveBeenCalledTimes(1);
   });
 
-  it('is disabled when the toolbar is read-only (disabled prop)', () => {
-    renderFormatToolbar({}, { props: { onOpenDocument: jest.fn(), disabled: true } });
-    expect(screen.getByTestId('compose-format-open-document')).toBeDisabled();
+  it('is unreachable when the toolbar is read-only — the Word MENU itself is disabled', () => {
+    renderFormatToolbar({}, { props: { ...wordProps, onOpenDocument: jest.fn(), disabled: true } });
+    // Before the move this was a top-level button carrying its own disabled state. Now the containing
+    // menu trigger is what read-only disables, so the gate moved UP a level — the item cannot be opened
+    // at all. Asserting the trigger (rather than an item that no longer renders) states the real contract.
+    expect(screen.getByTestId('compose-format-word-menu')).toBeDisabled();
+    expect(screen.queryByTestId('compose-format-open-document')).not.toBeInTheDocument();
   });
 
-  it('ADR-021: renders under a dark theme', () => {
-    renderFormatToolbar({}, { theme: webDarkTheme, props: { onOpenDocument: jest.fn() } });
+  it('ADR-021: renders under a dark theme', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { ...wordProps, onOpenDocument: jest.fn() } });
+    await openWordMenu(user);
     expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6a-2. Summarise changes (R8 UAT item 8 — owner placement call, 2026-09-03)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Summarise changes (Word menu)', () => {
+  const wordProps = { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn() };
+
+  async function openWordMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+  }
+
+  it('is not rendered when no onSummarizeChanges handler is wired', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { ...wordProps } });
+    await openWordMenu(user);
+    expect(screen.queryByTestId('compose-format-summarize-changes')).not.toBeInTheDocument();
+  });
+
+  it('renders inside the Word menu and fires onSummarizeChanges', async () => {
+    const user = userEvent.setup();
+    const onSummarizeChanges = jest.fn();
+    renderFormatToolbar({}, { props: { ...wordProps, onSummarizeChanges } });
+
+    await openWordMenu(user);
+    const item = screen.getByTestId('compose-format-summarize-changes');
+    expect(item).toHaveTextContent('Summarise changes');
+    await user.click(item);
+    expect(onSummarizeChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays ENABLED on a dirty document — unsaved state is answered by a prompt, not by hiding the control', async () => {
+    // The deliberate difference from "Apply template", which IS disabled while dirty. Applying a
+    // template to the wrong base is silently destructive; an unsaved document here is recoverable by
+    // saving, so the flow returns `needs-save` and the host offers to save. Disabling instead would
+    // hide the affordance behind a state the user can trivially resolve, with no way to discover why.
+    const user = userEvent.setup();
+    const onSummarizeChanges = jest.fn();
+    renderFormatToolbar({}, { props: { ...wordProps, onSummarizeChanges, isDirty: true } });
+
+    await openWordMenu(user);
+    expect(screen.getByTestId('compose-format-summarize-changes')).toBeEnabled();
+  });
+
+  it('opens the Word menu on its own when it is the only Word action wired', async () => {
+    // The menu's visibility is an OR over its items; a host that wires only this one must still get it.
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSummarizeChanges: jest.fn() } });
+
+    await openWordMenu(user);
+    expect(screen.getByTestId('compose-format-summarize-changes')).toBeInTheDocument();
+  });
+
+  it('ADR-021: renders under a dark theme', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { ...wordProps, onSummarizeChanges: jest.fn() } });
+    await openWordMenu(user);
+    expect(screen.getByTestId('compose-format-summarize-changes')).toBeInTheDocument();
   });
 });
 
@@ -1018,6 +1131,9 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
     onOpenDocument: jest.fn(),
     onReloadFromSource: jest.fn(),
     onRefreshProfile: jest.fn(),
+    // UAT round 2 #5i — Apply template moved INTO the Word menu, so it must be wired here for the
+    // relocation test to be able to look for it.
+    onApplyTemplate: jest.fn(),
     reviewDisclaimer: 'Not legal advice.',
   });
 
@@ -1041,16 +1157,6 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
     expect(screen.queryByText('Save New Document')).not.toBeInTheDocument();
   });
 
-  it('#11: the Word menu items read "Open in Word (web)" / "Open in Word (desktop)"', async () => {
-    const user = userEvent.setup();
-    renderFormatToolbar({}, { props: { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn() } });
-
-    await user.click(screen.getByTestId('compose-format-word-menu'));
-
-    expect(screen.getByTestId('compose-format-open-word-web')).toHaveTextContent('Open in Word (web)');
-    expect(screen.getByTestId('compose-format-open-word-desktop')).toHaveTextContent('Open in Word (desktop)');
-  });
-
   it('#11: Save remains the ONE entry point — the split-button still renders "Save Version" primary + "Save New Document" caret item', async () => {
     const user = userEvent.setup();
     const onSave = jest.fn();
@@ -1069,66 +1175,91 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
 
   // ---- #12: regroup + spacing ----
 
-  it('#12: exactly THREE ToolbarDividers are rendered, separating the four action-icon groups', () => {
-    renderFormatToolbar({}, { props: allControlsProps() });
-    expect(screen.getByTestId('compose-format-divider-1')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-format-divider-2')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-format-divider-3')).toBeInTheDocument();
-  });
+  // ---------------------------------------------------------------------------
+  // UAT ROUND 2 #5 (2026-09-02) — SUPERSEDES the round-4 #12 order asserted above.
+  // The owner re-specified the row: history at the far LEFT, format menus next, and the tool icons
+  // right-aligned. Open Document / Apply template moved INTO the Word menu, Refresh profile into the
+  // Save menu, so the three "unmentioned icons" the round-4 tests protected no longer sit on the row —
+  // which is why those tests are replaced rather than repaired.
+  // ---------------------------------------------------------------------------
 
-  it('#12: format menus (Body/Paragraph/Font/Table) stay at the left, unchanged relative order', () => {
-    renderFormatToolbar({}, { props: allControlsProps() });
-    const order = toolbarTestIdOrder();
-    expect(order[0]).toBe('compose-format-heading-menu');
-    expect(order.indexOf('compose-format-heading-menu')).toBeLessThan(order.indexOf('compose-format-paragraph-menu'));
-    expect(order.indexOf('compose-format-paragraph-menu')).toBeLessThan(order.indexOf('compose-format-font-menu'));
-    expect(order.indexOf('compose-format-font-menu')).toBeLessThan(order.indexOf('compose-format-table-menu'));
-  });
-
-  it('#12: the EXACT owner-specified left→right action-icon order — [Review Summary · Memo] | [Word · Save] | [Review Notes · Track Changes] | [Undo · Redo · Info]', () => {
+  it('#5c: Undo · Redo open the row, to the LEFT of every format menu', () => {
     renderFormatToolbar({}, { props: allControlsProps() });
     const order = toolbarTestIdOrder();
     const idx = (id: string): number => order.indexOf(id);
 
-    // Group 1
-    expect(idx('compose-format-review-summary-toggle')).toBeLessThan(idx('compose-format-memo-menu'));
-    // Divider 1 separates Group 1 from Group 2
-    expect(idx('compose-format-memo-menu')).toBeLessThan(idx('compose-format-divider-1'));
-    expect(idx('compose-format-divider-1')).toBeLessThan(idx('compose-format-word-menu'));
-    // Group 2
-    expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
-    // Divider 2 separates Group 2 from Group 3
-    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-divider-2'));
-    expect(idx('compose-format-divider-2')).toBeLessThan(idx('compose-format-review-notes-toggle'));
-    // Group 3
-    expect(idx('compose-format-review-notes-toggle')).toBeLessThan(idx('compose-format-track-changes'));
-    // Divider 3 separates Group 3 from Group 4
-    expect(idx('compose-format-track-changes')).toBeLessThan(idx('compose-format-divider-3'));
-    expect(idx('compose-format-divider-3')).toBeLessThan(idx('compose-format-undo'));
-    // Group 4
     expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
-    expect(idx('compose-format-redo')).toBeLessThan(idx('compose-format-review-info'));
+    expect(idx('compose-format-redo')).toBeLessThan(idx('compose-format-divider-history'));
+    expect(idx('compose-format-divider-history')).toBeLessThan(idx('compose-format-heading-menu'));
   });
 
-  it('#12: the unmentioned icons (Open Document / Reload from source / Refresh Profile) are preserved — placed after the format-menu group and before Group 1, in their pre-round-4 relative order', () => {
+  it('#5a: the format menus stay together and in order — Body · Paragraph · Font · Table', () => {
     renderFormatToolbar({}, { props: allControlsProps() });
     const order = toolbarTestIdOrder();
     const idx = (id: string): number => order.indexOf(id);
 
-    expect(screen.getByTestId('compose-format-open-document')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-format-reload-from-source')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-format-refresh-profile')).toBeInTheDocument();
-
-    // After the format-menu group...
-    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-open-document'));
-    // ...preserved relative order...
-    expect(idx('compose-format-open-document')).toBeLessThan(idx('compose-format-reload-from-source'));
-    expect(idx('compose-format-reload-from-source')).toBeLessThan(idx('compose-format-refresh-profile'));
-    // ...and before Group 1 (Review Summary is the first control of the regrouped action area).
-    expect(idx('compose-format-refresh-profile')).toBeLessThan(idx('compose-format-review-summary-toggle'));
+    expect(idx('compose-format-heading-menu')).toBeLessThan(idx('compose-format-paragraph-menu'));
+    expect(idx('compose-format-paragraph-menu')).toBeLessThan(idx('compose-format-font-menu'));
+    expect(idx('compose-format-font-menu')).toBeLessThan(idx('compose-format-table-menu'));
   });
 
-  it('#12: with the review-only controls absent (no hasReview), the format menus, unmentioned icons, Word/Save, and Undo/Redo/Info still render in order around the dividers', () => {
+  it('#5b: the tool icons are right-aligned and ordered Word · Save · Reload — separator — Comments · Track changes', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const order = toolbarTestIdOrder();
+    const idx = (id: string): number => order.indexOf(id);
+
+    // Everything in the tool group sits after the last format menu.
+    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-word-menu'));
+    expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
+    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-reload-from-source'));
+    // ...separator...
+    expect(idx('compose-format-reload-from-source')).toBeLessThan(idx('compose-format-divider-2'));
+    // ...then the comment/track-changes group.
+    expect(idx('compose-format-divider-2')).toBeLessThan(idx('compose-format-review-notes-toggle'));
+    expect(idx('compose-format-review-notes-toggle')).toBeLessThan(idx('compose-format-track-changes'));
+  });
+
+  it('#5f/#5h/#5i: the three relocated controls are GONE from the toolbar row, not deleted', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: allControlsProps() });
+
+    // The point of the restructure was to reclaim row space, so their absence here is the fix...
+    expect(screen.queryByTestId('compose-format-open-document')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-apply-template')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-refresh-profile')).not.toBeInTheDocument();
+
+    // ...but every one must still be REACHABLE. A restructure that quietly drops a capability is the
+    // failure mode this asserts against, and it is the reason these are checked together.
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+    expect(screen.getByTestId('compose-format-open-document')).toHaveTextContent('Open in preview');
+    expect(screen.getByTestId('compose-format-apply-template')).toHaveTextContent('Apply template');
+    await user.keyboard('{Escape}');
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    expect(screen.getByTestId('compose-format-refresh-profile')).toHaveTextContent('Refresh profile');
+  });
+
+  it('#5g: the Word menu reads "Open in web" / "Open in desktop" (supersedes round-4 #11 wording)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: allControlsProps() });
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+
+    expect(screen.getByTestId('compose-format-open-word-web')).toHaveTextContent('Open in web');
+    expect(screen.getByTestId('compose-format-open-word-desktop')).toHaveTextContent('Open in desktop');
+    // The old "(web)"/"(desktop)" parenthetical is gone — asserted explicitly so a relapse fails.
+    expect(screen.queryByText(/Open in Word \(web\)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Open in Word \(desktop\)/)).not.toBeInTheDocument();
+  });
+
+  it('#5e: the Word trigger carries a dropdown chevron so it reads as a menu, like the Save group', () => {
+    renderFormatToolbar({}, { props: allControlsProps() });
+    const trigger = screen.getByTestId('compose-format-word-menu');
+    expect(trigger).toHaveAttribute('aria-label', 'Word');
+    // The chevron is an svg child; before #5e the trigger was a bare icon button with no menu affordance.
+    expect(trigger.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders the whole row without review-only controls (no hasReview) — no crash, groups intact', () => {
     renderFormatToolbar(
       {},
       {
@@ -1145,72 +1276,53 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
     );
     const order = toolbarTestIdOrder();
     const idx = (id: string): number => order.indexOf(id);
-
-    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
-
-    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-open-document'));
-    expect(idx('compose-format-refresh-profile')).toBeLessThan(idx('compose-format-divider-1'));
-    expect(idx('compose-format-divider-1')).toBeLessThan(idx('compose-format-word-menu'));
+    expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-heading-menu'));
+    expect(idx('compose-format-table-menu')).toBeLessThan(idx('compose-format-word-menu'));
     expect(idx('compose-format-word-menu')).toBeLessThan(idx('compose-format-save'));
-    expect(idx('compose-format-save')).toBeLessThan(idx('compose-format-divider-2'));
-    expect(idx('compose-format-divider-3')).toBeLessThan(idx('compose-format-undo'));
-    expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
   });
 });
 
-// ---------------------------------------------------------------------------
-// FR-03 (task 041) — save-state indicator (Saving… / Unsaved / Saved + Auto Save)
-// ---------------------------------------------------------------------------
+describe('ComposeFormatToolbar — unsaved state on the Save icon (UAT round 2 #5d)', () => {
+  // The "Saving… / Unsaved / Saved · Auto Save On" TEXT indicator was REMOVED at the owner's request to
+  // reclaim toolbar space. Its two halves deliberately went to different places, and these tests pin both:
+  //   · "Unsaved" → a warning triangle on the Save icon, plus the button's aria-label.
+  //   · "Recovery draft On/Off" → the checkable item in the Save menu (covered by the Save-menu suite).
 
-describe('ComposeFormatToolbar — FR-03 save-state indicator', () => {
-  it('is not rendered when the host does not track save state (no onSave / hasUnsavedEdits)', () => {
-    renderFormatToolbar();
+  it('shows a warning badge on the Save icon when there are unsaved edits', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, hasUnsavedEdits: true } });
+    expect(screen.getByTestId('compose-format-save-unsaved-badge')).toBeInTheDocument();
+  });
+
+  it('shows NO badge when everything is saved', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, hasUnsavedEdits: false } });
+    expect(screen.queryByTestId('compose-format-save-unsaved-badge')).not.toBeInTheDocument();
+  });
+
+  it('announces the unsaved state through the Save button aria-label, so removing the text costs nothing to assistive tech', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, hasUnsavedEdits: true } });
+    expect(screen.getByRole('button', { name: /unsaved changes/i })).toBeInTheDocument();
+  });
+
+  it('a save in flight announces "Saving" and drops the unsaved badge', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, hasUnsavedEdits: true, isSaving: true } });
+    // isSaving overrides the dirty state — the same precedence the old text indicator had.
+    expect(screen.getByRole('button', { name: /^saving$/i })).toBeInTheDocument();
+  });
+
+  it('the removed text indicator does not come back', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, hasUnsavedEdits: true } });
+    // Asserting the ABSENCE explicitly: the space this reclaimed is the whole point of #5d, so a
+    // reintroduced indicator should fail rather than quietly re-consume the row.
     expect(screen.queryByTestId('compose-save-state-indicator')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Auto Save (On|Off)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Recovery draft (On|Off)/)).not.toBeInTheDocument();
   });
 
-  it('shows "Unsaved" when there are dirty edits and no save in flight', () => {
-    renderFormatToolbar({}, { props: { onSave: jest.fn(), hasUnsavedEdits: true, isSaving: false } });
-    const el = screen.getByTestId('compose-save-state-indicator');
-    expect(el).toHaveAttribute('data-save-state', 'unsaved');
-    expect(el).toHaveTextContent('Unsaved');
-  });
-
-  it('shows "Saved" when there are no unsaved edits', () => {
-    renderFormatToolbar({}, { props: { onSave: jest.fn(), hasUnsavedEdits: false, isSaving: false } });
-    const el = screen.getByTestId('compose-save-state-indicator');
-    expect(el).toHaveAttribute('data-save-state', 'saved');
-    expect(el).toHaveTextContent('Saved');
-  });
-
-  it('shows "Saving…" while a save is in flight (overrides the dirty state)', () => {
-    renderFormatToolbar({}, { props: { onSave: jest.fn(), hasUnsavedEdits: true, isSaving: true } });
-    const el = screen.getByTestId('compose-save-state-indicator');
-    expect(el).toHaveAttribute('data-save-state', 'saving');
-    expect(el).toHaveTextContent('Saving…');
-  });
-
-  it('reflects the Auto Save On/Off state when the toggle is wired', () => {
-    const { unmount } = renderFormatToolbar(
-      {},
-      { props: { onSave: jest.fn(), hasUnsavedEdits: false, autoSaveEnabled: true, onAutoSaveToggle: jest.fn() } }
-    );
-    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Auto Save On');
-    unmount();
-
+  it('renders correctly in dark mode (ADR-021 — no crash, badge present)', () => {
     renderFormatToolbar(
       {},
-      { props: { onSave: jest.fn(), hasUnsavedEdits: false, autoSaveEnabled: false, onAutoSaveToggle: jest.fn() } }
+      { theme: webDarkTheme, props: { onSave: jest.fn(), canSave: true, hasUnsavedEdits: true } }
     );
-    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Auto Save Off');
-  });
-
-  it('renders correctly in dark mode (ADR-021 — no crash, indicator present)', () => {
-    renderFormatToolbar(
-      {},
-      { theme: webDarkTheme, props: { onSave: jest.fn(), hasUnsavedEdits: true, isSaving: false } }
-    );
-    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Unsaved');
+    expect(screen.getByTestId('compose-format-save-unsaved-badge')).toBeInTheDocument();
   });
 });

@@ -97,6 +97,9 @@ public sealed class L2LoadTestFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             ReplaceSingleton<IProvisioningRunRepository>(services, Repository);
             ReplaceSingleton<IHandlerEnqueuer>(services, Enqueuer);
             ReplaceSingleton<ICustomerRunGuard>(services, Guard);

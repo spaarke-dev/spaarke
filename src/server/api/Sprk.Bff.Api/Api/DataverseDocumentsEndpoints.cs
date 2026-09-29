@@ -530,6 +530,20 @@ public static class DataverseDocumentsEndpoints
         .RequireAuthorization();
 
         // GET /api/v1/containers/{containerId}/documents - List documents in a container (alternative endpoint)
+        //
+        // GATED by unified-access-control-r2 task 078. Until 2026-08-28 this route carried
+        // .RequireAuthorization() alone — authentication, not authorization: nothing checked that the
+        // caller had any relationship to the container or to the record owning it.
+        // AddContainerDocumentAuthorizationFilter resolves the container to its OWNING RECORD (task 075's
+        // mapping) and requires the caller's Read on that record, evaluated as the caller. A container with
+        // no establishable owner is REFUSED (ADR-003).
+        //
+        // ⚠️ The gate is deliberately belt-and-braces TODAY, and that is the right order. The data path is
+        // separately blocked by a pre-existing type bug: sprk_containerid is NVARCHAR holding an SPE "b!…"
+        // id, but the handler below does Guid.TryParse and DataverseServiceClientImpl:874 does
+        // Guid.Parse — so a real container id 400s and a GUID-shaped one matches no row. Fixing that type
+        // mismatch is one line, and doing it WITHOUT this filter would make the disclosure live. See
+        // projects/unified-access-control-r2/notes/task-078-container-document-list-gate.md §4.
         app.MapGet("/api/v1/containers/{containerId}/documents", async (
             string containerId,
             int? skip,
@@ -588,6 +602,7 @@ public static class DataverseDocumentsEndpoints
         })
         .WithTags("Containers")
         .RequireRateLimiting("dataverse-query")
+        .AddContainerDocumentAuthorizationFilter()
         .RequireAuthorization();
 
         return app;

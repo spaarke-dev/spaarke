@@ -51,3 +51,46 @@ public sealed class DocumentLockedByWordException : Exception
     /// <summary>The SPE drive-item id that is locked.</summary>
     public string ItemId { get; }
 }
+
+/// <summary>
+/// Thrown when an SPE write is rejected because Microsoft Graph is throttling the caller — Graph
+/// returns <b>HTTP 429 Too Many Requests</b>, usually with a <c>Retry-After</c> header.
+/// </summary>
+/// <remarks>
+/// <para>
+/// FR-S09 item 6 (r8 task 016). Before this type, all four throttle sites in
+/// <see cref="UploadSessionManager"/> threw a bare
+/// <c>InvalidOperationException("Service temporarily unavailable due to Graph rate limiting")</c>,
+/// which reached <c>ComposeEndpoints.ExecuteSaveAsync</c>'s final <c>catch (Exception)</c> and became
+/// an <b>HTTP 500</b> whose body read <c>Save failed: InvalidOperationException: …</c>. A throttle is
+/// not a server fault and not a lost document: nothing was written, the caller's work is intact, and
+/// the ONE thing that makes it actionable — <b>how long to wait</b> — was being discarded.
+/// </para>
+/// <para>
+/// ADR-007: facade translation of a Graph <c>ODataError</c>/<c>ServiceException</c>; no
+/// <c>Microsoft.Graph</c> type crosses <see cref="ISpeFileOperations"/>. The endpoint maps it to a
+/// 429 ProblemDetails carrying <c>Retry-After</c>; the client's recovery is "wait N seconds, then
+/// Save again".
+/// </para>
+/// </remarks>
+public sealed class GraphThrottledException : Exception
+{
+    public GraphThrottledException(string target, TimeSpan? retryAfter, Exception? inner = null)
+        : base(
+            $"SPE write throttled by Microsoft Graph (HTTP 429) for '{target}'" +
+            (retryAfter is { } ra ? $"; retry after {ra.TotalSeconds:0} s." : "."),
+            inner)
+    {
+        Target = target;
+        RetryAfter = retryAfter;
+    }
+
+    /// <summary>The container path or drive-item id whose write was throttled.</summary>
+    public string Target { get; }
+
+    /// <summary>
+    /// Graph's advertised back-off, when it sent one. Null means Graph gave no <c>Retry-After</c> —
+    /// callers state a conservative default rather than inventing a precise number.
+    /// </summary>
+    public TimeSpan? RetryAfter { get; }
+}

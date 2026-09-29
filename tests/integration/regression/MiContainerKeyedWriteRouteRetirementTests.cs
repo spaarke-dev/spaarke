@@ -42,7 +42,8 @@ namespace Sprk.Bff.Api.Tests;
 /// </list>
 ///
 /// <para><b>Why RETIRED and not GATED.</b> A repo-wide caller sweep found ZERO callers of all three.
-/// Every live upload flow uses the OBO sibling <c>PUT /api/obo/containers/{id}/files/{*path}</c> — 11
+/// (Historical, as of task 073.) Every live upload flow then used the OBO sibling
+/// <c>PUT /api/obo/containers/{id}/files/{*path}</c> — 11
 /// call sites via <c>EntityCreationService.ts:493</c>, <c>Spaarke.SdapClient</c>
 /// <c>UploadOperation.ts:27</c>, and <c>document-upload/SdapApiClient.ts:101</c>. Gating instead would
 /// have required a container→owning-record mapping, which tasks 075/076 own; building one here would
@@ -150,7 +151,8 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
             + "task 073 and must not be re-registered. Each wrote into a caller-named SPE container or "
             + "drive as the managed identity, so SPE applied no caller-side check, behind a policy that "
             + "resolved DOCUMENT rights from a CONTAINER id. There are no callers: the supported "
-            + "user-context path is PUT /api/obo/containers/{id}/files/{*path}, and the supported "
+            + "user-context path is PUT /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}, "
+            + "and the supported "
             + "app-only path is the in-process SpeFileStore facade. If a genuine need for an app-only "
             + "HTTP write route reappears, it must authorize against the OWNING RECORD via the task "
             + "075/076 container resolver — not against the caller-supplied container id.\n\n"
@@ -236,10 +238,15 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
 
     /// <summary>
     /// Without these controls, a fixture change that made every request 404 would silently turn every
-    /// absence assertion above into a vacuous pass. This route SURVIVES: it is the OBO twin the live
-    /// upload flows actually call (11 wizard call sites), and it CREATES content, so no
-    /// <c>sprk_document</c> exists yet to authorize against — its authorization object is the owning
-    /// record, which tasks 075/076 build.
+    /// absence assertion above into a vacuous pass.
+    ///
+    /// RE-POINTED 2026-09-03 (task 076). Both controls in this section used to name
+    /// <c>PUT /api/obo/containers/{id}/files/{*path}</c> — described here as "the OBO twin the live
+    /// upload flows actually call (11 wizard call sites)". That route is now DELETED: every one of
+    /// those call sites moved onto contracts that name no container, and the route went with the last
+    /// of them. A positive control MUST name a route that survives, so both now name
+    /// <c>PUT /api/obo/me/files/{*path}</c> — the record-LESS replacement, which is mapped, carries
+    /// <c>RequireAuthorization()</c>, and accepts no container parameter.
     /// </summary>
     [Fact]
     public async Task SurvivingOboUploadRoute_WithoutBearer_Returns401NotFound()
@@ -247,13 +254,13 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
         using var content = new ByteArrayContent(new byte[] { 1, 2, 3 });
 
         var response = await CreateAnonymousClient()
-            .PutAsync("/api/obo/containers/test-container/files/f.txt", content);
+            .PutAsync("/api/obo/me/files/f.txt", content);
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Unauthorized,
-            "PUT /api/obo/containers/{id}/files/{*path} is still mapped. If this returns 404 the route "
-            + "was removed and ~7 Create*Wizard surfaces plus DocumentUploadWizard are broken — AND "
-            + "every absence assertion in this file has become vacuous.");
+            "PUT /api/obo/me/files/{*path} is mapped and requires authorization. If this returns 404 "
+            + "the route was removed — AND every absence assertion in this file has become vacuous, "
+            + "because a fixture that 404s everything would look identical.");
     }
 
     [Fact]
@@ -262,10 +269,10 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
         using var content = new ByteArrayContent(new byte[] { 1, 2, 3 });
 
         var response = await CreateAuthenticatedClient()
-            .PutAsync("/api/obo/containers/test-container/files/f.txt", content);
+            .PutAsync("/api/obo/me/files/f.txt", content);
 
-        // Deliberately asserts NOT-404 rather than a specific code: tasks 075/076 are expected to add
-        // a per-record gate to this route, which will change the authorized-path status. What must stay
+        // Deliberately asserts NOT-404 rather than a specific code: the authorized path's status
+        // depends on Graph/Dataverse behaviour the fixture does not fully stand up. What must stay
         // true is that the route is ROUTED, which is what makes the retired routes' 404s meaningful.
         response.StatusCode.Should().NotBe(
             HttpStatusCode.NotFound,

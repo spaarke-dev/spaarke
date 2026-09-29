@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
@@ -147,11 +148,16 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
             "/api/ai/chat/sessions/not-a-guid/summarize",
             new { });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        // Issue #863: SessionOwnershipFilter runs before the handler's GUID-format check, so a
+        // malformed id is answered as "not found" rather than "invalid". That is truthful — an id
+        // that cannot be a GUID cannot name a session — and it keeps ONE answer for every id the
+        // caller does not own, which is what stops the route being an existence oracle. The
+        // handler's sessionId.invalid branch survives for body-supplied ids on other routes.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         var raw = await response.Content.ReadAsStringAsync();
-        raw.Should().Contain("sessionId.invalid",
-            "ADR-019: stable errorCode for GUID-format failure");
+        raw.Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode,
+            "ADR-019: the filter's stable errorCode");
         raw.Should().Contain("correlationId",
             "ADR-019: every ProblemDetails carries a correlationId extension");
     }
@@ -160,6 +166,13 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
     public async Task Post_TooManyFileIds_Returns400_TooManyFiles()
     {
         _fx.Reset();
+
+        // Issue #863: seed an OWNED session. SessionOwnershipFilter runs ahead of the handler, so a
+        // test that leaves Session null no longer reaches the validation it is asserting on — and a
+        // real request to this route always resolves a session the caller owns, so "null" was
+        // modelling a request that cannot occur.
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+
         var client = _fx.CreateAuthenticatedClient();
 
         // 21 fileIds — exceeds NFR-02 cap of 20.
@@ -226,7 +239,7 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var raw = await response.Content.ReadAsStringAsync();
-        raw.Should().Contain("summarize.session-not-found",
+        raw.Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode,
             "ADR-019: stable errorCode for missing session");
         raw.Should().NotContain(TestSessionId,
             "ADR-019: do not echo sensitive identifiers in error detail strings (defense-in-depth)");
@@ -399,7 +412,7 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files);
+            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
     }
 }
 

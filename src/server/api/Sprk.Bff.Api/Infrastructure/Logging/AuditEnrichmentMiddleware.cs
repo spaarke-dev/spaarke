@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using Spaarke.Core.Auth;
 
 namespace Sprk.Bff.Api.Infrastructure.Logging;
 
@@ -36,6 +36,30 @@ namespace Sprk.Bff.Api.Infrastructure.Logging;
 /// See <c>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md</c> §G (audit trail integrity) and
 /// §5 row C8 (audit logging middleware). Standardising on <c>oid</c> over <c>upn</c>/<c>email</c>
 /// aligns with task D3 (identity claims hardening).
+///
+/// <para><b>Caller-kind classification lives in <see cref="CallerIdentity"/></b>
+/// (unified-access-control-r2 task 081). This middleware used to read <c>appid</c>/<c>azp</c>/
+/// <c>idtyp</c>/<c>scp</c>/<c>oid</c> itself, in <c>private static</c> helpers that no authorization
+/// path could reach. That logic was PROMOTED into <c>Spaarke.Core.Auth.CallerIdentity</c> so the
+/// authorization gate on <c>GET /api/diagnostics/tenant-container-resolver</c> and this logging scope
+/// share ONE classifier rather than drifting apart. Per CLAUDE.md §11 there must be exactly one place
+/// that decides caller kind from a <c>ClaimsPrincipal</c>; this file is a CONSUMER of it, not a second
+/// implementation.</para>
+///
+/// <para><b>Deliberate asymmetry — logging is two-valued, authorization is three-valued.</b>
+/// <c>CallerIdentity</c> answers <c>UserDelegated</c> / <c>Application</c> / <c>Indeterminate</c>. The
+/// <c>obo</c> log field projects that onto a bool as <c>Kind == UserDelegated</c>, so an
+/// <c>Indeterminate</c> token logs <c>obo=false</c> (not-OBO) — preserving this middleware's previous
+/// behaviour. An authorization site facing the SAME <c>Indeterminate</c> value must DENY. These are not
+/// inconsistent: for a log field the conservative answer is "no user was proven present", and for an
+/// access decision the conservative answer is "no". Both read the identical classification; only the
+/// projection differs.</para>
+///
+/// <para>One shape classifies differently than it did before task 081: a token carrying BOTH
+/// <c>idtyp=app</c> and a delegated <c>scp</c> claim now reports <c>UserDelegated</c> (so
+/// <c>obo=true</c>) where the old helper returned not-OBO. Entra does not issue that combination — the
+/// new ordering checks the delegated-scope claim first on purpose, because for an authorization gate
+/// the fail-closed reading of a contradictory token is "there may be a user behind this".</para>
 /// </summary>
 public sealed class AuditEnrichmentMiddleware
 {
@@ -60,12 +84,17 @@ public sealed class AuditEnrichmentMiddleware
             return;
         }
 
-        // Extract the canonical identity fields. Use null (not empty string) for "missing"
-        // so log sinks can distinguish "present but empty" from "absent".
-        var oid = ResolveOid(user);
-        var appId = ResolveAppId(user);
-        var tenantId = ResolveTenantId(user);
-        var isObo = IsOnBehalfOfFlow(user);
+        // Extract the canonical identity fields from the ONE classifier (task 081). It reads every
+        // claim in both its short JWT form and its mapped WS-Fed URI form, which is what the private
+        // helpers this replaced were doing by hand. Null (not empty string) means "missing", so log
+        // sinks can still distinguish "present but empty" from "absent".
+        var caller = CallerIdentity.FromPrincipal(user);
+        var oid = caller.ObjectId;
+        var appId = caller.ApplicationId;
+        var tenantId = caller.TenantId;
+
+        // Two-valued projection of a three-valued classification — see the asymmetry note on the class.
+        var isObo = caller.IsUserDelegated;
         var correlationId = context.TraceIdentifier;
 
         // Build the scope dictionary. ILogger<T>.BeginScope(IDictionary) is the
@@ -86,63 +115,11 @@ public sealed class AuditEnrichmentMiddleware
         }
     }
 
-    /// <summary>
-    /// Resolves the Azure AD object ID claim. Tries the short claim name first
-    /// (Microsoft.Identity.Web does NOT map this by default in newer versions),
-    /// then the long URI form for compatibility with older claim mappings.
-    /// </summary>
-    private static string? ResolveOid(ClaimsPrincipal user) =>
-        user.FindFirst("oid")?.Value
-        ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-
-    /// <summary>
-    /// Resolves the calling-app registration ID. Azure AD v2 tokens emit <c>azp</c>
-    /// (authorized party); v1 tokens emit <c>appid</c>. Either is the calling app.
-    /// </summary>
-    private static string? ResolveAppId(ClaimsPrincipal user) =>
-        user.FindFirst("appid")?.Value
-        ?? user.FindFirst("azp")?.Value;
-
-    /// <summary>
-    /// Resolves the issuing Azure AD tenant ID. Tries the short claim, then the long URI,
-    /// then the alternative <c>tenant_id</c> emitted by some federated issuers.
-    /// </summary>
-    private static string? ResolveTenantId(ClaimsPrincipal user) =>
-        user.FindFirst("tid")?.Value
-        ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-        ?? user.FindFirst("tenant_id")?.Value;
-
-    /// <summary>
-    /// Determines whether the incoming token represents a delegated (OBO-capable) user
-    /// flow vs an app-only flow.
-    ///
-    /// Per Azure AD docs:
-    /// <list type="bullet">
-    ///   <item>User-delegated tokens carry the <c>scp</c> (scope) claim with delegated permissions.</item>
-    ///   <item>App-only tokens carry the <c>roles</c> claim (application permissions) and no <c>scp</c>.</item>
-    ///   <item>The <c>idtyp</c> claim (when present) explicitly says <c>app</c> for app-only.</item>
-    /// </list>
-    /// We treat the request as OBO-eligible when a delegated <c>scp</c> claim is present
-    /// AND a user identity (<c>oid</c>) is present. This matches the contract the BFF
-    /// applies when exchanging the inbound token via the On-Behalf-Of flow.
-    /// </summary>
-    private static bool IsOnBehalfOfFlow(ClaimsPrincipal user)
-    {
-        // Explicit app-only signal wins if present.
-        var idtyp = user.FindFirst("idtyp")?.Value;
-        if (string.Equals(idtyp, "app", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var hasDelegatedScope =
-            user.HasClaim(c => c.Type == "scp")
-            || user.HasClaim(c => c.Type == "http://schemas.microsoft.com/identity/claims/scope");
-
-        var hasUserOid = !string.IsNullOrEmpty(ResolveOid(user));
-
-        return hasDelegatedScope && hasUserOid;
-    }
+    // NOTE (task 081): ResolveOid / ResolveAppId / ResolveTenantId / IsOnBehalfOfFlow used to live here
+    // as private static claim readers. They were promoted verbatim-in-behaviour into
+    // Spaarke.Core.Auth.CallerIdentity so that the authorization path can reach them. Do NOT reintroduce
+    // a local claim reader in this file — CLAUDE.md §11 and task 081's acceptance criteria require
+    // exactly ONE place that decides caller kind from a ClaimsPrincipal.
 }
 
 /// <summary>

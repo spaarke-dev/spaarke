@@ -633,17 +633,11 @@ export const SecurityPage: React.FC = () => {
       {selectedConfig && (
         <div className={styles.content}>
 
-          {/* ── Section 1: Secure Score ── */}
+          {/* ── Section 1: Secure Score ──
+              No section header here on purpose. SecureScoreCard renders its own "Secure Score"
+              header, and having both printed the title twice, one directly above the other
+              (UAT 2026-08-28). The card owns the heading; the page owns the layout. */}
           <div>
-            <div className={styles.sectionHeader}>
-              <span className={styles.sectionIcon}>
-                <Shield20Regular />
-              </span>
-              <Text size={400} weight="semibold" className={styles.sectionTitle}>
-                Secure Score
-              </Text>
-            </div>
-
             {/* Score error */}
             {scoreError && !isScoreLoading && renderScoreError()}
 

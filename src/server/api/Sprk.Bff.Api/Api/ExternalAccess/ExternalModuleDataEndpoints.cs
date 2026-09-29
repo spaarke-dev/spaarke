@@ -16,11 +16,20 @@
 // empty result (fetch) or 403 (record) — being authenticated does NOT reveal all records. Schema/view
 // reads (metadata, savedquery, savedqueries) return no record data and are app-only passthrough.
 //
+// No joins on the read seam (unified-access-control-r2 task 011 · spec FR-10 · finding A-17): the fetch
+// guard admits a caller-submitted FetchXML only when it is a SINGLE-ENTITY read of the module's own
+// entity with NO <link-entity> at any depth. Before FR-10 the guard tested only the SET OF ENTITY NAMES,
+// which a SELF-join cannot perturb — so `<link-entity name='{module.RecordEntity}'>` passed, and because
+// Tier-2 scoping filters PRIMARY rows only, its aliased columns carried OUT-OF-SCOPE rows of the same
+// entity out to the client. Joins are now refused structurally, not scoped. See EvaluateFetchXmlGuard.
+//
 // Broker-only (ADR-028 A1/A2/A3 · NFR-02): all reads execute APP-ONLY via the existing Dataverse read
 // services — no OBO / no caller-token exchange, no Graph pointer ever reaches the client, keyed on
 // record id. ADR-008: authorization via the inherited group filter (no global middleware). ADR-019:
 // ProblemDetails on every failure.
 
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -41,6 +50,22 @@ public static class ExternalModuleDataEndpoints
 
     /// <summary>Deny code when a record-scoped read targets a record outside the module's Tier-2 set.</summary>
     public const string DenyRecordNotAccessible = "sdap.external.module.record_not_in_accessible_set";
+
+    /// <summary>Error code when the caller-submitted FetchXML cannot be parsed (fail-closed).</summary>
+    public const string ErrorFetchXmlMalformed = "DV_FETCHXML_MALFORMED";
+
+    /// <summary>Error code when the FetchXML names an entity other than the module's own.</summary>
+    public const string ErrorFetchXmlEntityMismatch = "DV_FETCHXML_ENTITY_MISMATCH";
+
+    /// <summary>
+    /// Error code when the FetchXML contains a <c>&lt;link-entity&gt;</c> join. Distinct from
+    /// <see cref="ErrorFetchXmlEntityMismatch"/> because a SELF-join names no foreign entity yet is
+    /// equally exfiltrating (finding A-17 / spec FR-10).
+    /// </summary>
+    public const string ErrorFetchXmlLinkEntityNotPermitted = "DV_FETCHXML_LINK_ENTITY_NOT_PERMITTED";
+
+    /// <summary>Error code when the guard reaches an unmodelled verdict — fail-closed, never admitted.</summary>
+    public const string ErrorFetchXmlGuardIndeterminate = "DV_FETCHXML_GUARD_INDETERMINATE";
 
     /// <summary>
     /// Registers the module read-data endpoints on the shared external collaboration group. The group's
@@ -138,37 +163,13 @@ public static class ExternalModuleDataEndpoints
             return ProblemDetailsHelper.Forbidden(DenyModuleNotRegistered);
         }
 
-        // SECURITY (broker over-read defense): the app-only ServiceClient runs with full app privilege,
-        // so the caller-supplied FetchXML MUST reference ONLY the module's own entity. Any other entity —
-        // including a <link-entity> join — is rejected, because Tier-2 row-scoping filters the PRIMARY
-        // rows by id but cannot vet joined columns (e.g. a join to systemuser/contact would ride internal
-        // data out on an accessible project row). A per-module link-entity allow-list is the documented
-        // future extension seam; R1 is single-entity reads (lookup labels come from formatted values).
-        IReadOnlySet<string> referenced;
-        try
+        // SECURITY (broker over-read defense) — see EvaluateFetchXmlGuard for the full contract. The
+        // app-only ServiceClient runs with full app privilege, so a caller-supplied FetchXML is admitted
+        // ONLY when it is a single-entity read of the module's own entity with NO join of any kind.
+        var guard = EvaluateFetchXmlGuard(request.FetchXml, module.RecordEntity, entityExtractor);
+        if (!guard.IsAllowed)
         {
-            referenced = entityExtractor.ExtractEntities(request.FetchXml);
-        }
-        catch (FetchXmlParseException)
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
-                detail: "FetchXML payload could not be parsed.",
-                extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_FETCHXML_MALFORMED" });
-        }
-
-        if (referenced.Count == 0 ||
-            referenced.Any(e => !string.Equals(e, module.RecordEntity, StringComparison.OrdinalIgnoreCase)))
-        {
-            logger.LogWarning(
-                "[EXT-MODULE] Fetch denied — FetchXML for module {Module} references entities [{Entities}]; " +
-                "only '{ModuleEntity}' is permitted (no link-entities on the external read seam).",
-                module.Name, string.Join(",", referenced), module.RecordEntity);
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
-                detail: $"The module read may reference only entity '{module.RecordEntity}'. " +
-                        "Cross-entity joins (<link-entity>) are not permitted on this surface.",
-                extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_FETCHXML_ENTITY_MISMATCH" });
+            return RejectFetchXml(guard, module, logger);
         }
 
         // Compute the caller's Tier-2 accessible sets for this module's scope dimensions ONCE (a pure
@@ -416,6 +417,200 @@ public static class ExternalModuleDataEndpoints
                 statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",
                 detail: "Failed to list saved queries",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_INTERNAL_ERROR" });
+        }
+    }
+
+    // =========================================================================
+    // FetchXML guard (spec FR-10 · finding A-17)
+    // =========================================================================
+
+    // Internal (not public) because IFetchXmlEntityExtractor is internal — CS0051 otherwise. The BFF
+    // declares InternalsVisibleTo("Sprk.Bff.Api.Tests"), so tests call the real guard unchanged.
+    /// <summary>Why the FetchXML guard admitted or refused a caller-submitted fetch.</summary>
+    internal enum FetchXmlGuardVerdict
+    {
+        /// <summary>Single-entity read of the module's own entity, no joins. The ONLY admitting value.</summary>
+        Allowed = 0,
+
+        /// <summary>Unparseable / structurally invalid FetchXML — refused (ADR-003 fail-closed).</summary>
+        Malformed = 1,
+
+        /// <summary>References an entity other than the module's own — refused.</summary>
+        EntityMismatch = 2,
+
+        /// <summary>Contains a <c>&lt;link-entity&gt;</c> join (self-join included) — refused per FR-10.</summary>
+        LinkEntityNotPermitted = 3,
+    }
+
+    /// <summary>Guard outcome plus the entity names the FetchXML referenced (for logging only).</summary>
+    internal readonly record struct FetchXmlGuardResult(
+        FetchXmlGuardVerdict Verdict,
+        IReadOnlySet<string> ReferencedEntities)
+    {
+        /// <summary>True ONLY for <see cref="FetchXmlGuardVerdict.Allowed"/> — every other verdict refuses.</summary>
+        public bool IsAllowed => Verdict == FetchXmlGuardVerdict.Allowed;
+    }
+
+    private static readonly IReadOnlySet<string> NoReferencedEntities =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The FetchXML join element. Matched by LOCAL NAME, case-insensitively (see remarks).</summary>
+    private const string LinkEntityElementName = "link-entity";
+
+    /// <summary>
+    /// The single authority deciding whether a caller-submitted FetchXML may execute on the external
+    /// module read seam. Public (not a private lambda) so tests exercise the REAL decision rather than a
+    /// transcription of it — a transcribed predicate cannot detect a change in what production does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two independent refusal signals, both required, evaluated in this order:
+    /// </para>
+    /// <list type="number">
+    ///   <item><b>Entity identity</b> (pre-existing): every entity named by the FetchXML must equal the
+    ///   module's own <c>RecordEntity</c>. Unchanged so the cross-entity protection cannot regress, and
+    ///   ordered FIRST so a cross-entity join keeps reporting
+    ///   <see cref="ErrorFetchXmlEntityMismatch"/> exactly as before.</item>
+    ///   <item><b>Structural join detection</b> (FR-10 / A-17, NEW): refuse when ANY
+    ///   <c>&lt;link-entity&gt;</c> element is present at any depth. This is the signal the entity-name
+    ///   set structurally cannot carry — a SELF-join contributes only the module's own name, so the
+    ///   referenced set of an exfiltrating self-join is byte-identical to that of a benign single-entity
+    ///   read. Tier-2 scoping filters PRIMARY rows only, so aliased columns pulled through a self-join
+    ///   are extra attributes ON an in-scope row and are never scope-checked, and
+    ///   <c>FetchService.ProjectEntity</c> serializes <c>AliasedValue</c> straight to the client.</item>
+    /// </list>
+    /// <para>
+    /// <b>Posture: reject, do not scope</b> (FR-10 wording). No per-module join allow-list is offered —
+    /// no consumer needs one today (root CLAUDE.md §11: new surface requires a concrete cost-of-doing-
+    /// nothing), and a scoped join is materially harder to get right than a refusal. Adding one later is
+    /// an additive change to this one method.
+    /// </para>
+    /// <para>
+    /// <b>Join detection is deliberately broader than the extractor's.</b> It matches the element's
+    /// LOCAL name, case-insensitively, ignoring XML namespace — so a hypothetical
+    /// <c>&lt;Link-Entity&gt;</c> or namespace-qualified variant cannot slip past a guard that the
+    /// extractor's exact-name <c>Descendants("link-entity")</c> lookup would miss. Strictly more
+    /// conservative: any fetch Dataverse would itself reject is simply refused earlier, and no
+    /// single-entity read is affected. Comments and text nodes are not elements, so a literal
+    /// "link-entity" inside a comment or value is not a false positive.
+    /// </para>
+    /// <para>
+    /// ADR-003 fail-closed: every parse failure, empty referenced set, and unmodelled state refuses.
+    /// There is no permissive fallback anywhere in this method.
+    /// </para>
+    /// </remarks>
+    internal static FetchXmlGuardResult EvaluateFetchXmlGuard(
+        string? fetchXml,
+        string moduleRecordEntity,
+        IFetchXmlEntityExtractor entityExtractor)
+    {
+        ArgumentNullException.ThrowIfNull(entityExtractor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleRecordEntity);
+
+        if (string.IsNullOrWhiteSpace(fetchXml))
+        {
+            return new FetchXmlGuardResult(FetchXmlGuardVerdict.Malformed, NoReferencedEntities);
+        }
+
+        // ── (1) Entity identity — UNCHANGED predicate, so cross-entity rejection cannot regress ──
+        IReadOnlySet<string> referenced;
+        try
+        {
+            referenced = entityExtractor.ExtractEntities(fetchXml);
+        }
+        catch (FetchXmlParseException)
+        {
+            return new FetchXmlGuardResult(FetchXmlGuardVerdict.Malformed, NoReferencedEntities);
+        }
+
+        if (referenced.Count == 0 ||
+            referenced.Any(e => !string.Equals(e, moduleRecordEntity, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new FetchXmlGuardResult(FetchXmlGuardVerdict.EntityMismatch, referenced);
+        }
+
+        // ── (2) Structural join detection — the A-17 blind spot the name set cannot express ──
+        XDocument document;
+        try
+        {
+            // XDocument.Parse prohibits DTD processing by default on .NET, so no external-entity vector.
+            document = XDocument.Parse(fetchXml);
+        }
+        catch (XmlException)
+        {
+            // Fail closed: the extractor parsed it but we cannot, so we cannot prove the fetch join-free.
+            return new FetchXmlGuardResult(FetchXmlGuardVerdict.Malformed, referenced);
+        }
+
+        return ContainsLinkEntity(document)
+            ? new FetchXmlGuardResult(FetchXmlGuardVerdict.LinkEntityNotPermitted, referenced)
+            : new FetchXmlGuardResult(FetchXmlGuardVerdict.Allowed, referenced);
+    }
+
+    /// <summary>True when a <c>&lt;link-entity&gt;</c> element occurs at ANY depth (namespace- and case-agnostic).</summary>
+    private static bool ContainsLinkEntity(XDocument document) =>
+        document.Descendants().Any(element =>
+            string.Equals(element.Name.LocalName, LinkEntityElementName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Maps a refusing <see cref="FetchXmlGuardResult"/> to its ProblemDetails response (ADR-019).
+    /// Every arm refuses; the <c>default</c> arm exists so that adding a verdict without updating this
+    /// switch fails CLOSED with a 500 rather than falling through to an admit.
+    /// </summary>
+    private static IResult RejectFetchXml(
+        FetchXmlGuardResult guard,
+        ExternalModuleDescriptor module,
+        ILogger logger)
+    {
+        switch (guard.Verdict)
+        {
+            case FetchXmlGuardVerdict.Malformed:
+                logger.LogWarning(
+                    "[EXT-MODULE] Fetch denied for module {Module} — FetchXML could not be parsed.",
+                    module.Name);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
+                    detail: "FetchXML payload could not be parsed.",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorFetchXmlMalformed });
+
+            case FetchXmlGuardVerdict.EntityMismatch:
+                logger.LogWarning(
+                    "[EXT-MODULE] Fetch denied — FetchXML for module {Module} references entities [{Entities}]; " +
+                    "only '{ModuleEntity}' is permitted.",
+                    module.Name, string.Join(",", guard.ReferencedEntities), module.RecordEntity);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
+                    detail: $"The module read may reference only entity '{module.RecordEntity}'. " +
+                            "Cross-entity joins (<link-entity>) are not permitted on this surface.",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorFetchXmlEntityMismatch });
+
+            case FetchXmlGuardVerdict.LinkEntityNotPermitted:
+                // A-17: the referenced-entity set alone would have ADMITTED this fetch.
+                logger.LogWarning(
+                    "[EXT-MODULE] Fetch denied — FetchXML for module {Module} ({ModuleEntity}) contains a " +
+                    "<link-entity> join. Joins are not permitted on the external read seam: Tier-2 scoping " +
+                    "filters primary rows only, so aliased join columns would carry out-of-scope data.",
+                    module.Name, module.RecordEntity);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
+                    detail: "Joins (<link-entity>) are not permitted on this surface, including a self-join " +
+                            $"to '{module.RecordEntity}'. Submit a single-entity read.",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = ErrorFetchXmlLinkEntityNotPermitted,
+                    });
+
+            default:
+                // Unreachable by construction (callers check IsAllowed first). Fail CLOSED anyway — a
+                // permissive default is the exact failure mode this project keeps re-encountering.
+                logger.LogError(
+                    "[EXT-MODULE] Fetch denied for module {Module} — unmodelled guard verdict {Verdict}. " +
+                    "Refusing (fail-closed).",
+                    module.Name, guard.Verdict);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",
+                    detail: "The module read could not be authorized.",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorFetchXmlGuardIndeterminate });
         }
     }
 

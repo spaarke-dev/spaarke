@@ -347,7 +347,9 @@ Or specifically: `/bff-deploy`
 /code-page-deploy
 ```
 
-### Scenario: I need to deploy to Dataverse (solutions, plugins, web resources)
+### Scenario: I need to deploy to Dataverse (solutions, PCF, web resources)
+
+> Spaarke ships no Dataverse plugins (ADR-002, updated 2026-09-25).
 
 ```
 /dataverse-deploy

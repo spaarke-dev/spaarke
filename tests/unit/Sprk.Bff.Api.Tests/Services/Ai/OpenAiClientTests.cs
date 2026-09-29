@@ -128,41 +128,18 @@ public class OpenAiClientTests
     }
 }
 
-public class OpenAiClientConfigurationTests
-{
-    [Theory]
-    [InlineData(100)]
-    [InlineData(500)]
-    [InlineData(1000)]
-    [InlineData(4000)]
-    public void MaxOutputTokens_AcceptsValidRange(int maxTokens)
-    {
-        var options = new DocumentIntelligenceOptions { MaxOutputTokens = maxTokens };
-
-        options.MaxOutputTokens.Should().Be(maxTokens);
-    }
-
-    [Theory]
-    [InlineData(0.0f)]
-    [InlineData(0.3f)]
-    [InlineData(0.7f)]
-    [InlineData(1.0f)]
-    public void Temperature_AcceptsValidRange(float temperature)
-    {
-        var options = new DocumentIntelligenceOptions { Temperature = temperature };
-
-        options.Temperature.Should().Be(temperature);
-    }
-
-    [Theory]
-    [InlineData("gpt-4o-mini")]
-    [InlineData("gpt-4o")]
-    [InlineData("gpt-4")]
-    [InlineData("custom-deployment-name")]
-    public void SummarizeModel_AcceptsAnyDeploymentName(string model)
-    {
-        var options = new DocumentIntelligenceOptions { SummarizeModel = model };
-
-        options.SummarizeModel.Should().Be(model);
-    }
-}
+// `OpenAiClientConfigurationTests` was deleted here by task CICD-094 (issue #864) as the B16
+// migration that let the B16 guard arm green. Its three [Theory] methods (12 cases) each assigned
+// ONE auto-property on DocumentIntelligenceOptions and asserted that same property read back:
+//
+//     var options = new DocumentIntelligenceOptions { MaxOutputTokens = maxTokens };
+//     options.MaxOutputTokens.Should().Be(maxTokens);
+//
+// That is ADR-038 §7 B16 verbatim — the C# language guarantees the round-trip, and `{ get; set; }`
+// has no behavior to protect. The names promised more than the bodies delivered:
+// `MaxOutputTokens_AcceptsValidRange` asserted no range (none is enforced on the options type) and
+// `SummarizeModel_AcceptsAnyDeploymentName` asserted no deployment-name rule. Nothing regressed
+// when they were removed because they constrained nothing.
+//
+// If validation is ever added to these options, test THAT — the throw, the clamp, the default —
+// under `tests/unit/domain/**`. See Adr038TestBanGuardTests.B16_NoAutoPropertyRoundTripTests.

@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>OptionSetField — add edit mode via Fluent Dropdown + fix stale label typography (FR-09)</title>
+    <phase>1 Renderers</phase>
+    <gate>after-001-002</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped shared-library .tsx component that MatterHeaderPcf v1.0.20 consumes (Step 3.5.5: modifies code files = FULL).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Direct extension of one existing component with an explicit canonical reference (TextField.tsx) and a closed criteria set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason></parallel-reason>
+    <deps>001, 002</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend the existing `OptionSetField` renderer with an edit mode: a Fluent v9 `Dropdown` fed by an
+    `options` prop that the consumer resolves from the form attribute's `getOptions()`. ALSO fix its stale
+    label typography — it still uses the pre-v1.0.4 `caption1` / `colorNeutralForeground2` stack
+    (OptionSetField.tsx:86-89) while TextField adopted `fontSizeBase300` / `colorNeutralForeground1` at
+    v1.0.4 (TextField.tsx:56-69), so its label reads smaller and grayer than every sibling in a mixed grid.
+    All new props are optional: existing read-only consumers (including shipped MatterHeader) must be
+    untouched behaviorally.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 + Griffel and React 16/17-safe shared components.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    OptionSetField.tsx supports optional `options` / `onSave` / `disabled` props implementing the FR-10
+    edit contract with a Fluent Dropdown, its label typography matches TextField v1.0.4 exactly, all
+    pre-existing tests in __tests__/fields.test.tsx pass UNMODIFIED, and new edit-mode tests pass in a NEW
+    file __tests__/OptionSetField.edit.test.tsx.
+  </goal>
+
+  <context>
+    <background>
+      FR-09: `sprk_invoicestatus` must be editable from the header via dropdown, and the OptionSetField
+      label must match sibling renderers in a mixed grid. Spec §11 classifies this as a DIRECT EXTENSION
+      (not a new component): without it, status becomes the one read-only field on four entities. The
+      component's documented boundary (file header, OptionSetField.tsx:4-8) already places value
+      resolution on the CONSUMER (FormattedValue → label string); the options list follows the same
+      boundary — the consumer resolves `getXrmPage().getAttribute(name).getOptions()` and passes
+      `options`, keeping the renderer context-agnostic per ADR-012.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/OptionSetField.edit.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Phase 0 gate (spike decision; no direct input to this task)</dependency>
+      <dependency task="002" status="pending">Parity baseline captured — code changes are barred until it exists</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every color/typography/spacing value added or changed in OptionSetField.tsx comes from Fluent v9 semantic tokens; zero hex/rgb/hsl literals.</constraint>
+    <constraint source="ADR-022">OptionSetField.tsx stays React 16/17-safe: no `use()`, no `useSyncExternalStore`, no `createRoot`. Fluent `Dropdown` from `@fluentui/react-components` only — no new package.</constraint>
+    <constraint source="ADR-012">The renderer stays context-agnostic: no `Xrm` access, no `ComponentFramework` types. `options` is a plain `Array&lt;{ value: number; label: string }&gt;` prop resolved by the consumer from `getOptions()`.</constraint>
+    <constraint source="project">Backward compatibility (scope: this task): all new props are optional; with none of them supplied, rendered output is behaviorally identical to today except the label typography fix. Every pre-existing OptionSetField test in __tests__/fields.test.tsx MUST pass WITHOUT modification — if one fails, your change broke compat; fix the component, not the test.</constraint>
+    <constraint source="project">FR-10 contract for the edit path, mirroring TextField.tsx: `editable = typeof onSave === 'function' AND disabled !== true` (additionally requiring a non-empty `options` array — onSave without options logs `console.warn` once and stays read-only); on save rejection revert the draft and STAY in edit mode; Escape cancels; blur commits; tiny `Spinner` + disabled control while saving.</constraint>
+    <constraint source="project">Typography fix scope: ONLY the label styles move to the TextField v1.0.4 stack (`colorNeutralForeground1`, `fontSizeBase300`, `fontWeightRegular`, `lineHeightBase300`, `paddingBottom: spacingVerticalXS`, ellipsis/nowrap — TextField.tsx:56-69). Do not restyle the read-mode value chrome in this task beyond the editable hover affordance below.</constraint>
+    <constraint source="project">When editable, the read-mode value cell shows the clickability affordance mirroring TextField's `valueEditable` (cursor + hover background token, TextField.tsx:101-106) so editability is discoverable, consistent with siblings.</constraint>
+    <constraint source="project">Parallel-safety (scope: this task): MUST NOT edit fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx — barrel and shared test file are task 015's; group-A tasks racing on them cost R1 real time. New tests go in the NEW file only.</constraint>
+    <constraint source="project">D-10 / FR-11: do NOT add a required `*` marker; the em-dash behavior for null/undefined/'' (OptionSetField.tsx:110) is already correct — keep it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record-header field renderers; Fluent v9 Dropdown; shipped-component compatibility</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="canonical renderer contract" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx">Copy the edit-state machinery: editable gate, draft state, commit/cancel callbacks, revert-on-reject-stay-in-edit (lines 139-157), saving spinner, data-testid conventions — and the v1.0.4 label styles (lines 56-69) verbatim for the typography fix.</pattern>
+      <pattern name="portal theming" location=".claude/patterns/pcf/theme-management.md">The Dropdown listbox mounts in a portal — themed via the host FluentProvider wrap (pcf-build-scaffold gotcha 6). The renderer itself assumes tokens only; do not add provider logic here.</pattern>
+      <pattern name="Fluent v9 authoring conventions" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Component structure, token usage, JSDoc conventions.</pattern>
+      <pattern name="React version boundary" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">What is safe under the React 16/17 platform-library boundary.</pattern>
+      <pattern name="control initialization" location=".claude/patterns/pcf/control-initialization.md">Consumer-side context; renderer stays props-only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read OptionSetField.tsx and TextField.tsx fully; read the FR-09/FR-10 spec sections and the existing OptionSetField describe block in __tests__/fields.test.tsx (it must keep passing unmodified).</step>
+    <step order="1">Extend `IOptionSetFieldProps` with optional `options?: Array&lt;{ value: number; label: string }&gt;`, `onSave?: (newValue: number | null) =&gt; Promise&lt;void&gt;`, `disabled?: boolean`. JSDoc the getOptions() consumer boundary alongside the existing FormattedValue boundary note; document that onSave receives the option's numeric value (the form-buffer setValue payload for optionset attributes).</step>
+    <step order="2">Fix the label typography: replace the `typographyStyles.caption1` + `colorNeutralForeground2` label styles (lines 86-89) with the TextField v1.0.4 stack (TextField.tsx:56-69) verbatim.</step>
+    <step order="3">Implement the edit path: when editable, clicking the value enters edit mode rendering a Fluent `Dropdown` (`appearance` consistent with the filled-lighter family, `size="small"`, autoFocus) listing `options` with the current value selected as the draft; selecting an option commits it via onSave (the Dropdown-domain equivalent of Enter); Escape cancels; blur/light-dismiss commits a changed draft; rejection reverts the draft and STAYS in edit; tiny Spinner + disabled Dropdown while saving. Add the valueEditable hover affordance to the read-mode cell when editable.</step>
+    <step order="4">Author __tests__/OptionSetField.edit.test.tsx (NEW file) using `renderWithProviders` from `../../../__mocks__/pcfMocks`: cover the acceptance criteria including the onSave-without-options warn path and the rejected-save path.</step>
+    <step order="5">Run the FULL suite (`npm test` in Spaarke.UI.Components) — the pre-existing OptionSetField tests in fields.test.tsx must pass with `git diff` showing that file untouched. Run `npm run build`.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">If any deviations from plan occurred, document in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any pre-existing OptionSetField or integration test cannot pass without modifying the test itself, STOP and escalate per root CLAUDE.md §6 — that means the extension broke the shipped read-only contract that MatterHeaderPcf v1.0.20 consumes, and the compat question belongs to the operator, not to a test edit.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Option set editable via dropdown (Invoice)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_invoice&amp;id={record-id}</url>
+      <steps>
+        <step>Open an Invoice record whose header layout includes sprk_invoicestatus (executes at Phase 5 task 060, once the RecordHeader control is bound)</step>
+        <step>Click the status value; verify a Fluent Dropdown opens listing exactly the attribute's 2 options (spec success criterion 13)</step>
+        <step>Select the other option; verify the form goes dirty with no re-render flash and Save persists</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Dropdown edit works; correct options; zero console errors</expected>
+    </test>
+    <test name="Label typography parity in a mixed grid">
+      <steps>
+        <step>On any bound header showing OptionSetField next to TextField/DateField/NumberField cells</step>
+        <step>Inspect the OptionSetField label: computed font-size and color match sibling labels (fontSizeBase300 / colorNeutralForeground1)</step>
+      </steps>
+      <expected>No visible size/color difference between the OptionSetField label and sibling labels (FR-09 acceptance)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app</step>
+        <step>Verify label, value, and the OPEN Dropdown listbox (portal-mounted) adapt with no hard-coded colors</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens; the portal listbox is themed via the host FluentProvider</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared library</tool>
+    <tool name="terminal">git status/diff verification of the untouched-files constraints</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/OptionSetField.edit.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With only the pre-existing props (label/value/span/className), rendered output is unchanged except the label typography — and every pre-existing OptionSetField test in __tests__/fields.test.tsx passes with that file UNMODIFIED in git diff.</criterion>
+    <criterion testable="true">The label styles are exactly the TextField v1.0.4 stack: colorNeutralForeground1, fontSizeBase300, fontWeightRegular, lineHeightBase300, paddingBottom spacingVerticalXS — no `typographyStyles.caption1`, no `colorNeutralForeground2` remain in the label.</criterion>
+    <criterion testable="true">Given `options` + `onSave`, clicking the value opens a Fluent Dropdown listing every option label with the current value selected; selecting a different option calls onSave exactly once with that option's numeric value and exits edit on resolve.</criterion>
+    <criterion testable="true">Escape exits edit with zero onSave calls; selecting the CURRENT value (no change) exits edit with zero onSave calls.</criterion>
+    <criterion testable="true">Negative: when onSave rejects, the draft reverts to the prior value AND the component STAYS in edit mode; while saving, the Dropdown is disabled and a tiny Spinner shows.</criterion>
+    <criterion testable="true">Negative: `onSave` without a non-empty `options` array leaves the field read-only and emits `console.warn`; `disabled=true` leaves it read-only regardless of other props.</criterion>
+    <criterion testable="true">Negative (D-10): no required `*` marker exists anywhere in the component; null/undefined/'' still render `—`.</criterion>
+    <criterion testable="true">Grep of OptionSetField.tsx and the new test file for hex/rgb/hsl returns nothing (ADR-021); grep for `use(`, `useSyncExternalStore`, `createRoot` returns nothing (ADR-022).</criterion>
+    <criterion testable="true">`git status` shows NO modification to fields/index.ts, components/RecordHeader/index.ts, or __tests__/fields.test.tsx.</criterion>
+    <criterion testable="true">All unit tests pass and `npm run build` in Spaarke.UI.Components exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-09, FR-10, spec §11 row "OptionSetField edit mode" (classified: direct extension — hence
+    no justification element on this task), success criterion 13, Matter parity note: MatterHeader renders
+    OptionSetField read-only today; the shipped v1.0.20 bundle is compiled, so nothing changes on the live
+    Matter form until the R2 control ships — but the typography change WILL show in task 080's parity diff
+    (expected/intended; the 002 baseline is the before-picture). Do not export anything new from barrels
+    (015). This task is exports-compatible: the existing barrel line for OptionSetField already covers the
+    extended props type.
+  </notes>
+
+  <completion-summary date="2026-08-25">
+    Implemented as specified. `IOptionSetFieldOption`/`options`/`onSave`/`disabled` added to
+    `IOptionSetFieldProps` (all optional); label typography moved to the TextField v1.0.4 stack verbatim;
+    edit path uses a Fluent v9 `Dropdown` (defaultOpen on entry, filled-lighter/small/autoFocus) with
+    select-commits-immediately semantics, Escape-cancels, blur-commits, saving Spinner + disabled Dropdown,
+    revert-and-stay-in-edit on rejection, and a once-only `console.warn` when `onSave` is supplied without a
+    non-empty `options` array. New file `__tests__/OptionSetField.edit.test.tsx` (16 tests) covers every
+    acceptance criterion; `fields.test.tsx` is untouched in git diff and its 9 pre-existing OptionSetField
+    tests pass unmodified (verified via `npx jest OptionSetField fields.test` — 42/42 pass). `npm run build`
+    exits 0. Grep checks for hex/rgb/hsl and use()/useSyncExternalStore/createRoot are clean.
+
+    Full-suite run showed 22 unrelated pre-existing failures (10 suites) in other RecordHeader-adjacent and
+    unrelated modules (toolbar badges/sparkle popover in `recordHeader.integration.test.tsx`, plus
+    WorkspaceShell/EntityCreationService/ConversationView/FilePreview/CommunicationTimeline/hooks suites) —
+    caused by concurrent sibling-task work landed in this shared worktree (batch commit f85258f75 bundled
+    BooleanField/NumberField/TextField/RecordHeaderShell/index.ts changes from tasks 010-012 alongside this
+    task's OptionSetField changes). Isolated by temporarily swapping in the pre-R2 OptionSetField.tsx (git
+    blob from commit 801bca67e) and re-running `recordHeader.integration.test.tsx`: identical 8/10 failures
+    occurred with OptionSetField fully reverted, proving this task's change is not the cause. File restored
+    immediately after the isolation check; no other files were touched during verification.
+
+    TASK-INDEX.md status update deferred to the main session per explicit orchestrator instruction
+    (parallel-group A dispatch) — main session owns TASK-INDEX.md / current-task.md during this wave.
+  </completion-summary>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

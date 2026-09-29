@@ -37,12 +37,12 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 | **Authorization** | `*Authorization*.cs`, `*Filter.cs`, `*Policy*.cs` | ADR-003, ADR-008, **ADR-028** |
 | **Auth Library / Client Bootstrap** | `@spaarke/auth/**`, `*authInit*.ts`, `useAuth` consumers, `initAuth()` callers, `authenticatedFetch` callers | **ADR-028** |
 | **Caching** | `*Cache*.cs`, `IDistributedCache`, `IMemoryCache` | ADR-009 |
-| **Dataverse Plugin** | `*Plugin.cs` in plugins folder | ADR-002 |
+| **Dataverse write path** (plugin proposal; record create/update path; `Create*Wizard` services; rule a record must satisfy on save) | `*Plugin.cs` (prohibited), `*Wizard/*Service.ts`, `RecordCreationService`, `*Resolver.cs` writers | ADR-002 |
 | **Graph/SPE Integration** | `*Spe*.cs`, `*Graph*.cs`, `*Drive*.cs`, `GraphClientFactory.cs` | ADR-007, **ADR-028** |
 | **PCF Control** | `*.tsx` in pcf/, `ControlManifest.Input.xml` | ADR-006, ADR-011, ADR-012, ADR-021, **ADR-028** (for any PCF calling BFF) |
 | **Webresource** | `*.js` in webresources/ | ADR-006 |
 | **DI Registration** | `Program.cs` DI section, `Add*` extension methods | ADR-010 |
-| **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService` | ADR-001, ADR-004 |
+| **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService`; `IJobHandler`; `IScheduledJob`; a Functions project | ADR-052 (where it runs), ADR-004 (queue), ADR-036 (schedule) |
 | **Job Status/Persistence** | `*JobStatus*`, `JobOutcome`, `JobContract` | ADR-004, ADR-017, ADR-020 |
 | **Feature Flags / Kill Switches** | `*Feature*`, `FeatureFlag`, `IOptions*` gates | ADR-018 |
 | **API Errors / ProblemDetails** | `ProblemDetails`, `Results.Problem`, `IResult` error helpers | ADR-019 |
@@ -62,7 +62,7 @@ BEFORE writing any code:
      a. LOAD .claude/constraints/{domain}.md for MUST/MUST NOT rules
         - API work → .claude/constraints/api.md
         - PCF work → .claude/constraints/pcf.md
-        - Plugin work → .claude/constraints/plugins.md
+        - Dataverse write path / record invariants / any plugin proposal → .claude/constraints/plugins.md
         - Auth work → .claude/constraints/auth.md
         - Caching work → .claude/constraints/data.md
         - AI work → .claude/constraints/ai.md
@@ -90,11 +90,11 @@ BEFORE writing any code:
 |---------------|------------------|-------------------|------|
 | API Endpoint | `.claude/constraints/api.md` | `.claude/patterns/api/` | ADR-001, 008, 010 |
 | PCF Control | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/` | ADR-006, 011, 012, 021 |
-| Plugin | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/` | ADR-002 |
+| Dataverse write path (record create/update, invariants; plugins prohibited) | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/` | ADR-002 |
 | Auth/OAuth | `.claude/constraints/auth.md` | `.claude/patterns/auth/` (incl. `spaarke-sso-binding.md`) | ADR-003, 008, **028** (canonical) |
 | Caching | `.claude/constraints/data.md` | `.claude/patterns/caching/` | ADR-009 |
 | AI Features | `.claude/constraints/ai.md` | `.claude/patterns/ai/` | ADR-013, 014, 015, 016 |
-| Background Jobs | `.claude/constraints/jobs.md` | — | ADR-001, 004, 017 |
+| Background Jobs | `.claude/constraints/jobs.md` | — | ADR-052, 004, 036, 017 |
 | Testing | `.claude/constraints/testing.md` | `.claude/patterns/testing/` | ADR-022 |
 
 ### Rule 3: ADR Constraint Comments
@@ -147,8 +147,8 @@ Reference this table for common constraints. The source of truth is:
 
 | ADR | Title | Key Constraint | Violation Pattern |
 |-----|-------|----------------|-------------------|
-| ADR-001 | Minimal API + Workers (BFF runtime) | BFF endpoints in Minimal API; Functions OK only for out-of-band integration; no Durable Functions | `[FunctionName]`/`[HttpTrigger]` inside `Sprk.Bff.Api`; `DurableTask` packages |
-| ADR-002 | Thin Plugins | No HTTP in plugins; <50ms | `HttpClient` in Plugin class |
+| ADR-001 | Minimal API (BFF runtime) | BFF endpoints in Minimal API; no Functions / Durable Task inside the BFF. Where background work runs → **ADR-052** (inside the BFF: queue → ADR-004, schedule → ADR-036) | `[Function]`/`[FunctionName]`/`[HttpTrigger]` inside `Sprk.Bff.Api`; Functions or `DurableTask` packages in the BFF csproj |
+| ADR-002 | No Plugins + Server-Side Write Path | No plugins at all; each record invariant has one BFF owner; client previews only; security fails closed | Any `IPlugin`; `applyFieldMappings`/stamping only in a wizard then `Xrm.WebApi` create; NULL security flag treated as not-secure |
 | ADR-003 | Authorization Seams | Two seams only: UAC + Storage | Multiple `IAuthorizationXxx` interfaces |
 | ADR-004 | Async Job Contract | Uniform job processing | Ad-hoc `Task.Run` for async work |
 | ADR-005 | Flat Storage | No folder hierarchies in SPE | `CreateFolder`, nested paths |
@@ -170,7 +170,7 @@ Reference this table for common constraints. The source of truth is:
 | ADR-021 | Fluent UI v9 Design | Use Fluent v9; dark mode; tokens | Hard-coded colors, Fluent v8 imports |
 | ADR-022 | PCF Platform Libraries | PCF uses React 16/17 (platform); Code Pages use React 19 (bundled) | `createRoot` in PCF; `useId()` in PCF |
 | ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 | Webpack/CRA for new Code Pages; no `viteSingleFile` |
-| ADR-027 | Subscription Isolation | Managed solutions for prod; env-separated subs | Unmanaged in prod; ad-hoc resource groups |
+| ADR-027 | Subscription Isolation | **One Azure subscription per CUSTOMER** (amended 2026-09-28) + declarative per-scope resource groups; **unmanaged** solutions in every environment (amended 2026-06-02) | Two customers in one subscription; a shared App Service Plan across customers (impossible cross-subscription); ad-hoc/manually-created resource groups; **enforcing managed solutions** — that mandate is suspended, not active |
 | ADR-028 | Spaarke Auth Architecture (v2) | `useAuth()` + `authenticatedFetch`; MI (UAMI) for **app-only** outbound; **MI-FIC client assertion or KV certificate for confidential clients / OBO (A4)**; HMAC webhooks; tenant-specific authority | Raw `fetch(... Authorization: Bearer ...)`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, 6-strategy cascade, `ClientSecretCredential` for app-only when MI available, **`.WithClientSecret(...)` on BFF-identity clients (A4; transitional sites covered by E-3)**, per-request CCA construction, `/common` or `/organizations` authority |
 
 ---

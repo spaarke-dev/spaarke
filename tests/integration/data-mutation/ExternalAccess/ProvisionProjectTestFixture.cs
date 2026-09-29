@@ -7,12 +7,14 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -62,6 +64,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private readonly ConcurrentDictionary<Guid, SeededProject> _projects = new();
 
+    /// <summary>Monotonic counter making UPDATE order observable — see <see cref="RecordedUpdate"/>.</summary>
+    private int _updateSequence;
+
     // ── Recorded writes ──────────────────────────────────────────────────────
 
     /// <summary>Entity sets the endpoint issued a CREATE against, in order.</summary>
@@ -70,13 +75,76 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Every UPDATE the endpoint issued: entity set, record id, and the payload's keys/values.</summary>
     public ConcurrentBag<RecordedUpdate> Updates { get; } = new();
 
+    // ── Task 061: the POA share plane ───────────────────────────────────────
+
+    /// <summary>The systemuser the caller resolves to — i.e. the project's creator.</summary>
+    public static readonly Guid CallerSystemUserId = Guid.Parse("c0000000-0000-0000-0000-00000000cafe");
+
+    /// <summary>Every share the endpoint issued, in order.</summary>
+    public ConcurrentBag<RecordedShare> Grants { get; } = new();
+
+    /// <summary>Every share the endpoint revoked, in order.</summary>
+    public ConcurrentBag<RecordedShare> Revokes { get; } = new();
+
+    /// <summary>When false, the caller's Dataverse identity cannot be established.</summary>
+    public bool CallerSystemUserIdResolves { get; set; } = true;
+
+    /// <summary>Principal whose share throws, to model a partial-share failure.</summary>
+    public Guid? FailShareForPrincipal { get; set; }
+
+    /// <summary>Principal whose REVOKE throws, to model a partial-sweep failure.</summary>
+    /// <remarks>
+    /// Separate from <see cref="FailShareForPrincipal"/>, which is consulted only by the GRANT. Until
+    /// task 108 no knob failed a revoke at all, so "a share whose revoke fails stays non-fatal" was an
+    /// acceptance criterion that passed without testing anything.
+    /// </remarks>
+    public Guid? FailRevokeForPrincipal { get; set; }
+
+    /// <summary>
+    /// When false, the STRICT share read throws — the "incomplete counts as failed" cases.
+    /// </summary>
+    /// <remarks>
+    /// ISS-018 (task 108). This models an unreadable table code, an unreadable row, or a response that
+    /// continues on another page. Note it leaves the SOFT read working, and that asymmetry is the
+    /// point: on those refusals the soft read still returns the rows it could parse, so a caller that
+    /// falls back to it makes partial progress. Before this knob existed the double's strict read
+    /// delegated to the soft one and could never refuse, so pointing a caller at the strict read was
+    /// unobservable — the failure mode this fixture warns about under <see cref="RowsJsonFor"/>.
+    /// </remarks>
+    public bool StrictShareReadSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When false, the SOFT share read throws too — a total read failure where NEITHER read can
+    /// enumerate anything.
+    /// </summary>
+    /// <remarks>
+    /// Real: the soft read swallows a non-success status and an unreadable object type code, but a
+    /// transport failure or malformed JSON still throws out of it. Without this knob the endpoint's
+    /// "nothing could be enumerated at all" fallback would be unseedable dead code — which is ISS-018's
+    /// own shape (an unreachable catch) reproduced inside its fix.
+    /// </remarks>
+    public bool SoftShareReadSucceeds { get; set; } = true;
+
+    /// <summary>Captured log entries, so a test can assert a warning was actually WRITTEN.</summary>
+    public LogCapture Logs { get; } = new();
+
+    /// <summary>One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke.</summary>
+    public sealed record RecordedShare(
+        string EntitySet, Guid RecordId, DataversePrincipalRef Principal, string? AccessRightsCsv);
+
     /// <summary>Container display names passed to SPE, so a test can prove a container was created.</summary>
     public ConcurrentBag<string> CreatedContainerDisplayNames { get; } = new();
 
+    /// <summary>
+    /// One recorded UPDATE. <c>Sequence</c> is a monotonic counter, because <see cref="Updates"/> is a
+    /// <c>ConcurrentBag</c> and bags do NOT preserve insertion order — an ordering assertion read off the
+    /// bag itself is not an assertion about anything (task 061 wrote one before noticing).
+    /// </summary>
     public sealed record RecordedUpdate(
         string EntitySet,
         Guid RecordId,
-        IReadOnlyDictionary<string, string?> Payload);
+        IReadOnlyDictionary<string, string?> Payload,
+        int Sequence = 0);
 
     // ── Controllable environment shape ───────────────────────────────────────
 
@@ -100,7 +168,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool OwnershipPatchIsApplied { get; set; } = true;
 
     private sealed record SeededProject(
-        Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure);
+        Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
+        Guid? OwningUserId = null);
 
     /// <summary>Seeds a project row.</summary>
     public void SeedProject(
@@ -136,6 +205,15 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SpeContainerCreationSucceeds = true;
         ContainerStampSucceeds = true;
         OwnershipPatchIsApplied = true;
+        _updateSequence = 0;
+        Grants.Clear();
+        Revokes.Clear();
+        CallerSystemUserIdResolves = true;
+        FailShareForPrincipal = null;
+        FailRevokeForPrincipal = null;
+        StrictShareReadSucceeds = true;
+        SoftShareReadSucceeds = true;
+        Logs.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -157,7 +235,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         {
             // Entitled caller — the delegation gate (task 008) is not what these tests measure.
             services.RemoveAll<CallerRecordAccessProbe>();
-            services.AddSingleton<CallerRecordAccessProbe>(new WritableCallerRecordAccessProbe());
+            services.AddSingleton<CallerRecordAccessProbe>(new WritableCallerRecordAccessProbe(this));
+
+            // Task 061 — the POA share plane. Recorded rather than mocked: the assertions are about
+            // WHO was shared to and with WHICH rights, not about call counts.
+            services.RemoveAll<IDataverseRecordShareService>();
+            services.AddSingleton<IDataverseRecordShareService>(new RecordingRecordShareService(this));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
@@ -223,6 +306,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // assert the success path — the real store reaches unavailable Graph services.
             services.RemoveAll<SpeFileStore>();
             services.AddSingleton<SpeFileStore>(sp => new StubSpeFileStore(sp, this));
+
+            // Capture logs in-memory so a test can assert the endpoint actually WROTE its warning.
+            services.AddSingleton<ILoggerProvider>(Logs);
         });
     }
 
@@ -237,7 +323,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     private Task ApplyUpdate(string entitySet, Guid id, object payload)
     {
         var flat = Flatten(payload);
-        Updates.Add(new RecordedUpdate(entitySet, id, flat));
+        Updates.Add(new RecordedUpdate(entitySet, id, flat, Interlocked.Increment(ref _updateSequence)));
 
         if (flat.ContainsKey("sprk_containerid") && !ContainerStampSucceeds)
         {
@@ -251,9 +337,28 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 && ownerBind is not null
                 && OwnershipPatchIsApplied)
             {
-                var teamId = ParseTeamIdFromBind(ownerBind);
-                if (teamId is { } parsed)
-                    _projects[id] = project with { OwningTeamId = parsed };
+                // Task 061: `ownerid` is polymorphic. Provisioning binds a TEAM (into the Secure
+                // Project owner team); the reverse path binds a SYSTEMUSER (back out to a human).
+                // The double has to honour both, because each endpoint verifies its assignment by
+                // reading back the field its own bind should have populated — a fixture that only
+                // modelled teams would fail the un-secure read-back on every happy path, which is
+                // exactly what it did before this was widened.
+                var principalId = ParseIdFromBind(ownerBind);
+                if (principalId is { } parsed)
+                {
+                    _projects[id] = ownerBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
+                        ? project with { OwningUserId = parsed, OwningTeamId = null }
+                        : project with { OwningTeamId = parsed, OwningUserId = null };
+                }
+            }
+
+            if (flat.TryGetValue("sprk_issecure", out var isSecureRaw))
+            {
+                project = _projects[id];
+                _projects[id] = project with
+                {
+                    IsSecure = bool.TryParse(isSecureRaw, out var isSecure) && isSecure
+                };
             }
 
             if (flat.TryGetValue("sprk_containerid", out var container))
@@ -267,7 +372,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>Extracts the GUID from an <c>/teams(guid)</c> OData bind value.</summary>
-    private static Guid? ParseTeamIdFromBind(string bind)
+    private static Guid? ParseIdFromBind(string bind)
     {
         var open = bind.IndexOf('(');
         var close = bind.IndexOf(')');
@@ -392,6 +497,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     if (seeded.OwningTeamId is { } team)
                         row["_owningteam_value"] = team;
 
+                    // Task 061: the reverse path reads back _owninguser_value, so the double must
+                    // project it too.
+                    if (seeded.OwningUserId is { } owningUser)
+                        row["_owninguser_value"] = owningUser;
+
                     payload.Add(row);
                 }
                 break;
@@ -513,13 +623,153 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private sealed class WritableCallerRecordAccessProbe : CallerRecordAccessProbe
     {
-        public WritableCallerRecordAccessProbe()
+        private readonly ProvisionProjectTestFixture _fixture;
+
+        public WritableCallerRecordAccessProbe(ProvisionProjectTestFixture fixture)
             : base(new HttpClient(), new ConfigurationBuilder().Build(),
                    NullLogger<CallerRecordAccessProbe>.Instance)
-        { }
+        {
+            _fixture = fixture;
+        }
 
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
             => Task.FromResult(AccessRights.Read | AccessRights.Write);
+
+        /// <summary>
+        /// Task 061: who provisioning shares the project back to. <c>null</c> models the real
+        /// "the caller's Dataverse identity could not be established" case, which must FAIL the
+        /// provision rather than complete it — see <see cref="CallerSystemUserIdResolves"/>.
+        /// </summary>
+        public override Task<Guid?> GetCallerSystemUserIdAsync(
+            string? callerBearerToken, CancellationToken ct = default)
+            => Task.FromResult(_fixture.CallerSystemUserIdResolves ? CallerSystemUserId : (Guid?)null);
     }
+
+    /// <summary>
+    /// Records every POA share the endpoint issues, and fails them on demand.
+    /// </summary>
+    /// <remarks>
+    /// A double rather than a mock because the assertions are about the SEQUENCE and CONTENT of what
+    /// was shared — who, with which rights — not about call counts.
+    /// </remarks>
+    internal sealed class RecordingRecordShareService : IDataverseRecordShareService
+    {
+        private readonly ProvisionProjectTestFixture _fixture;
+
+        public RecordingRecordShareService(ProvisionProjectTestFixture fixture) => _fixture = fixture;
+
+        public Task GrantAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            string accessRightsCsv, CancellationToken ct = default)
+        {
+            if (_fixture.FailShareForPrincipal == principal.Id)
+                throw new InvalidOperationException($"Seeded share failure for {principal.Id}.");
+
+            _fixture.Grants.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv));
+            return Task.CompletedTask;
+        }
+
+        public Task RevokeAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            CancellationToken ct = default)
+        {
+            // Checked BEFORE recording, matching GrantAccessAsync above: `Revokes` means "shares that
+            // were actually removed", and tests assert emptiness on it to prove nothing was torn down.
+            // Recording a revoke that threw would make that assertion lie.
+            if (_fixture.FailRevokeForPrincipal == principal.Id)
+                throw new InvalidOperationException($"Seeded revoke failure for {principal.Id}.");
+
+            _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null));
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
+            string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            // The real soft read swallows a non-success status and an unreadable table code, but a
+            // transport failure still throws out of it — see SoftShareReadSucceeds.
+            if (!_fixture.SoftShareReadSucceeds)
+            {
+                throw new InvalidOperationException(
+                    $"Seeded transport failure reading the shares on {entityLogicalName}({recordId}).");
+            }
+
+            return Task.FromResult<IReadOnlyList<DataversePrincipalAccess>>(
+                _fixture.Grants
+                    .Where(g => g.RecordId == recordId)
+                    .Select(g => new DataversePrincipalAccess(g.Principal, 1, DateTimeOffset.UtcNow))
+                    .ToList());
+        }
+
+        // Task 063 widened the seam. Provisioning creates shares and never changes one, so a call here means the
+        // endpoint's behaviour changed — fail loudly rather than record something no assertion expects.
+        public Task ModifyAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            string accessRightsCsv, CancellationToken ct = default)
+            => throw new NotSupportedException("Provisioning creates shares; it never modifies one.");
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
+            string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            // Mirrors DataverseWebApiService.ShareReadFailed: the complete answer, or an exception.
+            // This used to delegate straight to the soft read, which means it could NEVER refuse —
+            // so re-pointing a caller at the strict read changed nothing any test could see.
+            if (!_fixture.StrictShareReadSucceeds)
+            {
+                throw new InvalidOperationException(
+                    $"The shares on {entityLogicalName}({recordId}) could not be read completely: " +
+                    "seeded refusal.");
+            }
+
+            return GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+        }
+    }
+
+    /// <summary>
+    /// In-memory <see cref="ILoggerProvider"/> capturing what the host logged, for assertion.
+    /// </summary>
+    /// <remarks>
+    /// Load-bearing for ISS-018 (task 108) rather than decoration. HALF of that defect was that the
+    /// warning naming the failure could never be written at all — the soft read swallowed the failure
+    /// and answered an empty list, so the <c>catch</c> holding the warning was unreachable for the
+    /// case it named. A test asserting only the response would leave that half unverified: the field
+    /// could be right while the operator still got no signal. Cleared by <see cref="Reset"/>, because
+    /// the fixture is shared across the class and a "a warning was logged" assertion would otherwise
+    /// pass on a previous test's entry.
+    /// </remarks>
+    public sealed class LogCapture : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<LogEntry> _entries = new();
+
+        public IReadOnlyCollection<LogEntry> Entries => _entries.ToArray();
+
+        public void Clear()
+        {
+            while (_entries.TryDequeue(out _)) { }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new QueueLogger(_entries);
+
+        public void Dispose() { }
+
+        private sealed class QueueLogger : ILogger
+        {
+            private readonly ConcurrentQueue<LogEntry> _entries;
+
+            public QueueLogger(ConcurrentQueue<LogEntry> entries) => _entries = entries;
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+                => _entries.Enqueue(new LogEntry(logLevel, formatter(state, exception)));
+        }
+    }
+
+    /// <summary>One captured log entry.</summary>
+    public sealed record LogEntry(LogLevel Level, string Message);
 }

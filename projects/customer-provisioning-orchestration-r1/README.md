@@ -1,5 +1,23 @@
 # Customer Provisioning & Deployment Orchestration (r1)
 
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Last Updated**: 2026-08-16
 > **Status**: Ready for Implementation (task-execute)
 > **Portfolio**: (register via `/devops-project-register` at task-execution start)
@@ -74,7 +92,7 @@ Per design.md §3 Locked Decisions D1–D20 + v3 additions D18/D19/D20 + §3A A1
 
 | Decision | Rationale | Reference |
 |---|---|---|
-| D3 (v3): two-tier tenancy (Model 2 dedicated + Model 1 shared trial) | Fixed-floor cost of dedicated stamp uneconomic for trial/SMB; PROJECT-UPDATE §4–5 economic analysis | design.md §3A |
+| ~~D3 (v3): two-tier tenancy~~ → 🔴 **SUPERSEDED by D-12 (2026-09-28)**: both models dedicated; no shared tier | Was: fixed-floor cost uneconomic for trial/SMB; PROJECT-UPDATE §4–5 economic analysis | design.md §3A |
 | D14 (v3.2 deferred): TF Power Platform provider adoption to first-customer engagement | Dev-only reality, 0 pending customers; interim `pac admin` + PPAC + Graph SDK | design.md §11.2 M-10 |
 | D18 (v3): BFF exposes `/api/onboarding/consent-callback` for Model 2 self-service | Only irreducible customer-tenant admin action — capturing it in BFF triggers pipeline immediately | design.md §4.1 H0.5 |
 | D19 (v3): per-tenant token-metering layer regardless of tenancy model | No-regret investment; powers pricing for either tier + runaway guardrail | design.md §3A A2 |

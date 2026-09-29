@@ -36,15 +36,18 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
 
     private readonly ITemplateEngine _templateEngine;
     private readonly IGenericEntityService _entityService;
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
     private readonly ILogger<CreateTaskNodeExecutor> _logger;
 
     public CreateTaskNodeExecutor(
         ITemplateEngine templateEngine,
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<CreateTaskNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
         _entityService = entityService;
+        _coreAncestors = coreAncestors;
         _logger = logger;
     }
 
@@ -213,7 +216,7 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 }
             }
 
-            var taskId = await new TaskActionCore(_entityService, _logger).CreateAsync(
+            var taskId = await new TaskActionCore(_entityService, _coreAncestors, _logger).CreateAsync(
                 new TaskActionInput(
                     subject,
                     description,

@@ -1,12 +1,17 @@
 /**
  * WorkAssignmentService — BU cascade integration tests (FR-WIZ-04 / INV-5)
  *
- * Scope: verify that `WorkAssignmentService.createWorkAssignment` populates BOTH
- *   - `sprk_containerid`
+ * Scope: verify that `WorkAssignmentService.createWorkAssignment` populates
  *   - `sprk_searchindexname`
  * on the create payload, sourced from the current user's owning Business Unit
  * via `EntityCreationService.applyUserBuDefaults` + `resolveUserBuDefaults`,
- * with INV-5 preserved for explicit pre-seeded values.
+ * with INV-5 preserved for explicit pre-seeded values — and that it writes NO
+ * `sprk_containerid` at all.
+ *
+ * ⚠️ Task 076 (2026-09-03) deleted BOTH container writes on this path: the host-injected
+ * `entity['sprk_containerid'] = this._containerId` and the `applyDefaultContainerId` cascade.
+ * Every assertion below that used to read a container value was converted to a negative one —
+ * that a create payload names no storage location is now the guarantee under test.
  *
  * Notes
  *   - We mock `window.Xrm.Utility.getGlobalContext()` to provide the current user ID.
@@ -129,7 +134,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     jest.restoreAllMocks();
   });
 
-  it('cascade: BU populates BOTH sprk_containerid and sprk_searchindexname when host did not pre-set container', async () => {
+  // Converted by task 076: was "BU populates BOTH sprk_containerid and sprk_searchindexname".
+  it('cascade: BU populates sprk_searchindexname only — no sprk_containerid — when host did not pre-set container', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -148,11 +154,13 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
   });
 
-  it('INV-5: host-provided containerId is preserved; BU only fills the searchindexname gap', async () => {
+  // Converted by task 076: was "INV-5: host-provided containerId is preserved". The host container
+  // is no longer written at all, so the surviving assertion is its absence.
+  it('host-provided containerId is NOT written; BU still fills the searchindexname gap', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -170,13 +178,14 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
     expect(payload).toBeDefined();
-    // INV-5: host explicit value sacred
-    expect(payload!['sprk_containerid']).toBe('host-explicit-container-xyz');
+    // Task 076: the host container never reaches the row — the server derives it from the WA.
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     // BU fills the gap on the field the host did not set
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
   });
 
-  it('NULL BU index (Spaarke Dev 1 / Test 1 scenario): containerId still cascades, searchindexname left unset', async () => {
+  // Converted by task 076: was "containerId still cascades, searchindexname left unset".
+  it('NULL BU index (Spaarke Dev 1 / Test 1 scenario): neither containerid nor searchindexname is written', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: null, // BU exists but index not yet configured (Phase A.5)
@@ -189,7 +198,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     // BFF tenant-default chain takes over server-side; payload field left unset
     expect('sprk_searchindexname' in payload!).toBe(false);
   });
@@ -215,8 +224,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
     expect(payload).toBeDefined();
-    // Host container retained; BU cascade was a no-op (no userId), so searchindexname unset.
-    expect(payload!['sprk_containerid']).toBe('host-explicit-container-xyz');
+    // No container written (task 076); BU cascade was a no-op (no userId), so searchindexname unset.
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
     // BU lookup must not have been called.
     expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('businessunit', expect.any(String), expect.any(String));
@@ -224,7 +233,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     warnSpy.mockRestore();
   });
 
-  it('graceful degradation: when BU resolve throws, createRecord still succeeds with host container only', async () => {
+  it('graceful degradation: when BU resolve throws, createRecord still succeeds with no cascade fields', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -249,13 +258,13 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('host-explicit-container-xyz');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
 
     warnSpy.mockRestore();
   });
 
-  it('user has no BU: cascade is a no-op; host container retained; createRecord succeeds', async () => {
+  it('user has no BU: cascade is a no-op; no container written; createRecord succeeds', async () => {
     const dataService = makeDataService(
       { sprk_containerid: 'unreachable', sprk_searchindexname: 'unreachable-index' },
       { userHasBu: false }
@@ -273,7 +282,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('host-explicit-container-xyz');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
   });
 });

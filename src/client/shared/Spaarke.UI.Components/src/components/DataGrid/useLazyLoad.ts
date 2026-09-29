@@ -174,7 +174,16 @@ export function useLazyLoad<T = Record<string, unknown>>({
           pageRef.current = targetPage;
           cookieRef.current = result.pagingCookie;
           setRecords(prev => (mode === 'reset' ? result.entities : prev.concat(result.entities)));
-          setHasMore(result.moreRecords === true);
+          // Robust `hasMore`: prefer the server's `moreRecords` flag, but fall back to
+          // page-fullness when it is absent. `Xrm.WebApi.retrieveMultipleRecords` (the MDA
+          // client) RESPECTS the injected `page`/`count` on a FetchXML query but STRIPS the
+          // `@Microsoft.Dynamics.CRM.morerecords` + paging-cookie annotations from the JS
+          // result — so `moreRecords` is always `false` there and infinite-scroll never
+          // advanced past page 1. A page filled to `pageSize` almost certainly has a
+          // successor; a short/empty page is the end (one harmless empty fetch at an
+          // exact-multiple boundary). BFF clients that DO return `moreRecords` are unaffected.
+          const looksFull = pageSize > 0 && result.entities.length >= pageSize;
+          setHasMore(result.moreRecords === true || looksFull);
           setIsLoading(false);
         })
         .catch((err: unknown) => {

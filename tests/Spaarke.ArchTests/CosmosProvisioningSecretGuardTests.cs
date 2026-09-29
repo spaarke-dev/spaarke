@@ -161,6 +161,55 @@ public class CosmosProvisioningSecretGuardTests
     /// section — swap ClientSecretCredential for DefaultAzureCredential). Added
     /// by Wave 4 Batch 4D wrap-up (2026-08-18).
     /// </para>
+    /// <para>
+    /// ─────────── Added 2026-08-27, issue #839 adjudication (spaarkeai-compose-r8) ───────────
+    /// </para>
+    /// <para>
+    /// This guard had been dark since the L2 project split and was repaired earlier the same day
+    /// (see <see cref="LoadL2Assemblies"/>). Its first real run produced eight findings. Five were
+    /// the regex matching the NAME of a secret rather than a value; those are now handled
+    /// structurally by <see cref="SecretReferenceSuffix"/> and are NOT listed here — the whole
+    /// point of that discriminator is to stop this list growing an entry per occurrence. The three
+    /// below are genuine cleartext secrets, and each is excluded on the SAME basis as the
+    /// <c>SolutionImportRequest</c> / <c>EnvVarValuesWriteRequest</c> precedent above: transient,
+    /// method- or invocation-scoped, provably never written to a Cosmos document.
+    /// </para>
+    /// <para>
+    /// <b>PendingKvSecretWrite</b> — <c>(VaultName, SecretName, Value)</c>. <c>Value</c> is the
+    /// cleartext app-registration client secret, staged in memory by H3 and committed to Key Vault
+    /// only after admin consent is verified (DS-4 §3 ordering). Excluded for <c>Value</c>, which the
+    /// NEW secret-carrier rule catches — the guard previously reported only <c>SecretName</c> here,
+    /// the one property on the record that is NOT sensitive. The type's own XML doc already states
+    /// the invariant: "MUST NEVER be logged or persisted to Cosmos; it exists ONLY in memory for the
+    /// duration of a single H3EntraAppRegHandler.HandleAsync invocation". Path C (a
+    /// <see cref="Models.KeyVaultSecretRef"/> round-trip) is not available: the value does not exist
+    /// in any vault yet — writing it there is what this record is for.
+    /// </para>
+    /// <para>
+    /// <b>ExchangePolicySidecarClient+SharedSecretResolution</b> and
+    /// <b>ExchangePolicySidecarReadClient+SharedSecretResolution</b> — a <c>private readonly struct</c>
+    /// returned by <c>ResolveSharedSecretAsync</c>, holding either the resolved sidecar shared secret
+    /// or a failure. Private, nested, method-local, never serialized; it exists to make
+    /// "resolved-or-failed" a single return value instead of an out-parameter. Two entries because
+    /// the read and write clients each declare their own nested copy.
+    /// </para>
+    /// <para>
+    /// <b>SolutionVerificationRequest</b> — transient record carrying the plaintext client secret
+    /// from H6 to the <c>pac solution list</c> shell-out. Exact parity with <c>SolutionImportRequest</c>
+    /// above (same handler, same run, same <c>pac auth create --clientSecret</c> constraint: the CLI
+    /// requires the value). Its absence from the original exclusion list alongside its sibling looks
+    /// like an oversight when task 049 added the sibling, not a deliberate distinction.
+    /// </para>
+    /// <para>
+    /// <b>PerEnvYamlEntry</b> and <b>PerEnvSettingEntry</b> — the H4b per-environment app-settings
+    /// manifest rows. The flagged property is <c>Key</c>: the NAME of an App Service application
+    /// setting (e.g. <c>ServiceBus__FullyQualifiedNamespace</c>). Bare <c>Key</c> gets no reference
+    /// suffix and is genuinely ambiguous elsewhere in the estate — an "ApiKey"-style property called
+    /// <c>Key</c> WOULD be a secret — so it is excluded per-type rather than by weakening the regex.
+    /// Neither type carries the setting's value in a secret-bearing slot: values arrive via
+    /// <c>LiteralValue</c> or by lookup in <c>envelope.Parameters.NonSecret</c>, which is
+    /// non-secret by construction and by name.
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedTypeFullNames = new(StringComparer.Ordinal)
     {
@@ -170,6 +219,16 @@ public class CosmosProvisioningSecretGuardTests
         "Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues.EnvVarValuesOptions",
         "Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues.EnvVarValuesWriteRequest",
         "Sprk.Provisioning.ControlPlane.Concurrency.CustomerRunGuardOptions",
+
+        // #839 (2026-08-27) — genuine cleartext, provably transient. Rationale per type above.
+        "Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg.PendingKvSecretWrite",
+        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarClient+SharedSecretResolution",
+        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarReadClient+SharedSecretResolution",
+        "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionVerificationRequest",
+
+        // #839 (2026-08-27) — `Key` is an app-setting NAME on both. Rationale per type above.
+        "Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.FilePerEnvSettingsManifest+PerEnvYamlEntry",
+        "Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.PerEnvSettingEntry",
     };
 
     /// <summary>
@@ -322,6 +381,63 @@ public class CosmosProvisioningSecretGuardTests
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
+    /// Suffixes that turn a secret-shaped name into a REFERENCE to a secret rather than the
+    /// secret itself. <c>SecretName</c> is a Key Vault lookup key; <c>KeyVaultName</c> is a
+    /// vault name; <c>KeyVaultReferenceIdentity</c> is an ARM resource id. None of them is a
+    /// credential, and persisting any of them to Cosmos leaks nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Added 2026-08-27 (issue #839 adjudication).</b> The start-anchored name regex above was
+    /// producing five findings that were all the same mistake — it was matching the <i>name of a
+    /// secret</i> and reporting it as the <i>value of a secret</i>:
+    /// <c>PerEnvYamlEntry.Key</c>, <c>PerEnvSettingEntry.Key</c>,
+    /// <c>SlotKeyVaultRefSnapshot.KeyVaultReferenceIdentity</c>,
+    /// <c>TrapVerificationRequest.KeyVaultName</c>, <c>PendingKvSecretWrite.SecretName</c>.
+    /// </para>
+    /// <para>
+    /// The fix is deliberately NOT a narrower value regex. This detector is CATASTROPHIC-severity
+    /// and a narrower value pattern is how it goes quiet. It is a name-vs-reference discriminator
+    /// applied AFTER the value regex matches, so the set of shapes treated as secret-bearing is
+    /// unchanged — only names that are self-evidently pointers stop being reported.
+    /// </para>
+    /// <para>
+    /// The precedent already existed as a whole-type exclusion: <c>KeyVaultSecretRef</c> was
+    /// excluded from day 1 solely because "its <c>SecretName</c> property matches the regex but
+    /// holds a KV secret NAME, not a value". That reasoning was always general; it was applied
+    /// one type at a time. Generalizing it stops the exclusion list from growing an entry per
+    /// occurrence of a mistake the rule can simply stop making
+    /// (CLAUDE.md §11 — extend the mechanism, don't accumulate entries).
+    /// </para>
+    /// </remarks>
+    private static readonly Regex SecretReferenceSuffix = new(
+        @"(Name|Id|Identity|Uri|Url|Ref|Reference|Path)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Bare value-property names. Meaningless in isolation — <c>Value</c> is the most common
+    /// property name in any codebase — but decisive on a type that ALSO carries a secret
+    /// reference: that pairing is the shape of a secret carrier.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This rule exists because of what the #839 adjudication found.</b>
+    /// <c>PendingKvSecretWrite(string VaultName, string SecretName, string Value)</c> was
+    /// reported by this guard — for <c>SecretName</c>, which is a lookup key and harmless. Its
+    /// <c>Value</c> property, which its own XML doc calls "CLEARTEXT … MUST NEVER be logged or
+    /// persisted to Cosmos", matched nothing and was invisible.
+    /// </para>
+    /// <para>
+    /// So the guard was pointing at the safe half of a record and missing the dangerous half.
+    /// Exempting reference-shaped names WITHOUT this rule would have removed the only signal
+    /// that type produced at all — trading a false positive for a false negative, on the
+    /// detector where a false negative is the expensive direction.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> PlainSecretValuePropertyNames =
+        new(StringComparer.OrdinalIgnoreCase) { "Value", "SecretValue", "PlainText", "Plaintext" };
+
+    /// <summary>
     /// Known secret-VALUE literal shapes. A fixture payload targeting the runs
     /// container that contains any of these NOT wrapped in
     /// <c>@Microsoft.KeyVault(...)</c> is a violation.
@@ -367,23 +483,7 @@ public class CosmosProvisioningSecretGuardTests
                         && t.Namespace.StartsWith(L2NamespacePrefix, StringComparison.Ordinal))
             .Where(t => t.FullName is null || !ExcludedTypeFullNames.Contains(t.FullName));
 
-        var offenders = new List<string>();
-        foreach (var type in typesToScan)
-        {
-            var props = type.GetProperties(
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
-            foreach (var prop in props)
-            {
-                if (prop.PropertyType != typeof(string)) continue;
-                if (!SecretShapedPropertyName.IsMatch(prop.Name)) continue;
-
-                offenders.Add(
-                    $"{type.FullName}.{prop.Name} : string — secret-shaped name on a " +
-                    $"Cosmos-persisted POCO. Use KeyVaultSecretRef (URI-only reference) " +
-                    $"instead. See RunParameters.Secrets for the compliant pattern.");
-            }
-        }
+        var offenders = typesToScan.SelectMany(SecretShapeOffendersOn).ToList();
 
         Assert.True(
             offenders.Count == 0,
@@ -393,6 +493,53 @@ public class CosmosProvisioningSecretGuardTests
             "Route secrets through KeyVaultSecretRef references only. If this is a genuinely " +
             "new requirement, follow CLAUDE.md §6.5 (path A/B) before adding an exclusion.\n" +
             $"Offenders:\n{string.Join("\n", offenders.OrderBy(x => x, StringComparer.Ordinal))}");
+    }
+
+    /// <summary>
+    /// The whole secret-shape rule for ONE type. Extracted so the negative controls below run the
+    /// REAL predicate against sample types instead of re-implementing it — a control that asserts
+    /// against its own copy of the logic proves only that the copy agrees with itself.
+    /// </summary>
+    private static IEnumerable<string> SecretShapeOffendersOn(Type type)
+    {
+        var props = type.GetProperties(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .Where(p => p.PropertyType == typeof(string))
+            .ToList();
+
+        // Does this type carry a POINTER to a secret (SecretName, KeyVaultName, …)? On its own
+        // that is compliant. Combined with a bare Value property it is not — see
+        // PlainSecretValuePropertyNames for why that pairing is the tell.
+        var carriesSecretReference = props.Any(p =>
+            SecretShapedPropertyName.IsMatch(p.Name) && SecretReferenceSuffix.IsMatch(p.Name));
+
+        foreach (var prop in props)
+        {
+            // (A) Value-shaped name: secret-shaped AND not a reference suffix.
+            if (SecretShapedPropertyName.IsMatch(prop.Name) &&
+                !SecretReferenceSuffix.IsMatch(prop.Name))
+            {
+                yield return
+                    $"{type.FullName}.{prop.Name} : string — secret-shaped name on a " +
+                    $"Cosmos-persisted POCO. Use KeyVaultSecretRef (URI-only reference) " +
+                    $"instead. See RunParameters.Secrets for the compliant pattern.";
+                continue;
+            }
+
+            // (B) Secret-carrier shape: a bare value property on a type that also names a secret.
+            // `Value` alone is noise; `SecretName` + `Value` is a credential in transit. This rule
+            // is what keeps (A)'s reference exemption from opening a false negative —
+            // PendingKvSecretWrite.Value is caught here, not by (A).
+            if (carriesSecretReference && PlainSecretValuePropertyNames.Contains(prop.Name))
+            {
+                yield return
+                    $"{type.FullName}.{prop.Name} : string — SECRET-CARRIER shape: this type " +
+                    $"names a secret (a *Name/*Id reference property) AND carries a bare " +
+                    $"'{prop.Name}' property, i.e. the credential itself. Use KeyVaultSecretRef " +
+                    $"so the value is resolved at use time, or add a documented Path A " +
+                    $"exclusion if the type is provably transient and never reaches Cosmos.";
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -552,6 +699,58 @@ public class CosmosProvisioningSecretGuardTests
                 $"The property-name catalog has silently over-broadened and will " +
                 $"false-positive on legitimate L2 properties.");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // NEGATIVE controls for the #839 name-vs-value discriminator + carrier rule
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Sample shapes for the controls below. Never instantiated; inspected reflectively.
+    /// These MUST be properties, not fields — the guard scans <see cref="Type.GetProperties()"/>,
+    /// so field-shaped samples would make every control pass vacuously.
+    /// </summary>
+    private sealed class SampleKvReference     { public string? SecretName { get; set; } public string? KeyVaultName { get; set; } }
+    private sealed class SampleSecretCarrier   { public string? SecretName { get; set; } public string? Value { get; set; } }
+    private sealed class SampleCleartextSecret { public string? ClientSecret { get; set; } }
+    private sealed class SampleBenignValueBag  { public string? Value { get; set; } public string? DisplayName { get; set; } }
+
+    [Fact(DisplayName = "FR-27 negative control: a pure secret REFERENCE (SecretName/KeyVaultName) is not an offender")]
+    public void SecretReferenceSuffix_ExemptsPointerShapes()
+    {
+        // The five #839 false positives were all this shape. A vault name and a secret name are
+        // lookup keys; persisting them leaks nothing.
+        Assert.Empty(SecretShapeOffendersOn(typeof(SampleKvReference)));
+    }
+
+    [Fact(DisplayName = "FR-27 negative control: the reference exemption does NOT weaken value detection")]
+    public void SecretReferenceSuffix_StillFlagsCleartextValues()
+    {
+        // The discriminator must not become a way to smuggle a real secret past the guard.
+        var offenders = SecretShapeOffendersOn(typeof(SampleCleartextSecret)).ToList();
+        Assert.Single(offenders);
+        Assert.Contains("ClientSecret", offenders[0], StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "FR-27 negative control: SecretName + Value (the PendingKvSecretWrite shape) IS an offender")]
+    public void SecretCarrierRule_FlagsNamePlusValuePairing()
+    {
+        // This is the finding the guard used to miss entirely: it reported the harmless
+        // SecretName and said nothing about the cleartext sitting next to it. If this control
+        // ever goes green-by-emptiness, the carrier rule has been silently removed.
+        var offenders = SecretShapeOffendersOn(typeof(SampleSecretCarrier)).ToList();
+        Assert.Single(offenders);
+        Assert.Contains("SECRET-CARRIER", offenders[0], StringComparison.Ordinal);
+        Assert.Contains(".Value", offenders[0], StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "FR-27 negative control: a bare Value property with no secret reference is NOT an offender")]
+    public void SecretCarrierRule_DoesNotOverMatchPlainValueProperties()
+    {
+        // `Value` is one of the most common property names there is. The carrier rule fires only
+        // on the PAIRING; without this control, widening it to "any Value property" would look
+        // like a stricter guard and would in practice make it unusable.
+        Assert.Empty(SecretShapeOffendersOn(typeof(SampleBenignValueBag)));
     }
 
     // -----------------------------------------------------------------------

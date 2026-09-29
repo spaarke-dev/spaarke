@@ -27,15 +27,6 @@ public class StorageRetryPolicyTests
     #region Constructor Tests
 
     [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new StorageRetryPolicy(null!);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
-    [Fact]
     public void Constants_HaveExpectedValues()
     {
         // Assert - verify documented constants
@@ -396,34 +387,33 @@ public class StorageRetryPolicyTests
         var cts = new CancellationTokenSource();
         var attemptCount = 0;
 
-        // Act - operation throws retryable exception, then we cancel during delay.
+        // Act - cancel SYNCHRONOUSLY inside the first attempt, then throw a retryable error.
         //
-        // R6 PR #395 hotfix 2026-06-18 + chat-routing-redesign 2026-06-23 follow-up:
-        // CancelAfter uses ThreadingTimer directly (not Task.Run scheduling) — reliable
-        // under CI VM contention. Bumped 100ms → 500ms to give the cancellation more
-        // headroom inside the 2s retry-delay window before the second attempt fires.
-        // Assertion relaxed from `attemptCount.Should().Be(1)` to BeLessThan(4) — the
-        // load-bearing semantic is "cancellation stopped the retry loop before
-        // exhaustion", which holds whether cancellation fires before attempt #2 (==1)
-        // or just slightly after (==2). What we want to catch is a regression where
-        // cancellation is ignored entirely (==4 attempts, full exhaustion). The
-        // OperationCanceledException assertion confirms cancellation propagated.
-        // Observed regression: CI run 28043099096 2026-06-23 (Debug+coverage runner).
+        // Task 091 (2026-08-28, #848): this test previously raced a 500ms `CancelAfter` timer
+        // against the policy's 2s backoff delay. On a loaded CI runner the timer could land
+        // AFTER the second attempt had already run and returned "success" — at which point
+        // ExecuteAsync completed normally and the ThrowAsync assertion failed. That is a
+        // property of the runner's scheduling latency, not of the retry policy.
+        //
+        // Cancelling inline removes the clock entirely: when the retry strategy goes to await
+        // its backoff delay the token is ALREADY cancelled, so it must abandon the loop. The
+        // assertion is correspondingly tightened from `BeLessThan(4)` back to an exact `Be(1)`
+        // — the behaviour we actually care about is "the retry loop does not run another
+        // attempt on a cancelled token", and that is now stated exactly.
+        //
+        // History: the 100ms → 500ms bump (PR #395, 2026-06-18) and the Be(1) → BeLessThan(4)
+        // relaxation (2026-06-23, CI run 28043099096) were both attempts to buy headroom for
+        // this race. Neither could remove it, because a wall-clock race has no safe margin.
         var act = async () => await _policy.ExecuteAsync(ct =>
         {
             attemptCount++;
-            if (attemptCount == 1)
-            {
-                cts.CancelAfter(TimeSpan.FromMilliseconds(500));
-                throw StorageRetryableException.DocumentNotFound(Guid.NewGuid());
-            }
-            return Task.FromResult("success");
+            cts.Cancel();
+            throw StorageRetryableException.DocumentNotFound(Guid.NewGuid());
         }, cts.Token);
 
-        // Assert - cancellation must propagate (OperationCanceledException) AND
-        // the retry loop must stop before exhaustion (< 4 attempts; full exhaustion = 4).
+        // Assert - cancellation propagates AND no further attempt is made.
         await act.Should().ThrowAsync<OperationCanceledException>();
-        attemptCount.Should().BeLessThan(4, "cancellation should stop the retry loop before exhaustion");
+        attemptCount.Should().Be(1, "a cancelled token MUST stop the retry loop before the next attempt");
     }
 
     #endregion

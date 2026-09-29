@@ -90,7 +90,9 @@ public sealed class ComposeServiceLoadParaIdTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     // 3 body paragraphs: one with an existing id, one without, one inside a table cell.
     private static byte[] FormattedDocx()
@@ -133,7 +135,7 @@ public sealed class ComposeServiceLoadParaIdTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ParaIdMap.Should().HaveCount(3, "one id per body paragraph incl. the table-cell paragraph (FR-08)");
@@ -182,7 +184,7 @@ public sealed class ComposeServiceLoadParaIdTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         using var ms = new MemoryStream(result.Content.ToArray());
@@ -219,7 +221,7 @@ public sealed class ComposeServiceLoadParaIdTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ParaIdMap.Should().BeEmpty();

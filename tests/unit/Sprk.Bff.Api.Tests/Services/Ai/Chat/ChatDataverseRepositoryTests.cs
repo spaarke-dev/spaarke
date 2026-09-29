@@ -50,7 +50,7 @@ public class ChatDataverseRepositoryTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: [],
-            HostContext: hostContext);
+            HostContext: hostContext) { OwnerOid = TestSessionOwner.Oid };
 
     // =========================================================================
     // CreateSessionAsync — sprk_analysis FK binding (task 020, spec FR-05)

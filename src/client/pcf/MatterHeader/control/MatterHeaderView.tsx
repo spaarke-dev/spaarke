@@ -26,19 +26,21 @@
  *  - Sparkle popover: sparkle icon + copy button + updated empty state text
  *  - TextareaField: `maxLines={10}` default; auto-grow past that
  *
- * v1.0.20 (2026-07-07) — AI Summary field fix: sparkle popover now reads
- *  `sprk_mattersummary` instead of `sprk_recordsummary`. Live Dataverse data
- *  confirmed `sprk_recordsummary` is populated on ZERO Matter records (the
- *  "external service" `record-header-and-notepad-r1` task 001 assumed would
- *  write it was never built), while `sprk_mattersummary` is actively written
- *  by an AI document-analysis action and holds real narrative summaries.
- *  The popover was silently empty for every Matter in production.
+ * 2026-08-25 — summary-field standardization (R2 FR-22 / RS-1, design.md §9).
+ *  The owner standardized every rollout entity on `sprk_recordsummary` and
+ *  DELETED the Matter-specific summary column that v1.0.20 had pointed the
+ *  sparkle at. That column name also sat in the `$select` below, so Dataverse
+ *  answered HTTP 400 and the ENTIRE header failed to load on every Matter
+ *  record — not just the popover. The summary field is now referenced solely
+ *  through the shared `RECORDSUMMARY_FIELD` constant, so a future rename lands
+ *  in one place instead of five. Populating the column belongs to a separate
+ *  project; until then the popover correctly shows its "No summary yet" state.
  *
- * Field payload (verified via Dataverse MCP):
+ * Field payload (live-verified against spaarkedev1, 2026-08-25):
  *   sprk_matternumber (span 1, required), sprk_mattername (span 2),
  *   _sprk_mattertype_value → editable LookupField (span 1),
  *   _sprk_practicearea_value → editable LookupField (span 1),
- *   sprk_matterdescription (span 3), sprk_mattersummary (sparkle popover body).
+ *   sprk_matterdescription (span 3), RECORDSUMMARY_FIELD (sparkle popover body).
  *
  * Theming: platform-library Fluent v9 auto-applies host theme (control-type="virtual").
  *
@@ -50,16 +52,6 @@
 
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-// v1.0.12 (DEF-06 partial) — the shared lib's `package.json` now defines an
-// `exports` map at `@spaarke/ui-components` so consumers on modern TypeScript
-// (`moduleResolution: "bundler"` or `"node16"`) can use clean subpaths like
-// `@spaarke/ui-components/RecordHeader`. THIS PCF's tsconfig extends
-// `pcf-scripts/tsconfig_base.json` which uses legacy `moduleResolution: "node"`
-// — it does NOT read the exports field. Migrating requires bumping the
-// pcf-scripts baseline, out of R1 scope. R1's own imports stay on
-// `dist/*` (the exports field includes a `./dist/*` fallback entry so this
-// path resolves cleanly through the exports gate). Downstream Code Page
-// consumers (Vite/Rollup) on bundler resolution get the clean-subpath UX now.
 import {
   FieldGrid,
   RecordHeaderShell,
@@ -68,8 +60,12 @@ import {
 } from '@spaarke/ui-components/dist/components/RecordHeader';
 import { LookupField } from '@spaarke/ui-components/dist/components/LookupField/LookupField';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
-import { useRecordFieldValues, useRecordHeaderToolbarActions } from '@spaarke/ui-components/dist/hooks';
-import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
+import {
+  RECORDSUMMARY_FIELD,
+  useRecordFieldValues,
+  useRecordHeaderToolbarActions,
+} from '@spaarke/ui-components/dist/hooks';
+import { getXrm, getXrmPage } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { CONTROL_VERSION } from './version';
 
 const ENTITY = 'sprk_matter';
@@ -80,7 +76,7 @@ const FIELDS = [
   '_sprk_mattertype_value',
   '_sprk_practicearea_value',
   'sprk_matterdescription',
-  'sprk_mattersummary',
+  RECORDSUMMARY_FIELD,
 ];
 
 // Lookup metadata. `refEntity` is the target entity's logical name (used for
@@ -126,19 +122,6 @@ export interface IMatterHeaderViewProps {
   title?: string;
   /** When `true` (default), the version footer is rendered. */
   showVersion?: boolean;
-}
-
-/** Extract Xrm.Page (deprecated but functional API used by AssociationResolver + other PCFs). */
-function getXrmPage(): unknown | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrmObj = w.Xrm || (w.parent as any)?.Xrm;
-    return xrmObj?.Page ?? null;
-  } catch {
-    return null;
-  }
 }
 
 /** Project a lookup value from `useRecordFieldValues` into `ILookupItem`. */
@@ -268,12 +251,17 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
   // trigger + popover itself when `aiSummary.onFetchSummary` is provided —
   // consumers don't touch icons directly (icon imports break virtual-PCF
   // webpack resolution, see v1.0.4 + v1.0.10 build regressions).
+  // Read via the shared constant (see the file header): the Matter-specific
+  // summary column was deleted in the 2026-08-25 standardization. Hoisted to a
+  // local so the callback's dep array stays a plain identifier.
+  const summaryValue = (values?.[RECORDSUMMARY_FIELD] ?? null) as string | null;
+
   const fetchSparkleSummary = React.useCallback(
     async (): Promise<{ summary: string | null; tldr: string | null }> => ({
-      summary: (values?.sprk_mattersummary ?? null) as string | null,
+      summary: summaryValue,
       tldr: null,
     }),
-    [values?.sprk_mattersummary]
+    [summaryValue]
   );
 
   const toolbarPropsWithSparkle = {

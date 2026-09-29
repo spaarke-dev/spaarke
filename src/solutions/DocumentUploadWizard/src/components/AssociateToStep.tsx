@@ -20,9 +20,10 @@
  * Entity types are loaded dynamically from sprk_recordtype_ref (data-driven,
  * follows the polymorphic resolver pattern — ADR-024).
  *
- * Container ID resolution:
- *   - Associated: selected record's sprk_containerid → fallback to business unit
- *   - Unassociated: always from business unit
+ * Container resolution: NONE — deliberately (task 076, 2026-09-03). This step now returns only the
+ * IDENTITY of the parent record. The server derives the storage container from that record after
+ * authorizing the caller against it, so the authorization key and the destination are one value.
+ * The fail-OPEN client resolver that used to live here is documented where it was deleted, below.
  *
  * @see ADR-021  - Fluent UI v9 design system
  * @see ADR-024  - Polymorphic resolver pattern
@@ -89,14 +90,16 @@ const REQUIRED_ENTITY_TYPES: IRecordTypeDef[] = [
 // ---------------------------------------------------------------------------
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// Narrowed 2026-09-03 (task 076) to exactly what this file calls. `retrieveRecord` and
+// `getGlobalContext` were dropped with the two container resolvers that used them — they were the
+// only readers. A structural type that still advertises members nothing reaches is how a deleted
+// mechanism keeps looking alive.
 interface XrmWebApi {
     retrieveMultipleRecords: (entity: string, options: string) => Promise<{ entities: Record<string, unknown>[] }>;
-    retrieveRecord: (entity: string, id: string, options: string) => Promise<Record<string, unknown>>;
 }
 
 interface XrmUtility {
     lookupObjects: (options: Record<string, unknown>) => Promise<Array<{ id: string; name: string; entityType: string }>>;
-    getGlobalContext: () => { userSettings: { userId: string } };
 }
 
 interface XrmHandle {
@@ -124,63 +127,47 @@ export function resolveXrm(): XrmHandle | null {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
-// Container ID resolution (business unit fallback)
+// Container ID resolution — DELETED 2026-09-03 (unified-access-control-r2 task 076, finding F-5)
 // ---------------------------------------------------------------------------
-
-export async function resolveBusinessUnitContainerId(xrm: XrmHandle): Promise<string> {
-    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
-    const userResult = await xrm.WebApi.retrieveRecord(
-        "systemuser", userId, "?$select=_businessunitid_value"
-    );
-    const buId = userResult["_businessunitid_value"] as string;
-    if (!buId) throw new Error("Could not resolve business unit for current user");
-
-    const buResult = await xrm.WebApi.retrieveRecord(
-        "businessunit", buId, "?$select=sprk_containerid"
-    );
-    const containerId = buResult["sprk_containerid"] as string;
-    if (!containerId) throw new Error("Business unit does not have a container ID configured");
-
-    return containerId;
-}
-
-async function resolveContainerIdForRecord(
-    xrm: XrmHandle,
-    entityLogicalName: string,
-    recordId: string
-): Promise<string> {
-    try {
-        const record = await xrm.WebApi.retrieveRecord(
-            entityLogicalName, recordId, "?$select=sprk_containerid"
-        );
-        if (record["sprk_containerid"]) {
-            return record["sprk_containerid"] as string;
-        }
-    } catch {
-        // Record may not have sprk_containerid field — fall through to BU
-    }
-    return resolveBusinessUnitContainerId(xrm);
-}
+//
+// TWO functions stood here and both are gone: `resolveBusinessUnitContainerId` and
+// `resolveContainerIdForRecord`. They are DELETED, not corrected, because the correct behaviour is
+// to not ask the question at all. The server resolves the container from the record it authorizes
+// the caller against — see `services/uploadOrchestrator.ts#resolveUploadTarget`.
+//
+// 🔴 What `resolveContainerIdForRecord` actually did, and why deleting it is the point.
+// It read the selected record's `sprk_containerid` inside a bare `try { } catch { }` and, on ANY
+// failure, returned the CURRENT USER's business-unit container. That catch could not distinguish
+// "this entity has no such column" (the case its comment claimed) from a 403, a 404, or a dropped
+// connection. So for a SECURE record whose container read was DENIED to this user, it silently
+// answered with the SHARED container — and the wizard then uploaded the bytes there. SPE
+// permissions are additive-only, so nothing retracts that afterwards.
+//
+// It was also documented as doing the opposite of what it did: the neighbouring note below used to
+// claim the container resolver "THROWS when no container is found". It did not — only the business
+// unit helper threw, and only when the BU itself had no container. A record-level denial produced
+// the shared container with no error at all. (FAILURE-MODES AP-12: a comment that outlived, and
+// then misdescribed, its mechanism.)
+//
+// Do not reintroduce either function. A client-side container lookup here cannot be made safe: the
+// client is not the authorization boundary, so any answer it computes is at best redundant with the
+// server's and at worst — exactly in the secure-record case — wrong in the unsafe direction.
 
 // ---------------------------------------------------------------------------
 // Search index name resolution (FR-WIZ-06)
 // ---------------------------------------------------------------------------
 //
-// `resolveSearchIndexNameForRecord` is the parallel sibling of
-// `resolveContainerIdForRecord` above. It lives in a standalone module
-// (`./searchIndexResolver.ts`) because, unlike the container resolver, it
-// pulls in no JSX / Fluent / Xrm-full-handle dependencies — keeping it
-// pure-TS makes the FR-WIZ-06 unit tests (3-step chain) trivially runnable
-// without a DOM. Re-exported here so the public symbol surface stays at
-// `AssociateToStep.tsx` as the task contract requires, and task 027 has a
-// single canonical import location.
+// `resolveSearchIndexNameForRecord` lives in a standalone module
+// (`./searchIndexResolver.ts`) because it pulls in no JSX / Fluent /
+// Xrm-full-handle dependencies — keeping it pure-TS makes the FR-WIZ-06 unit
+// tests (3-step chain) trivially runnable without a DOM. Re-exported here so
+// the public symbol surface stays at `AssociateToStep.tsx` as the task
+// contract requires, and task 027 has a single canonical import location.
 //
-// Semantic difference vs the container resolver:
-//   - Container resolver falls back to CURRENT USER's BU and THROWS when
-//     no container is found (container is REQUIRED for upload).
-//   - SearchIndexName resolver falls back to PARENT RECORD's owning BU and
-//     never throws — empty string is a legitimate result that defers to the
-//     server-side BFF tenant default (FR-BFF-04).
+// It falls back to the PARENT RECORD's owning BU and never throws — empty
+// string is a legitimate result that defers to the server-side BFF tenant
+// default (FR-BFF-04). It is NOT an authorization decision: an index name
+// scopes a search, it does not grant access to anything.
 //
 export { resolveSearchIndexNameForRecord } from "./searchIndexResolver";
 export type { IXrmWebApiLike } from "./searchIndexResolver";
@@ -263,7 +250,9 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
     const [recordTypes, setRecordTypes] = React.useState<IRecordTypeDef[]>([]);
     const [isLoadingTypes, setIsLoadingTypes] = React.useState(true);
     const [selectedEntityType, setSelectedEntityType] = React.useState<string>("");
-    const [isResolving, setIsResolving] = React.useState(false);
+    // `isResolving` was DELETED 2026-09-03 (task 076). It gated the controls while the client
+    // resolved a container for the selected record. There is no such resolution any more — record
+    // selection is now synchronous once the lookup returns.
     const [error, setError] = React.useState<string | null>(null);
 
     // ── Load entity types from sprk_recordtype_ref on mount ────────────────
@@ -347,22 +336,18 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
             const selected = results[0];
             const cleanId = selected.id.replace(/[{}]/g, "").toLowerCase();
 
-            // Resolve container ID from the selected record (fallback to BU)
-            setIsResolving(true);
-            const containerId = await resolveContainerIdForRecord(xrm, selectedEntityType, cleanId);
-
+            // No container resolution here any more (task 076). The record IS the answer: the
+            // upload names `(selectedEntityType, cleanId)` and the server derives the container
+            // from that same record after authorizing the caller against it.
             onParentResolved({
                 parentEntityType: selectedEntityType,
                 parentEntityId: cleanId,
                 parentEntityName: selected.name,
-                containerId,
                 isUnassociated: false,
             });
         } catch (err) {
             console.error("[AssociateToStep] Record selection failed:", err);
             setError(err instanceof Error ? err.message : "Failed to select record.");
-        } finally {
-            setIsResolving(false);
         }
     }, [selectedEntityType, onParentResolved]);
 
@@ -414,7 +399,6 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                                 // Clear previous selection when entity type changes
                                 if (hasSelection) onParentResolved(null);
                             }}
-                            disabled={isResolving}
                         >
                             {recordTypes.map((rt) => (
                                 <Option key={rt.logicalName} value={rt.logicalName}>
@@ -427,7 +411,7 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                         appearance="primary"
                         icon={<SearchRegular />}
                         onClick={handleSelectRecord}
-                        disabled={!selectedEntityType || isResolving}
+                        disabled={!selectedEntityType}
                     >
                         Select Record
                     </Button>
@@ -454,10 +438,8 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                 </div>
             )}
 
-            {/* Resolving spinner */}
-            {isResolving && (
-                <Spinner size="tiny" label="Resolving container..." />
-            )}
+            {/* The "Resolving container..." spinner was DELETED 2026-09-03 (task 076) — there is no
+                client-side container resolution left to wait on. */}
 
             {/* Hint text */}
             <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>

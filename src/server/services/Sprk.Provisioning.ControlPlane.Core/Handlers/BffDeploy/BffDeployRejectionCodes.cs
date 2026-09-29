@@ -115,6 +115,21 @@ public static class BffDeployRejectionCodes
     /// </summary>
     public const string StagingHealthCheckFailed = "staging-health-check-failed";
 
+    // ---- scheduled-jobs slot guard (ADR-036 A1 rule 2, GitHub #987) ----
+
+    /// <summary>
+    /// <see cref="ISlotStickyAppSettingWriter"/> reported that ARM rejected
+    /// setting the scheduled-jobs slot guard (<c>Scheduling__RunScheduledJobs=false</c>,
+    /// slot-sticky) on the staging slot — RetryableWithCleanup, the slot swap's
+    /// class. The Kudu zip-deploy is NOT attempted (fail closed: a slot without
+    /// the guard runs the BFF's scheduled jobs against production data).
+    /// Production is untouched.
+    /// </summary>
+    public const string ScheduledJobsSlotGuardFailed = "scheduled-jobs-slot-guard-failed";
+
+    /// <summary>The slot-guard ARM call threw (timeout, transport fault) — RetryableWithCleanup; no zip-deploy attempted.</summary>
+    public const string ScheduledJobsSlotGuardInfraFault = "scheduled-jobs-slot-guard-infra-fault";
+
     // ---- r3-era gate failures (SUPERSEDED by task 132 — see ArtifactManifestRejected
     //      above; retained per this file's stability policy — "do NOT rename;
     //      mark old ones @[Obsolete] on removal" — no code path emits these

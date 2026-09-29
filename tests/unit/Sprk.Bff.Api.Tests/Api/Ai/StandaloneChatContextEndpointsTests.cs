@@ -11,10 +11,12 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 // Task 070 repair (2026-05-31): tests under this class are §6.2 "repaired".
-// Root cause: the FakeAuthHandler (CustomWebAppFactory) injects no `tid` claim, so the
-// endpoint's ExtractTenantId() fell back to the X-Tenant-Id header — which the tests
-// were not setting — and returned 400 "Tenant ID not found". The minimal-diff repair
-// is to add the header on requests that expect 200 OK. No production or factory edits.
+// Root cause: the FakeAuthHandler (CustomWebAppFactory) injected no `tid` claim, so the endpoint's
+// ExtractTenantId() fell back to the X-Tenant-Id header — which the tests were not setting — and
+// returned 400 "Tenant ID not found". Task 070 repaired that by SETTING the header. Task 059
+// repaired the FIXTURE instead: a real Entra token always carries `tid`, so a principal without one
+// was non-contract, and compensating with the header made the spoofable fallback the only tenant
+// path these tests ever exercised.
 [Trait("status", "repaired")]
 
 /// <summary>
@@ -42,8 +44,8 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
     private const string ValidEntityType = "contact";
     private const string ValidEntityId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
-    // Task 070 repair: endpoint reads tenantId from `tid` JWT claim OR X-Tenant-Id header.
-    // FakeAuthHandler does not inject `tid`; tests pass tenant via the header fallback path.
+    // Task 059: the endpoint reads tenantId from the `tid` JWT claim and nothing else. This is the
+    // value FakeAuthHandler now injects (WorkspaceTestConstants.TestTenantId).
     private const string TestTenantId = "test-tenant-001";
 
     private readonly HttpClient _client;
@@ -54,14 +56,11 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
     }
 
     /// <summary>
-    /// Builds a request with the X-Tenant-Id header set. The endpoint uses this
-    /// when no `tid` claim is available (the FakeAuthHandler does not set `tid`).
+    /// Pass-through retained so the call sites below still read as "this request carries a tenant".
+    /// It no longer SETS anything: task 059 gave FakeAuthHandler the `tid` claim a real Entra token
+    /// always carries, so the tenant now arrives the way production delivers it.
     /// </summary>
-    private static HttpRequestMessage WithTenantHeader(HttpRequestMessage request)
-    {
-        request.Headers.Add("X-Tenant-Id", TestTenantId);
-        return request;
-    }
+    private static HttpRequestMessage WithTenantHeader(HttpRequestMessage request) => request;
 
     // =========================================================================
     // Endpoint Registration Tests (ADR-001 — Minimal API)

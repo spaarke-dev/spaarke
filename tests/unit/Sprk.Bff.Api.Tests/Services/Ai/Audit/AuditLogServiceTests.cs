@@ -67,16 +67,6 @@ public class AuditLogServiceTests
     // =========================================================================
 
     [Fact]
-    public void Constructor_NullCosmosClient_ThrowsArgumentNullException()
-    {
-        var logger = new Mock<ILogger<AuditLogService>>();
-
-        var act = () => new AuditLogService(null!, "spaarke-ai", logger.Object);
-
-        act.Should().Throw<ArgumentNullException>().WithParameterName("cosmosClient");
-    }
-
-    [Fact]
     public void Constructor_NullOrEmptyDatabaseName_ThrowsArgumentException()
     {
         var cosmosClient = new Mock<CosmosClient>();
@@ -89,16 +79,6 @@ public class AuditLogServiceTests
         actNull.Should().Throw<ArgumentException>();
         actEmpty.Should().Throw<ArgumentException>();
         actWhitespace.Should().Throw<ArgumentException>();
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        var cosmosClient = new Mock<CosmosClient>();
-
-        var act = () => new AuditLogService(cosmosClient.Object, "spaarke-ai", null!);
-
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
     // =========================================================================

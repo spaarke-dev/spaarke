@@ -99,28 +99,15 @@ Spaarke.Commands.Wizards = (function () {
     return { entityType: "", entityId: "", entityName: "" };
   }
 
-  /**
-   * Helper: resolve the SPE container ID from the current user's business unit.
-   * Mirrors the resolution NavigationService.openAddDocument uses in the
-   * SemanticSearchControl so ribbon and PCF launches behave identically.
+  /*
+   * `getContainerId()` was DELETED here 2026-09-03 (unified-access-control-r2 task 076).
    *
-   * @returns {Promise<string>} Container ID, or '' if not resolvable.
+   * It read the acting user's business unit's `sprk_containerid` and appended it to the
+   * DocumentUploadWizard launch envelope. The wizard no longer reads that parameter: the SERVER
+   * resolves the container from the parent record it authorizes the caller against. Three launch
+   * envelopes carried this value (this one, SemanticSearchControl's `NavigationService`, and
+   * LegalWorkspace's `WorkspaceGrid`); all three lost it in the same change.
    */
-  function getContainerId() {
-    try {
-      var userId = Xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
-      return Xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value").then(function (user) {
-        var buId = user._businessunitid_value;
-        if (!buId) return "";
-        return Xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid").then(function (bu) {
-          return bu.sprk_containerid || "";
-        });
-      });
-    } catch (err) {
-      console.warn("[WizardCommands] getContainerId failed:", err);
-      return Promise.resolve("");
-    }
-  }
 
   /**
    * Helper: resolve the display name of the parent record so the wizard can
@@ -228,32 +215,27 @@ Spaarke.Commands.Wizards = (function () {
     },
 
     openDocumentUploadWizard: function (primaryControl) {
-      // The wizard reads parentEntityType / parentEntityId / parentEntityName /
-      // containerId (NOT entityType/entityId). Without these it mounts with
-      // empty context and the upload never associates to the parent record.
+      // The wizard reads parentEntityType / parentEntityId / parentEntityName (NOT
+      // entityType/entityId). Without these it mounts with empty context and the upload never
+      // associates to the parent record.
+      //
+      // 🔴 `containerId` was REMOVED from this envelope 2026-09-03 (task 076), along with the
+      // "Cannot upload: no SPE container is configured for your business unit" alert that guarded
+      // it. That alert refused the upload outright whenever the ACTING USER's business unit had no
+      // container — including for a secure matter that has a container of its own, which the server
+      // resolves perfectly well. The client is no longer a participant in that decision, so it is
+      // not in a position to render a verdict on it. A record the server genuinely cannot resolve a
+      // container for now fails per file, on the wizard's Processing step, with the server's reason.
       var ctx = getEntityContext(primaryControl);
       if (!ctx.entityType || !ctx.entityId) {
         console.error("[WizardCommands] openDocumentUploadWizard: no parent record context");
         return;
       }
-      Promise.all([
-        getContainerId(),
-        getParentEntityName(ctx.entityType, ctx.entityId)
-      ]).then(function (results) {
-        var containerId = results[0];
-        var parentEntityName = results[1];
-        if (!containerId) {
-          Xrm.Navigation.openAlertDialog({
-            title: "Upload Documents",
-            text: "Cannot upload: no SPE container is configured for your business unit (sprk_containerid)."
-          });
-          return;
-        }
+      getParentEntityName(ctx.entityType, ctx.entityId).then(function (parentEntityName) {
         var baseData =
           "parentEntityType=" + encodeURIComponent(ctx.entityType) +
           "&parentEntityId=" + encodeURIComponent(ctx.entityId) +
           "&parentEntityName=" + encodeURIComponent(parentEntityName) +
-          "&containerId=" + encodeURIComponent(containerId) +
           "&theme=" + getTheme();
         openWizardWithBff(primaryControl, "sprk_documentuploadwizard", baseData, "Upload Documents");
       }).catch(function (err) {

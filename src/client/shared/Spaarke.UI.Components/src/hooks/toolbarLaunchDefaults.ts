@@ -90,17 +90,37 @@ export const SMARTTODO_WEBRESOURCE_NAME = 'sprk_smarttodo';
 export const RECORDSUMMARY_FIELD = 'sprk_recordsummary';
 
 /**
+ * Empty-state copy for the record-header sparkle popover.
+ *
+ * Paired with {@link RECORDSUMMARY_FIELD} deliberately: the field and the words
+ * shown when it is unpopulated are one contract, and R2 asserts this string in
+ * both the shared integration suite and the RecordHeader PCF suite. Declaring
+ * it once keeps those from drifting apart.
+ *
+ * "Yet" is load-bearing. At R2 ship time an empty summary is the EXPECTED
+ * steady state — the owner created `sprk_recordsummary` on all six rollout
+ * entities and a SEPARATE project populates it. The sparkle is therefore an
+ * empty affordance, not a dead one, and the copy must not read as an error.
+ * `AiSummaryPopover`'s own default ("No summary available for this document.")
+ * stays untouched for its nine document-oriented callers.
+ */
+export const RECORD_SUMMARY_EMPTY_TEXT = 'No summary yet.';
+
+/**
  * ADR-024 dual-field pattern — `sprk_memo`'s entity-specific regarding lookups.
  *
  * Key   = parent entity logical name.
  * Value = lookup field name on `sprk_memo` that points at that parent.
  *
- * `sprk_memo` supports exactly six parent entities (schema-limited).
+ * `sprk_memo` supports exactly seven parent entities (schema-limited).
  * Any launch context whose `regardingEntity` is not in this map cannot
  * create memos and must render an error surface (FR-13 / FR-19).
  *
  * Verified via Dataverse MCP `describe('tables/sprk_memo')` in task 001.
  * See notes/sprk-memo-schema.md.
+ *
+ * `sprk_agreement` added 2026-08-25 (R2 task 024 / FR-24) — owner
+ * live-verified `sprk_regardingagreement` exists on `sprk_memo`.
  */
 export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
   sprk_matter: 'sprk_regardingmatter',
@@ -109,6 +129,7 @@ export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
   sprk_invoice: 'sprk_regardinginvoice',
   sprk_budget: 'sprk_regardingbudget',
   sprk_workassignment: 'sprk_regardingworkassignment',
+  sprk_agreement: 'sprk_regardingagreement',
 };
 
 /**
@@ -140,12 +161,15 @@ export function buildMemoFilterForParent(regardingEntity: string, regardingId: s
  * Dataverse MCP `describe('tables/sprk_todo')` on 2026-07-03 after live QA surfaced a
  * "Could not find a property named '_regardingobjectid_value'" 400 error.
  *
- * `sprk_todo` supports **11 parent entity lookups** (a superset of `sprk_memo`'s six):
+ * `sprk_todo` supports **12 parent entity lookups** (a superset of `sprk_memo`'s seven):
  * Matter, Project, Event, Invoice, Budget, WorkAssignment, Analysis, Communication,
- * Contact, Document, Organization.
+ * Contact, Document, Organization, Agreement.
  *
  * Key   = parent entity logical name.
  * Value = lookup field name on `sprk_todo` that points at that parent.
+ *
+ * `sprk_agreement` added 2026-08-25 (R2 task 024 / FR-24) — owner
+ * live-verified `sprk_regardingagreement` exists on `sprk_todo`.
  */
 export const SUPPORTED_TODO_PARENTS: Record<string, string> = {
   sprk_matter: 'sprk_regardingmatter',
@@ -159,6 +183,7 @@ export const SUPPORTED_TODO_PARENTS: Record<string, string> = {
   contact: 'sprk_regardingcontact',
   sprk_document: 'sprk_regardingdocument',
   sprk_organization: 'sprk_regardingorganization',
+  sprk_agreement: 'sprk_regardingagreement',
 };
 
 /**

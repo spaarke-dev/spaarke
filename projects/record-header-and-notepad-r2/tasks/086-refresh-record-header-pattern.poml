@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Refresh .claude/patterns/ui/record-header-composition.md body for the shipped configurable RecordHeader (MAIN SESSION ONLY)</title>
+    <phase>6 Documentation + wrap</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation task — small pattern-pointer body refresh, no code implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, fully specified documentation update against shipped code and the rewritten guide.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary). NON-NEGOTIABLE: sub-agents launched via the Agent tool CANNOT write to .claude/ paths (root CLAUDE.md §3, Sub-Agent Write Boundary). A dispatcher MUST NOT hand this task to a sub-agent — it would fail with "Edit denied on .claude/...". Execute in the MAIN SESSION with Edit/Write directly.</parallel-reason>
+    <deps>085</deps>
+    <tags>documentation, patterns</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Update the BODY sections of .claude/patterns/ui/record-header-composition.md for the post-ship reality: the
+    ONE configuration-driven Spaarke.Records.RecordHeader control has shipped, MatterHeaderPcf is retired, and the
+    authoring guide has been rewritten (task 085). The withdrawal-warning block and the patterns/ui/INDEX.md row are
+    ALREADY corrected on this branch — do NOT re-edit them; ONLY the body sections need updating.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer maintaining the .claude/patterns pointer layer. Pattern files are 25-line-style
+    pointers telling readers WHICH code to read — keep it a pointer, not a tutorial.
+  </role>
+
+  <goal>
+    The pattern's body sections (Canonical code, Authoring guide, Follow-on project, See also) accurately point at
+    the shipped RecordHeader control, the rewritten guide, and R2 as delivered — with the already-corrected
+    warning block, the INDEX.md row, and the DEF-03/DEF-04 duplication pointers left intact.
+  </goal>
+
+  <context>
+    <background>
+      Design.md §3.1: "Refresh .claude/patterns/ui/record-header-composition.md accordingly (its withdrawal warning
+      and the patterns/ui/INDEX.md row are already corrected on this branch; only the body sections need the
+      post-ship update)." Current body drift after R2 ships: the "Reference PCF" bullet points at
+      src/client/pcf/MatterHeader/ (retired by task 081); the "Authoring guide" paragraph describes the OLD
+      per-entity guide content (manifest anatomy, ProjectHeaderPcf worked example) that task 085 replaced; the
+      "Follow-on project" section presents R2 as future work; the Load-when line names MatterHeaderPcf.
+    </background>
+    <relevant-files>
+      <file role="modify">.claude/patterns/ui/record-header-composition.md</file>
+      <file role="canonical-reference">docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</file>
+      <file role="canonical-reference">src/client/pcf/RecordHeader/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="085" status="pending">The rewritten authoring guide this pattern links to and summarizes — the body cannot describe the guide before the guide exists.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3">This task writes to a .claude/ path. It MUST run in the MAIN SESSION — never dispatched to a sub-agent. If an executor receives "Edit denied" on this file, that is the write boundary working: hand the edit back to the main session rather than retrying or working around it.</constraint>
+    <constraint source="project">Edit ONLY the body sections of record-header-composition.md. Do NOT re-edit the ⚠️ withdrawal-warning block or .claude/patterns/ui/INDEX.md — both are already corrected on this branch. Do NOT touch any other .claude/ file.</constraint>
+    <constraint source="project">PRESERVE the "Duplication pointers" section (DEF-03 CardChrome, DEF-04 MemoSection) — both deferrals remain live and out of R2 scope. Update only their surrounding context if it names retired artifacts.</constraint>
+    <constraint source="project">Keep it a POINTER: paths + one-line whys. The configuration tutorial lives in the rewritten guide; do not duplicate guide content here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pattern-pointer maintenance</topic>
+    <files>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="pattern-pointer style" location=".claude/patterns/ui/record-header-composition.md">The existing file IS the style reference — same structure and length class after the refresh as before.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (MINIMAL). CONFIRM this is the main session (not a sub-agent context) before editing — see the parallel-reason and CLAUDE.md §3 constraint.</step>
+    <step order="1">Read the current pattern file and the rewritten guide (task 085 output). Note which body claims are now stale.</step>
+    <step order="2">Update the body: Load-when line (modifying the RecordHeader PCF / consuming header primitives — not MatterHeaderPcf); Canonical code (Reference PCF → src/client/pcf/RecordHeader/, the ONE configuration-driven control; note MatterHeaderPcf retired by R2 task 081; add resolveHeaderConfig + the new field renderers to the shared-primitives bullet); Authoring guide paragraph (now describes configure-for-a-new-entity + layoutJson, and STILL cites the mandatory bundle-optimization triad); Follow-on project section (R2 is SHIPPED — convert from future-work framing to a delivered summary with a pointer to the R2 project folder); See also (R2 spec/design links current).</step>
+    <step order="3">Verify: withdrawal-warning block and INDEX.md untouched (git diff shows changes only in body sections of this one file); DEF-03/DEF-04 pointers intact.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="main-session-edit">Edit/Write from the main session only — sub-agents cannot write .claude/ paths</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/patterns/ui/record-header-composition.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The pattern body names Spaarke.Records.RecordHeader (src/client/pcf/RecordHeader/) as the reference control and nowhere presents MatterHeaderPcf as current (a historical/retired mention is allowed).</criterion>
+    <criterion testable="true">The Authoring guide paragraph matches the task-085 rewrite (configure-for-a-new-entity + layoutJson) and still cites the mandatory bundle-optimization triad.</criterion>
+    <criterion testable="true">git diff for this task touches EXACTLY ONE file (.claude/patterns/ui/record-header-composition.md) and does not modify the ⚠️ withdrawal-warning block; .claude/patterns/ui/INDEX.md is unchanged.</criterion>
+    <criterion testable="true">The DEF-03 (CardChrome) and DEF-04 (MemoSection) duplication pointers survive with their do-not-rush-to-migrate guidance intact.</criterion>
+    <criterion testable="true">Negative: the task was executed in the main session — no sub-agent "Edit denied" occurred (or, if one did, the work was re-done from the main session and the mis-dispatch noted in notes/).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Design ref: §3.1 documentation scope. This is the ONLY R2 task that writes under .claude/ — which is exactly why
+    it is serialized, deps-gated behind 085, and flagged parallel-safe false. The canonical dispatch pattern (root
+    CLAUDE.md §3): sub-agents may READ and report; the MAIN SESSION applies .claude/ edits.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist. MAIN SESSION ONLY.</protocol>
+  </execution>
+</task>

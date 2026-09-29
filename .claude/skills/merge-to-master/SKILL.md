@@ -159,19 +159,125 @@ CHECK 4 - Conflict preview:
 
 ---
 
+### Step 2.5: Update the BRANCH from master first (MANDATORY)
+
+> Added 2026-08-29 by owner direction: *"whenever we invoke `/merge-to-master` we always want the
+> worktree to first update and check for conflicts to ensure no issues."*
+
+Step 2's CHECK 4 only *previews* conflicts by trial-merging on master and aborting. That is detection,
+not resolution — it leaves the branch unchanged and defers the real merge to a moment when the
+resolution lands **on master**. This step inverts that: bring master INTO the branch, resolve there,
+and let master only ever receive an already-reconciled branch.
+
+**Why the direction matters.** A conflict resolved on the feature branch is reviewable in the PR, is
+re-runnable by CI before it reaches master, and is revertable by closing the PR. The same conflict
+resolved during a merge to master is none of those things — it lands unreviewed on the branch every
+other worktree pulls from.
+
+```
+FOR EACH branch to merge (run this IN the worktree that owns the branch):
+
+STEP 2.5a - Confirm we are on the branch, tree clean:
+  git rev-parse --abbrev-ref HEAD      # must be the feature branch, NOT master
+  git status --porcelain               # must be empty (Step 2 CHECK 1 already enforced this)
+
+STEP 2.5b - Fetch and measure drift:
+  git fetch origin master
+  behind = git rev-list --count HEAD..origin/master
+
+  IF behind == 0:
+    REPORT: "Branch is current with master — nothing to update. ✅"
+    → SKIP to Step 3
+
+STEP 2.5c - Choose the update method (see decision rule below):
+  → merge (DEFAULT)  or  rebase (narrow case only)
+
+STEP 2.5d - Apply it:
+  # DEFAULT
+  git merge origin/master
+  # NARROW CASE (branch never pushed, no PR)
+  git rebase origin/master
+
+STEP 2.5e - Resolve any conflicts HERE, on the branch:
+  IF conflicts:
+    REPORT: "{N} conflicted files: {list}"
+    RESOLVE per the Conflict Resolution Strategy section below
+    → re-run the build/test relevant to the touched surface (Step 4 criteria)
+    → commit the resolution
+  ELSE:
+    REPORT: "Branch updated from master, no conflicts ✅"
+
+STEP 2.5f - Push the updated branch so CI re-validates the RECONCILED state:
+  git push                              # merge path — fast-forward, no force needed
+  git push --force-with-lease           # rebase path ONLY; never bare --force
+
+  → WAIT for checks to reach a TERMINAL state before proceeding to Step 3.
+    A zero-failure count while checks are still `pending` is a measurement taken too
+    early, not a green build. See push-to-github Step 8.
+```
+
+#### Decision rule — merge vs rebase
+
+**Default to `merge`. Reach for `rebase` only in one narrow case.**
+
+| Situation | Method | Why |
+|---|---|---|
+| Branch is pushed / has an open PR (**the normal case**) | **`merge`** | No history rewrite, so no force-push. A force-push mid-review detaches existing review comments from their commits and cancels in-flight CI runs. |
+| Branch exists only locally — never pushed, no PR | `rebase` | Nothing downstream to invalidate, so the rewrite is free. |
+| Branch is shared with another person or worktree | **`merge`** — never rebase | Rewriting shared history forces everyone else into a recovery they did not ask for. |
+| Conflict spans many commits | **`merge`** | Merge resolves each conflict **once**. Rebase replays it per commit, and a mis-resolution mid-replay is easy to make and hard to spot. |
+
+**The repo-specific clincher: this repo squash-merges PRs** (`gh pr merge --squash`). Branch commit
+history is discarded at merge time regardless, so rebasing to obtain "clean linear history" buys
+nothing that survives the merge — while still costing a force-push and its side effects. When in
+doubt, **merge**.
+
+---
+
 ### Step 3: Execute Merge
 
 **FIRST: detect whether master is protected** — this determines which path runs.
 
 ```
-DETECT branch protection:
-  protection = gh api repos/{owner}/{repo}/branches/master/protection 2>/dev/null
+DETECT branch protection (rulesets — NOT the classic endpoint on this repo):
+  gh api repos/{owner}/{repo}/rules/branches/master     # what actually applies to master
+  gh api repos/{owner}/{repo}/rulesets                  # the ruleset objects themselves
 
-  IF protection has required_status_checks OR required_pull_request_reviews:
-    → master IS protected → use Path A (Auto-Merge PR — DEFAULT for this repo)
-  ELSE:
-    → master IS NOT protected → use Path B (Direct Local Merge — legacy fallback)
+  → Path A (Auto-Merge PR) is the DEFAULT **regardless of what this returns**.
+  → Path B (Direct Local Merge) requires an EXPLICIT user instruction. "Protection
+    looks off" is NOT that instruction — and on this repo it would simply be refused.
 ```
+
+> **Master IS protected as of 2026-08-29 — Path B is now refused by the server.**
+>
+> A repository **ruleset** (`id 21824191`) enforces on the default branch: **PR required** (0
+> approvals), required status check **`Router`**, `strict` **false**, plus force-push and deletion
+> blocked. `git push origin {branch}:master` fails.
+>
+> **Two traps worth knowing before you debug this:**
+>
+> 1. **Classic branch protection does not work on this repo.** `GET`/`PUT` on
+>    `/branches/master/protection` return `404 "Branch protection has been disabled on this
+>    repository"` even with `admin: true` and a `repo`-scoped token. Do not conclude "protection is
+>    off" from that 404 — check **rulesets**. This is why task CICD-071's planned cutover command
+>    (a `PUT` to the classic endpoint) will not work as written.
+> 2. **The required context is `Router`**, the literal check-run name — **not** `CI / Router` as the
+>    spec and several planning notes say. Setting a context string that never reports blocks every PR
+>    permanently, so verify with `gh api .../rules/branches/master` after any change.
+>
+> **This detection previously read *"NOT protected → use Path B (Direct Local Merge)"***, which
+> inverted the intent — it turned a missing guardrail into an instruction to skip review, and while
+> protection was off it would have routed **every** invocation to a direct push. Path A is the default
+> regardless of protection state, because:
+>
+> - **A direct push starves the CI cutover measurement.** `scripts/ci/shadow-window-status.ps1`
+>   enumerates merged **PRs** and compares legacy vs. new verdicts per merge commit. No PR → no
+>   comparison → the window takes *longer* to close.
+> - **Absence of a guardrail is not permission.** If protection is ever removed again (e.g. a CI
+>   outage), the correct response is to keep using PRs, not to start pushing directly.
+>
+> Path B remains documented for genuine emergencies and requires both an explicit user request **and**
+> a temporary ruleset bypass.
 
 #### Path A: Auto-Merge PR (DEFAULT for protected master)
 
@@ -460,7 +566,8 @@ CHECK 4: Build compiles
 | Force-pushed to master | User reached for `--force` instead of `--force-with-lease` (or worse — pushed master force) | NEVER force-push to master. NEVER use `--force` on shared branches (use `--force-with-lease` on feature branches only). |
 | Deleted branch before verifying CI passed | Cleanup ran too eagerly after merge | Wait for CI green before deleting the source branch. The reconciliation pattern explicitly preserves the branch until verified. |
 | Master diverges from origin after local merge | `git pull --rebase` produced conflicts; user committed without re-pushing | After merge to local master, immediately push. If push fails, fetch + rebase + push again. Don't leave local master ahead/behind silently. |
-| `git push origin master` rejected with "protected branch" | Path B (Direct Local Merge) attempted against a protected master | **R4 PR #331 incident (2026-06-02)**: skill defaulted to Path B and burned ~30 min discovering branch protection mid-push. Fix: Step 3 now detects branch protection via `gh api repos/{owner}/{repo}/branches/master/protection` BEFORE executing merge, and routes to Path A (Auto-Merge PR) when protection is on. |
+| `git push origin master` rejected with "protected branch" / "repository rule violations" | Path B (Direct Local Merge) attempted against a protected master | **R4 PR #331 incident (2026-06-02)**: skill defaulted to Path B and burned ~30 min discovering protection mid-push. Fix: Step 3 detects protection BEFORE merging and routes to Path A (Auto-Merge PR). ⚠️ **Probe the RULESET endpoint** `gh api repos/{owner}/{repo}/rules/branches/master` — **NOT** `…/branches/master/protection`, which returns `404 "Branch protection has been disabled"` on this repo and reads as "unprotected", sending you straight back into the rejected direct push. (This row named the classic endpoint until 2026-09-01; Step 3 itself was already correct — see its note.) |
+| Merged on a green **required** check while other checks were red | Gated on `Router` alone — it is the ONLY required check, so `mergeable` reads `MERGEABLE` even with failing jobs | Gate on the FULL rollup: `gh pr checks {N}` with zero `fail` and zero `pending`. `mergeStateStatus: UNSTABLE` = non-required checks failed → STOP; only `CLEAN` proceeds. Near-miss 2026-09-01 (#858): `Router` passed while two test jobs were red from a broken solution build. |
 | Auto-merge enabled but PR never merges | Required CI checks failing OR a new master commit landed and the branch is no longer up-to-date with `strict: true` | Run `gh pr checks {N}` — if checks fail, fix + push to PR branch. If "branch out of date", merge master into the PR branch OR rebase + force-push-with-lease — auto-merge will re-evaluate. |
 | Auto-merge uses squash by default (collapses commit history) | `gh pr merge --auto` without explicit `--merge` flag — gh may use repo default (often squash) | Always specify `gh pr merge --auto --merge` for projects with structured commits (R4 task `XXX:` prefixes etc.). Use `--squash` only if the repo prefers linear history and you're OK losing per-commit task fingerprints. |
 

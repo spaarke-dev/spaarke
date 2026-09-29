@@ -3,7 +3,7 @@
  *
  * Locks the best-effort 24h re-attach signal on the FilesAttachedIndicator chip: when a reopened
  * session's uploaded file has `available: false` (its searchable content was evicted from AI Search
- * after ~24h idle, SessionFilesCleanupJob), the chip renders a dimmed "no longer available" hint so the
+ * after ~24h idle, SessionFilesCleanupJob), the chip renders a dimmed "may no longer be available" hint so the
  * user is not promised a file the Assistant can no longer recall. `available` absent/true ⇒ usable.
  */
 
@@ -30,26 +30,26 @@ const AVAILABLE: AttachedFileSummary = { id: 'f1', filename: 'NDA.pdf', status: 
 const UNAVAILABLE: AttachedFileSummary = { id: 'f2', filename: 'Old.pdf', status: 'ready', available: false };
 
 describe('FilesAttachedIndicator — 24h availability signal', () => {
-  it('single available file shows its name with NO "no longer available" hint', () => {
+  it('single available file shows its name with NO availability hint', () => {
     renderIndicator([AVAILABLE]);
     expect(screen.getByText('NDA.pdf')).toBeInTheDocument();
-    expect(screen.queryByText(/no longer available/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no longer be available/i)).not.toBeInTheDocument();
   });
 
-  it('single UNAVAILABLE file appends "no longer available"', () => {
+  it('single UNAVAILABLE file appends "may no longer be available"', () => {
     renderIndicator([UNAVAILABLE]);
-    expect(screen.getByText(/Old\.pdf — no longer available/)).toBeInTheDocument();
+    expect(screen.getByText(/Old\.pdf — may no longer be available/)).toBeInTheDocument();
   });
 
   it('treats an absent `available` flag as available (back-compat with the live-upload path)', () => {
     renderIndicator([{ id: 'f3', filename: 'Live.docx', status: 'ready' }]);
     expect(screen.getByText('Live.docx')).toBeInTheDocument();
-    expect(screen.queryByText(/no longer available/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no longer be available/i)).not.toBeInTheDocument();
   });
 
-  it('multi-file with any unavailable shows "some files no longer available"', () => {
+  it('multi-file with any unavailable shows "some files may no longer be available"', () => {
     renderIndicator([AVAILABLE, UNAVAILABLE]);
-    expect(screen.getByText('some files no longer available')).toBeInTheDocument();
+    expect(screen.getByText('some files may no longer be available')).toBeInTheDocument();
   });
 
   it('multi-file all available shows "available for this session"', () => {
@@ -59,6 +59,6 @@ describe('FilesAttachedIndicator — 24h availability signal', () => {
 
   it('renders the unavailable variant under dark theme without regression (ADR-021)', () => {
     renderIndicator([UNAVAILABLE], webDarkTheme);
-    expect(screen.getByText(/no longer available/i)).toBeInTheDocument();
+    expect(screen.getByText(/no longer be available/i)).toBeInTheDocument();
   });
 });

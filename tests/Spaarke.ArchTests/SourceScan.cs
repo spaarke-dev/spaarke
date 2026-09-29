@@ -28,6 +28,20 @@ internal static class SourceScan
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Every <c>.cs</c> file under <c>tests/**</c>, excluding build output.
+    /// Added for <see cref="Adr038TestBanGuardTests"/> (issue #864) — the ADR-038 §7 bans
+    /// are rules about TEST source, so they need the mirror of <see cref="ServerSourceFiles"/>.
+    /// </summary>
+    internal static IEnumerable<string> TestSourceFiles()
+    {
+        var testRoot = Path.Combine(RepoRoot, "tests");
+        return Directory
+            .EnumerateFiles(testRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+    }
+
     /// <summary>Removes a <c>//</c> (and therefore <c>///</c>) line comment.</summary>
     internal static string StripLineComment(string line)
     {

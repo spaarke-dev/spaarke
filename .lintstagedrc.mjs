@@ -22,7 +22,6 @@ const ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
  */
 const ESLINT_CONFIG_DIRS = [
   "src/client/pcf/DocumentRelationshipViewer",
-  "src/client/pcf/EmailProcessingMonitor",
   "src/client/pcf/RelatedDocumentCount",
   "src/client/pcf/ScopeConfigEditor",
   "src/client/pcf/SemanticSearchControl",

@@ -121,38 +121,6 @@ public class PrecedentProjectionSyncTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_NullBoard_Throws()
-    {
-        Action act = () => new PrecedentProjectionSync(
-            null!, _insightsAiMock.Object, _searchIndexClientMock.Object, NullLogger<PrecedentProjectionSync>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("board");
-    }
-
-    [Fact]
-    public void Constructor_NullInsightsAi_Throws()
-    {
-        Action act = () => new PrecedentProjectionSync(
-            _boardMock.Object, null!, _searchIndexClientMock.Object, NullLogger<PrecedentProjectionSync>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("insightsAi");
-    }
-
-    [Fact]
-    public void Constructor_NullSearchIndexClient_Throws()
-    {
-        Action act = () => new PrecedentProjectionSync(
-            _boardMock.Object, _insightsAiMock.Object, null!, NullLogger<PrecedentProjectionSync>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("searchIndexClient");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        Action act = () => new PrecedentProjectionSync(
-            _boardMock.Object, _insightsAiMock.Object, _searchIndexClientMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
-
-    [Fact]
     public async Task ProjectAsync_EmptyPrecedentId_Throws()
     {
         var sut = CreateSut();

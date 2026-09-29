@@ -171,6 +171,49 @@ export function useRecordFieldValues(
       },
       (err: unknown) => {
         if (cancelled) return;
+
+        // ── $select degradation (RS-1 recurrence guard) ──────────────────────
+        // A `$select` is ALL-OR-NOTHING in OData: one column name Dataverse
+        // does not recognize 400s the entire request, so every field in the
+        // header goes null and every cell renders an em-dash. That exact
+        // failure has now been diagnosed twice — RS-1 (task 040, Matter header)
+        // and the v1.1.0 RecordHeader UAT, where a lookup whose type had not
+        // resolved was selected by its bare logical name instead of
+        // `_<name>_value`.
+        //
+        // Rather than let one bad column blank the whole control, retry ONCE
+        // with no `$select` at all. Dataverse then returns the full row —
+        // including every `_<lookup>_value` in its decorated form — so the
+        // header renders correctly even when the field list was wrong. The
+        // wider payload is the price of degrading gracefully, and it is paid
+        // only on the error path.
+        if (query !== '') {
+          xrm.WebApi.retrieveRecord(entity, recordId, '').then(
+            (record: Record<string, unknown>) => {
+              if (cancelled) return;
+              console.warn(
+                `[useRecordFieldValues] $select retrieve failed for ${entity}; ` +
+                  `recovered with an unprojected read. Check the field list: ${query}`,
+                err
+              );
+              setValues(record);
+              setError(null);
+              setLoading(false);
+            },
+            () => {
+              if (cancelled) return;
+              // Both attempts failed — surface the ORIGINAL error, which names
+              // the offending column and is what a developer needs to see.
+              const wrapped =
+                err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'retrieveRecord failed');
+              setValues(null);
+              setError(wrapped);
+              setLoading(false);
+            }
+          );
+          return;
+        }
+
         // Preserve the original error object where possible; otherwise wrap.
         const wrapped = err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'retrieveRecord failed');
         setValues(null);

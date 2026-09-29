@@ -67,8 +67,25 @@ public record RestoredSession(
 /// <param name="FileName">Original upload file name (chip label).</param>
 /// <param name="ContentType">MIME content type as reported on upload.</param>
 /// <param name="SizeBytes">Original (uncompressed) file size in bytes.</param>
+/// <param name="ContentAvailable">
+/// spaarkeai-compose-r8 FR-B05 (task 062) — the SERVER's answer to "is this file's content still
+/// usable?", replacing R7's client-side ~24h guess.
+/// <list type="bullet">
+///   <item><c>true</c> — a durable byte copy exists for this tenant, so the content survives for as
+///     long as the session does (re-indexed on demand by
+///     <see cref="SessionFileRehydrationService"/> if the hot chunks were evicted).</item>
+///   <item><c>false</c> — the durable store is configured and holds no copy. Content is not guaranteed
+///     beyond the hot index's own window.</item>
+///   <item><c>null</c> — the server cannot answer (the durable store is not configured in this
+///     deployment, or the probe failed). Clients MUST render this as unknown and MUST NOT substitute a
+///     guess: FR-B05 requires exactly one availability source, and this is it.</item>
+/// </list>
+/// Still identifier/display-class metadata, so it does not weaken the ADR-015 Tier-2 minimisation this
+/// projection was built for — it says whether content exists, never what the content is.
+/// </param>
 public record RestoredUploadedFile(
     string FileId,
     string FileName,
     string ContentType,
-    long SizeBytes);
+    long SizeBytes,
+    bool? ContentAvailable = null);

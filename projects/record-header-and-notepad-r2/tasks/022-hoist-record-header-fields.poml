@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>useRecordHeaderFields — hoist form-buffer staging, pending buffer, and lookup projection; unify the throwing path</title>
+    <phase>2 Metadata + Machinery</phase>
+    <gate>open (dep 021 complete @ 393fc78c3)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates/modifies .ts code files implementing shared save machinery — Step 3.5.5 code-implementation trigger</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex hoist with a COMPLETE spec (exact source line ranges, exact semantics to preserve) — the sonnet-xhigh profile: hard depth, low ambiguity. The judgment boundary (semantics cannot be preserved) is guarded by an escalation trigger; opus is the fallback if it fires.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial after 021 — consumes the shared getXrmPage() landed there; also edits hooks/index.ts (barrel).</parallel-reason>
+    <deps>021</deps>
+    <tags>react, shared-components, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create `hooks/useRecordHeaderFields.ts` in the shared library by hoisting the R1 form-buffer machinery out of `MatterHeaderView.tsx`: form-buffer staging (`getXrmPage().getAttribute(n).setValue(v)`, lines 175-235), the pending-changes buffer + `pendingX[name] ?? values?.[name]` display resolution (lines 166-172 and 249-256), and `projectLookup()` (lines 145-155). While hoisting, UNIFY the missing-attribute path so BOTH text and lookup saves THROW `Field '…' not on form` — today `saveText` throws (line 185) but `saveLookup` (lines 220-227) only `console.warn`s and silently no-ops, dropping the user's edit. This is FR-13, FR-14, FR-19.</prompt>
+  <role>SPAARKE platform developer. React hooks for PCF-hosted shared components; Xrm form-buffer (`Xrm.Page.getAttribute().setValue()`) dirty-state pattern. Follow ADRs strictly.</role>
+  <goal>A shared `useRecordHeaderFields` hook exists in `@spaarke/ui-components` reproducing R1's v1.0.7 form-buffer semantics EXACTLY, with the missing-attribute path throwing for both text and lookup saves, unit-tested; the generic RecordHeader control (task 033) and OOB lookup cell (task 023) can consume it. MatterHeaderView itself is NOT migrated.</goal>
+
+  <context>
+    <background>Spec FR-13/FR-14/FR-19. R1 learned the hard way (v1.0.7): writing straight to Dataverse via `Xrm.WebApi.updateRecord` triggered a retrieveRecord round-trip that toggled the shell's loading skeleton and re-rendered the whole PCF on every edit. The fix — stage edits into the FORM buffer so the field goes dirty and the form's own Save commits — is a MUST rule in the spec ("MUST preserve R1's form-buffer dirty-state pattern exactly"). Without the hoist, ~82 lines of this machinery get copied into every future consumer, and the `saveLookup` silent-drop defect (FR-14) ships in each copy. Hoisting `Xrm.Page` access into `hooks/` does NOT break ADR-012 — the shared lib already does exactly this (`FieldMappingHandler`, `useRecordFieldValues`, `useRelatedCount`): components stay props-driven; Xrm access lives in hooks/services behind the window/parent walker (spec "ADR Tensions" point 2). Do not "fix" this placement.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderFields.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderFields.test.ts</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Shared `getXrmPage()` in `utils/xrmContext.ts` — the hook MUST use it, never a local walker</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec-MUST">Every save in this hook stages via the form buffer (`getXrmPage().getAttribute(name).setValue(value)`). The hook MUST NOT call `Xrm.WebApi.updateRecord`, MUST NOT trigger a refetch after staging, and MUST NOT toggle any loading state on save — staged edits become visible ONLY through the pending buffer (R1 v1.0.7 semantics, preserved exactly).</constraint>
+    <constraint source="FR-14">Both `saveText` and `saveLookup` THROW `new Error("Field '&lt;name&gt;' not on form")` when the attribute is absent, and throw when `Xrm.Page` is unavailable — the lookup path's current warn-and-return (MatterHeaderView.tsx:220-227) is the defect being fixed. No silent no-op survives in either path.</constraint>
+    <constraint source="FR-13">Display resolution is `pendingText[name] ?? values?.[name]` for text and — preserving the `'name' in pendingLookup` membership check from MatterHeaderView.tsx:253-256 — `name in pendingLookup ? pendingLookup[name] : projectLookup(values, name)` for lookups, so a staged CLEAR (pending `null`) displays as empty rather than falling back to the Dataverse-loaded value. Both buffers reset when `recordId` changes (lines 169-172) and at no other time.</constraint>
+    <constraint source="project" scope="this task">Do NOT modify `MatterHeaderView.tsx` or any MatterHeader PCF file. The old control keeps its local machinery until its retirement (task 081); the hook's first consumers are tasks 023/033. Generalize field names (no `sprk_matter*` or `LOOKUP_META` hard-coding): `saveLookup` takes the target `entityType` as a parameter, since metadata-derived targets arrive via task 020's client, not via constants.</constraint>
+    <constraint source="ADR-012">Xrm access goes exclusively through `getXrm()` / `getXrmPage()` from `utils/xrmContext.ts` (task 021). No local window-walker, no PCF-specific `ComponentFramework` types in the hook.</constraint>
+    <constraint source="ADR-022">React 16/17-safe: no `use()`, no `useSyncExternalStore`, no `createRoot`; `React.useState`/`useCallback`/`useEffect` only, imported as `* as React`.</constraint>
+    <constraint source="NFR-05">All Dataverse read I/O stays inside `useRecordFieldValues` (Xrm.WebApi); no raw `fetch`, no `@spaarke/auth`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Form-buffer dirty-state hook</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/pcf/pcf-build-scaffold.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="Source machinery (copy semantics verbatim)" location="src/client/pcf/MatterHeader/control/MatterHeaderView.tsx">Lines 145-155 `projectLookup` (reads `_field_value` + `@OData.Community.Display.V1.FormattedValue` keys); 166-172 pending buffers + recordId reset; 174-191 `saveText` (throwing path — the model for BOTH paths); 216-235 `saveLookup` (fix its non-throwing path; keep the `[{ id, name, entityType }]` / `null`-clears setValue payload shape from line 229-231); 248-256 display resolution incl. the `in` check.</pattern>
+      <pattern name="Read hook to compose" location="src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts">The existing shared read path — the new hook composes it (or accepts its `values`/`loading` output) rather than duplicating retrieval. Mirror its test approach in `hooks/__tests__/useRecordFieldValues.test.ts`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL FULL per CLAUDE.md §8; update current-task.md.</step>
+    <step order="1">Design the hook signature: input `{ entity, recordId, fields }` (composing `useRecordFieldValues` internally) returning `{ values, loading, saveText(name, value), saveLookup(name, item, entityType), displayText(name), displayLookup(name) }` — or an equivalent shape that keeps every FR-13 semantic. Export `projectLookup` as a named pure function for unit testing.</step>
+    <step order="2">Implement staging: both save paths obtain the page via the shared `getXrmPage()` (task 021), throw `Form buffer unavailable` when it is null, throw `Field '&lt;name&gt;' not on form` when `getAttribute` returns nothing, then `setValue` + update the matching pending buffer. Lookup payload: `[{ id, name, entityType }]`, `null` clears.</step>
+    <step order="3">Implement pending buffers + display resolution + recordId-change reset exactly per the FR-13 constraint above.</step>
+    <step order="4">Export the hook (and `projectLookup`) from `hooks/index.ts`.</step>
+    <step order="5">Author `hooks/__tests__/useRecordHeaderFields.test.ts` covering every acceptance criterion below (mock `window.Xrm.Page` with jest attribute stubs; mirror the existing hook tests' renderHook approach).</step>
+    <step order="6">Build the shared lib and run its full test suite; green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the form-buffer semantics cannot be preserved EXACTLY in a shared hook — any design pressure toward staging-triggered refetch, loading toggles, buffer resets outside recordId change, or loosening the `'name' in pendingLookup` cleared-value semantics — STOP and escalate per CLAUDE.md §6 rather than adapting the semantics. Writing straight to Dataverse re-rendered the whole PCF (R1 v1.0.7); this failure mode is the reason the task exists.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None found for save/staging machinery in the shared lib — spec §11 table records "useRecordHeaderFields / RecordHeaderFields — none (grep-verified)". The machinery exists only inside the PCF layer at `MatterHeaderView.tsx:145-256`; the closest shared neighbors are `hooks/useRecordFieldValues.ts` (read-only retrieval, no staging) and `hooks/useRecordHeaderToolbarActions.ts` (toolbar only).</existing>
+    <extension>No — `useRecordFieldValues` is the read path and contains no form-buffer/pending-state surface, and the source implementation lives in a PCF view file that the shared library cannot import and that is scheduled for retirement (task 081). The new hook composes `useRecordFieldValues` rather than duplicating it.</extension>
+    <cost-of-doing-nothing>Each of the R2 rollout consumers (RecordHeader control task 033, and any future header surface) would re-copy ~82 lines of staging/pending/projection machinery per consumer, and the `saveLookup` silent-drop defect (FR-14 — a user's lookup edit is warn-logged and discarded when the field is not on the form) ships again in every copy.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) and run tests (`npm test`) in src/client/shared/Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderFields.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderFields.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a field present on the form, when `saveText(name, v)` runs, then the mocked attribute's `setValue` is called with `v`, the pending buffer holds `v`, `displayText(name)` returns `v`, and NO `Xrm.WebApi.updateRecord` / re-retrieve occurs (mock call counts prove it).</criterion>
+    <criterion testable="true">Given a lookup field present on the form, when `saveLookup(name, item, entityType)` runs, then `setValue` receives `[{ id, name, entityType }]`; when called with `null`, `setValue` receives `null` and `displayLookup(name)` returns the cleared (empty) state even though `values` still holds the Dataverse value (the `in`-check semantics).</criterion>
+    <criterion testable="true">Negative: given a field NOT on the form (`getAttribute` returns null/undefined), BOTH `saveText` and `saveLookup` throw an Error whose message contains `Field '&lt;name&gt;' not on form` — neither path warn-and-returns.</criterion>
+    <criterion testable="true">Negative: given `Xrm.Page` unavailable on every frame, BOTH save paths throw (no silent no-op).</criterion>
+    <criterion testable="true">Given staged pending values, when `recordId` changes, then both pending buffers reset to empty; unrelated re-renders with the same `recordId` do NOT reset them.</criterion>
+    <criterion testable="true">`projectLookup(values, field)` returns `{ id, name }` from `_field_value` + its FormattedValue annotation, and `null` for missing/empty id — unit-tested as a pure function.</criterion>
+    <criterion testable="true">The hook module imports `getXrmPage` from `../utils/xrmContext` (no local window-walker) and contains no `sprk_`-prefixed field or entity constants.</criterion>
+    <criterion testable="true">`git diff` shows no change under `src/client/pcf/MatterHeader/`; shared-lib build and full test suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-13, FR-14, FR-19; spec MUST rule "preserve R1's form-buffer dirty-state pattern exactly"; R1 v1.0.7 history in MatterHeaderView.tsx header comment (lines 8-22). The FR-19 companion component `RecordHeaderFields.tsx` (grid composition) is Phase 3 scope (task 033 wiring), not this task. Task 023 adds the OOB-picker staging on top of this hook's `saveLookup`.</notes>
+
+  <completion>
+    <status>completed</status>
+    <files-modified>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderFields.ts (324 lines; 91 code + 233 JSDoc)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderFields.test.ts (26 tests)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/hooks/index.ts (+7 lines: 2 exports + comment)</file>
+    </files-modified>
+    <verification>
+      <item>26/26 hook tests pass; 100% stmt/branch/func/line coverage on the new module (ADR-012 requires 90%).</item>
+      <item>Shared-lib `npm run build` (tsc) clean; eslint exit 0 on all three files.</item>
+      <item>Full shared-lib suite: 213/222 suites pass. The 9 failures are ALL pre-existing — verified by temporarily reverting hooks/index.ts to HEAD and re-running them (8 failed identically at baseline; the 9th, ConversationView.emailInFlow, is a load-sensitive timeout flake that passes in a smaller batch). Zero new failures introduced.</item>
+      <item>`src/client/pcf/MatterHeader/` untouched — tree hash e56179d2dd8b29aadbe9209c1280949149dc606c before AND after; `git diff`/`git status` empty for that path. Task 040's RECORDSUMMARY_FIELD wiring verified intact at lines 74, 89, 267, 271, 274.</item>
+      <item>MatterHeader PCF tests 7/7 green against the rebuilt dist (confirms the barrel edit is safe for deep-import consumers).</item>
+      <item>package.json `"sideEffects": false` untouched; marginal dist cost of the new module is one 12 KB file (mostly JSDoc, minified away in prod) whose every runtime import was already in the barrel.</item>
+    </verification>
+    <form-buffer-semantics-preserved>
+      Every save stages via `getXrmPage().getAttribute(name).setValue(value)`. NO `Xrm.WebApi.updateRecord`
+      (grep-verified absent + guard-tested); NO refetch after staging (`retrieveRecord` call count pinned at 1
+      across multiple saves); NO loading toggle on save (`loading` sampled during and after a save, asserted
+      false throughout); `refresh` deliberately NOT re-exported from the result so a consumer cannot
+      reintroduce the round trip (guard-tested). Buffers reset on `recordId` change ONLY — proven both ways
+      (resets on change; does NOT reset on a same-recordId re-render with a new `fields` array reference).
+      The `'name' in pendingLookup` membership check is preserved verbatim, so a staged CLEAR displays empty
+      rather than falling back to the still-loaded Dataverse value.
+    </form-buffer-semantics-preserved>
+    <deviations>
+      <deviation kind="logging">R1's `console.warn`(before throw) / `console.info`(staged edit) replaced by the
+        shared `createLogger` (`utils/logger.ts`) at debug level — the shared-lib convention, cf.
+        `services/FieldMappingHandler.ts`. The warn-before-throw was redundant with the thrown message.
+        Logging is not a form-buffer semantic; staging behavior is byte-identical. Documented in the file header.</deviation>
+      <deviation kind="type-only">`displayText` returns `string | null | undefined` rather than R1's
+        `as string | undefined` cast. Zero runtime change — it is simply truthful about the `null` Dataverse
+        genuinely returns for empty fields, and is assignable to BOTH `TextField.value`
+        (`string|number|null|undefined`) and `TextareaField.value` (`string|null|undefined`).</deviation>
+      <deviation kind="additive">`error` added to the result — a pass-through of `useRecordFieldValues`'s
+        existing error, so task 033 can render a degraded state on read failure. Not new surface.</deviation>
+      <deviation kind="scope-held">Scope held to `saveText` + `saveLookup` per the closed acceptance set. The
+        Boolean/Date/Number/OptionSet renderers' `onSave` take `boolean` / `Date|null` / `number|null` — task 033
+        will need staging for those value types. A generic `saveValue` was deliberately NOT added: new surface
+        outside this task's criteria (CLAUDE.md §11). Routed to 033.</deviation>
+      <deviation kind="not-harmonised">`getXrmPage()`'s 2-frame walk vs `getXrm()`'s 3-frame walk was left AS-IS
+        (task 021's deliberate choice). Assessed and it does not matter for this hook: a form-embedded
+        RecordHeader PCF has Xrm on frame 1, a Code Page host on frame 2. Only a host nested deeper than one
+        iframe would read fine (3-frame `getXrm`) but fail to stage (2-frame `getXrmPage`) — no such consumer
+        exists. The asymmetry is documented in the hook's file header for whoever hits it first.</deviation>
+      <deviation kind="artifact">POML step 8 asked for a deviation note under `notes/`. Recorded here in the POML
+        plus in the hook's file-header JSDoc instead (durable, co-located with the code). No `notes/` acceptance
+        criterion exists, and the executing agent was directed not to create standalone report .md files.</deviation>
+    </deviations>
+    <quality-gates>
+      <gate name="adr-check">PASS — 0 violations. ADR-012 / ADR-021 / ADR-022 / ADR-028 / ADR-038 compliant.
+        One low-confidence finding surfaced for coverage, NOT suppressed: ADR-012's Service Portability tier
+        table marks direct `Xrm.*` access as consumer-side. Already resolved as a documented non-tension at
+        spec.md:226 ("components props-driven, Xrm access in hooks/ and services/ behind a window/parent walker
+        — exactly where FR-19 puts it"), with in-repo precedent. No new deviation; no §6.5 escalation.</gate>
+      <gate name="code-review">PASS — 0 Critical, 0 Warning, 4 Suggestions (2 routed out of scope: a stale-values
+        frame on recordId change that `RecordHeaderShell loading` already masks → task 033; unescaped
+        `$select` field-name join in the pre-existing `useRecordFieldValues` → task 030's config guard).
+        AI-smell sweep clean on all five smells. Code-only complexity 7 (threshold 15); longest function
+        13 lines; zero `as any` and zero `eslint-disable` (R1's source needed 2 of each).</gate>
+      <gate name="lint">PASS — eslint exit 0.</gate>
+    </quality-gates>
+    <escalation-trigger-status>NOT FIRED — form-buffer semantics were preserved exactly with no design pressure
+      toward refetch, loading toggles, out-of-band buffer resets, or loosened `in`-check semantics.</escalation-trigger-status>
+    <note-for-task-034>The hoist does not change what `src/__tests__/recordHeader.integration.test.tsx` asserts,
+      so it stays red for its existing reason. It does, however, make the intended coverage newly expressible at
+      the HOOK level: 034 can assert staging/pending/clear behavior against `useRecordHeaderFields` directly
+      (see `hooks/__tests__/useRecordHeaderFields.test.ts` for the mock harness) instead of driving it through
+      the removed `sparklePopoverOpen`/`sparklePopoverContent`/`aiSummary` component contract.</note-for-task-034>
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

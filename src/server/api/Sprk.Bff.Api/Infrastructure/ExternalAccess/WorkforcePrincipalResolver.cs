@@ -11,6 +11,11 @@
 //                               IIdentityNormalizationService (sprk_primarycontact / AAD cross-ref).
 //   (b) AAD oid → contact     : IIdentityNormalizationService.TryResolveContactByWorkforceIdentityAsync
 //                               (oid cross-ref + verified-email fallback) — the contact-only branch.
+//                               The email fallback applies the NO-HIJACK rule (spec FR-12, finding
+//                               A-18, 2026-08-26): an email matching a contact already bound to a
+//                               DIFFERENT oid resolves to nothing, so it lands on (c) DENY. That
+//                               mirrors the CIAM guard in ExternalParticipationService — the two
+//                               planes now enforce the same rule against their own binding column.
 //   (c) neither                : explicit DENY — no silent fallback to an unscoped/anonymous principal.
 //
 // It adds NO new identity-resolution mechanism — only orchestration + a deny path (CLAUDE.md §11
@@ -146,10 +151,47 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         }
 
         // ── (b) contact-only branch — AAD oid / verified email → contact ──
+        //
+        // The email half of this conversion is a no-hijack decision, not a lookup: an email matching a
+        // contact already bound to a DIFFERENT oid resolves to nothing (spec FR-12 / finding A-18,
+        // mirroring the CIAM guard in ExternalParticipationService). This branch therefore has to treat
+        // "no contact" and "denied contact" identically — both are the absence of a principal, and the
+        // handling below already does exactly that.
         var verifiedEmail = ExtractVerifiedEmail(user);
-        var contactId = await _identity
-            .TryResolveContactByWorkforceIdentityAsync(callerOid, verifiedEmail, ct)
-            .ConfigureAwait(false);
+
+        Guid? contactId;
+        try
+        {
+            contactId = await _identity
+                .TryResolveContactByWorkforceIdentityAsync(callerOid, verifiedEmail, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Guarded deliberately. HttpClient surfaces a TIMEOUT as TaskCanceledException, which is an
+            // OperationCanceledException — so an unguarded arm here would rethrow a Dataverse timeout
+            // and produce exactly the un-auditable 500 the arm below exists to eliminate. Only a real
+            // cancellation (the caller went away) propagates; a timeout is a failure, and it denies.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The contract says this conversion isolates its own failures and returns null. If it ever
+            // stops doing so, the caller must still be DENIED rather than have the exception escape:
+            // an unhandled throw here is a 500, which is fail-closed today only by accident of the
+            // pipeline. A deny is fail-closed by construction (ADR-003) and is auditable.
+            //
+            // Deliberately NOT symmetrical with the systemuser branch above, which swallows and
+            // continues: there, the derived contactId is supplementary to an already-established
+            // systemuser principal. Here it IS the principal, so continuing would mean continuing
+            // without one.
+            _logger.LogError(ex,
+                "[WF-AUTH] Contact resolution threw for workforce caller oid={CallerOid} — denying " +
+                "({DenyCode}); the caller's contact binding state is unknown",
+                callerOid, DenyPrincipalNotResolved);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
+        }
 
         if (contactId is { } cid && cid != Guid.Empty)
         {

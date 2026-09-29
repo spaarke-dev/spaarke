@@ -11,7 +11,14 @@
  *    we verify computed styles contain `var(--…)` and no raw color literals.
  *  - Card chrome (bg, border, radius, padding) is applied via computed style.
  *
+ * Plus FR-18 (record-header-and-notepad-r2 task 032) acceptance criteria:
+ *  - columns omitted → 3-column skeleton, 6 cells, byte-identical to today
+ *  - columns=2 → 2-column skeleton, 4 cells
+ *  - columns=3 explicitly → output equals the default case
+ *  - loading=false → children render identically regardless of columns
+ *
  * @see FR-02 record-header-and-notepad-r1 spec
+ * @see FR-18 record-header-and-notepad-r2 spec (columns prop)
  * @see ADR-021 Fluent v9 semantic tokens (no hex/rgb literals)
  * @see ADR-022 React 16/17 boundary (no React 18-exclusive APIs)
  */
@@ -149,6 +156,81 @@ describe('RecordHeaderShell', () => {
       // Gap tokens present (Griffel resolves to CSS custom properties)
       expect(cs.columnGap).not.toBe('');
       expect(cs.rowGap).not.toBe('');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // columns prop (FR-18) — drives the loading skeleton only
+  // ─────────────────────────────────────────────────────────────────────
+
+  describe('columns prop (FR-18)', () => {
+    it('render_LoadingTrueColumnsOmitted_RendersThreeColumnSkeletonWithSixCells', () => {
+      // Same assertions as the pre-FR-18 default test — proves omitting
+      // `columns` is byte-identical to today.
+      renderWithProviders(
+        <RecordHeaderShell toolbar={makeToolbar()} loading={true}>
+          <div>hidden</div>
+        </RecordHeaderShell>
+      );
+
+      const skeleton = screen.getByTestId('record-header-shell-skeleton');
+      const cs = window.getComputedStyle(skeleton);
+      expect(cs.gridTemplateColumns).toBe('repeat(3, 1fr)');
+      for (let i = 0; i < 6; i++) {
+        expect(screen.getByTestId(`record-header-shell-skeleton-cell-${i}`)).toBeInTheDocument();
+      }
+      expect(screen.queryByTestId('record-header-shell-skeleton-cell-6')).not.toBeInTheDocument();
+    });
+
+    it('render_LoadingTrueColumnsTwo_RendersTwoColumnSkeletonWithFourCells', () => {
+      renderWithProviders(
+        <RecordHeaderShell toolbar={makeToolbar()} loading={true} columns={2}>
+          <div>hidden</div>
+        </RecordHeaderShell>
+      );
+
+      const skeleton = screen.getByTestId('record-header-shell-skeleton');
+      const cs = window.getComputedStyle(skeleton);
+      expect(cs.display).toBe('grid');
+      expect(cs.gridTemplateColumns).toBe('repeat(2, 1fr)');
+      expect(cs.columnGap).not.toBe('');
+      expect(cs.rowGap).not.toBe('');
+
+      for (let i = 0; i < 4; i++) {
+        expect(screen.getByTestId(`record-header-shell-skeleton-cell-${i}`)).toBeInTheDocument();
+      }
+      // Exactly 4 cells — no leftover 5th/6th cell from the 3-column default.
+      expect(screen.queryByTestId('record-header-shell-skeleton-cell-4')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('record-header-shell-skeleton-cell-5')).not.toBeInTheDocument();
+    });
+
+    it('render_LoadingTrueColumnsThreeExplicit_MatchesDefaultCase', () => {
+      renderWithProviders(
+        <RecordHeaderShell toolbar={makeToolbar()} loading={true} columns={3}>
+          <div>hidden</div>
+        </RecordHeaderShell>
+      );
+
+      const skeleton = screen.getByTestId('record-header-shell-skeleton');
+      const cs = window.getComputedStyle(skeleton);
+      expect(cs.gridTemplateColumns).toBe('repeat(3, 1fr)');
+      for (let i = 0; i < 6; i++) {
+        expect(screen.getByTestId(`record-header-shell-skeleton-cell-${i}`)).toBeInTheDocument();
+      }
+    });
+
+    it('render_LoadingFalseColumnsTwo_ChildrenRenderIdenticallyRegardlessOfColumns', () => {
+      // columns affects ONLY the loading skeleton — the loaded path is untouched.
+      renderWithProviders(
+        <RecordHeaderShell toolbar={makeToolbar('Matter Summary')} loading={false} columns={2}>
+          <div data-testid="body-child">Body content</div>
+        </RecordHeaderShell>
+      );
+
+      expect(screen.getByTestId('header-toolbar')).toBeInTheDocument();
+      expect(screen.getByTestId('body-child')).toBeInTheDocument();
+      expect(screen.getByText('Body content')).toBeInTheDocument();
+      expect(screen.queryByTestId('record-header-shell-skeleton')).not.toBeInTheDocument();
     });
   });
 

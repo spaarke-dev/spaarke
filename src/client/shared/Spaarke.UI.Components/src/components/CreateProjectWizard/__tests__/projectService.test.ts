@@ -1,14 +1,17 @@
 /**
  * projectService BU-cascade unit tests (Task 022 — FR-WIZ-02 + G2 latent-gap fix).
  *
- * Scope: ProjectService.createProject's BU cascade behavior for `sprk_containerid` and
- * `sprk_searchindexname`. The cascade itself lives in
- * `EntityCreationService.applyUserBuDefaults` (already covered by
+ * Scope: ProjectService.createProject's BU cascade behavior for `sprk_searchindexname`. The
+ * cascade itself lives in `EntityCreationService.applyUserBuDefaults` (already covered by
  * `EntityCreationService.cascade.test.ts`). These tests verify that:
  *
- *   - ProjectService wires the helper correctly (both fields appear on the create payload)
- *   - INV-5 is preserved for both fields when the payload already has a value
- *     (defensive: ProjectService's current payload doesn't pre-set these, so we mutate
+ *   - ProjectService wires the helper correctly (the index-name field appears on the payload)
+ *   - `sprk_containerid` NEVER appears on the create payload (task 076, 2026-09-03). This is the
+ *     security-critical case: `ICreateProjectFormState.isSecure` set `sprk_issecure` and then
+ *     cascaded the SHARED business-unit container onto the same row regardless. The container
+ *     half of the cascade is deleted; the server stamps it for a secure project.
+ *   - INV-5 is preserved for `sprk_searchindexname` when the payload already has a value
+ *     (defensive: ProjectService's current payload doesn't pre-set it, so we mutate
  *      the payload via a side-channel — see "INV-5 wiring proof" tests)
  *
  * NOTE: We mock `_dataService.createRecord` and inspect the payload argument it
@@ -68,7 +71,8 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ProjectService.createProject — FR-WIZ-02 BU cascade (G2 fix)', () => {
-  it('sets BOTH sprk_containerid AND sprk_searchindexname on the create payload when BU has both', async () => {
+  // Converted by task 076: was "sets BOTH sprk_containerid AND sprk_searchindexname".
+  it('sets sprk_searchindexname and NEVER sprk_containerid on the create payload when BU has both', async () => {
     const { service, createSpy } = makeDataService();
     const projectService = new ProjectService(service);
 
@@ -84,11 +88,13 @@ describe('ProjectService.createProject — FR-WIZ-02 BU cascade (G2 fix)', () =>
     expect(createSpy).toHaveBeenCalledTimes(1);
     const [entityName, payload] = createSpy.mock.calls[0];
     expect(entityName).toBe('sprk_project');
-    expect(payload['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload).not.toHaveProperty('sprk_containerid');
     expect(payload['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
   });
 
-  it('sets only sprk_containerid when BU has containerId but no searchIndexName (Spaarke Dev 1 / Test 1 scenario)', async () => {
+  // Converted by task 076: was "sets only sprk_containerid when BU has containerId but no
+  // searchIndexName". Same fixture, now asserting neither field is written.
+  it('writes neither field when BU has containerId but no searchIndexName (Spaarke Dev 1 / Test 1 scenario)', async () => {
     const { service, createSpy } = makeDataService();
     const projectService = new ProjectService(service);
 
@@ -101,8 +107,28 @@ describe('ProjectService.createProject — FR-WIZ-02 BU cascade (G2 fix)', () =>
     await projectService.createProject(EMPTY_FORM, defaults);
     const payload = createSpy.mock.calls[0][1];
 
-    expect(payload['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload).toBe(false);
+  });
+
+  // Added by task 076 — the case W1 actually endangered: a project the user marked SECURE must not
+  // be born pointing at the shared business-unit container.
+  it('writes no sprk_containerid on a SECURE project even when the BU supplies one', async () => {
+    const { service, createSpy } = makeDataService();
+    const projectService = new ProjectService(service);
+
+    const defaults: IUserBuCascadeDefaults = {
+      businessUnitId: 'bu-guid-1',
+      containerId: 'shared-bu-container-abc',
+      searchIndexName: 'spaarke-knowledge-index-v2',
+    };
+
+    const result = await projectService.createProject({ ...EMPTY_FORM, isSecure: true }, defaults);
+    expect(result.success).toBe(true);
+
+    const payload = createSpy.mock.calls[0][1];
+    expect(payload['sprk_issecure']).toBe(true);
+    expect(payload).not.toHaveProperty('sprk_containerid');
   });
 
   it('leaves both fields unset when cascadeDefaults is omitted (legacy behavior — backwards-compat)', async () => {
@@ -188,7 +214,9 @@ describe('ProjectService.createProject — INV-5 wiring (FR-WIZ-08)', () => {
 
     const applied = EntityCreationService.applyUserBuDefaults(entity, defaults);
 
-    expect(applied).toEqual({ containerIdSet: false, searchIndexNameSet: false });
+    expect(applied).toEqual({ searchIndexNameSet: false });
+    // A pre-seeded `sprk_containerid` is untouched simply because nothing writes the column any
+    // more (task 076) — the INV-5 guard that used to protect it has no field left to guard.
     expect(entity['sprk_containerid']).toBe('explicit-override-container');
     expect(entity['sprk_searchindexname']).toBe('spaarke-file-index');
   });

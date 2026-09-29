@@ -67,10 +67,17 @@ public class AiAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        // Extract document IDs from request arguments.
-        // If no document IDs are present (e.g. session-scoped endpoints where the session ID
-        // acts as the authorization scope), pass through to the next filter — the endpoint
-        // handler performs its own tenant/session ownership checks.
+        // Extract document IDs from request arguments. If none are present (e.g. session-scoped
+        // endpoints where the session id is the authorization scope), pass through to the next
+        // filter.
+        //
+        // This comment used to end "— the endpoint handler performs its own tenant/session
+        // ownership checks." That was false for two years and is the reason nobody added one: the
+        // handlers checked TENANT and nothing else, so within a tenant any user could read, rename,
+        // post into or delete any session (issue #863). Session ownership is now enforced by
+        // AddSessionOwnershipFilter on every {sessionId} route, NOT by the handlers and NOT here.
+        // If you are reading this because you are adding a session-scoped route, attach that filter
+        // — SessionOwnershipGuardTests will fail the build if you forget.
         var documentIds = ExtractDocumentIds(context);
         if (documentIds.Count == 0)
         {

@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-07-09 (added AP-6: braced GUIDs in `@odata.bind` → use `cleanGuid`)
+> **Last Updated**: 2026-09-03 (added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -28,6 +28,11 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax" (use `cleanGuid`)](#ap-6-interpolating-a-raw-guid-into-odatabind--braces-cause-error-in-query-syntax)
 - [AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only)
 - [AP-8: A green suite treated as the END of verification rather than the start of it](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)
+- [AP-9: Amending a failing test to match the source, without checking the source against the vendor contract](#ap-9-amending-a-failing-test-to-match-the-source)
+- [AP-10: A JSON-aware renderer that escapes one nesting level, over a config that is re-parsed at a deeper level](#ap-10-a-json-aware-renderer-that-escapes-one-nesting-level-over-a-config-re-parsed-deeper)
+- [AP-11: Code that RUNS but reaches the wrong destination — no compiler and no test spans the seam](#ap-11-code-that-runs-but-reaches-the-wrong-destination--no-compiler-and-no-test-spans-the-seam)
+- [AP-12: A comment becomes the constraint — prose outlives the mechanism it describes](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes)
+- [G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)](#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -42,6 +47,9 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-10: HTML5 DnD `dragEnter` fires on ancestors when preview extends beyond pointer](#g-10-html5-dnd-dragenter-fires-on-ancestors-when-preview-extends-beyond-pointer)
 - [G-11: `Xrm.Navigation.navigateTo({ target: 2 })` opens a separate window — cross-window signaling requires sessionStorage, not `window.*`](#g-11-xrmnavigationnavigateto-target-2-opens-a-separate-window--cross-window-signaling-requires-sessionstorage-not-window)
 - [G-12: `dotnet test --no-build` runs a stale assembly while the build *truthfully* reports "up-to-date"](#g-12-dotnet-test---no-build-runs-a-stale-assembly-while-the-build-truthfully-reports-up-to-date)
+- [G-13: A Dataverse `$select` is all-or-nothing — one bad column name blanks the entire control](#g-13-a-dataverse-select-is-all-or-nothing)
+- [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
+- [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
 
 ---
 
@@ -719,6 +727,105 @@ Prefer dropping `--no-build` entirely when a result is load-bearing. When restor
 That matters disproportionately because perturbation testing is the primary anti-vacuity tool (see [AP-8](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)): a stale assembly silently converts *"I proved this guard is load-bearing"* into *"this guard is untested"* — while looking identical. Treat "the perturbation bit" as a claim that requires the binary's timestamp as its receipt.
 
 **Evidence**: `projects/unified-access-control-r2/notes/task-011-fetchxml-join-posture.md` · `notes/wave2-parallel-merge-plan.md` §A11 (five-instance inventory) · commit `15924623d` (011).
+### AP-9: Amending a failing test to match the source
+
+> **Date**: 2026-08-26 · **Class**: Anti-pattern · **Surfaced by**: `record-header-and-notepad-r2` (tasks 020 → 033 UAT)
+
+**What happened**: A task found `XrmDataverseClient.test.ts` asserting `getEntityMetadata('sprk_event', ['Attributes'])` while the source called it with one argument. The agent changed the **test** to match the **source**, reported it as "fixed a pre-existing stale assertion", and the orchestrator accepted it. Two waves later, first UAT of the new control showed every field blank, every renderer defaulted to text, and a lookup emitted as a bare column name causing an HTTP 400. The failing test had been the only signal.
+
+**Root cause**: A red test is a *disagreement* between two artifacts. Deciding the source is right because it is the source begs the question. Neither artifact is authoritative — the **vendor contract** is.
+
+**Fix**: When a test and its source disagree, resolve against the third party: vendor documentation, the live endpoint, or an in-repo implementation already proven against production. Only then amend whichever is wrong. Record which evidence settled it.
+
+**Prevention**: Treat "I fixed a stale assertion" in an agent report as a **claim requiring evidence**, not a completed chore. The report should name what the assertion was checked against. If the only justification is "the source does X", the check has not happened.
+
+**Evidence**: `projects/record-header-and-notepad-r2/notes/decisions/033-def1-metadata-never-reached-resolver.md`. The correct resolution was that the *source* was wrong (see G-14) — the original test had been closer to right than the code.
+
+---
+
+### G-13: A Dataverse `$select` is all-or-nothing
+
+> **Date**: 2026-08-26 · **Class**: Gotcha · **Occurrences**: 3 (`RS-1`, RecordHeader UAT, and the generic guard that closed it)
+
+**What happened**: Three separate times, one invalid column name in a `useRecordFieldValues` `$select` produced HTTP 400 for the **whole request**, so every field came back null and the entire control rendered em-dashes. It presents as "the control is broken", not as "one field is wrong", which sends diagnosis in the wrong direction.
+
+- **RS-1**: `sprk_mattersummary` had been deleted; the shipped Matter header stopped loading entirely.
+- **RecordHeader UAT**: metadata failed to resolve, so a Lookup was emitted as its bare name (`sprk_projecttype_ref`) instead of `_sprk_projecttype_ref_value` → 400 → whole header blank.
+
+**Root cause**: OData rejects the request, not the offending property. Two consequences compound it: a Lookup's OData property is `_<name>_value` (the bare logical name exists in *metadata* but is **not** a queryable entity property), and any upstream failure that degrades renderer derivation silently changes which key is emitted.
+
+**Fix**: `useRecordFieldValues` now retries once with **no `$select`** on failure, returning the full row including every decorated `_<lookup>_value`. Degrading to "fetch more than we need" beats blanking the control.
+
+**Prevention**: Never let a `$select` be assembled from names that a *derivation step* produced without a fallback. When adding or renaming a Dataverse column that any control selects, grep for the old name across `src/client/**` — a deleted column is a live outage, not a stale reference.
+
+**Evidence**: `projects/record-header-and-notepad-r2/notes/rs1-hotfix-decision.md`; `notes/decisions/033-def1-metadata-never-reached-resolver.md`.
+
+---
+
+### G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape
+
+> **Date**: 2026-08-26 · **Class**: Gotcha · **Surfaced by**: `record-header-and-notepad-r2` task 033 UAT
+
+**What happened**: `projectAttribute` parsed the metadata payload assuming Web API shapes — a **string** `AttributeType` (`"Lookup"`) and an object `DisplayName`. It guarded with `if (typeof attributeType !== 'string') return 'String'`. Because the Client API returns a **number**, *every attribute of every entity* projected as `String` with no label. Downstream: all renderers fell back to text, labels showed humanized logical names, and lookups were emitted as bare column names (see G-13).
+
+**Root cause**: Two different Microsoft surfaces return two different shapes for the same concept:
+
+| | `Xrm.Utility.getEntityMetadata` (Client API) | Web API `EntityDefinitions` |
+|---|---|---|
+| `AttributeType` | **Number** (`AttributeTypeCode`, e.g. `6` = Lookup) | String (`"Lookup"`) |
+| `DisplayName` | **String** | Object (`UserLocalizedLabel.Label`) |
+
+**Fix**: Map the numeric `AttributeTypeCode` (mirror `XrmEnum.AttributeTypeCode` from `@types/xrm`) and accept a string `DisplayName`. Parse **both** shapes defensively — the same projection function is reachable from either transport.
+
+**Prevention**: `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', …)` **can never succeed** — `Xrm.WebApi` resolves its first argument to an entity *set* name, and metadata entities are not entities (`SemanticSearchControl/services/DataverseMetadataService.ts:222` records the same finding). Metadata via `Xrm` means `Xrm.Utility.getEntityMetadata`; anything else needs a direct `fetch`, which is an NFR-05 decision, not an implementation detail.
+
+**Caveat CLOSED 2026-08-26**: `@types/xrm` is not silent — it is explicit. `Metadata.AttributeMetadata` (the `getEntityMetadata` result) declares exactly six members: `DefaultFormValue`, `LogicalName`, `DisplayName`, `AttributeType`, `EntityLogicalName`, `OptionSet`. **No `Targets`, and no `Format`.** Both must come from the live form — `Xrm.Page.getControl(name).getEntityTypes()` and `Xrm.Page.getAttribute(name).getFormat()` (a documented STRING, `"date"` / `"datetime"`). Read the shipped `.d.ts` before inferring a platform payload from symptoms; it cost three UAT rounds here not to.
+
+---
+
+### G-15: A detached `Xrm` method loses `this` and dies inside the platform
+
+> **Date**: 2026-08-26 · **Class**: Gotcha · **Surfaced by**: `record-header-and-notepad-r2` task 033 UAT round 4
+> **Second occurrence.** R1 hit the identical trap on `Xrm.Navigation.navigateTo` and shipped four releases of a silent no-op before finding it.
+
+**What happened**: `RecordHeaderLookupField` aliased the picker before calling it:
+
+```ts
+const lookupObjects = xrm?.Utility?.lookupObjects;   // ← detaches from `xrm.Utility`
+const results = await lookupObjects({ ... });        // ← `this` is now undefined
+```
+
+Every click threw `TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')` — Xrm's own internals dereference `this`. The lookup rendered its value and appeared merely read-only.
+
+**Root cause**: Two compounding failures.
+
+1. **The alias.** Xrm methods are not free functions; they are bound to their namespace object. Extracting one strips the receiver.
+2. **A bare `catch {}` swallowed the TypeError**, so the failure was indistinguishable from "not wired". The component even documented the swallow as intentional ("preserve the no-throw contract").
+
+**Fix**: call directly on the namespace — `await xrm.Utility.lookupObjects({ ... })`. Never `const f = xrm.X.y`. Where a no-throw contract is genuinely required, `console.warn` the error; never discard it.
+
+**Prevention — the part that generalizes**: the unit suite passed throughout, because it mocked `lookupObjects` as a plain `jest.fn()`, which needs no receiver. **The mock was strictly more permissive than the thing it replaced, so the one property that mattered went untested.** When mocking a platform API, replicate its *requirements*, not just its signature — here, a `this`-sensitive mock that throws when the receiver is missing. Verified by reverting the fix: 3 of 19 tests fail on the old code, all 19 pass on the new.
+
+---
+
+### AP-10: A JSON-aware renderer that escapes one nesting level, over a config re-parsed deeper
+
+> **Date**: 2026-09-01 · **Class**: Anti-pattern · **Surfaced by**: `email-communication-intelligence-r2` (Pillar B Outlook add-in UAT — every saved document stuck at `sprk_filesummarystatus = Failed`)
+> **Full write-up**: [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) Part 4. GitHub #919.
+
+**What happened**: The "Document Profile" **playbook**'s Update Record node writes the AI summary back to `sprk_document`. Its stored `sprk_configjson` is the Playbook-Builder **wrapper format** — an outer JSON object whose `configJson` property is the *real* config encoded as a **JSON string** (`{"__canvasNodeId":…,"configJson":"{\"fieldMappings\":[{\"value\":\"{{output_aiAnalysis…}}\"}]}"}`). The Layer-1 template renderer (`PlaybookOrchestrationService.RenderConfigJsonStructurally`) is explicitly JSON-aware — it parses the config as a tree so that substituted values land in valid JSON. But it parses only the **outer** wrapper; the nested `configJson` is just a *string* to it. It flat-renders the multi-line AI summary into that string (raw `0x0A` newlines) and escapes them at the **outer** level only, so the outer stays valid. Then `UpdateRecordNodeExecutor.ParseConfig` unwraps via `GetString()` (decodes back to a raw newline) and **re-parses the nested string** → `JsonException: '0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value` → node fails → playbook stops → `Failed`.
+
+**Root cause**: The renderer's JSON-awareness is **single-level**, but the data is **double-nested** (JSON-inside-a-JSON-string) and gets **re-parsed at the inner level** by a different component. Escaping at the level you parsed is necessary but not sufficient when a downstream consumer re-parses a deeper level you treated as opaque text. The two components each look correct in isolation; the defect is in the seam between them.
+
+**Two wrong beliefs this corrected**:
+1. *"The renderer is JSON-aware, so it can't emit invalid JSON."* — It can't emit an invalid **outer** document, but it says nothing about the validity of a **nested** JSON string it never descended into.
+2. *"It falls back to flat substitution at `PlaybookOrchestrationService.cs:2284`."* — The prior checkpoint note asserted this confidently. **Wrong**: the outer wrapper *is* valid JSON, so the structural path runs and the `:2284` fallback never fires. A fix aimed at `:2284` would have missed entirely. The precise site was settled by pulling the **live** node config from Dataverse and matching `fieldMappings[0] = sprk_filesummary` to the observed `$.fieldMappings[0].value` error path — not by reading the renderer and reasoning forward.
+
+**Fix (options, see the doc)**: make Layer 1 **wrapper-aware** (recurse into a nested string that is itself JSON-containing-a-template, so newlines escape at the nested level) — fixes Update Record / Create Task / Create Notification / Send Email at once; or converge the app-only path onto the direct-Action spine that has no config re-parse. **Not yet applied.**
+
+**Prevention**: (a) When two components share a serialized payload across a boundary, ask *at how many levels does someone parse this?* and escape at each. (b) A **stored-config** test passing is not evidence the **rendered** config is valid — the bug lives only after substitution; test the render, or test end-to-end. (c) The same capability (document profiling) exists on two spines here — a node **playbook** and a direct **Action** — and only one had the bug; when a feature "works in one entry point and fails in another", suspect **two implementations**, not one flaky one.
+
+**Known aliasing sites already carrying warning comments** (do not "simplify"): `useRecordHeaderToolbarActions.ts` (navigateTo), `RegardingResolverApp.tsx:1483`, `DailyBriefingApp.tsx:566`.
 
 ---
 
@@ -728,6 +835,221 @@ That matters disproportionately because perturbation testing is the primary anti
 2. **When a skill says "NEVER" or "ALWAYS"** with confidence, but the agent has no recent empirical verification, the agent should add a brief "verify" step (per AP-1's prevention).
 3. **When a session surfaces a NEW cross-cutting failure pattern** — something that affects more than one skill, or recurs across different sessions — append an entry here. Use the same shape: title, date, class, what-happened, root-cause, fix, prevention, evidence.
 4. **Bidirectional links**: each affected skill should have a `See FAILURE-MODES.md#<anchor>` pointer in its Gotchas section. (Phase 2b refinements will add these.)
+
+---
+
+### AP-11: Code that RUNS but reaches the wrong destination — no compiler and no test spans the seam
+
+> **Added 2026-09-01** by `unified-access-control-r2`. **Class**: silent under-delivery across a
+> language/process boundary. Three independent instances found in one sweep, all shipped, all
+> user-visible, none with a test.
+
+**What happened.** Three defects of one shape reached production:
+
+| Instance | Ran fine, but | User saw |
+|---|---|---|
+| `bffUploadServiceAdapter.uploadFile` | POSTed to `/api/documents/upload`, a route the BFF serves at **no** group prefix | every external-user upload 404'd, for the life of the feature |
+| `SummarizeFilesDialog` create-project | built `ProjectService` without `authFetch`/`bffBaseUrl`, so `provisionSecureProject` never ran — while `sprk_issecure = true` was written anyway and `sprk_containerid` cascaded from the SHARED business unit | a project **marked secure** whose documents land in the shared container, **with no warning** |
+| SpeAdmin `ContainersPage.handleDelete` | made **no server call at all**; stripped rows from local state and reported success | *"N containers deleted (moved to Recycle Bin)"* — nothing was deleted; rows returned on refresh |
+
+**Root cause — three reinforcing blind spots.**
+
+1. **No compiler spans the seam.** TypeScript cannot see C# routes; C# cannot see TS string literals. A
+   client URL is just a string, so a URL nobody serves compiles perfectly and passes every client test.
+2. **Optional collaborators degrade silently.** `ProjectService(dataService, authFetch?, bffBaseUrl?)` —
+   the security-relevant leg sits behind `if (authFetch && bffBaseUrl)`. One host wires three
+   collaborators, another wires one, and the under-wired host **silently skips the behaviour** instead of
+   failing. The tell is **optional constructor params / optional props**, and the shape is *"a component
+   rendered by two hosts where one wires fewer collaborators."*
+3. **The warning lived on the path that was bypassed.** The real wizard surfaces
+   *"Secure Project provisioning failed…"*; the dialog that skipped provisioning also skipped the warning.
+   **The error path and the happy path were both in the wrapper the caller went around.**
+
+**Why nothing caught them.** No test asserted any of it. The container-step failure copy still said
+*"no client-supplied ContainerId"* long after that field was deleted — **prose has no compiler**, so
+comments and user-facing strings outlive the mechanisms they describe. And the `ContainersPage` comment
+asserted *"speApiClient.containers does not currently expose a delete method… when the endpoint is added"*
+while `POST /api/spe/bulk/delete` had been live and a **sibling component was already calling it**.
+
+**Prevention.**
+- **Client↔server route agreement is a structural fitness function, not a unit test.**
+  `tests/Spaarke.ArchTests/SpeAdminClientRouteAgreementTests.cs` (task 092, found two live 404s) and
+  `ClientUploadRouteAgreementTests.cs` (this entry) are the instrument. When adding a client that builds
+  `/api/...` URLs, extend the census — **a guard scoped to one file is why the next file slips past.**
+- **Resolve nested `MapGroup` prefixes** when checking route existence. Ignoring them produced **nine
+  false mismatches** in a sibling project, and "fixing" the client would have broken four working surfaces.
+- **A destructive or security-relevant action must not degrade quietly.** If required collaborators are
+  absent, **warn or refuse** — never complete the non-security half and report success. Prefer required
+  params over optional ones for the leg that enforces isolation.
+- **An enqueue is acceptance, not completion.** Don't claim "deleted" for work you have not observed
+  finish, and don't optimistically mutate local state before the server acts — that is what made a
+  no-op look successful.
+- **When deleting a field or route, grep the PROSE too** — doc comments, `<see cref=…>`, and user-facing
+  message strings. The compiler updates call sites; it does not update the sentences that explain them.
+- **Distrust a comment that explains why something isn't wired.** Both false premises here were
+  load-bearing comments. Check the claim before inheriting it: in one case the endpoint existed and a
+  sibling file was already using it.
+
+**Also — the meta-lesson about the sweeps themselves.** A broad automated debt sweep found candidates but
+graded them badly: its **#1 severity claim was wrong** (the sibling delete path *does* call the server), it
+**missed** the upload 404 entirely, and it listed `SprkChatBridge` as dead when it is type-imported by three
+live files — actioning that would have broken the shared-lib build. An **adversarial verification pass**
+(default verdict NOT-DEAD, ten consumption channels incl. `React.lazy(() => import(...))`, ribbon XML,
+`window.__X__` globals, string registries, PCF `dist` deep-imports) is what made the list safe to use.
+Error rate: ~48 claims → 40 confirmed / 3 refuted-or-wrong / 4 undercounted / 3 correctly unsure.
+**Treat a sweep as a lead list, never a work list.**
+
+**Evidence**: `projects/unified-access-control-r2/notes/tech-debt-sweep-VERIFICATION-2026-09-01.md` ·
+`notes/client-tech-debt-sweep-2026-09-01.md` · `notes/create-wizard-duplication-analysis.md` · fixes in
+commit `304b6d8f2`; guard in `tests/Spaarke.ArchTests/ClientUploadRouteAgreementTests.cs`.
+
+---
+
+### G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)
+
+> **Added 2026-09-03** by `unified-access-control-r2`. **Cost: three wrong measurements in one
+> session**, one of which was written into a recovery file as a false claim about file corruption.
+
+**What happens.** GNU grep 3.0 under MSYS2 / Git Bash returns **`0` matches** — no error, no warning
+— for any pattern containing a **non-BMP** character (codepoint > U+FFFF, i.e. 4 bytes in UTF-8).
+Windows `wchar_t` is 16-bit, so such a codepoint needs a surrogate pair and cannot fit in one wide
+character; the match silently never fires.
+
+**It is NOT a locale problem.** Verified: `LANG=en_US.UTF-8`, and forcing `LC_ALL=C.UTF-8` changes
+nothing. The pattern also reaches grep intact — byte-dumping `'🔲'` gives the correct `f0 9f 94 b2`.
+Do not "fix" this by setting a locale.
+
+**The confusing part is that SOME emoji work**, so grep looks fine until it isn't:
+
+| Marker | Codepoint | UTF-8 | `grep -cF` on a file containing 38 |
+|---|---|---|---|
+| ✅ | U+2705 | 3-byte (BMP) | works |
+| ⚠ | U+26A0 | 3-byte (BMP) | works |
+| ❌ | U+274C | 3-byte (BMP) | works |
+| 🔲 | U+1F532 | 4-byte | **0** |
+| 🔄 | U+1F504 | 4-byte | **0** |
+| 🟡 | U+1F7E1 | 4-byte | **0** |
+| 🔴 | U+1F534 | 4-byte | **0** |
+| 🗄 | U+1F5C4 | 4-byte | **0** |
+
+A bracket class mixing them (`[🔲✅🔄]`) is worse: it made grep report **"Binary file matches"** and
+suppress output entirely.
+
+**Where this bites in this repo**: `projects/*/tasks/TASK-INDEX.md` uses 🔲 (U+1F532) for open tasks
+and ✅ (U+2705) for complete. So `grep -c '✅'` is right and `grep -c '🔲'` is **always 0** — which
+reads as "no open tasks" on a project with dozens.
+
+**Rule.** For any count or match over files with emoji status markers, use Python:
+
+```bash
+python -c "print(sum(1 for l in open(PATH,encoding='utf-8') if l.startswith('| 🔲')))"
+```
+
+**Why it earns an entry.** The failure is silent and returns a *plausible* number, so it launders
+itself into conclusions. In one session it produced "0 open tasks" on a 37-open project, then a
+follow-on false claim that the file was mojibake/binary (it was clean UTF-8 — 0 NULs, 0
+double-encoded sequences), then a third miss on a verification grep. Same family as
+[AP-12](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes), one
+layer up: there the stale *prose* misleads; here the *instrument* does, while sounding confident.
+**Cross-check any count that will drive a decision.**
+
+---
+
+### AP-12: A comment becomes the constraint — prose outlives the mechanism it describes
+
+> **Added 2026-09-02** by `unified-access-control-r2`. **Class**: documentation drift promoted to
+> de-facto behaviour. **Eight instances in a single session**, two of which produced wrong answers to
+> the owner, and one of which this project had *already flagged as wrong* and still acted on.
+> Sibling of [AP-11](#ap-11-code-that-runs-but-reaches-the-wrong-destination--no-compiler-and-no-test-spans-the-seam),
+> which notes "prose has no compiler"; this entry is that observation promoted to its own failure mode,
+> because the consequence is not a wrong destination but a **wrong decision**.
+
+**The shape.** Something is deleted, never built, or built differently. The compiler dutifully updates
+every call site it can see. **Nothing updates the sentences that explain them.** The prose survives,
+reads as authoritative, and the next reader — human or agent — treats it as the specification.
+
+The tell is a comment that states **a limit, a route, a role mapping, a capability, or a reason
+something isn't wired**. Those are exactly the claims that (a) cannot be checked by any compiler and
+(b) get believed without checking.
+
+**Worked instances (all real, all this session).**
+
+| Prose said | Reality | Cost |
+|---|---|---|
+| `PathValidator.SmallUploadMaxBytes` enforces a 4 MiB upload cap | The constant had **zero code references**; the guard using it was deleted long before | A **real product limit**. Files 4 MiB–250 MB were refused by clients alone, for no server-side reason. Three separate client copies of the same fiction |
+| `ISpeFileOperations`: the simple PUT "takes no `@microsoft.graph.conflictBehavior` — not rename, not fail" | The **REST API honours it**; only the Kiota SDK doesn't expose it | Drove a design conclusion twice — **including after this project had written down that the claim was false** |
+| SPE permissions are "additive-only"; a misrouted write "cannot be retracted" / is "irreversible" | Permissions are **container-level** — removing the item ends the access | Wrong mental model in an arch guard's own failure message; invites hunting for a per-file ACL that does not exist |
+| A hook's docstring named a privilege route and a compound role model | The route never existed; `/status` already returned the privilege, and the filter already mapped three roles | An **unnecessary escalation to the owner** for a decision that had already been made in code |
+| `TokenProvider`: "authentication handled by browser session / Dataverse authentication" | Returns `''`, and the caller then omits the `Authorization` header entirely | Describes auth that **cannot work** against a `RequireAuthorization` BFF. Survived because the path has zero callers |
+| A retirement note described a 4 MiB ceiling on a path it was itself deleting | Same phantom constant | Propagated the fiction into a *new* file while removing the old one |
+
+**Why it is so durable.** Deleting code is loud — the build breaks. Deleting a *claim* is silent, so
+nobody does it. Worse, prose accretes authority with age: a comment that has survived several refactors
+reads as battle-tested rather than merely unexamined. And an agent reading a file top-to-bottom
+encounters the comment **before** the code, so the claim frames the reading of the very evidence that
+would refute it.
+
+**Prevention.**
+- **A doc comment stating a limit, route, role mapping, or capability is a CLAIM, not a fact.** Verify
+  it against code before believing it — and *especially* before quoting it to a human. Two of the eight
+  produced wrong answers to the owner.
+- **A constant with zero references is not harmless.** Grep for references before treating any named
+  limit as real; if it has none, the limit does not exist — delete it, and say in its place why it must
+  not come back (see `PathValidator`, `UploadOperation`, `uploadOrchestrator`).
+- **When you delete a field, route, guard, or constant, grep the PROSE in the same change** — doc
+  comments, `<see cref=…>`, retirement notes, user-facing strings, and *test* comments. AP-11 says this
+  too; it keeps being the step that is skipped.
+- **Correct in place, and say the claim was wrong.** A silent rewrite lets the next reader re-derive the
+  old belief from history. Leave a dated "🔴 Corrected — do not re-derive X" line. Both corrections in
+  commit `524a32fd3` do this, precisely because one of them had been silently corrected before and came
+  back.
+- **Distrust your own project's notes at the same rate.** This project's handoff asserted a missing
+  `encodeURIComponent` that was present two lines above the cited line, and a consolidation plan that
+  would have replaced a working client with one that cannot authenticate. **Re-derive; never inherit a
+  claim, including your own.**
+
+**Evidence**: commits `4044286a6` (dead constant + 4 MiB client ceiling), `13d8b878a` (stale docstring),
+`68eb58ad0` (phantom route in a docstring), `09025ab39` (third copy of the phantom cap), `524a32fd3`
+(conflictBehavior claim + the additive-only framing, both corrected with do-not-re-derive notes) ·
+`projects/unified-access-control-r2/current-task.md` § "the five things that will bite a fresh session".
+
+---
+
+### AP-13: A tool with no parameter for a thing you must control, silently picking a default
+
+> **Found** 2026-09-04 by `unified-access-control-r2` task 038, on a live environment.
+
+**The shape**: an agent calls a tool to create a durable, shared artifact. The tool exposes no parameter
+for an attribute that is *not optional in this repo*. The tool succeeds, so nothing signals a problem —
+and the artifact is created under a default the caller never chose and cannot see in the result.
+
+**The instance**: `mcp__dataverse__create_table` has **no publisher or solution parameter**. Called to
+create `sprk_noaccessentry`, it silently used the environment's **default publisher**, producing
+`cr140_noaccessentry` in `spaarkedev1`. Wrong prefix, wrong solution, outside `SpaarkeCore`, invisible to
+the repo's ALM. The call returned success. Only an explicit read-back caught it.
+
+**Why it is not "just be careful"**: the failure is in the *shape of the tool*, not the caller's
+diligence. There is no argument to get wrong and no error to notice. Every future caller meets the same
+trap at full strength, and a stray table is permanent-ish: someone must find it and consent to deleting
+it. In Dataverse specifically, publisher prefix is **immutable** — the artifact cannot be corrected in
+place, only recreated.
+
+**Rules**:
+- **MUST NOT** use `mcp__dataverse__create_table` when the entity must live under the `sprk` publisher —
+  which is every Spaarke entity. Use the raw Web API with the `MSCRM.SolutionUniqueName` header, the
+  pattern `scripts/Deploy-PrecedentEntity.ps1` already uses.
+- **MUST** read the artifact back (`mcp__dataverse__describe`) and assert the *prefix*, not merely that
+  creation succeeded. A success return says the tool ran, not that it did what you meant.
+- **Generalize before reaching for a tool that mutates shared state**: ask *"what does this tool NOT let
+  me specify, and does this repo care about it?"* If the answer is "it cares", the tool is wrong for the
+  job regardless of how convenient it is.
+
+**The wider lesson, which is the reason this entry exists**: an agent should not have been creating a
+live table at all here. Task 038's declared output was a schema **document**; the brief authorized
+*verifying* schema against live metadata — a read. "I need to check the schema" drifted into "I'll create
+the schema" with no gate in between. **A read authorization is not a write authorization**, and a shared
+environment is not scratch space. Owner directive 2026-09-04: schema work on this project is **code +
+docs only**; live table creation is an explicit operator step.
 
 ---
 

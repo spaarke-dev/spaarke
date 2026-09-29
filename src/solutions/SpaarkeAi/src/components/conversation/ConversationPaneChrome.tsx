@@ -211,7 +211,9 @@ const useStyles = makeStyles({
     whiteSpace: "nowrap",
     minWidth: 0,
   },
-  // spaarkeai-compose-r7: dimmed hint for a reopened file whose content is no longer available (>24h).
+  // spaarkeai-compose-r7: dimmed hint for a reopened file whose content may no longer be available.
+  // r8 task 062: hedged copy — `available === false` is now either the server's authoritative answer
+  // or, while the durable store is disabled, the client's ~24h eviction-window inference.
   filesAttachedIndicatorHintUnavailable: {
     color: tokens.colorNeutralForegroundDisabled,
   },
@@ -599,7 +601,12 @@ export interface AttachedFileSummary {
   /**
    * Best-effort 24h re-attach signal (spaarkeai-compose-r7): `false` ⇒ the file's searchable content
    * was evicted from AI Search (session idle > 24h, SessionFilesCleanupJob) so it can no longer be
-   * recalled — render a dimmed "no longer available" chip. Absent/`true` ⇒ usable this session.
+   * recalled — render a dimmed "may no longer be available" chip. Absent/`true` ⇒ usable this session.
+   *
+   * TRI-STATE as of r8 task 062: `false` no longer means "definitely gone". It is either the server's
+   * authoritative answer from the durable store, OR — while that store is disabled and the server
+   * returns null — the client's ~24h eviction-window inference. The copy is hedged accordingly; see
+   * `ConversationPane.handleSelectHistorySession` for which source produced it.
    */
   available?: boolean;
 }
@@ -657,7 +664,7 @@ export function FilesAttachedIndicator(props: {
             title={files[0].filename}
           >
             {files[0].filename}
-            {files[0].available === false ? " — no longer available" : ""}
+            {files[0].available === false ? " — may no longer be available" : ""}
           </Text>
         ) : (
           // spaarkeai-compose-r7: on a reopened session, if any file's content was evicted (>24h) say so.
@@ -668,7 +675,7 @@ export function FilesAttachedIndicator(props: {
             )}
           >
             {!!files && files.some((f) => f.available === false)
-              ? "some files no longer available"
+              ? "some files may no longer be available"
               : "available for this session"}
           </Text>
         )}

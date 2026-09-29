@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Sparkle wiring — sprk_recordsummary via RECORDSUMMARY_FIELD, existence-gated visibility</title>
+    <phase>3 Config Resolver + Control</phase>
+    <gate>blocked until 033 (RecordHeader PCF) is complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include pcf; modifies the RecordHeader control view</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-patterned wiring task with the exact reference implementation cited (MatterHeaderView.tsx:258-282 aiSummary wiring) and a closed behavioral spec (FR-17/FR-22)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordHeaderView.tsx, the file task 033 creates — serial after 033 per plan section 4</parallel-reason>
+    <deps>033</deps>
+    <tags>pcf, react, typescript, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the RecordHeader sparkle (AI summary popover) to sprk_recordsummary via the EXISTING
+    shared constant RECORDSUMMARY_FIELD (hooks/toolbarLaunchDefaults.ts:90). Visibility keys on
+    attribute EXISTENCE in entity metadata, NOT value population: show the sparkle whenever the
+    effective summary field names an existing attribute (even with 0 populated records, rendering
+    the explicit "No summary yet" empty state); hide it only when the attribute is absent or the
+    configured summaryField names a non-existent attribute.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF + shared-component composition and defensive
+    Dataverse field selection. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    RecordHeaderView passes an aiSummary fetch into the toolbar exactly when the effective summary
+    field exists in the host entity's metadata; the popover reads the field value and shows the
+    shared "No summary yet" empty state when the value is empty; the values retrieve never selects
+    a non-existent column; unit tests and ui-tests pass.
+  </goal>
+
+  <context>
+    <background>
+      FR-17 + FR-22. The owner created sprk_recordsummary on all six rollout entities and a
+      SEPARATE project populates it — so at R2 ship time most records have an empty summary. The
+      sparkle must still show (an empty affordance, not a dead one) and must hide only where the
+      attribute genuinely does not exist. The default field is the shared constant
+      RECORDSUMMARY_FIELD, already corrected once by R1 task 001 — re-declaring the literal
+      invites drift (the v1.0.20 sparkle regression was exactly a summary-field mismatch). The
+      RS-1 lesson (FR-23): a $select naming a non-existent column fails the ENTIRE retrieve with
+      HTTP 400 — the shipped Matter header currently fails to load for this reason — so the
+      summary field may be added to the fetched field list ONLY after metadata confirms it exists.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/pcf/RecordHeader/control/RecordHeaderView.tsx</file>
+      <file role="modify">src/client/pcf/RecordHeader/__tests__/RecordHeaderView.test.tsx</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/__tests__/recordHeader.integration.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">RecordHeaderView.tsx — the generic view this task extends (resolver + metadata already wired)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Import RECORDSUMMARY_FIELD from the shared library via its dist/* deep path (it lives in hooks/toolbarLaunchDefaults.ts:90 and is exported through dist/hooks). This task MUST NOT re-declare the literal string sprk_recordsummary anywhere in src/client/pcf/RecordHeader/ (FR-22a — single source of truth).</constraint>
+    <constraint source="project">Effective summary field = resolved.summaryField from the 031 resolver when configured, otherwise RECORDSUMMARY_FIELD. The default is applied HERE at the wiring site (031 deliberately passes summaryField through as undefined when unconfigured).</constraint>
+    <constraint source="project">Visibility gate (FR-17), scoped to the toolbar wiring in RecordHeaderView: pass the aiSummary fetch into the toolbar props IF AND ONLY IF the effective summary field names an attribute present in the host entity's metadata (the metadata the view already holds from 033). When absent, OMIT the aiSummary prop entirely so HeaderToolbar renders no sparkle. Value population MUST NOT influence visibility.</constraint>
+    <constraint source="project">Fetch safety (FR-23 RS-1 lesson), scoped to the view's field-list construction: append the effective summary field to the retrieved field list ONLY when the metadata existence check passes. A field list naming a non-existent column fails the whole retrieve with HTTP 400 and blanks the header.</constraint>
+    <constraint source="project">Empty state: when the attribute exists but the value is null/undefined/empty, the sparkle stays visible and the popover shows the shared "No summary yet" empty state (testid sparkle-popover-empty — see recordHeader.integration.test.tsx:422). Consume the existing HeaderToolbar aiSummary.onFetchSummary contract exactly as MatterHeaderView.tsx:258-282 does (fetch returns summary null for empty); do NOT fork HeaderToolbar or the popover.</constraint>
+    <constraint source="project">The sparkle refresh icon stays UNWIRED (DEF-01 / R1 FR-08a / NFR-07) — this task must not add any refresh behavior or BFF call.</constraint>
+    <constraint source="ADR-022">React 16/17-safe additions only; ADR-021 semantic tokens if any styling is touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/ui/record-header-composition.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="aiSummary wiring" location="src/client/pcf/MatterHeader/control/MatterHeaderView.tsx">
+        Lines 258-282: useRecordHeaderToolbarActions + onFetchSummary callback + spreading
+        aiSummary into toolbar props. This is the exact wiring shape to generalize — replace the
+        hard-coded sprk_mattersummary read with the effective-summary-field read, and make the
+        aiSummary spread conditional on the existence gate.
+      </pattern>
+      <pattern name="RECORDSUMMARY_FIELD constant" location="src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts">
+        Line 90: the shared constant (a FIELD on parent entities, not an entity). Import it; never
+        re-declare it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read MatterHeaderView.tsx:258-282 and the useRecordHeaderToolbarActions aiSummary contract.</step>
+    <step order="1">In RecordHeaderView.tsx compute the effective summary field (resolved.summaryField ?? RECORDSUMMARY_FIELD) and the metadata existence flag.</step>
+    <step order="2">Gate the field-list construction: include the effective summary field in the values retrieve only when it exists in metadata.</step>
+    <step order="3">Gate the toolbar wiring: conditionally attach aiSummary.onFetchSummary (reading the fetched value, returning null when empty) — omit the prop entirely when the existence check fails.</step>
+    <step order="4">Extend __tests__/RecordHeaderView.test.tsx for the acceptance matrix below (visible+empty, visible+populated, hidden, no-400 field list, constant import).</step>
+    <step order="5">Run npm run build:prod + npm test in the RecordHeader PCF; redeploy to spaarkedev1 via pcf-deploy (version bump across all 5 locations per ADR-020) and execute the ui-tests.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing HeaderToolbar/AiSummaryPopover surface cannot express existence-gated visibility or the "No summary yet" empty state through its current props (aiSummary omission + onFetchSummary returning null), STOP and escalate per CLAUDE.md section 6 to decide the shared-library extension — missing behavior lands in the shared lib (spec MUST NOT fork); do not duplicate popover code in the PCF layer.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Sparkle visible with empty summary (FR-17)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_project&amp;id={record-id}</url>
+      <steps>
+        <step>Open a Project record whose sprk_recordsummary is empty (no layoutJson summaryField override)</step>
+        <step>Verify the sparkle icon renders in the toolbar</step>
+        <step>Click the sparkle; verify the popover shows the "No summary yet" empty state</step>
+        <step>Check the console for errors and the network trace for a 400 on the record retrieve</step>
+      </steps>
+      <expected>Sparkle visible; popover renders "No summary yet"; no console errors; no HTTP 400</expected>
+    </test>
+    <test name="Sparkle hidden for non-existent attribute (FR-17 negative)">
+      <steps>
+        <step>Configure layoutJson with summaryField naming an attribute that does not exist on the entity; publish and reload</step>
+        <step>Verify the sparkle icon does NOT render; To Do and Notepad slots are unaffected</step>
+        <step>Verify the header still loads fully (the retrieve did not include the bogus column — no HTTP 400)</step>
+      </steps>
+      <expected>Sparkle absent; header loads normally; no 400, no console error</expected>
+    </test>
+    <test name="Populated summary renders">
+      <steps>
+        <step>Populate sprk_recordsummary on a test record via the API or a form field; reload</step>
+        <step>Click the sparkle; verify the popover shows the summary text; verify the refresh icon remains a no-op</step>
+      </steps>
+      <expected>Popover shows the field value; refresh stays unwired</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode and reload; open the sparkle popover</step>
+        <step>Verify popover background, text, and empty-state colors adapt via semantic tokens (no white surface in dark mode)</step>
+      </steps>
+      <expected>Popover fully theme-correct in both modes</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build:prod) and run tests</tool>
+    <tool name="pac">Redeploy via the pcf-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RecordHeader/control/RecordHeaderView.tsx</output>
+    <output type="test">src/client/pcf/RecordHeader/__tests__/RecordHeaderView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given no summaryField in layoutJson and an entity whose metadata contains sprk_recordsummary, the sparkle renders and its fetch reads the value of RECORDSUMMARY_FIELD.</criterion>
+    <criterion testable="true">Given the attribute exists and the value is null, undefined, or empty string, the sparkle renders and the popover shows the "No summary yet" empty state (testid sparkle-popover-empty).</criterion>
+    <criterion testable="true">Given layoutJson summaryField naming a DIFFERENT existing attribute, that attribute's value feeds the popover (config override wins over the default).</criterion>
+    <criterion testable="true">Negative: given summaryField (configured or default) naming an attribute ABSENT from entity metadata, no aiSummary prop is passed (sparkle absent), the retrieved field list does NOT contain that column, and the header renders without an HTTP 400 (unit-test the field-list builder for both branches).</criterion>
+    <criterion testable="true">Negative: grep of src/client/pcf/RecordHeader/ finds no literal sprk_recordsummary string — the constant is imported from the shared library dist path.</criterion>
+    <criterion testable="true">The sparkle refresh icon performs no action and no BFF/network call is added (code inspection at review).</criterion>
+    <criterion testable="true">npm run build:prod green with the version bumped in all 5 locations; unit tests pass; all four ui-tests executed with results recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-17, FR-22; RS-1 background in FR-23. No justification element: modify-only task
+    (extends the view created by 033; imports an existing constant). Summary POPULATION is
+    explicitly out of scope — a separate project writes the columns; "No summary yet" is the
+    intended steady state at ship time.
+
+    COMPLETED 2026-08-26 as v1.1.4. Bundle 99,068 to 100,352 bytes (40 percent of the NFR-02
+    ceiling). RecordHeader PCF suite 72 of 72; recordHeader.integration 11 of 11.
+
+    ESCALATION FIRED and was resolved additively. This POML asserted a "No summary yet" empty
+    state with testid sparkle-popover-empty, citing recordHeader.integration.test.tsx line 422.
+    That citation came from the KNOWN-RED suite: the shipped AiSummaryPopover had NEITHER the
+    testid NOR that copy (it read "No summary available for this document."). Rather than fork
+    the popover into the PCF layer, the shared component gained an OPTIONAL emptyText prop
+    defaulting to its existing string, plus stable data-testids. Nine existing callers render
+    byte-identical output. Alternative rejected: changing the default globally, which would have
+    reworded VisualHost, SemanticSearchControl, DocumentCard, RichFilePreview, InsightSummaryCard,
+    DocumentLibrary, MessageQuickView, CalendarVisual and MatterHeader.
+
+    TWO DEVIATIONS from the authored steps, both documented in
+    notes/decisions/034-sparkle-existence-gate.md:
+    (a) the metadata request now names BOTH summary candidates. Step 1 as written could not work:
+        sprk_recordsummary is on no rollout entity's FORM, so it would never appear in the
+        metadata payload and the existence gate would fail on every entity, silently.
+    (b) useHeaderFormMetadata retries unprojected if the named-attribute request is rejected, so a
+        maker typo in summaryField degrades to a working header rather than a blank one (NFR-10).
+
+    ALSO CLOSED: notes/issues/ISSUE-recordheader-integration-test-stale.md. That suite was assigned
+    here and is now green. It carried FIVE stale contracts, not the one diagnosed — see the
+    decision note. Repo-wide known-red drops from 9 suites to 8.
+
+    UI-TESTS NOT RUN — no --chrome session and the control is not yet imported. The four ui-tests
+    remain owner-executed at re-UAT.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

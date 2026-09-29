@@ -601,7 +601,12 @@ describe('buildImportedContentModel — fidelity warnings', () => {
     editor.destroy();
   });
 
-  it('counts a dropped hardBreak on an edited paragraph (server BuildRun renders one w:t — no newline split)', () => {
+  // Task 046 REPLACED this test's premise. It used to assert that editing a paragraph DROPPED its
+  // hardBreak (warned, not silent). That was honest reporting of a real loss — and the loss is now
+  // fixed: a soft break round-trips as an `isLineBreak` marker run, the same contract `isPageBreak` has
+  // had since task 023. Address blocks, party blocks and signature blocks are held together by these,
+  // so the paragraphs users edit most were the ones collapsing.
+  it('round-trips a hardBreak on an edited paragraph as an isLineBreak marker run, with no warning', () => {
     const editor = makeEditor();
     editor.commands.setContent('<p>One<br>Two</p>');
     stamp(editor, ['AAAA0001']);
@@ -619,8 +624,29 @@ describe('buildImportedContentModel — fidelity warnings', () => {
       sessionThreads: NO_THREADS,
     });
 
-    expect(model.blocks[0].runs!.every(r => !r.text.includes('\n'))).toBe(true);
-    expect(warnings).toContainEqual({ code: 'edited-paragraph-line-break-dropped', count: 1 });
+    const runs = model.blocks[0].runs!;
+    // The break is a MARKER run, never a '\n' inside text — the server renders one w:t per run and a
+    // newline in text would be emitted literally.
+    expect(runs.every(r => !r.text.includes('\n'))).toBe(true);
+    expect(runs.filter(r => r.isLineBreak).length).toBe(1);
+    // Position matters as much as presence: the marker has to sit BETWEEN the two halves, or the break
+    // survives the round trip in the wrong place, which is its own kind of damage.
+    const markerIndex = runs.findIndex(r => r.isLineBreak);
+    expect(
+      runs
+        .slice(0, markerIndex)
+        .map(r => r.text)
+        .join('')
+    ).toBe('One');
+    expect(
+      runs
+        .slice(markerIndex + 1)
+        .map(r => r.text)
+        .join('')
+    ).toContain('Two');
+    // And nothing is reported, because nothing was lost. A warning here would be the false-signal
+    // problem from the other direction.
+    expect(warnings).not.toContainEqual(expect.objectContaining({ code: 'edited-paragraph-line-break-dropped' }));
     editor.destroy();
   });
 

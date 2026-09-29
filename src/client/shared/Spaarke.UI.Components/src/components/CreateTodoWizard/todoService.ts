@@ -26,13 +26,16 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import {
   applyResolverFields,
   discoverNavProps,
+  toNavPropMap,
   cleanGuid,
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import type { IPolymorphicWebApi } from '../../services/PolymorphicResolverService';
 import { TODO_REGARDING_CATALOG } from '../../services/TodoRegardingUpdateBuilder';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -91,18 +94,66 @@ export class TodoService {
   ) {}
 
   /**
+   * Lazily-built `EntityCreationService` used for the upload → link sequence (task 119 /
+   * ISS-027). Built on first use, not in the constructor, because `_authenticatedFetch` /
+   * `_bffBaseUrl` are optional (the `createTodoRegardingChild` follow-on path constructs this
+   * service with neither, and never attaches files). Returns `undefined` when either dependency
+   * is missing — the caller treats that as a graceful "upload not configured" no-op, the same
+   * contract the field-mapping engine call already uses below.
+   */
+  private _entityService?: EntityCreationService;
+  private _getEntityCreationService(): EntityCreationService | undefined {
+    if (!this._authenticatedFetch || !this._bffBaseUrl) {
+      return undefined;
+    }
+    if (!this._entityService) {
+      const dataService = this._dataService;
+      // EntityCreationService expects IWebApiWithCreate (createRecord returning { id }).
+      // Same adapter shape as MatterService's constructor (matterService.ts:142-159) and
+      // TodoWizardDialog's existing webApiAdapter for the send-email path.
+      const webApiAdapter = {
+        createRecord: async (entityName: string, data: Record<string, unknown>) => {
+          const id = await dataService.createRecord(entityName, data);
+          return { id };
+        },
+        retrieveRecord: (entityName: string, id: string, options?: string) =>
+          dataService.retrieveRecord(entityName, id, options),
+        retrieveMultipleRecords: (entityName: string, options?: string) =>
+          dataService.retrieveMultipleRecords(entityName, options),
+      };
+      this._entityService = new EntityCreationService(webApiAdapter, this._authenticatedFetch, this._bffBaseUrl);
+    }
+    return this._entityService;
+  }
+
+  /**
    * Create a `sprk_todo` Dataverse record.
    *
    * Builds a `sprk_todo` entity payload from the wizard form state and,
    * when a regarding triple is supplied, atomically populates the 11+4
    * regarding fields per ADR-024 before issuing the create call.
    *
+   * After the record exists, uploads any attached files to SPE and creates one
+   * `sprk_document` row per file, linked through the discovered `sprk_relatedtodo`
+   * nav-prop (task 119 / ISS-027). Mirrors `MatterService.createMatter`'s
+   * upload → discover nav-prop → createDocumentRecords sequence
+   * (matterService.ts:356-408): create-first (`uploadFilesToSpe` requires the
+   * record id — EntityCreationService.ts:479-484), never throws on a failed
+   * upload or a failed document-record create — both degrade to entries in
+   * `warnings` instead.
+   *
    * @param formValues — Captured form state from the wizard.
    * @param regarding — Optional AssociateToStep selection (null/undefined means "skipped").
+   * @param uploadedFiles — Files attached in the wizard's "Add file(s)" step. Omitted/empty
+   *   means the upload → link sequence is skipped entirely (zero-files path is unchanged).
    *
    * @returns A `ICreateTodoResult` — never throws.
    */
-  async createTodo(formValues: ICreateTodoFormState, regarding?: AssociationResult | null): Promise<ICreateTodoResult> {
+  async createTodo(
+    formValues: ICreateTodoFormState,
+    regarding?: AssociationResult | null,
+    uploadedFiles: IUploadedFile[] = []
+  ): Promise<ICreateTodoResult> {
     // Non-fatal diagnostics accumulated during creation (currently just the
     // field-mapping engine, task 021).
     const warnings: string[] = [];
@@ -225,14 +276,9 @@ export class TodoService {
     }
 
     // 4. Create the record — strictly `sprk_todo` (NEVER `sprk_event`)
+    let todoId: string;
     try {
-      const todoId = await this._dataService.createRecord('sprk_todo', entity);
-      return {
-        todoId,
-        todoName: formValues.title.trim(),
-        success: true,
-        warnings,
-      };
+      todoId = await this._dataService.createRecord('sprk_todo', entity);
     } catch (err) {
       console.error('[TodoService] createRecord error:', err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -243,5 +289,64 @@ export class TodoService {
         errorMessage: `Failed to create to do: ${message}`,
       };
     }
+
+    // 5. Upload attached files to SPE + create linked sprk_document records (ISS-027 / task
+    //    119). Deliberately OUTSIDE the try/catch above — the to do already exists at this
+    //    point, so an upload/link problem must degrade to a warning, never to a report that
+    //    the to do failed to create. Create-first, always: uploadFilesToSpe requires the
+    //    record id (EntityCreationService.ts:479-484). Skipped entirely when there are no
+    //    files — the zero-files path stays byte-identical. Mirrors
+    //    MatterService.createMatter's upload → discover nav-prop → createDocumentRecords
+    //    sequence (matterService.ts:356-408), which places this step outside its own create
+    //    try/catch for the same reason.
+    if (uploadedFiles.length > 0) {
+      const entityService = this._getEntityCreationService();
+      if (!entityService) {
+        warnings.push('File upload skipped -- upload is not configured for this to do creation path.');
+      } else {
+        const uploadResult = await entityService.uploadFilesToSpe('sprk_todo', todoId, uploadedFiles);
+
+        if (!uploadResult.success) {
+          warnings.push(
+            `File upload failed (${uploadResult.failureCount} of ${uploadedFiles.length}). ` +
+              'Files can be added from the to do record.'
+          );
+        } else if (uploadResult.uploadedFiles.length > 0) {
+          // Discover the sprk_document -> sprk_todo nav-prop at runtime. The column is
+          // sprk_relatedtodo (Models.cs DocumentLinkFields.All), nav-prop sprk_RelatedToDo —
+          // there is no bare `sprk_todo` column and no existing TypeScript call site to copy
+          // the string from, so this mirrors matterService.ts:371-372 with a literal fallback.
+          const docNavProps = toNavPropMap(await discoverNavProps('sprk_document'));
+          const docTodoNavProp = docNavProps['sprk_relatedtodo'] ?? 'sprk_RelatedToDo';
+
+          const linkResult = await entityService.createDocumentRecords(
+            'sprk_todos',
+            todoId,
+            docTodoNavProp,
+            uploadResult.uploadedFiles,
+            {
+              parentRecordName: formValues.title.trim(),
+            }
+          );
+          if (linkResult.warnings.length > 0) {
+            warnings.push(...linkResult.warnings);
+          }
+        }
+
+        if (uploadResult.failureCount > 0 && uploadResult.successCount > 0) {
+          warnings.push(
+            `${uploadResult.failureCount} file(s) failed to upload: ` +
+              uploadResult.errors.map(e => e.fileName).join(', ')
+          );
+        }
+      }
+    }
+
+    return {
+      todoId,
+      todoName: formValues.title.trim(),
+      success: true,
+      warnings,
+    };
   }
 }

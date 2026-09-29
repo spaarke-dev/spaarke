@@ -3,7 +3,7 @@
   <metadata>
     <title>Decommission legacy spe-redis-dev-67e2xz</title>
     <phase>3: Dev environment cutover</phase>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>036</dependencies>
     <blocks>038</blocks>
@@ -13,7 +13,30 @@
     <parallel-group>Phase3</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
-  </metadata>
+    <completion>
+    <tagged date="2026-06-26">Step 1 executed: decommission=2026-06-26,
+      decommission-reason=replaced-by-spaarke-bff-redis-dev,
+      decommission-project=spaarke-redis-cache-remediation-r1. TASK-INDEX recorded this as complete
+      at the time; THIS POML was left at not-started — a bookkeeping miss corrected 2026-08-30.</tagged>
+    <deleted date="2026-08-30">Step 3 executed with explicit owner sign-off, ~2 months after the stated
+      7-14 day reversibility window closed. `az redis delete` succeeded; `az redis show` now returns
+      ResourceNotFound, satisfying the acceptance criterion.
+
+      Pre-delete record: Basic C0, redis 6.0, West US 2,
+      host spe-redis-dev-67e2xz.redis.cache.windows.net.
+
+      Orphan sweep before deleting (all clean): zero cache hits across every 12h bucket over 2 days
+      while the live cache logged 1206-1219; the BFF's Redis connection string resolves to a Key Vault
+      secret naming spaarke-bff-redis-dev; the redis-cache-memory-high-dev metric alert is scoped to
+      the LIVE cache; no scheduled query rule names either cache; ZERO exact-name references in
+      infrastructure/, scripts/, config/, .github/ or src/ (all 20 repo hits are project notes and
+      docs); no linked servers, no private endpoints, no VNet subnet.
+
+      NOTE for anyone reading the ops count: it was 144-164 vs the live cache's 190-254 — within 25%.
+      "It has traffic, therefore it is used" would have been the WRONG test here. Only cache hits
+      separated them.</deleted>
+  </completion>
+</metadata>
   <prompt>Per FR-15: after 24-hr window passes, EITHER delete `spe-redis-dev-67e2xz` OR tag it with `decommission=YYYY-MM-DD`. Default to TAG (safer; allows reversal during a longer cooling-off if needed); delete only if explicit owner sign-off captured in cutover record.</prompt>
   <role>Spaarke operator.</role>
   <goal>Legacy resource either deleted OR tagged. Decision and timestamp documented.</goal>

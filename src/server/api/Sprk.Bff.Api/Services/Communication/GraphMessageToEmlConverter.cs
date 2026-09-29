@@ -27,9 +27,16 @@ public sealed class GraphMessageToEmlConverter
         mimeMessage.WriteTo(stream);
         var bytes = stream.ToArray();
 
-        // Generate filename
+        // Generate filename. IncomingCommunicationProcessor.ArchiveEmlAsync turns this into the SPE upload
+        // path ("{communicationId:N}_{FileName}"), so it goes through the ONE sanitizer.
+        //
+        // ⚠️ THIS WAS A REAL LATENT BUG, not just a duplicate. The private copy here used a bare
+        // Path.GetInvalidFileNameChars(), which on the linux-x64 runtime the BFF publishes to returns only
+        // {'\0','/'} — so '<', '>', '"', ':', '\\', '|', '?', '*' all SURVIVED into archived .eml names in
+        // production. The unit test asserting they were stripped passed anyway, because it runs on Windows
+        // where that call returns the wide set. Consolidating onto SpeUploadPath fixes it by construction.
         var subject = graphMessage.Subject ?? "No Subject";
-        var sanitizedSubject = SanitizeFileName(subject);
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(subject, maxLength: 50);
         var date = graphMessage.SentDateTime ?? graphMessage.ReceivedDateTime ?? DateTimeOffset.UtcNow;
         var dateStr = date.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{sanitizedSubject}_{dateStr}.eml";
@@ -221,10 +228,6 @@ public sealed class GraphMessageToEmlConverter
         }
     }
 
-    private static string SanitizeFileName(string input)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new string(input.Where(c => !invalid.Contains(c)).ToArray());
-        return sanitized.Length > 50 ? sanitized[..50] : sanitized;
-    }
+    // SanitizeFileName DELETED 2026-08-29 — consolidated onto Infrastructure/Graph/SpeUploadPath
+    // (root CLAUDE.md §11). See the note at the call site for the platform bug this removed.
 }

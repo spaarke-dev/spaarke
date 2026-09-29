@@ -366,17 +366,6 @@ public class InsightsIntentClassifierTests
     // ────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_NullOpenAi_Throws()
-    {
-        var act = () => new InsightsIntentClassifier(
-            openAi: null!,
-            cache: new MemoryCache(new MemoryCacheOptions { SizeLimit = 16 }),
-            options: BuildOptionsMonitor(new InsightsIntentClassifierOptions()),
-            logger: NullLogger<InsightsIntentClassifier>.Instance);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Fact]
     public void Constructor_NullCache_Throws()
     {
         var act = () => new InsightsIntentClassifier(

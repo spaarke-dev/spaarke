@@ -138,6 +138,7 @@ public class CommunicationServiceArchiveEmbedTests
             jobSubmissionService,
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<CommunicationService>>(),
             scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }

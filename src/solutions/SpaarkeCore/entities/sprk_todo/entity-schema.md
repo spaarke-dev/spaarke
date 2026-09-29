@@ -37,7 +37,7 @@
 |--------------|--------------|------|----------|------------|-------------|
 | sprk_description | Description | Multiline (Text) | No | 4000 | Plain-text description |
 | sprk_notes | Notes | Multiline (Text) | No | 100000 | Rich-text notes (replaces former `sprk_eventtodo.sprk_todonotes`) |
-| sprk_assignedto | Assigned To | Lookup → systemuser | No | - | User assignee. Teams own via standard `ownerid` (per D-1 revised 2026-06-07). |
+| sprk_assignedto | Assigned To | Lookup → **contact** | No | - | Assignee. **Migrated systemuser → contact (Person) 2026-06-21** (CreateTodoWizard `todoService` binds `/contacts(...)`; confirmed by owner 2026-09-02). Teams own via standard `ownerid`. |
 
 ### Kanban Behavior Fields
 
@@ -125,7 +125,7 @@ solution via `SolutionUniqueName` parameter on `InsertStatusValue`/`UpdateOption
 ## Notes
 
 - **Naming**: `sprk_regardingcontact` (NOT `sprk_regardingperson` like `sprk_communication`) per task 002 prompt instructions. Target is OOB `contact`.
-- **Ownership**: User or Team. The `sprk_assignedto` lookup is User-only (per design D-1 revised). Teams "assign" by being the owner.
+- **Ownership**: User or Team. The `sprk_assignedto` lookup targets **contact** (migrated from systemuser 2026-06-21 — see the Assigned To field row). Teams "assign" by being the `ownerid`.
 - **No backward compat**: Per design D-12 and OS-2, no shims or migration from `sprk_eventtodo`.
 - **Resolver pattern**: Use `PolymorphicResolverService.applyResolverFields` (D-2 / ADR-024). Never set resolver fields directly.
 - **Deployment**: Created via `scripts/Deploy-SprkTodoEntity.ps1` (Web API + PowerShell — PAC CLI has no `pac table create`).

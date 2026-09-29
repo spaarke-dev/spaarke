@@ -8,7 +8,6 @@ module.exports = {
     'src/services/CustomCommandFactory.ts',
     'src/services/CommandRegistry.ts',
     'src/services/CommandExecutor.ts',
-    'src/hooks/useVirtualization.ts',
     'src/hooks/useKeyboardShortcuts.ts',
     'src/hooks/useForceSimulation.ts',
     'src/utils/themeDetection.ts',

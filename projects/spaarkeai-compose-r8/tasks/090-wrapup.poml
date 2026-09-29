@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Wrap-up — anti-clobber deploy · /test-diet · write-side fidelity doc · lessons-learned · INDEX + root §17 update</title>
+    <phase>8 Wrap-up</phase>
+    <gate>blocked-on-all</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close mechanics and documentation; implementation was reviewed in its owning tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical with clear oracles: the deploy either pairs both artifacts, `/test-diet` emits its report, the INDEX row either matches reality or does not. The judgment in this project was spent in tasks 020–074.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys shared environments and updates repo-wide indexes.</parallel-reason>
+    <deps>017, 023, 031, 045, 053, 063, 070, 071, 072, 073, 074</deps>
+    <tags>devops, documentation, deployment</tags>
+    <estimated-effort>5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the project properly.
+
+    1. **Anti-clobber deploy** — BFF and `sprk_spaarkeai` together, same tree, one window (NFR-05). Never from
+       a net8 tree.
+    2. **`/test-diet`** — MANDATORY at project close (root CLAUDE.md §7). It reconciles tests added during R8
+       against the ADR-038 §7 build-vs-maintain classifier and emits `git rm`/`git mv` commands for reviewer
+       judgment. It is read-only — do NOT auto-execute its output. Report to
+       `projects/spaarkeai-compose-r8/notes/test-diet-report.md`; the wrap-up PR MUST cite it.
+    3. **Write-side fidelity companion doc** — the counterpart to
+       `docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`: the merge mechanism, the seven invariants, the
+       residual loss list pointer, and the extension recipe for a future contributor.
+    4. **Lessons-learned** — including the one the project turned on: seven releases of engine investment
+       (Half A, "what bytes to write") while the client contract (Half B, "did it arrive and did we tell the
+       truth") got none, and why the seam tests were structurally incapable of catching it.
+    5. **Indexes** — `projects/INDEX.md` row updated; root CLAUDE.md §17 Compose pointer refreshed to name the
+       write-side doc alongside the read-side one; god-class ratchet row updated for the deleted waivers.
+  </prompt>
+
+  <role>SPAARKE DevOps + documentation engineer. Familiar with the anti-clobber deploy pair, `/test-diet`, and the repo's documentation pointers.</role>
+
+  <goal>
+    R8 is deployed as a matched pair, its tests are reconciled against ADR-038, the write-side architecture is
+    documented, lessons are recorded, and every index that names Compose is current.
+  </goal>
+
+  <context>
+    <background>
+      Root CLAUDE.md §7 makes `/test-diet` a HARD WARNING if skipped at project close, and the wrap-up PR must
+      cite the report or document the skip rationale. Root §17's Compose row currently points only at the
+      read/reference fidelity doc — R8 is the write side, and leaving §17 unchanged would send the next
+      contributor to the wrong document.
+    </background>
+    <relevant-files>
+      <file role="doc-output">docs/architecture/ (write-side fidelity companion)</file>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/lessons-learned.md</file>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/test-diet-report.md</file>
+      <file role="primary-edit">projects/INDEX.md</file>
+      <file role="primary-edit">CLAUDE.md (§17 Compose pointer)</file>
+      <file role="canonical-reference">.claude/patterns/testing/god-class-ratchet.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec NFR-05">Deploy BFF and `sprk_spaarkeai` TOGETHER, same tree, one window. Never from a net8 tree.</constraint>
+    <constraint source="root CLAUDE.md §7">`/test-diet` is MANDATORY at project close. It is READ-ONLY — do NOT auto-execute its `git rm`/`git mv` output. The wrap-up PR MUST cite the report.</constraint>
+    <constraint source="root CLAUDE.md §3">Root `CLAUDE.md` and `.claude/` edits are MAIN SESSION only — sub-agents cannot write those paths.</constraint>
+    <constraint source="root CLAUDE.md §18">Any PR touching root CLAUDE.md MUST add an entry to `.claude/CHANGELOG.md`.</constraint>
+    <constraint source="root CLAUDE.md §11">The write-side doc COMPLEMENTS `COMPOSE-READ-REFERENCE-FIDELITY.md`. MUST NOT duplicate its content.</constraint>
+    <constraint source="project">The god-class ratchet row in root §17 MUST reflect the ACTUAL number of remaining Compose waivers after Track D — if task 074 recorded NOT-CONFIRMED, say five-minus-four, not five-minus-five.</constraint>
+    <constraint source="project">`/conflict-check` before the PR. Report final publish size (absolute + delta vs 44.96 MB).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project close, deployment pairing, documentation pointers</topic>
+    <files>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor STANDARD; load spec.md + CLAUDE.md.</step>
+    <step order="1">Run `/conflict-check`. Confirm the TFM is net10.</step>
+    <step order="2">Deploy BFF + `sprk_spaarkeai` together from the same tree.</step>
+    <step order="3">Run `/test-diet`; write the report; do NOT execute its output.</step>
+    <step order="4">Write the write-side fidelity companion doc in `docs/architecture/`.</step>
+    <step order="5">Write lessons-learned, including the Half-A/Half-B finding and why the seam tests could not catch Half B.</step>
+    <step order="6">Update `projects/INDEX.md`; update root CLAUDE.md §17 (Compose pointer + god-class ratchet row) with the ACTUAL waiver count; add the `.claude/CHANGELOG.md` entry.</step>
+    <step order="7">Open the wrap-up PR citing the test-diet report and the final publish size.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any Track's gate did not pass (Track S UAT, the Phase-3 gate, the fidelity gate in CI), do NOT close the project. Report what is outstanding — a wrap-up over an unmet gate is how the next release inherits the same defect.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">docs/architecture/ (write-side fidelity companion)</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/test-diet-report.md</output>
+    <output type="doc">projects/INDEX.md</output>
+    <output type="doc">CLAUDE.md</output>
+    <output type="doc">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>BFF and `sprk_spaarkeai` were deployed together from the same net10 tree, in one window.</criterion>
+    <criterion>`/test-diet` was run, its report written, and the wrap-up PR cites it.</criterion>
+    <criterion>The write-side fidelity companion doc exists in `docs/architecture/` covering the merge mechanism, the seven invariants, the residual-list pointer, and an extension recipe.</criterion>
+    <criterion>Lessons-learned records the Half-A/Half-B finding and why the seam tests were structurally incapable of catching Half B.</criterion>
+    <criterion>`projects/INDEX.md` is updated; root CLAUDE.md §17 names the write-side doc and states the ACTUAL remaining Compose waiver count.</criterion>
+    <criterion>`.claude/CHANGELOG.md` has an entry for the root CLAUDE.md change.</criterion>
+    <criterion>`/conflict-check` was run; final publish size reported (absolute + delta vs 44.96 MB).</criterion>
+    <criterion>NEGATIVE: `/test-diet` output was NOT auto-executed.</criterion>
+    <criterion>NEGATIVE: the write-side doc does not duplicate `COMPOSE-READ-REFERENCE-FIDELITY.md`.</criterion>
+    <criterion>NEGATIVE: the project was not closed over an unmet gate.</criterion>
+  </acceptance-criteria>
+</task>

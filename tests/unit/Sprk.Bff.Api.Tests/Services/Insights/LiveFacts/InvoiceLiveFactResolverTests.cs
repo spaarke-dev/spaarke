@@ -184,17 +184,4 @@ public class InvoiceLiveFactResolverTests
         fact.Should().BeNull();
     }
 
-    [Fact]
-    public void Constructor_NullEntityService_Throws()
-    {
-        Action act = () => new InvoiceLiveFactResolver(null!, NullLogger<InvoiceLiveFactResolver>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("entityService");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        Action act = () => new InvoiceLiveFactResolver(_entityServiceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
 }

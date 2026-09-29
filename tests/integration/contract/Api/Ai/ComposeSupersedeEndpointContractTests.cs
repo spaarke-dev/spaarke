@@ -26,6 +26,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -41,6 +42,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
 
@@ -70,7 +72,7 @@ public sealed class ComposeSupersedeEndpointContractTests : IClassFixture<Compos
         var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
 
         var session = await sessions.CreateSessionAsync(
-            ComposeSupersedeFixture.TestTenantId, documentId: null, playbookId: null, hostContext: null);
+            ComposeSupersedeFixture.TestTenantId, TestSessionOwner.Oid, documentId: null, playbookId: null, hostContext: null);
 
         var draft = new SessionOutput
         {
@@ -228,7 +230,7 @@ public sealed class ComposeSupersedeFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -286,6 +288,9 @@ public sealed class ComposeSupersedeFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -324,6 +329,36 @@ public sealed class ComposeSupersedeFixture : WebApplicationFactory<Program>
                 .ReturnsAsync((ChatSession?)null);
             services.RemoveAll<IChatDataverseRepository>();
             services.AddSingleton(chatRepoMock.Object);
+
+            // WARM tier (Cosmos, ADR-015 Tier 3 / decision D-06) — the boundary this fixture MISSED,
+            // and the reason Supersede_WhenSessionUnknown_Returns404 used to fail locally after ~2m6s
+            // with TaskCanceledException while passing in CI on the same commit (repaired 2026-08-28).
+            //
+            // ChatSessionManager.GetSessionAsync is a THREE-tier lookup: Redis hot → Cosmos warm →
+            // Dataverse cold. This fixture doubled the hot tier (in-memory cache) and the cold tier
+            // (above) but left the warm tier REAL: AiPersistenceModule registers a live CosmosClient
+            // against CosmosPersistence:Endpoint (https://test.documents.azure.com — a hostname that
+            // RESOLVES to a live Azure IP via wildcard DNS and answers TCP) holding a real
+            // DefaultAzureCredential. Four of the five tests here create their session first, so they
+            // hit the hot tier and never noticed. Supersede_WhenSessionUnknown_Returns404 asks for a
+            // random GUID BY DESIGN — a guaranteed hot-tier miss — so it alone fell through to Cosmos
+            // and paid ~6 s per failed local credential-chain attempt (az CLI + Az.Accounts + the
+            // Visual Studio identity cache are all present on a developer machine and absent in CI)
+            // inside the SDK's retry loop, until the test client's default 100 s HttpClient.Timeout
+            // fired. Nothing about the product was wrong: the file's own header says "only external
+            // boundaries mocked", and Cosmos is an external boundary.
+            //
+            // Returning null keeps the documented semantics exactly — an unknown session is absent
+            // from the warm tier too, so the lookup proceeds to the cold tier and honestly 404s.
+            // TestInfrastructure/TestOutboundNetworkGuard.cs is the assembly-wide safety net for the
+            // same class of gap in other fixtures; this double is what makes THIS fixture hermetic
+            // rather than merely fast.
+            var sessionPersistenceMock = new Mock<ISessionPersistenceService>();
+            sessionPersistenceMock
+                .Setup(p => p.LoadSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((StoredSession?)null);
+            services.RemoveAll<ISessionPersistenceService>();
+            services.AddSingleton(sessionPersistenceMock.Object);
         });
     }
 
@@ -358,7 +393,10 @@ internal sealed class SupersedeFakeAuthHandler : AuthenticationHandler<Authentic
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

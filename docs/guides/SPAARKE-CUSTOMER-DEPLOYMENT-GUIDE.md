@@ -4,7 +4,7 @@
 > **Last Updated**: 2026-08-17
 > **Status**: **Authoritative**. Supersedes the customer-provisioning content in `CUSTOMER-DEPLOYMENT-GUIDE.md`, `CUSTOMER-ONBOARDING-RUNBOOK.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md`, `auth-deployment-setup.md`, `SPAARKE-DEPLOYMENT-GUIDE.md`, and `PRODUCTION-DEPLOYMENT-GUIDE.md`. Those files are retained as one-paragraph stubs pointing here.
 > **Audience**: Platform Operator (primary). Claude Code AI executes automated phases; a human operator holds accountability for gates, secrets, and customer communication.
-> **Applies To**: Every new Spaarke customer environment (Model 2 dedicated stamp; Model 1 shared trial/SMB).
+> **Applies To**: Every new Spaarke customer environment. **Model 1** = dedicated stamp in Spaarke's Azure tenant; **Model 2** = dedicated stamp in the customer's own Azure tenant (D-12, 2026-09-28).
 > **Owner**: Platform Operations. Maintained by `customer-provisioning-orchestration-r1` and its successors.
 
 ---
@@ -86,7 +86,7 @@ Historically Spaarke has three generations of provisioning assets (Gen 1 manual 
 **In-scope for r1** (this guide covers all of these):
 
 - 19 handlers H0–H14, L2 control plane, `/provision-environment` skill (Phase D)
-- Model 1 shared trial/SMB tier + Model 2 dedicated stamp
+- Model 1 (Spaarke-tenant dedicated stamp) + Model 2 (customer-tenant dedicated stamp)
 - Tenant-isolation invariants I1–I5 (ArchTest-enforced)
 - Canonical KV secret catalog + naming compliance (Phase G/H)
 - UAMI migration (Phase C — structural fix for T5 slot-swap trap)
@@ -150,8 +150,8 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |
 | Azure region | `westus2` (default) | Customer intake / geo requirement |
 | Dataverse region | `unitedstates` (default) | Must match Azure region locality |
-| Tenancy model | `Model2Dedicated` (default) or `Model1Shared` | Per §3 selection criteria |
-| Deployment profile | `spaarke-hosted`, `customer-owned`, `demo`, `trial` | Per D15 |
+| Tenancy model | `Model2Dedicated` — ⚠️ currently the **only** valid value, and it covers **both** new models. `Model1Shared` is retired. Migration pending (D-12 §6). | Per §3 selection criteria |
+| Deployment profile | `spaarke-hosted-model2` (= the new **Model 1**), `customer-owned-model2` (= the new **Model 2**), `demo`. ⚠️ `spaarke-hosted-model1-trial` is **retired — never select it**. Names still encode the old vocabulary because the live L2 API validates them; renaming is part of the D-12 §6 enum migration. | Per D15 |
 | Customer admin contact | Name, email, phone | For H0.5 consent flow (Model 2) |
 
 ### 2.4 External lead-time items (surface BEFORE starting pipeline)
@@ -186,55 +186,101 @@ az webapp list --query "[?name=='spaarke-bff-{customerId}-{env}']"
 
 ## 3. Deployment Model Selection
 
-Per D3 (v3), Spaarke supports **two tenancy models**. Same code, different Bicep composition, different post-conditions.
+> 🔴 **REWRITTEN 2026-09-28 — owner decisions D-12 + D-13.** This section previously defined **Model 1 as
+> a shared trial/SMB tier** sharing App Service Plan, Azure OpenAI and AI Search across customers. That tier
+> is **RETIRED**. It was documented, specified, funded and partly built in Bicep, but **never implemented in
+> the engine** — `H5DataverseEnvCreationHandler` creates a Dataverse environment **unconditionally**, keyed
+> `dvenv-{customerId}`. There has never been a code path in which two customers share an environment.
 
-### 3.1 Model 2 — Dedicated Stamp (default)
+Spaarke supports **two deployment models**. They differ on **one axis only: which Azure tenant owns the
+customer's subscription.** Everything else is the same.
 
-**When to choose**: regulated/enterprise customers requiring physical isolation, expected sustained usage, per-customer cost transparency.
+| | Dataverse environment | Azure tenant | Azure subscription + resource group |
+|---|---|---|---|
+| **Model 1** | dedicated, one per customer | **Spaarke's** | dedicated, one per customer |
+| **Model 2** | dedicated, one per customer | **the customer's own** | dedicated, one per customer |
 
-**Composition**:
+**Only two things actually differ**, and both follow from tenant ownership:
 
-- Dedicated per-customer: **Azure OpenAI**, **AI Search**, Document Intelligence, Service Bus, Cosmos DB, Key Vault, App Insights, Storage, App Service Plan, App Service (BFF), UAMI
-- Dedicated: Dataverse env, SPE container-type + root container, Entra app registration (BFF; multitenant per FR-06)
-- **Not per-customer**: Redis (per-environment via `scripts/Deploy-RedisCache.ps1` per Q-E FR-12)
-
-**Cost floor**: ≤ $400/mo Azure per empty environment (per NFR-04); usage-passthrough pricing native via Azure Cost Management + tags.
-
-**Bicep stack**: `infrastructure/bicep/customer.bicep` or `model2-full.bicep`.
-
-### 3.2 Model 1 — Shared Trial/SMB Tier
-
-**When to choose**: trial prospects, SMB customers where the fixed-floor cost of a dedicated stamp is uneconomic, evaluation deployments.
-
-**Composition** (per §3A A1):
-
-- **Shared** across all Model 1 tenants: App Service Plan, Azure OpenAI (metered per D19), Azure AI Search (per-tenant `tenantId` filter on every query)
-- **Dedicated per-customer**: Dataverse env, SPE container-type + root container, Key Vault, Storage, UAMI, Entra app config
-
-**Cost envelope**: ≤ $430/mo marginal per customer (5-10 users, capped tokens); ≤ $400/mo shared platform floor.
-
-**Bicep stack**: `infrastructure/bicep/stacks/model1-shared.bicep`.
-
-**Additional invariants for Model 1** (see §8 for full I1–I5 detail):
-
-- Per-tenant token metering (D19) enforces `tokenBudgetMonthlyUSD` — over-budget attempts return HTTP 429
-- **`tenantId eq` filter mandatory on every AI Search query** (I2 / FR-29) — never a fallback default index scan
-- All Cosmos operations carry `/tenantId` partition-key predicate (I3 / FR-30)
-
-### 3.3 Model 1 vs Model 2 handler-behavior differences
-
-Handlers execute the same code but different inputs and post-conditions per tenancy model. Full table in `design.md` §4.1a; summarized here:
-
-| Handler | Model 2 (dedicated) | Model 1 (shared trial/SMB) |
+| | Model 1 | Model 2 |
 |---|---|---|
-| **H0 preflight** | Full per-customer OpenAI quota + subscription vCPU headroom | Verify per-tenant token budget + shared-platform capacity for +1 tenant |
-| **H2a Bicep** | `customer.bicep` — full dedicated stamp | `model1-shared.bicep` — dedicated KV/Cosmos/Storage/UAMI **only**; shares App Service Plan + AI Search + OpenAI |
-| **H2b AI Search indexes** | 7 indexes on customer's dedicated AI Search | 7 indexes **already exist** on shared platform — H2b verifies + provisions per-tenant `tenantId`-filter query template |
-| **H7 env-var + app-settings** | Points at customer's dedicated OpenAI/AI Search/App Insights | Points at shared platform OpenAI/AI Search; per-tenant metering headers set via D19 layer |
-| **H12c runtime refs** | `sprk_aimodeldeployment` → customer's dedicated OpenAI | `sprk_aimodeldeployment` → shared platform OpenAI with per-tenant attribution |
-| **H13 acceptance** | Full E2E + verify dedicated-resource isolation | Full E2E + verify `tenantId`-filter enforcement + token-metering attribution |
+| **H0.5 admin consent** | not needed (Spaarke's own tenant) | **required** |
+| **H1 Azure Lighthouse delegation** | not needed (Spaarke owns the subscription) | **required** |
 
-Handlers not listed behave identically across tiers.
+⚠️ **The models are now nearly identical infrastructurally.** Resist the pull to justify having two models
+by inventing differences between them — the list above is complete.
+
+### 3.1 Terminology — binding
+
+| Term | Meaning |
+|---|---|
+| **tenant** / `tenantId` | The Entra / Azure / Dataverse **tenant GUID**. Model 1 ⇒ always Spaarke's. Model 2 ⇒ the customer's. |
+| **customer** | The business entity Spaarke sells to. **Many customers share one Azure tenant** under Model 1. |
+
+🔴 **Never write "tenant" when you mean "customer."** Under Model 1 every customer presents the **same**
+`tenantId`, so any control keyed on it — an AI Search `tenantId eq` filter, a Cosmos `/tenantId` partition,
+an SPE container resolver, a `tenant:{tenantId}:…` cache key — **cannot separate customers, and its tests
+pass anyway.**
+
+### 3.2 Composition — identical in both models
+
+**Dedicated per customer**: Dataverse environment · SPE container-type + root container ·
+**Entra app registration (BFF)** · App Service + Plan · Azure OpenAI · AI Search · Cosmos DB ·
+**Redis (Standard tier)** · Storage · Key Vault · Service Bus · Document Intelligence ·
+App Insights + Log Analytics · UAMI · Power BI workspace.
+
+**Shareable — exactly two named exceptions**, each requiring a **`customerId`** discriminator in the BFF
+runtime: **Static Web Apps** (Office add-ins + external SPA) and **Content Safety**. The list is **CLOSED**;
+the admission test is *holds no privileged legal content at rest*. Full criteria:
+`projects/unified-access-control-r2/notes/D-12-resource-sharing-analysis.md`.
+
+🔴 **The BFF Entra app registration is per customer — D-13, BINDING, do not re-open.** The app registration
+determines the Dataverse **application user**, which is assigned to exactly one **business unit**, and every
+BFF-created record is owned by that application user — so a record can only land in customer X's business
+unit if the BFF authenticated as an app registration dedicated to customer X. Mechanism and rejected
+counter-arguments: `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
+
+⚠️ **Why dedication, and not a filter.** Dedicating a resource moves isolation from a query predicate to a
+resource boundary. A predicate must be written correctly in every query, forever, by everyone; a boundary
+cannot be forgotten. For a product holding privileged legal material that difference is the whole argument.
+
+**Azure subscription structure**: one subscription **and** one resource group per customer, so usage is
+segregated and billed per customer natively (ADR-027, amended 2026-09-28). 🔴 This **forces** a dedicated
+App Service Plan — an App Service app cannot use a plan in a different subscription — which is the largest
+single per-customer fixed cost.
+
+**Bicep stack**: `infrastructure/bicep/customer.bicep` / `stacks/model2-full.bicep` — the same per-customer
+stamp for both models. ⚠️ `stacks/model1-shared.bicep`, `stacks/model1-customer.bicep`,
+`modules/model1-shared-l2-rbac.bicep` and `parameters/model1-prod.bicepparam` are **retired artifacts**;
+`model1-shared.bicep` has not compiled since 2026-08-17. Retiring them is a **coordinated multi-surface
+change** (parameter files bound by `using`, an inverted-polarity assertion in `bicep-e2e-dry-run.ps1` that
+passes only while the build fails, and a GitHub workflow whose manifest schema declares `model1-shared` a
+**required** key) — not yet done.
+
+### 3.3 Handler behaviour — what differs
+
+Handlers execute the same code and, as of D-12, almost the same inputs.
+
+| Handler | Model 1 | Model 2 |
+|---|---|---|
+| **H0.5 consent-callback** | **skipped** — Spaarke's own tenant | **required** |
+| **H1 subscription readiness** | SpaarkeOwned ⇒ **no Lighthouse** | CustomerOwned ⇒ **Lighthouse required** |
+
+🔴 **Every other handler behaves identically.** The former per-model table — H0 shared-platform capacity,
+H2a `model1-shared.bicep`, H2b "7 indexes already exist on shared platform", H7/H12c pointing at shared
+platform OpenAI, H13 verifying `tenantId`-filter enforcement — described the retired tier and is deleted.
+
+⚠️ **A known live defect until the enum migration lands** (D-12 §6): `sprk_tenancymodel` value `1`
+(`Model2Dedicated`) covers **both** new models, and `H1SubscriptionReadinessHandler` maps that literal to
+`CustomerOwned` unconditionally — so it currently **demands Lighthouse delegation for subscriptions Spaarke
+already owns**. Expect this when provisioning a new Model 1 customer today.
+
+### 3.4 Invariants — what I1–I5 actually enforce
+
+I2 (AI Search `tenantId` filter), I3 (Cosmos `/tenantId` partition) and I4 (SPE container resolver) remain
+in force and remain ArchTest-enforced, **but they are belt-and-braces, not the customer boundary.** They key
+on `tenantId`, which is identical for every Model 1 customer. The boundary is the dedicated per-customer
+resource in the per-customer subscription. I1 and I5 are unaffected.
 
 ---
 
@@ -315,7 +361,7 @@ Enumerated `gateStates` + `interStepState` shapes per `design.md` §6.2.
 
 - `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_provisionedon`
 - `sprk_currentrunid` (I5 concurrency serialization)
-- `sprk_tenancymodel` (Choice: Model1Shared / Model2Dedicated)
+- `sprk_tenancymodel` (Choice) — 🔴 **MIGRATE, DO NOT RELABEL** (D-12 §6): value `1` (`Model2Dedicated`) holds **both** old-2a and old-2b, which now split across **different** models and need **opposite** Lighthouse answers; value `0` (`Model1Shared`) has **no successor**
 - `sprk_tenantid` (populated from H0.5 or run params)
 - `sprk_bffversion`, `sprk_solutionversion`, `sprk_ClientCacheBustToken` (§14A upgrade compat)
 
@@ -332,18 +378,18 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy: RG, KV, Storage, Service Bus, Cosmos, OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR. Redis explicitly **NOT** per-customer | — | `infra-{customerId}-{bicepVer}` |
 | **H2b** | AI Search indexes | Provision 7 canonical indexes via `scripts/ai-search/Deploy-AllIndexes.ps1` (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) | — | `aisearch-{customerId}-{indexVer}` |
-| **H3** | Entra app registration | 1 BFF app-reg with ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent) | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
+| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ⚠️ **The code does not do this yet**: `H3EntraAppRegHandler` still has a `Model1Shared` branch that creates **zero** app registrations and reuses `SharedBffAppRegistrationId`. Deleting it is open work. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` |
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
 | **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s) | Container GET succeeds; container ID persisted to Dataverse + KV | `spe-{customerId}` |
-| **H9** | BFF deploy | `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (customerId-driven, no `spaarkedev1` hardcode) | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
+| **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
-| **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at correct OpenAI deployment (Model 2 dedicated; Model 1 shared with attribution) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
+| **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
 | **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 6 T1–T6 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` |
 | **H14** | Post-deploy integrations | (a) 2 Exchange `ApplicationAccessPolicy` (BFF app-reg + UAMI — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | `Get-ApplicationAccessPolicy` returns 2 with both principals | `integrations-{customerId}-{integrationVer}` |
 
@@ -424,7 +470,7 @@ Set by H7 per §10.3 of design.md:
 | `sprk_BffApiAppId` | BFF app-reg client ID |
 | `sprk_MsalClientId` | MSAL client ID for browser flows |
 | `sprk_TenantId` | Customer tenant GUID (I1 enforcement — no default) |
-| `sprk_AzureOpenAiEndpoint` | Model 2: dedicated OpenAI; Model 1: shared platform OpenAI |
+| `sprk_AzureOpenAiEndpoint` | The customer's **own dedicated** Azure OpenAI endpoint — both models (D-12 §3). `SharedPlatformOpenAiEndpoint` is a retired artifact |
 | `sprk_ShareLinkBaseUrl` | Customer-facing share link base URL |
 | `sprk_SharePointEmbeddedContainerId` | Populated from H8 output (I4 enforcement) |
 
@@ -463,9 +509,9 @@ Failure diagnostic surfaces to operator; run does not start until resolved.
 
 **H1** verifies target subscription is reachable + Lighthouse delegation (`CustomerOwned` only).
 
-**H2a** deploys the per-customer Bicep stack:
-- **Model 2**: `customer.bicep` — 15 resources per §7.2 of design.md
-- **Model 1**: `model1-shared.bicep` — dedicated KV/Cosmos/Storage/UAMI only
+**H2a** deploys the per-customer Bicep stack — **the same stack in both models** (D-12):
+- `customer.bicep` — 15 resources per §7.2 of design.md, into the customer's own subscription + resource group
+- ⚠️ `model1-shared.bicep` is a **retired artifact** (§3.2) and is not deployed
 
 Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + report on drift (per FR-34).
 
@@ -477,6 +523,13 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 - `-TenantId` is **mandatory** (I1 enforcement — no default per v3.3 code fix `1834b77bc`)
 - Grants ~14 permissions per `Infrastructure/Auth/GraphAppRoles.cs`
 - Client secret stored as KV URI reference (never cleartext)
+
+**Office add-in SPA redirect URIs (Outlook/Word add-in sign-in — REQUIRED, per add-in host).** If the environment serves the Spaarke Office add-in, register BOTH of the following as **Single-page application (SPA)** platform redirect URIs on the app registration:
+
+- `brk-multihub://<addin-host>` — the Nested-App-Authentication (NAA) broker redirect used by **desktop** Office (Windows/Mac).
+- `https://<addin-host>/auth-callback.html` — the standard MSAL popup redirect used by **Office on the web** (which does not support NAA, so `OfficeNaaStrategy` falls back to a standard `PublicClientApplication`).
+
+`<addin-host>` is the origin serving the add-in bundle (the Static Web App / CDN host in the manifest `SourceLocation`), so these are **per-host** — every environment (dev / each customer) that serves the add-in from a distinct host needs its own pair. Missing them produces `AADSTS7000471` ("no matching redirect URI") at add-in sign-in. Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts) derives the broker redirect as `brk-multihub://${window.location.hostname}` and the web fallback as `https://<host>/auth-callback.html`.
 
 **Escalation gate** (per FR-13 / H10): 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` must be completed via `az` enumeration BEFORE first production customer provisioning.
 
@@ -503,11 +556,19 @@ Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId
 
 ### 7.6 Phase 6 — BFF Deployment (H9)
 
-**H9** invokes `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (customerId-driven, no `spaarkedev1` hardcode per Gap 2).
+**H9** (`H9BffDeployHandler`) deploys the CI-published BFF artifact — nothing is built at provision time. In order:
+
+1. Scan the hardened `Deploy-Release.ps1` Phase 4 for a `spaarkedev1` hardcode (Gap 2) — blocks if found.
+2. Resolve and verify the artifact manifest (`latest.json`) — blocks on a missing or red gate result recorded by CI.
+3. Download the artifact zip (UAMI RBAC).
+4. **Scheduled-jobs slot guard** — set `Scheduling__RunScheduledJobs=false` on the staging slot and make it slot-sticky on the site (merge, never replace; a re-run writes nothing). Fails closed: if it cannot be set, nothing is deployed, because a slot without it runs the BFF's scheduled jobs against production data (ADR-036 A1 rule 2).
+5. Kudu zip-deploy to the staging slot.
+6. Staging `/healthz` probe, then the NFR-01 publish-size check.
+7. Swap staging → production, production `/healthz` smoke test, re-swap rollback on failure.
 
 **Blue-green** via staging slot in upgrade mode; rollback via re-swap.
 
-r3-era gates (all must pass):
+r3-era gates (all must pass — run in CI and recorded in the manifest):
 - Analyzers-as-errors
 - God-class ratchet (no NEW server `.cs` > 2,000 LOC; 13 frozen files respect +100 grace)
 - 5 new ArchTests (I1–I5 tenant-isolation invariants)
@@ -539,7 +600,7 @@ Then syncs Graph app-role parity from `GraphAppRoles.cs` constant onto UAMI SP.
 
 Both consume the **declarative seed manifest** (resolves the `scripts/seed-data` MVP vs `infra/dataverse` R7 drift per INVENTORY §9).
 
-**H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (Model 2 dedicated; Model 1 shared with per-tenant attribution). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
+**H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
@@ -584,6 +645,7 @@ Cross-tenant data bleed is the single class of catastrophe r1 must make structur
 **Verification lifecycle**:
 
 - **At code time**: 5 ArchTests (CI Tier-1 blocking, coordinated PR with `ci-cd-unit-test-remediation-r1`)
+  - **Functions projects** live under `src/server/functions/` ([ADR-052](../adr/ADR-052-workload-placement.md) §5). The I2 and I3 ArchTests scan all of `src/server/**`, so a Model-1 shared Function carries those invariants automatically; I4 and I5 currently scan BFF paths only (`Sprk.Bff.Api/Services`, `Sprk.Bff.Api/Infrastructure/{Graph,Auth}`), so a Function's SPE-container and Graph-token code is covered by review until those scans are widened.
 - **At provisioning time**: H13 samples a query in each of the 5 classes
 - **At runtime**: OpenTelemetry span attributes include `tenantId`; log samples cross-referenced for anomaly detection
 
@@ -673,7 +735,7 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
 1. Complete §2.5 preflight naming collision check
 2. Verify §2.4 external lead-time items (Azure quota, SPE cert-bootstrap, Model 2 admin consent)
 3. Verify §2.2 identity + access role assignments
-4. Confirm §3.1/§3.2 tenancy model choice with customer / stakeholder
+4. Confirm the tenancy model with the customer (§3) — Model 1 = Spaarke tenant, Model 2 = customer tenant / stakeholder
 
 ### 12.2 Provisioning sequence (interim)
 
@@ -683,7 +745,7 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
     -CustomerId "acme" `
     -TenantId "<customer-tenant-guid>" `   # MANDATORY per I1
     -Environment "prod" `
-    -TenancyModel "Model2Dedicated" `      # or "Model1Shared"
+    -TenancyModel "Model2Dedicated" `      # covers BOTH models until the D-12 enum migration; "Model1Shared" is retired
     -SubscriptionId "<sub-guid>" `
     -Region "westus2"
 
@@ -898,6 +960,19 @@ Diagnostic:
 **Post-Phase-C** (UAMI): T5 is structurally impossible — same UAMI bound to both slots. If still observed, verify `app-service.bicep` refactor landed on this environment.
 
 ### 13.3 SPE 403 "public client not allowed"
+
+> 🔴 **CONTRADICTED 2026-08-28** by `sdap-SPE-admin-app-r2`. The remedy below conflates two different
+> things: **"confidential client" is not "app-only".** Container-type CREATE is **delegated-only** —
+> Microsoft lists Application permission as *"Not supported"*, and an app-only
+> (`client_credentials`) token gets `403 accessDenied` even with the role granted and
+> admin-consented (probed twice 2026-08-28; also task 010, 2026-08-21).
+> `scripts/Create-NewContainerType.ps1` does exactly that (line 46 `client_credentials` → line 76
+> `POST /beta/storage/fileStorage/containerTypes`) and therefore **cannot work**. The correct fix for
+> a public-client rejection is a confidential client performing a **delegated** exchange
+> (auth-code / OBO), not `client_credentials`.
+> **Until fixed, create container types via the SPE Admin app, the VS Code extension, or the
+> SharePoint admin center.** Treat H8 as unproven. Full analysis:
+> [`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](../architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) §7.
 
 T6 root cause. Handler H8 (or interim `Create-NewContainerType.ps1`) must use confidential-client (app-only) token with cert bootstrapped from KV. If retrofitting an existing env: re-run H8 (or manually invoke updated script) with `-UseConfidentialClient` switch.
 

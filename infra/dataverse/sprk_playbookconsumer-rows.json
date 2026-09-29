@@ -374,7 +374,8 @@
       "chipTransitions": "[]",
       "onEventBindings": null,
       "matchConditions": null,
-      "toolDescription": "Prepare the user's daily briefing: what changed on their matters and projects, tasks due soon or overdue, recent activity, and high-priority flagged items, narrated per channel with a TL;DR. Use when the user asks for a briefing, a daily update, or what changed since yesterday."
+      "$comment-r4-uat-2026-08-18": "toolDescription NULLED to remove this Informational binding from the chat-loop projection. R4 UAT: a typed suggestion 'Prepare your daily briefing with updates' dispatched this capability and its structured {tldr,channelNarratives,...} payload (built for the Daily Briefing WIDGET, not chat) was DUMPED as raw JSON in the transcript — the client has no chat renderer for it. A non-empty sprk_tooldescription is the SOLE opt-in to text-loop projection (ConsumerRoutingService.SelectTextProjectable ignores sprk_surfaces), so nulling it removes it from both the agent tool set and the 021 suggestion proposer. Daily briefing belongs in its TAB (the task-022/023 'Open Daily Briefing' follow-on card / surfaceLaunchRegistry), not inline chat. Nulling is safe: the scheduler/email composite (UC-D-1) resolves by consumerType/actionCode, not by toolDescription. Prior value: 'Prepare the user's daily briefing: what changed on their matters and projects, tasks due soon or overdue, recent activity, and high-priority flagged items, narrated per channel with a TL;DR. Use when the user asks for a briefing, a daily update, or what changed since yesterday.'",
+      "toolDescription": null
     },
     {
       "consumerType": "daily-briefing-narrate",
@@ -393,7 +394,8 @@
       "chipTransitions": "[]",
       "onEventBindings": "[{\"event\":\"briefing_scheduled\",\"order\":1}]",
       "matchConditions": null,
-      "toolDescription": "Email delivery leg of the Daily Briefing coded composite (UC-D-1): same collect+narrate workflow, routed to the Communication (Email) service by the email disposition. Scheduler surface only - not offered to the chat loop."
+      "$comment-r4-uat-2026-08-18": "toolDescription NULLED. This leg is explicitly 'Scheduler surface only - not offered to the chat loop', yet a non-empty sprk_tooldescription is the SOLE opt-in to chat-loop projection (SelectTextProjectable ignores sprk_surfaces=scheduler), so it was projectable despite its own stated intent. Nulled to honor that intent + prevent chat-loop selection. Scheduler path resolves by consumerType/actionCode + onEventBindings(briefing_scheduled), not by toolDescription. Prior value: 'Email delivery leg of the Daily Briefing coded composite (UC-D-1): same collect+narrate workflow, routed to the Communication (Email) service by the email disposition. Scheduler surface only - not offered to the chat loop.'",
+      "toolDescription": null
     },
     {
       "consumerType": "document-profile",

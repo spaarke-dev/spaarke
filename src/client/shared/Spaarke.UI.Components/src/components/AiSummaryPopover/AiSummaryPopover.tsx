@@ -46,7 +46,24 @@ export interface IAiSummaryPopoverProps {
   positioning?: 'above' | 'below' | 'before' | 'after';
   /** Whether to show the arrow. Default: true. */
   withArrow?: boolean;
+  /**
+   * Body text when the fetch resolves with neither `summary` nor `tldr`.
+   *
+   * Defaults to the DOCUMENT-oriented copy this component has always shipped,
+   * so the nine existing callers (VisualHost, SemanticSearchControl,
+   * DocumentCard, RichFilePreview, InsightSummaryCard, DocumentLibrary,
+   * MessageQuickView, CalendarVisual, MatterHeader) render exactly what they
+   * rendered before this prop existed.
+   *
+   * Record headers override it: a Matter or Project is not a document, and at
+   * R2 ship time an unpopulated summary is the EXPECTED steady state rather
+   * than a failure — a separate project populates the column (r2 FR-17).
+   */
+  emptyText?: string;
 }
+
+/** The shipped default for {@link IAiSummaryPopoverProps.emptyText}. */
+export const AI_SUMMARY_DEFAULT_EMPTY_TEXT = 'No summary available for this document.';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -95,6 +112,7 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
   onFetchSummary,
   positioning = 'after',
   withArrow = true,
+  emptyText = AI_SUMMARY_DEFAULT_EMPTY_TEXT,
 }) => {
   const styles = useStyles();
 
@@ -158,12 +176,25 @@ export const AiSummaryPopover: React.FC<IAiSummaryPopoverProps> = ({
             <Spinner size="small" label="Loading summary..." />
           </div>
         )}
-        {error && <Text>Summary not available for this document.</Text>}
+        {error && <Text data-testid="sparkle-popover-error">Summary not available for this document.</Text>}
         {data && !loading && (
+          // The three bodies below are mutually exclusive by construction, and
+          // each carries a stable `data-testid` so a consumer suite can assert
+          // WHICH state rendered rather than pattern-matching on copy. An empty
+          // STRING is falsy here, so `''` lands on the empty state alongside
+          // `null`/`undefined` — that is deliberate (r2 FR-17).
           <React.Fragment>
-            {data.tldr && <Text weight="semibold">{data.tldr}</Text>}
-            {data.summary && <Text style={{ whiteSpace: 'pre-wrap' }}>{data.summary}</Text>}
-            {!data.summary && !data.tldr && <Text>No summary available for this document.</Text>}
+            {data.tldr && (
+              <Text weight="semibold" data-testid="sparkle-popover-tldr">
+                {data.tldr}
+              </Text>
+            )}
+            {data.summary && (
+              <Text style={{ whiteSpace: 'pre-wrap' }} data-testid="sparkle-popover-summary">
+                {data.summary}
+              </Text>
+            )}
+            {!data.summary && !data.tldr && <Text data-testid="sparkle-popover-empty">{emptyText}</Text>}
           </React.Fragment>
         )}
       </PopoverSurface>

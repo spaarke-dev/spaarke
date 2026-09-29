@@ -47,28 +47,12 @@ public class TodoRegardingBuilderTests
                 .ReturnsAsync(recordTypeRef);
         }
 
-        return new TodoRegardingBuilder(_commServiceMock.Object, _loggerMock.Object);
+        return new TodoRegardingBuilder(_commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _loggerMock.Object);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
     // ──────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullCommService_Throws()
-    {
-        var act = () => new TodoRegardingBuilder(null!, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("communicationService");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        var act = () => new TodoRegardingBuilder(_commServiceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Argument validation

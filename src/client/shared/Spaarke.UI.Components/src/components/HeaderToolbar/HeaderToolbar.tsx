@@ -159,6 +159,7 @@ export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots,
               </Tooltip>
             }
             onFetchSummary={aiSummary.onFetchSummary}
+            emptyText={aiSummary.emptyText}
             positioning="below"
           />
         ) : null}

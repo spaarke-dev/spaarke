@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { TaskPaneHeader, type HostType } from './TaskPaneHeader';
-import { TaskPaneNavigation, type NavigationTab, getDefaultTab } from './TaskPaneNavigation';
+import type { HostType } from './TaskPaneHeader';
+import { getDefaultTab, type NavigationTab } from './TaskPaneNavigation';
+import { TaskPaneToolbar } from './TaskPaneToolbar';
 import { TaskPaneFooter, type ConnectionStatus } from './TaskPaneFooter';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
@@ -184,29 +185,20 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
 
   return (
     <div className={styles.shell}>
-      {/* Header */}
-      <TaskPaneHeader
-        title={title}
+      {/* Single consolidated toolbar: logo + tabs (left) + overflow tools (right). */}
+      <TaskPaneToolbar
         hostType={hostType}
-        userName={userName}
-        userEmail={userEmail}
+        showTabs={showNavigation}
+        selectedTab={selectedTab}
+        onTabChange={handleTabChange}
         isAuthenticated={isAuthenticated}
-        onSignOut={onSignOut}
-        onSettings={onSettings}
+        {...(userName ? { userName } : {})}
+        {...(userEmail ? { userEmail } : {})}
+        {...(onSignOut ? { onSignOut } : {})}
+        {...(onSettings ? { onSettings } : {})}
         themePreference={themePreference}
-        onThemeChange={onThemeChange}
-        compact={isCompact}
+        {...(onThemeChange ? { onThemeChange } : {})}
       />
-
-      {/* Navigation (only show if authenticated and enabled) */}
-      {showNavigation && isAuthenticated && (
-        <TaskPaneNavigation
-          selectedTab={selectedTab}
-          onTabChange={handleTabChange}
-          hostType={hostType}
-          compact={isCompact}
-        />
-      )}
 
       {/* Main Content with Error Boundary */}
       <main className={contentClassName}>

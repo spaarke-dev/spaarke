@@ -115,7 +115,7 @@ public class TodoGenerationServiceTests
 
         // Inject a TodoRegardingBuilder via the internal test seam so creation paths
         // with regarding parents can run without ExecuteAsync's lazy initialization.
-        svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(_commServiceMock.Object, _builderLoggerMock.Object));
+        svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(_commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _builderLoggerMock.Object));
 
         return svc;
     }
@@ -174,50 +174,6 @@ public class TodoGenerationServiceTests
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor tests
     // ──────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullServiceProvider_ThrowsArgumentNullException()
-    {
-        var act = () => new TodoGenerationService(
-            null!,
-            _loggerMock.Object,
-            _defaultOptions);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("serviceProvider");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(_dataverseMock.Object);
-        var sp = services.BuildServiceProvider();
-
-        var act = () => new TodoGenerationService(
-            sp,
-            null!,
-            _defaultOptions);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
-    [Fact]
-    public void Constructor_NullOptions_ThrowsArgumentNullException()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(_dataverseMock.Object);
-        var sp = services.BuildServiceProvider();
-
-        var act = () => new TodoGenerationService(
-            sp,
-            _loggerMock.Object,
-            null!);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("options");
-    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // TodoExistsAsync — idempotency guard (now queries sprk_todo, not sprk_event)

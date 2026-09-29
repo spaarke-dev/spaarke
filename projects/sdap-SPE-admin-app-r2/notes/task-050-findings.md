@@ -208,7 +208,11 @@ gated on it was completed.
 
 ```powershell
 Update-Module Microsoft.Online.SharePoint.PowerShell      # need >= 16.0.27515.12000
-Connect-SPOService -Url https://spaarkedev1-admin.sharepoint.com
+Connect-SPOService -Url https://spaarke-admin.sharepoint.com     # NOT spaarkedev1-admin — the SharePoint tenant is
+#                                                        # `spaarke`, verified from a container's drive
+#                                                        # webUrl (https://spaarke.sharepoint.com/...).
+#                                                        # The Dataverse org name (spaarkedev1) and the
+#                                                        # SharePoint tenant name are different things.
 Set-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-6055-4681-8f87-2f4f9f921c06 -IsArchiveEnabled $true
 Get-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-6055-4681-8f87-2f4f9f921c06   # confirm
 ```
@@ -220,3 +224,69 @@ container. Expect `recentlyArchived`, and expect `archivalDetails` to begin appe
 successful archive, then the property is unserved on this tenant despite being in the CSDL — the
 `webUrl` situation again — and the grid must show archive state from the action outcome plus
 `Get-SPOContainer -ArchiveStatus`, not from `archivalDetails`. The code isolates this in one mapper.
+
+---
+
+## 8. Opt-in was set 2026-08-28 — and Graph STILL refuses
+
+The operator ran the corrected command against the right tenant
+(`https://spaarke-admin.sharepoint.com` — see §7's URL correction) and it took:
+
+```
+Set-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-… -IsArchiveEnabled $true
+Get-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-…
+  → IsArchiveEnabled : True     (confirmed on an independent read-back)
+```
+
+**Graph is unchanged.** Probed on a fresh throwaway container (created → activated → probed → torn
+down 204/204, 0 leftovers verified):
+
+```
+POST /beta/storage/fileStorage/containers/{id}/archive
+  → 403 notAllowed: "Archival operation cannot proceed because this
+                     application does not currently support archiving."
+```
+
+Byte-identical to the pre-opt-in response.
+
+### The wording is the clue, and it is not the one we assumed
+
+The message names **"this APPLICATION"** — the owning app registration `170c98e1` — not the container
+type. Task 050 originally read this as "the container type has not opted in". That reading is now
+**unproven**: the container type HAS opted in and the message did not change.
+
+Two candidates, not yet distinguishable:
+
+| # | Hypothesis | How to falsify |
+|---|---|---|
+| **1** | **Replication lag.** SPE container-type settings propagate asynchronously — up to **24 h**. Spec FR-C08 exists because of exactly this. | Re-probe after ~24 h. If it succeeds, this was it |
+| **2** | **A separate application-level capability**, distinct from the container-type flag — i.e. the sentence is literal | Only worth chasing if (1) is ruled out. No evidence beyond the wording |
+
+**Do not conclude (2) from the sentence alone.** Reading a vendor error message as a precise
+statement about system state is how this project got `Set-SPOContainerType -IsArchiveEnabled` (a
+command that does not exist) into five documents. (1) is free to test and is documented behaviour.
+
+### `archivalDetails` — the watch item still stands
+
+An **active** container returns these keys and no more:
+
+```
+containerTypeId, createdDateTime, description, displayName, id, lockState, ownershipType,
+settings, status
+```
+
+`archivalDetails` is **absent**, as it has been in every observation. It has still never been seen on
+the wire. If it remains absent after a successful archive, the grid must source archive state from
+the **action outcome**, not the property — the code already isolates that decision in one mapper
+(`ReadArchiveStatus`).
+
+### Status
+
+**AC-1 / AC-2 remain unmet**, and the escalation remains open — but the *reason* has changed and is
+now narrower: it is no longer "the operator has not run the command". Re-probe scheduled for
+2026-08-29. `scratchpad/probe050_optedin.py` re-runs the whole check end to end.
+
+⚠️ Incidental, worth recording: the SPO configuration output carries **`CopilotEmbeddedChatHosts`**.
+FR-C07 asked for `agent.chatEmbedAllowedHosts`, which task 025 proved exists in **neither** Graph API
+version. So the *concept* is real but lives in SPO PowerShell only — it is not a Graph settings
+property, and FR-C07's omission of `sharingCapability` in its favour was still an error.

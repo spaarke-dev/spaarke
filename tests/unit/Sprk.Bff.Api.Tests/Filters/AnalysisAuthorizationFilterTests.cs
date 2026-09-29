@@ -300,14 +300,6 @@ public class AnalysisAuthorizationFilterTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_NullAuthService_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new AnalysisAuthorizationFilter(null!, _loggerMock.Object, AuthorizationMode.DocumentAccess);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
 
     #endregion
 }

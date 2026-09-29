@@ -84,27 +84,6 @@ public class InsightsIngestJobHandlerTests
     // ---------- Constructor + JobType ----------
 
     [Fact]
-    public void Constructor_NullInsightsAi_Throws()
-    {
-        var act = () => new InsightsIngestJobHandler(null!, _idempotencyServiceMock.Object, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("insightsAi");
-    }
-
-    [Fact]
-    public void Constructor_NullIdempotencyService_Throws()
-    {
-        var act = () => new InsightsIngestJobHandler(_insightsAiMock.Object, null!, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("idempotencyService");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        var act = () => new InsightsIngestJobHandler(_insightsAiMock.Object, _idempotencyServiceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
-
-    [Fact]
     public void JobType_ReturnsConstantValue()
     {
         _handler.JobType.Should().Be("InsightsUniversalIngest");

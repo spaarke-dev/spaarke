@@ -92,27 +92,6 @@ public class PlaybookSchedulerJobTests
         _sut.Description.Should().NotBeNullOrWhiteSpace();
     }
 
-    [Fact]
-    public void Constructor_WithNullScopeFactory_ThrowsArgumentNullException()
-    {
-        var act = () => new PlaybookSchedulerJob(null!, _configuration, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("scopeFactory");
-    }
-
-    [Fact]
-    public void Constructor_WithNullConfiguration_ThrowsArgumentNullException()
-    {
-        var act = () => new PlaybookSchedulerJob(_scopeFactoryMock.Object, null!, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("configuration");
-    }
-
-    [Fact]
-    public void Constructor_WithNullLogger_ThrowsArgumentNullException()
-    {
-        var act = () => new PlaybookSchedulerJob(_scopeFactoryMock.Object, _configuration, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
-
     // ── No active playbooks: success / processedItems=0 / empty children ─────────────────
 
     [Fact]

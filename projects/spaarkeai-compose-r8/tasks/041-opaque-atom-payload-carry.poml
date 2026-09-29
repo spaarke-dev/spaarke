@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A05/A06 — Promote opaque atoms into the write model with verbatim XML payload; table + atom identity</title>
+    <phase>4 Track A — Faithful Save</phase>
+    <gate>blocked-on-031</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the write content model and the ProseMirror node contract; a payload-carry error corrupts documents. PROVISIONAL — amendable by task 031.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: carrying verbatim XML through a JSON model and back into a document is the classic place where "it round-trips" is true for the test document and false for the one with a namespace declared on an ancestor. The SDK parse gate is what makes it safe, and knowing WHERE to gate it is judgment, not pattern-matching.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeContentModel.cs and the renderer alongside task 040's changes.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, frontend, compose, save-path, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    ⚠️ **PROVISIONAL** — re-read `notes/gate-decision.md` first; its findings override anything here.
+
+    R4 built the CLIENT half of opaque atoms and it shipped: `opaqueAtomNode.ts` defines `composeBlockAtom`
+    and `composeInlineAtom` as ProseMirror `atom: true` nodes, and its comment at ~:88 is explicit that the
+    atom carries "this atom's OWN identity (never a paraId)". `ComposeDocxProjection` has
+    `ComposeBlockAtom` / `ComposeAtomKind` (~:307-328) — but **on the READ side only**.
+
+    The write model has no atom kind at all: `ComposeBlockKind` is Paragraph | Heading | ListItem | Table, and
+    `ComposeInlineRun` (~:276) carries only Text/Bold/Italic/Underline/Href. So every field, SDT, drawing and
+    footnote reference the reader carefully identified is discarded the moment a save is built.
+
+    **FR-A05** — promote atoms into the WRITE model with their verbatim XML payload, so fields, SDT, drawings
+    and footnote refs round-trip as whole constructs. Generalize
+    `ComposeFormatChange.PreviousPropertiesXml`'s proven carry-with-SDK-parse-gate pattern. EXTEND the
+    existing `composeBlockAtom`/`composeInlineAtom` nodes — do not replace them.
+
+    **FR-A06** — give tables and atoms an identity: `ComposeBlock.Table` keyed by its first descendant cell
+    paraId; atoms by a server-minted `AtomId`. Without identity the merge cannot decide whether a table
+    changed.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose content model, OOXML fragment serialization, and ProseMirror atom nodes. Follow ADR-049 and ADR-038.</role>
+
+  <goal>
+    Fields, SDT, drawings and footnote references survive a save as whole constructs. Tables and atoms have
+    stable identity the merge can compare on. The client atom nodes carry payload without becoming editable.
+  </goal>
+
+  <context>
+    <background>
+      This is invariant (7) in concrete form — "deterministic information available at capture time MUST be
+      carried, not re-derived". The reader already knows exactly what each atom is; the write model throws it
+      away and the renderer then has nothing to reconstruct from. The fix is carry, not smarter rendering.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs (ComposeFormatChange.PreviousPropertiesXml ~:131)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs (~:307-328)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-A05">MUST EXTEND the existing `composeBlockAtom` / `composeInlineAtom` nodes. MUST NOT replace them or add a third atom node type (root §11).</constraint>
+    <constraint source="project">MUST generalize the `ComposeFormatChange.PreviousPropertiesXml` carry pattern INCLUDING its SDK parse gate. Carried XML MUST be validated as parseable before it is written into a document — an unparseable payload must degrade to thin render + warning, never corrupt the output.</constraint>
+    <constraint source="ADR-049 I-2">MUST NOT author `.docx` bytes on the client. The client carries an opaque payload it never interprets; only the server writes bytes.</constraint>
+    <constraint source="spec §Out of Scope">Carried constructs are PRESERVED, not made EDITABLE. Atoms stay `atom: true`. MUST NOT add editing affordances for footnotes, fields, SDT or drawings.</constraint>
+    <constraint source="project">Atom identity is a server-minted `AtomId` — NEVER a paraId (the existing client comment at opaqueAtomNode.ts ~:88 states this and it must remain true).</constraint>
+    <constraint source="project">Namespace correctness: a carried fragment may rely on namespace declarations from an ancestor in the source document. Verify round-trip for a fragment whose namespace is declared on `w:document`, not on the fragment itself.</constraint>
+    <constraint source="spec NFR-09">NEVER delete `docxBridge.ts`.</constraint>
+    <constraint source="spec NFR-02">No new NuGet. Report publish size.</constraint>
+    <constraint source="ADR-038">Coverage in `tests/integration/seam/**`, asserted through the gate harness on the corpus fixtures containing fields, footnotes and SDT (task 022).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>opaque XML carry, ProseMirror atoms, OOXML fragments</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load gate-decision.md, spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Read `ComposeFormatChange.PreviousPropertiesXml` (~:131) and its SDK parse gate. That is the pattern to generalize — understand exactly where it validates.</step>
+    <step order="2">Read the READ-side `ComposeBlockAtom`/`ComposeAtomKind` (~:307-328) and `opaqueAtomNode.ts`. Establish what the reader already knows about each atom.</step>
+    <step order="3">Add an atom kind + verbatim payload to the WRITE model (`ComposeBlockKind`, `ComposeInlineRun`), carrying the reader's information rather than re-deriving it.</step>
+    <step order="4">Extend the client atom nodes to carry the payload opaquely — stored, round-tripped, never interpreted, never editable.</step>
+    <step order="5">Renderer: write carried payloads back verbatim, gated on SDK parseability; unparseable → thin render + warning.</step>
+    <step order="6">Implement identity: `ComposeBlock.Table` keyed by first descendant cell paraId; atoms by server-minted `AtomId`.</step>
+    <step order="7">Verify namespace-inherited fragments round-trip. Run the gate on the field/footnote/SDT fixtures.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a carried fragment cannot be written back without also carrying part-level context (e.g. a footnote reference whose target lives in `footnotes.xml`, or a drawing with a relationship id into `document.xml.rels`), stop — cross-part carry is a larger design question than payload carry and needs an explicit decision about what "whole construct" means.</trigger>
+    <trigger>If a table has no descendant cell paraId (empty table, or an unstamped baseline), the identity scheme has a gap — surface it rather than falling back to positional identity silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The write model carries an atom kind plus verbatim XML payload; fields, SDT, drawings and footnote refs round-trip as whole constructs (corpus-asserted).</criterion>
+    <criterion>Carried XML passes an SDK parse gate before being written; an unparseable payload degrades to thin render + warning and never corrupts output (asserted by test).</criterion>
+    <criterion>A fragment whose namespace is declared on an ancestor round-trips correctly.</criterion>
+    <criterion>`ComposeBlock.Table` is keyed by its first descendant cell paraId; atoms carry a server-minted `AtomId`.</criterion>
+    <criterion>NEGATIVE: `AtomId` is never a paraId — the opaqueAtomNode.ts invariant still holds (verified by reading).</criterion>
+    <criterion>NEGATIVE: the existing `composeBlockAtom`/`composeInlineAtom` nodes were EXTENDED, not replaced; no third atom node type exists.</criterion>
+    <criterion>NEGATIVE: atoms remain `atom: true` and non-editable — no editing affordance was added for footnotes, fields, SDT or drawings.</criterion>
+    <criterion>NEGATIVE: no `.docx` bytes are authored on the client (ADR-049 I-2).</criterion>
+    <criterion>NEGATIVE: `docxBridge.ts` was not deleted.</criterion>
+    <criterion>The gate improves or holds on the field/footnote/SDT fixtures; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

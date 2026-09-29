@@ -42,7 +42,7 @@ import {
   mergeClasses,
 } from '@fluentui/react-components';
 import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
-import { getXrmForPicker } from '@spaarke/ui-components';
+import { getXrmForPicker, SprkModal } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
   applyRegardingSelection,
@@ -85,12 +85,16 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   // are ADDED to the candidate list as confirmable cards (not auto-filed) — the reviewer
   // clicks Confirm to file. Per-email; reset on selection change.
   const [addedCandidates, setAddedCandidates] = React.useState<PrimaryCandidate[]>([]);
+  // R3-CARD-2: the "See all" modal listing EVERY above-floor candidate (the strip caps
+  // at top-3). Per-email; closed on selection change.
+  const [seeAllOpen, setSeeAllOpen] = React.useState(false);
 
   // Session-local review state is per-selected-email — reset on selection change.
   React.useEffect(() => {
     setSelectedKey(undefined);
     setError(null);
     setAddedCandidates([]);
+    setSeeAllOpen(false);
   }, [communicationId]);
 
   // SAME data path as the engine (no client recompute; ADR-045).
@@ -127,6 +131,14 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     const seen = new Set(model.candidates.map(candidateKey));
     return [...model.candidates, ...addedCandidates.filter(c => !seen.has(candidateKey(c)))];
   }, [model.candidates, addedCandidates]);
+  // R3-CARD-2: the FULL candidate set the "See all" modal renders — every above-floor
+  // engine candidate (not just the strip's top-3) plus any reviewer-added lookups, deduped.
+  const allShownCandidates = React.useMemo(() => {
+    const seen = new Set(model.allCandidates.map(candidateKey));
+    return [...model.allCandidates, ...addedCandidates.filter(c => !seen.has(candidateKey(c)))];
+  }, [model.allCandidates, addedCandidates]);
+  // Candidates the strip hides behind the top-3 cap — the reason "See all" exists.
+  const hiddenCandidateCount = allShownCandidates.length - shownCandidates.length;
   // Item 2f: in the reconcile variant the primary now renders as a green candidate
   // card carrying its OWN Undo button — so the filed-banner's Undo is redundant and
   // is only shown for a primary NOT represented among the cards (a denorm-only /
@@ -384,6 +396,22 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
         )}
       </div>
 
+      {/* R3-CARD-2: the strip caps at the top-3 candidates, so a genuine 4th+ match
+          (e.g. PAT-942404 at 96.5%) sits off-strip. When more above-floor candidates
+          exist than the strip shows, offer "See all (N)" → a modal listing EVERY
+          candidate, each still confirmable. Only where the cards themselves render. */}
+      {(reconcile || !isConfirmed) && hiddenCandidateCount > 0 && (
+        <Button
+          className={s.seeAllBtn}
+          appearance="transparent"
+          size="small"
+          onClick={() => setSeeAllOpen(true)}
+          data-testid="see-all-candidates"
+        >
+          See all ({allShownCandidates.length})
+        </Button>
+      )}
+
       {/* Reconcile variant — "Look up another record" as a LABELLED FIELD (owner UAT
           round-3: "lookup record as more of a field"). A single click on the field
           opens the record-type menu → the host's polymorphic lookup dialog (same
@@ -436,6 +464,54 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           New record
         </Button>
       )}
+
+      {/* R3-CARD-2 — the "See all" modal. Lists EVERY above-floor candidate (the strip's
+          hidden 4th+ included) as compact rows; each carries its own Confirm (or Undo for
+          the current primary) and files through the SAME `confirmCandidate` /
+          `handleUndoPrimary` write path the strip uses (no second write path; NFR-10).
+          Filing closes the modal — the result (or any error) surfaces in the main view. */}
+      <SprkModal
+        open={seeAllOpen}
+        onClose={() => setSeeAllOpen(false)}
+        title="All matching records"
+        size="sm"
+        dismiss="light"
+        footerStart={
+          <Button appearance="secondary" onClick={() => setSeeAllOpen(false)} data-testid="see-all-close">
+            Close
+          </Button>
+        }
+      >
+        <div className={s.seeAllList} data-testid="see-all-candidates-modal">
+          {allShownCandidates.map(c => {
+            const k = candidateKey(c);
+            const isGreen = k === greenKey;
+            const isSelected = k === activeSelectedKey;
+            return (
+              <CandidateCard
+                key={k}
+                candidate={c}
+                selected={isSelected || isGreen}
+                tone={isGreen ? 'primary' : 'select'}
+                showConfirm={false}
+                compact
+                busy={busy}
+                readOnly={readOnly}
+                onSelect={() => setSelectedKey(k)}
+                onConfirm={() => {
+                  setSeeAllOpen(false);
+                  void confirmCandidate(c);
+                }}
+                onUndo={() => {
+                  setSeeAllOpen(false);
+                  void handleUndoPrimary();
+                }}
+                s={s}
+              />
+            );
+          })}
+        </div>
+      </SprkModal>
     </div>
   );
 }

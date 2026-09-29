@@ -247,4 +247,72 @@ describe('useRecordFieldValues', () => {
     // No additional call issued for the null recordId.
     expect(mockRetrieveRecord).toHaveBeenCalledTimes(1);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // $select degradation — the RS-1 recurrence guard
+  //
+  // A `$select` is all-or-nothing in OData: ONE column name Dataverse does not
+  // recognize 400s the entire request, so every field goes null and every
+  // header cell renders an em-dash. That has now been diagnosed twice — RS-1
+  // (task 040) and the RecordHeader v1.1.0 UAT, where an unresolved lookup was
+  // selected by its bare logical name. The hook must degrade per-read rather
+  // than blank the control.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('$select degradation (RS-1 recurrence guard)', () => {
+    it('recovers with an unprojected read when the $select read fails', async () => {
+      installXrm();
+      const badColumn = new Error("Could not find a property named 'sprk_projecttype_ref'");
+      mockRetrieveRecord.mockRejectedValueOnce(badColumn).mockResolvedValueOnce(MATTER_RECORD);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      const { result } = renderHook(() =>
+        useRecordFieldValues('sprk_project', 'record-guid-1', ['sprk_projecttype_ref'])
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      // The header renders instead of showing six em-dashes.
+      expect(result.current.values).toEqual(MATTER_RECORD);
+      expect(result.current.error).toBeNull();
+
+      // First attempt was projected; the retry drops $select entirely so
+      // Dataverse returns the full row (including decorated `_x_value` keys).
+      expect(mockRetrieveRecord).toHaveBeenCalledTimes(2);
+      expect(mockRetrieveRecord.mock.calls[0][2]).toBe('?$select=sprk_projecttype_ref');
+      expect(mockRetrieveRecord.mock.calls[1][2]).toBe('');
+      expect(warn).toHaveBeenCalled();
+
+      warn.mockRestore();
+    });
+
+    it('surfaces the ORIGINAL error when the unprojected retry also fails', async () => {
+      installXrm();
+      const badColumn = new Error("Could not find a property named 'sprk_projecttype_ref'");
+      mockRetrieveRecord.mockRejectedValueOnce(badColumn).mockRejectedValueOnce(new Error('record not found'));
+
+      const { result } = renderHook(() =>
+        useRecordFieldValues('sprk_project', 'record-guid-1', ['sprk_projecttype_ref'])
+      );
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      // The first error names the offending column — that is what a developer
+      // needs. The retry's generic failure must not mask it.
+      expect(result.current.error).toBe(badColumn);
+      expect(result.current.values).toBeNull();
+    });
+
+    it('does not retry when the failing read had no $select to drop', async () => {
+      installXrm();
+      const err = new Error('record not found');
+      mockRetrieveRecord.mockRejectedValue(err);
+
+      const { result } = renderHook(() => useRecordFieldValues('sprk_project', 'record-guid-1', []));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.error).toBe(err);
+      expect(mockRetrieveRecord).toHaveBeenCalledTimes(1);
+    });
+  });
 });

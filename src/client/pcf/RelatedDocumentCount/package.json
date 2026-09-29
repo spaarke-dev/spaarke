@@ -28,7 +28,7 @@
     "react-test-renderer": "^16.14.0",
     "ts-jest": "^29.2.5",
     "@eslint/js": "^9.25.1",
-    "@fluentui/react-components": "^9.46.2",
+    "@fluentui/react-components": "9.68.0",
     "@fluentui/react-icons": "^2.0.0",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",

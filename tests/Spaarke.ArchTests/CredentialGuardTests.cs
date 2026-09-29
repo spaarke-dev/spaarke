@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -72,6 +72,45 @@ public class CredentialGuardTests
                 + "it cannot express the rollback NFR-06 depends on. This is CONSOLIDATION, not expansion "
                 + "— auth-v4 task 022 removed nine sites and routed them through this one. Task 033 "
                 + "deletes the branch and this entry with it."),
+
+        new AllowlistEntry(
+            FileName: "DataverseWebApiEnvVarValuesWriter.cs",
+            Adr: "ADR-028 E-1",
+            Reason:
+                "Authenticates as the CUSTOMER's own Entra app registration, not the BFF's. TenantId, "
+                + "ClientId and ClientSecret all arrive per-request on the handler's request record "
+                + "(resolved from Key Vault upstream), because L2 provisions into an environment that "
+                + "belongs to the customer's tenant. MI-FIC would have to be federated onto each "
+                + "customer's registration, which is not ours to do — the same reasoning that "
+                + "allowlists SpeAdminTokenProvider. Contrast DataverseRegistryConcurrencyStore, which "
+                + "hit the ADMIN env as the BFF's OWN identity and was migrated to the L2 UAMI on "
+                + "2026-08-27 rather than allowlisted."),
+
+        new AllowlistEntry(
+            FileName: "DataverseWebApiSolutionImporter.cs",
+            Adr: "ADR-028 E-1",
+            Reason:
+                "Authenticates as the CUSTOMER's own Entra app registration, not the BFF's. TenantId, "
+                + "ClientId and ClientSecret all arrive per-request on the handler's request record "
+                + "(resolved from Key Vault upstream), because L2 provisions into an environment that "
+                + "belongs to the customer's tenant. MI-FIC would have to be federated onto each "
+                + "customer's registration, which is not ours to do — the same reasoning that "
+                + "allowlists SpeAdminTokenProvider. Contrast DataverseRegistryConcurrencyStore, which "
+                + "hit the ADMIN env as the BFF's OWN identity and was migrated to the L2 UAMI on "
+                + "2026-08-27 rather than allowlisted."),
+
+        new AllowlistEntry(
+            FileName: "DataverseWebApiSolutionVerifier.cs",
+            Adr: "ADR-028 E-1",
+            Reason:
+                "Authenticates as the CUSTOMER's own Entra app registration, not the BFF's. TenantId, "
+                + "ClientId and ClientSecret all arrive per-request on the handler's request record "
+                + "(resolved from Key Vault upstream), because L2 provisions into an environment that "
+                + "belongs to the customer's tenant. MI-FIC would have to be federated onto each "
+                + "customer's registration, which is not ours to do — the same reasoning that "
+                + "allowlists SpeAdminTokenProvider. Contrast DataverseRegistryConcurrencyStore, which "
+                + "hit the ADMIN env as the BFF's OWN identity and was migrated to the L2 UAMI on "
+                + "2026-08-27 rather than allowlisted."),
 
         new AllowlistEntry(
             FileName: "SpeAdminTokenProvider.cs",

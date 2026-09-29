@@ -65,7 +65,8 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">.NET 8 Minimal API. NO Azure Functions for in-proc Action execution. Scheduler external + dispatch in BFF — confirmed by task 001 runtime ADR draft.</constraint>
+    <constraint source="ADR-001">.NET 8 Minimal API; no Azure Functions inside the BFF assembly.</constraint>
+    <constraint source="ADR-052">Scheduler external + dispatch in BFF — as confirmed by the task 001 runtime ADR draft, the per-workload placement decision under ADR-052. Inside the BFF, queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`.</constraint>
     <constraint source="ADR-008">Endpoint-filter authorization. NO endpoints registered in this task (just the module DI surface), but the pattern for Phase 2+ endpoints uses `.AddEndpointFilter&lt;&gt;()`.</constraint>
     <constraint source="ADR-010">Feature-module DI. Register via `AddActionEngineModule()` extension; NO flat `Program.cs` blob. ≤15 non-framework DI registrations.</constraint>
     <constraint source="ADR-013">Action Engine lives in BFF per refined 2026-05-20 decision criteria. CRUD-side consumers reach via `Services/Ai/PublicContracts/` facade — created in parallel by task 015.</constraint>
@@ -78,6 +79,7 @@
   <knowledge>
     <files>
       <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
       <file>.claude/adr/ADR-008-endpoint-filters.md</file>
       <file>.claude/adr/ADR-010-di-minimalism.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>

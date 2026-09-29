@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Retire the orphaned text-offset edit-batch surface left behind by task 052 — `ComposeEditBatch`, `ComposeEditTransaction`, `POST /api/compose/edit-batch/validate` and the models serving only them</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A deletion spanning DI registrations, a routed endpoint and shared model types. Deletion tasks fail by omission, and the shared models are the trap: several are consumed by code that SURVIVES.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the hard part is the model file. `ComposeEditModels.cs` mixes types that die with this surface (`ResolvedMatch`, `AppliedEdit`, `SkippedEdit`, `ComposeEditBatchResult`, `ComposeEditTransactionResult`, `MatchExample`) with types the SURVIVING anchor pass still returns (`EditVerdict`, `BatchValidationResult`, `EditValidationError`, `EditErrorKind`, `ProposedEdit`). Cutting the boundary wrong either breaks `ComposeEditAnchorPass` — which task 052 left as the Compose-owned validation path — or leaves the orphan behind and defeats the task.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`Services/Compose/**` + `Api/ComposeEndpoints.cs` — the same files as 047b / 058 / Track D.</parallel-reason>
+    <deps>052</deps>
+    <tags>bff-api, compose, deletion, testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    **Owner decision 2026-08-25: "whatever is the 'best practice' coding approach."** For code with no
+    producer and no consumer, best practice is deletion. This task carries it out.
+
+    **What is orphaned, and why.** `ComposeEditBatch` and `ComposeEditTransaction` apply edits by
+    **string offset** (`ResolvedMatch(Offset, Length)`) into a plaintext projection. Their only producer was
+    `ComposeEditValidator`, which task 052 deleted. Every verdict the surviving `ComposeEditAnchorPass`
+    produces carries an **empty** `Matches` collection — the paraId IS the address — so these two can never
+    apply anything again. They are DI-registered (`ComposeModule.cs:29-30`) and injected nowhere.
+
+    `POST /api/compose/edit-batch/validate` is in the same condition and always was: a repo-wide grep for
+    `edit-batch` returns **zero** `.ts`/`.tsx` hits. It has never had a client caller — real placement
+    happens client-side in `usePendingRedline`. Task 052 recorded this as finding F-1 and left the endpoint
+    in place because deleting it was outside that task's list.
+
+    **Read `notes/052-text-search-demotion-decisions.md` §1.4 first** — it is the evidence base and it
+    already states the recommendation this task executes.
+
+    **The trap is the model file, not the classes.** `ComposeEditModels.cs` holds two populations:
+
+    - **Dies with this surface**: `ResolvedMatch`, `MatchExample`, `AppliedEdit`, `SkippedEdit`,
+      `ComposeEditBatchResult`, `ComposeEditTransactionResult`, `EditBatchValidateRequest`.
+    - **SURVIVES** — still returned by `ComposeEditAnchorPass`, which task 052 kept as the Compose-owned
+      validation path (ADR-043/041 assessment §7 C-7): `ProposedEdit`, `EditVerdict`,
+      `BatchValidationResult`, `EditValidationError`, `EditErrorKind`.
+
+    Do not assume that split — verify each type's consumers by grep before removing it. Note in particular
+    that `EditVerdict.Matches` and `EditValidationError.Examples` are typed on members of the DYING set, so
+    those members may need to go even though their owning records survive. Decide that explicitly.
+
+    **A question you must answer rather than assume.** With the endpoint gone, does
+    `ComposeEditAnchorPass` still have a caller? If it does not, it is the same category of orphan and
+    should be surfaced (not silently deleted — task 052 deliberately kept it, and the assessment names it as
+    the designated home for closed-set validation, so its removal is an owner decision, not a cleanup).
+  </prompt>
+
+  <role>SPAARKE backend developer, careful at deletion — verifies consumers before removing. Follow the consumer-check discipline task 052 used.</role>
+
+  <goal>
+    The text-offset edit-batch surface is gone. Everything that still has a consumer is untouched and still
+    works. Nothing that survives references a deleted type, in code or in prose.
+  </goal>
+
+  <context>
+    <background>
+      Task 052's §1.4 established the evidence and explicitly deferred the decision to the owner, who has now
+      taken it. This is the second half of that retirement, not a new investigation.
+
+      Task 052's own lesson applies here: it corrected TWO stale comments that asserted things which had
+      stopped being true, and a third stale claim was found in a test FIXTURE that neither of its agents
+      owned. A comment or fixture naming a deleted type is a defect in this project, not cosmetic.
+    </background>
+    <relevant-files>
+      <file role="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditBatch.cs</file>
+      <file role="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditTransaction.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs</file>
+      <file role="keep">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditAnchorPass.cs</file>
+      <file role="keep">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeAnchorResolver.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Before deleting ANY symbol, grep the WHOLE repo for consumers — `src/`, `tests/`, `infra/`, and non-code fixtures. Record the result per symbol. A missed consumer is how a deletion task breaks production.</constraint>
+    <constraint source="task 052">`ComposeEditAnchorPass` and `ComposeAnchorResolver` are KEEP. If the endpoint's removal leaves the anchor pass with no caller, SURFACE it — do not delete it as cleanup.</constraint>
+    <constraint source="ADR-010 / bff-extensions.md §F.1">Both DI registrations are unconditional; removing them must not leave an asymmetric registration. Confirm and state it.</constraint>
+    <constraint source="ADR-038">Tests for deleted code are deleted with it. Say which test files went and how many cases, so the suite delta is fully accounted for.</constraint>
+    <constraint source="project">Fix EVERY stale prose reference to a deleted type — XML docs, comments, test-file headers, and JSON/text fixtures. Grep non-`.cs` files too; task 052's third stale claim was in `golden-utterances.json`.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size report; no new NuGet; no new HIGH CVE. Expect a small DECREASE — report it either way.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>orphan retirement, consumer verification, Compose edit surface</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare FULL; read `notes/052-…-decisions.md` §1.4 FIRST — it is the evidence base.</step>
+    <step order="1">Re-verify the orphan claim independently: grep for injections of `ComposeEditBatch`/`ComposeEditTransaction` and for `edit-batch` across ALL file types. Record it.</step>
+    <step order="2">Partition `ComposeEditModels.cs` by consumer, type by type, with grep evidence. Decide the `EditVerdict.Matches` / `EditValidationError.Examples` member question explicitly.</step>
+    <step order="3">Delete the classes, the endpoint + its route registration, the DI registrations, and the dead model types.</step>
+    <step order="4">Answer the `ComposeEditAnchorPass` caller question. Surface it if it is now orphaned.</step>
+    <step order="5">Sweep prose: every XML doc, comment, test header and fixture naming a deleted type. Include non-`.cs` files.</step>
+    <step order="6">Build + full suites + arch tests; account for the test-count delta exactly. Publish size + CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any deletion-list symbol turns out to have a live consumer — especially outside `Services/Compose/` — STOP and surface it. The orphan claim is the whole premise; if it is wrong anywhere, the premise needs revisiting, not working around.</trigger>
+    <trigger>If removing the endpoint leaves `ComposeEditAnchorPass` with no caller, STOP short of deleting it and report. Task 052 kept it deliberately and the ADR-043/041 assessment designates it the home for closed-set validation — retiring it is an owner decision.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditBatch.cs</output>
+    <output type="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditTransaction.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/064-orphan-retirement-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`ComposeEditBatch`, `ComposeEditTransaction`, their DI registrations, `POST /api/compose/edit-batch/validate` and its route registration are gone — verified by grep.</criterion>
+    <criterion>A consumer check is RECORDED per deleted symbol, repo-wide and across all file types.</criterion>
+    <criterion>`ComposeEditModels.cs` is partitioned with grep evidence per type; the `EditVerdict.Matches` / `EditValidationError.Examples` question is decided explicitly.</criterion>
+    <criterion>`ComposeEditAnchorPass` and `ComposeAnchorResolver` are intact; the caller question is answered, and surfaced if they are now orphaned.</criterion>
+    <criterion>No surviving file — code, comment, doc or fixture — references a deleted type.</criterion>
+    <criterion>NEGATIVE: no asymmetric DI registration left behind (bff-extensions.md §F.1).</criterion>
+    <criterion>Build clean; suites green; the test-count delta is fully accounted for.</criterion>
+    <criterion>Publish size reported (expect a small decrease); no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>
