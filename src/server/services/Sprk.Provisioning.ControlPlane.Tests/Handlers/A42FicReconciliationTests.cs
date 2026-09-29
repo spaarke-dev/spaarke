@@ -73,10 +73,20 @@ public sealed class A42FicReconciliationTests
     // (a) Idempotency by (issuer, subject, audience) triple — SF-7
     // =====================================================================
 
+    // Deliberately not shaped like a real MI name — the FR-B4 CredentialGuardTests scan on
+    // src/server/** substring-matches "mi-bff-api-dev" and "spaarke-bff-identity" to catch runtime
+    // NAME-based MI resolution (decoy risk per notes/decisions/023-identity-conflation.md §2). This
+    // test project happens to live under src/server/services/Sprk.Provisioning.ControlPlane.Tests/
+    // (non-standard placement — most test projects live under tests/), so it falls inside the guard's
+    // scope. The semantic here is "any name that is NOT the canonical FIC name" — the literal value
+    // is arbitrary — so a non-MI-shaped fixture constant serves the test without triggering the
+    // guard on a value that isn't a real runtime identity binding. See task 220 (2026-09-28) notes.
+    private const string ArbitraryDifferentFicName = "differently-named-fic-fixture";
+
     [Fact]
     public void A42a_FindEquivalentByTriple_MatchingTripleUnderDifferentName_IsSatisfied()
     {
-        var differentlyNamed = Fic("mi-bff-api-dev-assertion", Issuer, UamiPrincipalId, Audience);
+        var differentlyNamed = Fic(ArbitraryDifferentFicName, Issuer, UamiPrincipalId, Audience);
 
         var result = GraphAppRegistrationProvisioner.FindEquivalentByTriple(
             new[] { differentlyNamed }, Issuer, UamiPrincipalId, Audience);
