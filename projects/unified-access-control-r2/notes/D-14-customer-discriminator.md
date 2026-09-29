@@ -155,14 +155,34 @@ passes ARM and is then silently mangled:
 `storageAccountName = take(toLower(replace('${baseName}sa','-','')),24)` strips hyphens, so `acme-x` and
 `acmex` produce the SAME storage account name. A collision nothing validates.
 
-### What must be decided
+### ✅ DECIDED 2026-09-29 (owner), and implemented by task 124
 
-1. **Which form is the identifier of record** — the short Bicep-safe slug, or the longer registry form? They
-   cannot both be `customerId`. If the registry form stays, something must own the slug↔registry mapping.
-2. **Enforce it where it is assigned**: a `@pattern` on the Bicep param and a matching rule at intake, so the
-   two cannot drift again. Today nothing compares them.
-3. **Assignment authority**: Dataverse (`sprk_dataverseenvironment`) is the natural owner — the row is created
-   at intake, before any Azure resource exists. Bicep should CONSUME it, never mint one.
+> "the current dataverse values can be changed and we can update our process so that it aligns with what is
+> required for KV; we don't have production systems so this is easy clean up. Define the standard, document
+> it, and then update components accordingly."
+
+**The standard: `^[a-z][a-z0-9]{2,7}$` — 3 to 8 characters, lowercase letters and digits, starting with a
+letter.** Full derivation in
+[`docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` § "The `customerId` standard"](../../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md).
+
+🔴 **Defining it exposed a latent DEPLOYMENT FAILURE, not just a naming preference.** `customer.bicep`
+composes `take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24)`, and Key Vault names may not end
+in a hyphen. At `customerId` length 10 with `environmentName = 'staging'` the name becomes
+`sprk-xxxxxxxxxx-staging-` — 24 characters ending in a hyphen, which **Azure rejects**. The previous
+`@maxLength(10)` therefore admitted a value that cannot deploy, and `take()` concealed it: the name was
+silently shortened rather than the template refusing.
+
+⚠️ **The character rule cannot be enforced in the template.** ARM has no regex constraint on parameters —
+there is no `@pattern` decorator, and this repo has no `bicepconfig.json` enabling experimental assertions.
+Length is enforced in Bicep; the character rule is enforced **at assignment (provisioning intake)** and
+documented at both parameters so the two cannot drift apart unnoticed.
+
+**Assignment authority**: Dataverse (`sprk_dataverseenvironment.sprk_customerid`) — the row exists at intake,
+before any Azure resource. Bicep CONSUMES it and never mints one.
+
+**Still to do (cpo-r1)**: the existing registry/intake values (e.g. `trial-2026-08-18`, 16 chars with
+hyphens) violate the standard and must be re-issued. Handed over in
+`projects/customer-provisioning-orchestration-r1/INCOMING-CUSTOMERID-STANDARD.md`.
 
 ---
 

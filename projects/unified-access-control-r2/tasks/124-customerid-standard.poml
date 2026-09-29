@@ -77,7 +77,7 @@ satisfies the platform rules) — say so rather than implying it is mandated.</b
 
   <constraints>
     <constraint>Derive the limit from the composed names, and SHOW the derivation in the doc. A number with no derivation rots the moment a name changes.</constraint>
-    <constraint>Enforce with `@pattern` as well as length — length alone still admits hyphens, which collide after the storage-name strip.</constraint>
+    <constraint>🔴 CORRECTED DURING EXECUTION: Bicep/ARM has NO `@pattern` decorator and no regex constraint on parameters, and this repo has no `bicepconfig.json` enabling experimental assertions. Only LENGTH is enforceable in the template. The character rule is enforced where the value is ASSIGNED (provisioning intake) and documented at the parameter so the two cannot drift.</constraint>
     <constraint>Do NOT rename existing Azure resources to widen the limit. Tightening the parameter costs nothing; changing a Key Vault name is a live-resource change.</constraint>
     <constraint>`customer.json` is COMPILED from `customer.bicep` — change the source and regenerate; do not hand-edit the JSON.</constraint>
     <constraint>The Dataverse/intake half is cpo-r1's process; state the standard and hand it over rather than editing their tree.</constraint>
@@ -93,7 +93,7 @@ satisfies the platform rules) — say so rather than implying it is mandated.</b
   <steps mode="directional">
     <step>Re-verify the Key Vault arithmetic for all three environments before changing any number.</step>
     <step>Write the standard into AZURE-RESOURCE-NAMING-CONVENTION.md with its derivation, and fix the resource-group order the doc gets backwards.</step>
-    <step>Tighten and pattern-constrain the parameter in both stacks; regenerate `customer.json` from source.</step>
+    <step>Tighten the length in both stacks and document the character rule; regenerate BOTH compiled artifacts (`customer.json`, `stacks/model2-full.json`) from source with `az bicep build --outfile`.</step>
     <step>Record the decision in D-14 §6.</step>
     <step>Hand the registry/intake cleanup to cpo-r1 in writing.</step>
   </steps>
@@ -103,13 +103,24 @@ satisfies the platform rules) — say so rather than implying it is mandated.</b
   </escalation>
 
   <acceptance-criteria>
-    <criterion>Both stacks enforce the same length AND an explicit `@pattern`.</criterion>
+    <criterion>Both stacks enforce the same length (8), and both document the character rule plus the fact that ARM cannot enforce it.</criterion>
     <criterion>A customerId at the new maximum produces a COMPLETE, valid Key Vault name in BOTH stacks for all three environments — demonstrated, not asserted.</criterion>
     <criterion>The naming doc states the standard, shows the derivation, and names the binding resource.</criterion>
     <criterion>The resource-group pattern in the doc matches the code.</criterion>
-    <criterion>`customer.json` is regenerated from `customer.bicep`, not hand-edited.</criterion>
+    <criterion>`customer.json` AND `stacks/model2-full.json` are regenerated from source, not hand-edited.</criterion>
     <criterion>The cpo-r1 handoff for the registry/intake values is written.</criterion>
   </acceptance-criteria>
 
   <notes>Authored 2026-09-29 (session 25) on the owner's D-14 §6 decision. The finding that made it urgent: the existing maxLength(10) admits a value that produces an invalid Key Vault name, so this is a latent deploy failure rather than a naming preference.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29. Limit 10 → 8 in both stacks; both compiled artifacts regenerated with
+    `az bicep build --outfile` (customer.json diff 3 lines, model2-full.json 5 — confirming the sources and
+    artifacts were otherwise in sync). Naming doc gained the standard with its derivation, and had two
+    drifts corrected: the resource-group pattern had env and customer reversed, and the section closed by
+    claiming customers share environment-level AI services and the BFF, which D-12 retired.</outcome>
+    <deviation>The POML required enforcement via `@pattern`. That decorator does not exist in Bicep/ARM —
+    verified, after nearly shipping a comment that asserted it. Length is enforced in the template; the
+    character rule is enforced at assignment and documented at both parameters.</deviation>
+  </execution>
 </task>
