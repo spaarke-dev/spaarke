@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// Background service that polls receive-enabled mailboxes for new messages,
 /// catching any emails missed by the Graph webhook subscription.
 ///
-/// Implements ADR-001 BackgroundService pattern with PeriodicTimer (5-minute interval).
+/// A hand-rolled timer BackgroundService with PeriodicTimer (5-minute interval) — existing debt, ADR-052 §1.
 /// Follows the same pattern as GraphSubscriptionManager.
 ///
 /// Messages found by polling are enqueued as IncomingCommunication jobs via JobSubmissionService.

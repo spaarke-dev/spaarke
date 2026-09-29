@@ -60,16 +60,9 @@ namespace Sprk.Bff.Api.Services.Compose;
 public sealed partial class ComposeDocumentRenderer
 {
     // ── style ids ────────────────────────────────────────────────────────────────────────────────
-    private const string NormalStyleId = "Normal";
-    private const string ListParagraphStyleId = "ListParagraph";
-    private const int MaxHeadingLevel = 6;               // Heading1..6 (TipTap heading levels)
+    internal const int MaxHeadingLevel = 6;               // Heading1..6 (TipTap heading levels)
 
-    // ── numbering ids (see NumberingPlan) ────────────────────────────────────────────────────────
-    private const int HeadingAbstractNumId = 0;          // style-linked clause scheme (ilvl 0-8)
-    private const int OrderedAbstractNumId = 1;           // decimal list scheme (direct numPr)
-    private const int BulletAbstractNumId = 2;            // bullet list scheme (direct numPr)
-    private const int HeadingNumInstanceId = 1;           // the ONE num instance the Heading styles reference
-    private const int FirstListNumInstanceId = 2;         // list num instances are allocated from here up
+    // ── numbering ids (see ComposeNumberingAuthor.NumberingPlan) ────────────────────────────────────────────────────────
 
     // The largest permitted w14:paraId is 0x7FFFFFFF (ST_LongHexNumber, 0 < x < 0x80000000) — mirrors
     // ParaIdPreParser (task 010), the canonical mint scheme. Kept in lockstep so a rendered doc and a
@@ -112,13 +105,13 @@ public sealed partial class ComposeDocumentRenderer
             mainPart.Document = new Document();
             var body = mainPart.Document.AppendChild(new Body());
 
-            // A NumberingPlan accumulates the ordered/bullet num instances the body render allocates, so the
+            // A ComposeNumberingAuthor.NumberingPlan accumulates the ordered/bullet num instances the body render allocates, so the
             // numbering part authored afterwards references exactly the ids the body used. (Blank package —
             // no carrier numbering exists, so source NumIds map to allocated instances; see ListRenderState.)
             // Task 026: the state is ALSO the render-side degradation sink (state.Warn), so every silent
             // render drop — filtered anchors, dropped format-change records, unresolvable hrefs — is
             // counted and surfaced through the optional `degradations` out-collection.
-            var plan = new NumberingPlan();
+            var plan = new ComposeNumberingAuthor.NumberingPlan();
             var state = new ListRenderState(plan);
             // Task 012: user-edit revision facts arrive author-less by design — attribute the saving user.
             state.DefaultRevisionAuthor = author;
@@ -133,8 +126,8 @@ public sealed partial class ComposeDocumentRenderer
 
             RenderBlocks(body, renderBlocks, state);
 
-            // G5 (FR-05, task 033): swap each BuildRun href-sentinel for a real EXTERNAL hyperlink
-            // relationship on the main part (the part is in scope here; BuildRun was not). Before save.
+            // G5 (FR-05, task 033): swap each ComposeRunAuthor.BuildRun href-sentinel for a real EXTERNAL hyperlink
+            // relationship on the main part (the part is in scope here; ComposeRunAuthor.BuildRun was not). Before save.
             ResolveHyperlinkRelationships(body, mainPart, state);
 
             // Word requires a trailing sectPr for a valid single-section document.
@@ -142,8 +135,8 @@ public sealed partial class ComposeDocumentRenderer
                 new PageSize { Width = 12240, Height = 15840 },
                 new PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440, Header = 720, Footer = 720, Gutter = 0 }));
 
-            AddStyleDefinitions(mainPart);
-            AddNumberingDefinitions(mainPart, plan);
+            ComposeStyleCatalog.AddStyleDefinitions(mainPart);
+            ComposeNumberingAuthor.AddNumberingDefinitions(mainPart, plan);
             EnsureCommentsPart(mainPart, model.Comments, state);
 
             // Mint a unique w14:paraId on every paragraph lacking a valid one — AFTER the body is fully built
@@ -256,7 +249,7 @@ public sealed partial class ComposeDocumentRenderer
             body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
 
             // Defensive list path (Step-9.5 fix F5): mirror RenderIntoCarrier's collision-safe scan — the
-            // old blank-package plan allocated from FirstListNumInstanceId regardless of the target's own
+            // old blank-package plan allocated from ComposeNumberingAuthor.FirstListNumInstanceId regardless of the target's own
             // numbering, so an appended list could capture (or dangle against) an existing target instance.
             // Gated on list presence like RenderIntoCarrier (011-T2: list-free appends never touch the part).
             // Task 025 note (Step-9.5 F9): AppendSection takes NO revision-id seed — its callers (the
@@ -264,14 +257,14 @@ public sealed partial class ComposeDocumentRenderer
             // If a future caller appends revisions, thread ScanCarrierRevisionIdSeed here like
             // RenderIntoCarrier (ids would otherwise mint from 1 against the target's existing ids —
             // Word-tolerated but collision-unclean).
-            var plan = new NumberingPlan();
+            var plan = new ComposeNumberingAuthor.NumberingPlan();
             var state = new ListRenderState(plan);
             var maxExistingAbstractId = 0;
-            if (ModelContainsListItem(blocks))
+            if (ComposeNumberingAuthor.ModelContainsListItem(blocks))
             {
-                var targetNumbering = ScanCarrierNumbering(docxBytes);
+                var targetNumbering = ComposeNumberingAuthor.ScanCarrierNumbering(docxBytes);
                 maxExistingAbstractId = targetNumbering.MaxAbstractNumId;
-                plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, targetNumbering.MaxNumId + 1));
+                plan = new ComposeNumberingAuthor.NumberingPlan(Math.Max(ComposeNumberingAuthor.FirstListNumInstanceId, targetNumbering.MaxNumId + 1));
                 state = new ListRenderState(plan, targetNumbering);
             }
 
@@ -292,18 +285,18 @@ public sealed partial class ComposeDocumentRenderer
             // an EXISTING part gets the same collision-safe merge as RenderIntoCarrier, F5).
             if (mainPart.StyleDefinitionsPart is null && blocks.Any(b => b.Kind == ComposeBlockKind.Heading))
             {
-                AddStyleDefinitions(mainPart);
+                ComposeStyleCatalog.AddStyleDefinitions(mainPart);
             }
 
             if (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null)
             {
                 if (mainPart.NumberingDefinitionsPart is null)
                 {
-                    AddNumberingDefinitions(mainPart, plan);
+                    ComposeNumberingAuthor.AddNumberingDefinitions(mainPart, plan);
                 }
                 else
                 {
-                    MergeNumberingDefinitions(
+                    ComposeNumberingAuthor.MergeNumberingDefinitions(
                         mainPart.NumberingDefinitionsPart,
                         plan,
                         orderedAbstractId: maxExistingAbstractId + 1,
@@ -366,7 +359,7 @@ public sealed partial class ComposeDocumentRenderer
     /// render never touches the numbering part at all (numbering.xml stays byte-identical). Only items whose
     /// identity is unknown to the carrier (born-in-editor, foreign source) allocate: those instances
     /// allocate ABOVE the carrier's max <c>numId</c> and reference renderer abstracts appended ABOVE the
-    /// carrier's max <c>abstractNumId</c> (<see cref="MergeNumberingDefinitions"/>) — a rendered list can
+    /// carrier's max <c>abstractNumId</c> (<see cref="ComposeNumberingAuthor.MergeNumberingDefinitions"/>) — a rendered list can
     /// never capture a carrier num definition and no carrier-owned abstract/instance is touched. The heading
     /// abstract/instance is NOT merged (headings follow carrier styles, see above).
     /// </para>
@@ -382,12 +375,24 @@ public sealed partial class ComposeDocumentRenderer
     /// <b>Carrier metadata preserved</b>: core properties (creator etc.) are left untouched when present;
     /// <paramref name="author"/> is used only when the carrier lacks a core-properties part entirely.
     /// Orphaned parts (images/footnotes referenced only by the replaced body) remain in the package as inert
-    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). Two further
-    /// documented degradations (review 011-P4/P9): a preserved header/footer whose <c>REF</c> field or
-    /// anchor hyperlink targets a BODY bookmark loses its target with the body swap (the model does not
-    /// carry bookmarks — Word shows its standard broken-reference text on field update); and a carrier
-    /// instance referencing an UNDEFINED abstractNumId that happens to equal a remapped renderer abstract id
-    /// would resolve to it — only observable from numbered paragraphs inside preserved parts, accepted.
+    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). One further
+    /// documented degradation: a carrier instance referencing an UNDEFINED abstractNumId that happens to
+    /// equal a remapped renderer abstract id would resolve to it — only observable from numbered paragraphs
+    /// inside preserved parts, accepted.
+    /// </para>
+    /// <para>
+    /// <b>Review 011-P4/P9 is CLOSED (task 049).</b> It recorded that a preserved header/footer whose
+    /// <c>REF</c> field or anchor hyperlink targets a BODY bookmark would lose its target with the body
+    /// swap, "because the model does not carry bookmarks". That reason stopped being true at task 041:
+    /// bookmarks survive a save in both block positions — an untouched block is cloned verbatim, and an
+    /// edited one has its base block's bookmarks restored by <c>ComposeBlockMerge.CarryBookmarks</c> (span
+    /// widened to the paragraph, which keeps a cross-reference resolving). Measured by
+    /// <c>ComposeFieldCarrySeamTests.EditedBookmarkParagraph_StillCarriesTheTarget_SoACarriedRefResolves</c>
+    /// over <c>ref-cross-references.docx</c>. Verifying this rather than inheriting it is what let task 049
+    /// carry <c>REF</c>/<c>PAGEREF</c> LIVE instead of freezing them: a carried cross-reference is only an
+    /// improvement if its target is still there. Residual: a bookmark whose paragraph the user DELETED is
+    /// gone — Word's own semantics for the same edit — and the R6 fail-open path (baseline unprojectable)
+    /// loses bookmarks along with everything else it does not clone.
     /// </para>
     /// </remarks>
     /// <param name="carrierBytes">The retained source package (a valid WordprocessingML OPC package).</param>
@@ -396,7 +401,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <exception cref="ArgumentException"><paramref name="carrierBytes"/> is null/empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="ComposePatchException">The carrier is not a readable package or has no main part/body.</exception>
-    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null)
+    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null, bool mergeUnchangedBlocks = true, ComposeMergeStats? mergeStats = null)
     {
         if (carrierBytes is null || carrierBytes.Length == 0)
         {
@@ -446,6 +451,54 @@ public sealed partial class ComposeDocumentRenderer
                     ?.ParagraphProperties?.SectionProperties?.CloneNode(true) as SectionProperties;
             }
 
+            // #777: interior section breaks that will be lost if NO merge runs. Counted HERE because the
+            // body is about to be emptied, and it is the only place the source's own paragraphs are still
+            // readable.
+            //
+            // Why it is needed at all. On the merge path every surviving break is reported per EDITED block
+            // by WarnIfSectionBreakFlattened, and an untouched one is cloned intact. But the merge does not
+            // always run: `mergeUnchangedBlocks: false`, and — the case that matters in production —
+            // ComposeBlockMerge.Capture FAILING OPEN (no blocks, or the re-projection threw). That path
+            // rebuilds the whole body from the model, so it loses EVERY interior section break at once.
+            // Since the projection-time warning is gone, saying nothing here would make the worst case the
+            // quietest one, which is the exact inversion ADR-049's never-silent rule exists to prevent.
+            //
+            // Same value rule as the merge path: a break equal to the trailing section is the promotion
+            // shape (or a break that merely repeated the final setup) and changes nothing a reader sees.
+            var interiorSectionBreaksAtRisk = body.Elements<Paragraph>()
+                .Select(p => p.ParagraphProperties?.SectionProperties)
+                .Count(s => s is not null
+                    && !(trailingSectPr is not null
+                         && string.Equals(trailingSectPr.OuterXml, s.OuterXml, StringComparison.Ordinal)));
+
+            // ═══════════════════════════════════════════════════════════════════════════════════
+            // THE BASE SIDE (ADR-049 R8 third amendment · task 040).
+            //
+            // `body.RemoveAllChildren()` below is the single instruction that cost the project 82% of its
+            // untouched blocks: every tab stop, indent, style, spacing rule and numbering association in the
+            // carrier was discarded here, and the body rebuilt from a content model carrying justification,
+            // bold and italic.
+            //
+            // The merge does not change that control flow (ADR-049 I-5: ONE body author, and this is it). It
+            // adds the BASE side R6 never had — the baseline's own blocks, captured before the swap and
+            // re-projected server-side, so a block the user never touched is put back VERBATIM instead of
+            // re-authored from a lossy model.
+            //
+            // Captured BEFORE the removal because RemoveAllChildren detaches the nodes.
+            //
+            // `mergeUnchangedBlocks` defaults to TRUE and is a TEST SEAM, not a feature flag: it is bound to
+            // no configuration and exists so the seam measurement can run a control arm through the same
+            // renderer in the same test run. An instrument that reports two different answers for two inputs
+            // is measuring something; that is the anti-vacuity evidence behind the gate.
+            var mergeBaseline = mergeUnchangedBlocks ? ComposeBlockMerge.Capture(body, carrierBytes) : null;
+            if (mergeUnchangedBlocks && mergeBaseline is null)
+            {
+                // Fail OPEN: a baseline we cannot re-project simply gets no merge and the render proceeds
+                // exactly as R6 does. A save is never refused because the base side was unavailable
+                // (ADR-049 invariant 1 — every save terminates in a defined outcome).
+                mergeStats?.RecordBaselineUnavailable();
+            }
+
             body.RemoveAllChildren();
 
             // Collision-safe allocation base (see remarks), computed BEFORE the render so the plan's ids
@@ -460,18 +513,24 @@ public sealed partial class ComposeDocumentRenderer
             // Task 025: revision ids in the re-authored body seed ABOVE the carrier's existing ids
             // (read-only scan; skipped entirely for a revision-free model).
             var revisionIdSeed = ModelContainsRevision(model.Blocks) ? ScanCarrierRevisionIdSeed(carrierBytes) : 0;
-            var plan = new NumberingPlan();
+            var plan = new ComposeNumberingAuthor.NumberingPlan();
             var state = new ListRenderState(plan, revisionIdSeed: revisionIdSeed);
             var maxExistingAbstractId = 0;
-            if (ModelContainsListItem(model.Blocks))
+            if (ComposeNumberingAuthor.ModelContainsListItem(model.Blocks))
             {
-                var carrierNumbering = ScanCarrierNumbering(carrierBytes);
+                var carrierNumbering = ComposeNumberingAuthor.ScanCarrierNumbering(carrierBytes);
                 maxExistingAbstractId = carrierNumbering.MaxAbstractNumId;
-                plan = new NumberingPlan(Math.Max(FirstListNumInstanceId, carrierNumbering.MaxNumId + 1));
+                plan = new ComposeNumberingAuthor.NumberingPlan(Math.Max(ComposeNumberingAuthor.FirstListNumInstanceId, carrierNumbering.MaxNumId + 1));
                 state = new ListRenderState(plan, carrierNumbering, revisionIdSeed);
             }
             // Task 012: user-edit revision facts arrive author-less by design — attribute the saving user.
             state.DefaultRevisionAuthor = author;
+
+            // Task 056: the ids a carried embedded object is allowed to reference. Read from the LIVE part —
+            // relationships are NOT touched by the body swap (measured; see ComposeRunAuthor.TryBuildCarriedObject) — so an
+            // object carried out of this very document resolves by construction, while one a client
+            // fabricated does not and is refused rather than authored as a dangling reference.
+            state.CarrierRelationshipIds = ComposeRunAuthor.CollectRelationshipIds(mainPart);
 
             // Step-9.5 F2 + task 012: anchors may only reference ids the target will actually contain —
             // the carrier part's own ids (scanned READ-ONLY from the bytes) PLUS any NEW model comments
@@ -519,7 +578,22 @@ public sealed partial class ComposeDocumentRenderer
                 renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds, state);
             }
 
-            RenderBlocks(body, renderBlocks, state);
+            if (mergeBaseline is not null)
+            {
+                RenderMergedBlocks(body, renderBlocks, mergeBaseline, state, mergeStats, trailingSectPr);
+            }
+            else
+            {
+                RenderBlocks(body, renderBlocks, state);
+
+                // #777: no base side, so nothing was cloned and every interior section break counted above
+                // is gone. One warning per lost break, matching the merge path's per-instance granularity.
+                for (var i = 0; i < interiorSectionBreaksAtRisk; i++)
+                {
+                    state.Warn("section-break-flattened");
+                }
+            }
+
             ResolveHyperlinkRelationships(body, mainPart, state);
 
             if (mainPart.StyleDefinitionsPart is null)
@@ -529,18 +603,18 @@ public sealed partial class ComposeDocumentRenderer
                 // carrier mode, so a numbered Heading style would either dangle (no numbering part) or
                 // CAPTURE a carrier num instance at numId 1 — the exact collision class the merge
                 // exists to prevent. Unnumbered headings are the documented carrier-faithful stance.
-                AddStyleDefinitions(mainPart, includeHeadingNumbering: false);
+                ComposeStyleCatalog.AddStyleDefinitions(mainPart, includeHeadingNumbering: false);
             }
 
             if (plan.OrderedInstanceIds.Count > 0 || plan.BulletInstanceId is not null)
             {
                 if (mainPart.NumberingDefinitionsPart is null)
                 {
-                    AddNumberingDefinitions(mainPart, plan);
+                    ComposeNumberingAuthor.AddNumberingDefinitions(mainPart, plan);
                 }
                 else
                 {
-                    MergeNumberingDefinitions(
+                    ComposeNumberingAuthor.MergeNumberingDefinitions(
                         mainPart.NumberingDefinitionsPart,
                         plan,
                         orderedAbstractId: maxExistingAbstractId + 1,
@@ -799,95 +873,13 @@ public sealed partial class ComposeDocumentRenderer
         return rebuilt ?? blocks;
     }
 
-    /// <summary>Whether <paramref name="blocks"/> contains any list item (recursing into table cells) —
-    /// gates the carrier numbering inspection/merge so a list-free render never touches (and therefore
-    /// never rewrites) the carrier's numbering part (011-T2 preserve-parts contract).</summary>
-    private static bool ModelContainsListItem(IReadOnlyList<ComposeBlock> blocks)
-    {
-        foreach (var block in blocks)
-        {
-            if (block.Kind == ComposeBlockKind.ListItem)
-            {
-                return true;
-            }
-            if (block.Kind == ComposeBlockKind.Table && block.Table is not null
-                && block.Table.Rows.Any(r => r.Cells.Any(c => ModelContainsListItem(c.Blocks))))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
 
-    /// <summary>
-    /// Task 011: merges the plan's list instances into an EXISTING carrier numbering part. Renderer abstracts
-    /// are inserted with REMAPPED ids above the carrier's own (schema order: AbstractNum before Num — inserted
-    /// before the first existing instance), and every plan instance references those remapped abstracts. No
-    /// carrier-owned abstract or instance is modified. The heading abstract/instance is deliberately absent —
-    /// carrier styles govern headings (see <see cref="RenderIntoCarrier"/> remarks).
-    /// </summary>
-    private static void MergeNumberingDefinitions(
-        NumberingDefinitionsPart numberingPart, NumberingPlan plan, int orderedAbstractId, int bulletAbstractId)
-    {
-        var numbering = numberingPart.Numbering ??= new Numbering();
-
-        // CT_Numbering order edges (review finding 011-P3): all abstractNum precede all num, and a
-        // trailing w:numIdMacAtCleanup (Mac Word artifact) must stay LAST — new instances insert before
-        // it, and new abstracts insert before the first existing instance (or before the cleanup marker
-        // when the part has abstracts but no instances).
-        var firstInstance = numbering.Elements<NumberingInstance>().FirstOrDefault();
-        var macCleanup = numbering.GetFirstChild<NumberingIdMacAtCleanup>();
-
-        void InsertAbstract(AbstractNum abstractNum)
-        {
-            var anchor = (OpenXmlElement?)firstInstance ?? macCleanup;
-            if (anchor is not null)
-            {
-                numbering.InsertBefore(abstractNum, anchor);
-            }
-            else
-            {
-                numbering.AppendChild(abstractNum);
-            }
-        }
-
-        void AppendInstance(NumberingInstance instance)
-        {
-            if (macCleanup is not null)
-            {
-                numbering.InsertBefore(instance, macCleanup);
-            }
-            else
-            {
-                numbering.AppendChild(instance);
-            }
-        }
-
-        if (plan.OrderedInstanceIds.Count > 0)
-        {
-            InsertAbstract(BuildOrderedAbstractNum(orderedAbstractId));
-            foreach (var orderedId in plan.OrderedInstanceIds)
-            {
-                var instance = new NumberingInstance(new AbstractNumId { Val = orderedAbstractId }) { NumberID = orderedId };
-                instance.AppendChild(new LevelOverride(new StartOverrideNumberingValue { Val = 1 }) { LevelIndex = 0 });
-                AppendInstance(instance);
-            }
-        }
-
-        if (plan.BulletInstanceId is { } bulletId)
-        {
-            InsertAbstract(BuildBulletAbstractNum(bulletAbstractId));
-            AppendInstance(new NumberingInstance(new AbstractNumId { Val = bulletAbstractId }) { NumberID = bulletId });
-        }
-
-        numberingPart.Numbering.Save();
-    }
 
     // ────────────────────────────────────────────────────────────────────────────────────────────
     // Body render
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state)
+    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state, IDictionary<int, int>? runCursor = null)
     {
         // Ordered-list continuity (task 021, review 020-R1 + Step-9.5 fix F1): the model contract — not
         // block adjacency — governs instance selection. An item carrying a source NumId resolves through
@@ -913,7 +905,10 @@ public sealed partial class ComposeDocumentRenderer
         //   - StartsNewList=true always allocates a fresh restart-at-1 instance.
         // State is local per container: a table-cell boundary starts fresh (a NumId-less list never
         // continues across cells).
-        var orderedRunByLevel = new Dictionary<int, int>();
+        // Task 040: the merge owns ONE cursor for the whole body and passes it here, so ordered-list run
+        // continuity spans cloned blocks and multiple calls. Every other caller passes null and gets the
+        // previous per-call behaviour — a table-cell boundary still starts fresh, which is the contract.
+        var orderedRunByLevel = runCursor ?? new Dictionary<int, int>();
 
         void CloseRunsDeeperThan(int level)
         {
@@ -984,7 +979,7 @@ public sealed partial class ComposeDocumentRenderer
 
     /// <summary>The nearest ACTIVE ordered run shallower than <paramref name="level"/> (a NumId-less
     /// nested ordered item joins its parent's instance at a deeper ilvl — Word's multi-level idiom).</summary>
-    private static bool TryNearestShallowerRun(Dictionary<int, int> orderedRunByLevel, int level, out int numId)
+    private static bool TryNearestShallowerRun(IDictionary<int, int> orderedRunByLevel, int level, out int numId)
     {
         for (var probe = level - 1; probe >= 0; probe--)
         {
@@ -1008,7 +1003,7 @@ public sealed partial class ComposeDocumentRenderer
     private static Paragraph BuildHeading(ComposeBlock block, ListRenderState state)
     {
         var level = Math.Clamp(block.Level <= 0 ? 1 : block.Level, 1, MaxHeadingLevel);
-        var pPr = new ParagraphProperties(new ParagraphStyleId { Val = HeadingStyleId(level) });
+        var pPr = new ParagraphProperties(new ParagraphStyleId { Val = ComposeStyleCatalog.HeadingStyleId(level) });
         // NO w:numPr here — the number is supplied by the Heading{level} STYLE's numPr (style-linked). A
         // direct numId here would double-number (FR-27).
         ApplyPageBreakBefore(pPr, block);
@@ -1020,7 +1015,7 @@ public sealed partial class ComposeDocumentRenderer
     {
         var ilvl = Math.Clamp(block.Level, 0, 8);
         // CT_PPr order: pStyle < pageBreakBefore < numPr < jc — built sequentially in that order.
-        var pPr = new ParagraphProperties(new ParagraphStyleId { Val = ListParagraphStyleId });
+        var pPr = new ParagraphProperties(new ParagraphStyleId { Val = ComposeStyleCatalog.ListParagraphStyleId });
         ApplyPageBreakBefore(pPr, block);
         // DIRECT numPr: ListParagraph carries no style numbering, so this is not double-numbering.
         pPr.AppendChild(new NumberingProperties(
@@ -1054,8 +1049,8 @@ public sealed partial class ComposeDocumentRenderer
         if (block.MarkRevision is { } markRev)
         {
             OpenXmlElement markChange = markRev.Kind == ComposeRevisionKind.Inserted
-                ? new Inserted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = ResolveRevisionAuthorValue(markRev.Author, state), Date = TryValidRevisionDate(markRev.Date) }
-                : new Deleted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = ResolveRevisionAuthorValue(markRev.Author, state), Date = TryValidRevisionDate(markRev.Date) };
+                ? new Inserted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = ComposeRunAuthor.ResolveRevisionAuthorValue(markRev.Author, state), Date = TryValidRevisionDate(markRev.Date) }
+                : new Deleted { Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture), Author = ComposeRunAuthor.ResolveRevisionAuthorValue(markRev.Author, state), Date = TryValidRevisionDate(markRev.Date) };
             pPr.AppendChild(new ParagraphMarkRunProperties(markChange));
         }
 
@@ -1065,12 +1060,12 @@ public sealed partial class ComposeDocumentRenderer
         // on the render degradation sink (task 026; was render-silent, 025-F4/F7 routing).
         if (block.PropertiesChange is { } propsChange)
         {
-            if (TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
+            if (TryParseOpaqueCarry<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
             {
                 pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
                 {
                     Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
-                    Author = ResolveRevisionAuthorValue(propsChange.Author, state),
+                    Author = ComposeRunAuthor.ResolveRevisionAuthorValue(propsChange.Author, state),
                     Date = TryValidRevisionDate(propsChange.Date),
                 });
             }
@@ -1124,10 +1119,35 @@ public sealed partial class ComposeDocumentRenderer
                 continue;
             }
 
+            // Task 049: a FIELD marker run is authored at paragraph level rather than from ComposeRunAuthor.BuildRun, for two
+            // schema reasons: `w:fldSimple` is an EG_PContent element (it is not a run and cannot sit inside
+            // `w:ins`/`w:del`), and the complex form is FIVE runs rather than one. Revision and hyperlink
+            // context are handled inside — wrapper OUTSIDE, `w:ins`/`w:del` INSIDE, exactly the nesting the
+            // revised-linked-run case above establishes.
+            if (run.Field is { } field)
+            {
+                CloseWrapper();
+                if (ComposeRunAuthor.AppendField(paragraph, run, field, state))
+                {
+                    continue;
+                }
+
+                // The instruction did not survive authoring hardening (see ComposeRunAuthor.AppendField). Degrade to the
+                // cached result as plain prose — today's flatten, and a defined outcome (invariant 1).
+                // Deliberately NOT warned here: the merge's base-vs-rendered count already reports the
+                // field as lost, and task 045 established that saying it twice is how a taxonomy stops
+                // being read.
+                paragraph.AppendChild(ComposeRunAuthor.BuildRun(
+                    run with { Field = null, Text = field.CachedResult },
+                    state,
+                    deleted: run.Revision?.Kind == ComposeRevisionKind.Deleted));
+                continue;
+            }
+
             if (run.Revision is not { } revision)
             {
                 CloseWrapper();
-                paragraph.AppendChild(BuildRun(run, state));
+                paragraph.AppendChild(ComposeRunAuthor.BuildRun(run, state));
                 continue;
             }
 
@@ -1138,117 +1158,59 @@ public sealed partial class ComposeDocumentRenderer
             if (!string.IsNullOrWhiteSpace(run.Href))
             {
                 CloseWrapper();
-                OpenXmlElement linkedWrapper = NewRevisionWrapper(revision, state);
-                linkedWrapper.AppendChild(BuildRun(run with { Href = null }, state, deleted: revision.Kind == ComposeRevisionKind.Deleted));
+                OpenXmlElement linkedWrapper = ComposeRunAuthor.NewRevisionWrapper(revision, state);
+                linkedWrapper.AppendChild(ComposeRunAuthor.BuildRun(run with { Href = null }, state, deleted: revision.Kind == ComposeRevisionKind.Deleted));
                 paragraph.AppendChild(new Hyperlink(linkedWrapper) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() });
                 continue;
             }
 
             if (wrapper is null || wrapperRevision != revision)
             {
-                wrapper = NewRevisionWrapper(revision, state);
+                wrapper = ComposeRunAuthor.NewRevisionWrapper(revision, state);
                 wrapperRevision = revision;
                 paragraph.AppendChild(wrapper);
             }
 
             // A Deleted run's text authors as w:delText (Word's requirement for pending-deleted content).
-            wrapper.AppendChild(BuildRun(run, state, deleted: revision.Kind == ComposeRevisionKind.Deleted));
+            wrapper.AppendChild(ComposeRunAuthor.BuildRun(run, state, deleted: revision.Kind == ComposeRevisionKind.Deleted));
         }
 
         return paragraph;
     }
 
-    /// <summary>Task 012: revision-author resolution — a fact that carries an author keeps it
-    /// (imported revisions round-trip their true authors); an EMPTY author falls back to the save-time
-    /// authenticated author (<see cref="ListRenderState.DefaultRevisionAuthor"/> — the client mapper
-    /// omits the author on user-edit revisions), then to the sanitizer's "Unknown" floor.</summary>
-    private static string ResolveRevisionAuthorValue(string? factAuthor, ListRenderState state)
-    {
-        // Sanitize FIRST, then decide: a control-chars-only author (hostile client input) must take the
-        // fallback exactly like an absent one — checking IsNullOrWhiteSpace on the RAW value would let
-        // it bypass the fallback and land on the "Unknown" floor instead of the saving user.
-        var sanitized = SanitizeText(factAuthor ?? string.Empty).Trim();
-        return SanitizeRevisionAuthor(sanitized.Length > 0 ? sanitized : state.DefaultRevisionAuthor);
-    }
 
-    private static OpenXmlElement NewRevisionWrapper(ComposeRevision revision, ListRenderState state)
-    {
-        var id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture);
-        var author = ResolveRevisionAuthorValue(revision.Author, state);
-        var date = TryValidRevisionDate(revision.Date);
-        return revision.Kind == ComposeRevisionKind.Inserted
-            ? new InsertedRun { Id = id, Author = author, Date = date }
-            : new DeletedRun { Id = id, Author = author, Date = date };
-    }
+
+
+
+    /// <summary>
+    /// Authoring cap on a posted field instruction. Real instructions are tens of characters
+    /// (a <c>REF</c> to a bookmark with two switches is about 32 characters); this is generous by two
+    /// orders of magnitude and still bounded, in the same spirit as <see cref="MaxRevisionAuthorChars"/>. Over the cap the field
+    /// flattens rather than being truncated — a truncated instruction is a DIFFERENT field, and silently
+    /// authoring one would be exactly the "re-authored look-alike" defect the carry exists to avoid.
+    /// </summary>
+
+
+
+
+
 
     // G5 (FR-05, task 033): sentinel prefix stashing a run's href on the temporary Hyperlink.Id during the
     // static body build (which has no MainDocumentPart in hand). ResolveHyperlinkRelationships replaces
     // each sentinel with a real EXTERNAL relationship id BEFORE the document is saved — the sentinel never
     // persists. A prefix that can never collide with a real OOXML relationship id (rId…).
-    private const string HyperlinkPendingIdPrefix = "COMPOSE_PENDING_HREF:";
+    internal const string HyperlinkPendingIdPrefix = "COMPOSE_PENDING_HREF:";
 
-    private static OpenXmlElement BuildRun(ComposeInlineRun run, ListRenderState state, bool deleted = false)
-    {
-        // Task 023: a page-break run IS the break — every other field is ignored by contract
-        // (ComposeInlineRun.IsPageBreak). Same markup AppendSection's page-broken section uses.
-        // (Inside a w:ins/w:del wrapper the bare break run is schema-legal — no delText involved.)
-        if (run.IsPageBreak)
-        {
-            return new Run(new Break { Type = BreakValues.Page });
-        }
 
-        var element = new Run();
-        // Task 025: a tracked run-formatting change (w:rPrChange) forces an rPr even on an unmarked run —
-        // the change record lives inside it (LAST in CT_RPr order). A record whose opaque carry fails the
-        // parse gate drops — counted on the render degradation sink (task 026).
-        var formatChange = run.FormatChange is { } change
-            ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml))
-            : ((ComposeFormatChange Change, PreviousRunProperties? Previous)?)null;
-        if (formatChange is { Previous: null })
-        {
-            state.Warn("tracked-format-change-dropped");
-        }
-        if (run.Bold || run.Italic || run.Underline || formatChange?.Previous is not null)
-        {
-            var rPr = new RunProperties();
-            if (run.Bold) rPr.AppendChild(new Bold());
-            if (run.Italic) rPr.AppendChild(new Italic());
-            if (run.Underline) rPr.AppendChild(new Underline { Val = UnderlineValues.Single });
-            if (formatChange is { Previous: { } previousRPr } fc)
-            {
-                // Same drop-on-parse-failure posture as pPrChange: schema requires the previous-rPr
-                // child, so an invalid opaque carry drops the whole record (formatting stands as-is).
-                rPr.AppendChild(new RunPropertiesChange(previousRPr)
-                {
-                    Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
-                    Author = ResolveRevisionAuthorValue(fc.Change.Author, state),
-                    Date = TryValidRevisionDate(fc.Change.Date),
-                });
-            }
-            element.AppendChild(rPr);
-        }
 
-        // Pending-deleted content authors as w:delText (Word rejects w:t inside w:del).
-        OpenXmlElement textElement = deleted
-            ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
-            : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
-        element.AppendChild(textElement);
 
-        // G5: a run carrying an href renders as a clean w:hyperlink wrapping the run. The real external
-        // relationship id can only be minted once the MainDocumentPart is in scope, so stash the href on a
-        // sentinel Hyperlink.Id here; ResolveHyperlinkRelationships (called by both byte-authors after the
-        // body is built) swaps it for the true rId. Zero text-search — the wrap is by the model's own run.
-        if (!string.IsNullOrWhiteSpace(run.Href))
-        {
-            return new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
-        }
 
-        return element;
-    }
+
+
 
     /// <summary>
     /// G5 (FR-05, task 033): resolve every sentinel <see cref="HyperlinkPendingIdPrefix"/> id emitted by
-    /// <see cref="BuildRun"/> into a real EXTERNAL hyperlink relationship on <paramref name="mainPart"/>
+    /// <see cref="ComposeRunAuthor.BuildRun"/> into a real EXTERNAL hyperlink relationship on <paramref name="mainPart"/>
     /// (<c>TargetMode="External"</c>). Called by both authors (<see cref="SynthesizeDocument"/> +
     /// <see cref="AppendSection"/>) after the body is built and BEFORE save, so no sentinel ever persists.
     /// A malformed href that cannot form a Uri is unwrapped to its inner run (never a broken relationship,
@@ -1265,6 +1227,25 @@ public sealed partial class ComposeDocumentRenderer
             }
 
             var href = id.Substring(HyperlinkPendingIdPrefix.Length);
+
+            // An INTERNAL cross-reference ("see Section 4.2") targets a BOOKMARK, not a relationship:
+            // Word writes it as `w:anchor` and it has NO entry in document.xml.rels. So there is nothing
+            // to resolve and — the point ADR-049 I-2 turns on — nothing to RE-DERIVE: the anchor is a
+            // self-contained scalar available verbatim at capture time, so it must be carried, not lost.
+            // Before UAT 2026-08-26 (D-1) this fell to the `Uri.TryCreate` else-branch below, because
+            // "#Section2" is not an absolute Uri — every internal cross-reference was silently delinked
+            // and reported as `hyperlink-target-dropped`.
+            // The bookmark it names is guaranteed to still be there: it is cloned with an untouched block,
+            // or restored from the base by ComposeBlockMerge.CarryUnmodeledConstructs (task 041) on an
+            // edited one. A dangling `w:anchor` does not make Word report a damaged file either, so this
+            // needs no equivalent of the embedded-object relationship-resolution gate.
+            if (href.Length > 1 && href[0] == '#')
+            {
+                hyperlink.Id = null;                        // the sentinel id must never persist
+                hyperlink.Anchor = SanitizeText(href[1..]); // client-controlled: same gate as body text
+                continue;
+            }
+
             if (Uri.TryCreate(href, UriKind.Absolute, out var uri))
             {
                 hyperlink.Id = mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;
@@ -1504,217 +1485,15 @@ public sealed partial class ComposeDocumentRenderer
     // Style catalog (StyleDefinitionsPart)
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static void AddStyleDefinitions(MainDocumentPart mainPart, bool includeHeadingNumbering = true)
-    {
-        var stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>();
-        var styles = new Styles();
 
-        // Normal — the default paragraph style every other style is based on.
-        styles.AppendChild(new Style(
-            new StyleName { Val = "Normal" },
-            new PrimaryStyle())
-        {
-            Type = StyleValues.Paragraph,
-            StyleId = NormalStyleId,
-            Default = true,
-        });
-
-        // Heading1..6 — each carries a w:numPr referencing the ONE heading num instance at its own ilvl
-        // (the STYLE side of the style-link) + an outlineLvl so the doc has a navigable outline. Descending
-        // sizes; all bold; keepNext so a heading stays with its following paragraph. Carrier mode (task 011)
-        // passes includeHeadingNumbering=false — the heading num instance is never authored there, so a
-        // style-linked numPr would dangle or capture a carrier num definition (review finding 011-M1).
-        var headingSizes = new[] { "32", "28", "26", "24", "22", "22" }; // half-points: 16pt..11pt
-        for (var level = 1; level <= MaxHeadingLevel; level++)
-        {
-            styles.AppendChild(BuildHeadingStyle(level, headingSizes[level - 1], includeHeadingNumbering));
-        }
-
-        // ListParagraph — indent only; NO numbering (list items supply a direct numPr).
-        styles.AppendChild(new Style(
-            new StyleName { Val = "List Paragraph" },
-            new BasedOn { Val = NormalStyleId },
-            new UIPriority { Val = 34 },
-            new PrimaryStyle(),
-            new StyleParagraphProperties(
-                new Indentation { Left = "720" },
-                new ContextualSpacing()))
-        {
-            Type = StyleValues.Paragraph,
-            StyleId = ListParagraphStyleId,
-        });
-
-        stylesPart.Styles = styles;
-        stylesPart.Styles.Save();
-    }
-
-    private static Style BuildHeadingStyle(int level, string sizeHalfPoints, bool includeNumbering = true)
-    {
-        var ilvl = level - 1;
-
-        // CT_PPrBase child order: keepNext precedes numPr precedes spacing precedes outlineLvl.
-        var pPr = new StyleParagraphProperties();
-        pPr.AppendChild(new KeepNext());
-        if (includeNumbering)
-        {
-            pPr.AppendChild(new NumberingProperties(
-                new NumberingLevelReference { Val = ilvl },
-                new NumberingId { Val = HeadingNumInstanceId }));
-        }
-        pPr.AppendChild(new SpacingBetweenLines { Before = "240", After = "120" });
-        pPr.AppendChild(new OutlineLevel { Val = ilvl });
-
-        return new Style(
-            new StyleName { Val = $"heading {level}" },
-            new BasedOn { Val = NormalStyleId },
-            new UIPriority { Val = 9 },
-            new PrimaryStyle(),
-            pPr,
-            new StyleRunProperties(
-                new Bold(),
-                new FontSize { Val = sizeHalfPoints },
-                new FontSizeComplexScript { Val = sizeHalfPoints }))
-        {
-            Type = StyleValues.Paragraph,
-            StyleId = HeadingStyleId(level),
-        };
-    }
 
     // ────────────────────────────────────────────────────────────────────────────────────────────
     // Numbering (NumberingDefinitionsPart) — the keystone
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static void AddNumberingDefinitions(MainDocumentPart mainPart, NumberingPlan plan)
-    {
-        var numberingPart = mainPart.AddNewPart<NumberingDefinitionsPart>();
-        var numbering = new Numbering();
 
-        // AbstractNum elements MUST precede Num elements (schema order).
-        numbering.AppendChild(BuildHeadingAbstractNum());
-        numbering.AppendChild(BuildOrderedAbstractNum());
-        numbering.AppendChild(BuildBulletAbstractNum());
 
-        // The ONE heading num instance the Heading styles reference (numId 1 → heading abstract).
-        numbering.AppendChild(new NumberingInstance(new AbstractNumId { Val = HeadingAbstractNumId }) { NumberID = HeadingNumInstanceId });
 
-        // The shared bullet instance (allocated only if a bullet list was rendered).
-        if (plan.BulletInstanceId is { } bulletId)
-        {
-            numbering.AppendChild(new NumberingInstance(new AbstractNumId { Val = BulletAbstractNumId }) { NumberID = bulletId });
-        }
-
-        // One ordered instance per restart-scoped ordered list, each with a startOverride so it restarts at 1.
-        foreach (var orderedId in plan.OrderedInstanceIds)
-        {
-            var instance = new NumberingInstance(new AbstractNumId { Val = OrderedAbstractNumId }) { NumberID = orderedId };
-            instance.AppendChild(new LevelOverride(new StartOverrideNumberingValue { Val = 1 }) { LevelIndex = 0 });
-            numbering.AppendChild(instance);
-        }
-
-        numberingPart.Numbering = numbering;
-        numberingPart.Numbering.Save();
-    }
-
-    /// <summary>
-    /// The style-linked multi-level clause scheme (FR-27): ONE multilevel abstractNum, 9 levels (ilvl 0-8),
-    /// each a decimal <c>%N</c> cascade (<c>%1</c> / <c>%1.%2</c> / <c>%1.%2.%3</c> …). Levels 0-5 back-link
-    /// their <c>Heading1..6</c> style via <c>w:pStyle</c>; levels 6-8 are numbered (for completeness) but
-    /// unlinked (headings only reach level 6). Each level restarts its counter after a higher level advances.
-    /// </summary>
-    private static AbstractNum BuildHeadingAbstractNum()
-    {
-        // CT_AbstractNum order: nsid precedes multiLevelType precedes the levels.
-        var abstractNum = new AbstractNum(
-            new Nsid { Val = "0E7D0000" },
-            new MultiLevelType { Val = MultiLevelValues.Multilevel })
-        { AbstractNumberId = HeadingAbstractNumId };
-
-        for (var ilvl = 0; ilvl <= 8; ilvl++)
-        {
-            var cascade = string.Join(".", Enumerable.Range(1, ilvl + 1).Select(k => $"%{k}"));
-            var level = new Level(
-                new StartNumberingValue { Val = 1 },
-                new NumberingFormat { Val = NumberFormatValues.Decimal },
-                new LevelText { Val = cascade },
-                new LevelJustification { Val = LevelJustificationValues.Left },
-                new PreviousParagraphProperties(
-                    new Indentation { Left = (720 * (ilvl + 1)).ToString(CultureInfo.InvariantCulture), Hanging = "360" }))
-            {
-                LevelIndex = ilvl,
-            };
-
-            // Style-link levels 0-5 → Heading1..6 (the abstract side of the link). Schema order places
-            // w:pStyle after w:numFmt and BEFORE w:lvlText (matches the real CSA numbering.xml idiom).
-            if (ilvl < MaxHeadingLevel)
-            {
-                level.InsertBefore(new ParagraphStyleIdInLevel { Val = HeadingStyleId(ilvl + 1) }, level.GetFirstChild<LevelText>());
-            }
-
-            abstractNum.AppendChild(level);
-        }
-
-        return abstractNum;
-    }
-
-    /// <summary>The ordered-list scheme: 9 decimal levels (<c>%N.</c>), consumed via a DIRECT numPr on
-    /// ListParagraph items. No style link (lists are not styled-numbered). <paramref name="abstractNumId"/>
-    /// defaults to the blank-package id; carrier mode (task 011) passes a remapped id above the carrier's own.</summary>
-    private static AbstractNum BuildOrderedAbstractNum(int abstractNumId = OrderedAbstractNumId)
-    {
-        var abstractNum = new AbstractNum(
-            new Nsid { Val = "0E7D0001" },
-            new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
-        { AbstractNumberId = abstractNumId };
-
-        for (var ilvl = 0; ilvl <= 8; ilvl++)
-        {
-            abstractNum.AppendChild(new Level(
-                new StartNumberingValue { Val = 1 },
-                new NumberingFormat { Val = NumberFormatValues.Decimal },
-                new LevelText { Val = $"%{ilvl + 1}." },
-                new LevelJustification { Val = LevelJustificationValues.Left },
-                new PreviousParagraphProperties(
-                    new Indentation { Left = (720 * (ilvl + 1)).ToString(CultureInfo.InvariantCulture), Hanging = "360" }))
-            {
-                LevelIndex = ilvl,
-            });
-        }
-
-        return abstractNum;
-    }
-
-    /// <summary>The bullet-list scheme: 9 bullet levels (Symbol-font glyphs), consumed via a DIRECT numPr.
-    /// <paramref name="abstractNumId"/> defaults to the blank-package id; carrier mode remaps (task 011).</summary>
-    private static AbstractNum BuildBulletAbstractNum(int abstractNumId = BulletAbstractNumId)
-    {
-        var abstractNum = new AbstractNum(
-            new Nsid { Val = "0E7D0002" },
-            new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
-        { AbstractNumberId = abstractNumId };
-
-        // Cycle the three classic Word bullet glyphs across depths.
-        var glyphs = new[] { "", "o", "" }; // • (Symbol), o (Courier), ▪ (Wingdings)
-        var fonts = new[] { "Symbol", "Courier New", "Wingdings" };
-
-        for (var ilvl = 0; ilvl <= 8; ilvl++)
-        {
-            var pick = ilvl % 3;
-            abstractNum.AppendChild(new Level(
-                new StartNumberingValue { Val = 1 },
-                new NumberingFormat { Val = NumberFormatValues.Bullet },
-                new LevelText { Val = glyphs[pick] },
-                new LevelJustification { Val = LevelJustificationValues.Left },
-                new PreviousParagraphProperties(
-                    new Indentation { Left = (720 * (ilvl + 1)).ToString(CultureInfo.InvariantCulture), Hanging = "360" }),
-                new NumberingSymbolRunProperties(
-                    new RunFonts { Ascii = fonts[pick], HighAnsi = fonts[pick], Hint = FontTypeHintValues.Default }))
-            {
-                LevelIndex = ilvl,
-            });
-        }
-
-        return abstractNum;
-    }
 
     // ────────────────────────────────────────────────────────────────────────────────────────────
     // paraId minting (E2 substrate) — mirrors ParaIdPreParser's ST_LongHexNumber scheme
@@ -1739,6 +1518,20 @@ public sealed partial class ComposeDocumentRenderer
     /// </summary>
     private void AssignParaIds(Body body)
     {
+        // Task 040 investigated excluding paragraphs inside opaque regions (`mc:AlternateContent`,
+        // `w:txbxContent`) from this pass, because entering them MUTATES a block the merge cloned verbatim:
+        // Word writes the same box twice (Choice + Fallback) carrying the SAME w14:paraId, pass 1 treats the
+        // second copy as a malformed duplicate, and re-mints it. Measured cost at the STRICT comparison level:
+        // alternate-content-duplicate-paraid.docx 66.67%, AppligentNDA_Signed.docx 95.92% (both 100% LENIENT
+        // — content is preserved; only identity churns).
+        //
+        // REVERTED, deliberately. Excluding them breaks task 011's global-paraId-uniqueness guarantee, which
+        // RenderOnSaveSeamTests pins by name on the NDA's 2BBF07C9/CA/CB class — duplicate anchors were part
+        // of the production-422 failure chain. Strict is a no-regression RATCHET, not a gate (task 031 T5),
+        // and both documents clear it by a wide margin; trading a safety invariant for a better number on a
+        // non-gating metric is the exact move the ADR-049 paired-MUST exists to forbid. The residual is on the
+        // task-045 loss list with this reasoning; resolving it properly means changing what the identity map
+        // considers a block, which is not a rendering change.
         var paragraphs = body.Descendants<Paragraph>().ToList();
 
         // Pass 1: keep the first occurrence of each client id; null out duplicates so pass 2 re-mints them.
@@ -1770,6 +1563,7 @@ public sealed partial class ComposeDocumentRenderer
             p.ParagraphId = new HexBinaryValue(minted);
         }
     }
+
 
     private string MintUnique(HashSet<string> seen)
     {
@@ -1837,7 +1631,6 @@ public sealed partial class ComposeDocumentRenderer
         }
     }
 
-    private static string HeadingStyleId(int level) => $"Heading{level}";
 
     private static void AddCoreProperties(WordprocessingDocument document, string creator)
     {
@@ -1861,7 +1654,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <summary>Strips XML-illegal control characters so Word never reports "unreadable content"
     /// (mirrors <c>DocxExportService.SanitizeText</c>; the content model text is already plain, so no HTML
     /// decode is needed). Tab / LF / CR are preserved (valid in XML).</summary>
-    private static string SanitizeText(string value) =>
+    internal static string SanitizeText(string value) =>
         string.IsNullOrEmpty(value) ? string.Empty : XmlInvalidCharPattern().Replace(value, string.Empty);
 
     // ── task 025: tracked-change authoring hardening ─────────────────────────────────────────────
@@ -1872,7 +1665,16 @@ public sealed partial class ComposeDocumentRenderer
     // schema-validated (never string-injected), revision ids ALWAYS server-minted.
 
     private const int MaxRevisionAuthorChars = 255;
-    private const int MaxPreviousPropertiesXmlChars = 32 * 1024;
+
+    /// <summary>
+    /// Authoring cap on ANY opaque OOXML carry — <see cref="ComposeFormatChange.PreviousPropertiesXml"/>
+    /// (task 025) and <see cref="ComposeEmbeddedObject.Xml"/> (task 056). One number for one mechanism:
+    /// a second cap would be a second contract in everything but name. Generous for both (a real
+    /// <c>w:drawing</c> in the corpus is 0.6–2.4 KB, a <c>w:rPr</c> a few hundred bytes) and still bounded
+    /// against a hostile payload. Over the cap the carry is REFUSED, never truncated — a truncated subtree
+    /// is not the construct the document contained.
+    /// </summary>
+    internal const int MaxOpaqueCarryXmlChars = 32 * 1024;
 
     // Step-9.5 F3: the xsd:dateTime LEXICAL forms (K covers Z / ±hh:mm / no-zone). A merely
     // DateTime.TryParse-able string ("08/01/2026") is NOT a valid @w:date and must be dropped.
@@ -1893,7 +1695,7 @@ public sealed partial class ComposeDocumentRenderer
             ? raw
             : null;
 
-    private static string SanitizeRevisionAuthor(string? author)
+    internal static string SanitizeRevisionAuthor(string? author)
     {
         var sanitized = SanitizeText(author ?? string.Empty).Trim();
         if (sanitized.Length == 0)
@@ -1907,22 +1709,37 @@ public sealed partial class ComposeDocumentRenderer
     /// form (Step-9.5 F3 — strictly tighter than the 024 comments-part <c>TryParse</c> gate, which admits
     /// culture formats that are schema-invalid as <c>@w:date</c>); junk is omitted (the attribute is
     /// schema-optional). The RAW string is kept for byte-faithful re-authoring.</summary>
-    private static DateTimeValue? TryValidRevisionDate(string? date) =>
+    internal static DateTimeValue? TryValidRevisionDate(string? date) =>
         NormalizeXsdDateTime(date) is { } valid ? new DateTimeValue { InnerText = valid } : null;
 
     /// <summary>
-    /// The <see cref="ComposeFormatChange.PreviousPropertiesXml"/> gate: parses the opaque carry through
-    /// the TYPED SDK class — the generated ctor VALIDATES the root element (name + namespace; a
-    /// wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are prohibited by the
-    /// SDK reader) — then schema-validates the parsed subtree; any failure drops the whole change record
-    /// (the current formatting simply stands; equivalent to accepting the formatting change). Never
-    /// string-injection into the package. Size-clamped against hostile payloads. The validator is
-    /// per-call — <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and
-    /// this runs on concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
+    /// THE opaque-carry gate — one mechanism, two consumers:
+    /// <see cref="ComposeFormatChange.PreviousPropertiesXml"/> (task 025) and
+    /// <see cref="ComposeEmbeddedObject.Xml"/> (task 056).
+    /// <para>
+    /// Parses the carry through the TYPED SDK class — the generated ctor VALIDATES the root element (name +
+    /// namespace; a wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are
+    /// prohibited by the SDK reader) — then schema-validates the parsed subtree; any failure returns null
+    /// and the CALLER degrades (the format-change record is not emitted / the object is dropped). Never
+    /// string-injection into the package. Size-clamped against hostile payloads. The validator is per-call —
+    /// <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and this runs on
+    /// concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
+    /// </para>
+    /// <para>
+    /// Named for what it does rather than for its first caller (task 056 renamed it from
+    /// <c>TryParsePreviousProperties</c>): a method called <c>…PreviousProperties</c> parsing a
+    /// <c>w:drawing</c> is precisely the kind of stale naming that let a stale REMARK about bookmarks
+    /// survive two tasks past being true.
+    /// </para>
+    /// <para>
+    /// <b>Parsing is not sufficient for every carry.</b> A subtree that parses and validates can still name
+    /// a package RELATIONSHIP that does not exist — see <see cref="ComposeRunAuthor.CarriedObjectRelationshipsResolve"/>,
+    /// which is the second gate the embedded-object carry needs and the format-change carry does not.
+    /// </para>
     /// </summary>
-    private static T? TryParsePreviousProperties<T>(string? xml) where T : OpenXmlElement
+    internal static T? TryParseOpaqueCarry<T>(string? xml) where T : OpenXmlElement
     {
-        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxPreviousPropertiesXmlChars)
+        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxOpaqueCarryXmlChars)
         {
             return null;
         }
@@ -1943,7 +1760,7 @@ public sealed partial class ComposeDocumentRenderer
     /// re-serialization by the mere read (the 011-T2 preserve-parts hazard). Exception POLICY deliberately
     /// stays with each caller (fallback-to-empty vs typed <see cref="ComposePatchException"/>): the
     /// duplication this removes is the open preamble, not the divergent failure semantics.</summary>
-    private static T ScanCarrierBytes<T>(byte[] carrierBytes, Func<WordprocessingDocument, T> scan)
+    internal static T ScanCarrierBytes<T>(byte[] carrierBytes, Func<WordprocessingDocument, T> scan)
     {
         using var stream = new MemoryStream(carrierBytes, writable: false);
         using var doc = WordprocessingDocument.Open(stream, isEditable: false);
@@ -1961,7 +1778,7 @@ public sealed partial class ComposeDocumentRenderer
     /// Task 025: the collision base for re-authored revision ids — the max revision <c>w:id</c> across the
     /// carrier's parts (body included: preserved headers/footers/notes may carry revisions, and seeding
     /// above the old body's ids costs nothing). READ-ONLY side open of the bytes, same discipline as
-    /// <see cref="ScanCarrierNumbering"/> / <see cref="ScanCarrierComments"/>. Mirrors the R5 engine's
+    /// <see cref="ComposeNumberingAuthor.ScanCarrierNumbering"/> / <see cref="ScanCarrierComments"/>. Mirrors the R5 engine's
     /// <c>SeedRevisionId</c>. Unreadable carrier → 0 (blank-package posture).
     /// </summary>
     private static int ScanCarrierRevisionIdSeed(byte[] carrierBytes)
@@ -2046,27 +1863,41 @@ public sealed partial class ComposeDocumentRenderer
     /// body and cell is the same Word list. NumId-less (born-in-editor) items never reach this map — they
     /// use <c>RenderBlocks</c>' per-container current-instance + <see cref="ComposeBlock.StartsNewList"/> contract.
     /// </summary>
-    private sealed class ListRenderState
+    internal sealed class ListRenderState
     {
-        private readonly CarrierNumberingScan? _carrier;
+        private readonly ComposeNumberingAuthor.CarrierNumberingScan? _carrier;
         private readonly Dictionary<int, int> _orderedBySourceId = new();
         private int _revisionId;
 
-        public ListRenderState(NumberingPlan plan, CarrierNumberingScan? carrier = null, int revisionIdSeed = 0)
+        public ListRenderState(ComposeNumberingAuthor.NumberingPlan plan, ComposeNumberingAuthor.CarrierNumberingScan? carrier = null, int revisionIdSeed = 0)
         {
             Plan = plan;
             _carrier = carrier;
             _revisionId = revisionIdSeed;
         }
 
-        public NumberingPlan Plan { get; }
+        public ComposeNumberingAuthor.NumberingPlan Plan { get; }
 
         /// <summary>Task 012: the save-time authenticated author — the FALLBACK identity for any
         /// revision/format-change fact whose Author is empty. The client mapper deliberately OMITS the
         /// author on user-edit revision facts so the server (never the client) attributes the saving
         /// user; a fact that CARRIES an author (imported revisions) keeps it. Raw — sanitized at the
-        /// emission sites via <see cref="ResolveRevisionAuthorValue"/>.</summary>
+        /// emission sites via <see cref="ComposeRunAuthor.ResolveRevisionAuthorValue"/>.</summary>
         public string? DefaultRevisionAuthor { get; set; }
+
+        /// <summary>
+        /// Task 056: every relationship id the RENDER TARGET's main document part can resolve. A carried
+        /// embedded object is authored only when every relationship its subtree references is in this set —
+        /// otherwise the save would emit a reference to nothing, and Word reports such a file as damaged.
+        /// <para>
+        /// EMPTY by default, which is the correct answer for <see cref="SynthesizeDocument"/>: a
+        /// born-in-editor package has no relationships, so a posted object naming one is refused rather than
+        /// authored into a document that cannot resolve it. Populated by
+        /// <see cref="RenderIntoCarrier"/> from the carrier's own part.
+        /// </para>
+        /// </summary>
+        public IReadOnlySet<string> CarrierRelationshipIds { get; set; } =
+            System.Collections.Immutable.ImmutableHashSet<string>.Empty;
 
         /// <summary>Task 025: mints the next revision <c>w:id</c> — monotonic per render, seeded above the
         /// carrier's existing revision ids (<see cref="ScanCarrierRevisionIdSeed"/>) so re-authored body
@@ -2125,180 +1956,123 @@ public sealed partial class ComposeDocumentRenderer
                 : Plan.BulletInstance();
     }
 
-    /// <summary>
-    /// The carrier numbering facts <see cref="RenderIntoCarrier"/> needs BEFORE rendering: the referencable
-    /// <c>w:num</c> id set, the collision-safe allocation base (max instance/abstract ids), and a
-    /// per-(instance, level) ordered-vs-bullet classification for the F2 kind guard.
-    /// </summary>
-    private sealed class CarrierNumberingScan
+
+
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // THE MERGE, EXECUTED (ADR-049 R8 third amendment · task 040).
+    //
+    // Not a second body author (ADR-049 I-5): this method lives in the renderer, appends into the same
+    // `body`, and shares the same `ListRenderState` as `RenderBlocks`, which it delegates to for every block
+    // it does not clone. `ComposeBlockMerge` decides; this executes. One component writes body children.
+    //
+    //   cloned  -> the baseline's own subtree, appended verbatim, with ZERO property logic. Nothing is
+    //              re-derived, so nothing can be lost (invariant 7).
+    //   rendered-> from the model, inheriting the base counterpart's unmodeled properties (FR-A04).
+    //   no base -> from the model alone. An inserted block has no base side; that is not a failure.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    private void RenderMergedBlocks(
+        Body body,
+        IReadOnlyList<ComposeBlock> posted,
+        ComposeMergeBaseline baseline,
+        ListRenderState state,
+        ComposeMergeStats? stats,
+        SectionProperties? trailingSectPr)
     {
-        private readonly HashSet<int> _numIds = new();
-        private readonly Dictionary<int, int> _abstractByNumId = new();
-        private readonly Dictionary<(int AbstractId, int Level), bool> _bulletByAbstractLevel = new();
-        private readonly Dictionary<(int NumId, int Level), bool> _bulletByInstanceOverride = new();
+        var steps = ComposeBlockMerge.Plan(posted, baseline, stats);
 
-        public int MaxNumId { get; private set; }
-        public int MaxAbstractNumId { get; private set; }
+        // ONE ordered-list run cursor for the entire body, observed by cloned and rendered blocks alike.
+        // The task-030 prototype batched renders and let each batch start a fresh cursor, so a rendered list
+        // item following cloned list items restarted at 1 (its limitation 3). Sharing the cursor — and
+        // recording every cloned block into it — is what makes a cloned list and a rendered continuation of
+        // it number as one list.
+        var runCursor = new Dictionary<int, int>();
+        var single = new ComposeBlock[1];
 
-        public bool ContainsNumId(int numId) => _numIds.Contains(numId);
-
-        /// <summary>
-        /// Whether the carrier instance's scheme at <paramref name="level"/> matches the item's kind.
-        /// Tolerant probe (exact level, then nearer-lower, then higher — mirroring the projector's
-        /// <c>ResolveOrderedFromModel</c> posture); an UNCLASSIFIABLE id/level returns compatible — the
-        /// designed same-source carrier always matches, so unknown defaults to direct reference.
-        /// </summary>
-        public bool IsKindCompatible(int numId, int level, bool ordered)
+        foreach (var step in steps)
         {
-            var isBullet = ResolveBulletness(numId, level);
-            return isBullet is null || isBullet.Value != ordered;
-        }
+            if (step.Action == ComposeMergeAction.Clone)
+            {
+                var clone = baseline.Blocks[step.BaseIndex].CloneNode(true);
+                body.AppendChild(clone);
+                ComposeBlockMerge.ObserveClonedBlock(clone, runCursor);
+                continue;
+            }
 
-        private bool? ResolveBulletness(int numId, int level)
-        {
-            if (_bulletByInstanceOverride.TryGetValue((numId, level), out var overridden))
-            {
-                return overridden;
-            }
-            if (!_abstractByNumId.TryGetValue(numId, out var abstractId))
-            {
-                return null;
-            }
-            if (_bulletByAbstractLevel.TryGetValue((abstractId, level), out var exact))
-            {
-                return exact;
-            }
-            for (var probe = level - 1; probe >= 0; probe--)
-            {
-                if (_bulletByAbstractLevel.TryGetValue((abstractId, probe), out var lower))
-                {
-                    return lower;
-                }
-            }
-            for (var probe = level + 1; probe <= 8; probe++)
-            {
-                if (_bulletByAbstractLevel.TryGetValue((abstractId, probe), out var higher))
-                {
-                    return higher;
-                }
-            }
-            return null;
-        }
+            // Rendered one block at a time so the just-appended element can be identified for property
+            // inheritance. Continuity is unaffected: the run cursor is external and persists across calls.
+            var before = body.ChildElements.Count;
+            single[0] = posted[step.PostedIndex];
+            RenderBlocks(body, single, state, runCursor);
 
-        public void RecordAbstract(AbstractNum abstractNum)
-        {
-            if (abstractNum.AbstractNumberId?.Value is not int abstractId)
+            if (step.BaseIndex < 0)
             {
-                return;
+                continue;
             }
-            MaxAbstractNumId = Math.Max(MaxAbstractNumId, abstractId);
-            foreach (var level in abstractNum.Elements<Level>())
-            {
-                if (level.LevelIndex?.Value is int ilvl && level.NumberingFormat?.Val is { } fmt)
-                {
-                    _bulletByAbstractLevel[(abstractId, ilvl)] = fmt.Value == NumberFormatValues.Bullet;
-                }
-            }
-        }
 
-        public void RecordInstance(NumberingInstance instance)
-        {
-            if (instance.NumberID?.Value is not int numId)
+            var baseElement = baseline.Blocks[step.BaseIndex];
+            for (var i = before; i < body.ChildElements.Count; i++)
             {
-                return;
+                ComposeBlockMerge.InheritProperties(body.ChildElements[i], baseElement);
             }
-            _numIds.Add(numId);
-            MaxNumId = Math.Max(MaxNumId, numId);
-            if (instance.AbstractNumId?.Val?.Value is int abstractId)
-            {
-                _abstractByNumId[numId] = abstractId;
-            }
-            // A w:lvlOverride carrying a FULL w:lvl redefinition can change the level's numFmt for this
-            // instance only — record it so the kind guard sees the instance-effective classification.
-            foreach (var levelOverride in instance.Elements<LevelOverride>())
-            {
-                if (levelOverride.LevelIndex?.Value is int ilvl
-                    && levelOverride.GetFirstChild<Level>()?.NumberingFormat?.Val is { } fmt)
-                {
-                    _bulletByInstanceOverride[(numId, ilvl)] = fmt.Value == NumberFormatValues.Bullet;
-                }
-            }
+
+            // FR-A05 (task 041): restore what the content model cannot represent — bookmarks (the target of
+            // every REF field, so dropping one breaks cross-references ELSEWHERE in the document) and a
+            // block-level content-control shell. Taken from the BASE block, never from a client payload.
+            ComposeBlockMerge.CarryUnmodeledConstructs(body, before, baseElement, code => state.Warn(code));
+
+            WarnIfSectionBreakFlattened(baseElement, trailingSectPr, state);
         }
     }
 
     /// <summary>
-    /// Task 021: inspects the carrier's numbering part via a SEPARATE READ-ONLY open of the carrier bytes —
-    /// never the editable package, whose Numbering DOM would be marked for autoSave re-serialization by the
-    /// mere read (the 011-T2 preserve-parts hazard). Returns the carrier's <c>w:num</c> id set + kind
-    /// classification (for direct reference) and max instance/abstract ids (the collision-safe allocation
-    /// base). A malformed numbering part surfaces as <see cref="ComposePatchException"/> (Step-9.5 fix F4 —
-    /// the package-level open is lazy, so bytes that passed the editable open can still fail the part parse
-    /// here).
+    /// #777 (r8, 2026-09-01): reports <c>section-break-flattened</c> for an interior <c>w:sectPr</c> lost
+    /// because the user EDITED the paragraph that carried it.
     /// </summary>
-    private static CarrierNumberingScan ScanCarrierNumbering(byte[] carrierBytes)
+    /// <remarks>
+    /// <para><b>Why here and not at projection.</b> This warning used to be emitted by
+    /// <c>ComposeContentModelProjector</c> while the document was being OPENED, once per interior section
+    /// break in the file. But an interior <c>sectPr</c> only dies when its paragraph is RE-RENDERED:
+    /// <c>ComposeBlockMerge.Capture</c> clones an untouched body child whole, so the untouched case carries
+    /// its <c>pPr/sectPr</c> through verbatim. Warning at open therefore reported loss on a document nothing
+    /// had been done to (the "×6" on an untouched contract), which is exactly the non-actionable noise the
+    /// owner directive rules out. Here it fires once per section break that a save actually flattened.</para>
+    ///
+    /// <para><b>Why it is KEPT rather than retired</b>, unlike <c>indentation-dropped</c> and
+    /// <c>paragraph-style-flattened</c>: those two had their premise falsified — the properties are carried
+    /// now, so the warnings were false. This one is still true. An edited paragraph's interior section break
+    /// IS dropped (<c>InheritParagraphProperties</c> excludes <c>SectionProperties</c> because the renderer
+    /// owns the trailing section), the content joins the final section's page setup, and pagination and
+    /// header scope really do change. It is real, and "open it in Word" is a real thing to do about it.</para>
+    ///
+    /// <para><b>The promotion shape falls out for free.</b> Review 023-F1's exception — the 011-P1 generator
+    /// idiom where the FINAL section's <c>sectPr</c> is parked in the last paragraph and
+    /// <c>RenderIntoCarrier</c> promotes it to body level — used to need a predicate mirroring the renderer's
+    /// promotion condition. Comparing by VALUE against the trailing section retires that duplication, and is
+    /// the more honest test anyway: if the section this paragraph ended is the same section its content now
+    /// sits in, the reader sees no change, and a warning would be a false loss report.</para>
+    ///
+    /// <para><paramref name="trailingSectPr"/> is passed in because the caller DETACHES it before the merge
+    /// and re-attaches it afterwards — during this loop the body carries no section properties of its own,
+    /// so reading them from <paramref name="baseElement"/>'s document would find nothing.</para>
+    /// </remarks>
+    private static void WarnIfSectionBreakFlattened(
+        OpenXmlElement baseElement, SectionProperties? trailingSectPr, ListRenderState state)
     {
-        try
+        if (baseElement is not Paragraph baseParagraph
+            || baseParagraph.ParagraphProperties?.SectionProperties is not { } baseSectPr)
         {
-            return ScanCarrierBytes(carrierBytes, doc =>
-            {
-                var scan = new CarrierNumberingScan();
-                var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
-                if (numbering is null)
-                {
-                    return scan;
-                }
-
-                foreach (var abstractNum in numbering.Elements<AbstractNum>())
-                {
-                    scan.RecordAbstract(abstractNum);
-                }
-                foreach (var instance in numbering.Elements<NumberingInstance>())
-                {
-                    scan.RecordInstance(instance);
-                }
-                return scan;
-            });
-        }
-        catch (Exception ex) when (ex is not ComposePatchException and not OutOfMemoryException)
-        {
-            throw new ComposePatchException(
-                ComposePatchErrorKind.MalformedDocument,
-                "The carrier .docx numbering part is not readable.",
-                ex);
-        }
-    }
-
-    /// <summary>
-    /// Accumulates the list <c>w:num</c> instances a body render allocates: a single shared bullet instance
-    /// (lazily) and one instance per restart-scoped ordered list. The heading instance (numId 1) is fixed and
-    /// authored unconditionally, so it is not tracked here.
-    /// </summary>
-    private sealed class NumberingPlan
-    {
-        private int _nextNumId;
-
-        /// <summary>Blank-package authoring — instances allocate from <see cref="FirstListNumInstanceId"/>.</summary>
-        public NumberingPlan() : this(FirstListNumInstanceId) { }
-
-        /// <summary>Task 011 (carrier mode): allocate instances from <paramref name="firstNumId"/> — set
-        /// ABOVE the carrier's own max numId so a rendered list can never capture a carrier num definition.</summary>
-        public NumberingPlan(int firstNumId) => _nextNumId = firstNumId;
-
-        /// <summary>The allocated ordered-list instance ids, in allocation order (each restarts at 1).</summary>
-        public List<int> OrderedInstanceIds { get; } = new();
-
-        /// <summary>The shared bullet-list instance id, or null when no bullet list was rendered.</summary>
-        public int? BulletInstanceId { get; private set; }
-
-        /// <summary>Allocates a fresh ordered-list instance (a new numbered list that restarts at 1).</summary>
-        public int NewOrderedInstance()
-        {
-            var id = _nextNumId++;
-            OrderedInstanceIds.Add(id);
-            return id;
+            return;
         }
 
-        /// <summary>Returns the shared bullet-list instance id, allocating it on first use.</summary>
-        public int BulletInstance() => BulletInstanceId ??= _nextNumId++;
+        // Same section, so the content's page setup is unchanged — the promotion shape, and any interior
+        // break that merely repeated the final section's setup.
+        if (trailingSectPr is not null
+            && string.Equals(trailingSectPr.OuterXml, baseSectPr.OuterXml, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        state.Warn("section-break-flattened");
     }
 }

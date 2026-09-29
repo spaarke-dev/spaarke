@@ -213,6 +213,17 @@ module.exports = async (env, options) => {
             to: 'word/manifest.xml',
             transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
           },
+          {
+            // Legacy XML (OfficeApp/MailApp) manifest for Outlook — the format the M365 admin
+            // center "Integrated apps" accepts directly (the unified manifest.json is dev-sideload
+            // only, `manifestVersion: devPreview`). Served at /outlook/outlook-manifest.xml so admins
+            // can upload it by file OR URL. Self-contained absolute URLs; the transform is a harmless
+            // no-op (kept for parity with the Word copy).
+            from: './outlook/outlook-manifest.xml',
+            to: 'outlook/outlook-manifest.xml',
+            noErrorOnMissing: true,
+            transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
+          },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
           // Mock Office.js for browser testing
           { from: './outlook/taskpane/mock-office.js', to: 'outlook/mock-office.js', noErrorOnMissing: true },

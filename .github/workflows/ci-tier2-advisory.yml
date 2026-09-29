@@ -163,7 +163,7 @@ jobs:
           node-version: '20'
 
       - name: Cache root npm
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-root-${{ hashFiles('package-lock.json') }}
@@ -266,7 +266,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Cache NuGet
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true
         with:
           path: ~/.nuget/packages
@@ -659,7 +659,7 @@ jobs:
       contents: read
     steps:
       - name: Aggregate & post deduplicated PR comment
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           # Each job reports TWICE, and the two disagree by design:
           #

@@ -49,6 +49,7 @@ import {
   Person20Regular,
   ColumnTriple20Regular,
   Settings20Regular,
+  Delete20Regular,
   Info20Regular,
   Copy16Regular,
   CheckmarkCircle16Filled,
@@ -71,6 +72,7 @@ import {
   CONTAINER_URL_ABSENT_TOOLTIP,
 } from "./containerCompliance";
 import { CustomPropertyEditor } from "./CustomPropertyEditor";
+import { ContainerItemRecycleBin } from "../recycle-bin/ContainerItemRecycleBin";
 import type {
   Container,
   ColumnDefinition,
@@ -99,7 +101,7 @@ export interface ContainerDetailProps {
 // Tab identifiers
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabId = "details" | "permissions" | "columns" | "customProperties";
+type TabId = "details" | "permissions" | "columns" | "customProperties" | "recycleBin";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
@@ -822,6 +824,15 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
             <Tab value="customProperties" icon={<Settings20Regular />}>
               Custom Properties
             </Tab>
+            {/*
+              The per-container ITEM recycle bin (FR-E03). Deliberately lives here rather than on
+              the top-level Recycle Bin screen, which lists deleted CONTAINERS — spec D3 keeps the
+              two distinct, and a deleted file only has meaning relative to the container it was
+              deleted from.
+            */}
+            <Tab value="recycleBin" icon={<Delete20Regular />}>
+              Recycle Bin
+            </Tab>
           </TabList>
 
           {/* Tab content area */}
@@ -871,6 +882,16 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
                   containerId={container.id}
                   isActive={activeTab === "customProperties"}
                 />
+              )}
+              {activeTab === "recycleBin" && selectedConfig && (
+                <div style={{ padding: tokens.spacingVerticalM, paddingLeft: tokens.spacingHorizontalL, paddingRight: tokens.spacingHorizontalL }}>
+                  <ContainerItemRecycleBin
+                    containerId={container.id}
+                    configId={selectedConfig.id}
+                    containerName={container.displayName}
+                    isActive={activeTab === "recycleBin"}
+                  />
+                </div>
               )}
             </>
           ) : null}

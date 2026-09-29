@@ -52,6 +52,34 @@ Tests under these eight paths are **KEEP-protected**. Deleting a file under any 
 - ✅ **MUST** test one behavior per test method
 - ✅ **MUST** use `TimeProvider` (or `FakeTimeProvider`) for any code that reads the current time, schedules, or delays. **Banned**: `Stopwatch`, `DateTime.UtcNow`, `Task.Delay` in tests.
 
+### 2a. Reliability-registry exit rule (BINDING, added 2026-08-28)
+
+[`tests/.reliability-registry.json`](../../tests/.reliability-registry.json) lists tests whose
+timing/concurrency assertions earn a **pass-2 retry** in CI instead of failing the build outright.
+
+- ✅ **MUST** delete a test's registry entry **in the same PR** that removes its timing or
+  concurrency dependence (e.g. converting it to `FakeTimeProvider`).
+- ❌ **MUST NOT** leave an entry for a test that is now deterministic.
+
+Membership describes the test **as it exists today**, not a permanent label. A stale entry buys a
+deterministic test a free retry, so a genuine regression can pass on the second attempt and ship.
+This is not hypothetical: three entries went stale the moment PR #884 landed, including
+`StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07` — a test that *names an NFR*.
+
+Adding an entry is likewise a real claim: only add one when the assertions are genuinely
+wall-clock- or concurrency-dependent, and prefer fixing the test with `FakeTimeProvider` over
+registering it.
+
+### 2b. Test-scope clause in task acceptance criteria (BINDING, added 2026-08-28)
+
+- ✅ **MUST**: any task that adds or modifies tests states in its `<acceptance-criteria>` which
+  behaviours and edge cases are in scope for coverage.
+- ❌ **MUST NOT** state a numeric test count — a number invites satisfying the number.
+
+Acceptance criteria are otherwise a **closed set** (`task-create`), so an unqualified "write tests"
+is an open instruction inside a closed contract; the predictable result is breadth padding that
+passes every B1–B17 ban individually while adding no unique verification value.
+
 ### 3. Test isolation
 
 - ✅ **MUST** isolate tests from external production services (use real test tenants for integration, in-memory for unit)
@@ -83,7 +111,7 @@ The first 5 (B1-B5) attack wiring antipatterns; B6-B17 attack the deeper scaffol
 
 6. ❌ **MUST NOT** write **mirror tests** — test methods that assert the implementation does what it does (`GetName_ReturnsName` → `=> Name;`). Test the behavior the field participates in.
 7. ❌ **MUST NOT** write **tests-with-all-mocks-and-trivial-assertion** — every collaborator mocked, ≤2 assertions, often just `Verify.Once()`. Tests interaction shape, not behavior.
-8. ❌ **MUST NOT** test **internal/private methods** via `[InternalsVisibleTo]` or reflection. Locks implementation; test through the public surface instead.
+8. ❌ **MUST NOT** reach non-public members by **reflection** (`BindingFlags.NonPublic`, `GetMethod(…).Invoke`, `PrivateObject`-style access) — it binds by string and breaks silently on rename. ✅ **`internal` + `[assembly: InternalsVisibleTo]` IS permitted** (ADR-038 **Amendment A2**, 2026-09-18) for a member that is deliberately extracted to be assertable, pure or near-pure, and carries a contract the public surface cannot express observably — a predicate, a filter string, a mapping, an election rule. Reflection is a lock-pick; `InternalsVisibleTo` is a key the author cut on purpose. Note B1 still bans `Mock<HttpMessageHandler>`, so for an OData `$filter` the extracted member is often the *only* honest observation point (finding A-5 is the worked example). A member made `internal` *only* to be reachable, carrying no contract, is still scaffolding — B6 and B9 apply to it.
 9. ❌ **MUST NOT** write **pass-through wrapper tests** — methods that delegate `=> _service.DoIt(x)` need no test; if the wrapper grows logic later, test the logic then.
 10. ❌ **MUST NOT** write **coverage-fillers** — tests with `NotThrow()` / `NotNull()` assertions added solely to push coverage %. Coverage is observation (§3), never gate; assert the result.
 11. ❌ **MUST NOT** write **language-feature redundancy tests** — tests of `required` keyword, record equality, sealed hierarchies, exhaustive switch. The C# compiler/runtime enforces these.

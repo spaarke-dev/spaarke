@@ -28,8 +28,35 @@
     Skip external HTTP HEAD validation. Local file links still checked.
 
 .PARAMETER ExcludePattern
-    Regex of paths to exclude (matched against full path). Default excludes
-    node_modules, .git, dist, bin, obj, publish, TestResults, .archive.
+    Regex of paths to exclude (matched against full path).
+
+    SCAN CORPUS (revised 2026-08-28, task CICD-093 / issue #849)
+    ------------------------------------------------------------
+    The validator governs documentation that is INTENDED TO STAY CURRENT — the
+    docs a human or an agent navigates to find out how the system works today:
+
+        root *.md (CLAUDE.md, README.md)   docs/**        .claude/** (see below)
+        knowledge/**                       src/**         tests/**
+        scripts/**   infrastructure/**     .github/**
+
+    Everything below is excluded, each for a stated reason. A validator whose
+    corpus is mostly documents nobody intends to keep link-current reports
+    findings nobody can triage, which is operationally the same as reporting
+    nothing (#849).
+
+    | Excluded                | Why |
+    |-------------------------|-----|
+    | node_modules, dist, bin,| Build output and vendored code. Not authored here. |
+    | obj, publish, TestResults|    |
+    | .git                    | Not documentation. |
+    | projects/**             | Historical project records — specs, designs, task POMLs, notes. Their links legitimately rot as the repo moves on; that is what an archival record does. 3,643 of 4,581 tracked .md files (79.5%) live here, and they dominated the old 1,212-finding report. |
+    | .claude/worktrees/**    | Gitignored, transient full-repo copies for parallel agent sessions. 117,311 .md files on a typical dev machine — enough to bury the real signal and to convince a developer the tool is broken. Zero tracked. |
+    | .claude/archive/**      | The reversibility archive: content is preserved BY DATE precisely because it is superseded. Previously NOT excluded — the old `\.archive` alternation matches a segment literally named `.archive`, which `.claude/archive` is not. |
+    | provisioning-runs/**,   | Generated run records / reports, not authored documentation. |
+    | reports/**              |     |
+
+    Pass an explicit -ExcludePattern to override, or -Path to scan one subtree
+    (e.g. `-Path projects/my-project` still works and ignores this default).
 
 .PARAMETER MaxExternalChecks
     Cap on external HEAD requests (default 200) to bound runtime on large repos.
@@ -56,7 +83,16 @@ param(
 
     [switch]$NoNetwork,
 
+    # Junk / build output. Matched ANYWHERE in the path — these are never authored docs
+    # no matter where they appear.
     [string]$ExcludePattern = '(?i)[\\/](node_modules|\.git|dist|bin|obj|publish|TestResults|\.archive)([\\/]|$)',
+
+    # Archival + transient documentation areas. Matched against the path RELATIVE TO THE REPO
+    # ROOT, anchored at the start — NOT anywhere in the path. That distinction is load-bearing:
+    # an unanchored `projects` would match the absolute path of every file when the caller runs
+    # `-Path projects/some-project` (a documented example below), silently scanning zero files.
+    # See the SCAN CORPUS table in the header for why each entry is here.
+    [string]$ExcludeFromRootPattern = '(?i)^(projects|provisioning-runs|reports|\.claude[\\/](worktrees|archive))([\\/]|$)',
 
     [int]$MaxExternalChecks = 200
 )
@@ -87,19 +123,45 @@ function Get-RepoRoot {
 }
 $repoRoot = Get-RepoRoot -StartPath $scanRoot
 
+# If the caller explicitly pointed -Path INTO an archival area, honour that: they asked for it
+# by name, so the root-anchored exclusions are suppressed for this run. Without this, the
+# documented `-Path projects/<name>` usage would scan nothing.
+$scanRootRel = $scanRoot.Substring([Math]::Min($repoRoot.Length, $scanRoot.Length)).TrimStart('\', '/')
+$explicitlyInsideExcludedArea = $scanRootRel -and ($scanRootRel -match $ExcludeFromRootPattern)
+
 Write-Host "================================================"
 Write-Host "Markdown Link Validator"
 Write-Host "  Scan root: $scanRoot"
 Write-Host "  Repo root: $repoRoot"
 Write-Host "  Network:   $((-not $NoNetwork))"
 Write-Host "  Max ext:   $MaxExternalChecks"
+if ($explicitlyInsideExcludedArea) {
+    Write-Host "  Corpus:    EXPLICIT -Path inside an archival area — root exclusions suppressed"
+} else {
+    Write-Host "  Corpus:    current documentation (see SCAN CORPUS in script header)"
+}
 Write-Host "================================================"
 
 # Collect .md files (filtered)
 $mdFiles = Get-ChildItem -LiteralPath $scanRoot -Filter '*.md' -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -notmatch $ExcludePattern }
 
-Write-Host "Found $($mdFiles.Count) .md files"
+$foundBeforeCorpusFilter = $mdFiles.Count
+
+if (-not $explicitlyInsideExcludedArea) {
+    $mdFiles = $mdFiles | Where-Object {
+        $rel = $_.FullName.Substring([Math]::Min($repoRoot.Length, $_.FullName.Length)).TrimStart('\', '/')
+        $rel -notmatch $ExcludeFromRootPattern
+    }
+}
+
+$excludedByCorpus = $foundBeforeCorpusFilter - $mdFiles.Count
+
+Write-Host "Found $($mdFiles.Count) .md files in the governed corpus"
+if ($excludedByCorpus -gt 0) {
+    # Never let a scope reduction look like a clean scan. Say what was dropped.
+    Write-Host "  ($excludedByCorpus file(s) excluded as archival/transient — see SCAN CORPUS in script header)"
+}
 
 # Patterns
 # Inline link [text](target) — non-greedy text, parens not allowed in target
@@ -186,6 +248,15 @@ foreach ($file in $mdFiles) {
             $pathPart = ($target -split '#', 2)[0]
             if ([string]::IsNullOrWhiteSpace($pathPart)) { continue }  # was anchor-only
 
+            # Percent-decode before resolving. Markdown links to paths containing spaces are
+            # commonly written `Sprint%202/...`, which Test-Path would never match literally —
+            # a false "file not found" on a link that actually resolves. (Both current instances
+            # in this repo turn out to be genuinely broken either way, so this changes no count
+            # today; it is here so the next one is not misreported.)
+            if ($pathPart -match '%[0-9A-Fa-f]{2}') {
+                try { $pathPart = [System.Uri]::UnescapeDataString($pathPart) } catch { }
+            }
+
             if ($pathPart.StartsWith('/')) {
                 $resolved = Join-Path $repoRoot $pathPart.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar)
             } else {
@@ -219,7 +290,23 @@ Write-Host "  Broken links found:  $($results.Count)"
 Write-Host ""
 
 if ($results.Count -gt 0) {
-    $results | Format-Table -AutoSize File, Kind, Target, Reason | Out-Host
+    # Per-area rollup FIRST — 200+ raw rows is a wall of text; the rollup tells a reader
+    # where the debt actually is before they scroll. (Format-Table was truncating paths to
+    # the console width, which made the raw rows unusable as well as unreadable.)
+    Write-Host "Broken links by area:"
+    $results |
+        Group-Object { ($_.File -replace '^\.[\\/]', '' -split '[\\/]')[0] } |
+        Sort-Object Count -Descending |
+        ForEach-Object { Write-Host ("    {0,5}  {1}" -f $_.Count, $_.Name) }
+    Write-Host ""
+
+    Write-Host "Detail:"
+    foreach ($r in $results) {
+        # One line per finding, never truncated — a path you cannot read is a finding you
+        # cannot fix.
+        Write-Host ("  {0}`n      -> [{1}] {2}  ({3})" -f $r.File, $r.Kind, $r.Target, $r.Reason)
+    }
+
     Write-Host ""
     Write-Host "::error::Markdown link validation FAILED — $($results.Count) broken link(s) found"
     exit 1

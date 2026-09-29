@@ -96,7 +96,7 @@ When a task has these tags, ALWAYS include these knowledge files:
 | `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` | `.claude/patterns/ai/streaming-endpoints.md` | — |
 | `deploy` | — | — | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/guides/PCF-DEPLOYMENT-GUIDE.md` |
 | `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` | — |
-| `worker`, `job`, `background` | `.claude/constraints/jobs.md` | — | — |
+| `worker`, `job`, `background` | `.claude/constraints/jobs.md` | `.claude/patterns/api/background-workers.md` (queue), `.claude/patterns/api/scheduled-jobs.md` (schedule) | `.claude/adr/ADR-052-workload-placement.md` (where it runs) |
 
 **Critical: PCF tasks MUST reference PCF-DEPLOYMENT-GUIDE.md**
 
@@ -130,7 +130,7 @@ FOR each task identified:
     - Dataverse Plugin → ADR-002
     - Graph/SPE Integration → ADR-007
     - PCF Control → ADR-006, ADR-011, ADR-012, ADR-021
-    - Background Worker → ADR-001, ADR-004
+    - Background Worker → ADR-052 (where it runs), ADR-004 (queue) / ADR-036 (schedule)
     - DI Registration → ADR-010
     - AI Features → ADR-013, ADR-014, ADR-015, ADR-016
     - Testing → ADR-022
@@ -262,6 +262,13 @@ FOR each task identified, assign a model tier:
 - **Explicit scope everywhere.** List the **exact files** to touch (not "the follow-on components"); **point at the canonical reference implementation to copy** (e.g. `workAssignmentService.ts`) rather than describe it; state the **exact contract** (e.g. the ADR-024 resolver's 5 fields + mutual-exclusion). A `<constraint>` without an explicit scope clause is a defect — write "Every endpoint added or modified in this task applies `DocumentAuthFilter`," not "use endpoint filters for auth."
 - **Acceptance criteria are a CLOSED SET.** The executor treats every listed `<criterion>` as mandatory and **anything not listed as out of scope**. Criteria must be **exhaustive, not illustrative** — include the negative/authorization cases (the 401, the empty-input, the unauthorized-user path), not just the happy path.
 - **"Above and beyond" must be requested.** If a task should include opportunistic improvements (e.g. "also fix adjacent lint violations in touched files"), say so explicitly. Do NOT rely on the model to infer it — and do NOT add anti-laziness scaffolding ("be exhaustive", "double-check everything"); Sonnet 5 over-triggers on those and burns effort on ritual verification.
+- **Test-scope clause (added 2026-08-28).** For any task that will add or modify tests, state in `<acceptance-criteria>` **which behaviours and edge cases are in scope for test coverage** — not just the production behaviour. Frame it as intent, and say what is *not* wanted:
+
+  > *"Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes."*
+
+  Two reasons. First, the closed-set rule above already tells the executor that unlisted criteria are out of scope; without a test-scope clause, "write tests" is an **open** instruction inside an otherwise closed contract, and the predictable result is breadth padding as uncertainty-hedging — three near-identical happy-path variants that each pass every ADR-038 §7 ban individually while adding no unique verification value. Second, it gives `/test-diet` something concrete to check a MAINTAIN classification against at project close.
+
+  **Do NOT state a numeric test count.** A number invites satisfying the number, which is the padding behaviour this clause exists to prevent.
 - **Step mode (see Step 3.5.5c) and escalation triggers (see the `<escalation>` element)** are the other two literal-execution levers — set them deliberately per task.
 - **Frontend tasks need concrete visual direction** (see Step 3.65): anchor the look in a `<knowledge>` pattern reference to an existing Fluent v9 component or an explicit spec. "Clean and modern" is not a spec — Sonnet 5 will settle into a fixed default house style.
 - **Knowledge curation (token discipline).** The 1M context window is headroom for genuinely cross-cutting tasks, NOT license to load the full ADR corpus by default. The Sonnet-5 tokenizer produces ~30% more tokens for the same text, so padding is materially more expensive — load what the task needs via the Tag-to-Knowledge mapping, reference the rest by path.
@@ -696,7 +703,7 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <step order="2">{Second concrete action}</step>
     <step order="3">{Continue until task is complete}</step>
     <step order="N-2">Run tests and verify all pass</step>
-    <step order="N-1">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+    <step order="N-1">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` — the bracketed ASCII token is mandatory, the emoji alone is not greppable (see the Status token table + FAILURE-MODES G-16)</step>
     <step order="N">If any deviations from plan, document in projects/{project-name}/notes/</step>
   </steps>
 
@@ -749,11 +756,39 @@ UPDATE projects/{project-name}/CLAUDE.md:
 CREATE tasks/TASK-INDEX.md:
   | ID | Title | Phase | Status | Dependencies | Parallel |
   |----|-------|-------|--------|--------------|----------|
-  | 001 | ... | 1 | 🔲 | none | — |
-  | 002 | ... | 1 | 🔲 | 001 | — |
-  | 020 | ... | 2 | 🔲 | 010 | Group A |
-  | 021 | ... | 2 | 🔲 | 010 | Group A |
+  | 001 | ... | 1 | 🔲 [open] | none | — |
+  | 002 | ... | 1 | 🔲 [open] | 001 | — |
+  | 020 | ... | 2 | 🔲 [open] | 010 | Group A |
+  | 021 | ... | 2 | 🔲 [open] | 010 | Group A |
   ...
+
+  🔴 **THE BRACKETED ASCII TOKEN IS MANDATORY — the emoji alone is NOT greppable.**
+  (Added 2026-09-03 by `unified-access-control-r2`, owner-directed.)
+
+  | Token | Emoji | Meaning | POML `<status>` |
+  |---|---|---|---|
+  | `[open]` | 🔲 | not started | `pending` |
+  | `[wip]` | 🔄 | in progress | `in-progress` |
+  | `[done]` | ✅ | complete | `completed` |
+  | `[escalated]` | ⚠️ | complete, residue accepted | `completed-with-escalation` |
+  | `[blocked]` | 🟡 | shipped but blocked | `blocked-shipped` |
+
+  **Why.** Status is a DATA FIELD. `grep` in this environment **silently returns 0** for any
+  character above U+FFFF, and 🔲 is U+1F532 (4 bytes). So `grep -c '🔲'` reports **zero open tasks
+  on a project with dozens** — no error, just a plausible wrong number. ✅ (U+2705) happens to be
+  3-byte and works, which makes the failure look like data rather than tooling. Full mechanism:
+  [`.claude/FAILURE-MODES.md` G-16](../../FAILURE-MODES.md#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji).
+
+  Keep the emoji — it is genuinely faster for a human to scan a column of glyphs than a column of
+  words. The token is additive, in the same cell, so the table shape does not change.
+
+  ⚠️ **The status is written in TWO places** — here and the task's own `<status>` element — and
+  nothing structurally keeps them equal. A 2026-09-03 audit of one project found **17 disagreements
+  across 92 tasks** (14 tasks finished and merged whose POML still said `pending`; one finished task
+  the index still showed as `🔄`). Verify both with `pwsh scripts/check-task-status-drift.ps1`
+  after any status write — `task-execute` Step 10 requires it. The POML `<status>` is CANONICAL when
+  they disagree only in the sense that it is machine-readable; **resolve from git evidence, not by
+  assuming either side is right** — in that audit the POML was stale 14 times and the index once.
 
   ADD "Parallel Execution Groups" section:
   ```markdown

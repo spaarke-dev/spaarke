@@ -25,7 +25,43 @@ import {
   TODO_REGARDING_CATALOG,
   _resetTodoNavPropCacheForTests,
 } from '../TodoRegardingUpdateBuilder';
+import { _resetNavPropCacheForTests } from '../PolymorphicResolverService';
 import type { INavPropEntry, IPolymorphicWebApi } from '../PolymorphicResolverService';
+
+// ---------------------------------------------------------------------------
+// FR-26 core-ancestor derivation (task 050) — shared metadata stub
+//
+// `buildTodoRegardingUpdate` now derives the target's core-record ancestor
+// before assembling the payload, and FAILS CLOSED when the target's metadata
+// cannot be read. Every test in this file therefore needs the metadata endpoint
+// to answer. The stub reports all four core-ancestor lookups on every entity;
+// the canned webApi below returns rows with no ancestor values, so derivation
+// lands on 'no-ancestor' and the payloads asserted here are unchanged from
+// before task 050. Ancestor-stamping itself is covered in
+// PolymorphicResolverService.coreAncestor.test.ts.
+// ---------------------------------------------------------------------------
+
+const CORE_ANCESTOR_COLUMNS = [
+  'sprk_regardingmatter',
+  'sprk_regardingproject',
+  'sprk_regardingworkassignment',
+  'sprk_regardingservicerequest',
+];
+
+beforeEach(() => {
+  _resetNavPropCacheForTests();
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      value: CORE_ANCESTOR_COLUMNS.map(c => ({
+        ReferencingAttribute: c,
+        ReferencingEntityNavigationPropertyName: c.replace(/^sprk_regarding/, 'sprk_Regarding'),
+        ReferencedEntity: 'unused',
+      })),
+    }),
+  }) as unknown as typeof fetch;
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures

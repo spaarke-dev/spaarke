@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Memory;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -157,6 +158,18 @@ public sealed class RecallSessionFileHandler : IToolHandler
     internal const string TruncationReasonExceeded8K = "exceeded_8K";
 
     /// <summary>
+    /// truncation_reason (spaarkeai-compose-r8 FR-B02): this file's hot-index chunks had been evicted and
+    /// have just been REBUILT from the durable byte copy, but Azure AI Search has not made them queryable
+    /// yet. The content exists and the next recall will find it.
+    /// </summary>
+    /// <remarks>
+    /// This exists so the transient state is DISTINGUISHABLE from <see cref="TruncationReasonNotFound"/>.
+    /// Collapsing them would tell the agent (and through it the user) that a file it still holds is gone,
+    /// which is the "no longer available" defect this track exists to remove — arriving by a new route.
+    /// </remarks>
+    internal const string TruncationReasonRehydrating = "content_rehydrating";
+
+    /// <summary>
     /// ErrorCode emitted when requireCitations=true and the recall produced zero citations
     /// AND scope != "summary" — architecture §8.3 trust-frame enforcement; the agent should
     /// retry with a different scope.
@@ -175,6 +188,9 @@ public sealed class RecallSessionFileHandler : IToolHandler
     internal const string OutcomeCancelled = "cancelled";
     internal const string OutcomeException = "exception";
     internal const string OutcomeSearchUnavailable = "search_unavailable";
+
+    /// <summary>Outcome discriminator for the FR-B02 rebuild-in-progress state.</summary>
+    internal const string OutcomeRehydrating = "rehydrating";
 
     // ────────────────────────────────────────────────────────────────────────
     // Tunables
@@ -222,13 +238,21 @@ public sealed class RecallSessionFileHandler : IToolHandler
     // production; tests can also inject Mock<IRecentlyDiscussedTracker> explicitly).
     private readonly IRecentlyDiscussedTracker? _recentlyDiscussedTracker;
 
+    // spaarkeai-compose-r8 FR-B02 (task 061) — lazy re-index from the durable byte copy when the hot
+    // index has been evicted. OPTIONAL for the same reason as the two dependencies above: the unit
+    // suite constructs this handler directly. DI registers SessionFileRehydrationService
+    // unconditionally (AiPersistenceModule), so production always supplies a real instance; a null
+    // here simply means "no lazy re-index", i.e. exactly the pre-task-061 behaviour.
+    private readonly SessionFileRehydrationService? _sessionFileRehydration;
+
     public RecallSessionFileHandler(
         IRagService ragService,
         ChatSessionManager sessionManager,
         TimeProvider timeProvider,
         ILogger<RecallSessionFileHandler> logger,
         IContextEventEmitter? contextEventEmitter = null,
-        IRecentlyDiscussedTracker? recentlyDiscussedTracker = null)
+        IRecentlyDiscussedTracker? recentlyDiscussedTracker = null,
+        SessionFileRehydrationService? sessionFileRehydration = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -236,6 +260,7 @@ public sealed class RecallSessionFileHandler : IToolHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _contextEventEmitter = contextEventEmitter;
         _recentlyDiscussedTracker = recentlyDiscussedTracker;
+        _sessionFileRehydration = sessionFileRehydration;
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -621,19 +646,19 @@ public sealed class RecallSessionFileHandler : IToolHandler
             // CallerPrincipal — sessionId itself is the authorization).
         };
 
-        RagSearchResponse response;
-        try
+        // Post-filter by fileId — the session-files schema carries one document per chunk
+        // with a `fileId` (or sessionFileId) tagging column. The RagSearchResult shape doesn't
+        // surface this column directly; we filter via the manifest's SearchDocumentIdsCsv which
+        // ChatSessionFile carries from task 071 enrichment.
+        //
+        // FR-B02: SearchSessionFileAsync also performs the lazy re-index when the manifest names
+        // chunks the hot index no longer holds (the 24h-eviction state).
+        var search = await SearchSessionFileAsync(
+            context.TenantId!, sessionIdString, file, args.Query, options, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (search.SearchUnavailable)
         {
-            response = await _ragService.SearchAsync(args.Query, options, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // Architecture §9.1 T5 graceful degradation: AI Search query fails → return
-            // truncation_reason: "search_unavailable" so the agent can retry or apologize.
-            _logger.LogWarning(ex,
-                "RecallSessionFileHandler search failed for fileId={FileId}: {ErrorType}",
-                args.FileId, ex.GetType().Name);
             return (new RecallSessionFilePayload
             {
                 Content = string.Empty,
@@ -643,18 +668,18 @@ public sealed class RecallSessionFileHandler : IToolHandler
             }, OutcomeSearchUnavailable);
         }
 
-        // Post-filter by fileId — the session-files schema carries one document per chunk
-        // with a `fileId` (or sessionFileId) tagging column. The RagSearchResult shape doesn't
-        // surface this column directly; we filter via the manifest's SearchDocumentIdsCsv which
-        // ChatSessionFile carries from task 071 enrichment.
-        var allowedSearchIds = new HashSet<string>(
-            (file.SearchDocumentIdsCsv ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            StringComparer.Ordinal);
+        if (search.Rehydrating)
+        {
+            return (new RecallSessionFilePayload
+            {
+                Content = string.Empty,
+                Citations = Array.Empty<RecallCitation>(),
+                ScopeTruncated = true,
+                TruncationReason = TruncationReasonRehydrating
+            }, OutcomeRehydrating);
+        }
 
-        var fileScopedResults = allowedSearchIds.Count == 0
-            ? response.Results.ToList()
-            : response.Results.Where(r => allowedSearchIds.Contains(r.Id)).ToList();
+        var fileScopedResults = search.Results.ToList();
 
         // Per-purpose post-processing (FR-31 — minimal first-cut semantics; rich NLP deferred)
         if (string.Equals(args.Purpose, PurposeQuote, StringComparison.Ordinal))
@@ -733,22 +758,19 @@ public sealed class RecallSessionFileHandler : IToolHandler
             UseKeywordSearch = true
         };
 
-        RagSearchResponse response;
-        try
+        // File-scoped filter via SearchDocumentIdsCsv + FR-B02 lazy re-index (same as HandleRagSearchAsync).
+        // The session-files index keyword path supports "*" as a "match anything" stub; when query is
+        // empty (rare for full_text) fall back to it so the search retains some anchor.
+        var search = await SearchSessionFileAsync(
+            context.TenantId!,
+            sessionIdString,
+            file,
+            string.IsNullOrWhiteSpace(args.Query) ? "*" : args.Query,
+            options,
+            cancellationToken).ConfigureAwait(false);
+
+        if (search.SearchUnavailable)
         {
-            response = await _ragService.SearchAsync(
-                // The session-files index keyword path supports "*" as a "match anything" stub;
-                // when query is empty (rare for full_text) fall back to the args.Query so the
-                // search retains some semantic anchor.
-                string.IsNullOrWhiteSpace(args.Query) ? "*" : args.Query,
-                options,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex,
-                "RecallSessionFileHandler full_text search failed for fileId={FileId}: {ErrorType}",
-                args.FileId, ex.GetType().Name);
             return (new RecallSessionFilePayload
             {
                 Content = string.Empty,
@@ -758,17 +780,18 @@ public sealed class RecallSessionFileHandler : IToolHandler
             }, OutcomeSearchUnavailable);
         }
 
-        // File-scoped filter via SearchDocumentIdsCsv (same as HandleRagSearchAsync)
-        var allowedSearchIds = new HashSet<string>(
-            (file.SearchDocumentIdsCsv ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            StringComparer.Ordinal);
-        var fileChunks = allowedSearchIds.Count == 0
-            ? response.Results.OrderBy(r => r.ChunkIndex).ToList()
-            : response.Results
-                .Where(r => allowedSearchIds.Contains(r.Id))
-                .OrderBy(r => r.ChunkIndex)
-                .ToList();
+        if (search.Rehydrating)
+        {
+            return (new RecallSessionFilePayload
+            {
+                Content = string.Empty,
+                Citations = Array.Empty<RecallCitation>(),
+                ScopeTruncated = true,
+                TruncationReason = TruncationReasonRehydrating
+            }, OutcomeRehydrating);
+        }
+
+        var fileChunks = search.Results.OrderBy(r => r.ChunkIndex).ToList();
 
         var sb = new StringBuilder();
         var citations = new List<RecallCitation>();
@@ -838,6 +861,185 @@ public sealed class RecallSessionFileHandler : IToolHandler
             ScopeTruncated = true,
             TruncationReason = TruncationReasonNotFound
         };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // FR-B02 — session-scoped search with LAZY re-index from the durable copy
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Result of one session-scoped search attempt, including the FR-B02 rebuild states.</summary>
+    private sealed record SessionFileSearch(
+        IReadOnlyList<RagSearchResult> Results,
+        bool SearchUnavailable,
+        bool Rehydrating)
+    {
+        internal static SessionFileSearch Ok(IReadOnlyList<RagSearchResult> results)
+            => new(results, false, false);
+
+        internal static readonly SessionFileSearch Unavailable =
+            new(Array.Empty<RagSearchResult>(), true, false);
+
+        internal static readonly SessionFileSearch Rebuilding =
+            new(Array.Empty<RagSearchResult>(), false, true);
+    }
+
+    /// <summary>
+    /// Runs one session-scoped search, post-filters it to the manifest's chunk ids, and — when the
+    /// manifest names chunks the hot index no longer holds — rebuilds them from the durable byte copy
+    /// and searches once more (spaarkeai-compose-r8 FR-B02).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why "empty result" is not by itself the trigger.</b> A zero-result recall usually means the
+    /// query matched nothing, and rehydrating on that would fire a Document Intelligence re-extraction
+    /// on every unlucky question — a real cost regression dressed up as a fix. The eviction state is
+    /// distinguished by a cheap filter-only EXISTENCE probe: <c>SessionFilesCleanupJob</c> evicts per
+    /// <c>(tenantId, sessionId)</c>, all-or-nothing, so "this session has ZERO chunks in the index" is
+    /// the signal, and it costs one TopK=1 filter query taken only in the already-empty branch.
+    /// </para>
+    /// <para>
+    /// <b>Known limitation, deliberately not hidden.</b> Azure AI Search does not make a write
+    /// immediately queryable, so the confirming search can still come back empty. That is reported as
+    /// <see cref="TruncationReasonRehydrating"/> — NOT as <see cref="TruncationReasonNotFound"/> — and
+    /// the rebuild is durable, so the next recall succeeds. A retry-sleep in a tool-call path was
+    /// considered and rejected: it would trade an explainable transient state for latency plus a race
+    /// it cannot actually close.
+    /// </para>
+    /// </remarks>
+    private async Task<SessionFileSearch> SearchSessionFileAsync(
+        string tenantId,
+        string sessionId,
+        ChatSessionFile file,
+        string query,
+        RagSearchOptions options,
+        CancellationToken cancellationToken)
+    {
+        var allowedSearchIds = new HashSet<string>(
+            (file.SearchDocumentIdsCsv ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.Ordinal);
+
+        var first = await TrySearchAsync(query, options, file.FileId, cancellationToken).ConfigureAwait(false);
+        if (first is null)
+        {
+            return SessionFileSearch.Unavailable;
+        }
+
+        var scoped = FilterToManifest(first, allowedSearchIds);
+        if (scoped.Count > 0
+            || allowedSearchIds.Count == 0
+            || _sessionFileRehydration is null
+            || !_sessionFileRehydration.IsAvailable)
+        {
+            return SessionFileSearch.Ok(scoped);
+        }
+
+        if (await SessionHasIndexedChunksAsync(tenantId, sessionId, file.FileId, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            // The index still holds this session — the query simply matched nothing. Not an eviction.
+            return SessionFileSearch.Ok(scoped);
+        }
+
+        _logger.LogInformation(
+            "RecallSessionFileHandler: session-files index holds no chunks for this session but the " +
+            "manifest names {ManifestChunkCount} — rebuilding from the durable copy (FR-B02). " +
+            "TenantId={TenantId}, SessionId={SessionId}, FileId={FileId}",
+            allowedSearchIds.Count, tenantId, sessionId, file.FileId);
+
+        SessionFileRehydrationResult rehydration;
+        try
+        {
+            rehydration = await _sessionFileRehydration
+                .RehydrateAsync(tenantId, sessionId, file, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "RecallSessionFileHandler: lazy re-index threw for fileId={FileId}: {ErrorType}",
+                file.FileId, ex.GetType().Name);
+            return SessionFileSearch.Ok(scoped);
+        }
+
+        if (rehydration.Outcome != SessionFileRehydrationOutcome.Reindexed)
+        {
+            // No durable copy (pre-FR-B01 upload), store disabled, or the rebuild failed. The honest
+            // answer is the empty result the search already produced — this handler does not invent
+            // content, and the rehydration service has already logged the specific cause.
+            _logger.LogInformation(
+                "RecallSessionFileHandler: lazy re-index did not rebuild the index. Outcome={Outcome}, FileId={FileId}",
+                rehydration.Outcome, file.FileId);
+            return SessionFileSearch.Ok(scoped);
+        }
+
+        var second = await TrySearchAsync(query, options, file.FileId, cancellationToken).ConfigureAwait(false);
+        if (second is null)
+        {
+            return SessionFileSearch.Unavailable;
+        }
+
+        var rescoped = FilterToManifest(second, allowedSearchIds);
+        return rescoped.Count > 0
+            ? SessionFileSearch.Ok(rescoped)
+            : SessionFileSearch.Rebuilding;
+    }
+
+    /// <summary>
+    /// Filter-only, TopK=1 probe answering "does the session-files index still hold ANY chunk for this
+    /// session?". Vector + semantic + keyword are all off so <c>RagService</c> issues a match-all query
+    /// whose only discriminator is the tenant + session filter it always applies.
+    /// </summary>
+    private async Task<bool> SessionHasIndexedChunksAsync(
+        string tenantId,
+        string sessionId,
+        string fileId,
+        CancellationToken cancellationToken)
+    {
+        var probe = new RagSearchOptions
+        {
+            TenantId = tenantId,
+            SessionId = sessionId,
+            TopK = 1,
+            MinScore = 0f,
+            UseSemanticRanking = false,
+            UseVectorSearch = false,
+            UseKeywordSearch = false,
+        };
+
+        var response = await TrySearchAsync("*", probe, fileId, cancellationToken).ConfigureAwait(false);
+
+        // A FAILED probe must not be read as "evicted" — that would trigger a re-extraction every time
+        // AI Search has a bad minute. Treat unknown as "still there" and leave the empty result alone.
+        return response is null || response.Results.Count > 0;
+    }
+
+    private async Task<RagSearchResponse?> TrySearchAsync(
+        string query,
+        RagSearchOptions options,
+        string fileId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _ragService.SearchAsync(query, options, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Architecture §9.1 T5 graceful degradation: AI Search query fails → the caller returns
+            // truncation_reason: "search_unavailable" so the agent can retry or apologize.
+            _logger.LogWarning(ex,
+                "RecallSessionFileHandler search failed for fileId={FileId}: {ErrorType}",
+                fileId, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    private static List<RagSearchResult> FilterToManifest(
+        RagSearchResponse response,
+        HashSet<string> allowedSearchIds)
+        => allowedSearchIds.Count == 0
+            ? response.Results.ToList()
+            : response.Results.Where(r => allowedSearchIds.Contains(r.Id)).ToList();
 
     // ────────────────────────────────────────────────────────────────────────
     // Helpers

@@ -34,13 +34,17 @@ import * as React from 'react';
 import {
   makeStyles,
   tokens,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Text,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
   MessageBarActions,
   Button,
 } from '@fluentui/react-components';
-import { Dismiss16Regular } from '@fluentui/react-icons';
+import { Dismiss16Regular, Info16Regular } from '@fluentui/react-icons';
 
 import type {
   ComposeCheckoutLockedByInfo,
@@ -50,6 +54,7 @@ import type {
 } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 import type { PendingRedlineError } from './hooks/usePendingRedline';
+import { describeRedlineError } from './redlineFailureCopy';
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
@@ -158,6 +163,17 @@ export interface ComposeBannerStackProps {
    * renders nothing. No dismiss affordance (cleared by the parent at the next Generate/Email attempt).
    */
   memoActionMessage?: string | null;
+  /**
+   * R8 UAT item 8 — the change-summary negative-path notice. EXACT sibling of
+   * {@link memoActionMessage} (same shape, same lifecycle, same rationale): the honest
+   * "no tracked changes to summarise" / "couldn't generate" answer, rendered here rather than as a
+   * stray host MessageBar. Null renders nothing; cleared by the parent at the next attempt.
+   *
+   * This one carries more weight than a convenience notice. The summary Action is ASKED for from the
+   * Word menu, so "there is nothing to summarise" is an answer the user is owed — the alternative is
+   * dispatching an empty operand, which is what makes the model fabricate a phantom "[Insertion]".
+   */
+  changeSummaryMessage?: string | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -225,7 +241,30 @@ function writeImportWarningsDismissed(signature: string): void {
 // "Some content was simplified when saving (code ×N)." line. Codes are the server render-side /
 // client mapper vocabulary (ComposeContentModel save path).
 
+/**
+ * FR-S02 (r8 task 011): the concurrency notice's code. It travels in the save response's
+ * `degradationWarnings` array (one wire field, one dismissal), but renders as its own row — see the
+ * partition in the component body for why.
+ */
+export const CONCURRENT_EXTERNAL_CHANGE_CODE = 'concurrent-external-change';
+
 const SAVE_DEGRADATION_COPY: Record<string, string> = {
+  // FR-S09 item 7 (r8 task 016): the document saved completely; only the Dataverse columns that DESCRIBE
+  // it (size, SharePoint path) could not be brought up to date with it. Kept calm on purpose — the
+  // user's work is fine and there is nothing for them to redo — but not silent, because those columns
+  // are what the Documents grid shows and what "Open in SharePoint" follows, so a stale value is a wrong
+  // number displayed rather than a hidden one. It clears itself on the next successful save.
+  'document-metadata-stale':
+    "Saved. The document's size and location details in Spaarke could not be refreshed just now, so " +
+    'they may look out of date elsewhere until the next save.',
+  // FR-S02 (r8 task 011): concurrency is LAST-WRITER-WINS with a warning. The save SUCCEEDED; someone
+  // else's version landed between this document being opened and being saved, and this save is now the
+  // current one. Version history is the honest recovery path — their content is not lost, it is the
+  // previous version. Supersedes the 412 refusal shipped 2026-08-18, which left the user with unsaved
+  // work in a browser tab and no way forward.
+  'concurrent-external-change':
+    'Someone else saved a new version of this document while you had it open. Your save is now the ' +
+    'current version — use version history in the document management system to see or restore theirs.',
   'comment-anchor-dropped': "A comment's anchor could not be placed; the comment text was kept.",
   // UAT-23 (2026-08-18): an edit whose anchor drifted during editing so it couldn't be re-anchored on
   // save (a still-valid edit the op-log path had to drop) — surfaced instead of vanishing silently.
@@ -258,6 +297,10 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'comment-flattened': "A comment's rich content was simplified when saving.",
   'comment-anchor-flattened': "A comment's anchored range was simplified when saving.",
   'strikethrough-flattened': 'Strikethrough formatting was not preserved.',
+  // Task 044 (r8): the merge's shortfall report emits this for a w:sym in an EDITED paragraph. Every
+  // other code it emits already had copy — this was the one gap, and a banner that falls through to
+  // the raw "(symbol-flattened ×2)" line is developer language in a user-facing sentence.
+  'symbol-flattened': 'A special symbol in an edited paragraph was saved as ordinary text.',
   'numbering-unresolved': "An automatic list number couldn't be preserved and may differ.",
   'numstylelink-unresolved': "A linked list-numbering style couldn't be preserved.",
   'style-linked-numbering-dropped': 'Style-linked list numbering was simplified.',
@@ -291,13 +334,21 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   // simplifications (the text/content is intact) — folded into the concise summary below via
   // SAVE_DEGRADATION_LABEL rather than one sentence each. Entries here keep the per-code fallback honest
   // if the summary path is ever bypassed. See also DEF-002 (the actual widener engine work, UAT-07a).
-  'indentation-dropped': 'Some indentation was simplified.',
-  'paragraph-style-flattened': 'Some paragraph styles were simplified.',
-  'section-break-flattened': 'A section break was simplified.',
+  // 'indentation-dropped' and 'paragraph-style-flattened' RETIRED (#777, 2026-09-01) — same
+  // Direction-B rule as 'internal-link-flattened' below. Neither has a producer any more: task 041 made
+  // an edited block inherit w:ind from its base, and ComposeBlockMerge.InheritParagraphProperties now
+  // carries an UNMODELED w:pStyle (only Normal/Heading1-6/ListParagraph are the model's to decide). They
+  // were also whole-document open-time counts, which is how an untouched contract reported "×84 / ×85".
+  // Leaving the copy would let a reader conclude the server still emits them.
+  'section-break-flattened':
+    'A section break was removed — page setup and headers from that point now follow the final section.',
   'tab-flattened': 'Some tab stops were simplified.',
   'table-formatting-flattened': 'Some table formatting was simplified.',
   'line-break-flattened': 'A line break was simplified.',
-  'internal-link-flattened': 'An internal link was simplified.',
+  // 'internal-link-flattened' RETIRED (UAT 2026-08-26 / D-1). An internal cross-reference is no longer
+  // flattened — `w:anchor` is a self-contained scalar and is now carried, so the code has no producer.
+  // Retiring the copy in the same change is the Direction-B rule: a taxonomy that advertises a code
+  // nothing can emit is the same over-claim as a residual-loss doc that under-reports.
 };
 
 // UAT-07b: short NOUN labels for the common formatting-simplification codes, used to build ONE concise,
@@ -305,13 +356,12 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
 // Codes not listed here fall back to their full SAVE_DEGRADATION_COPY sentence (they are usually
 // content-affecting, e.g. a dropped link target, and deserve their own line).
 const SAVE_DEGRADATION_LABEL: Record<string, string> = {
-  'indentation-dropped': 'indentation',
-  'paragraph-style-flattened': 'paragraph styles',
+  // 'indentation-dropped' / 'paragraph-style-flattened' RETIRED — see SAVE_DEGRADATION_COPY above.
   'section-break-flattened': 'section breaks',
   'tab-flattened': 'tab stops',
   'table-formatting-flattened': 'table formatting',
   'line-break-flattened': 'line breaks',
-  'internal-link-flattened': 'internal links',
+  // 'internal-link-flattened' RETIRED — see SAVE_DEGRADATION_COPY above.
 };
 
 /** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */
@@ -359,6 +409,25 @@ function saveDegradationSignature(warnings: ReadonlyArray<{ code: string; count:
 }
 
 const useStyles = makeStyles({
+  // UAT round 1 #2 — the collapsed formatting-notice row. One line of chrome instead of a stack of
+  // full-width MessageBars. Semantic tokens only (ADR-021).
+  noticeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    paddingInline: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalXXS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  noticeIcon: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
+  noticeText: { color: tokens.colorNeutralForeground2 },
+  noticePopover: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    maxWidth: '380px',
+  },
   bannerStack: {
     display: 'flex',
     flexDirection: 'column',
@@ -395,6 +464,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     onClearRedlineError,
     composeDraftError = null,
     memoActionMessage = null,
+    changeSummaryMessage = null,
   } = props;
 
   // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
@@ -444,7 +514,28 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     writeDismissedFlag(SAVE_DEGRADATION_DISMISS_KEY_PREFIX, saveWarningsSig);
     setSaveWarningsDismissed(true);
   }, [saveWarningsSig]);
-  const showSaveDegradation = saveWarnings.length > 0 && !saveWarningsDismissed;
+
+  // FR-S02 (r8 task 011): the concurrency notice rides the SAME wire field and the same dismissal, but
+  // it is NOT a degradation — nothing was simplified. Partition it out so the degradation banner's
+  // "Some formatting was simplified when saving" title and its version-history trailer stay TRUE of
+  // what they describe; both would be false of a concurrency notice.
+  //
+  // UAT-S-01 (2026-08-21, owner UAT of task 017): the trailer previously read "The original file is
+  // unchanged until you save." That is FALSE everywhere this banner renders. `saveDegradationWarnings`
+  // is dispatched from the SERVER's response to a COMPLETED save (ComposeWorkspace triggerSave, and
+  // the post-save re-mount carry) — the bytes are already written and the simplification the banner
+  // describes is already IN them. Telling the user their original is untouched at the exact moment it
+  // was overwritten is the misreporting class Track S exists to remove (FR-S06/FR-S09). The trailer now
+  // names the real recovery: version history, same safety net FR-S02's concurrency notice points at.
+  const concurrencyNotice = saveWarnings.find(w => w.code === CONCURRENT_EXTERNAL_CHANGE_CODE) ?? null;
+  const degradationOnlyWarnings = saveWarnings.filter(w => w.code !== CONCURRENT_EXTERNAL_CHANGE_CODE);
+  const showSaveDegradation = degradationOnlyWarnings.length > 0 && !saveWarningsDismissed;
+  // UAT round 1 #2 — how many formatting-notice families are currently showing. Drives the collapsed
+  // row's count and its render gate. Deliberately a count of FAMILIES, not of individual warning codes:
+  // the popover shows one paragraph per family, and "7 formatting notices" for a single simplification
+  // message would be the same over-reporting the retired per-paragraph warnings were guilty of.
+  const formattingNoticeCount = (showImportWarnings ? 1 : 0) + (showSaveDegradation ? 1 : 0);
+  const showConcurrencyNotice = concurrencyNotice !== null && !saveWarningsDismissed;
 
   // UAT #7: a successful Save previously showed no confirmation — the button flipped from
   // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent
@@ -531,6 +622,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     !!pendingRedlineError ||
     !!composeDraftError ||
     !!memoActionMessage ||
+    !!changeSummaryMessage ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -782,37 +874,91 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
-      {showImportWarnings ? (
-        <MessageBar intent="info" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
-          <MessageBarBody>
-            <MessageBarTitle>Some formatting was simplified</MessageBarTitle>
-            This document uses advanced Word features that Compose shows in a simplified view. Your original file
-            isn&apos;t changed until you save.
-          </MessageBarBody>
-          {/* FR-21/DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
-              container action. Clears the banner AND persists the dismissal to
-              sessionStorage so it stays closed for the rest of the session. */}
-          <MessageBarActions
-            containerAction={
-              <Button
-                appearance="transparent"
-                aria-label="Dismiss"
-                icon={<Dismiss16Regular />}
-                data-testid="compose-workspace-import-warning-dismiss"
-                onClick={dismissImportWarnings}
-              />
-            }
+      {/* ═══ UAT round 1 #2 (r8, 2026-09-02) — FORMATTING NOTICES, COLLAPSED ═══
+          The two formatting-notice families (load-time "simplified view" and save-time "simplified when
+          saving") used to render as full-width MessageBars stacked in this rail. On a real contract that
+          is several lines of chrome above the document, every session — the owner's "very intrusive,
+          takes a lot of space".
+
+          They now collapse into ONE compact row: a count plus a popover holding the same copy verbatim.
+          Nothing is lost, and both keep their own sessionStorage dismissal keys, so dismissing the load
+          notice still does not dismiss a later save notice (026-F5) — the two families stay independent
+          behind one affordance.
+
+          WHY HERE AND NOT IN THE TOOLBAR: the owner asked for this as part of the toolbar redesign. The
+          warning STATE lives in ComposeWorkspace and the toolbar lives inside ComposeEditor, so hosting
+          it there would mean threading this state through a 4,000-line component purely for placement.
+          This rail sits immediately above the toolbar, so the affordance reads as adjacent to it while
+          the state stays where it is owned. Flagged for the owner to redirect if the exact position
+          matters more than the coupling.
+
+          ERRORS ARE DELIBERATELY NOT COLLAPSED. A failed save, a checkout conflict and a redline anchor
+          failure stay full-width: they are actionable and blocking, and hiding one behind a popover would
+          be the opposite of the never-silent rule the rest of this release enforces. ═══ */}
+      {formattingNoticeCount > 0 ? (
+        <div className={styles.noticeRow} data-testid="compose-workspace-formatting-notices">
+          <Info16Regular className={styles.noticeIcon} aria-hidden />
+          <Text size={200} className={styles.noticeText}>
+            {formattingNoticeCount === 1 ? '1 formatting notice' : `${formattingNoticeCount} formatting notices`}
+          </Text>
+          <Popover withArrow positioning="below-start" size="small">
+            <PopoverTrigger disableButtonEnhancement>
+              <Button appearance="transparent" size="small" data-testid="compose-workspace-formatting-notices-open">
+                View
+              </Button>
+            </PopoverTrigger>
+            <PopoverSurface data-testid="compose-workspace-formatting-notices-popover">
+              <div className={styles.noticePopover}>
+                {showImportWarnings ? (
+                  <div data-testid="compose-workspace-import-warning-notice">
+                    <Text weight="semibold" as="p">
+                      Some formatting was simplified
+                    </Text>
+                    <Text size={200} as="p">
+                      This document uses advanced Word features that Compose shows in a simplified view. Your original
+                      file isn&apos;t changed until you save.
+                    </Text>
+                  </div>
+                ) : null}
+                {showSaveDegradation ? (
+                  <div data-testid="compose-workspace-save-degradation-notice">
+                    <Text weight="semibold" as="p">
+                      Some formatting was simplified when saving
+                    </Text>
+                    <Text size={200} as="p">
+                      {`${summarizeSaveDegradation(degradationOnlyWarnings)} These changes are in the version you just saved. The previous version is still available in version history.`}
+                    </Text>
+                  </div>
+                ) : null}
+              </div>
+            </PopoverSurface>
+          </Popover>
+          <Button
+            appearance="transparent"
+            size="small"
+            aria-label="Dismiss formatting notices"
+            icon={<Dismiss16Regular />}
+            data-testid="compose-workspace-formatting-notices-dismiss"
+            onClick={() => {
+              // Each family keeps its OWN dismissal key (026-F5). Dismissing the collapsed row dismisses
+              // whichever families are currently showing — not a single shared flag, which would make a
+              // later save notice inherit an earlier load dismissal.
+              if (showImportWarnings) dismissImportWarnings();
+              if (showSaveDegradation) dismissSaveWarnings();
+            }}
           />
-        </MessageBar>
+        </div>
       ) : null}
 
-      {showSaveDegradation ? (
-        // 026-F5 (task 012, r6): save-time degradation — the save SUCCEEDED but some content was
-        // simplified while authoring it. Own dismissible banner; NOT gated by hideImportWarnings.
-        <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
+      {showConcurrencyNotice ? (
+        // FR-S02 (r8 task 011): concurrency is last-writer-wins with a warning. The save SUCCEEDED and is
+        // now the current version; the other writer's content is the PREVIOUS version, not lost. Version
+        // history is the recovery path, and saying so is the whole point — the 412 refusal this replaces
+        // left the user with unsaved work in a tab and no way forward.
+        <MessageBar intent="warning" data-testid="compose-workspace-concurrency-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Some formatting was simplified when saving</MessageBarTitle>
-            {`${summarizeSaveDegradation(saveWarnings)} The original file is unchanged until you save.`}
+            <MessageBarTitle>Someone else saved this document while you had it open</MessageBarTitle>
+            {SAVE_DEGRADATION_COPY[CONCURRENT_EXTERNAL_CHANGE_CODE]}
           </MessageBarBody>
           <MessageBarActions
             containerAction={
@@ -820,7 +966,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 appearance="transparent"
                 aria-label="Dismiss"
                 icon={<Dismiss16Regular />}
-                data-testid="compose-workspace-save-degradation-dismiss"
+                data-testid="compose-workspace-concurrency-dismiss"
                 onClick={dismissSaveWarnings}
               />
             }
@@ -835,12 +981,33 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       {pendingRedlineError ? (
         <MessageBar intent="warning" data-testid="compose-redline-error" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Suggested edit couldn&apos;t be placed</MessageBarTitle>
-            {pendingRedlineError.kind === 'ambiguous'
-              ? `This suggested edit matches ${pendingRedlineError.matchCount} places in the document. Select the exact passage and try again.`
-              : (pendingRedlineError.failedCount ?? 0) > 1
-                ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
-                : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
+            <MessageBarTitle>
+              {pendingRedlineError.kind === 'target_deleted'
+                ? "Suggested edit's target is gone"
+                : "Suggested edit couldn't be placed"}
+            </MessageBarTitle>
+            {/* FR-C05 outcome 3 (r8 task 052): a DELETED target gets its own sentence. It used to share
+                the generic "wording differs slightly" copy with an unresolvable citation, which was
+                simply untrue — the anchor resolved fine, the paragraph it named is no longer there,
+                and "re-select the passage and try again" is advice the user cannot act on.
+
+                FR-C07 (r8 task 053): the "wording differs slightly" branch is GONE, and this is the
+                one place it was ever rendered. It survived because ONE branch served two unrelated
+                states, and for the one that actually fires now it was a fabrication:
+
+                  - `source: 'anchored'` — the suggestion named a `target_para_id`/`target_ref` and
+                    that anchor did not resolve. NO TEXT WAS COMPARED, so there is no wording
+                    difference to report; telling the user their wording drifted invented a cause and
+                    sent them to re-word a clause that was never the problem. Since task 051 every
+                    newly produced edit is anchored, so this is the branch a user can actually hit —
+                    which is exactly why the copy had to become true.
+                  - `source: 'legacy-replay'` — a REPLAYED pre-anchor ledger entry (FR-C06) whose
+                    quoted prose is not in the document. Here prose really was compared, and the
+                    honest answer is not "your wording differs" but "this predates paragraph
+                    references — re-run it", which is a remedy the user can act on in one click.
+
+                See `projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md`. */}
+            {describeRedlineError(pendingRedlineError)}
           </MessageBarBody>
           {onClearRedlineError ? (
             <MessageBarActions
@@ -876,6 +1043,17 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
           <MessageBarBody>
             <MessageBarTitle>Create Summary Memo</MessageBarTitle>
             {memoActionMessage}
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {/* R8 UAT item 8: the change-summary negative path — "no tracked changes to summarise" or a
+          failure. Mirrors the memo notice above; cleared by the parent at the next attempt. */}
+      {changeSummaryMessage ? (
+        <MessageBar intent="info" data-testid="compose-workspace-change-summary-message" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Summarise changes</MessageBarTitle>
+            {changeSummaryMessage}
           </MessageBarBody>
         </MessageBar>
       ) : null}

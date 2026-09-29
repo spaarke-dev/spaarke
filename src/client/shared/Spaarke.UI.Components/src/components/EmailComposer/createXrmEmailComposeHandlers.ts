@@ -235,14 +235,22 @@ export function createXrmEmailComposeHandlers(options?: {
           const xrm = getXrm();
           if (!xrm?.WebApi) throw new Error('Dataverse is unavailable — cannot upload the attachment.');
 
-          // Single SPE container per deployment, resolved from the current user's owning
-          // Business Unit (`businessunit.sprk_containerid`). No per-record container.
+          // 🔴 PARENTLESS UPLOAD. Task 076: this flow genuinely has no owning record when the bytes
+          // move — the `sprk_document` is created AFTER the upload and deliberately unassociated,
+          // because the email may have no persisted regarding yet. So it uses the record-LESS route
+          // (`PUT /api/obo/me/files/{path}`), where the SERVER derives the container from the acting
+          // user's business unit. Task 076's classification (project notes
+          // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
+          // parentless, alongside the Analysis wizard's standalone-document flow — the only other
+          // caller of `uploadFilesWithoutRecord` at HEAD.
+          //
+          // The client no longer resolves or names that container. The value is the same one it used
+          // to compute here; the difference is that the client is no longer the authority for it.
           const userId: string | undefined = xrm.Utility?.getGlobalContext?.()?.userSettings?.userId;
           if (!userId) throw new Error('Could not resolve the current user for upload.');
+          // Still needed for the SEARCH-INDEX routing fields below; the container half of this
+          // result is no longer read by anything on this path.
           const bu = await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
-          if (!bu.containerId) {
-            throw new Error('No document storage container is configured for your business unit.');
-          }
 
           const svc = new EntityCreationService(xrm.WebApi, authenticatedFetch, bffBaseUrl);
           const uploaded: IUploadedFile = {
@@ -252,7 +260,7 @@ export function createXrmEmailComposeHandlers(options?: {
             fileType: deriveUploadedFileType(file.type),
             file,
           };
-          const uploadResult = await svc.uploadFilesToSpe(bu.containerId, [uploaded]);
+          const uploadResult = await svc.uploadFilesWithoutRecord([uploaded]);
           const meta = uploadResult.uploadedFiles[0];
           if (!meta) throw new Error(uploadResult.errors[0]?.error ?? 'File upload failed.');
 
@@ -264,7 +272,9 @@ export function createXrmEmailComposeHandlers(options?: {
             sprk_filename: meta.name,
             sprk_filesize: meta.size,
             sprk_graphitemid: meta.id,
-            sprk_graphdriveid: bu.containerId,
+            // The drive the SERVER put the bytes in, read off the upload response — not a container
+            // this client chose. These were the same value before only by coincidence.
+            sprk_graphdriveid: meta.driveId,
             sprk_filepath: meta.webUrl ?? null,
             sprk_hasfile: true,
           };

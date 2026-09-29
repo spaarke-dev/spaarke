@@ -228,7 +228,7 @@ public sealed class DispositionRoutabilityNotificationSeamTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: Array.Empty<ChatSessionFile>()));
+            UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid });
 
         public void GivenBinding(BindingDisposition disposition, string inputSchema) =>
             Routing

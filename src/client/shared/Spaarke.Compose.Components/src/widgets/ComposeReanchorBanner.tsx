@@ -72,24 +72,78 @@ const useStyles = makeStyles({
 });
 
 /**
- * Human-readable count phrase. Uses the design's own wording ("re-anchored" / "need review") and
- * folds orphans into the "need attention" count so the user is told about EVERY anchor that isn't
- * silently placed — orphans are never hidden (FR-27).
+ * FR-C07 (r8 task 053) — name WHAT re-attached, not just how many things did.
+ *
+ * `ReanchoredAnnotation.type` is the annotation kind the BFF carries through (`'comment'`,
+ * `'insertion-suggestion'`, `'deletion-suggestion'`, …). It was already on the wire and already
+ * mirrored in `ComposeReanchor.types.ts`; nothing here asks the server for anything new — this is the
+ * "deterministic information available at capture time MUST be carried, not re-derived" invariant (7)
+ * applied to a message.
+ *
+ * Buckets are deliberately coarse: a comment is a comment, and every suggestion kind reads to the user
+ * as a tracked change. An unrecognized kind falls into "annotations" rather than being dropped.
+ */
+function describeKinds(annotations: readonly { type: string }[]): string {
+  let comments = 0;
+  let trackedChanges = 0;
+  let other = 0;
+  for (const a of annotations) {
+    const kind = (a.type ?? '').toLowerCase();
+    if (kind.includes('comment')) comments += 1;
+    else if (kind.includes('insertion') || kind.includes('deletion') || kind.includes('suggestion'))
+      trackedChanges += 1;
+    else other += 1;
+  }
+  const parts: string[] = [];
+  if (comments > 0) parts.push(`${comments} comment${comments === 1 ? '' : 's'}`);
+  if (trackedChanges > 0) parts.push(`${trackedChanges} tracked change${trackedChanges === 1 ? '' : 's'}`);
+  if (other > 0) parts.push(`${other} annotation${other === 1 ? '' : 's'}`);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Human-readable summary of the return-from-Word re-anchor pass.
+ *
+ * FR-C07 (r8 task 053): this is the ONE place a fuzzy match is still allowed to speak to the user, so
+ * it has to say what actually happened rather than gesture at it. Word regenerates `w14:paraId`s on
+ * save (Open-XML-SDK #925), so anchors from an externally edited document are genuinely re-located by
+ * similarity — an honest, ADR-sanctioned use of fuzzy matching (`AnnotationReanchorService`, a KEEP
+ * asset). The message therefore leads with the CAUSE ("this document was edited in Word"), names WHAT
+ * re-attached by kind, and separates what still needs a human.
+ *
+ * `AnnotationReanchorService`'s BEHAVIOUR is untouched by this task — bands, thresholds, the ambiguity
+ * guard and the never-silently-drop rule are exactly as they were. Only the sentence changed, and it
+ * is composed here on the client from fields the summary already carried.
+ *
+ * Orphans stay folded into the "needs attention" count so no anchor is ever hidden (FR-27).
  */
 function summarize(summary: ReanchorSummary): { title: string; needsAttention: number } {
   const needsAttention = summary.reviewCount + summary.orphanCount;
-  const reAnchored = summary.autoCount;
+  const annotations = summary.annotations ?? [];
+  const autoAnnotations = annotations.filter(a => a.band === 'auto');
+  // Fall back to the bare count if the per-annotation detail is missing (an older/partial payload):
+  // "4 re-attached" is less specific but still true, which beats asserting a composition we don't have.
+  const reAttachedDetail = describeKinds(autoAnnotations) || `${summary.autoCount}`;
+  const reAttachedPhrase = `${reAttachedDetail} re-attached to ${
+    summary.autoCount === 1 ? 'its paragraph' : 'their paragraphs'
+  }`;
 
-  const reAnchoredPhrase = `${reAnchored} re-anchored`;
   const attentionPhrase =
     summary.orphanCount > 0
-      ? `${summary.reviewCount} need review, ${summary.orphanCount} orphaned`
+      ? `${summary.reviewCount} need review and ${summary.orphanCount} couldn't be re-attached`
       : `${summary.reviewCount} need review`;
 
+  const prefix = 'This document was edited in Word';
   const title =
-    needsAttention > 0
-      ? `Document updated in Word — ${reAnchoredPhrase}, ${attentionPhrase}`
-      : `Document updated in Word — ${reAnchoredPhrase}, all anchors kept`;
+    summary.autoCount === 0
+      ? needsAttention > 0
+        ? `${prefix} — nothing re-attached automatically; ${attentionPhrase}`
+        : `${prefix} — there was nothing to re-attach`
+      : needsAttention > 0
+        ? `${prefix} — ${reAttachedPhrase}; ${attentionPhrase}`
+        : `${prefix} — ${reAttachedPhrase}, and nothing needs your attention`;
 
   return { title, needsAttention };
 }

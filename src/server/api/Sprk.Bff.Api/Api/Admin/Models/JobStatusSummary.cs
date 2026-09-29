@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Api.Admin.Models;
 /// <param name="CronSchedule">Cron expression parsed by Cronos (5-field minute-precision or 6-field seconds).</param>
 /// <param name="LastRunStartedOn">Start time of the most recent run, or <c>null</c> if never executed.</param>
 /// <param name="LastRunCompletedOn">Completion time of the most recent run, or <c>null</c> if never completed (or still running).</param>
-/// <param name="LastRunStatus">Outcome of the most recent run (<c>"Succeeded"</c>, <c>"Failed"</c>, <c>"InProgress"</c>, or <c>null</c> if never executed).</param>
+/// <param name="LastRunStatus">Outcome of the most recent run (<c>"Succeeded"</c>, <c>"Failed"</c>, <c>"Skipped"</c>, <c>"InProgress"</c>, or <c>null</c> if never executed).</param>
 /// <param name="NextScheduledOn">Next cron occurrence computed from <see cref="CronSchedule"/>, or <c>null</c> if disabled or cron-unparseable.</param>
 public sealed record JobStatusSummary(
     string JobId,

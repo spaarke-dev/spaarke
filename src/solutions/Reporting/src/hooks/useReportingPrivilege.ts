@@ -7,11 +7,23 @@
  *   - Author: can view, export, and switch to edit mode
  *   - Admin:  full access including workspace management
  *
- * Privilege is fetched from GET /api/reporting/privilege which the BFF
- * resolves from the user's Dataverse security role membership:
- *   - sprk_ReportingAccess              → Viewer
- *   - sprk_ReportingAccess + Author     → Author
- *   - sprk_ReportingAccess + Admin      → Admin
+ * Privilege comes from GET /api/reporting/status, which the BFF resolves in
+ * ReportingAuthorizationFilter from the caller's Dataverse security roles:
+ *   - sprk_ReportingAccess  → Viewer
+ *   - sprk_ReportingAuthor  → Author
+ *   - sprk_ReportingAdmin   → Admin
+ *
+ * Corrected 2026-09-02: this previously said the source was
+ * GET /api/reporting/privilege. That route has never existed — the call 404'd
+ * on every mount and this hook silently degraded everyone to "Viewer", making
+ * Author/Admin controls unreachable. The role NAMES here were also wrong
+ * ("Access + Author"); the roles are three independent ones, per
+ * ReportingAuthorizationFilter and docs/guides/reporting-admin.md §Roles.
+ *
+ * Server-side enforcement was never affected: the reporting endpoints check
+ * `privilege < ReportingPrivilegeLevel.Author` themselves, so a Viewer could
+ * never create or update a report regardless of what this hook returned. The
+ * defect was UI-only — the controls were hidden, not unguarded.
  *
  * The hook returns a stable result object with { privilege, loading, error }.
  * Defaults to "Viewer" on error to ensure safe, read-only degradation.

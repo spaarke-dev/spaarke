@@ -332,7 +332,7 @@ public class SessionDispatchManifestProbeTests
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
             UploadedFiles: files.Count > 0 ? files : null)
-        {
+        { OwnerOid = TestSessionOwner.Oid,
             ActiveDocument = string.IsNullOrEmpty(activeSessionFileId)
                 ? null
                 : new ActiveDocumentIdentity(

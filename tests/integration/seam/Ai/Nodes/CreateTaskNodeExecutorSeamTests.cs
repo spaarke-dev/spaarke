@@ -37,6 +37,7 @@ public class CreateTaskNodeExecutorSeamTests
         _executor = new CreateTaskNodeExecutor(
             new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             _entityServiceMock.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             NullLogger<CreateTaskNodeExecutor>.Instance);
     }
 

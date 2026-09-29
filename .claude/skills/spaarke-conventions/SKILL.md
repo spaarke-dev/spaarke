@@ -225,37 +225,22 @@ new BridgeStrategy() / new XrmStrategy() / new MsalSilentStrategy()  // WRONG �
 
 **Canonical reference**: [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../adr/ADR-028-spaarke-auth-architecture.md), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../patterns/auth/spaarke-sso-binding.md), [`.claude/constraints/auth.md`](../../constraints/auth.md).
 
-### Dataverse Plugins
+### Dataverse Plugins → NOT USED; Record Invariants Live on the Server (ADR-002, 2026-09-25)
+
+Spaarke ships **no Dataverse plugins** (C#, plugin-backed Custom API, low-code). A rule a record must satisfy when saved (default, stamp, isolation, derived field) has **one owner in the BFF write path**; clients may preview it, never solely enforce it. See [`.claude/constraints/plugins.md`](../../constraints/plugins.md).
+
+```typescript
+// ❌ DON'T: enforce an invariant only in the wizard, then write via Xrm.WebApi
+const payload = await applyFieldMappings(...);          // client-only enforcement (WP-2 gap)
+await xrmDataService.createRecord('sprk_matter', payload);
+
+// ✅ DO: the BFF create endpoint applies invariants inline and returns the record (WP-1/WP-3/WP-4)
+const created = await authenticatedFetch(`${bff}/api/.../matters`, { method: 'POST', body: JSON.stringify(input) });
+// optional: the wizard may PREVIEW mapped values before submit — the server result is authoritative
+```
 
 ```csharp
-// ✅ DO: Keep plugins thin (<200 LoC, <50ms)
-public class ValidateDocumentPlugin : IPlugin
-{
-    public void Execute(IServiceProvider serviceProvider)
-    {
-        var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
-        var target = context.InputParameters["Target"] as Entity;
-        
-        ValidateRequiredFields(target);
-        // That's it - no HTTP calls, no external services
-    }
-    
-    private void ValidateRequiredFields(Entity entity)
-    {
-        if (!entity.Contains("sp_name"))
-            throw new InvalidPluginExecutionException("Name is required");
-    }
-}
-
-// ❌ DON'T: Make HTTP/Graph calls from plugins (ADR-002)
-public class BadPlugin : IPlugin
-{
-    public void Execute(IServiceProvider serviceProvider)
-    {
-        using var client = new HttpClient(); // WRONG
-        var result = client.GetAsync("...").Result; // WRONG
-    }
-}
+// ❌ DON'T: public class AnythingPlugin : IPlugin { ... }   — prohibited; escalate via CLAUDE.md §6.5 if you think you need one
 ```
 
 ## Error Handling Patterns
@@ -379,7 +364,8 @@ When generating or reviewing code, automatically check:
 | Interface necessity | Single implementation? | Info |
 | Async pattern | No `.Result` or `.Wait()` | Warning |
 | Error handling | Uses ProblemDetails | Warning |
-| Plugin size | <200 LoC | Warning |
+| Dataverse plugin | None exist — any `IPlugin` / plugin project is a violation (ADR-002) | Error |
+| Record invariant | Enforced in BFF write path, not only in client wizard (ADR-002 WP-2) | Warning |
 | Type safety | No `any` without justification | Warning |
 
 ## Resources

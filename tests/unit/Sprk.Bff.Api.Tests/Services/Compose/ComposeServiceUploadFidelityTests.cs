@@ -81,7 +81,9 @@ public sealed class ComposeServiceUploadFidelityTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
     /// unmodified by any editor round-trip.</summary>
@@ -121,6 +123,10 @@ public sealed class ComposeServiceUploadFidelityTests
 
     private void ArrangeContainerCreate(out Func<byte[]> capturedBytesAccessor)
     {
+        // Issue #858: the container is SERVER-derived now — this sets up the two reads that derivation
+        // makes, resolving to the same ContainerId the SPE setup below still expects.
+        ComposeServiceCollaborators.SetupActingUserContainer(_dataverse, ContainerId);
+
         _spe.Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResolvedDriveId);
 
@@ -197,14 +203,13 @@ public sealed class ComposeServiceUploadFidelityTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,           // transient draft — no SPE item yet
-            ContainerId = ContainerId,
             Content = original,             // the client sent the RETAINED ORIGINAL (editor was clean)
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
             DisplayName = "Unedited draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             original.ToArray(),
@@ -225,14 +230,13 @@ public sealed class ComposeServiceUploadFidelityTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = regenerated,          // the client sent the tipTapToDocxBytes REGENERATION (editor was dirty)
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
             DisplayName = "Edited draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var persisted = capturedBytes();
         persisted.Should().BeEquivalentTo(
@@ -263,7 +267,7 @@ public sealed class ComposeServiceUploadFidelityTests
             TenantId = Tenant,
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             original.ToArray(),
@@ -295,7 +299,7 @@ public sealed class ComposeServiceUploadFidelityTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // Strict mocks (ISpeFileOperations/IGenericEntityService/IPostUploadIndexingEnqueuer) —
         // any unexpected collaborator call (e.g. a hypothetical server-side regeneration hook)

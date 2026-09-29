@@ -77,7 +77,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         // Arrange — a real, loose (no HostContext) session, minted via the SAME ChatSessionManager
         // the endpoint uses.
         var loose = await _fx.Sessions.CreateSessionAsync(
-            AnalysisPromoteEndpointTestFixture.TenantId, documentId.ToString(), playbookId: null, hostContext: null);
+            AnalysisPromoteEndpointTestFixture.TenantId, TestSessionOwner.Oid, documentId.ToString(), playbookId: null, hostContext: null);
         _fx.ChatRepo.Created.Clear();
 
         var client = _fx.CreateAuthenticatedClient();
@@ -182,7 +182,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: "sprk_analysisoutput",
-                EntityId: existingAnalysisId.ToString()));
+                EntityId: existingAnalysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync("/api/ai/analysis/promote", new
@@ -217,7 +217,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync("/api/ai/analysis/promote", new
@@ -251,7 +251,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
         _fx.ChatRepo.FailOnBind = true;
 
         var client = _fx.CreateAuthenticatedClient();
@@ -287,7 +287,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         // surface a real chat turn uses (create → re-fetch → cache update), never touching
         // IAnalysisDataverseService at all.
         var loose = await _fx.Sessions.CreateSessionAsync(
-            AnalysisPromoteEndpointTestFixture.TenantId, documentId.ToString(), playbookId: null, hostContext: null);
+            AnalysisPromoteEndpointTestFixture.TenantId, TestSessionOwner.Oid, documentId.ToString(), playbookId: null, hostContext: null);
         var fetched = await _fx.Sessions.GetSessionAsync(AnalysisPromoteEndpointTestFixture.TenantId, loose.SessionId);
 
         fetched.Should().NotBeNull();
@@ -320,7 +320,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync("/api/ai/analysis/promote", new
@@ -365,7 +365,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync("/api/ai/analysis/promote", new

@@ -70,7 +70,7 @@ public sealed class GoldenMisfileRegressionTests
             new ThreadContinuityRung(dv.Object),
             new ParticipantCorrelationRung(dv.Object),
         };
-        return new IncomingAssociationResolver(rungs, dv.Object, dv.Object, mapper, NullLogger<IncomingAssociationResolver>.Instance);
+        return new IncomingAssociationResolver(rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), NullLogger<IncomingAssociationResolver>.Instance);
     }
 
     private static void SetupRoster(Mock<IDataverseService> dv)

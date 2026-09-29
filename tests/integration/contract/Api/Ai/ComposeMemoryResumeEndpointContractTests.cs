@@ -38,6 +38,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -124,7 +125,7 @@ public sealed class ComposeMemoryResumeEndpointContractTests
             EntityId: matterId);
 
         var session = await sessions.CreateSessionAsync(
-            ComposeMemoryResumeFixture.TestTenantId,
+            ComposeMemoryResumeFixture.TestTenantId, TestSessionOwner.Oid,
             documentId: speId,
             playbookId: null,
             hostContext: hostContext);
@@ -342,7 +343,7 @@ public sealed class ComposeMemoryResumeFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -400,6 +401,9 @@ public sealed class ComposeMemoryResumeFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -490,7 +494,10 @@ internal sealed class MemoryResumeFakeAuthHandler : AuthenticationHandler<Authen
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

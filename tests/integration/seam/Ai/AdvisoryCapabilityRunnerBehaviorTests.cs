@@ -139,7 +139,7 @@ public sealed class AdvisoryCapabilityRunnerBehaviorTests
         Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>(),
         HostContext: null,
         AdditionalDocumentIds: null,
-        UploadedFiles: Array.Empty<ChatSessionFile>());
+        UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid };
 
     private static SessionDispatchRequest Request(string? operandText = null) => new(
         TenantId, SessionId, Guid.NewGuid(),

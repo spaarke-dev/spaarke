@@ -112,6 +112,65 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// Serves a DIFFERENT response to each successive GET on <paramref name="pathPrefix"/>, in order.
+    /// The final response repeats for any further calls.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Required by any production path that reads a resource, mutates it, and re-reads to verify —
+    /// which is the shape task 052's permanent delete is obliged to use, because Graph answers
+    /// <c>204</c> whether it purged everything, some, or nothing. A single fixed stub would return the
+    /// same bin contents before and after the delete, so a test built on <see cref="StubGet"/> could
+    /// only ever assert "nothing was purged" and could never distinguish a working verification from
+    /// a broken one.
+    /// </para>
+    /// <para>
+    /// Implemented with WireMock scenarios (a state machine per stub), so ordering is enforced by the
+    /// fake endpoint rather than by the test guessing how many calls production makes.
+    /// </para>
+    /// </remarks>
+    /// <param name="responses">Response bodies with their status codes, in call order.</param>
+    public GraphWireMockFixture StubGetSequence(
+        string pathPrefix, params (string Body, int StatusCode)[] responses)
+    {
+        if (responses.Length == 0)
+        {
+            throw new ArgumentException("At least one response is required.", nameof(responses));
+        }
+
+        // Scenario names must be unique per stub or two sequences on different paths share state.
+        var scenario = $"seq:{pathPrefix}:{responses.Length}";
+
+        for (var i = 0; i < responses.Length; i++)
+        {
+            var step = _server
+                .Given(Request.Create()
+                    .WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*"))
+                    .UsingGet())
+                .InScenario(scenario);
+
+            if (i > 0)
+            {
+                step = step.WhenStateIs($"{scenario}#{i}");
+            }
+
+            // The last response deliberately does NOT advance, so extra calls repeat it rather than
+            // falling through to an unstubbed 404 that would look like a production defect.
+            if (i < responses.Length - 1)
+            {
+                step = step.WillSetStateTo($"{scenario}#{i + 1}");
+            }
+
+            step.RespondWith(Response.Create()
+                .WithStatusCode(responses[i].StatusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(responses[i].Body));
+        }
+
+        return this;
+    }
+
     /// <summary>Serves <paramref name="jsonBody"/> for a PATCH — used to cover update-property paths.</summary>
     public GraphWireMockFixture StubPatch(string pathPrefix, string jsonBody, int statusCode = 200)
     {

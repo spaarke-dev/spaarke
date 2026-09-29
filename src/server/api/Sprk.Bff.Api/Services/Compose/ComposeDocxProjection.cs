@@ -315,6 +315,27 @@ public enum ComposeAtomKind
 
     /// <summary>A complex or floating object — <c>w:drawing</c> (image/shape) or <c>w:object</c> (OLE embed).</summary>
     ComplexObject,
+
+    // ── Task 048 (r8): RENDERABLE atoms ──────────────────────────────────────────────────────────────
+    //
+    // The three kinds above are opaque: the projection cannot render them, so the editor shows a labeled
+    // placeholder. The two below are the opposite — they render exactly as they always did (a tab is
+    // whitespace, a symbol is its glyph), and are atoms only in the EDITOR sense: a leaf with no interior
+    // cursor position, so the user can select or delete one but never type inside it.
+    //
+    // They share this enum because they share its one job — supplying the `data-atom-kind` token that lets
+    // the client tell a construct apart from the ordinary text it looks like. That was the whole gap: a tab
+    // reached the editor as a space and a symbol as a glyph, so an edit to the paragraph rebuilt both as
+    // plain text (root §11 — extend the mechanism that already carries identity rather than mint a second).
+    //
+    // NOT set on `RunBoundary.AtomKind`, which means something stricter — "no operation may target inside
+    // this" — and stays limited to the three opaque kinds.
+
+    /// <summary>A tab (<c>w:tab</c> / <c>w:ptab</c>). Renders as whitespace; atomic to the caret.</summary>
+    Tab,
+
+    /// <summary>A symbol-font glyph (<c>w:sym</c>). Renders as the resolved glyph; atomic to the caret.</summary>
+    Symbol,
 }
 
 /// <summary>

@@ -60,7 +60,7 @@ public sealed class DailyBriefingEndpointsTests
             request,
             NullLoggerFactory.Instance,
             composite,
-            httpContext ?? new DefaultHttpContext(),
+            httpContext ?? TestHttpContexts.Authenticated(),
             cancellationToken
         })!;
 

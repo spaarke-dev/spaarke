@@ -46,6 +46,8 @@ import type {
   ContainerSearchResult,
   DriveItemSearchResult,
   DeletedContainer,
+  RecycleBinItem,
+  RecycleBinItemActionResult,
   BulkOperationAccepted,
   BulkOperationStatus,
   BulkDeleteRequest,
@@ -964,17 +966,14 @@ export const speApiClient = {
       return wire.map(mapDriveItem);
     },
 
-    /**
-     * GET /api/spe/containers/{containerId}/items/{itemId}?configId={id}
-     * Get details for a single drive item.
-     */
-    async get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
-      return mapDriveItem(
-        await get<WireDriveItem>(
-          "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
-        ),
-      );
-    },
+    // `get(containerId, itemId, configId)` DELETED by task 092. It declared
+    // GET /api/spe/containers/{id}/items/{itemId}, which the server has never served — the item
+    // surface exposes /versions, /thumbnails, /content, /preview, POST /share, DELETE and upload, but
+    // no single-item GET. It also had zero callers, so it was dead in both directions. Per this
+    // project's standing disposition (task 083; precedent in 071 and 073) a dead path is DELETED
+    // rather than converted — inventing a server route to satisfy an uncalled client method would be
+    // building a feature to justify dead code. Callers needing item details take them from
+    // `list(...)`, which is what every current caller already does.
 
     /**
      * POST /api/spe/containers/{containerId}/items/upload?configId={id}&folderId={folderId}
@@ -1075,8 +1074,15 @@ export const speApiClient = {
     },
 
     /**
-     * POST /api/spe/containers/{containerId}/items/{itemId}/sharing?configId={id}
+     * POST /api/spe/containers/{containerId}/items/{itemId}/share?configId={id}
      * Create a sharing link for a drive item.
+     *
+     * The path is `/share`, NOT `/sharing`. It was `/sharing` here from the start while the server has
+     * always served `/share` (ContainerItemEndpoints.cs, WithName("CreateSharingLink")), so this call
+     * 404'd for the life of the feature — and because FileDetailPanel catches the failure and renders
+     * "Failed to create sharing link.", the UI gave no hint that the cause was a wrong URL. Fixed by
+     * task 092; kept honest by SpeAdminClientRouteAgreementTests, which fails the build if any URL in
+     * this file has no matching server route.
      */
     createSharingLink(
       containerId: string,
@@ -1085,7 +1091,7 @@ export const speApiClient = {
       body: { type: SharingLinkType; scope: SharingLinkScope; expirationDateTime?: string },
     ): Promise<SharingLink> {
       return post<typeof body, SharingLink>(
-        "/spe/containers/" + containerId + "/items/" + itemId + "/sharing" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/share" + qs({ configId }),
         body,
       );
     },
@@ -1224,6 +1230,68 @@ export const speApiClient = {
      */
     permanentDelete(containerId: string, configId: string): Promise<void> {
       return del("/spe/recyclebin/" + containerId + qs({ configId }));
+    },
+  },
+
+  // =========================================================================
+  // Recycle Bin — ITEMS inside one container (FR-E03 / task 052)
+  //
+  // ⚠️ A different Graph resource from the deleted-CONTAINERS bin above. Spec decision D3 keeps
+  // both. Do not merge these two surfaces.
+  // =========================================================================
+
+  recycleBinItems: {
+    /**
+     * GET /api/spe/containers/{containerId}/recyclebin/items?configId={id}
+     * Lists deleted files and folders in one container's recycle bin.
+     * An empty array means the bin is empty — a valid state, not a failure.
+     */
+    list(containerId: string, configId: string): Promise<RecycleBinItem[]> {
+      return get<{ items: RecycleBinItem[]; count: number }>(
+        "/spe/containers/" + encodeURIComponent(containerId) + "/recyclebin/items" + qs({ configId }),
+      ).then(r => r.items);
+    },
+
+    /**
+     * POST /api/spe/containers/{containerId}/recyclebin/items/restore?configId={id}
+     *
+     * Restores items and returns the outcome of EVERY requested id.
+     *
+     * Resolves on both 200 (all restored) and 207 (mixed) — the caller must read
+     * `outcomes`, not the status. Rejects with 409 when Graph refused the whole batch, in which
+     * case NOTHING was restored and the bin is unchanged.
+     */
+    restore(
+      containerId: string,
+      ids: string[],
+      configId: string,
+    ): Promise<RecycleBinItemActionResult> {
+      return post<{ ids: string[] }, RecycleBinItemActionResult>(
+        "/spe/containers/" + encodeURIComponent(containerId) + "/recyclebin/items/restore" + qs({ configId }),
+        { ids },
+      );
+    },
+
+    /**
+     * POST /api/spe/containers/{containerId}/recyclebin/items/delete?configId={id}
+     *
+     * Permanently purges items. **Irreversible.**
+     *
+     * POST rather than DELETE because Graph models this as an action taking an `ids` body, and a
+     * DELETE with a body is not reliably supported by intermediaries.
+     *
+     * The BFF re-reads the bin to establish what was actually purged, because Graph answers 204
+     * regardless. Check `verified` before believing the outcomes.
+     */
+    permanentDelete(
+      containerId: string,
+      ids: string[],
+      configId: string,
+    ): Promise<RecycleBinItemActionResult> {
+      return post<{ ids: string[] }, RecycleBinItemActionResult>(
+        "/spe/containers/" + encodeURIComponent(containerId) + "/recyclebin/items/delete" + qs({ configId }),
+        { ids },
+      );
     },
   },
 

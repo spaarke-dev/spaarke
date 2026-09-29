@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-D01 — Decompose ComposeService.cs (3,573 lines) below 2,000 and DELETE its god-class waiver</title>
+    <phase>7 Track D — God-Class Removal</phase>
+    <gate>blocked-on-040</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Restructures the file that owns `SaveAsync`, baseline resolution and the save fork — the spine every other track touched.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: refactoring is where behavior changes accidentally. This file holds the save fork, staleness handling and baseline resolution that tasks 011/013/014/040 all modified; a decomposition that subtly reorders a guard or drops a branch reintroduces a defect the project just spent seven tasks removing, and the tests would still pass if the branch was never covered.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>The most contended file in the Compose spine.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, compose, refactor, testing</tags>
+    <estimated-effort>10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `ComposeService.cs` is 3,573 lines and frozen by the god-class ratchet. Bring it below 2,000 and DELETE
+    its waiver entry from `GodClassGuardTests.cs`.
+
+    Decompose along the seams the project already revealed: the save fork (ContentModel path vs op-log path),
+    baseline resolution, concurrency handling, outcome mapping, and the re-anchor path. Those are natural
+    collaborators, not arbitrary slices.
+
+    Two hard rules:
+    - **ADR-010** — produce INTERNAL collaborators (or partial classes), NOT new DI registrations. The
+      ≤15 non-framework budget binds and Track B already spent one.
+    - **Behavior-preserving** — this is a refactor. If you find a defect while decomposing, record it as a
+      finding against its owning task; do not fix it silently inside a restructure, where it becomes
+      impossible to review.
+
+    Do not re-baseline the waiver. Delete it.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in behavior-preserving refactoring of large C# services and the god-class ratchet contract. Follow ADR-010 and ADR-038.</role>
+
+  <goal>
+    `ComposeService.cs` is under 2,000 lines, its waiver is deleted from `GodClassGuardTests.cs`, ArchTests are
+    green, and no behavior changed.
+  </goal>
+
+  <context>
+    <background>
+      The owner's instruction was direct: "The 'god class' was supposed to be removed — remove it." Track D is
+      a full committed deliverable, not opportunistic cleanup. It is sequenced AFTER task 040 deliberately —
+      decomposing before the merge lands would mean doing it twice.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">tests/Spaarke.ArchTests/GodClassGuardTests.cs</file>
+      <file role="canonical-reference">.claude/patterns/testing/god-class-ratchet.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/red-item-analyses/ (decomposition seeds)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Decomposition produces INTERNAL collaborators or partial classes — NOT new DI registrations. The ≤15 non-framework budget binds.</constraint>
+    <constraint source="god-class-ratchet">MUST DELETE the `ComposeService` waiver entry, not re-baseline it. Re-baselining is explicitly the wrong move here (spec FR-D01).</constraint>
+    <constraint source="project">Behavior-preserving refactor ONLY. A defect found while decomposing is RECORDED as a finding against its owning task — MUST NOT be fixed silently inside the restructure.</constraint>
+    <constraint source="project">MUST NOT create a second body author or a second save entry point. The decomposition splits responsibilities within one service, it does not fork the save path.</constraint>
+    <constraint source="ADR-038">Existing tests MUST pass unchanged where they test behavior. MUST NOT add DI-registration or ctor-null tests for the new collaborators — that is exactly the ban ADR-038 §7 names.</constraint>
+    <constraint source="project">Coordinate with the parallel god-class program (`chatendpoints-decomposition-r1`, `speadmin-decomposition-r1`, `code-quality-and-assurance-r3` owns the ratchet). Run `/conflict-check` before the PR.</constraint>
+    <constraint source="ADR-029">Report publish size. No new NuGet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>behavior-preserving refactoring, god-class ratchet, DI budget</topic>
+    <files>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, god-class-ratchet.md, ADR-010.</step>
+    <step order="1">Read the ratchet pattern file and any decomposition seeds in `code-quality-and-assurance-r3/notes/`.</step>
+    <step order="2">Map the file's responsibilities and identify seams: save fork, baseline resolution, concurrency, outcome mapping, re-anchor.</step>
+    <step order="3">Extract collaborators one seam at a time, running the test suite after each extraction — not once at the end.</step>
+    <step order="4">Verify the DI registration count did not increase.</step>
+    <step order="5">Confirm the file is under 2,000 lines; delete the waiver entry from `GodClassGuardTests.cs`.</step>
+    <step order="6">Run ArchTests, the Compose seam suite and the fidelity gate. All must be green with no behavior change.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the file cannot reach 2,000 lines without either a new DI registration or a genuine behavior change, surface it — FR-D01 commits to both the line target and ADR-010, and if they genuinely conflict that is an owner decision under §6.5.</trigger>
+    <trigger>Any defect found during decomposition — record it against its owning task and surface it; do not fix it inside this refactor.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (new collaborator files)</output>
+    <output type="test">tests/Spaarke.ArchTests/GodClassGuardTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`ComposeService.cs` is under 2,000 lines.</criterion>
+    <criterion>Its waiver entry is DELETED from `GodClassGuardTests.cs` — not re-baselined.</criterion>
+    <criterion>ArchTests pass with the entry removed.</criterion>
+    <criterion>The Compose seam suite and the fidelity gate are green with NO behavior change.</criterion>
+    <criterion>The DI registration count did not increase (ADR-010) — stated explicitly.</criterion>
+    <criterion>NEGATIVE: no new DI registration was added.</criterion>
+    <criterion>NEGATIVE: no second body author or second save entry point was created.</criterion>
+    <criterion>NEGATIVE: no DI-registration or ctor-null tests were added for the new collaborators (ADR-038).</criterion>
+    <criterion>NEGATIVE: no defect was fixed silently inside the refactor — any found defect is recorded as a finding against its owning task.</criterion>
+    <criterion>`/conflict-check` run before the PR; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

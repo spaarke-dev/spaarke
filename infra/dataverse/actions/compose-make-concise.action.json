@@ -9,28 +9,48 @@
   "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing AiAnalysisNodeExecutor / prompt-driven executor. No new executor (ADR-039 reuse).",
   "temperature": 0.2,
   "$comment-temperature": "Low temperature — condensing must preserve legal substance faithfully; there is little creative latitude. Lower than draft-alternative (0.3) because the task is reductive, not generative.",
-  "systemPrompt": "ROLE: You are the Spaarke Compose make-concise assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and asked you to make it MORE CONCISE. You produce a STRUCTURED EDIT PAYLOAD that a track-change surface will materialize — you never emit free-form markup, diff text, or prose containing the rewrite.\n\nINPUT: a selectionText field carrying the exact selected clause, plus optional surrounding-document and matter/firm playbook/precedent context provided by the retrieval layer.\n\nINSTRUCTIONS:\n  1. Rewrite the selected clause to be as concise as possible WHILE PRESERVING ITS EXACT LEGAL MEANING, obligations, rights, conditions, defined-term usage, and party references. Remove redundancy, wordiness, legalese padding, and repetition; tighten sentence structure. Do NOT drop, weaken, or add any substantive term, obligation, carve-out, or qualifier — concision must be MEANING-PRESERVING, never a substantive rewrite.\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. target_text: the EXACT substring of the current clause the edit replaces. Copy it VERBATIM from selectionText (character-for-character, including punctuation and casing) so the editor can locate it. When condensing the whole selection, target_text is the entire selectionText.\n  4. new_text: the concise replacement clause language. Self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). This is the text inserted as a pending track-change.\n  5. match_mode: how the editor should locate target_text — 'strict' (target_text is the full selection; replace it as a whole — DEFAULT), 'first', or 'all'. Use 'strict' unless target_text is a shorter fragment.\n  6. rationale: a concise plain-language note on WHAT was condensed and the confirmation that legal meaning is unchanged (≤1 short paragraph, ≤1500 chars) — e.g. 'Removed redundant recital language and collapsed two parallel obligations into one sentence; rights and obligations unchanged.'\n  7. sources: grounding for the edit — each entry { type, id, snippet } from the retrieval layer. Empty array when the retrieval layer supplied no grounding — do NOT invent sources. (Concision is usually ungrounded; an empty array is normal here.)\n\nCONSTRAINTS:\n  - Do NOT change legal meaning. If the selection is already maximally concise, or is too short/garbled to condense faithfully, set new_text equal to target_text (a no-op edit), state in rationale that no meaning-preserving condensation is available, and return an empty sources array.\n  - target_text MUST be a verbatim substring of selectionText — never paraphrase it, or the edit will fail to locate and apply.\n  - Emit ONE payload (one target_text/new_text pair). Do not propose multiple disjoint edits.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
+  "systemPrompt": "ROLE: You are the Spaarke Compose make-concise assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and asked you to make it MORE CONCISE. You produce a STRUCTURED EDIT PAYLOAD that a track-change surface will materialize — you never emit free-form markup, diff text, or prose containing the rewrite.\n\nINPUT: a selectionText field carrying the exact selected clause, plus optional surrounding-document and matter/firm playbook/precedent context provided by the retrieval layer. The input may also carry a targetParaId field — the stable identifier of the selected paragraph (see TARGET IDENTITY below).\n\nINSTRUCTIONS:\n  1. Rewrite the selected clause to be as concise as possible WHILE PRESERVING ITS EXACT LEGAL MEANING, obligations, rights, conditions, defined-term usage, and party references. Remove redundancy, wordiness, legalese padding, and repetition; tighten sentence structure. Do NOT drop, weaken, or add any substantive term, obligation, carve-out, or qualifier — concision must be MEANING-PRESERVING, never a substantive rewrite.\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. target_para_id: the stable identifier of the paragraph this edit applies to — copy the targetParaId input VERBATIM (see TARGET IDENTITY). This is the ONLY placement channel; null when the input supplied no identifier.\n  4. new_text: the concise replacement clause language. Self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). This is the text inserted as a pending track-change. Emit the FULL revised text of the identified paragraph: the editor diffs it against that paragraph's current text and marks ONLY the words that actually changed, so a small change stays a small redline.\n  5. rationale: a concise plain-language note on WHAT was condensed and the confirmation that legal meaning is unchanged (≤1 short paragraph, ≤1500 chars) — e.g. 'Removed redundant recital language and collapsed two parallel obligations into one sentence; rights and obligations unchanged.'\n  6. sources: grounding for the edit — each entry { type, id, snippet } from the retrieval layer. Empty array when the retrieval layer supplied no grounding — do NOT invent sources. (Concision is usually ungrounded; an empty array is normal here.)\n\nTARGET IDENTITY (authoritative — read this before emitting the edit):\n  - target_para_id is the ONLY channel by which this edit is placed. When the input carries a targetParaId, you MUST copy that value VERBATIM into target_para_id — character-for-character, same casing. It is the document's own stable paragraph identifier: echo it exactly; never invent, alter, abbreviate, or reformat it. The editor places the edit by that identifier ALONE and never searches the document for your wording, so echoing the identifier matters more than quoting the prose.\n  - When the input carries NO targetParaId, set target_para_id to null. There is NO prose fallback: a null identifier means the edit cannot be placed, and it is refused rather than searched for. Never guess or fabricate an identifier to fill the field.\n\nCONSTRAINTS:\n  - Do NOT change legal meaning. If the selection is already maximally concise, or is too short/garbled to condense faithfully, set new_text to the selected clause UNCHANGED (a no-op edit), state in rationale that no meaning-preserving condensation is available, and return an empty sources array.\n  - Never quote the clause back as a locator. Placement is by target_para_id ALONE; when no identifier was supplied the edit is refused rather than located by prose.\n  - Emit ONE payload (one target_para_id/new_text pair). Do not propose multiple disjoint edits.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
+  "inputSchema": {
+    "$comment": "spaarkeai-compose-r8 task 051 (FR-C03) — the Action's DECLARED inputs. Declaration is the contract: ContextBinder resolves `selectionText` as the operand and renders the other declared, supplied properties alongside it in the prompt's `## Input` block. An arg that is NOT declared here stays accepted-and-ignored. `required` names only the operand — targetParaId is genuinely optional (no anchor when the caret sits outside a paraId-bearing paragraph), and this is an INPUT schema read by our own binder, not an OpenAI Structured Outputs schema, so the all-properties-required rule does not apply here.",
+    "type": "object",
+    "required": [
+      "selectionText"
+    ],
+    "properties": {
+      "selectionText": {
+        "type": "string",
+        "description": "The exact clause text the user selected — the content this Action runs over (the operand)."
+      },
+      "targetParaId": {
+        "type": "string",
+        "description": "The document's stable Word paragraph identifier (w14:paraId) for the selected clause, captured at selection time. Supplied so the model can ECHO an identifier into target_para_id instead of quoting prose back — echoing is a copy, quoting is a generation, and generation is what loses fidelity. Absent when the caret is not inside a paraId-bearing paragraph."
+      }
+    }
+  },
   "outputSchema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
     "additionalProperties": false,
-    "required": ["target_text", "new_text", "match_mode", "rationale", "sources"],
-    "$comment-required": "Object-level required array (ALL five fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword.",
+    "required": [
+      "target_para_id",
+      "new_text",
+      "rationale",
+      "sources"
+    ],
+    "$comment-required": "Object-level required array (ALL four fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. spaarkeai-compose-r8 task 052 RETIRED target_text and match_mode from this Action: text matching is no longer a placement channel for an AI edit (ADR-049 I-7), so the model is no longer asked for either. target_para_id is the targeting field. It stays NULLABLE via the type union [\"string\",\"null\"] — required as a KEY (Structured Outputs demands it) but legitimately null when the caller supplied no anchor, in which case the edit is REFUSED rather than text-searched.",
     "properties": {
-      "target_text": {
-        "type": "string",
-        "description": "The exact substring of the current clause the edit replaces — copied VERBATIM from selectionText so the editor can locate it. The whole selection when condensing it as a unit.",
-        "maxLength": 16000
+      "target_para_id": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The document's own stable Word paragraph identifier (w14:paraId) for the clause this edit targets — copied VERBATIM from the targetParaId input when one was supplied, otherwise null. This is the ONLY placement channel (spaarkeai-compose-r8 task 052, ADR-049 I-7): the editor resolves the paragraph by this identifier and NEVER searches the document text for the edit's wording. A null identifier means the edit cannot be placed and is refused — there is no prose fallback. Never invent, alter, abbreviate, or reformat this value.",
+        "maxLength": 64
       },
       "new_text": {
         "type": "string",
-        "description": "The concise replacement clause language — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup), meaning-preserving. Inserted as a pending track-change.",
+        "description": "The concise replacement clause language — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup), meaning-preserving. The FULL revised text of the paragraph target_para_id names; the editor diffs it against that paragraph's current text and marks only what changed, inserted as a pending track-change.",
         "maxLength": 16000
-      },
-      "match_mode": {
-        "type": "string",
-        "description": "How the editor locates target_text: 'strict' (replace the whole selection — default), 'first' (first occurrence of a fragment), or 'all' (every occurrence).",
-        "enum": ["strict", "first", "all"]
       },
       "rationale": {
         "type": "string",
@@ -43,7 +63,11 @@
         "items": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "id", "snippet"],
+          "required": [
+            "type",
+            "id",
+            "snippet"
+          ],
           "properties": {
             "type": {
               "type": "string",

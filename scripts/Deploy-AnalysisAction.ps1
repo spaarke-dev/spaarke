@@ -165,6 +165,14 @@ foreach ($action in $actions) {
     if ($action.outputSchema) {
         $body["sprk_outputschemajson"] = ($action.outputSchema | ConvertTo-Json -Depth 20 -Compress)
     }
+    # sprk_inputschema — the Action's DECLARED inputs (Binding.InputSchemaJson). ContextBinder reads this
+    # to decide both which operand field to resolve AND which companion inputs reach the model's `## Input`
+    # block (spaarkeai-compose-r8 task 051). Without this mapping an authored `inputSchema` never leaves the
+    # seed file, so a declared input silently fails to reach the model at runtime — which is exactly the
+    # failure mode that hid Compose's missing edit anchor.
+    if ($action.inputSchema) {
+        $body["sprk_inputschema"] = ($action.inputSchema | ConvertTo-Json -Depth 20 -Compress)
+    }
     if ($action.tags) {
         $body["sprk_tags"] = $action.tags
     }

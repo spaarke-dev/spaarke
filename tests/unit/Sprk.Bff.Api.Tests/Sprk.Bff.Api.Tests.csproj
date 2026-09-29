@@ -78,6 +78,16 @@
   </ItemGroup>
 
   <!--
+    Cross-suite test helpers shared by contract/seam/regression/tenant tests (the location
+    tests/CLAUDE.md names for cross-class builders). Added 2026-08-28 for issue #863's
+    TestSessionOwner, which has to be the SAME value in every suite that mints a session — a
+    constant duplicated per file is a constant that drifts.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\Shared\**\*.cs" LinkBase="SharedTestHelpers" />
+  </ItemGroup>
+
+  <!--
     Security-auth KEEP path per ADR-038 §2 path #1 (authentication / authorization, token validation,
     claims handling, OBO exchange). tests/integration/auth/** existed as a documented KEEP category
     but held only its README and was compiled by NO test project — so one of the seven

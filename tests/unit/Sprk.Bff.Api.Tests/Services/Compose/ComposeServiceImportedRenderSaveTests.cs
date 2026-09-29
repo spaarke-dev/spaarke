@@ -67,6 +67,10 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _sessions
             .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
+
+        // No acting-user container setup here: this fixture exercises the REPLACE path (a document that
+        // already has a drive-item), which never reaches issue #858's create-on-save container
+        // derivation. Adding the setup would arrange a call that is never made.
     }
 
     private ComposeService CreateSut() => new(
@@ -74,7 +78,9 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _sessions.Object,
         _dataverse.Object,
         _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     /// <summary>A retained-original carrier whose STYLES PART carries a distinctive custom style —
     /// the oracle that the save rendered INTO the carrier (parts preserved) rather than synthesizing a
@@ -144,6 +150,14 @@ public sealed class ComposeServiceImportedRenderSaveTests
                 "sprk_document", It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_document") { Id = Guid.NewGuid() });
 
+        // FR-S09 item 7 (r8 task 016): a replace save now refreshes sprk_filesize/sprk_filepath on the
+        // existing row. The mock is STRICT, so without this setup the call throws MockException, the
+        // service's best-effort catch records a failed refresh, and every clean replace test acquires a
+        // spurious `document-metadata-stale` warning — a fixture gap presenting as a production defect.
+        _dataverse.Setup(d => d.UpdateAsync(
+                "sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _indexing.Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
@@ -187,7 +201,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
             ParaIdMap = new List<ComposeBaselineParaId> { new(Index: 0, ParaId: "7B00AA01", Text: null) },
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.Origin.Should().Be(ComposeOrigin.Imported, "a save with a baseline source is Imported even with a ContentModel");
         result.VersionId.Should().NotBeNullOrEmpty();
@@ -214,7 +228,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         var sut = CreateSut();
         var request = ReplaceRequest(EditedModel(), baselineVersionId: LoadTimeVersionId);
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.Origin.Should().Be(ComposeOrigin.Imported,
             "version-fetch coordinates are a baseline source — never mis-stamped Authored");
@@ -249,7 +263,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         var request = ReplaceRequest(projection.Model, content: ndaBytes);
 
         // The old path 422'd here (count-gate mismatch → zero anchorable ops → hard refusal).
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.VersionId.Should().NotBeNullOrEmpty("the NDA save must succeed — the 422 class is unreachable on the render path");
 
@@ -282,7 +296,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
             new ComposeInlineRun { CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = 99 } });
 
         var result = await sut.SaveAsync(
-            ReplaceRequest(model, content: BuildCarrierBytes()), new DefaultHttpContext(), CancellationToken.None);
+            ReplaceRequest(model, content: BuildCarrierBytes()), TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DegradationWarnings.Should().NotBeNull("render drops surface as success-with-warnings, never silently");
         result.DegradationWarnings!.Should().ContainSingle(w => w.Code == "comment-anchor-dropped")
@@ -309,7 +323,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
             },
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DegradationWarnings.Should().NotBeNull();
         result.DegradationWarnings!.Should().ContainSingle(w => w.Code == "op-log-ignored")
@@ -328,7 +342,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         var sut = CreateSut();
 
         var result = await sut.SaveAsync(
-            ReplaceRequest(EditedModel(), content: BuildCarrierBytes()), new DefaultHttpContext(), CancellationToken.None);
+            ReplaceRequest(EditedModel(), content: BuildCarrierBytes()), TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DegradationWarnings.Should().BeNull("a clean render reports no warnings");
     }
@@ -346,7 +360,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         var sut = CreateSut();
         var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes());
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.ContentModel.Should().NotBeNull(
             "a render-path save returns the post-save canonical model — the client's new merge base");
@@ -369,7 +383,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.ContentModel.Should().BeNull("only render-path saves project a post-save model");
     }
@@ -397,7 +411,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
             },
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.VersionId.Should().NotBeNullOrEmpty("ignoring the separate comments never fails the save");
         result.DegradationWarnings.Should().NotBeNull();
@@ -464,7 +478,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         };
 
         var request = ReplaceRequest(model, content: BuildCarrierBytesWithComment());
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.VersionId.Should().NotBeNullOrEmpty();
 
@@ -520,7 +534,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         };
 
         var request = ReplaceRequest(model, content: BuildCarrierBytesWithComment());
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.VersionId.Should().NotBeNullOrEmpty("a collision warns - it never fails the save");
         result.DegradationWarnings.Should().NotBeNull();
@@ -548,7 +562,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         };
 
         var request = ReplaceRequest(model, content: BuildCarrierBytesWithComment());
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         (result.DegradationWarnings ?? Array.Empty<ComposeProjectionWarning>())
             .Should().NotContain(w => w.Code == "comment-id-collision",
@@ -569,7 +583,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
             new ComposeInlineRun { Text = " imported insert", Revision = new ComposeRevision { Kind = ComposeRevisionKind.Inserted, Author = "Jane Q. Author" } });
 
         var request = ReplaceRequest(model, content: BuildCarrierBytes());
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
         var insertions = doc.MainDocumentPart!.Document!.Body!.Descendants<InsertedRun>().ToList();
@@ -580,4 +594,69 @@ public sealed class ComposeServiceImportedRenderSaveTests
             "a fact that carries an author keeps it — imported revisions round-trip their true authors");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Document Revision Report appendix (spaarkeai-compose-r8, UAT item 8) — the SAVE-PATH WIRING.
+    //
+    // ComposeRevisionReportSeamTests proves the generator and AppendSection agree over real corpus bytes.
+    // What it cannot reach is whether SaveAsync actually CALLS them, which is the half that silently does
+    // nothing if the request field is added and the call site is not. Worth noting: the sibling
+    // `SummaryPage` field has no equivalent wiring test — this closes that gap for the new field rather
+    // than matching a weak precedent.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SaveAsync_WithARevisionReport_AppendsTheReportToThePersistedBytes()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            RevisionReport = new ComposeRevisionReportInput(
+                Summary: "The reviewer added a liability cap.",
+                Changes: new[]
+                {
+                    new ComposeRevisionChangeInput("insertion", "Section 7.4", "Added a 12-month cap on aggregate liability."),
+                },
+                DocumentName: "Master Services Agreement.docx",
+                DocumentVersion: "7",
+                AsOf: new DateTimeOffset(2026, 9, 3, 14, 30, 0, TimeSpan.Zero)),
+        };
+
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+
+        text.Should().Contain("Document Revision Report", "the appendix must reach the PERSISTED bytes, not just the generator");
+        text.Should().Contain("The reviewer added a liability cap.");
+        text.Should().Contain("Section 7.4");
+        text.Should().Contain("version 7", "the scope line travels with the report into the document");
+        text.Should().Contain("Edited body text.", "appending the report must not disturb the document it describes");
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithARevisionReportCarryingNothingToReport_AppendsNothing()
+    {
+        // The branch the sibling SummaryPage path does not have. A report over no changes would append a
+        // heading with nothing under it — the document-shaped version of the phantom change the client
+        // producer refuses to dispatch.
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            RevisionReport = new ComposeRevisionReportInput(string.Empty, Array.Empty<ComposeRevisionChangeInput>()),
+        };
+
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
+
+        result.VersionId.Should().NotBeNullOrEmpty("the save itself still succeeds — an empty report is not a failure");
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+
+        text.Should().NotContain("Document Revision Report", "nothing to report means nothing appended");
+        text.Should().Contain("Edited body text.", "the ordinary save is unaffected");
+    }
 }

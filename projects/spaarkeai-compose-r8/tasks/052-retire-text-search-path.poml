@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C04/C05 — Retire the text-search placement path (server + client) and give stale/deleted targets deterministic outcomes</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <gate>blocked-on-051</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes a placement mechanism the product currently depends on; a missed consumer breaks AI editing in production.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: deletion tasks fail by omission. Two names on the KEEP list (`ComposeTextFold`, `AnnotationReanchorService`) sit adjacent to seven on the DELETE list, and one is used by the baseline stamper the entire merge depends on. Getting the boundary wrong either leaves the search path alive (project goal unmet) or removes something Track A needs (fidelity broken) — neither is visible in a passing test run.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deletes across `Services/Compose/` and the Compose client widgets.</parallel-reason>
+    <deps>051, 054, 055</deps>
+    <tags>bff-api, frontend, compose, ai, deletion, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    With every anchor source supplied (task 051), retire the R2-era text-search placement path.
+
+    **DELETE — server**: `ComposeEditValidator` + `IComposeEditValidator` + `FindAll` (the whole-document text
+    search at ~:58), and `ProposedEdit.TargetText` / `match_mode`.
+
+    **DELETE — client**: `resolveTargetSpans`, `findTargetMatches`, `MATCH_FOLD`, `collapseWhitespaceIndex`,
+    `buildCharIndex`.
+
+    **KEEP — do not touch**:
+    - `ComposeTextFold` — used by the baseline stamper, which the entire Track A merge depends on.
+    - `AnnotationReanchorService` — the ADR-sanctioned return-from-Word fuzzy case.
+
+    **FR-C05 — deterministic outcomes.** Removing the search means the edge cases it used to absorb now need
+    real answers:
+    - Sub-paragraph edit → local diff WITHIN the known paragraph (we know which paragraph; the only question
+      is where inside it).
+    - Stale target (the clause changed since the suggestion) → "this clause changed since the suggestion —
+      apply anyway?"
+    - Deleted target → "the text this suggestion referred to no longer exists."
+
+    If task 050 found FR-C05's confirmation is an ADR-041 Gate, build it as a Gate-ledger confirmation — not
+    an ad-hoc dialog.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose edit path and careful at deletion — verifies consumers before removing. Follow ADR-049 I-7, ADR-041 and the task-050 assessment.</role>
+
+  <goal>
+    Text search no longer exists as a placement mechanism. Every AI edit either places at its anchor or
+    produces a deterministic, explainable outcome. The two KEEP items are untouched and still working.
+  </goal>
+
+  <context>
+    <background>
+      `ComposeEditValidator`'s header records that it was "Ported from the validated Spike 2 prototype
+      (projects/spaarkeai-compose-r2/notes/spikes/edit-validator-prototype.cs)" — R2-era code that predates
+      R4's paraId anchor model. It was never migrated. ADR-049 I-7 already forbids text search as a placement
+      mechanism; this task makes the code match the ADR.
+    </background>
+    <relevant-files>
+      <file role="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditValidator.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file role="keep">src/server/api/Sprk.Bff.Api/Services/Compose/ (ComposeTextFold — KEEP)</file>
+      <file role="keep">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs (KEEP)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-08-24">SCOPE REFRAMING — this task DEMOTES text matching; it does not eliminate the capability. Three roles are legitimate and survive: (1) the ADR-sanctioned return-from-Word re-anchor (`AnnotationReanchorService`, already KEEP), (2) genuinely anchorless input — replayed/legacy edits — as task 053's bounded CONFIRMABLE fallback, (3) user-invoked find/replace, where matching text IS the semantics rather than a fallback. What is retired is text matching as the PRIMARY targeting channel for an AI edit that had a deterministic anchor available and discarded it (project invariant 7). Do not read the task title more broadly than this.</constraint>
+    <constraint source="owner 2026-08-24">DECIDE `match_mode: 'all'` EXPLICITLY, not by omission. A defined-term change across a whole document ("every instance of 'Company' becomes 'Supplier'") is genuinely text-semantic; under a paraId-only model the model must enumerate every affected paragraph, which is more explicit and checkable but costs tokens and can miss one. State the decision and its reasoning in the task notes either way.</constraint>
+    <constraint source="spec FR-C04">MUST KEEP `ComposeTextFold` (used by the baseline stamper) and `AnnotationReanchorService` (ADR-sanctioned return-from-Word). Deleting either breaks Track A or the sanctioned re-anchor case.</constraint>
+    <constraint source="project">Before deleting ANY symbol, grep for consumers across the WHOLE repo — not just Compose. Record the consumer check per deleted symbol. A missed consumer is how a deletion task breaks production.</constraint>
+    <constraint source="ADR-049 I-7">MUST NOT use text search as a placement mechanism. After this task, no placement path may search document text.</constraint>
+    <constraint source="task 050">If FR-C05's confirmation was assessed as an ADR-041 Gate, it MUST be implemented as a Gate-ledger confirmation with catalog-derived risk tier and ledger-held state — NOT an ad-hoc dialog. Cite the assessment.</constraint>
+    <constraint source="project">Sub-paragraph edits MUST diff LOCALLY within the known paragraph. MUST NOT reintroduce a document-scoped search under a different name.</constraint>
+    <constraint source="ADR-010">If `IComposeEditValidator` had a DI registration, removing it must not leave an asymmetric registration (bff-extensions.md § F.1). Check the registration site.</constraint>
+    <constraint source="ADR-021">Any new confirmation UI uses Fluent v9 semantic tokens and the `SprkModal`/`ConfirmModal` shell (ADR-050).</constraint>
+    <constraint source="ADR-038">Tests updated per the bff-extensions.md § F test-update obligation. Deleted code's tests are deleted with it; the new deterministic outcomes each get a test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>text-search retirement, deterministic edit outcomes, ADR-041 gates</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-policy.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load the task-050 assessment, spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Verify task 051 landed ALL THREE anchor sources, including any fourth source it flagged. Do not delete while an uncovered source depends on the search.</step>
+    <step order="2">For each symbol on the DELETE list, grep the whole repo for consumers. Record the result per symbol.</step>
+    <step order="3">Confirm `ComposeTextFold` and `AnnotationReanchorService` consumers are distinct from the deleted set — they must survive intact.</step>
+    <step order="4">Delete the server set: `ComposeEditValidator`, `IComposeEditValidator`, `FindAll`, `ProposedEdit.TargetText`, `match_mode`. Check the DI registration site for asymmetry.</step>
+    <step order="5">Delete the client set: `resolveTargetSpans`, `findTargetMatches`, `MATCH_FOLD`, `collapseWhitespaceIndex`, `buildCharIndex`.</step>
+    <step order="6">Implement FR-C05's three deterministic outcomes. Sub-paragraph → local diff within the known paragraph. Stale → confirmable (as a Gate if 050 said so). Deleted → explicit message.</step>
+    <step order="7">Tests: each outcome; plus a repo-wide grep asserting no placement path searches document text.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A symbol on the DELETE list has a consumer outside the Compose AI edit path. Surface it — that consumer needs its own migration, and deleting underneath it is a production break.</trigger>
+    <trigger>If sub-paragraph placement cannot be done by local diff within the known paragraph (e.g. the model returns a replacement for text that spans paragraphs), that case needs a defined outcome, not a widened search.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</output>
+    <output type="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditValidator.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All seven DELETE-list symbols are removed (server: `ComposeEditValidator`, `IComposeEditValidator`, `FindAll`, `TargetText`, `match_mode`; client: `resolveTargetSpans`, `findTargetMatches`, `MATCH_FOLD`, `collapseWhitespaceIndex`, `buildCharIndex`) — verified by grep.</criterion>
+    <criterion>A consumer check is RECORDED per deleted symbol, repo-wide.</criterion>
+    <criterion>`ComposeTextFold` and `AnnotationReanchorService` are UNMODIFIED and their consumers still work (the baseline stamper in particular).</criterion>
+    <criterion>Sub-paragraph edits diff locally within the known paragraph.</criterion>
+    <criterion>A stale target produces "this clause changed since the suggestion — apply anyway?" — built as an ADR-041 Gate if task 050 so determined, with the assessment cited.</criterion>
+    <criterion>A deleted target produces "the text this suggestion referred to no longer exists."</criterion>
+    <criterion>NEGATIVE: no placement path searches document text — asserted by repo-wide grep.</criterion>
+    <criterion>NEGATIVE: no document-scoped search was reintroduced under a new name.</criterion>
+    <criterion>NEGATIVE: removing `IComposeEditValidator` left no asymmetric DI registration (bff-extensions.md § F.1).</criterion>
+    <criterion>Tests exist for each of the three deterministic outcomes; deleted code's tests were removed with it.</criterion>
+    <criterion>Publish size reported (expect a decrease); no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

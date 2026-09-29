@@ -79,7 +79,7 @@ public class ChatSessionManagerTests
                  .Returns(Task.CompletedTask);
 
         // Act
-        var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+        var session = await _sut.CreateSessionAsync(TenantId, TestSessionOwner.Oid, DocumentId, PlaybookId);
 
         // Assert
         session.Should().NotBeNull();
@@ -103,7 +103,7 @@ public class ChatSessionManagerTests
                  .Returns(Task.CompletedTask);
 
         // Act
-        var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+        var session = await _sut.CreateSessionAsync(TenantId, TestSessionOwner.Oid, DocumentId, PlaybookId);
 
         // Assert — Dataverse persist was called with the same session
         _repoMock.Verify(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -135,7 +135,7 @@ public class ChatSessionManagerTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+        var session = await _sut.CreateSessionAsync(TenantId, TestSessionOwner.Oid, DocumentId, PlaybookId);
 
         // Assert — wrapper invoked with 24h sliding TTL (NFR-07, ADR-009)
         _cacheMock.Verify(c => c.SetSlidingAsync(
@@ -185,7 +185,7 @@ public class ChatSessionManagerTests
             .Returns(Task.CompletedTask);
 
         // Act
-        var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+        var session = await _sut.CreateSessionAsync(TenantId, TestSessionOwner.Oid, DocumentId, PlaybookId);
 
         // Assert — resource MUST be "session" (FR-14 smoke-test contract)
         capturedTenant.Should().Be(TenantId);
@@ -649,7 +649,7 @@ public class ChatSessionManagerTests
             .ThrowsAsync(new InvalidOperationException("Cosmos DB unavailable"));
 
         // Act — must not throw despite Cosmos failure
-        var act = async () => await _sutWithCosmos.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+        var act = async () => await _sutWithCosmos.CreateSessionAsync(TenantId, TestSessionOwner.Oid, DocumentId, PlaybookId);
         await act.Should().NotThrowAsync(
             "Cosmos write failure must not surface to the caller (D-06 non-fatal policy)");
 
@@ -991,7 +991,7 @@ public class ChatSessionManagerTests
             PlaybookId: PlaybookId,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: []);
+            Messages: []) { OwnerOid = TestSessionOwner.Oid };
 
     private void SetupCacheSetSuccess()
     {

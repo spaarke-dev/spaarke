@@ -24,9 +24,19 @@ export { useComposeHeartbeatGate } from './useComposeHeartbeatGate';
 export { usePendingRedline, resolveTargetSpans, collectMarkedRanges } from './usePendingRedline';
 export type {
   UsePendingRedlineResult,
+  UsePendingRedlineOptions,
   PendingRedline,
   PendingRedlineError,
+  // FR-C05 (r8 task 052) — the "this clause changed since the suggestion — apply anyway?" question.
+  PendingRedlineStaleTarget,
+  // FR-C06 (r8 task 053) — the "is this the right place?" question for a REPLAYED/LEGACY anchorless
+  // suggestion. The bounded confirmable fallback's only user-visible surface.
+  PendingRedlineLegacyProposal,
+  AnchorResolveResult,
   MaterializeStatus,
+  // FR-C05 residual (r8 task 052b) — `'live' | 'replay'`, the discriminator that decides whether the
+  // paragraph a materialize finds may be recorded as the text the model saw. Fail-closed when absent.
+  MaterializeOrigin,
   RedlineMatchMode,
   RedlineSpan,
   ResolveResult,

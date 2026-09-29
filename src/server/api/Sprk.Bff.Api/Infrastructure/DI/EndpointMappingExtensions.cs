@@ -139,8 +139,46 @@ public static class EndpointMappingExtensions
         app.MapNavMapEndpoints();
         app.MapDataverseDocumentsEndpoints();
         app.MapFileAccessEndpoints();
-        app.MapDocumentsEndpoints();
         app.MapDocumentsBulkEndpoints();
+
+        // MapDocumentsEndpoints() REMOVED — unified-access-control-r2 task 083 (Phase 0c Wave 2).
+        // Api/DocumentsEndpoints.cs is DELETED. Task 090 had already removed six of its eight routes;
+        // these were the last two, and they were the last two ClientSupplied rows in
+        // SpeWriteSinkContainerProvenanceGuardTests:
+        //
+        //   PUT    /api/drives/{driveId}/upload            (rows 4 / S1)
+        //   DELETE /api/drives/{driveId}/items/{itemId}     (rows 5 / S2)
+        //
+        // Both took an SPE drive id straight off the ROUTE and wrote as the MANAGED IDENTITY, so SPE
+        // applied no caller-side check, behind RequireAuthorization("canwritefiles") ->
+        // ResourceAccessRequirement("upload_file") -> ResourceAccessHandler, which resolves DOCUMENT
+        // rights from a DRIVE id (ExtractResourceId treats containerId / driveId / documentId
+        // interchangeably). Same real-mechanism-wrong-resource-domain shape 073 retired above.
+        //
+        // ⚠️ The comment this replaces claimed they were "deliberately retained: they use canwritefiles
+        // on routes that DO carry a {driveId} resource, so their per-resource check is satisfiable."
+        // CARRYING a resource is not the same as carrying the resource the policy EVALUATES. The policy
+        // looks the driveId up as sprk_documents({id}); a real drive id (b!…) is not a GUID, so the
+        // lookup 400s and denies. The route was never satisfiable — it was accidentally safe, and the
+        // sentence recorded the accident as a design. That is FAILURE-MODES AP-12.
+        //
+        // RETIRED, NOT GATED, and the two rows are dead for DIFFERENT reasons — both verified
+        // first-hand rather than inherited, per the task-076 lesson:
+        //   · Row 4 is dead UPSTREAM. Its only caller (spaarke_documents/DocumentOperations.js
+        //     processFileUpload) first calls GET /api/containers/{containerId}/drive — deleted by task
+        //     090 — and throws "Failed to get container drive information." before the PUT is built.
+        //   · Row 5's caller path is reachable (driveId/itemId come off form attributes) but CANNOT
+        //     AUTHENTICATE: that file's getAuthToken returns null and its apiCall sends only
+        //     credentials:'include'. The BFF's schemes are JwtBearer + ApiKey + Ciam — there is no
+        //     cookie scheme — so every call 401s before any policy runs.
+        // Gating instead would have minted a SECOND record-keyed upload surface and a SECOND
+        // record-keyed delete surface, a root §11 reuse failure on its face. The sanctioned
+        // replacements already ship: creation via the task-076 record-keyed route, deletion via
+        // Api/DocumentOperationsEndpoints.cs -> DocumentCheckoutService, which reads DriveId/ItemId off
+        // the AUTHORIZED sprk_document row instead of off the request.
+        //
+        // Absence is asserted by tests/integration/regression/
+        // DriveKeyedWriteRouteRetirementTests.cs. Do not re-add these routes.
 
         // MapUploadEndpoints() REMOVED — unified-access-control-r2 task 073 (Phase 0c Wave 1).
         // Api/UploadEndpoints.cs is deleted; its three app-only (managed-identity) routes were
@@ -157,9 +195,11 @@ public static class EndpointMappingExtensions
         // documentId / id interchangeably). Real mechanism, wrong resource domain.
         //
         // RETIRED, NOT GATED, because a repo-wide caller sweep found ZERO callers: every live upload
-        // flow uses the OBO sibling PUT /api/obo/containers/{id}/files/{*path} (11 call sites via
-        // EntityCreationService.ts:493, Spaarke.SdapClient UploadOperation.ts:27, document-upload
-        // SdapApiClient.ts:101). Gating instead would have required a container->owning-record
+        // flow then used the OBO sibling PUT /api/obo/containers/{id}/files/{*path} (11 call sites).
+        // ⚠️ That sibling was ITSELF deleted on 2026-09-03 by task 076, for the same class of reason —
+        // it wrote bytes to a CALLER-NAMED container. Live uploads now go to the record-keyed routes
+        // or PUT /api/obo/me/files/{*path}, none of which takes a container parameter.
+        // Gating instead would have required a container->owning-record
         // mapping that tasks 075/076 own, i.e. a second copy of that mapping — which task 075's
         // constraints forbid. Deletion is remedy #2 in RouteAuthorizationGuardTests' own remedy list
         // and follows task 071's precedent for the OBO drive-keyed routes.
@@ -374,10 +414,21 @@ public static class EndpointMappingExtensions
         // SPE Admin endpoints (/api/spe/*) — environments, configs, business units, containers, audit log, dashboard
         app.MapSpeAdminEndpoints();
 
-        // SPE container item endpoints (/api/spe/containers/{id}/items, /upload, /content, /preview, /versions, /thumbnails, /sharing, /folders)
-        // Registered separately because ContainerItemEndpoints maps absolute paths (not relative to the /api/spe group).
-        // Inherits auth via RequireAuthorization() called inside MapContainerItemEndpoints. (SPE-017 through SPE-021)
-        app.MapContainerItemEndpoints();
+        // SPE container item endpoints (SPE-017..021) are NOT registered here. They now register on
+        // the /api/spe group inside MapSpeAdminEndpoints() above, so they inherit
+        // SpeAdminAuthorizationFilter + SpeAdminTenantScopeFilter like every other admin route.
+        //
+        // ⚠️ Do not restore a root-app registration for them. This site used to read:
+        //     "Registered separately because ContainerItemEndpoints maps absolute paths (not relative
+        //      to the /api/spe group). Inherits auth via RequireAuthorization() called inside
+        //      MapContainerItemEndpoints."
+        // Both sentences were true and the conclusion was still wrong: absolute paths were a reason
+        // to make them group-relative, not a reason to bypass the group, and RequireAuthorization()
+        // supplies authentication — not the admin-role check or the tenant scope. The result was nine
+        // routes (enumerate, versions, thumbnails, share-link, download, preview, delete, folder,
+        // upload) at /api/spe/... URLs reachable by any authenticated caller, with the client-supplied
+        // configId unchecked across tenants. Fixed by unified-access-control-r2 task 091; guarded by
+        // tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs.
 
         // M365 Copilot Agent gateway endpoints (/api/agent/*)
         app.MapAgentEndpoints();

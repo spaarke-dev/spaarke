@@ -490,6 +490,52 @@ export interface ComposeInlineRun {
   /** Server task 023: this run IS a manual page break (`w:br w:type="page"`); every other field is
    * ignored when true. Server-set by the docx→model projection; preserve untouched on re-post. */
   isPageBreak?: boolean;
+
+  /**
+   * Task 046 (r8): this run IS a SOFT line break (`w:br` with no type). Same marker-run contract as
+   * {@link isPageBreak} — when true every other field on the run is ignored — and mutually exclusive
+   * with it. The editor carries these as TipTap `hardBreak` nodes; before this field existed they were
+   * dropped from every edited paragraph because the model had nowhere to put them.
+   */
+  isLineBreak?: boolean;
+
+  /**
+   * Task 048 (r8): this run IS a tab (`w:tab`). Marker-run contract for {@link text}, but — unlike the
+   * break markers — run PROPERTIES still apply server-side (an underlined tab is the fill-in leader on a
+   * signature block). The editor carries these as `composeInlineAtom` nodes of kind `tab`.
+   */
+  isTab?: boolean;
+
+  /**
+   * Task 048 (r8): this run IS a symbol-font glyph (`w:sym`). Carries the font + code point VERBATIM, not
+   * the glyph the reader resolved for display — re-authoring the resolved look-alike would turn a
+   * Symbol-font § into a different character, and an unresolvable one into the U+FFFD placeholder that
+   * exists only to be honest on screen. Same marker/property contract as {@link isTab}.
+   */
+  symbol?: { font: string; charCode: string };
+
+  /**
+   * Task 049 (server) / task 057 (client, r8): this run IS a Word FIELD — `w:fldSimple`, or the
+   * `w:fldChar` begin/instrText/separate/result/end run sequence. Same marker/property contract as
+   * {@link isTab}: {@link text} is empty and the run's other content fields are ignored.
+   *
+   * The INSTRUCTION is the field's identity; `cachedResult` is only what Word last displayed. Carrying
+   * both means the save changes nothing on screen while the construct stays a field — before this,
+   * editing a paragraph replaced `{ REF _Ref_Confidentiality \r \h }` with the literal characters `4`,
+   * and the cross-reference went on claiming "Section 4" forever after the agreement renumbered.
+   *
+   * `complex` records which FORM the document used (`true` = the `w:fldChar` run sequence) so the
+   * renderer reproduces it rather than normalising; `locked` (`w:fldLock`) and `dirty` (`w:dirty`) are
+   * the author's own instructions about when the field may update — dropping `locked` would silently
+   * convert a deliberately frozen field into a live one.
+   *
+   * Set by the server projection AND, since task 057, by the client mapper from a `field`
+   * `composeInlineAtom`'s payload attributes. The client NEVER invents one: an atom that arrived without
+   * `data-field-instr` is a field the server said it could not reproduce (nested, or with no recoverable
+   * instruction), and it produces no field run at all.
+   */
+  field?: { instruction: string; cachedResult: string; complex: boolean; locked: boolean; dirty: boolean };
+
   /** Server task 024: this run IS a comment range anchor (`Start` → `w:commentRangeStart`; `End` →
    * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
    * Server-set; preserve untouched on re-post. */

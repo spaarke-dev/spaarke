@@ -35,7 +35,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 ///     fan-out <see cref="Parallel.ForEachAsync"/> is cancelable so host shutdown
 ///     drains within the 30s ceiling.</item>
 ///   <item>NFR-08 — fresh correlationId per child playbook (<see cref="Guid.NewGuid"/>.ToString("N")).</item>
-///   <item>ADR-001 — pure in-process; no Azure Function / external scheduler.</item>
+///   <item>ADR-036 — an IScheduledJob (no external scheduler); where it runs is ADR-052.</item>
 ///   <item>ADR-010 — concrete singleton; <see cref="IScheduledJob"/> is the legitimate
 ///     framework-defined seam.</item>
 ///   <item>ADR-013 — lives under <c>Services/Ai/</c> alongside its AI-internal dependencies

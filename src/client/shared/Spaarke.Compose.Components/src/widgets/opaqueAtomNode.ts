@@ -56,14 +56,42 @@
  */
 import { Node, mergeAttributes } from '@tiptap/core';
 
-/** The four atom-kind tokens the server projection emits (`AtomKindToken` in ComposeDocxProjectionBuilder.cs). */
-export type ComposeAtomKind = 'sdt' | 'field' | 'object' | 'unknown';
+/** The atom-kind tokens the server projection emits (`AtomKindToken` in ComposeDocxProjectionBuilder.cs). */
+export type ComposeAtomKind = 'sdt' | 'field' | 'object' | 'tab' | 'symbol' | 'unknown';
 
-/** Human-readable label per atom kind — the placeholder's visible "labeled with its kind" text. */
+/**
+ * Task 048: the kinds that render as THEMSELVES rather than as a labeled placeholder.
+ *
+ * `sdt` / `field` / `object` are OPAQUE — the server could not render them, so the editor shows a label
+ * saying what was there. `tab` and `symbol` are the opposite: they render exactly as they always did (an
+ * em space, the resolved glyph), and are atoms only in the caret sense — a leaf with no interior position,
+ * so the user can select or delete one but never type inside it and never split it in half.
+ *
+ * They are here at all because that identity is the ONLY thing that was missing. A tab reached the editor
+ * as an em space and a symbol as a glyph, so an edit anywhere in the paragraph rebuilt both as ordinary
+ * text. Nothing about their appearance needed to change — only whether the mapper can recognize them.
+ */
+const RENDERS_AS_ITSELF = new Set<ComposeAtomKind>(['tab', 'symbol']);
+
+/**
+ * Whether an atom of this kind renders as its own content rather than as a labeled placeholder.
+ *
+ * Exported because the MAPPER needs exactly this distinction (`docxBridge.ts`): a renderable atom's display
+ * text is the document's own character and belongs in the editor's text coordinate space, whereas an opaque
+ * atom's is a UI LABEL ("Field: 3") that must never be mistaken for content. One definition, two consumers.
+ */
+export function atomRendersAsItself(kind: string | null | undefined): boolean {
+  return RENDERS_AS_ITSELF.has(kind as ComposeAtomKind);
+}
+
+/** Human-readable label per OPAQUE atom kind — the placeholder's visible "labeled with its kind" text. */
 const ATOM_KIND_LABELS: Record<ComposeAtomKind, string> = {
   sdt: 'Content control',
   field: 'Field',
   object: 'Object',
+  // Never shown (RENDERS_AS_ITSELF), but present so the record stays total over the kind union.
+  tab: 'Tab',
+  symbol: 'Symbol',
   unknown: 'Unsupported content',
 };
 
@@ -71,9 +99,11 @@ function atomKindLabel(kind: string | null | undefined): string {
   return ATOM_KIND_LABELS[kind as ComposeAtomKind] ?? ATOM_KIND_LABELS.unknown;
 }
 
+const KNOWN_ATOM_KINDS: readonly string[] = ['sdt', 'field', 'object', 'tab', 'symbol'];
+
 function readAtomKind(element: HTMLElement): ComposeAtomKind {
   const raw = element.getAttribute('data-atom-kind');
-  return raw === 'sdt' || raw === 'field' || raw === 'object' ? raw : 'unknown';
+  return KNOWN_ATOM_KINDS.includes(raw ?? '') ? (raw as ComposeAtomKind) : 'unknown';
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +204,55 @@ export interface ComposeInlineAtomAttributes {
   paraId?: string | null;
   /** The server's cached display text (a field's resolved value, an SDT's rendered content), if any. */
   displayText?: string | null;
+  /**
+   * Task 048, `symbol` kind only: the symbol FONT (`w:sym/@w:font`, e.g. `Symbol`). Round-tripped so the
+   * save re-emits the original `w:sym` instead of the glyph the reader resolved for display.
+   */
+  symFont?: string | null;
+  /** Task 048, `symbol` kind only: the code point within that font (`w:sym/@w:char`, e.g. `F0A7`). */
+  symChar?: string | null;
+  /**
+   * Task 057, `field` kind only: the field INSTRUCTION verbatim (`data-field-instr` —
+   * `w:fldSimple/@w:instr`, or the concatenated `w:instrText` of the `w:fldChar` code phase), including
+   * the leading/trailing spaces Word writes.
+   *
+   * Its PRESENCE is the carryability gate. `ComposeDocxProjectionBuilder.FieldAtomDataAttributes` emits
+   * this attribute only for a field the server can re-emit exactly; a NESTED or instruction-less field
+   * gets no payload at all, so a client structurally cannot hand back a construct the server would have
+   * to refuse. The rule lives in one place (the server's `TryCarryField`), mirrored here as data rather
+   * than restated as client policy.
+   *
+   * Declared here because ProseMirror keeps only the attributes a node's schema NAMES: without this
+   * declaration the server's payload is dropped at `setContent` and task 049's carry is unreachable from
+   * a keystroke edit. Same mechanism task 048 added for `w:sym`'s font + code point — and, like those,
+   * re-emitted by `renderHTML` so the payload also survives the `getHTML()` round trip the local draft
+   * store persists (`ComposeEditor.getDraftHtml`).
+   *
+   * DISPLAY-ONLY still holds: this module never parses or authors the instruction, and never renders it.
+   * The atom shows the same "Field: <cached result>" label it always did.
+   */
+  fieldInstruction?: string | null;
+  /**
+   * Task 057, `field` kind only: `true` when the source authored the field as the `w:fldChar`
+   * begin/instrText/separate/result/end RUN sequence (`data-field-complex`); `false` for the compact
+   * `w:fldSimple` element. The renderer reproduces the FORM the document used rather than normalising —
+   * Word treats the two as equivalent, but a save is not licensed to rewrite what the file contains.
+   */
+  fieldComplex?: boolean;
+  /**
+   * Task 057, `field` kind only: `w:fldLock` (`data-field-locked`) — the author froze this field so it
+   * never updates. Dropping it is the one way the carry could be WORSE than flattening: it would convert
+   * a deliberately frozen field into a live one.
+   */
+  fieldLocked?: boolean;
+  /** Task 057, `field` kind only: `w:dirty` (`data-field-dirty`) — the author asked Word to re-evaluate
+   * this field on next open. The document's own instruction about when the field may change. */
+  fieldDirty?: boolean;
+}
+
+/** Read a server `data-field-*` boolean flag — emitted as `"1"` when true, omitted entirely when false. */
+function readFieldFlag(element: HTMLElement, attribute: string): boolean {
+  return element.getAttribute(attribute) === '1';
 }
 
 /**
@@ -210,10 +289,77 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
       },
       displayText: {
         default: null,
-        parseHTML: (element: HTMLElement) => element.textContent?.trim() || null,
-        // Not re-emitted as an attribute — re-rendered as the placeholder's visible label instead
-        // (see renderHTML below), so it stays testable via getHTML() without a redundant data-*.
-        renderHTML: () => ({}),
+        // Task 048: NOT trimmed any more. A tab's display text is a single em space — trimming it to the
+        // empty string would erase the one character the atom contributes to the editor's text coordinate
+        // space, which is exactly the space the server's offset table already counts for a `w:tab`. The
+        // opaque kinds are unaffected: their display text never has meaningful edge whitespace, and an
+        // empty string still falls back to the bare label below.
+        //
+        // Task 057: prefer an explicit `data-atom-display` over the element's text. The server never
+        // emits that attribute (its atom span contains exactly the display text), so the load path is
+        // unchanged — but THIS node's own `renderHTML` does, and without it the round trip corrupts the
+        // value. An OPAQUE atom renders as "<label>: <displayText>", so re-parsing `getHTML()` output
+        // read `Field: 4` back as the display text, and a second pass read `Field: Field: 4`. That was
+        // cosmetic while the display text was only ever a UI label; it stopped being cosmetic once task
+        // 057 made it the field's `cachedResult`, i.e. a string written into the saved document. The
+        // round trip is real and reachable: `ComposeEditor.getDraftHtml` persists `getHTML()` to the
+        // local draft store on the dirty-autosave tick, and the FR-03 recovery path re-mounts it.
+        //
+        // Task 056 — the same defect, in the case 057's fix did not reach. The attribute was emitted only
+        // when the display text was TRUTHY, so an atom the server emits EMPTY still had nothing to
+        // re-emit and read its own label back on the next parse. `object` is that entire family (its span
+        // has no content at all), and an `sdt` whose content resolves to nothing is another: `Object` →
+        // `Object: Object` → `Object: Object: Object`. So an OPAQUE atom now always emits the attribute,
+        // empty when it has no display text — "there is none" said explicitly, which is what stops the
+        // placeholder from answering the question instead.
+        //
+        // A RENDERABLE atom (tab, symbol) is deliberately left alone: its rendered content IS its display
+        // text, with no label to absorb, so `textContent` already round-trips it exactly.
+        parseHTML: (element: HTMLElement) =>
+          element.hasAttribute('data-atom-display')
+            ? element.getAttribute('data-atom-display')
+            : element.textContent || null,
+        renderHTML: attributes =>
+          atomRendersAsItself(attributes.kind as string | null | undefined)
+            ? attributes.displayText
+              ? { 'data-atom-display': attributes.displayText as string }
+              : {}
+            : { 'data-atom-display': (attributes.displayText as string | null) ?? '' },
+      },
+      symFont: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-sym-font'),
+        renderHTML: attributes => (attributes.symFont ? { 'data-sym-font': attributes.symFont as string } : {}),
+      },
+      symChar: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-sym-char'),
+        renderHTML: attributes => (attributes.symChar ? { 'data-sym-char': attributes.symChar as string } : {}),
+      },
+      // Task 057 — the field payload. Parsed AND re-emitted: parsing is what makes the carry reachable
+      // from a keystroke edit at all, re-emitting is what keeps it alive across the `getHTML()` round trip
+      // the local draft store persists. Absent `data-field-instr` => `null` => the mapper emits no field
+      // run, which is exactly the server's own carryability refusal.
+      fieldInstruction: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-field-instr'),
+        renderHTML: attributes =>
+          attributes.fieldInstruction ? { 'data-field-instr': attributes.fieldInstruction as string } : {},
+      },
+      fieldComplex: {
+        default: false,
+        parseHTML: (element: HTMLElement) => readFieldFlag(element, 'data-field-complex'),
+        renderHTML: attributes => (attributes.fieldComplex ? { 'data-field-complex': '1' } : {}),
+      },
+      fieldLocked: {
+        default: false,
+        parseHTML: (element: HTMLElement) => readFieldFlag(element, 'data-field-locked'),
+        renderHTML: attributes => (attributes.fieldLocked ? { 'data-field-locked': '1' } : {}),
+      },
+      fieldDirty: {
+        default: false,
+        parseHTML: (element: HTMLElement) => readFieldFlag(element, 'data-field-dirty'),
+        renderHTML: attributes => (attributes.fieldDirty ? { 'data-field-dirty': '1' } : {}),
       },
     };
   },
@@ -223,8 +369,30 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    const kind = (node.attrs.kind as string) ?? 'unknown';
+    const kind = (node.attrs.kind as ComposeAtomKind) ?? 'unknown';
     const displayText = node.attrs.displayText as string | null;
+
+    // Task 048: a renderable atom IS its content — no label, and it keeps the class its appearance already
+    // depended on (`compose-tab`). Anything else is opaque and shows a labeled placeholder.
+    //
+    // `compose-atom-renderable` is what stops it LOOKING like a placeholder. `.compose-atom` styles an atom
+    // as a dashed, background-filled, italic chip — right for "a content control was here", very wrong for a
+    // tab or a section mark, which are ordinary document content and must render indistinguishably from the
+    // plain text they were before this change. The modifier class resets that chrome in ComposeEditor's
+    // `useStyles()`. The `compose-atom` class itself has to stay: it is half the parse selector.
+    if (RENDERS_AS_ITSELF.has(kind)) {
+      const classes = ['compose-atom', 'compose-atom-inline', 'compose-atom-renderable'];
+      if (kind === 'tab') classes.push('compose-tab');
+      return [
+        'span',
+        mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+          class: classes.join(' '),
+          contenteditable: 'false',
+        }),
+        displayText ?? '',
+      ];
+    }
+
     const label = atomKindLabel(kind);
     const content = displayText ? `${label}: ${displayText}` : label;
     return [

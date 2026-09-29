@@ -86,6 +86,7 @@ Where `{InstanceName}` is the StackExchange.Redis instance prefix (configured to
 
 - **Prefix**: `spaarke:` (canonical, replaces deprecated `sdap:` brand). Configurable via `RedisOptions.InstanceName` but the binding constraint is `spaarke:` in all deployed environments.
 - **Tenant segment**: `tenant:{tenantId}:` is MANDATORY for every key (see Tenant Isolation below). The `ITenantCache` wrapper injects this automatically; callers must never construct keys without it.
+- 🔴 **Subject segment — MANDATORY (added 2026-09-28, ADR-009 §5 amendment)**: the key part **after** the tenant segment **MUST discriminate the subject** — the user, session, record or other principal whose data is cached — whenever the cached value is not identical for every principal in the tenant. **`{resource}:{id}` MUST NOT both be compile-time constants.** A key that varies by `tenantId` and nothing else is served to every user in the tenant. See *Tenant Isolation → What the tenant prefix does and does not do* below.
 - **Domain segments**: `auth`, `graph`, `embedding`, `ai`, `idem`, `system`.
 - **Version suffix**: `:v{version}` (e.g., `:v3`, `:v{etag}`) used for ETag-versioned metadata and content-versioned entries. New version creates new key; old key expires via TTL.
 - **Builder**: `ITenantCache.BuildKey(category, identifier, parts...)` (or the wrapper's `GetOrSetAsync` overloads) produces keys in this format. Direct string concatenation in caller code is forbidden.
@@ -95,12 +96,52 @@ Where `{InstanceName}` is the StackExchange.Redis instance prefix (configured to
 | Era | Key example |
 |-----|-------------|
 | Pre-remediation | `sdap:auth:access:user123:doc456` |
-| Post-remediation (Phase 1) | `spaarke:tenant:contoso.onmicrosoft.com:auth:access:user123:doc456` |
-| Versioned metadata | `spaarke:tenant:contoso.onmicrosoft.com:graph:metadata:driveA:item789:v"abc123etag"` |
+| Post-remediation (Phase 1) | `spaarke:tenant:3f2a91c4-7b88-4e1d-9a6c-0d5e2f814bb7:auth:access:user123:doc456` |
+| Versioned metadata | `spaarke:tenant:3f2a91c4-7b88-4e1d-9a6c-0d5e2f814bb7:graph:metadata:driveA:item789:v"abc123etag"` |
+
+> ⚠️ **`{tenantId}` is an Entra tenant GUID**, and the examples above show one. They previously showed a
+> domain name (`contoso.onmicrosoft.com`), which read as "one customer per key prefix" — the exact
+> misreading the section below corrects.
 
 ## Tenant Isolation
 
-**Binding invariant** (FR-05, Success Criterion #9): Every cache key written from BFF API code MUST carry a `tenant:{tenantId}:` prefix immediately after the instance name. This prevents cross-tenant data leakage where one tenant's cached authorization, metadata, or AI output could be served to a different tenant under similar identifiers (e.g., same `userId` across separate tenants).
+**Binding invariant** (FR-05, Success Criterion #9): Every cache key written from BFF API code MUST carry a `tenant:{tenantId}:` prefix immediately after the instance name. Combined with the mandatory **subject segment** (Key Conventions above), this prevents one principal's cached authorization, metadata, or AI output being served to a different principal under similar identifiers.
+
+### 🔴 What the tenant prefix does and does not do (added 2026-09-28, D-12 §3 / ADR-009 §5 amendment)
+
+**The tenant prefix separates Entra tenants. It does not separate customers.**
+
+Under [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md) **Model 1**,
+every customer's Dataverse environment is hosted in **Spaarke's** Azure tenant, so `tenantId` holds the
+**same GUID for every Model 1 customer** and a key prefixed with it is identical across customers. This
+section previously claimed the prefix *"prevents cross-tenant data leakage"* and that claim was being read
+as customer isolation, which it never was.
+
+**What delivers customer separation is the dedicated per-customer Redis instance** — a resource boundary in
+the customer's own Azure subscription, not a key convention. Per D-12 §3, Redis is **dedicated per customer
+in both models, at Standard tier** (Standard supplies the SLA and replication that Basic lacks; Premium's
+exclusives — VNet injection, which is unused and Microsoft-deprecated, RDB persistence, geo-replication,
+clustering — are not in use, and losing this cache costs a cold start, not data). Redis is the clearest case
+for a boundary rather than a filter because **its auth is per-instance, not per-keyspace**: a connection
+string reaches every key.
+
+⚠️ **How much the shared case would have mattered, stated precisely.** A collision also needs
+`{resource}:{id}` to repeat across customers. At most call sites `{id}` is a GUID or hash (conversation id,
+session id, document id, `SHA256(user-token)`, `userId:resourceId`) and is globally unique, so those keys do
+not collide even on a shared instance. The exposure is keys whose id is *not* unique — which is exactly what
+the **subject-segment MUST** forbids. Three such sites exist today (`agent-thread`, `agent-config`,
+`approle-module-map`).
+
+🔴 **The subject-segment MUST closes a gap the tenant prefix never covered, and dedication does not fix.**
+`AgentServiceClient` composes `spaarke:tenant:{tenantId}:agent-thread:thread:v1`, where `agent-thread` and
+`thread` are compile-time constants — the key varies by `tenantId` and nothing else, so **every user in a
+tenant resumes the same Foundry conversation thread**. That is a cross-**user** leak *inside one customer*,
+independent of tenancy model, and a dedicated Redis instance does nothing about it. (Latent, not live:
+`AgentServiceOptions.Enabled` defaults to `false` and no `appsettings` sets it.) Contrast
+`chat:session:{tenantId}:{sessionId}`, which is safe because `sessionId` discriminates the subject.
+
+**Both controls stay in force.** The tenant prefix and the subject segment remain mandatory as
+belt-and-braces on top of the dedicated instance; neither is optional because the other exists.
 
 **Enforcement mechanism**:
 
@@ -127,9 +168,9 @@ A small, explicit set of cache entries are **legitimately cross-tenant** and use
 
 ### Rationale
 
-- **Multi-tenant invariant**: Spaarke serves multiple Dataverse tenants. Cache poisoning or accidental cross-tenant key collision is a security incident.
-- **Defense in depth**: Even if authorization logic is correct upstream, a malformed cache key could surface another tenant's metadata/embeddings.
-- **Auditability**: Tenant-prefixed keys make Redis traffic analysis (and per-tenant memory accounting) trivial.
+- **Multi-tenant invariant**: a Spaarke deployment may serve more than one Entra tenant. Cache poisoning or accidental cross-tenant key collision is a security incident.
+- **Defense in depth**: even if authorization logic is correct upstream, a malformed cache key could surface another principal's metadata/embeddings. This is the prefix's actual job — it is a second line behind the dedicated per-customer Redis instance, not the customer boundary itself.
+- **Auditability**: tenant-prefixed keys make Redis traffic analysis (and per-tenant memory accounting) trivial.
 
 ## Multi-instance Behavior
 
@@ -151,23 +192,25 @@ The BFF API is designed to run as multiple App Service instances behind a load b
 
 ### Architecture 1 (current — 2026-06-25)
 
-A single "default" Redis instance per environment serves the entire BFF API:
+A single "default" Redis instance serves one BFF deployment. Because **each customer has their own BFF App
+Service in their own Azure subscription (D-12), each customer has their own Redis instance** — the
+non-production rows below are shared development infrastructure, not a customer-serving topology.
 
 | Environment | Redis instance | Resource group | SKU |
 |-------------|---------------|----------------|-----|
 | dev | `spaarke-bff-redis-dev` | `rg-spaarke-dev` | Basic C0 |
 | staging | `spaarke-bff-redis-staging` | `rg-spaarke-staging` | Standard C0+ |
-| prod | `spaarke-bff-redis-prod` | `rg-spaarke-prod` | Standard C2+ or Premium P1+ |
+| customer (prod, both models) | one per customer, in the customer's own subscription | the customer's own resource group | **Standard C2+** (D-12 §3 — Premium is not justified by any feature in use) |
 
-There is no per-tenant Redis instance; tenant isolation is provided by key prefixing (above), not by physical separation.
+**Customer separation is the dedicated instance, not the key prefix.** The `tenant:{tenantId}:` prefix and
+the subject segment remain mandatory on top of it (see Tenant Isolation).
 
 ### Future extensibility (NFR-12 — Architecture 2)
 
-The `ITenantCache` wrapper is designed as the routing seam for future multi-Redis scenarios:
+The `ITenantCache` wrapper is designed as the routing seam for further multi-Redis scenarios:
 
 - **Per-region Redis** (e.g., compliance-driven data residency): wrapper could route by tenant ID → region map.
 - **Tiered Redis** (hot vs. cold; small Standard for hot keys + large Premium for analytical embeddings): wrapper could route by cache-type or key-prefix hint.
-- **Per-customer dedicated Redis** (very large tenants requiring isolation beyond key prefix): wrapper could resolve a per-tenant `IConnectionMultiplexer` from a registry.
 
 These remain explicit non-goals for the current Phase 1 remediation; the wrapper's central seam ensures we do not have to refactor 199 call sites to introduce them later. Adding a new physical Redis instance requires a future ADR amendment and corresponding wrapper-registry changes.
 
@@ -283,7 +326,8 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 ## Constraints
 
 - **MUST**: Use `ITenantCache` (not `IDistributedCache` directly) for all distributed caching in `Sprk.Bff.Api/` (ADR-009 amended, FR-06)
-- **MUST**: Every cache key carry `tenant:{tenantId}:` prefix UNLESS on the System-Level Exception Allow-List (FR-05)
+- **MUST**: Every cache key carry `tenant:{tenantId}:` prefix UNLESS on the System-Level Exception Allow-List (FR-05). ⚠️ This separates **Entra tenants**, not customers — customer separation is the dedicated per-customer Redis instance (D-12 §3)
+- **MUST**: The key part **after** the tenant segment discriminate the subject (user / session / record) whenever the cached value is not identical for every principal in the tenant — `{resource}:{id}` MUST NOT both be compile-time constants (ADR-009 §5, added 2026-09-28)
 - **MUST**: `Redis:InstanceName = "spaarke:"` in all environments (FR-07)
 - **MUST**: Redis connection string sourced from Key Vault via `@Microsoft.KeyVault(...)` reference in deployed envs (FR-14, ADR-028)
 - **MUST**: Fail-fast (`AbortOnConnectFail=true`) when Redis is configured but unreachable in deployed envs (ADR-009 amended)

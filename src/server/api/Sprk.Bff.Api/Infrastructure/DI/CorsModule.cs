@@ -124,6 +124,11 @@ public static class CorsModule
                           "X-Requested-With",
                           "X-Correlation-Id",
                           "X-Idempotency-Key",
+                          // KEEP. Task 059 stopped the BFF from READING this header, but the browser
+                          // SSE path (useSseStream.ts readSseStream) still SENDS it. Dropping it here
+                          // would make the CORS preflight reject the request outright — turning an
+                          // ignored header into a broken chat stream. Remove only together with the
+                          // client-side send.
                           "X-Tenant-Id",
                           "request-id",
                           "client-request-id",

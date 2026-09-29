@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list) + ExternalAccessModule.cs.</parallel-reason>
-    <deps>032, 034, 035</deps>
+    <deps>032, 034, 035, 104</deps>
     <tags>bff-api, auth, security, dataverse, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -27,16 +27,17 @@
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (⚠️ there is NO appsettings.json in this repo — verified at HEAD 2026-09-21. The five files that exist are appsettings.template.json, appsettings.Testing.json, appsettings.Development.json.template, appsettings.Production.json.template and appsettings.tokens.md. The template already carries an "ExternalAccess" section at :66 and documents it with the "_ExternalAccess_comment" sibling-key convention at :65 — extend that section, do not create a new file.)</file>
       <file role="modify">docs/guides/auth-deployment-setup.md</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">Rights-map evaluator (the Dataverse-answer term contributes into the additive max).</dependency>
-      <dependency task="034" status="pending">NFR-04 negative canary — BLOCKING MERGE GATE for this PR; cite the green run in the PR description.</dependency>
-      <dependency task="035" status="pending">ImpersonatedRootSetSource (the new source being swapped in).</dependency>
+      <dependency task="032" status="completed">Rights-map evaluator (the Dataverse-answer term contributes into the additive max).</dependency>
+      <dependency task="034" status="blocked-shipped">NFR-04 negative canary — BLOCKING MERGE GATE for this PR; cite the green run in the PR description.</dependency>
+      <dependency task="035" status="completed">ImpersonatedRootSetSource (the new source being swapped in).</dependency>
+      <dependency task="104" status="completed">Added 2026-09-15 (register ISS-013 / #990): the shared impersonation helper must fail closed before this task turns impersonated root sets on — otherwise a call site that bypasses RetrieveMultipleImpersonatedAsync silently runs an app-only, unscoped query. Re-derive the status from 104's own POML (these attributes drift).</dependency>
     </dependencies>
   </context>
 
@@ -47,6 +48,7 @@
     <constraint source="spec NFR-01 + investigation 08 §3a-2">Scope: failure handling under flag-on. If the impersonated source throws (including Guid.Empty from a principal missing SystemUserId), the composition FAILS (deny) — MUST NOT fall back to the membership path or an app-only query mid-request, because a silent fallback reintroduces the over-grant the flag was supposed to remove.</constraint>
     <constraint source="spec NFR-03">Scope: truncation. When the impersonated set hits its cap, AccessibleRecordSet carries Truncated=true and the external module data response exposes it so the client can render "Only 5,000 records displayed". Silent truncation is a defect.</constraint>
     <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+    <constraint source="owner 2026-09-10">🔴 THE NFR-04 CANARY IS NOW A **MANUAL** PRE-MERGE GATE — RUN IT BY HAND BEFORE THIS TASK MERGES. The owner decided 2026-09-10 that the live Dataverse assertions will NOT run in CI ("we do not need to have this dataverse test; this seems like overkill and introduce too much complexity to the CI"). That decision is accepted, and it makes THIS task the single place the check cannot be skipped, because TASK-INDEX calls 034 "a blocking merge gate for 036". WHAT TO RUN: task 034's NFR-04 canary against dev — compare the impersonated root-set read against the app-only read for the same user. PASS = the impersonated set is STRICTLY SMALLER. 🔴 EQUALITY IS A FAILURE, NOT A PASS: equal sets mean impersonation is INERT and the query is silently returning org-wide rows — a disclosure that looks exactly like success, which is the entire reason NFR-04 exists. Do NOT flip the flag on an equality result; STOP and escalate. ⚠️ ALSO NOTE: until 2026-09-09 this gate was GUARANTEED to lie, because every root-BU user inherited System Administrator via the BU's default owner team, so both reads returned everything and would have compared equal — a confident false pass. The owner removed that role and the main session verified it (root BU default team roles=[], and the previously-exposed user now gets 403), but THE CANARY HAS NOT BEEN RE-MEASURED SINCE. So this is a first real measurement, not a re-confirmation: do not assume the fix restored a meaningful inequality. Record the two set sizes in notes/ so the next person can see what "strictly smaller" actually meant here. Rationale: spec.md § "No Dataverse credential in CI".</constraint>
   </constraints>
 
   <knowledge>
@@ -64,7 +66,7 @@
 
   <steps mode="prescriptive">
     <step order="0" name="Context + rigor declaration">Declare rigor FULL. Verify tasks 032/035 merged and task 034's canary is green in the gate. Read ComposeForSystemUserAsync as it stands post-032.</step>
-    <step order="1">Add the ExternalAccess:ImpersonatedRootSets:Enabled option (default false) with an options class; document both states in appsettings.json comments.</step>
+    <step order="1">Add the ExternalAccess:ImpersonatedRootSets:Enabled option (default false) with an options class; document both states under the existing "ExternalAccess" section of appsettings.template.json, using the file's "_ExternalAccess_comment" sibling-key convention (JSON has no comment syntax — that convention is how this repo documents a setting).</step>
     <step order="2">Implement the flag-on branch: root ids for the three root types from ImpersonatedRootSetSource; contribute as the Dataverse-answer term (design §4.5 term 1) into the additive max; membership term omitted on this plane under flag-on; contact-grants union untouched.</step>
     <step order="3">Implement failure handling per the NFR-01 constraint (throw → gate denies; log with the [WF-AUTHZ] prefix and the active source).</step>
     <step order="4">Propagate Truncated from the source onto AccessibleRecordSet and out through the external module data response; verify the field reaches the client payload.</step>

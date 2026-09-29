@@ -30,8 +30,8 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/SpeRevokeMatcherTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test pinning the never-matches behavior (new file created here if 001 did not cover SPE).</dependency>
-      <dependency task="010" status="pending">Grant/revoke idempotency already merged into RevokeExternalAccessEndpoint.cs — rebase this change on it.</dependency>
+      <dependency task="001" status="completed">Characterization test pinning the never-matches behavior (new file created here if 001 did not cover SPE).</dependency>
+      <dependency task="010" status="completed">Grant/revoke idempotency already merged into RevokeExternalAccessEndpoint.cs — rebase this change on it.</dependency>
     </dependencies>
   </context>
 

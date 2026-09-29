@@ -108,11 +108,22 @@ public sealed class ComposeHardTierDegradationSeamTests
         var occurrences = text.Split("Choice-branch signature text").Length - 1;
         occurrences.Should().Be(1, "Choice and Fallback duplicate the SAME box — extraction takes one branch");
 
-        // Warnings: two text-carrying boxes flattened LOUDLY; the text-free drawing keeps the loud drop.
+        // Warnings: two text-carrying boxes still flatten LOUDLY — their text is preserved as prose, so
+        // carrying the box as well would put the same words in the document twice.
         projection.Warnings.Should().ContainSingle(w => w.Code == "text-box-flattened")
             .Which.Count.Should().Be(2);
-        projection.Warnings.Should().ContainSingle(w => w.Code == "complex-object-dropped")
-            .Which.Count.Should().Be(1);
+
+        // Task 056 CHANGED the third one. The text-free drawing is no longer dropped: its subtree is
+        // carried verbatim as a ComposeInlineRun.EmbeddedObject, so there is nothing to warn about and
+        // warning anyway would be a false alarm on a construct that survived. This assertion was inverted
+        // deliberately — the two halves are what make the pair meaningful, because "text boxes flatten" is
+        // only interesting alongside "text-free objects do not".
+        projection.Warnings.Should().NotContain(w => w.Code == "complex-object-dropped",
+            "a text-free drawing is CARRIED since task 056 — reporting it dropped would be a warning for a " +
+            "loss that did not happen");
+        projection.Model!.Blocks.SelectMany(b => b.Runs)
+            .Should().Contain(r => r.EmbeddedObject != null,
+                "…and it is carried, not silently omitted — the positive half of the same claim");
     }
 
     [Fact]

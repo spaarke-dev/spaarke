@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A11 — Comment anchors and revision-id seeding under cloning (dup-paraId consume-in-order, cross-boundary ranges)</title>
+    <phase>4 Track A — Faithful Save</phase>
+    <gate>passed-031</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cloning interacts with comment ranges and tracked-change ids in ways that silently corrupt a document. PROVISIONAL — amendable by task 031.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: comment ranges span block boundaries and revision ids must stay unique across cloned and rendered content simultaneously. A duplicate revision id or an orphaned `commentRangeEnd` produces a document Word will repair — which the gate's LibreOffice proxy may not even catch. This is reasoning about invariants across two representations at once.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the same merge path as task 040.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, compose, save-path, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    ⚠️ **PROVISIONAL** — re-read `notes/gate-decision.md` first; its findings override anything here.
+
+    Cloning whole `w:p` subtrees is safe for content but NOT automatically safe for two cross-cutting id
+    systems that live inside those subtrees:
+
+    1. **Comments** — `w:commentRangeStart` / `w:commentRangeEnd` frequently span MULTIPLE paragraphs. Clone
+       one paragraph and render its neighbour and you can orphan a range end, or duplicate a start. Model-side
+       anchors must be suppressed for cloned blocks (the clone already carries the real markup — re-emitting
+       from the model duplicates it).
+
+    2. **Revisions** — `w:ins` / `w:del` carry ids that must be unique across the whole document. Cloned
+       blocks bring their existing ids; rendered blocks mint new ones. Seed the minting so the two sets cannot
+       collide.
+
+    Plus the duplicate-paraId case: when the baseline has duplicate paraIds (spec-legal in
+    `mc:AlternateContent`), consume candidates in DOCUMENT ORDER, and on dup-detection fall back to thin
+    render rather than risk cloning the wrong subtree.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in WordprocessingML comment ranges, tracked changes, and the Compose merge path. Follow ADR-049 and ADR-038.</role>
+
+  <goal>
+    A merged document has no orphaned or duplicated comment ranges, no colliding revision ids, and never
+    clones the wrong subtree when paraIds duplicate. Word opens it without repair.
+  </goal>
+
+  <context>
+    <background>
+      These are the failure modes that make a merge look correct and be wrong. Content compares equal, the
+      preservation number is good, and the document prompts Word to repair on open. FR-G05 exists precisely
+      because `OpenXmlValidator` alone does not catch this class — a headless LibreOffice open is the CI proxy
+      and a periodic Word Online smoke is the real check.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ (the merge collaborator from task 040)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs (tracked-change facts on ComposeInlineRun)</file>
+      <file role="test">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Model-side comment anchors MUST be suppressed for CLONED blocks. Emitting them from the model on top of a clone duplicates markup that is already present.</constraint>
+    <constraint source="project">Revision-id seeding MUST account for ids arriving via clones. The minting range for rendered blocks must be disjoint from every id present in the cloned content — computed, not assumed.</constraint>
+    <constraint source="project">Duplicate paraIds → consume candidates in DOCUMENT ORDER; on dup-detection, fall back to thin render + warning. MUST NOT guess which duplicate is the intended match.</constraint>
+    <constraint source="project">A comment range spanning a cloned block and a rendered block MUST remain well-formed — both endpoints present, correctly ordered. Verify this case explicitly; it is the one most likely to be missed.</constraint>
+    <constraint source="ADR-049">Failure to preserve a comment range degrades to thin render + warning; MUST NOT refuse the save.</constraint>
+    <constraint source="spec FR-G05">Verification MUST include an actual document-open check (headless LibreOffice in CI). `OpenXmlValidator` passing is explicitly NOT sufficient evidence.</constraint>
+    <constraint source="ADR-038">Coverage in `tests/integration/seam/**`, driven from corpus fixtures — including the duplicate-paraId fixture from task 021.</constraint>
+    <constraint source="spec NFR-02">No new NuGet. Report publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>comment ranges, tracked changes, document repair</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load gate-decision.md, spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Map every place comment markup and revision ids enter the output: from clones, and from model rendering. Enumerate the four combinations (cloned/rendered × comments/revisions).</step>
+    <step order="2">Suppress model-side comment anchors for cloned blocks.</step>
+    <step order="3">Compute the revision-id seed from ids actually present in the cloned content, then mint rendered ids above it. Do not use a fixed offset.</step>
+    <step order="4">Handle cross-boundary comment ranges: a range starting in a cloned block and ending in a rendered one (and the reverse) must stay well-formed.</step>
+    <step order="5">Implement duplicate-paraId consume-in-document-order with dup-detected → thin-render fallback.</step>
+    <step order="6">Verify with a real document open (headless LibreOffice), not just `OpenXmlValidator`.</step>
+    <step order="7">Add corpus coverage for: cross-boundary comment range, mixed tracked changes across cloned+rendered blocks, duplicate paraIds.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a cross-boundary comment range cannot be kept well-formed without rendering the cloned block too (i.e. cloning and comment integrity conflict), surface the trade — silently rendering more blocks to protect comments lowers preservation, and the owner should know the exchange rate.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (merge collaborator)</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Model-side comment anchors are suppressed for cloned blocks — no duplicated comment markup in output.</criterion>
+    <criterion>The revision-id seed is COMPUTED from ids present in cloned content; rendered ids cannot collide with cloned ids (asserted by test).</criterion>
+    <criterion>A comment range spanning a cloned block and a rendered block remains well-formed in both directions.</criterion>
+    <criterion>Duplicate paraIds are consumed in document order; dup-detection falls back to thin render + warning rather than guessing.</criterion>
+    <criterion>Merged documents open without repair, verified by an actual document open (headless LibreOffice), not `OpenXmlValidator` alone.</criterion>
+    <criterion>Corpus coverage exists for cross-boundary comment ranges, mixed tracked changes, and duplicate paraIds.</criterion>
+    <criterion>NEGATIVE: no orphaned `commentRangeStart`/`commentRangeEnd` in any corpus output.</criterion>
+    <criterion>NEGATIVE: no save is refused on comment/revision grounds — failures degrade to thin render + warning.</criterion>
+    <criterion>NEGATIVE: no duplicate-paraId case silently clones a guessed subtree.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

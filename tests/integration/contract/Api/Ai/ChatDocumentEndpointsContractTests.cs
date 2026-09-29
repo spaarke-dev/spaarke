@@ -10,6 +10,7 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -32,6 +33,7 @@ using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Sprk.Bff.Api.Tests.Mocks;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Spaarke.Dataverse;
 using Spaarke.Core.Auth;
@@ -321,6 +323,11 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         // FeatureDisabledException and emits the canonical 503 (ADR-018/ADR-019), never a
         // dead SSE stream.
         _fx.Reset();
+
+        // Issue #863: the kill-switch contract is asserted on a session the caller OWNS -- the
+        // filter runs first, so without a seeded session this never reaches the 503 branch.
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+
         var client = _fx.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
@@ -343,8 +350,13 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "/api/ai/chat/sessions/not-a-guid/events/document-uploaded",
             new { fileIds = new[] { "file-1" } });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("sessionId.invalid");
+        // Issue #863: SessionOwnershipFilter runs before the handler's GUID-format check, so a
+        // malformed id is answered "not found" rather than "invalid" -- truthful (an id that cannot
+        // be a GUID cannot name a session) and it keeps ONE answer for every id the caller does not
+        // own, which is what stops the route being an existence oracle.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync())
+            .Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
     }
 
     [Fact]
@@ -554,7 +566,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: uploadedFiles);
+            UploadedFiles: uploadedFiles) { OwnerOid = TestSessionOwner.Oid };
 
     private static MultipartFormDataContent BuildMultipartForm(string filename, string content)
     {
@@ -596,6 +608,43 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     public List<string> CacheCalls { get; } = new();
 
     /// <summary>
+    /// spaarkeai-compose-r8 FR-B01 (task 060) — the blob boundary behind
+    /// <see cref="SessionFileBlobStore"/>. Keyed by the exact blob name the PRODUCTION store computes,
+    /// so the seam tests in <c>tests/integration/seam/Ai/SessionDurableFileStoreSeamTests.cs</c> observe
+    /// real reachability rather than an assertion about a path string.
+    /// </summary>
+    internal InMemorySessionFileBlobGateway DurableBlobs { get; } = new();
+
+    /// <summary>
+    /// The store under test, built over <see cref="DurableBlobs"/>. Registered unconditionally, exactly
+    /// as <c>AiPersistenceModule</c> registers it in production (ADR-032 P1) — this fixture would fail
+    /// to start if the endpoint's new parameter were ever left unresolvable.
+    /// </summary>
+    public SessionFileBlobStore DurableFileStore { get; }
+
+    /// <summary>Per-test control over the authenticated caller's tenant (see <see cref="UploadFakeAuthOptions"/>).</summary>
+    public UploadFakeAuthOptions Auth { get; } = new(includeTid: true);
+
+    /// <summary>
+    /// The very <see cref="ITenantCache"/> the upload endpoint writes its four <c>doc-upload-*</c>
+    /// entries into (a real in-memory store behind <see cref="RecordingTenantCache"/>).
+    /// </summary>
+    /// <remarks>
+    /// Exposed by spaarkeai-compose-r8 task 063 so the erasure seam can run against the entries a REAL
+    /// upload produced. That is the only way to pin the property that matters: the eraser composes the
+    /// same cache key the writer did. Two independently-written key expressions that differ by one
+    /// character produce an erasure that removes nothing and reports success — with no exception, no
+    /// count and no log line to contradict it.
+    /// </remarks>
+    public ITenantCache Cache => _recordingCache;
+
+    public ChatDocumentEndpointsTestFixture()
+    {
+        DurableFileStore = new SessionFileBlobStore(
+            DurableBlobs, Microsoft.Extensions.Logging.Abstractions.NullLogger<SessionFileBlobStore>.Instance);
+    }
+
+    /// <summary>
     /// Build a loose <see cref="SpeFileStore"/> mock (concrete facade with a null-checking ctor —
     /// the established idiom, cf. <c>CommunicationServiceArchiveEmbedTests.BuildSpeMock</c>).
     /// <c>DownloadFileAsync</c> is virtual; per-test setup supplies the .eml bytes.
@@ -626,7 +675,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
 
         // Auth — single scheme that succeeds on Authorization: Bearer ... with tid claim.
         builder.Services
-            .AddSingleton(new UploadFakeAuthOptions(includeTid: true))
+            .AddSingleton(Auth)
             .AddAuthentication(o =>
             {
                 o.DefaultAuthenticateScheme = UploadFakeAuthHandler.SchemeName;
@@ -659,6 +708,12 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         builder.Services.AddSingleton<ChatSessionManager>(Sessions);
         builder.Services.AddSingleton<ITextExtractor>(TextExtractorMock.Object);
         builder.Services.AddSingleton(AuthMock.Object);
+
+        // spaarkeai-compose-r8 FR-B01 (task 060) — the durable byte store is a REQUIRED handler
+        // parameter on both upload paths. Registered unconditionally here for the same reason
+        // AiPersistenceModule registers it unconditionally in production (ADR-032 P1): the endpoints
+        // map unconditionally, so a missing registration aborts endpoint metadata generation.
+        builder.Services.AddSingleton(DurableFileStore);
 
         // RagIndexingPipeline — sealed concrete; build a real instance with mocked
         // dependencies. The pipeline writes through SearchIndexClient.GetSearchClient(...)
@@ -751,6 +806,9 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         SpeMock.Reset();
         AuthzMock.Reset();
         CacheCalls.Clear();
+        DurableBlobs.Clear();
+        Auth.IncludeTid = true;
+        Auth.TenantId = UploadFakeAuthOptions.DefaultTenantId;
         ConfigureDefaults();
     }
 
@@ -929,7 +987,21 @@ public sealed class RecordingTenantCache : ITenantCache
 /// <summary>Singleton holder for "include tid claim?" — mutated per-test via fixture.</summary>
 public sealed class UploadFakeAuthOptions
 {
+    /// <summary>
+    /// The tenant every existing contract test has always authenticated as. Kept as the default so
+    /// adding <see cref="TenantId"/> (task 060, for the two-tenant seam tests) changes no existing behaviour.
+    /// </summary>
+    public const string DefaultTenantId = "00000000-0000-0000-0000-000000000abc";
+
     public bool IncludeTid { get; set; }
+
+    /// <summary>
+    /// Tenant emitted in the <c>tid</c> claim. Overridable per test so a suite can drive the SAME
+    /// endpoint as two different tenants — required to prove tenant isolation through the wire rather
+    /// than only at the store's own API.
+    /// </summary>
+    public string TenantId { get; set; } = DefaultTenantId;
+
     public UploadFakeAuthOptions(bool includeTid) => IncludeTid = includeTid;
 }
 
@@ -971,7 +1043,7 @@ public sealed class UploadFakeAuthHandler : AuthenticationHandler<Authentication
 
         if (_opts.IncludeTid)
         {
-            claims.Add(new Claim("tid", "00000000-0000-0000-0000-000000000abc"));
+            claims.Add(new Claim("tid", _opts.TenantId));
         }
 
         var identity = new ClaimsIdentity(claims, SchemeName);

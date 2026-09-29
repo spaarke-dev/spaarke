@@ -3,6 +3,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Communication;
@@ -36,12 +38,24 @@ public class OfficeService : IOfficeService
     private readonly OfficeJobQueue _jobQueue;
     private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
+    private readonly RecordContainerResolver _containerResolver;
+
+    /// <summary>FR-26 core-ancestor derivation for the To Do write path (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
     private readonly IMembershipEventPublisher _membershipEventPublisher;
     // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
     // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
     // sprk_document archive. Optional/null-tolerant so hosts without the Communication module (and the existing
     // bare test constructions) keep working; null → the capture step is a guarded no-op (best-effort, NFR-04).
     private readonly EmailUploadCaptureService? _emailUploadCapture;
+    // Real Dataverse entity search for the add-in "File to" picker (task 026 / #229 — replaces the
+    // GenerateStubResults hardcoded fixtures). App-only read (ADR-028); singleton REST client.
+    // Optional/null-tolerant so bare test constructions keep compiling; null → stub fallback.
+    private readonly DataverseWebApiClient? _dataverseClient;
+    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Matter/Project).
+    // Registered singleton (→ IDataverseService, GraphModule.cs); optional/null-tolerant so bare test
+    // ctors keep compiling; null → quick-create returns null (endpoint 403s).
+    private readonly IGenericEntityService? _genericEntityService;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -56,9 +70,17 @@ public class OfficeService : IOfficeService
         OfficeStorageUploader storageUploader,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
+        RecordContainerResolver containerResolver,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<OfficeService> logger,
-        EmailUploadCaptureService? emailUploadCapture = null)
+        EmailUploadCaptureService? emailUploadCapture = null,
+        DataverseWebApiClient? dataverseClient = null,
+        IGenericEntityService? genericEntityService = null)
     {
+        _containerResolver = containerResolver
+            ?? throw new ArgumentNullException(nameof(containerResolver));
+        _coreAncestors = coreAncestors
+            ?? throw new ArgumentNullException(nameof(coreAncestors));
         _jobStatusService = jobStatusService;
         _jobService = jobService;
         _emailEnricher = emailEnricher;
@@ -68,7 +90,78 @@ public class OfficeService : IOfficeService
         _emailProcessingOptions = emailProcessingOptions.Value;
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
+        _dataverseClient = dataverseClient;
+        _genericEntityService = genericEntityService;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Decides which SPE container this save writes into. Server-side, always — task 085.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// With a <c>TargetEntity</c>, the container is derived from that record through task 076's
+    /// <see cref="RecordContainerResolver"/>. That record is the one
+    /// <c>AddEntityAccessFilter</c> already authorized the caller against, so the authorization key
+    /// and the write destination become a single value. The resolver refuses (rather than falling
+    /// back) when a secure record has no container of its own, which is why this method does not catch
+    /// <see cref="SdapProblemException"/>: swallowing it would turn a correct fail-closed refusal into
+    /// what reads like a misconfiguration.
+    /// </para>
+    /// <para>
+    /// Without a <c>TargetEntity</c> there is no record, so the configured default applies. It is
+    /// fail-closed when unset. Every shipped add-in path sends a <c>TargetEntity</c>, so this branch
+    /// exists for the contract rather than for traffic.
+    /// </para>
+    /// </remarks>
+    private async Task<string> ResolveContainerAsync(SaveRequest request, CancellationToken ct)
+    {
+        if (request.TargetEntity is { } target && target.EntityId != Guid.Empty)
+        {
+            var decision = await _containerResolver
+                .ResolveForRecordAsync(target.EntityType, target.EntityId, ct)
+                .ConfigureAwait(false);
+
+            // FailClosed means the record is SECURE and has no container of its own. Falling through to
+            // the configured default here would put a secure record's content in the shared container —
+            // the precise failure this project exists to prevent, and irreversible in SPE because
+            // permissions there are additive-only. Refuse instead.
+            if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
+            {
+                throw new InvalidOperationException(
+                    $"The storage container for secure record {target.EntityType} {target.EntityId} could "
+                    + "not be determined. Refusing rather than writing its content into a shared "
+                    + "container, which SPE cannot subsequently un-share.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(decision.ContainerId))
+            {
+                _logger.LogDebug(
+                    "Office save container derived from {EntityType} {EntityId} (outcome: {Outcome})",
+                    target.EntityType, target.EntityId, decision.Outcome);
+
+                return decision.ContainerId!;
+            }
+
+            // Unresolved: a non-secure record with no container and no business-unit default. Falling
+            // through to the configured default is safe here precisely BECAUSE the record is not
+            // secure — the outcome enum guarantees Unresolved is unreachable for a secure record.
+            _logger.LogDebug(
+                "No container resolved for {EntityType} {EntityId} (outcome: {Outcome}); using the "
+                + "configured default.",
+                target.EntityType, target.EntityId, decision.Outcome);
+        }
+
+        var configured = _emailProcessingOptions.DefaultContainerId;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new InvalidOperationException(
+                "No storage container could be determined for this save. The request names no target "
+                + "entity to derive one from, and EmailProcessing:DefaultContainerId is not configured. "
+                + "Refusing rather than guessing a container.");
+        }
+
+        return configured;
     }
 
     /// <inheritdoc />
@@ -160,13 +253,39 @@ public class OfficeService : IOfficeService
                 request.TargetEntity?.EntityType,
                 request.TargetEntity?.EntityId);
 
+            // ══ SERVER-DERIVED CONTAINER (task 085) ═══════════════════════════════════════════════
+            // Derived HERE, before the payload is built, so the job record and the upload below cannot
+            // disagree. Previously the payload carried request.ContainerId — a client-chosen container
+            // that outlived the request inside the ProcessingJob row.
+            //
+            // With a TargetEntity, the container comes from the SAME record the caller was authorized
+            // against (AddEntityAccessFilter), via task 076's resolver: the authorization key and the
+            // write destination are now one value, so no code path can let them disagree. The resolver
+            // is also secure-aware — a secure record's own container wins over any business-unit
+            // default, which is the isolation guarantee a client-supplied id could always defeat.
+            //
+            // Without a TargetEntity there is no record to derive from, so the configured
+            // EmailProcessing:DefaultContainerId applies — server-side, and already fail-closed when
+            // unset (below). This is the sanctioned ServerDerivedConfig shape for content with no
+            // owning record.
+            //
+            // ⚠️ Deliberately NOT the acting user's business unit. That was this task's brief, and the
+            // resolver's own contract argues against it (RecordContainerResolver §"Why the RECORD's
+            // business unit and not the ACTING USER's"): users sit in the Operations subtree while
+            // secure records are owned in Secure Projects, so acting-user resolution writes a secure
+            // record's content into the general Operations container — the exact isolation failure this
+            // project exists to close. The owner's Q1 answer sanctioned acting-user BU for the three
+            // upload-before-a-record-exists client paths in task 076, which are a different surface;
+            // Office save always carries a TargetEntity from the shipped add-in, so its no-record
+            // branch is contract-only and needs no new derivation component (CLAUDE.md §11).
+            var derivedContainerId = await ResolveContainerAsync(request, cancellationToken);
+
             // Serialize the request payload for storage
             var payload = System.Text.Json.JsonSerializer.Serialize(new
             {
                 ContentType = request.ContentType.ToString(),
                 TargetEntity = request.TargetEntity,
-                ContainerId = request.ContainerId,
-                FolderPath = request.FolderPath,
+                ContainerId = derivedContainerId,
                 Email = request.Email,
                 Attachment = request.Attachment,
                 Document = request.Document,
@@ -248,7 +367,10 @@ public class OfficeService : IOfficeService
                         {
                             throw new InvalidOperationException("Attachment content is required for attachment saves");
                         }
-                        fileName = request.Attachment.FileName;
+                        // SANITIZED — see the note on the Document branch below. The client-supplied
+                        // attachment name becomes the SPE upload path verbatim, and any '/' in it makes
+                        // Graph create a folder.
+                        fileName = SpeUploadPath.SanitizeFileName(request.Attachment.FileName);
                         break;
 
                     case SaveContentType.Document when request.Document != null:
@@ -263,30 +385,41 @@ public class OfficeService : IOfficeService
                         {
                             throw new InvalidOperationException("Document content is required for document saves");
                         }
-                        fileName = request.Document.FileName;
+                        // ══ SANITIZED 2026-08-28 — THIS IS THE FOLDER-MINTING DEFECT, ROOT CAUSE ══════
+                        // The add-in's "Document Name" box is free text (SaveFlow.tsx) and its value
+                        // arrives here as request.Document.FileName with NO client-side cleaning. It then
+                        // becomes the SPE upload path verbatim (OfficeStorageUploader → UploadSmallAsync →
+                        // Drives[id].Root.ItemWithPath(path)), and Graph creates EVERY '/'-delimited
+                        // segment of an upload path as a folder.
+                        //
+                        // So a user typing a date — "New Word Document from Word Web Add In 8/24/2026" —
+                        // produced a folder "New Word Document from Word Web Add In 8", containing a
+                        // folder "24", containing an extension-less file "2026". That is the origin of the
+                        // mystery folders in SPE Admin: not Word Online writing directly to the container,
+                        // and not a folder prefix in our code, but OUR OWN app-only upload of a filename
+                        // with slashes in it. Confirmed against production sprk_document rows (created by
+                        // the BFF service identities, in the reported container) — the app-only upload is
+                        // also why SPE Admin showed no human creator, which is what made it look external.
+                        //
+                        // The EMAIL branch above never had this bug because GenerateEmlFileName sanitizes.
+                        // The asymmetry was the defect; the document and attachment branches now use the
+                        // same sanitizer. Removing the hardcoded folder prefixes elsewhere in this change
+                        // does NOT subsume this — a filename is a path, so it needs its own guard.
+                        fileName = SpeUploadPath.SanitizeFileName(request.Document.FileName);
                         break;
 
                     default:
                         throw new InvalidOperationException($"Unsupported content type: {request.ContentType}");
                 }
 
-                // Get the container ID (use provided or default from configuration)
-                var containerId = request.ContainerId;
-                if (string.IsNullOrEmpty(containerId))
-                {
-                    containerId = _emailProcessingOptions.DefaultContainerId;
-                    if (string.IsNullOrEmpty(containerId))
-                    {
-                        throw new InvalidOperationException(
-                            "ContainerId is required for save operations. Either provide ContainerId in request or configure EmailProcessing:DefaultContainerId.");
-                    }
-                    _logger.LogDebug("Using default container ID from configuration: {ContainerId}", containerId);
-                }
+                // Task 085: the container was derived from the AUTHORIZED RECORD above, before the job
+                // payload was built. This site used to read request.ContainerId and only fall back to
+                // config — which is how a caller chose the destination of an app-only MI write.
+                var containerId = derivedContainerId;
 
                 // Upload to SPE
                 var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
                     containerId,
-                    request.FolderPath,
                     fileName,
                     contentStream,
                     cancellationToken);
@@ -652,27 +785,142 @@ public class OfficeService : IOfficeService
         // Determine which entity types to search
         var typesToSearch = GetEntityTypesToSearch(request.EntityTypes);
 
-        // TRACKED: GitHub #229 - Replace with Dataverse queries once tables exist
-        // The implementation should:
-        // 1. Build FetchXML queries for each entity type with 'contains' filter on name fields
-        // 2. Execute queries in parallel for performance
-        // 3. Combine and sort results by relevance + recency
-        // 4. Apply pagination (skip/top) to combined results
-        // 5. Filter by user permissions (Dataverse handles this via security roles)
+        // Real Dataverse search (task 026 / #229). When no client is injected (bare test
+        // constructions), fall back to the legacy stub so those tests keep their shape.
+        if (_dataverseClient is null)
+        {
+            var stub = GenerateStubResults(request.Query, typesToSearch, request.Top);
+            var stubTotal = stub.Count + (request.Skip > 0 ? request.Skip : 0);
+            return new EntitySearchResponse
+            {
+                Results = stub.Skip(request.Skip).Take(request.Top).ToList(),
+                TotalCount = stubTotal,
+                HasMore = stubTotal > request.Skip + request.Top
+            };
+        }
 
-        // For now, return stub data for testing the endpoint structure
-        var results = GenerateStubResults(request.Query, typesToSearch, request.Top);
-        var totalCount = results.Count + (request.Skip > 0 ? request.Skip : 0);
+        // Query each requested entity type with a name/number 'contains' filter. Each type is
+        // best-effort — one entity's failure (missing table, transient 4xx) is logged and skipped,
+        // never fails the whole picker. NOTE: app-only read (no per-user security trimming yet) —
+        // tracked as a follow-up on #919.
+        var combined = new List<EntitySearchResult>();
+        var perTypeTop = Math.Clamp(request.Top, 5, 50);
+        foreach (var type in typesToSearch)
+        {
+            try
+            {
+                combined.AddRange(await QuerySearchEntityAsync(type, request.Query, perTypeTop, cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Entity search failed for type {EntityType}; skipping", type);
+            }
+        }
 
-        await Task.CompletedTask; // Simulate async operation
+        // Rank: prefix matches first, then most-recently-modified.
+        var ordered = combined
+            .OrderByDescending(r => r.Name.StartsWith(request.Query, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(r => r.ModifiedOn)
+            .ToList();
 
         return new EntitySearchResponse
         {
-            Results = results.Skip(request.Skip).Take(request.Top).ToList(),
-            TotalCount = totalCount,
-            HasMore = totalCount > request.Skip + request.Top
+            Results = ordered.Skip(request.Skip).Take(request.Top).ToList(),
+            TotalCount = ordered.Count + request.Skip,
+            HasMore = ordered.Count > request.Skip + request.Top
         };
     }
+
+    /// <summary>Per-entity-type Dataverse Web API search metadata (mirrors RecordSyncJob's catalogue).</summary>
+    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField);
+
+    private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
+        new Dictionary<AssociationEntityType, EntitySearchMeta>
+        {
+            [AssociationEntityType.Matter]  = new("sprk_matters",  "sprk_matterid",  "sprk_mattername",  "sprk_matternumber",  "sprk_matterdescription"),
+            [AssociationEntityType.Project] = new("sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription"),
+            [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name",        "sprk_invoicenumber", "sprk_description"),
+            [AssociationEntityType.Account]  = new("accounts",     "accountid",      "name",             "accountnumber",      "description"),
+            [AssociationEntityType.Contact]  = new("contacts",     "contactid",      "fullname",         null,                 "jobtitle"),
+        };
+
+    /// <summary>
+    /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API and
+    /// maps rows to <see cref="EntitySearchResult"/>. App-only read.
+    /// </summary>
+    private async Task<List<EntitySearchResult>> QuerySearchEntityAsync(
+        AssociationEntityType type,
+        string query,
+        int top,
+        CancellationToken cancellationToken)
+    {
+        var meta = _searchMeta[type];
+
+        // OData string literal: double single-quotes, then URL-encode the value (the surrounding
+        // contains(...) syntax stays literal).
+        var value = Uri.EscapeDataString(query.Replace("'", "''"));
+        var nameClause = $"contains({meta.NameField},'{value}')";
+        var filter = meta.RefField is null
+            ? nameClause
+            : $"({nameClause} or contains({meta.RefField},'{value}'))";
+
+        var selectFields = new List<string> { meta.IdField, meta.NameField, "modifiedon" };
+        if (meta.RefField is not null) selectFields.Add(meta.RefField);
+        if (meta.DescField is not null) selectFields.Add(meta.DescField);
+
+        var rows = await _dataverseClient!.QueryAsync<Dictionary<string, JsonElement>>(
+            meta.EntitySet,
+            filter: filter,
+            select: string.Join(",", selectFields),
+            top: top,
+            cancellationToken: cancellationToken);
+
+        var results = new List<EntitySearchResult>(rows.Count);
+        foreach (var row in rows)
+        {
+            var mapped = MapSearchRow(type, meta, row);
+            if (mapped is not null)
+                results.Add(mapped);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Maps one Dataverse Web API JSON row to an <see cref="EntitySearchResult"/>, or null when the
+    /// row has no name (never surface an unnamed record in the picker). Pure — unit-tested.
+    /// </summary>
+    internal static EntitySearchResult? MapSearchRow(
+        AssociationEntityType type,
+        EntitySearchMeta meta,
+        Dictionary<string, JsonElement> row)
+    {
+        var name = GetJsonString(row, meta.NameField);
+        if (string.IsNullOrWhiteSpace(name))
+            return null;
+
+        var id = Guid.TryParse(GetJsonString(row, meta.IdField), out var g) ? g : Guid.Empty;
+        var refVal = meta.RefField is not null ? GetJsonString(row, meta.RefField) : null;
+        var desc = meta.DescField is not null ? GetJsonString(row, meta.DescField) : null;
+        var modified = DateTimeOffset.TryParse(GetJsonString(row, "modifiedon"), out var mo)
+            ? mo
+            : DateTimeOffset.UtcNow;
+
+        return new EntitySearchResult
+        {
+            Id = id,
+            EntityType = type,
+            LogicalName = GetLogicalName(type),
+            Name = name!,
+            DisplayInfo = !string.IsNullOrWhiteSpace(refVal) ? refVal! : (desc ?? GetLogicalName(type)),
+            PrimaryField = !string.IsNullOrWhiteSpace(refVal) ? refVal! : name!,
+            IconUrl = $"/icons/{type.ToString().ToLowerInvariant()}.svg",
+            ModifiedOn = modified
+        };
+    }
+
+    private static string? GetJsonString(Dictionary<string, JsonElement> row, string key)
+        => row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
 
     /// <summary>
     /// Determines which entity types to search based on the request.
@@ -1149,10 +1397,21 @@ public class OfficeService : IOfficeService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
+    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter + Project</b> (the common
+    /// filings from an email); other types return null (endpoint 403s) until built out. The record is
+    /// created via the generic Dataverse create (<see cref="IGenericEntityService.CreateAsync"/>) with
+    /// only the required name (Dataverse-required set is name-only for both). Ownership is attributed to
+    /// the caller when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-024
+    /// — best-effort; unresolved → app-owned, still created). There is no impersonated-create helper in
+    /// the BFF, so ownership is set via the <c>ownerid</c> lookup rather than MSCRMCallerID.
+    /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
         QuickCreateRequest request,
         string userId,
+        string? ownerSystemUserId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -1160,44 +1419,219 @@ public class OfficeService : IOfficeService
             entityType,
             userId);
 
-        // Get the display name for the created entity
-        var displayName = entityType == QuickCreateEntityType.Contact
-            ? $"{request.FirstName} {request.LastName}".Trim()
-            : request.Name ?? "Unnamed";
+        // Scope: Matter + Project + Invoice (UI feedback 2026-09-02). Others not yet supported.
+        if (entityType is not (QuickCreateEntityType.Matter
+            or QuickCreateEntityType.Project
+            or QuickCreateEntityType.Invoice))
+        {
+            _logger.LogInformation(
+                "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
+                entityType);
+            return null;
+        }
 
-        // TRACKED: GitHub #229 - Implement Dataverse record creation
-        // The implementation should:
-        // 1. Verify user has create permission for the entity type
-        // 2. Build the entity record with appropriate fields based on entity type:
-        //    - Matter: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Project: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Invoice: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Account: name, description, industrycode, address1_city
-        //    - Contact: firstname, lastname, emailaddress1, parentcustomerid (lookup)
-        // 3. Create the record via Dataverse SDK
-        // 4. Return the created record ID and URL
+        if (_genericEntityService is null)
+        {
+            _logger.LogWarning("Quick create unavailable — IGenericEntityService not injected.");
+            return null;
+        }
 
-        // Simulate async Dataverse operation
-        await Task.Delay(100, cancellationToken);
+        var name = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null; // endpoint validates Name; guard defensively
+        }
 
-        // Generate stub response for testing
-        var createdId = Guid.NewGuid();
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
+        var (nameField, descriptionField) = entityType switch
+        {
+            QuickCreateEntityType.Matter => ("sprk_mattername", (string?)"sprk_matterdescription"),
+            QuickCreateEntityType.Project => ("sprk_projectname", (string?)"sprk_projectdescription"),
+            _ => ("sprk_invoicename", (string?)null), // Invoice: name-only (no verified description field)
+        };
+
+        var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
+        entity[nameField] = name;
+        if (descriptionField is not null && !string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity[descriptionField] = request.Description!.Trim();
+        }
+
+        // Attribute ownership to the caller when resolved (ADR-024). Best-effort: an unresolved
+        // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
+        if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
+        {
+            entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);
+        }
+
+        var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Quick create completed: EntityType={EntityType}, Id={Id}, Name={Name}",
             entityType,
             createdId,
-            displayName);
+            name);
 
         return new QuickCreateResponse
         {
             Id = createdId,
             EntityType = entityType,
             LogicalName = logicalName,
-            Name = displayName,
-            Url = $"https://spaarkedev1.crm.dynamics.com/main.aspx?etn={logicalName}&id={createdId}&pagetype=entityrecord"
+            Name = name,
+            // Org URL isn't known server-side (the add-in must not be org-pinned); the add-in uses
+            // Id + Name to select the new record as the regarding, not the Url.
+            Url = null
         };
+    }
+
+    /// <summary>Friendly regarding type → (entity-specific <c>sprk_todo</c> lookup attribute, target logical name).
+    /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c> for the three types the add-in "Related to"
+    /// picker offers (Matter/Project/Invoice).</summary>
+    private static readonly IReadOnlyDictionary<string, (string LookupAttribute, string LogicalName)> _todoRegardingMap =
+        new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Matter"] = ("sprk_regardingmatter", "sprk_matter"),
+            ["Project"] = ("sprk_regardingproject", "sprk_project"),
+            ["Invoice"] = ("sprk_regardinginvoice", "sprk_invoice"),
+        };
+
+    /// <inheritdoc />
+    public async Task<CreateTodoResponse?> CreateTodoAsync(
+        CreateTodoRequest request,
+        string userId,
+        string? ownerSystemUserId = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Create To Do requested by user {UserId}", userId);
+
+        if (_genericEntityService is null)
+        {
+            _logger.LogWarning("Create To Do unavailable — IGenericEntityService not injected.");
+            return null;
+        }
+
+        var name = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null; // endpoint validates Name; guard defensively.
+        }
+
+        // Core sprk_todo body (mirrors CreateTodoWizard's todoService.createTodo — statecode/statuscode Open+Active).
+        var entity = new Microsoft.Xrm.Sdk.Entity("sprk_todo");
+        entity["sprk_name"] = name;
+        entity["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);   // Active
+        entity["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(1);  // Open
+
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity["sprk_description"] = request.Description!.Trim();
+        }
+
+        // sprk_duedate is Date-Only — write UTC-midnight of the supplied yyyy-MM-dd (best-effort parse).
+        if (!string.IsNullOrWhiteSpace(request.DueDate)
+            && DateOnly.TryParse(request.DueDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var due))
+        {
+            entity["sprk_duedate"] = due.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        }
+
+        // Priority/Effort scores (client resolved the choice → 0-100 score, mirroring the wizard).
+        entity["sprk_priorityscore"] = request.PriorityScore;
+        entity["sprk_effortscore"] = request.EffortScore;
+
+        // Assignee → CONTACT (sprk_assignedto migrated systemuser → contact, 2026-06-21).
+        if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
+        {
+            entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId);
+        }
+
+        // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.
+        if (!string.IsNullOrWhiteSpace(request.RegardingEntityType)
+            && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
+            && _todoRegardingMap.TryGetValue(request.RegardingEntityType!, out var reg))
+        {
+            entity[reg.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(reg.LogicalName, regardingId);
+            entity["sprk_regardingrecordid"] = regardingId.ToString();
+            if (!string.IsNullOrWhiteSpace(request.RegardingRecordName))
+            {
+                entity["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
+            }
+
+            // Best-effort record-type ref (denormalized ADR-024 resolver lookup). Non-fatal — the typed lookup
+            // above is the load-bearing relationship; a missing record-type ref only affects cross-entity display.
+            var recordTypeId = await ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
+                .ConfigureAwait(false);
+            if (recordTypeId is { } rtId && rtId != Guid.Empty)
+            {
+                entity["sprk_regardingrecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", rtId);
+            }
+
+            // FR-26 core-ancestor stamp (task 052) — applied AFTER the typed lookup so it cannot be
+            // overwritten. Two of the three types this picker offers are CORE (Matter, Project) and stamp
+            // only themselves; INVOICE is child-class, so the add-in can already file a To Do under an
+            // invoice today and that To Do would otherwise carry no matter/project stamp — invisible to
+            // everyone whose access comes from the invoice's matter.
+            var stamp = await _coreAncestors
+                .StampAsync(entity, reg.LogicalName, regardingId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!stamp.Succeeded)
+            {
+                // NFR-01 fail-closed, expressed in THIS method's existing error contract: a null return
+                // is what every other guard here uses, and the endpoint maps it to a failure. Creating
+                // the To Do without the stamp would be a silent inheritance hole, which is worse.
+                _logger.LogError(
+                    "Create To Do aborted: core-ancestor derivation failed for {RegardingType} {RegardingId}. {Error}",
+                    reg.LogicalName, regardingId, stamp.Error);
+                return null;
+            }
+        }
+
+        // Owner attribution (ADR-024) — best-effort, same posture as QuickCreate.
+        if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
+        {
+            entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);
+        }
+
+        var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Create To Do completed: Id={TodoId}, Name={Name}, Regarding={RegardingType}",
+            todoId, name, request.RegardingEntityType ?? "(none)");
+
+        return new CreateTodoResponse { TodoId = todoId, Name = name };
+    }
+
+    /// <summary>
+    /// Resolves the <c>sprk_recordtype_ref</c> id for a target entity logical name (mirrors the client
+    /// <c>PolymorphicResolverService.resolveRecordType</c>). Best-effort — returns null on any failure or when the
+    /// reference table / row is absent, so the To Do create proceeds with the typed lookup alone.
+    /// </summary>
+    private async Task<Guid?> ResolveRegardingRecordTypeIdAsync(string logicalName, CancellationToken cancellationToken)
+    {
+        if (_dataverseClient is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var value = Uri.EscapeDataString(logicalName.Replace("'", "''"));
+            var rows = await _dataverseClient.QueryAsync<Dictionary<string, JsonElement>>(
+                "sprk_recordtype_refs",
+                filter: $"sprk_recordlogicalname eq '{value}' and statecode eq 0",
+                select: "sprk_recordtype_refid",
+                top: 1,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var idString = rows.Count > 0 ? GetJsonString(rows[0], "sprk_recordtype_refid") : null;
+            return Guid.TryParse(idString, out var id) ? id : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Record-type ref lookup failed for {LogicalName}; To Do regarding will omit it.", logicalName);
+            return null;
+        }
     }
 
     /// <inheritdoc />
@@ -1262,16 +1696,9 @@ public class OfficeService : IOfficeService
                 LastUsed = DateTimeOffset.UtcNow.AddHours(-5),
                 UseCount = 8
             },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Account,
-                LogicalName = "account",
-                Name = "Acme Corporation",
-                DisplayInfo = "Industry: Manufacturing | City: Chicago",
-                LastUsed = DateTimeOffset.UtcNow.AddDays(-1),
-                UseCount = 23
-            },
+            // An `account` sample row was removed here 2026-09-04: `account` is no longer an association
+            // type (sprk_document has no account lookup in either column family), and sample data that
+            // shows a type the save path now refuses teaches the wrong shape.
             new()
             {
                 Id = Guid.NewGuid(),
@@ -1333,10 +1760,11 @@ public class OfficeService : IOfficeService
                 FileSize = 1024567,
                 EntityReference = new EntityReference
                 {
+                    // Retyped from `account` 2026-09-04 — see the removal note above.
                     Id = Guid.NewGuid(),
-                    EntityType = AssociationType.Account,
-                    LogicalName = "account",
-                    Name = "Acme Corporation"
+                    EntityType = AssociationType.Project,
+                    LogicalName = "sprk_project",
+                    Name = "Acme Implementation Project"
                 }
             },
             new()
@@ -1394,14 +1822,8 @@ public class OfficeService : IOfficeService
                 Name = "Smith vs Jones Matter",
                 FavoritedAt = DateTimeOffset.UtcNow.AddDays(-30)
             },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Account,
-                LogicalName = "account",
-                Name = "Acme Corporation",
-                FavoritedAt = DateTimeOffset.UtcNow.AddDays(-25)
-            },
+            // An `account` favorite sample was removed here 2026-09-04 — same reason as the removal in
+            // the recent-associations sample above.
             new()
             {
                 Id = Guid.NewGuid(),

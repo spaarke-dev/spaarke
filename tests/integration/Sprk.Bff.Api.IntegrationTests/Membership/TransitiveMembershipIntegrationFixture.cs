@@ -81,7 +81,7 @@ public class TransitiveMembershipIntegrationFixture : WebApplicationFactory<Prog
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -137,6 +137,9 @@ public class TransitiveMembershipIntegrationFixture : WebApplicationFactory<Prog
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Replace Redis with in-memory cache (ADR-009).
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();

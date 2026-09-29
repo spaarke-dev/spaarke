@@ -56,7 +56,7 @@ Determine which agent surface will call the tool:
 
 - **ADR-013 (AI Architecture)**: Use the existing `IAiToolHandler` pattern in `src/server/api/Sprk.Bff.Api/Services/Ai/`. The `AiToolService` is the orchestrator — register handlers in DI per ADR-010 (≤15 non-framework registrations; check the budget before adding).
 - **ADR-007 (SpeFileStore facade)**: If the tool reads/writes SharePoint Embedded content, route through `SpeFileStore`. Do NOT inject `GraphServiceClient` directly into the handler.
-- **ADR-001 (Minimal API)**: No Azure Functions; tool handlers are .NET 8 services hosted in `Sprk.Bff.Api`.
+- **ADR-001 (Minimal API)**: tool handlers are .NET services hosted in `Sprk.Bff.Api` — they serve live requests, so they stay in the BFF (ADR-052 signal B4).
 - **ADR-008 (Endpoint filters)**: Authorization for tool invocation goes through endpoint filters on `AiToolEndpoints`, not global middleware.
 
 ### Step 4: Tool schema and approval mode

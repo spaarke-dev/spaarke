@@ -82,7 +82,7 @@ public sealed class AgreementReviewKnowledgeScopeSeamTests : IClassFixture<Agree
                 {
                     ExtractedText = "This Mutual NDA governs...",
                 },
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
         return sessionId;
     }
 
@@ -215,7 +215,7 @@ public sealed class AgreementReviewKnowledgeScopeSeamFixture : WebApplicationFac
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -273,6 +273,9 @@ public sealed class AgreementReviewKnowledgeScopeSeamFixture : WebApplicationFac
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -363,7 +366,9 @@ public sealed class AgreementReviewKnowledgeScopeSeamFixture : WebApplicationFac
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
+        // Issue #863: a STABLE test user. A fresh Guid per client meant the caller identity
+        // changed between the seed and the request, so an ownership check could never pass.
+        client.DefaultRequestHeaders.Add("X-Test-User", TestSessionOwner.Oid);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
@@ -390,7 +395,10 @@ internal sealed class AgreementReviewSeamFakeAuthHandler : AuthenticationHandler
         }
 
         var oid = Request.Headers["X-Test-User"].ToString();
-        if (string.IsNullOrWhiteSpace(oid)) oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair): the fallback was Guid.NewGuid(), so every request with no
+        // X-Test-User header arrived as a DIFFERENT user. Entra never issues a per-request oid,
+        // and an ownership key that changes every call makes ownership untestable.
+        if (string.IsNullOrWhiteSpace(oid)) oid = TestSessionOwner.Oid;
 
         var claims = new List<Claim>
         {

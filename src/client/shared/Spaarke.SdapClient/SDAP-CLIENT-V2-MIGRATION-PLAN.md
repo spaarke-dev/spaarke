@@ -1,8 +1,23 @@
 # SDAP Shared Client - Migration Plan
 
+> ## ⚠️ SUPERSEDED — HISTORICAL ONLY (annotated 2026-09-03)
+>
+> **Do not follow the steps below.** Both PCF controls this plan targets were retired and no longer
+> exist in the repo: `src/client/pcf/UniversalQuickCreate` and `src/client/pcf/SpeFileViewer`. The
+> "current state" table, its line counts, and every code snippet describe files that are gone.
+>
+> Consolidation onto `@spaarke/sdap-client` **did happen**, by a different route and against
+> different callers — `unified-access-control-r2` item N-1, 2026-09-02/03. The three parallel upload
+> implementations that actually existed were `EntityCreationService`'s raw inline `fetch`,
+> `@spaarke/ui-components/services/document-upload/SdapApiClient.ts`, and this package. The first
+> two are now gone; this package is the survivor.
+>
+> Kept rather than deleted because the rationale sections (why one client, what duplication costs)
+> are still sound. Everything procedural is obsolete.
+
 **Package:** `@spaarke/sdap-client`
 **Version:** 1.0.0
-**Purpose:** Step-by-step migration guide for existing PCF controls
+**Purpose:** ~~Step-by-step migration guide for existing PCF controls~~ (superseded — see above)
 
 ---
 

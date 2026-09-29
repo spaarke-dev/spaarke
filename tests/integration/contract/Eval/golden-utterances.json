@@ -1606,8 +1606,8 @@
       "family": "compose-draft-alternative-dispatch",
       "ucId": "UC-G-2",
       "channel": "click",
-      "utterance": "[Draft alternative] toolbar action on a selected clause — strict match_mode replace of the whole selection",
-      "notes": "FR-09/FR-17 — the compose-DISPOSITION ledger write. UNLIKE the four sibling read/informational compose dispatch families, this Binding declares disposition=100000006 (BindingDisposition.Compose, VERIFIED against Binding.cs by the spaarkeai-compose-r2 routing promotion: ToLedgerValue -> 'compose', OutputRouter pass-through store-before-render, ADR-040). The dispatched structured-edit payload ({target_text, new_text, match_mode:'strict', rationale, sources}) is written to the SessionOutput ledger BEFORE the Workspace materializes the pending track-change (never a client-only DOM edit). Live-asserted structurally by ComposeDraftAlternativeDispatchCases_AssertComposeDispositionLedgerWrite (GoldenUtteranceEvalSuiteTests.cs) against the real Binding row's declared disposition in sprk_playbookconsumer-rows.json.",
+      "utterance": "[Draft alternative] toolbar action on a selected clause — anchored replace of the selected paragraph",
+      "notes": "FR-09/FR-17 — the compose-DISPOSITION ledger write. UNLIKE the four sibling read/informational compose dispatch families, this Binding declares disposition=100000006 (BindingDisposition.Compose, VERIFIED against Binding.cs by the spaarkeai-compose-r2 routing promotion: ToLedgerValue -> 'compose', OutputRouter pass-through store-before-render, ADR-040). The dispatched structured-edit payload ({target_para_id, new_text, rationale, sources}) is written to the SessionOutput ledger BEFORE the Workspace materializes the pending track-change (never a client-only DOM edit). Live-asserted structurally by ComposeDraftAlternativeDispatchCases_AssertComposeDispositionLedgerWrite (GoldenUtteranceEvalSuiteTests.cs) against the real Binding row's declared disposition in sprk_playbookconsumer-rows.json.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
       "expected": {
         "outcomeClass": "dispatch",
@@ -1626,8 +1626,8 @@
       "family": "compose-draft-alternative-dispatch",
       "ucId": "UC-G-2",
       "channel": "click",
-      "utterance": "[Draft alternative] toolbar action targeting the first occurrence of a repeated phrase (match_mode: first)",
-      "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note); match_mode='first' variant.",
+      "utterance": "[Draft alternative] toolbar action on a clause whose wording repeats elsewhere in the document",
+      "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note). Formerly the match_mode='first' variant; r8 task 052 retired match_mode, and this case now covers the reason it could be retired — repeated wording is no longer a targeting hazard because the edit names its paragraph by target_para_id, so there is no 'which occurrence' question to answer.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
       "expected": {
         "outcomeClass": "dispatch",
@@ -1646,8 +1646,8 @@
       "family": "compose-draft-alternative-dispatch",
       "ucId": "UC-G-2",
       "channel": "click",
-      "utterance": "[Draft alternative] toolbar action targeting every occurrence of a defined term (match_mode: all)",
-      "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note); match_mode='all' variant.",
+      "utterance": "[Draft alternative] toolbar action asking to change a defined term everywhere it appears",
+      "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note). Formerly the match_mode='all' variant. r8 task 052 retired match_mode INCLUDING 'all' (decision recorded in projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md §2): a document-wide fan-out over matched prose silently rewrites the term inside defined-terms definitions, party blocks and quoted third-party clauses, and reports success. The utterance stays valid and still dispatches — what changed is the payload: the model emits one anchored edit per affected paragraph, and a genuine document-wide sweep is served by user-invoked find/replace (FR-17), which shows the match count and requires an explicit Replace All. This case exists to keep that boundary asserted.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
       "expected": {
         "outcomeClass": "dispatch",

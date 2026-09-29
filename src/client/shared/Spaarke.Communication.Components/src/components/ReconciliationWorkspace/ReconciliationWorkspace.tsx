@@ -62,12 +62,13 @@ import type { EmailCitation } from '../../logic/citations';
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
 
 /**
- * Item 1 (owner UAT 2026-08-19) — page size for the Needs-Review grid. The reconciliation
- * queue is a bounded working set (typically 10s–low 100s); loading it in ONE page shows the
- * whole queue in the browse "N of M" navigator instead of capping at the framework default
- * (25). Large enough to cover the queue without unbounded growth.
+ * Item 1 (owner UAT 2026-08-19) — page size for the Needs-Review grid's INFINITE SCROLL.
+ * The grid lazy-loads this many rows per page and fetches the next page as the reviewer
+ * scrolls (fixed alongside the `useLazyLoad` page-fullness `hasMore` fallback so paging
+ * advances past page 1 under the MDA `Xrm.WebApi` client). 50 keeps scrolling smooth with
+ * few round-trips; the whole queue is reachable by scrolling.
  */
-const RECONCILIATION_PAGE_SIZE = 500;
+const RECONCILIATION_PAGE_SIZE = 50;
 
 /** The reconciled entity — used for the UAT-Fix#3 targeted single-row re-fetch on confirm. */
 const COMMUNICATION_ENTITY = 'sprk_communication';

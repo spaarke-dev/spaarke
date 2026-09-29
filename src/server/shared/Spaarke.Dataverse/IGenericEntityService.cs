@@ -38,6 +38,30 @@ public interface IGenericEntityService
     /// generic seam (added for FR-C3 graduate-on-divergence clearing <c>sprk_canonicaldocument</c>).
     /// </summary>
     Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default);
+
+    /// <summary>
+    /// Updates N records of ONE table in one request, <b>all-or-nothing</b>: every update is applied, or
+    /// none is. Never a partial set.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Limits.</b> Keep each call to at most <b>1,000</b> updates — <c>ExecuteMultiple</c>'s
+    /// documented batch size and the same ceiling this method always had; the transaction documentation
+    /// states no figure of its own. Splitting a larger set into several calls gives per-call atomicity only —
+    /// decide whether that is acceptable before doing it.</para>
+    /// <para><b>Fields.</b> A C# <c>null</c> value SKIPS that key, as in <see cref="UpdateAsync"/>.
+    /// <see cref="DBNull.Value"/> is rejected with <see cref="ArgumentException"/> before any I/O — to clear
+    /// a column, use <see cref="UpdateAsync"/>.</para>
+    /// <para><b>Failure.</b> Throws <see cref="InvalidOperationException"/> whose message states only what
+    /// is known: when Dataverse identifies the request that faulted, the message names its index and record
+    /// and states that NO update was applied; otherwise it states that the updates were applied all together
+    /// or not at all. Cancellation surfaces as <see cref="OperationCanceledException"/>; argument errors throw
+    /// before any I/O.</para>
+    /// <para><b>Corrected 2026-09-10</b> (unified-access-control-r2 task 096, ISS-005 / #970). This method
+    /// used to send an <c>ExecuteMultipleRequest</c> with <c>ContinueOnError = false</c> under the comment
+    /// "Stop on first error for transactional behavior". <c>ExecuteMultiple</c> is not transactional: it
+    /// stopped at the first fault with every earlier update already committed, and its error message
+    /// implied nothing had happened.</para>
+    /// </remarks>
     Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default);
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);
     Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default);

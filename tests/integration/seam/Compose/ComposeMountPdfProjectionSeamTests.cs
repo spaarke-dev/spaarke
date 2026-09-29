@@ -156,6 +156,77 @@ public sealed class ComposeMountPdfProjectionSeamTests : IClassFixture<ComposeFi
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // (2b) BYTES DECIDE, NOT THE FILE NAME — both directions.
+    //
+    //      This is the task-040 Step-9.5 MEDIUM-5 fix, and task 070's cluster-4 mutation pass found it
+    //      had NO test: disabling either half of the sniff left all 1,798 Compose tests green. Every
+    //      existing case here happens to use a correctly-named file, so the sniff and the extension
+    //      always agreed and nothing ever exercised the disagreement.
+    //
+    //      Both directions are covered because they fail differently, and neither failure is loud:
+    //        - a docx named .pdf routed to intake would be REFLOWED through the lossy PDF path when a
+    //          native full-fidelity OOXML mount was available — silent fidelity loss on a document we
+    //          could have read perfectly;
+    //        - a PDF named .docx routed to the native path would fail closed on the OOXML projection,
+    //          turning a mountable document into a dead end.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Project_DocxBytesNamedDotPdf_TakesTheNativePath_NeverTheLossyIntake()
+    {
+        _fixture.ResetBoundaries();
+
+        // PK\x03\x04 bytes, .pdf name — the mis-named-download case.
+        var docx = BuildMinimalDocx("A Word document that someone saved with a .pdf extension.");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/compose/project",
+            new { content = docx, fileName = "actually-a-word-doc.pdf" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var project = await response.Content.ReadFromJsonAsync<ComposeProjectResponse>();
+        project.Should().NotBeNull();
+
+        project!.SourceFormat.Should().BeNull(
+            "the BYTES are an OOXML package, so this is not a PDF mount however the file is named");
+        project.Projection.Html.Should().Contain("A Word document that someone saved with a .pdf extension.",
+            "the native path reads the real document; the lossy reflow would not reproduce it verbatim");
+
+        _fixture.PdfIntakeSourceMock.Verify(
+            p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "trusting the .pdf extension over PK-zip bytes would send a perfectly readable Word document " +
+            "through the lossy PDF reflow — fidelity thrown away for a naming mistake");
+    }
+
+    [Fact]
+    public async Task Project_PdfBytesNamedDotDocx_TakesTheIntakePath_NotTheOoxmlDeadEnd()
+    {
+        _fixture.ResetBoundaries();
+
+        _fixture.PdfIntakeSourceMock
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Success(NdaLayout()));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // %PDF- bytes, .docx name — the other direction of the same mistake.
+        var response = await client.PostAsJsonAsync("/api/compose/project",
+            new { content = PdfBytes, fileName = "actually-a-pdf.docx" });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"%PDF- bytes route to intake regardless of the name — the OOXML path would fail closed on " +
+            $"them and turn a mountable document into a dead end. Body: {body}");
+
+        _fixture.PdfIntakeSourceMock.Verify(
+            p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the %PDF- signature decides, not the .docx extension");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
     // (3) Intake unavailability fails the mount door LOUDLY — honest 503, not a silent mount / 500.
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 

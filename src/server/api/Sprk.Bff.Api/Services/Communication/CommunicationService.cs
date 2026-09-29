@@ -81,6 +81,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// facet (task 051) reads. Optional so existing unit constructions keep compiling; production DI always supplies
     /// it. Best-effort / non-fatal + idempotent (it never throws) — a junction-write failure never fails the send.
     /// </param>
+    /// <summary>FR-26 core-ancestor derivation for the outbound communication write path (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -91,6 +94,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         JobSubmissionService jobSubmissionService,
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<CommunicationService> logger,
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
@@ -108,6 +112,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _threadResolver = threadResolver;
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
@@ -866,7 +871,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
-        MapAssociationFields(communication, request.Associations, _logger);
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -1780,7 +1785,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields)
-        MapAssociationFields(communication, request.Associations, _logger);
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -1885,7 +1890,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields)
-        MapAssociationFields(communication, request.Associations, _logger);
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -1920,10 +1925,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Maps the primary association (associations[0]) to Dataverse regarding lookup
     /// and denormalized text fields on the sprk_communication entity.
     /// </summary>
-    private static void MapAssociationFields(
+    private async Task MapAssociationFieldsAsync(
         DataverseEntity communication,
         CommunicationAssociation[]? associations,
-        ILogger logger)
+        string correlationId,
+        CancellationToken ct)
     {
         if (associations is not { Length: > 0 })
             return;
@@ -1936,10 +1942,39 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (RegardingLookupMap.TryGetValue(primary.EntityType, out var mapping))
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
+
+            // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
+            // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an
+            // inherited one. Four of the twelve mapped targets are child-class (analysis, invoice, event
+            // and - via the reply path - communication), so an email filed against an invoice would
+            // otherwise carry no matter stamp and stay invisible to everyone whose access comes from
+            // that matter.
+            var stamp = await _coreAncestors
+                .StampAsync(communication, primary.EntityType, primary.EntityId, ct)
+                .ConfigureAwait(false);
+
+            if (!stamp.Succeeded)
+            {
+                // NFR-01 fail-closed, in this class's existing error contract (SdapProblemException, as
+                // ValidateRequest uses). Recording an unstamped communication would leave a row nobody
+                // downstream of the regarding record can see - a silent under-grant, worse than a loud
+                // failure the caller can retry.
+                throw new SdapProblemException(
+                    code: "CORE_ANCESTOR_DERIVATION_FAILED",
+                    title: "Regarding association could not be resolved",
+                    detail: "The core-record ancestor of the regarding target could not be derived, so the "
+                          + "communication cannot be filed with correct access inheritance.",
+                    statusCode: 502,
+                    extensions: new Dictionary<string, object>
+                    {
+                        ["correlationId"] = correlationId,
+                        ["regardingEntityType"] = primary.EntityType,
+                    });
+            }
         }
         else
         {
-            logger.LogWarning(
+            _logger.LogWarning(
                 "Unknown entity type for association lookup mapping: {EntityType}. Regarding lookup will not be set.",
                 primary.EntityType);
         }
@@ -2046,23 +2081,70 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
             .GenerateEml(request, partialResponse, emlAttachments);
 
-        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml.
+        // 2. Upload to SPE at {commId:N}_{fileName}.eml — FLAT, in the container root.
+        //
+        // WHY THE GUID MOVED FROM A FOLDER SEGMENT INTO THE FILENAME. In SPE, uploading to a PATH makes
+        // Graph implicitly create every folder segment in it, so "/communications/{id}/…" minted a
+        // `communications` folder plus a per-communication subfolder on every archival. But the {id}
+        // segment was ALSO the only thing keeping two communications' identically-named .eml files apart:
+        // UploadSmallAsync resolves to graphClient.Drives[…].Root.ItemWithPath(path).Content.PutAsync,
+        // Graph's path-keyed simple PUT, which accepts NO @microsoft.graph.conflictBehavior and is a
+        // silent, unconditional REPLACE. Flattening to a bare {fileName} would therefore have been silent
+        // DATA LOSS. Folding the id into the filename keeps the write flat AND keeps it unique — the same
+        // filename-carries-the-uniqueness approach EmailAttachmentProcessor.GenerateUniqueFileName already
+        // uses (Services/Email/EmailAttachmentProcessor.cs).
+        //
         // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
         // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
-        // so the archived object downloads/opens as an email file in Outlook (UAT #4c).
-        var driveId = _options.ArchiveContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            throw new InvalidOperationException("ArchiveContainerId not configured for SPE archival");
-        }
-
-        var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
+        // so the archived object downloads/opens as an email file in Outlook (UAT #4c). The prefix is
+        // added ahead of the name, so the ".eml" extension remains the last segment and inference holds.
+        // SANITIZED 2026-08-29 (defence in depth). The archiver seam is pluggable — ICommunicationArchiver
+        // has two implementations today and channel authors add more — so the flatness of this path must not
+        // depend on every future archiver remembering to sanitize the name it returns. Folding the id in
+        // front does not protect it: "{id}_a/b.eml" still mints an "{id}_a" folder.
+        var spePath = $"{communicationId:N}_{SpeUploadPath.SanitizeFileName(emlResult.FileName)}";
 
         using var stream = new MemoryStream(emlResult.Content);
         // SpeFileStore is Scoped — resolve it per-operation (R9); scope lives to method end.
         using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
             "IServiceScopeFactory is required to resolve SpeFileStore for SPE archival.")).CreateScope();
         var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
+        // ── ROUTED 2026-08-28 (unified-access-control-r2 task 076) ──────────────────────────────
+        // This USED to read `_options.ArchiveContainerId` directly, which put a SECURE matter's
+        // archived .eml into the shared archive container. A .eml is the FULL message body, so it is
+        // at least as disclosing as any attachment — and because SharePoint Embedded permissions are
+        // additive-only, no later permission change can retract it.
+        //
+        // Task 075 fixed the INBOUND .eml (IncomingCommunicationProcessor.ArchiveEmlAsync) with
+        // exactly this call and exactly this reasoning. This is its OUTBOUND / on-demand twin, which
+        // 075 did not reach: three callers land here — ArchiveExistingAsync (on-demand, which also
+        // re-archives inbound mail), SendAsync, and SendAsUserAsync.
+        //
+        // ArchiveContainerId is still the answer for a non-secure communication — it is INV-7's
+        // tier-3 server-side default (projects/spaarke-multi-container-multi-index-r1/design.md
+        // §82-88), which is why it is passed IN as the fallback rather than read as the decision.
+        // The resolver consults the communication's securable regarding first.
+        //
+        // Resolved off `speScope` rather than injected: CommunicationContainerResolver is Scoped and
+        // this class is not, which is the same reason SpeFileStore is resolved here. The decision
+        // therefore had to move BELOW the scope creation — it used to sit above it.
+        var containerResolver = speScope.ServiceProvider
+            .GetRequiredService<Engine.CommunicationContainerResolver>();
+
+        // Throws SdapProblemException on a secure regarding with no container of its own
+        // (secure_record_container_missing) or ambiguous ownership — fail closed, never the shared
+        // archive. Returns null only when nothing is secure AND no archive container is configured.
+        var driveId = await containerResolver
+            .ResolveContainerAsync(communicationId, _options.ArchiveContainerId, ct);
+
+        if (string.IsNullOrWhiteSpace(driveId))
+        {
+            // Same exception and message as before the routing change, so the three callers'
+            // existing handling is unchanged: ArchiveExistingAsync translates it to
+            // ARCHIVE_NOT_CONFIGURED (500) and both send paths treat it as non-fatal.
+            throw new InvalidOperationException("ArchiveContainerId not configured for SPE archival");
+        }
         var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
         _logger.LogInformation(

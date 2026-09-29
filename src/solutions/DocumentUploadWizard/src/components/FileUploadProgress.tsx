@@ -18,6 +18,7 @@ import {
     ProgressBar,
     Spinner,
     Badge,
+    Button,
     mergeClasses,
 } from "@fluentui/react-components";
 import {
@@ -27,9 +28,13 @@ import {
     ArrowUploadFilled,
     DatabaseRegular,
     BrainCircuitRegular,
+    WarningFilled,
 } from "@fluentui/react-icons";
 
 import type { OrchestratorFileProgress, FileUploadPhase } from "../services/uploadOrchestrator";
+
+/** The two collision resolutions a user is offered. See ConflictBehaviorOption for why only two. */
+export type ConflictResolution = "rename" | "replace";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -38,6 +43,15 @@ import type { OrchestratorFileProgress, FileUploadPhase } from "../services/uplo
 export interface IFileUploadProgressProps {
     /** Per-file progress entries from the upload orchestrator. */
     fileProgress: OrchestratorFileProgress[];
+
+    /**
+     * Invoked when the user resolves a name collision for one file. Omit to render collisions as
+     * plain errors (no buttons) — the honest fallback for a host that cannot retry.
+     */
+    onResolveConflict?: (fileName: string, resolution: ConflictResolution) => void;
+
+    /** File names currently being retried — their buttons are disabled to prevent double-submit. */
+    resolvingFileNames?: ReadonlySet<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +84,10 @@ const useStyles = makeStyles({
     },
     fileRowError: {
         backgroundColor: tokens.colorPaletteRedBackground1,
+    },
+    // A collision is not a failure — nothing was written and the user has a choice. Amber, not red.
+    fileRowConflict: {
+        backgroundColor: tokens.colorPaletteYellowBackground1,
     },
     fileRowComplete: {
         backgroundColor: tokens.colorPaletteGreenBackground1,
@@ -116,6 +134,19 @@ const useStyles = makeStyles({
     },
     errorMessage: {
         color: tokens.colorPaletteRedForeground1,
+    },
+    statusIconConflict: {
+        color: tokens.colorPaletteYellowForeground1,
+    },
+    conflictMessage: {
+        color: tokens.colorNeutralForeground1,
+    },
+    conflictActions: {
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+        marginTop: tokens.spacingVerticalXS,
     },
 });
 
@@ -172,20 +203,30 @@ function usePhaseDisplay(phase: FileUploadPhase, styles: ReturnType<typeof useSt
 
 function FileUploadProgressRow({
     progress,
+    onResolveConflict,
+    isResolving,
 }: {
     progress: OrchestratorFileProgress;
+    onResolveConflict?: (fileName: string, resolution: ConflictResolution) => void;
+    isResolving: boolean;
 }): JSX.Element {
     const styles = useStyles();
     const phaseDisplay = usePhaseDisplay(progress.phase, styles);
 
+    // A collision only reads as a CHOICE if the host can actually act on it. Without a resolver
+    // this row stays a plain error — misleading buttons would be worse than no buttons.
+    const isConflict = progress.phase === "error" && progress.nameConflict != null;
+    const canResolve = isConflict && onResolveConflict != null;
+
     const rowClassName = mergeClasses(
         styles.fileRow,
-        progress.phase === "error" && styles.fileRowError,
+        progress.phase === "error" && (isConflict ? styles.fileRowConflict : styles.fileRowError),
         progress.phase === "complete" && styles.fileRowComplete,
     );
 
     const showProgressBar = progress.phase === "uploading";
     const showSpinner =
+        isResolving ||
         progress.phase === "uploading" ||
         progress.phase === "creating-record" ||
         progress.phase === "profiling";
@@ -196,6 +237,10 @@ function FileUploadProgressRow({
                 {/* Status icon */}
                 {showSpinner ? (
                     <Spinner size="tiny" />
+                ) : isConflict ? (
+                    <WarningFilled
+                        className={mergeClasses(styles.statusIcon, styles.statusIconConflict)}
+                    />
                 ) : (
                     phaseDisplay.icon
                 )}
@@ -211,11 +256,12 @@ function FileUploadProgressRow({
                     appearance="outline"
                     color={
                         progress.phase === "complete" ? "success"
+                        : isConflict ? "warning"
                         : progress.phase === "error" ? "danger"
                         : "informative"
                     }
                 >
-                    {phaseDisplay.label}
+                    {isResolving ? "Retrying" : isConflict ? "Name conflict" : phaseDisplay.label}
                     {progress.phase === "uploading" && progress.uploadPercent > 0
                         ? ` (${progress.uploadPercent}%)`
                         : ""}
@@ -231,11 +277,47 @@ function FileUploadProgressRow({
                 />
             )}
 
-            {/* Error message */}
+            {/* Error message — a collision is stated in neutral text, not error red. */}
             {progress.phase === "error" && progress.errorMessage && (
-                <Text size={100} className={styles.errorMessage}>
-                    {progress.errorMessage}
+                <Text
+                    size={100}
+                    className={isConflict ? styles.conflictMessage : styles.errorMessage}
+                >
+                    {isConflict
+                        ? `A file named "${progress.fileName}" already exists here. Nothing has been uploaded or changed — choose how to continue.`
+                        : progress.errorMessage}
                 </Text>
+            )}
+
+            {/* Collision resolution — exactly two options.
+                "Keep both" = server stores this file under a non-colliding name (rename).
+                "Save as new version" = replace; SharePoint retains the prior content as a version,
+                so the existing document is recoverable, not destroyed.
+                There is deliberately no third "replace and discard" option — at the Graph level it
+                is the same call as replace; a user who wants the old file gone deletes it. */}
+            {canResolve && (
+                <div className={styles.conflictActions}>
+                    <Button
+                        size="small"
+                        appearance="primary"
+                        disabled={isResolving}
+                        onClick={() => onResolveConflict(progress.fileName, "rename")}
+                    >
+                        Keep both
+                    </Button>
+                    <Button
+                        size="small"
+                        appearance="secondary"
+                        disabled={isResolving}
+                        onClick={() => onResolveConflict(progress.fileName, "replace")}
+                    >
+                        Save as new version
+                    </Button>
+                    <Text size={100} className={styles.statusLabel}>
+                        Keep both uploads this file under a new name. Save as new version keeps the
+                        existing document and adds this file as its latest version.
+                    </Text>
+                </div>
             )}
         </div>
     );
@@ -247,15 +329,24 @@ function FileUploadProgressRow({
 
 export function FileUploadProgress({
     fileProgress,
+    onResolveConflict,
+    resolvingFileNames,
 }: IFileUploadProgressProps): JSX.Element {
     const styles = useStyles();
 
     const summary = useMemo(() => {
         const total = fileProgress.length;
         const completed = fileProgress.filter((f) => f.phase === "complete").length;
-        const errors = fileProgress.filter((f) => f.phase === "error").length;
-        const inProgress = total - completed - errors;
-        return { total, completed, errors, inProgress };
+        const failed = fileProgress.filter(
+            (f) => f.phase === "error" && f.nameConflict == null,
+        ).length;
+        // Counted separately from `failed`: a collision is awaiting a decision, and reporting it as
+        // "failed" tells the user something went wrong when nothing has.
+        const conflicts = fileProgress.filter(
+            (f) => f.phase === "error" && f.nameConflict != null,
+        ).length;
+        const inProgress = total - completed - failed - conflicts;
+        return { total, completed, failed, conflicts, inProgress };
     }, [fileProgress]);
 
     return (
@@ -267,13 +358,21 @@ export function FileUploadProgress({
                 </Text>
                 <Text size={200} className={styles.statusLabel}>
                     {summary.completed}/{summary.total} complete
-                    {summary.errors > 0 ? ` \u2022 ${summary.errors} failed` : ""}
+                    {summary.failed > 0 ? ` \u2022 ${summary.failed} failed` : ""}
+                    {summary.conflicts > 0
+                        ? ` \u2022 ${summary.conflicts} needing your choice`
+                        : ""}
                 </Text>
             </div>
 
             {/* Per-file rows */}
             {fileProgress.map((fp) => (
-                <FileUploadProgressRow key={fp.fileName} progress={fp} />
+                <FileUploadProgressRow
+                    key={fp.fileName}
+                    progress={fp}
+                    onResolveConflict={onResolveConflict}
+                    isResolving={resolvingFileNames?.has(fp.fileName) ?? false}
+                />
             ))}
         </div>
     );

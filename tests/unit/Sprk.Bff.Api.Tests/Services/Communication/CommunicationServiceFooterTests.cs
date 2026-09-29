@@ -97,6 +97,7 @@ public class CommunicationServiceFooterTests
             null!, null!,
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<CommunicationService>>(),
             trackingTokenSigner: signer,
             trackingFooterGate: gate);

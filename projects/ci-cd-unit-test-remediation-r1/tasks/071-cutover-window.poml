@@ -14,12 +14,54 @@
   </metadata>
 
   <prompt>
-    THE CUTOVER. Execute the ~4-hour synchronized window per spec.md §177-184 + design.md §177-191. Three settings flips: (1) restore `Release` to the `Build & Test` matrix in `sdap-ci.yml` (or its successor); (2) flip branch protection on master to require ONLY `CI / Router`; (3) enable GitHub merge queue (batch=1, no speculative, queue timeout 30 min). Rollback playbook ready per spec §152 — pre-cutover snapshot from task 070 is the source.
+    THE CUTOVER. Execute the ~4-hour synchronized window per spec.md §177-184 + design.md §177-191. Three settings flips: (1) restore `Release` to the `Build & Test` matrix in `sdap-ci.yml` (or its successor); (2) branch protection — ALREADY DONE 2026-08-29 via ruleset 21824191 (required check `Router`), so this flip is now a VERIFY step, not a change; (3) enable GitHub merge queue (batch=1, no speculative, queue timeout 30 min). Rollback playbook ready per spec §152 — pre-cutover snapshot from task 070 is the source.
   </prompt>
+
+  <correction date="2026-08-29" source="session investigation; full detail in notes/branch-protection-enabled-2026-08-29.md">
+    The original step 4 read:
+
+      gh api -X PUT repos/spaarke-dev/spaarke/branches/master/protection \
+        -F required_status_checks[contexts][]='CI / Router'
+
+    That command had THREE independent defects and would have burned part of the 4-hour window:
+
+    (1) THE ENDPOINT DOES NOT WORK ON THIS REPO. GET and PUT on /branches/master/protection both
+        return 404 "Branch protection has been disabled on this repository" — with admin:true, a
+        repo-scoped token, and a PUBLIC repo, so no private-plan limitation explains it. Rulesets
+        are the working mechanism. CONSEQUENCE FOR TASK 070's SNAPSHOT: the 404 it recorded is NOT
+        evidence that protection was deliberately switched off; the same 404 appears when the
+        endpoint simply does not serve this repo. Do not treat "protection was disabled on purpose"
+        as established.
+
+    (2) THE CONTEXT NAME WAS WRONG. The real check-run name is `Router`, not `CI / Router`. A
+        required context that never reports blocks EVERY PR permanently — the worst possible
+        failure mode inside a cutover window.
+
+    (3) THE PAYLOAD WAS INCOMPLETE. The classic PUT requires a full object: `strict` alongside
+        `contexts`, plus top-level enforce_admins / required_pull_request_reviews / restrictions.
+        A single -F field would 422 even if the endpoint were available.
+
+    RESOLUTION: branch protection was enabled 2026-08-29 via ruleset 21824191 (PR required, 0
+    approvals; required check `Router`; strict=false; force-push + deletion blocked) and verified —
+    docs-only PRs still pass because `Router` is an always() aggregate that reports success when
+    Tier 1 skips (#891, #892), and existing PR #887 went mergeable/CLEAN. Step 4 is therefore now a
+    VERIFY step. What remains genuinely undone in this task is the MERGE QUEUE and the Release
+    matrix restore.
+
+    ROLLBACK: `gh api -X DELETE repos/spaarke-dev/spaarke/rulesets/21824191`. This supersedes the
+    070 snapshot's rollback command (which targets the non-functional classic endpoint).
+
+    strict=false is DELIBERATE and contradicts the 070 snapshot's stated forward target of
+    strict=true. strict=true requires every PR branch to contain the newest master commit, so the
+    first merge invalidates all other open PRs and each author must update and wait a full CI cycle
+    — that serializes merging, which is exactly north star #2, and it reverses the 2026-06-05
+    strict=false decision. The correct instrument for the semantic-conflict risk strict addresses is
+    the merge queue (step 5 of this task).
+  </correction>
 
   <role>CI/CD engineer executing the synchronized cutover.</role>
 
-  <goal>Branch protection requires only `CI / Router`; merge queue enabled; Release matrix restored; sdap-ci.yml still running in parallel (NOT yet deleted — that's task 077, gated by 14-day stability).</goal>
+  <goal>Branch protection requires only `Router` (already true since 2026-08-29 — verify); merge queue enabled; Release matrix restored; sdap-ci.yml still running in parallel (NOT yet deleted — that's task 077, gated by 14-day stability).</goal>
 
   <inputs>
     <file purpose="pre-cutover-snapshot">projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-pre-cutover.json (from 070)</file>
@@ -46,12 +88,13 @@
     <step order="1">Confirm 070 snapshot exists + is well-formed + meta document references the restore command</step>
     <step order="2">Restore Release matrix in `sdap-ci.yml` (uncomment lines 86-91 area; verify build runs both Debug and Release). Commit + push.</step>
     <step order="3">Wait for one full sdap-ci.yml run to confirm Release matrix builds green</step>
-    <step order="4">Flip branch protection: `gh api -X PUT repos/spaarke-dev/spaarke/branches/master/protection -F required_status_checks[contexts][]='CI / Router'` (replace full required check list — only `CI / Router` required; sdap-ci.yml jobs become non-required but still run in parallel)</step>
+    <step order="4">ALREADY DONE 2026-08-29 — VERIFY ONLY, do not run the old command. Run `gh api repos/spaarke-dev/spaarke/rules/branches/master` and confirm ruleset 21824191 is active with required check `Router`, strict=false, PR required, force-push + deletion blocked. See the CORRECTION block below for why the previously-written command cannot work.</step>
     <step order="5">Enable merge queue: GitHub UI → Settings → Branches → master → Require merge queue (batch=1, no speculative, timeout 30min). OR via `gh api` if available.</step>
-    <step order="6">Verify state: `gh api repos/spaarke-dev/spaarke/branches/master/protection` shows only `CI / Router` required; merge queue enabled</step>
+    <step order="6">Verify state: `gh api repos/spaarke-dev/spaarke/rules/branches/master` shows `required_status_checks` → `Router`; merge queue enabled. Do NOT use the classic `/branches/master/protection` endpoint — it 404s on this repo.</step>
     <step order="7">Test merge: create a trivial test PR; verify it goes through router → tier1 (blocking) → tier2 (advisory PR comment) → merge queue → merged</step>
     <step order="8">Monitor for the next 4 hours for any of the rollback triggers; if triggered, execute rollback (see spec §152) — restore branch-protection from 070 snapshot, disable merge queue, re-enable sdap-ci as required, document in `notes/cutover-attempts.md`</step>
     <step order="9">If stable through 4-hour window, commit cutover-success note to `notes/cutover-success.md`</step>
+    <step order="9b">Merge PR #869 (dependabot: re-actors/alls-green 1.2.2 -> 1.3.0 in ci-router.yml). HELD until now on purpose: alls-green is the aggregation step in router-result, i.e. the job whose conclusion IS the `Router` required check, so bumping it mid-shadow-window could make prior verdict observations non-comparable. Its two siblings (#870 github-script, #872 cache) were verdict-neutral and merged 2026-08-30. Once cutover is done the window has served its purpose and this is free.</step>
     <step order="10">Step 9.5: code-review + adr-check on sdap-ci.yml Release restoration (other changes are settings, not code)</step>
   </steps>
 
@@ -64,7 +107,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Release matrix restored in sdap-ci.yml; both Debug+Release build green</criterion>
-    <criterion testable="true">Branch protection lists only `CI / Router` as required</criterion>
+    <criterion testable="true">`gh api repos/spaarke-dev/spaarke/rules/branches/master` lists `required_status_checks` with context `Router` (exact name; NOT `CI / Router`)</criterion>
     <criterion testable="true">Merge queue enabled (batch=1, no speculative, 30min timeout)</criterion>
     <criterion testable="true">A test PR successfully goes through router → tier1 → tier2 → merge queue → merge</criterion>
     <criterion testable="true">No rollback triggered within 4-hour window (or rollback executed cleanly if triggered)</criterion>

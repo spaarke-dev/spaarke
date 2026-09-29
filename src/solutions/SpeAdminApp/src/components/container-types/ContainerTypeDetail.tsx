@@ -67,11 +67,7 @@ import {
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, describeApiError } from "../../services/speApiClient";
-import {
-  ContainerTypeSettingsForm,
-  type ContainerTypeSettings,
-  type SharingCapabilityValue,
-} from "./ContainerTypeSettingsForm";
+import { ContainerTypeSettingsForm } from "./ContainerTypeSettingsForm";
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
 import { ContainerTypeOwnersPanel } from "./ContainerTypeOwnersPanel";
 import {
@@ -82,7 +78,11 @@ import {
   SAVE_ACCEPTED_DETAIL,
   SAVE_ACCEPTED_TITLE,
 } from "./containerTypeLifecycle";
-import type { ContainerType, ContainerTypePermission } from "../../types/spe";
+import type {
+  ContainerType,
+  ContainerTypePermission,
+  ContainerTypeSettings,
+} from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -145,19 +145,31 @@ function capitalize(s: string): string {
 }
 
 /**
- * Extract ContainerTypeSettings from a SpeContainerTypeConfig (selectedConfig).
- * The config holds the Dataverse-side settings for the container type.
+ * The settings a container type actually has, as reported by Graph.
+ *
+ * 🔴 REPLACED `extractSettingsFromConfig` 2026-08-27 (task 025 completion). That function read the
+ * **Dataverse config record** and filled every gap with an invented default —
+ * `?? "disabled"`, `?? false`, `?? 100`, `?? 1 GB`, and `isSearchEnabled: true` hard-coded with the
+ * comment *"Graph API search is enabled by default"*. The Settings screen therefore displayed the
+ * client's guesses as though they were the container type's configuration, on a screen whose entire
+ * purpose is to report that configuration. Signature defect (spec §2.4), inside the settings screen.
+ *
+ * Graph is the authority for Graph settings. Where Graph reports nothing the value stays
+ * `undefined` — rendered as "Not reported" and omitted from any save, because the BFF applies only
+ * non-null fields. An unknown must not become a write.
  */
-function extractSettingsFromConfig(
-  config: NonNullable<ReturnType<typeof useBuContext>["selectedConfig"]>
-): ContainerTypeSettings {
-  return {
-    sharingCapability: (config.sharingCapability as SharingCapabilityValue) ?? "disabled",
-    isItemVersioningEnabled: config.isItemVersioningEnabled ?? false,
-    itemMajorVersionLimit: config.itemMajorVersionLimit ?? 100,
-    maxStoragePerBytes: config.maxStoragePerBytes ?? 1_073_741_824,
-    isSearchEnabled: true, // Graph API search is enabled by default; no Dataverse field yet
-  };
+function settingsFromContainerType(ct: ContainerType | null): ContainerTypeSettings {
+  return ct?.settings ? { ...ct.settings } : {};
+}
+
+/**
+ * The subset of settings that were actually established — i.e. everything the admin either saw
+ * reported or explicitly set. Sent as the PUT body; anything absent means "leave unchanged".
+ */
+function definedSettings(settings: ContainerTypeSettings): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, v]) => v !== undefined && v !== null)
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,13 +421,9 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
 
   // ── Settings / Dirty State ─────────────────────────────────────────────────
 
-  const [settings, setSettings] = React.useState<ContainerTypeSettings>({
-    sharingCapability: "disabled",
-    isItemVersioningEnabled: false,
-    itemMajorVersionLimit: 100,
-    maxStoragePerBytes: 1_073_741_824,
-    isSearchEnabled: true,
-  });
+  // Empty, not defaulted. Before the container type loads nothing is known, and an invented
+  // starting value would render as fact for the duration of the fetch.
+  const [settings, setSettings] = React.useState<ContainerTypeSettings>({});
   const [savedSettings, setSavedSettings] = React.useState<ContainerTypeSettings>(settings);
   const [saving, setSaving] = React.useState(false);
   const [saveSuccess, setSaveSuccess] = React.useState(false);
@@ -494,8 +502,8 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       .get(containerTypeId, selectedConfig.id)
       .then((ct) => {
         setContainerType(ct);
-        // Initialise settings from selectedConfig (which holds the Dataverse settings)
-        const initial = extractSettingsFromConfig(selectedConfig);
+        // Seed from Graph's own reported settings — the authority for this screen.
+        const initial = settingsFromContainerType(ct);
         setSettings(initial);
         setSavedSettings(initial);
       })
@@ -552,25 +560,35 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      await speApiClient.containerTypes.updateSettings(
+      // All nine v1.0 settings now travel under Graph's own property names, and only the ones
+      // actually established are sent — the BFF applies non-null fields and leaves the rest alone,
+      // so omitting an unreported setting is how we avoid writing a guess.
+      //
+      // `isOfficeRestricted` is stripped: it is beta-only and read-only on the v1.0 surface this
+      // endpoint writes through, so sending it would be asking for a change that cannot happen.
+      const { isOfficeRestricted: _readOnly, ...writable } = settings;
+
+      const updated = await speApiClient.containerTypes.updateSettings(
         containerTypeId,
         selectedConfig.id,
-        {
-          sharingCapability: settings.sharingCapability,
-          isItemVersioningEnabled: settings.isItemVersioningEnabled,
-          itemMajorVersionLimit: settings.itemMajorVersionLimit,
-          // Renamed from `maxStoragePerBytes` 2026-08-24 (task 023). That was the Dataverse config
-          // column's name leaking onto the wire; the BFF contract key is the Graph property name.
-          // It is a per-container CEILING, never a usage figure — the two must not share a name
-          // anywhere in the chain (spec FR-C05).
-          maxStoragePerContainerInBytes: settings.maxStoragePerBytes,
-          // ⚠️ The BFF has no `isSearchEnabled` on its settings request, so this value is currently
-          // discarded on arrival. It is one of the five remaining settings task 025 (FR-C07) wires
-          // up; the control is left in place because 025 is the next task to touch this surface.
-          isSearchEnabled: settings.isSearchEnabled,
-        }
+        definedSettings(writable)
       );
-      setSavedSettings({ ...settings });
+
+      // MERGE, never replace. The PUT returns `ContainerTypeSettingsResponseDto` — a deliberately
+      // narrower shape carrying id, displayName, billing, createdDateTime and settings. It does NOT
+      // carry owningAppId, expiryDateTime or region, so assigning it wholesale would blank those
+      // from the details panel above and make a successful save look like data loss. Object spread
+      // only copies keys the response actually has, so the omitted ones survive.
+      const merged: ContainerType = { ...(containerType as ContainerType), ...updated };
+      setContainerType(merged);
+
+      // Re-seed from the response, not from what we sent. Task 025 made the update response carry
+      // the post-update settings precisely so a caller can confirm the write applied instead of
+      // trusting a 200 (FR-C04) — and task 051 measured Graph accepting a settings PATCH while
+      // silently discarding a property. Echoing our own request back would hide exactly that.
+      const applied = settingsFromContainerType(merged);
+      setSettings(applied);
+      setSavedSettings(applied);
       setSaveSuccess(true);
     } catch (err) {
       const message =
@@ -579,7 +597,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [containerTypeId, selectedConfig, settings]);
+  }, [containerTypeId, selectedConfig, settings, containerType]);
 
   // ── Close Handler (with dirty check) ──────────────────────────────────────
 
@@ -866,7 +884,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                           .get(containerTypeId, selectedConfig.id)
                           .then((ct) => {
                             setContainerType(ct);
-                            const initial = extractSettingsFromConfig(selectedConfig);
+                            const initial = settingsFromContainerType(ct);
                             setSettings(initial);
                             setSavedSettings(initial);
                           })

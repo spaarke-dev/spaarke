@@ -29,6 +29,9 @@ export type {
   ComposeEditorDocumentRef,
   ComposeDraftPayload,
   ComposeDraftProvenance,
+  // FR-C05 residual (r8 task 052b) — the `'live' | 'replay'` provenance discriminator a host must
+  // declare so the stale-target check knows whether the paragraph it finds is the capture-time text.
+  MaterializeOrigin,
   // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) —
   // ComposeEditorHandle.placeAdvisoryComments' input/output shapes.
   AdvisoryCommentInput,
@@ -106,6 +109,18 @@ export type {
   AnchorValidationReason,
   AnchorValidationResult,
 } from './widgets/hooks/useAiApplyValidation';
+
+// R8 UAT item 8 — the on-demand change-summary flow: save gate → live pull-annotations → the
+// `changesText` producer → dispatch. Returns a CLOSED outcome set (`needs-save` / `no-changes` /
+// `dispatched` / `failed`) so the host renders a real answer for each; `no-changes` in particular must
+// be TOLD to the user, since the action was asked for rather than offered.
+export { useComposeChangeSummary } from './widgets/hooks/useComposeChangeSummary';
+export type {
+  ComposeChangeSummaryOutcome,
+  ComposeChangeSummaryTarget,
+  UseComposeChangeSummaryOptions,
+  UseComposeChangeSummaryResult,
+} from './widgets/hooks/useComposeChangeSummary';
 
 // -------------------------------------------------------------------------
 // Workspace-level widgets (Phase 7 task 091 — moved from SpaarkeAi)
@@ -392,6 +407,14 @@ export {
   IMPORTED_COMMENT_THREAD_PREFIX,
 } from './widgets/importedComments';
 export type { ApplyImportedCommentAnchorsResult } from './widgets/importedComments';
+
+// R8 UAT item 8 — the `changesText` PRODUCER for `compose-summarize-word-changes`. Turns the same
+// recovered-revision/comment data the two modules above render into the operand the Action declares.
+// Returns `null` when there is no real change data: the action was pulled from the selection toolbar
+// because dispatching it empty makes the model fabricate a phantom "[Insertion]", so a caller MUST treat
+// `null` as "do not dispatch". `hasComposeChangeData` is the same decision, for gating a trigger.
+export { buildComposeChangesText, hasComposeChangeData, COMPOSE_CHANGES_TEXT_CAP } from './widgets/composeChangesText';
+export type { ComposeChangeSources } from './widgets/composeChangesText';
 
 // DOCX bridge helpers — exported for advanced consumers + tests. Most consumers should use ComposeEditor
 // (which orchestrates these internally). R3 task 027: the `docx.js` byte-authoring exporters

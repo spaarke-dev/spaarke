@@ -204,7 +204,7 @@ public sealed class MetricsDistributedCacheRegistrationTests
                     ["Graph:TenantId"] = "test-tenant-id",
                     ["Graph:ClientId"] = "test-client-id",
                     ["Graph:ClientSecret"] = "test-client-secret",
-                    ["Graph:UseManagedIdentity"] = "false",
+                    ["Graph:ManagedIdentity:Enabled"] = "false",
                     ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                     ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                     ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -282,6 +282,9 @@ public sealed class MetricsDistributedCacheRegistrationTests
 
             builder.ConfigureTestServices(services =>
             {
+                // Test hosts must not authenticate for real — see TestTokenCredential.
+                services.UseStubTokenCredential();
+
                 // Remove hosted services that depend on external systems not configured here.
                 // Same pattern as CustomWebAppFactory; we never start the request pipeline,
                 // only resolve IDistributedCache + ITenantCache from the DI root.

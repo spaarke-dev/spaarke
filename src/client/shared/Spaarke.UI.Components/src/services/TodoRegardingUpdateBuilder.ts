@@ -24,7 +24,13 @@
  * @see PolymorphicResolverService.applyResolverFields — the underlying primitive
  */
 
-import { applyResolverFields, type INavPropEntry, type IPolymorphicWebApi } from './PolymorphicResolverService';
+import {
+  buildRegardingSelectionPayload,
+  findHostNavPropForLookup,
+  CORE_ANCESTOR_LOOKUPS,
+  type INavPropEntry,
+  type IPolymorphicWebApi,
+} from './PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Target catalog (mirrors TODO_REGARDING_TARGETS in AssociateToStep/types.ts)
@@ -168,16 +174,23 @@ export type ITodoRegardingUpdate = Record<string, string | number | boolean | nu
  * @param target          — The chosen entity type (one of TODO_REGARDING_CATALOG).
  * @param recordId        — GUID of the selected parent record (with or without braces).
  * @param recordName      — Display name of the selected parent record.
+ * @param fetchImpl       — Fetch implementation used for the FR-26 core-ancestor
+ *                          derivation's metadata discovery (test seam; defaults
+ *                          to the global `fetch`).
  *
  * @throws Error if `target` is not in `TODO_REGARDING_CATALOG` (i.e., not a known
- *               `sprk_todo` regarding target).
+ *               `sprk_todo` regarding target), OR if the FR-26 core-ancestor
+ *               derivation fails. The second case is deliberate: writing a child
+ *               that silently carries no inherited access is worse than not
+ *               writing it (NFR-01 fail-closed).
  */
 export async function buildTodoRegardingUpdate(
   webApi: IPolymorphicWebApi,
   navProps: INavPropEntry[],
   target: { entityType: string },
   recordId: string,
-  recordName: string
+  recordName: string,
+  fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<ITodoRegardingUpdate> {
   const catalogEntry = TODO_REGARDING_CATALOG.find(c => c.entityType === target.entityType);
   if (!catalogEntry) {
@@ -187,39 +200,29 @@ export async function buildTodoRegardingUpdate(
     );
   }
 
-  // Start with all 10 OTHER lookups explicitly cleared (clear-and-set per FR-13).
-  // The chosen lookup is then set by applyResolverFields → overwriting the null.
-  const entity: ITodoRegardingUpdate = {};
-  for (const other of TODO_REGARDING_CATALOG) {
-    if (other.entityType !== catalogEntry.entityType) {
-      // Nav-prop name is discovered from `navProps` rather than guessed —
-      // applyResolverFields uses the same lookup. For the CLEAR side we set
-      // it via the lookup-attribute fallback (Dataverse accepts both navprop
-      // and column-name@odata.bind in update payloads, but to maximize
-      // compatibility we use the discovered navprop when available).
-      const navProp = navProps.find(
-        n => n.referencedEntity === other.entityType && n.columnName.toLowerCase().includes(other.navPropHint)
-      );
-      const key = navProp?.navPropName ?? other.lookupAttribute;
-      entity[`${key}@odata.bind`] = null;
-    }
-  }
-
-  // Delegate to the canonical resolver service (ADR-024). It populates the
-  // four resolver fields AND the entity-specific @odata.bind for the chosen
-  // target — overwriting the corresponding `null` we set above (if any).
-  await applyResolverFields(
+  // The whole payload — pre-clear, resolver fields, and the FR-26 core-ancestor
+  // stamp — is assembled by ONE shared function so the ordering that makes the
+  // stamp survive the pre-clear cannot be got wrong per-consumer (task 050).
+  const result = await buildRegardingSelectionPayload(
     webApi,
-    entity as Record<string, unknown>,
     navProps,
-    catalogEntry.entityType,
-    catalogEntry.entitySet,
+    TODO_REGARDING_CATALOG,
+    catalogEntry,
     recordId,
     recordName,
-    catalogEntry.navPropHint
+    undefined,
+    fetchImpl
   );
 
-  return entity;
+  if (!result.success || !result.payload) {
+    throw new Error(
+      `[TodoRegardingUpdateBuilder] Core-ancestor derivation failed for ` +
+        `${catalogEntry.entityType}(${recordId}); refusing to write an unstamped To Do (FR-26 / NFR-01). ` +
+        `${result.error ?? ''}`.trim()
+    );
+  }
+
+  return result.payload as ITodoRegardingUpdate;
 }
 
 /**
@@ -248,6 +251,23 @@ export function buildTodoRegardingClear(navProps: INavPropEntry[]): ITodoRegardi
     );
     const key = navProp?.navPropName ?? target.lookupAttribute;
     entity[`${key}@odata.bind`] = null;
+  }
+
+  // 1b. Null any FR-26 core-ancestor lookup that the catalog does not already
+  //     cover (task 050). A cleared child has no parent, therefore no inherited
+  //     access — leaving a stale `sprk_regarding{core}` stamp behind would keep
+  //     the record visible to the former ancestor's principals after the user
+  //     believes they detached it.
+  //
+  //     Unlike the catalog loop above there is NO lookup-attribute fallback
+  //     here: these columns are not present on every host (sprk_todo has no
+  //     `sprk_regardingservicerequest`), and writing an absent property makes
+  //     Dataverse reject the whole update with "Invalid property".
+  for (const core of CORE_ANCESTOR_LOOKUPS) {
+    if (TODO_REGARDING_CATALOG.some(t => t.entityType === core.entityType)) continue;
+    const navProp = findHostNavPropForLookup(navProps, core.entityType, core.lookupAttribute);
+    if (!navProp) continue;
+    entity[`${navProp}@odata.bind`] = null;
   }
 
   // 2. Null the resolver record-type lookup.

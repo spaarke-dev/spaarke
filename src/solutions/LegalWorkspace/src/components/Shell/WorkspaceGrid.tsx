@@ -52,8 +52,20 @@ const LazyQuickSummaryDashboardDialog = React.lazy(() =>
   }))
 );
 
+// Repointed to the SHARED copy 2026-09-04 (unified-access-control-r2, owner directive "work from
+// shared components where efficient"). This used to import a LegalWorkspace twin that was "kept in
+// lockstep" with the shared component BY A COMMENT — a maintenance tax with an obvious failure mode.
+// The twin is deleted; the shared component is strictly better, taking `authenticatedFetch` and
+// `bffBaseUrl` as injected props instead of importing solution-specific modules.
+// The shared file carries a default export specifically so React.lazy() keeps working here.
+// NOTE the path shape: the vite alias (vite.config.ts:134) already resolves
+// "@spaarke/ui-components" TO the package's `src` directory, so the subpath must NOT repeat it.
+// "@spaarke/ui-components/src/components/..." typechecks (tsconfig paths resolve it) but fails the
+// BUNDLE with a doubled `src/src/`. Deep-imported rather than taken off the barrel so React.lazy
+// still yields a separate chunk — importing from the package root would pull the whole barrel into
+// the main bundle and defeat the lazy split this call site exists for.
 const LazyCloseProjectDialog = React.lazy(
-  () => import("../CreateProject/CloseProjectDialog")
+  () => import("@spaarke/ui-components/components/CreateProjectWizard/CloseProjectDialog")
 );
 
 // SmartToDoDialog — inline replacement for the retired
@@ -521,28 +533,13 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       return;
     }
 
-    // Resolve container ID from business unit
-    let containerId = "";
-    try {
-      const userSettings = xrm.Utility.getGlobalContext().userSettings;
-      const uid = userSettings.userId.replace(/[{}]/g, "");
-      const user = await xrm.WebApi.retrieveRecord(
-        "systemuser", uid, "?$select=_businessunitid_value"
-      );
-      const buId = user["_businessunitid_value"] as string;
-      if (buId) {
-        const bu = await xrm.WebApi.retrieveRecord(
-          "businessunit", buId, "?$select=sprk_containerid"
-        );
-        containerId = (bu["sprk_containerid"] as string) ?? "";
-      }
-    } catch (err) {
-      console.warn("[WorkspaceGrid] Failed to resolve container ID:", err);
-    }
-    if (!containerId) {
-      console.error("[WorkspaceGrid] No container ID available");
-      return;
-    }
+    // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
+    // business-unit container lookup and its `if (!containerId) return;` guard.
+    //
+    // This launch is the standalone (no parent) entry, so the wizard's "skip associate" branch
+    // applies and the SERVER derives the acting user's BU container — the same value this code was
+    // reading, now read where it can be trusted. The guard additionally made the button silently do
+    // NOTHING for any user whose BU had no container, with only a console line to show for it.
 
     // Detect theme
     let theme = "light";
@@ -562,7 +559,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "parentEntityType=sprk_document" +
       "&parentEntityId=" +
       "&parentEntityName=" +
-      "&containerId=" + containerId +
+      // `&containerId=` REMOVED 2026-09-03 (task 076) — the wizard does not read it.
       "&theme=" + theme +
       "&bffBaseUrl=" + encodeURIComponent(getBffBaseUrl());
 
@@ -1037,6 +1034,11 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
             projectName={closeProjectContext.projectName}
             containerId={closeProjectContext.containerId}
             onClose={handleCloseProjectDialog}
+            // Injected 2026-09-04 with the repoint to the shared component. The deleted LW twin
+            // imported both of these itself; the shared one takes them as props so it stays free of
+            // solution-specific imports. Both were already in scope here.
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={getBffBaseUrl()}
           />
         </React.Suspense>
       )}

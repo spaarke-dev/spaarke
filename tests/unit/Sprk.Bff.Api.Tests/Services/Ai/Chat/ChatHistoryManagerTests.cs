@@ -533,7 +533,7 @@ public class ChatHistoryManagerTests
             PlaybookId: PlaybookId,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: messages);
+            Messages: messages) { OwnerOid = TestSessionOwner.Oid };
     }
 
     private static ChatMessage CreateTestMessage(string sessionId, int sequenceNumber)

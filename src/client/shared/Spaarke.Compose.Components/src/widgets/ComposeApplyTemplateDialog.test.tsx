@@ -14,42 +14,36 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    // Behavioral FormModal stub mirroring the preset contract (SprkModal envelope not under test).
-    FormModal: (props: {
-      open: boolean;
-      onClose: () => void;
-      onSubmit: () => void;
-      title: string;
-      submitLabel?: string;
-      cancelLabel?: string;
-      submitDisabled?: boolean;
-      busy?: boolean;
-      children: React.ReactNode;
-    }) =>
-      props.open ? (
-        <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
-          <span>{props.title}</span>
-          {props.children}
-          <button onClick={props.onClose} disabled={props.busy} data-testid="mock-form-modal-cancel">
-            {props.cancelLabel ?? 'Cancel'}
-          </button>
-          <button
-            onClick={props.onSubmit}
-            disabled={props.busy || props.submitDisabled}
-            data-testid="mock-form-modal-submit"
-          >
-            {props.submitLabel ?? 'Save'}
-          </button>
-        </div>
-      ) : null,
-  }),
-  // virtual: the sibling package's dist/ is not built in this environment (KNOWN baseline) —
-  // the raw specifier cannot resolve, so the mock must be registered against it directly.
-  { virtual: true }
-);
+jest.mock('@spaarke/ui-components', () => ({
+  // Behavioral FormModal stub mirroring the preset contract (SprkModal envelope not under test).
+  FormModal: (props: {
+    open: boolean;
+    onClose: () => void;
+    onSubmit: () => void;
+    title: string;
+    submitLabel?: string;
+    cancelLabel?: string;
+    submitDisabled?: boolean;
+    busy?: boolean;
+    children: React.ReactNode;
+  }) =>
+    props.open ? (
+      <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
+        <span>{props.title}</span>
+        {props.children}
+        <button onClick={props.onClose} disabled={props.busy} data-testid="mock-form-modal-cancel">
+          {props.cancelLabel ?? 'Cancel'}
+        </button>
+        <button
+          onClick={props.onSubmit}
+          disabled={props.busy || props.submitDisabled}
+          data-testid="mock-form-modal-submit"
+        >
+          {props.submitLabel ?? 'Save'}
+        </button>
+      </div>
+    ) : null,
+}));
 
 // eslint-disable-next-line import/first
 import { ComposeApplyTemplateDialog, type ComposeApplyTemplateDialogProps } from './ComposeApplyTemplateDialog';

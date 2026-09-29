@@ -72,12 +72,21 @@ The constraints above apply to **application logs** (Tier 1). R2 introduces two 
 | **Tier 1: App Logs** | App Insights / Azure Monitor | Metadata only (IDs, sizes, timings) | 90 days | SRE | N/A |
 | **Tier 2: Compliance Audit** | Cosmos DB `audit` container | Response hash (SHA-256), tool names, doc IDs, safety scores. **No verbatim text.** | 7 years (configurable) | Compliance role only | No (legal hold) |
 | **Tier 3: Work History** | Cosmos DB `sessions`, `prompts`, `memory`, `feedback` | Full messages, widget state, matter facts. User-owned data. | 90 days default | Owning user + admin | Yes (Art. 17) |
+| 3 | `SessionFileBlobStore` (blob, `{tenantId}/session-files/{sessionId}/{fileId}`) | User-uploaded document BYTES | Follows session TTL (incl. `-1` filed = indefinite) — **task 062, NOT YET IMPLEMENTED** | Managed identity only; tenant is the leading path segment | **Task 063, NOT YET IMPLEMENTED** |
+
+> **Amendment 2026-08-25 (`spaarkeai-compose-r8` task 060, §6.5 Path B).** The durable session-file
+> byte store is added to the table above as a Tier-3 governed store. Its retention and erasure rows are
+> honestly marked NOT YET IMPLEMENTED: this ADR requires both for a persisted store, and they are owned
+> by tasks 062/063. The non-compliant state is unreachable by a MECHANICAL gate rather than a promise —
+> `SessionFileStore:BlobEndpoint` ships EMPTY, so no bytes are persisted at all until an operator sets
+> it. Enabling it before 062/063 merge would accumulate user document bytes with no defined deletion
+> path, and the config template says so at the point of use.
 
 ### Tier-Specific MUST Rules
 
 - **MUST** treat Tier 1 (app logs) as strict — ADR-015 original constraints apply in full
 - **MUST** store only metadata + hashes in Tier 2 audit log — never verbatim prompts or responses
-- **MUST** partition all Tier 2/3 data by `tenantId` — no cross-tenant queries
+- 🟡 **AMENDED 2026-09-28 (D-12 §3).** Was *"**MUST** partition all Tier 2/3 data by `tenantId` — no cross-tenant queries"*. Now: **MUST** hold all Tier 2/3 data in the customer's **own dedicated Cosmos account** — that boundary, not a partition predicate, is what delivers no cross-**customer** query capability and backs the 7-year audit + GDPR Art. 17 guarantees. **MUST NOT** partition by `/tenantId`: it is one constant value inside a dedicated account, so every document lands in a single hot logical partition. Aligns this ADR with [ADR-042](ADR-042-memory-architecture-governance.md), which already rejected `/tenantId` on capacity grounds while this one still mandated it.
 - **MUST** apply immutable policy to Tier 2 (append-only, no updates/deletes)
 - **MUST** support user-initiated deletion in Tier 3 (GDPR right to erasure)
 - **MUST** define retention policy on every Cosmos container at provisioning time
@@ -92,7 +101,9 @@ The constraints above apply to **application logs** (Tier 1). R2 introduces two 
 
 | Container | Tier | Partition Key | Purpose |
 |-----------|------|---------------|---------|
-| `audit` | 2 | `/tenantId` | Append-only compliance log |
+> ⚠️ **Partition keys below are the pre-2026-09-28 state and are to be re-keyed** — `/tenantId` is a single constant inside a per-customer account. The replacement key per container is a follow-up; existing containers are not migrated by this amendment (ADR-042 keeps the legacy container as-is).
+
+| `audit` | 2 | ⚠️ `/tenantId` | Append-only compliance log |
 | `sessions` | 3 | `/tenantId` | Work history (messages, widgets, artifacts) |
 | `prompts` | 3 | `/tenantId` | Saved prompt templates |
 | `memory` | 3 | `/tenantId` | Matter-scoped AI memory (structured facts) |

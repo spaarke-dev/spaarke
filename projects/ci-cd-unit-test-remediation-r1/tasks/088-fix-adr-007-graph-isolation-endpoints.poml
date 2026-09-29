@@ -1,7 +1,7 @@
 <task id="CICD-088" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Fix ADR-007 violation — isolate Microsoft.Graph SDK out of 18 endpoint classes (wrap Graph exceptions in SpeFileStore facade) — BLOCKS 071 cutover</title>
-    <status>closed-moot</status>
+    <status>complete</status>
     <estimated-effort>4-6 hours</estimated-effort>
     <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
     <stream>A - CI tiering remediation</stream>
@@ -12,6 +12,7 @@
     <blocks>071</blocks>
     <tags>bff-api, adr-007, spe, graph-sdk, hot-path, FR-A06</tags>
     <execution-note>Modifies src/server/api/Sprk.Bff.Api/** — hot-path. Overrides project's `<hot-path-declaration><bff-api>NO</bff-api>` per owner direction 2026-06-26. Coordinate via INDEX.md before editing. Larger blast radius than 087 (18 endpoint files); execute carefully + test each surface.</execution-note>
+    <disposition date="2026-08-30">OBJECTIVE ALREADY MET — verified 2026-08-30. The ADR-007 arch tests this task exists to make green now PASS 6/6 (ADR007_GraphIsolationTests + ADR007_NestedDomainRecordTests), and both ControllersShouldNotReferenceGraphSdk and EndpointsShouldNotReferenceGraphSdk are armed in the Tier 1 blocking filter. The violation was resolved by other work during the project window. This task was still marked BLOCKED and was listed as a precondition of cutover (071) — i.e. the cutover was nominally gated on a phantom blocker. Closed on evidence; 071's dependency on it is satisfied.</disposition>
   </metadata>
 
   <closure-record date="2026-08-28" resolution="MOOT — violation no longer exists">

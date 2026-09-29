@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S06 + FR-S10 — Closed save-outcome enum on the wire (no HTTP 200 with nothing written) + outcome telemetry</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a contract field to a shipped response DTO consumed by the client; every other Track S task and the Phase-2 gate depend on this enum.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: this defines the vocabulary the entire project reasons in — the gate's outcome-honesty assertion (FR-G02) and every Track S recovery path key off these members. A member that is subtly wrong (overlapping, or missing a real terminal state) does not fail a test; it quietly makes some failure unrepresentable, which is precisely how "HTTP 200 Saved ✓ over a failed write" happened in the first place.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeEndpoints.cs, ComposeService.cs and the client response handling — the shared save spine.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, frontend, compose, save-path, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `SaveComposeDocumentResponse` has NO completion field. Save outcomes exist today only as scattered
+    ProblemDetails the client structurally cannot receive (see task 010 — `authenticatedFetch` throws on
+    non-2xx). The verified consequence: a total write failure can present to the user as HTTP 200 "Saved ✓".
+
+    Put a **closed enum** on the wire and make it load-bearing:
+
+      persisted · persisted-with-warnings · refused-stale · refused-locked ·
+      refused-invalid · storage-failed · partially-recorded
+
+    Then emit it as telemetry, following the existing `cosmos.write_failures` precedent, so a save-failure
+    spike is visible without waiting for owner UAT — the absence of which is why R5/R6/R7 each shipped with
+    the save button dead.
+
+    This is the vocabulary every other Track S task and the Phase-2 gate's outcome-honesty assertion (FR-G02)
+    is written against. Define it once, correctly, and make every save path terminate in exactly one member.
+  </prompt>
+
+  <role>SPAARKE backend + frontend developer. Expert in the Compose endpoint surface, BFF response DTOs, and the repo's metrics conventions. Follow ADR-013 (no AI internals in Services/Compose), ADR-029 and ADR-038.</role>
+
+  <goal>
+    Every terminal state of the save path maps to exactly one enum member, the member crosses the wire on
+    `SaveComposeDocumentResponse`, the client reads it rather than inferring success from the HTTP status,
+    and each terminal outcome emits a metric carrying its cause.
+  </goal>
+
+  <context>
+    <background>
+      This is the single most reused artifact in the project. Task 011 needs `persisted-with-warnings`;
+      task 014 needs a member for "we could not re-download current bytes"; task 015 needs one for oversize;
+      task 016 maps the honest-failure set onto it; the Phase-2 gate asserts on it for every corpus document.
+      Getting the member set right matters more than getting any single call site right — a missing member
+      forces a later task to invent an eighth outcome locally, which reintroduces the scatter this removes.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api (cosmos.write_failures metric emission — the precedent to follow)</file>
+      <file role="test">tests/integration/seam/Compose/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-S06">The enum is CLOSED. Every save path terminates in exactly one member. MUST NOT add a catch-all "unknown"/"other" member — that recreates the undefined outcome this requirement removes. If a real terminal state does not fit, escalate rather than widening the set silently.</constraint>
+    <constraint source="project">MUST extend the existing `SaveComposeDocumentResponse` DTO. MUST NOT introduce a parallel response type (root CLAUDE.md §11 — the spec's §11 table records this as an extension, not a new surface).</constraint>
+    <constraint source="project">The client MUST decide success from the outcome field, not from `response.ok`. Coordinate with task 010 — 010 owns the thrown-error branch, this task owns the 2xx branch.</constraint>
+    <constraint source="ADR-013">MUST NOT reach AI internals from `Services/Compose/`. Telemetry goes through the existing metrics abstraction. Scope: the metric emission added here.</constraint>
+    <constraint source="ADR-029">No new NuGet for telemetry. Use the existing metrics pipeline. Report publish size (absolute + delta vs 44.96 MB).</constraint>
+    <constraint source="ADR-038">Seam tests in `tests/integration/seam/**`. MUST NOT write DI-registration or ctor-null tests for the new type. Scope: this task's tests.</constraint>
+    <constraint source="spec NFR-08">Every status code this task leaves reachable on the save path needs a paired client-recovery test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>save outcome contract, BFF response DTOs, metrics</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-013, bff-extensions.md.</step>
+    <step order="1">Enumerate EVERY terminal state of `SaveAsync` today — every return, every throw, every early exit. Map each to exactly one of the seven members. Any state that does not map is an escalation, not a new member.</step>
+    <step order="2">Add the enum + the response field to `SaveComposeDocumentResponse`. Serialize it as a stable string (not an ordinal) so the wire contract survives reordering.</step>
+    <step order="3">Make each terminal state set the outcome. Verify no path can return 200 without setting it — prefer a construction that makes the field non-optional over a runtime check.</step>
+    <step order="4">Emit the telemetry metric per terminal outcome, carrying the outcome and its cause, following the `cosmos.write_failures` precedent.</step>
+    <step order="5">Client: read the outcome field on the 2xx branch and render accordingly. `persisted` → Saved. `persisted-with-warnings` → Saved + warning banner. Anything else → the corresponding failure state, NOT "Saved".</step>
+    <step order="6">Seam tests: drive each reachable outcome and assert the response field. Client tests: assert a `partially-recorded` (or `storage-failed`) 200 does NOT render "Saved ✓".</step>
+  </steps>
+
+  <escalation>
+    <trigger>A real terminal state of the save path does not map to any of the seven members. Adding an eighth is a spec change (FR-S06 names the set) — surface it to the owner with the concrete state rather than widening the enum locally.</trigger>
+    <trigger>If `SaveComposeDocumentResponse` is consumed by a surface outside Compose, adding a required field is a breaking change — surface the consumer list before proceeding.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The seven-member closed enum exists and is serialized as a stable string on `SaveComposeDocumentResponse`.</criterion>
+    <criterion>Every terminal state of `SaveAsync` sets exactly one member — demonstrated by an enumeration of the paths in the task notes.</criterion>
+    <criterion>No save path can return HTTP 200 without an outcome value set.</criterion>
+    <criterion>The client decides success from the outcome field, not from `response.ok`.</criterion>
+    <criterion>A 200 carrying `storage-failed` or `partially-recorded` does NOT render "Saved ✓" — asserted by a client test.</criterion>
+    <criterion>Each terminal outcome emits a metric carrying outcome + cause, following the `cosmos.write_failures` precedent.</criterion>
+    <criterion>NEGATIVE: no "unknown"/"other"/catch-all member was added.</criterion>
+    <criterion>NEGATIVE: no parallel response DTO was created — the existing one was extended.</criterion>
+    <criterion>NEGATIVE: a normal successful save still reports `persisted` and renders "Saved" (no false positives).</criterion>
+    <criterion>Seam tests drive each reachable outcome; paired client-recovery tests exist per NFR-08.</criterion>
+    <criterion>Publish size reported (absolute + delta vs 44.96 MB); no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-08-20. All acceptance criteria met. No escalation fired — all seven members have a
+    real producer and no terminal state needed an eighth.
+
+    **Step 1 — the terminal-state enumeration (the load-bearing artifact).** Every `return` and `throw`
+    in `SaveAsync` (lines 1063–1690) plus every catch in `ExecuteSaveAsync`, each mapped to exactly one
+    member:
+
+    | Terminal state | Member | Cause tag |
+    |---|---|---|
+    | success, clean | `persisted` | `none` |
+    | success + degradation warnings / re-anchor / superseded concurrent version | `persisted-with-warnings` | `warnings` |
+    | success + unresolved ops (best-effort recovery) | `partially-recorded` | `partial-apply` |
+    | `BuildContainerFailedResult` (no container, or SPE create returned null) | `storage-failed` | `container-step` |
+    | `ArgumentException` (TenantId / DriveId missing) | `refused-invalid` | `bad-request` |
+    | `ComposePdfIntakeException` 422 / 503 | `refused-invalid` / `storage-failed` | `bad-request` |
+    | `InvalidOperationException` "not found" | `storage-failed` | `not-found` |
+    | `UnauthorizedAccessException` | `refused-invalid` | `forbidden` |
+    | `DocumentLockedByWordException` | `refused-locked` | `word-lock` |
+    | `EtagPreconditionFailedException` (post-retry, task 011) | `refused-stale` | `precondition` |
+    | `ComposePatchException` | `refused-invalid` | `patch-refusal` |
+    | sprk_document identity-key fault | `partially-recorded` | `record-conflict` |
+    | unhandled | `storage-failed` | `unhandled` |
+
+    **CORRECTION to the note left after task 011.** That note said the 409 should map to `storage-failed`
+    and that `refused-stale` no longer had a producer. Both were wrong, and the enumeration is what
+    showed it: the 409 is a refusal on STALENESS grounds — the basis kept being superseded — while
+    nothing in storage failed. `refused-stale` is its correct member, and the closed set holds intact.
+
+    **The identity-key fault is `partially-recorded`, not `storage-failed`** — that block's own comment
+    records that the SPE version ALREADY PERSISTED and only the Dataverse row upsert failed. Calling it
+    a storage failure would tell the user their document is gone when it is not.
+
+    **THE defect, verified in code and now covered.** `BuildContainerFailedResult` RETURNS a result (it
+    carries the per-step create-on-save completion projection the client needs) and the endpoint wraps
+    every returned result in `Results.Ok` — so a save that stored nothing arrived as HTTP 200 and the
+    client rendered "Saved ✓". The status deliberately stays 200 (the step-projection contract rides on
+    that body, and the acceptance criteria explicitly anticipate a 200 carrying `storage-failed`); what
+    changed is that the body now says what happened and the client keys off it.
+
+    **Design decisions:**
+    1. `Outcome` on `SaveComposeDocumentResult` is `required` — "returned a result without saying what
+       happened" is now a COMPILE error. It caught a test construction site immediately, which is the
+       mechanism working.
+    2. Wire values are hand-mapped constants, not enum serialization, so the contract survives member
+       reordering/renaming and any change to the app's global `JsonStringEnumConverter` config.
+    3. The response field defaults to `persisted` for the record's optional-trailing convention. Safe
+       only because every server construction site passes an explicit value derived from the `required`
+       service field — the default is for wire compatibility, never a fallback for "we didn't know".
+    4. Client: absent outcome = success (an older BFF's 200 always meant a completed write);
+       UNRECOGNIZED outcome = not-a-success (a newer BFF's new member must never silently read as saved).
+    5. Telemetry is emitted at the ENDPOINT — the single choke point that sees both returned results and
+       every mapped exception, so no terminal state is double-counted or missed.
+
+    **Consequential find while wiring the client.** Task 010's `savePersisted` flag was set on any 2xx.
+    That was correct under the old assumption that a 200 meant "written" — FR-S06 disproves it. Split
+    into `savePersisted` (2xx AND a success outcome) and `saveReachedServer` (2xx, outcome not yet read).
+    A 2xx whose body cannot be parsed is therefore genuinely INDETERMINATE and is now reported as such:
+    "Not saved" would risk a duplicate save, "Saved" would risk silent data loss. Task 010's test
+    asserted the old "was saved" claim and was updated to the new truth, with the reason recorded in it.
+
+    **Component justification (§11) for `ComposeSaveTelemetry`:** existing `CosmosPersistenceTelemetry`
+    counts Cosmos write failures tagged by container — different subject, different dimension; widening
+    it would make one counter mean two unrelated things, which its own doc-comment forbids.
+    Cost-of-doing-nothing: a total Compose save outage stays invisible until an owner reports it by hand,
+    which is the literal history of R5–R7. Registered in `TelemetryModule` — an unregistered meter is
+    silently dropped from the App Insights export (the trap the AI redesign's task 054 found).
+
+    **Verification:** BFF builds clean. Compose suite **1131 passed / 0 failed / 0 skipped** (+2 new
+    contract tests). Fidelity gate **11/11**. Client **790 passed**, 2 failures — the SAME two
+    pre-existing `renderOnSave` create-on-save failures reproduced on clean HEAD, unrelated to this task.
+    Publish **43.68 MB compressed incl. PDBs** (unchanged from task 011 — an enum and a counter add
+    nothing measurable), ceiling 60 MB. No package reference changed; no vulnerable packages.
+
+    Quality gates: code-review ✅ · adr-check ✅ (ADR-013 no AI internals reached — telemetry goes through
+    the existing `System.Diagnostics.Metrics` pipeline; ADR-015 both metric dimensions are bounded
+    enum-like discriminators, never ids or free text; ADR-029 no new NuGet; ADR-038 contract tests at the
+    documented KEEP path with no banned shapes; §11 justification above) · prettier ✅.
+
+    NOT deployed — Track S deploys as a batch at task 017.
+  </notes>
+</task>

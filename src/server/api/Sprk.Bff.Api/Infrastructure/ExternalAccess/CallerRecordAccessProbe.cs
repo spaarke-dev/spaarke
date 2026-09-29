@@ -220,7 +220,77 @@ public class CallerRecordAccessProbe
             return AccessRights.None;
         }
 
-        string dataverseToken;
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"{entitySet}({recordId})", ct).ConfigureAwait(false);
+
+        if (dataverseToken is null)
+            return AccessRights.None;
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+        {
+            return AccessRights.None;
+        }
+
+        return await RetrievePrincipalAccessAsync(
+            dataverseToken, callerSystemUserId.Value, entitySet, recordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The calling user's Dataverse <c>systemuserid</c>, or <c>null</c> when it cannot be established.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by unified-access-control-r2 task 061. Secure-project provisioning has to share the
+    /// record back to its creator (design §5.1: <i>"All human access is by explicit Dataverse share,
+    /// including the creating attorney's"</i>), so it needs to know who the creator IS as a Dataverse
+    /// principal.</para>
+    ///
+    /// <para><b>Why here rather than a new helper</b> (CLAUDE.md §11): this class already resolves
+    /// exactly this value on every delegation check, by the one method that cannot be fooled —
+    /// <c>WhoAmI()</c> on the caller's OBO token answers for the token's subject and nothing else. A
+    /// second identity path (an <c>azureactivedirectoryobjectid</c> lookup, say) could silently map to
+    /// the wrong user or miss, and a share aimed at the wrong principal is a disclosure, not an
+    /// inconvenience.</para>
+    ///
+    /// <para><b>Null means "do not proceed."</b> It is deliberately indistinguishable between "no
+    /// caller token", "the OBO exchange failed" and "WhoAmI answered nothing" — every one of them
+    /// means the caller's identity is unproven, and the caller of this method fails closed.</para>
+    /// </remarks>
+    public virtual async Task<Guid?> GetCallerSystemUserIdAsync(
+        string? callerBearerToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Cannot resolve the caller's systemuserid: hasToken={HasToken}, " +
+                "canDoObo={CanDoObo}, hasEnvironmentUrl={HasEnvironmentUrl}.",
+                FallbackMarker,
+                !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable, !string.IsNullOrEmpty(_environmentUrl));
+
+            return null;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, "caller identity", ct).ConfigureAwait(false);
+
+        return dataverseToken is null
+            ? null
+            : await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Exchanges the caller's bearer token for a Dataverse token on their behalf, or <c>null</c> on
+    /// any failure (already logged).
+    /// </summary>
+    /// <param name="callerBearerToken">The caller's bearer token.</param>
+    /// <param name="context">What the exchange is for — log context only, never a decision input.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<string?> ExchangeForDataverseTokenAsync(
+        string callerBearerToken,
+        string context,
+        CancellationToken ct)
+    {
         try
         {
             // Asked PER EXCHANGE rather than held in a field. The provider owns the one client cache
@@ -236,16 +306,16 @@ public class CallerRecordAccessProbe
                 .ExecuteAsync(ct)
                 .ConfigureAwait(false);
 
-            dataverseToken = result.AccessToken;
+            return result.AccessToken;
         }
         catch (MsalException ex)
         {
             // ADR-015: MSAL error CODE only — never the assertion or token material.
             _logger.LogWarning(
-                "[{Marker}] OBO exchange for the delegation check failed ({ErrorCode}) on {EntitySet}({RecordId}). Denying.",
-                FallbackMarker, ex.ErrorCode, entitySet, recordId);
+                "[{Marker}] OBO exchange failed ({ErrorCode}) for {Context}. Denying.",
+                FallbackMarker, ex.ErrorCode, context);
 
-            return AccessRights.None;
+            return null;
         }
         catch (InvalidOperationException ex)
         {
@@ -255,29 +325,18 @@ public class CallerRecordAccessProbe
             // assertion" — the two need different operator responses, and the generic catch below
             // would flatten them into one message.
             _logger.LogWarning(
-                "[{Marker}] No usable confidential credential for the delegation check on " +
-                "{EntitySet}({RecordId}): {Message}. Denying.",
-                FallbackMarker, entitySet, recordId, ex.Message);
+                "[{Marker}] No usable confidential credential for {Context}: {Message}. Denying.",
+                FallbackMarker, context, ex.Message);
 
-            return AccessRights.None;
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[{Marker}] OBO exchange for the delegation check threw on {EntitySet}({RecordId}). Denying.",
-                FallbackMarker, entitySet, recordId);
+                "[{Marker}] OBO exchange threw for {Context}. Denying.", FallbackMarker, context);
 
-            return AccessRights.None;
+            return null;
         }
-
-        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
-        if (callerSystemUserId is null)
-        {
-            return AccessRights.None;
-        }
-
-        return await RetrievePrincipalAccessAsync(
-            dataverseToken, callerSystemUserId.Value, entitySet, recordId, ct).ConfigureAwait(false);
     }
 
     /// <summary>

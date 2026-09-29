@@ -271,6 +271,23 @@ const App = ({ data }) => (
 - Component is experimental
 - Component has tight coupling to module context
 
+## Scrollable Lists — Infinite Lazy-Scroll (ADR-051, binding)
+
+Every scrollable list / record collection in this library uses **infinite lazy-scroll + the canonical thin scrollbar** — **never a pager**.
+
+- **Dataverse-backed list → use `<DataGrid configId=… />`.** It ships infinite lazy-scroll (internal `useLazyLoad` + a bottom-sentinel `IntersectionObserver`) AND the thin scrollbar out of the box. Don't build a parallel list component.
+- **Any scroll container → spread `thinScrollbarStyle`** (single scroller) or `thinScrollbarDescendantStyle` (surface root) from this package's `theme/scrollbar`. Never hand-roll `::-webkit-scrollbar` or a hex thumb (breaks dark mode; see [`.claude/patterns/ui/thin-scrollbar.md`](../../../.claude/patterns/ui/thin-scrollbar.md)).
+- **`hasMore` = `moreRecords === true || page-was-full`.** The MDA `Xrm.WebApi` client strips the FetchXML `morerecords`/paging-cookie annotations, so `useLazyLoad` falls back to page fullness — do not regress this to a `moreRecords`-only check (it silently caps MDA lists at page 1 / "shows only 25").
+
+| ✅ DO | ❌ DON'T |
+|-------|----------|
+| Reuse `<DataGrid>` for record lists; page incrementally (`pageSize` ~25–50) | Add a "Load more" button, prev/next, numbered pages, or a down-arrow/chevron next-page control |
+| Spread `thinScrollbarStyle` on the real `overflow:auto` element | Hand-roll `::-webkit-scrollbar` rules or a hex scrollbar thumb |
+| Keep the page-fullness `hasMore` fallback | Rely on `moreRecords` alone (stripped under MDA `Xrm.WebApi`) |
+| Verify scroll advances past page 1 in each host | Load the whole set in one giant page (`pageSize=500`) to "show all" |
+
+Full rule: [`.claude/patterns/ui/infinite-scroll-list.md`](../../../.claude/patterns/ui/infinite-scroll-list.md) · [ADR-051](../../../.claude/adr/ADR-051-infinite-scroll-lists.md).
+
 ## Do's and Don'ts
 
 | ✅ DO | ❌ DON'T |

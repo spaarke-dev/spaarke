@@ -1,0 +1,56 @@
+<task id="CICD-094" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>ADR-038 7: assess the remaining 15 bans; arm every one that can arm green (#864)</title>
+    <status>complete</status>
+    <completed date="2026-08-29">
+      5 of 17 bans armed (B1/B4 from #865; B3/B12/B16 added here). 12 documented-unenforceable, each with
+      a live count, grouped by the four distinct reasons they cannot arm. Migration cost: 4 test methods in
+      2 files (PipelineHealthTests 1, OpenAiClientConfigurationTests 3). ArchTests 136 -> 139, all green.
+      Guards armed in the same PR and verified by extracting the exact Tier 1 filter string (22 -> 25
+      selected), then proven end-to-end by seeding real violations into tests/ and confirming exactly those
+      three went red. Census: notes/094-adr038-ban-census.md; annex added to ADR-038 section 7.
+      B8 named as the strongest candidate for the next arming pass (tight signature, 7 call sites, 5 files).
+    </completed>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>865 (merged)</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-workflows, testing, archtests, adr-038</tags>
+    <tracking-issue>#864</tracking-issue>
+  </metadata>
+
+  <adoption-note date="2026-08-28">
+    ADOPTED INTO THIS PROJECT, NOT DEFERRED. Owner direction 2026-08-28: "if an issue is
+    important, then it should be added to this project NOT deferred to others."
+
+    ADR-038 is this project OWN ADR (Stream B). PR #865 armed B4 and B1 because both were at zero live instances. The other 15 remain documented-but-unenforced, which is the gap #864 was filed about. Leaving 15 of 17 as prose is leaving the deliverable half-built.
+
+    This is a DEFECT REPORT AGAINST THIS PROJECT OWN DELIVERABLE, not new scope. The project
+    cannot honestly close while something it shipped is known-broken. That is north star #1
+    ("fix it right the first time") and #3 ("no constant reds").
+  </adoption-note>
+
+  <goal>Every ADR-038 ban is either enforced by a blocking guard, or carries a written reason why it cannot be, with the live count that makes the case.</goal>
+
+  <steps mode="directional">
+    <step order="1">For each of B2, B3, B5-B17, measure the live count using the /test-diet classifier (hardened over six spot-check rounds: comment-stripped matching, deny-list assertions, helper-aware, literal-safe brace counting, expression-bodied capture).</step>
+    <step order="2">Classify each: (a) at zero, arm a hard guard now at no migration cost; (b) small non-zero, propose a migration or a reasoned inventory; (c) not mechanically detectable, document WHY and hand to /test-diet judgement.</step>
+    <step order="3">B6 (mirror tests) is expected to land in (c): implementation == implementation has no regex signature, and it is plausibly the largest real bucket. Say so plainly rather than shipping a weak detector.</step>
+    <step order="4">B13 (~1,124 live) lands in (b), and the owner has already ruled that a bad name is NOT grounds for deletion. The only honest options are rename-over-time via /test-diet, or no guard. Do not re-litigate that decision.</step>
+    <step order="5">ARM IN THE SAME PR. Per #839 an unarmed guard is a file that merely looks like enforcement. Verify with the exact Tier 1 filter STRING, not just the test class name.</step>
+    <step order="6">Every new guard carries a negative control (fires on the real defect) and a positive control (ignores the sanctioned shape), per the tests/CLAUDE.md structural-fitness rules.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 17 bans accounted for: enforced, or documented-unenforceable with a live count</criterion>
+    <criterion testable="true">Every new guard is armed in the Tier 1 filter and verified with the exact filter string</criterion>
+    <criterion testable="true">Every new guard has both a negative and a positive control</criterion>
+    <criterion testable="true">No guard ships red</criterion>
+  </acceptance-criteria>
+</task>

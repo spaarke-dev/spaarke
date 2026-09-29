@@ -1,0 +1,129 @@
+{
+  "$comment": [
+    "SHARED CITATION-PARITY CORPUS — executed by BOTH resolvers (#699, 2026-09-01).",
+    "",
+    "WHY THIS FILE EXISTS. `composeCitationResolver.ts` is a hand-written client mirror of the server",
+    "`CitationResolver.cs`. Both had parity test cases, but they were TRANSCRIBED by hand into two",
+    "suites — so the two parsers could drift and both suites would stay green, because each only ever",
+    "asserted against its own copy of the expectations. This corpus is the single set of expectations;",
+    "each side runs it against its own parser, so a divergence fails on the side that lags.",
+    "",
+    "WHY DIVERGENCE MATTERS FOR #699. When the client cannot parse a citation the server can, the",
+    "deterministic anchor leg in `placeAdvisoryComments` returns null and the finding falls through to",
+    "TEXT search — reinstating exactly the wrong-clause anchoring #699 is about. A silent parser gap is",
+    "therefore not a cosmetic inconsistency; it is the defect coming back through a side door.",
+    "",
+    "MAINTENANCE. Adding a citation SHAPE to either parser means adding a case here. The vocabulary/",
+    "shape-enum drift detector that makes forgetting hard is",
+    "tests/Spaarke.ArchTests/ComposeCitationResolverParityGuardTests.cs.",
+    "",
+    "`paraIds` is the EXPECTED match list in document order (empty = an explicit not-found, which is a",
+    "valid answer and never a fabricated paraId). `shape` is the parse classification both sides must",
+    "agree on independently of what matched."
+  ],
+
+  "maps": {
+    "headingStyle": [
+      { "index": 6, "paraId": "HEAD0004", "computedNumber": "4", "listPath": [4] },
+      { "index": 9, "paraId": "HEAD0042", "computedNumber": "4.2", "listPath": [4, 2] }
+    ],
+    "decimalDepth": [
+      { "index": 0, "paraId": "MLVL0000", "computedNumber": "1", "listPath": [1] },
+      { "index": 1, "paraId": "MLVL0001", "computedNumber": "1.1", "listPath": [1, 1] },
+      { "index": 2, "paraId": "MLVL0002", "computedNumber": "1.1.1", "listPath": [1, 1, 1] }
+    ],
+    "letterRoman": [
+      { "index": 0, "paraId": "AAAA0001", "computedNumber": "4.2", "listPath": [4, 2] },
+      { "index": 1, "paraId": "AAAA0002", "computedNumber": "4.2(a)", "listPath": [4, 2, 1] },
+      { "index": 2, "paraId": "AAAA0003", "computedNumber": "4.2(b)", "listPath": [4, 2, 2] },
+      { "index": 3, "paraId": "AAAA0004", "computedNumber": "4.2(b)(iii)", "listPath": [4, 2, 2, 3] },
+      { "index": 4, "paraId": "AAAA0005", "computedNumber": "4.2(b)(iv)", "listPath": [4, 2, 2, 4] }
+    ],
+    "range": [
+      { "index": 0, "paraId": "RNG00003", "computedNumber": "3", "listPath": [3] },
+      { "index": 1, "paraId": "RNG00004", "computedNumber": "4", "listPath": [4] },
+      { "index": 2, "paraId": "RNG00041", "computedNumber": "4.1", "listPath": [4, 1] },
+      { "index": 3, "paraId": "RNG00005", "computedNumber": "5", "listPath": [5] },
+      { "index": 4, "paraId": "RNG00007", "computedNumber": "7", "listPath": [7] },
+      { "index": 5, "paraId": "RNG00008", "computedNumber": "8", "listPath": [8] }
+    ],
+    "bullets": [
+      { "index": 0, "paraId": "BUL00001", "computedNumber": "1", "listPath": [1] },
+      { "index": 1, "paraId": "BUL00002", "computedNumber": "•", "listPath": [1, 1] },
+      { "index": 2, "paraId": "BUL00003", "computedNumber": "", "listPath": [1, 2] }
+    ]
+  },
+
+  "cases": [
+    { "map": "headingStyle", "citation": "Section 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "section 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "SECTION 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "§ 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "§4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "§§ 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "Article 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "Clause 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "Paragraph 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "Para 4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "Sections §4.2", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "  Section   4.2  ", "shape": "single", "paraIds": ["HEAD0042"] },
+    { "map": "headingStyle", "citation": "4.2.", "shape": "single", "paraIds": ["HEAD0042"] },
+
+    { "map": "headingStyle", "citation": "Section 4", "shape": "single", "paraIds": ["HEAD0004"] },
+    { "map": "headingStyle", "citation": "Section 9", "shape": "single", "paraIds": [] },
+
+    { "map": "decimalDepth", "citation": "1.1.1", "shape": "single", "paraIds": ["MLVL0002"] },
+    { "map": "decimalDepth", "citation": "1.1", "shape": "single", "paraIds": ["MLVL0001"] },
+    { "map": "decimalDepth", "citation": "Section 1", "shape": "single", "paraIds": ["MLVL0000"] },
+
+    { "map": "letterRoman", "citation": "4.2(b)(iii)", "shape": "subItem", "paraIds": ["AAAA0004"] },
+    { "map": "letterRoman", "citation": "4.2(b)", "shape": "subItem", "paraIds": ["AAAA0003"] },
+    { "map": "letterRoman", "citation": "4.2(a)", "shape": "subItem", "paraIds": ["AAAA0002"] },
+    { "map": "letterRoman", "citation": "Section 4.2(b)(iv)", "shape": "subItem", "paraIds": ["AAAA0005"] },
+    { "map": "letterRoman", "citation": "4.2 (b) (iii)", "shape": "subItem", "paraIds": ["AAAA0004"] },
+    { "map": "letterRoman", "citation": "4.2(b)(3)", "shape": "subItem", "paraIds": ["AAAA0004"] },
+    { "map": "letterRoman", "citation": "4.2(b)(ix)", "shape": "subItem", "paraIds": [] },
+
+    {
+      "map": "range",
+      "citation": "Sections 4-7",
+      "shape": "range",
+      "paraIds": ["RNG00004", "RNG00041", "RNG00005", "RNG00007"]
+    },
+    {
+      "map": "range",
+      "citation": "Sections 4–7",
+      "shape": "range",
+      "paraIds": ["RNG00004", "RNG00041", "RNG00005", "RNG00007"]
+    },
+    {
+      "map": "range",
+      "citation": "Sections 4—7",
+      "shape": "range",
+      "paraIds": ["RNG00004", "RNG00041", "RNG00005", "RNG00007"]
+    },
+    { "map": "range", "citation": "4-5", "shape": "range", "paraIds": ["RNG00004", "RNG00041", "RNG00005"] },
+    {
+      "map": "range",
+      "citation": "7-4",
+      "shape": "range",
+      "paraIds": ["RNG00004", "RNG00041", "RNG00005", "RNG00007"]
+    },
+    { "map": "range", "citation": "Sections 20-30", "shape": "range", "paraIds": [] },
+
+    { "map": "bullets", "citation": "Section 1", "shape": "single", "paraIds": ["BUL00001"] },
+    { "map": "bullets", "citation": "1.1", "shape": "single", "paraIds": [] },
+    { "map": "bullets", "citation": "1.2", "shape": "single", "paraIds": [] },
+    { "map": "bullets", "citation": "Sections 1-2", "shape": "range", "paraIds": ["BUL00001"] },
+
+    { "map": "headingStyle", "citation": "", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "   ", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "Section", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "the confidentiality clause", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "4.2(", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "4.2()", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "4.2(b)junk", "shape": "unrecognized", "paraIds": [] },
+    { "map": "headingStyle", "citation": "Exhibit A", "shape": "unrecognized", "paraIds": [] }
+  ]
+}

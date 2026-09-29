@@ -102,8 +102,43 @@ describe('formatDraftAlternativeResult', () => {
     expect(md).toContain('playbook: pb-9');
   });
 
-  it('returns null when the required triad (target_text/new_text/match_mode) is incomplete', () => {
+  // r8 task 052: the shape test is now `new_text` PLUS a target of either vintage.
+  it('returns null when new_text is present but NO target of either vintage is', () => {
     expect(formatDraftAlternativeResult({ new_text: 'x', match_mode: 'strict' })).toBeNull();
+    expect(formatDraftAlternativeResult({ target_para_id: 'A1B2C3D4' })).toBeNull();
+  });
+
+  // r8 task 053b: the presence-vs-truthiness audit reached this detector too. A post-052 edit the
+  // model could not anchor arrives as `{ target_para_id: null, new_text }` — a real, renderable
+  // draft-alternative result. Under the previous `asNonEmptyString(...) !== null` test it matched NO
+  // formatter and fell through to the ```json``` fence, so the user was shown raw JSON for exactly the
+  // edit that most needed explaining. The shape test is now key PRESENCE.
+  it('renders a NULL-identifier payload — an edit the model could not anchor is still an edit', () => {
+    const md = formatDraftAlternativeResult({
+      target_para_id: null,
+      new_text: 'The Vendor liability shall be capped at the fees paid in the preceding 12 months.',
+      rationale: 'Provides a bounded, market-standard cap instead of a full carve-out.',
+      sources: [],
+    });
+    expect(md).not.toBeNull();
+    expect(md).toContain('**Drafted an alternative clause.**');
+    expect(md).toContain('capped at the fees paid in the preceding 12 months');
+  });
+
+  it('still returns null for a payload that declares NO target field at all (not edit-shaped)', () => {
+    expect(formatDraftAlternativeResult({ new_text: 'x' })).toBeNull();
+  });
+
+  it('renders a POST-052 payload that carries target_para_id and no prose target', () => {
+    const md = formatDraftAlternativeResult({
+      target_para_id: 'A1B2C3D4',
+      new_text: 'The Vendor liability shall be capped at the fees paid in the preceding 12 months.',
+      rationale: 'Provides a bounded, market-standard cap instead of a full carve-out.',
+      sources: [],
+    });
+    expect(md).not.toBeNull();
+    expect(md).toContain('**Drafted an alternative clause.**');
+    expect(md).toContain('capped at the fees paid in the preceding 12 months');
   });
 });
 

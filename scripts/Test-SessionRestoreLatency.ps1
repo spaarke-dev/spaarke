@@ -93,8 +93,13 @@ if ([string]::IsNullOrWhiteSpace($AuthToken)) {
     }
 }
 
+# NOTE (spaarkeai-compose-r8 task 059): $TenantId is no longer sent to the BFF. Tenant identity is
+# resolved server-side from the `tid` claim of $AuthToken and from nothing else, so the value below
+# would be ignored. It is retained only for the console output and the results file, where it labels
+# the run. Before 059 this script sent "test-tenant-loadtest" as an X-Tenant-Id header — a tenant
+# that does not exist — which is exactly the kind of caller-chosen partition key that task removed.
 if ([string]::IsNullOrWhiteSpace($TenantId)) {
-    $TenantId = "test-tenant-loadtest"
+    $TenantId = "(from token tid claim)"
 }
 
 # ---------------------------------------------------------------------------
@@ -106,7 +111,6 @@ $restoreUrl = "$($BffBaseUrl.TrimEnd('/'))/api/ai/chat/sessions/$SessionId/resto
 $headers = @{
     "Authorization" = "Bearer $AuthToken"
     "Accept"        = "application/json"
-    "X-Tenant-Id"   = $TenantId
 }
 
 # ---------------------------------------------------------------------------

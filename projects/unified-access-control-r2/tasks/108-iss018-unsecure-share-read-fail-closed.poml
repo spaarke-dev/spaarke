@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="108" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-018 (#995) — unsecure-project must not report a failed share read as "0 shares revoked"</title>
+    <phase>3 Secure Project lifecycle — register-driven (owner rule 2026-09-15)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies an access-control write path (.cs) plus its tests; tags auth/bff-api/testing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One call site, one seam already built by task 063; the only judgment is the partial-progress question, which carries an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** — this project's exclusive zone (project CLAUDE.md).</parallel-reason>
+    <deps>063</deps>
+    <tags>auth, bff-api, dataverse, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <origin>Register ISS-018 / GitHub #995 — kept in the project under the owner's 2026-09-15 rule: this project's own code (task 061) on an access-control path.</origin>
+  </metadata>
+
+  <prompt>UnsecureProjectEndpoint.RevokeAllSharesAsync reads the project's POA shares inside a try/catch whose catch logs "Could not read the shares … none were revoked". That catch cannot fire for the failure it names: GetPrincipalAccessAsync fails SOFT — a non-success status, or an unreadable object type code, returns an EMPTY LIST. So a failed read is indistinguishable from "no shares": nothing is revoked, the endpoint answers success with sharesRevoked = 0, and the warning is never written. Unsecuring can therefore leave every share in place, silently.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, Dataverse POA sharing, fail-closed design. Follow ADRs strictly.</role>
+  <goal>Unsecuring a project can no longer report a failed share read as a clean sweep: the read that decides the sweep answers completely or fails, the failure reaches the operator (log AND response), and a record whose shares cannot be fully enumerated is never reported as fully revoked.</goal>
+
+  <context>
+    <background>Task 063 added `GetPrincipalAccessOrThrowAsync` (and `IDataverseRecordShareService.GetPrincipalAccessOrThrowAsync`) for exactly this class of defect — the complete list or an exception — and uses it for every write decision on the FR-29 share endpoints. This task points the unsecure sweep at it. The soft read stays as it is for display-only callers (PlaybookSharingService, DirectThreadAccessService).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs — RevokeAllSharesAsync (:301-340 at the time of filing — verify)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs — GetPrincipalAccessAsync (soft) vs GetPrincipalAccessOrThrowAsync (strict), and why both exist</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs — task 063's use of the strict read and its refusal shapes</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/task-063-internal-user-share-endpoints.md §3 — the undocumented-Dataverse reasoning</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Scope: the sweep's read. Fail closed — a read that cannot be completed must never read as "no shares".</constraint>
+    <constraint source="project">Scope: the endpoint's promise. The unsecure flow is best-effort per share and must stay non-fatal overall (ownership has already moved by then), but it must not CLAIM a sweep it did not perform.</constraint>
+    <constraint source="ADR-019">Scope: any new response field or refusal. ProblemDetails with a stable reason code; a new field is additive and documented.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory — reverting the strict read must fail a test.</constraint>
+    <constraint source="owner directive">Scope: tests. No Dataverse test in CI.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Verify the premise against the code: confirm the soft read's empty-on-failure behaviour and that no existing test covers the failed-read path of the sweep.</step>
+    <step order="1">Point the sweep at the strict read. Decide the partial-progress question and record the decision in the task notes: the strict read also refuses a record whose shares span more than one page (&gt;5000 rows) or that carries an unreadable row, where the soft read would have revoked the rows it could see. For a "revoke everything" sweep, partial progress may be better than none — if so, enumerate strictly, and on refusal fall back to revoking what CAN be read while reporting the shortfall. Never report a shortfall as success.</step>
+    <step order="2">Make the failure visible to the caller, not only in logs (e.g. an additive `sharesUnreadable` / `sweepComplete` field on the response). If that cannot be done without changing the response contract in a breaking way, fire the escalation trigger below.</step>
+    <step order="3">Tests at the KEEP path: a seeded read failure produces the warning AND a response that does not claim a clean sweep; the happy path is unchanged. Perturbation: revert to the soft read and watch the new test fail.</step>
+    <step order="4">Build; the affected suites and ArchTests; publish size against a fresh master (§10). Notes; TASK-INDEX; comment on #995.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If honest reporting requires a BREAKING change to UnsecureProjectResponse (rather than an additive field), STOP and escalate with the shape you propose — clients read that response.</trigger>
+    <trigger>If the partial-progress decision in step 1 turns out to be a product question (is an incomplete unsecure better than a refused one?), STOP and escalate rather than choosing silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs</output>
+    <output type="test">tests/ (KEEP path — the unsecure endpoint's existing suite)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/ (the partial-progress decision)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a share read that fails, the endpoint does NOT answer a clean sweep: the response distinguishes "no shares to revoke" from "the shares could not be read", and the warning is logged.</criterion>
+    <criterion testable="true">Given a readable record with N active shares, the sweep still revokes all N and reports N (regression).</criterion>
+    <criterion testable="true">Given a share whose revoke fails, behaviour is unchanged: best-effort per share, logged with its principal, never fatal.</criterion>
+    <criterion testable="true">Perturbation: restoring the soft read fails at least one test.</criterion>
+    <criterion testable="true">Build green; affected suites and ArchTests green; publish size reported against a fresh master and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register ISS-018; GitHub #995 (label unified-access-control-r2). Found by task 063, which added the strict read this task consumes. Not fixed inside 063 deliberately: it changes task 061's endpoint behaviour on the &gt;5000-row and unreadable-row paths, which deserves its own review rather than a drive-by.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

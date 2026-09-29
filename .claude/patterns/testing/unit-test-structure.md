@@ -5,12 +5,11 @@
 > **Status**: Verified
 
 ## When
-Writing xUnit unit tests for BFF API services, endpoint filters, or Dataverse plugins.
+Writing xUnit unit tests for BFF API services or endpoint filters.
 
 ## Read These Files
 1. `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs` — Service tests with AAA and inline builders
 2. `tests/unit/Sprk.Bff.Api.Tests/Filters/AiAuthorizationFilterTests.cs` — Filter tests with constructor setup
-3. `tests/unit/Spaarke.Plugins.Tests/ValidationPluginTests.cs` — Plugin tests with exception assertions
 
 ## Constraints
 - **ADR-022**: xUnit + FluentAssertions + Moq are the approved testing stack

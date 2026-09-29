@@ -1,3 +1,13 @@
+> ## ⚠️ STATUS: SUPERSEDED (2026-09-03) — do not act on the fix below
+> Live verification against `spaarkedev1` found the AI routing catalog **is now seeded, enabled, and wired**
+> (all 3 `sprk_analysisaction` + 3 `sprk_playbookconsumer` rows present, `enabled=true`, valid action lookups),
+> and **triage works** on real captures (priority + rich summary + reviewoutcome + riconfidence populate). The
+> "seed the catalog" fix below is a **no-op** — it was already applied after this doc was written. The *real*
+> residual was **triage CATEGORY resolution** (100% miss), root-caused + fixed 2026-09-03 (a `y→ies` entity-set
+> pluralization bug in `LookupChoicesResolver` blanked the `$choices` taxonomy lookup). See
+> **`email-matching-and-triage-go-forward-plan.md` → "P1 FINDING"**. This doc is retained for its accurate
+> flow description (routing table → ActionResolver → NFR-04 swallow), not its remedy.
+
 # DEFECT — Triage/Job-B/Job-C AI fields blank on real captures — ROOT CAUSE FOUND 2026-08-13
 
 > UAT Fix #4. The handoff hypothesis (**"`ICommunicationTriageAi` is Null in dev — DI feature-gate OFF"**) is **WRONG**. Corrected root cause below. Severity: Medium (triage/propose/create-task never populate on real captures; only the 14 seeded rows have triage because the seed script wrote those fields directly).

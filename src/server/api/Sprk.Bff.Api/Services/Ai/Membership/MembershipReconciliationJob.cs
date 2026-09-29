@@ -87,8 +87,8 @@
 //     continues to the next entity type.
 //
 // ADR-013 (placement under Services/Ai/Membership/); ADR-010 (Singleton +
-// IServiceScopeFactory.CreateScope per execution); ADR-001 (pure in-process
-// scheduling; no Azure Functions); bff-extensions.md §A pre-merge
+// IServiceScopeFactory.CreateScope per execution); ADR-036 (in-BFF
+// scheduling; placement per ADR-052); bff-extensions.md §A pre-merge
 // checklist applied in notes/bff-publish-size-task085.md.
 //
 // Reference: projects/spaarke-platform-foundations-r3/spec.md FR-2P2.7,

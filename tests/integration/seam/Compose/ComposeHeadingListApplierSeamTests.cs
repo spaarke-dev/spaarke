@@ -5,7 +5,7 @@
 //
 // The LIST cases reuse R4.5's read-side numbering ENGINE unchanged (referenced in place per task 005,
 // R5-D4): after applying a list op, the numbering the target paragraph shows is computed by the REAL
-// ComposeDocxProjectionBuilder.NumberingComputationEngine over the patched bytes — the same engine the
+// ComposeNumbering.NumberingComputationEngine over the patched bytes — the same engine the
 // read/projection path uses — so "edit-side renumber matches read-time model" is proven end-to-end, not
 // asserted against a hand-rolled expectation. The engine is NEVER re-implemented here.
 //
@@ -176,9 +176,9 @@ public sealed class ComposeHeadingListApplierSeamTests
         // The referenced numId must resolve to a BULLET format in the read-side model.
         using var doc = OpenRead(patched);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var target = ResolvePara(doc, targetParaId!);
-        var numbering = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(target, model);
+        var numbering = ComposeNumbering.ResolveParagraphNumbering(target, model);
         numbering.Should().NotBeNull("the bulleted paragraph must resolve numbering in the model");
         model.ResolveLevel(numbering!.NumId, 0)?.NumFmt.Should().Be(NumberFormatValues.Bullet,
             "ListOrdered=false must reference a bullet-format numId");
@@ -308,13 +308,13 @@ public sealed class ComposeHeadingListApplierSeamTests
     {
         using var doc = OpenRead(bytes);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
-        var engine = new ComposeDocxProjectionBuilder.NumberingComputationEngine(model);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
+        var engine = new ComposeNumbering.NumberingComputationEngine(model);
 
         string? label = null;
         foreach (var p in mainPart.Document!.Body!.Descendants<Paragraph>())
         {
-            var numbering = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model);
+            var numbering = ComposeNumbering.ResolveParagraphNumbering(p, model);
             if (numbering is null)
             {
                 continue;

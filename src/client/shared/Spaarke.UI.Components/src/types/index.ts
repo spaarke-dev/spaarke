@@ -37,5 +37,3 @@ export {
   getEventTypeFieldConfig,
 } from '../services/EventTypeService';
 export type { IGetEventTypeFieldConfigResult } from '../services/EventTypeService';
-export { useDatasetMode } from '../hooks/useDatasetMode';
-export { useVirtualization } from '../hooks/useVirtualization';

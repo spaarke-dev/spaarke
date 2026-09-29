@@ -54,6 +54,23 @@ public sealed class RecordContainerResolver
     /// <summary>The business unit entity, whose <c>sprk_containerid</c> is the non-secure default.</summary>
     private const string BusinessUnitEntity = "businessunit";
 
+    /// <summary>The Dataverse user entity, for the no-record case (<see cref="ResolveForActingUserAsync"/>).</summary>
+    private const string SystemUserEntity = "systemuser";
+
+    /// <summary>
+    /// The <c>systemuser</c> column carrying the user's Entra object id.
+    /// </summary>
+    /// <remarks>
+    /// This is a LOOKUP KEY, not a comparison. The Entra <c>oid</c> is matched against the column
+    /// Dataverse stores it in — which is what makes the no-record path free of the id-space defect
+    /// <c>CallerIdentityGuardTests.Rule2</c> exists to catch. Nothing here compares an <c>oid</c> to a
+    /// <c>systemuserid</c>; the query TRANSLATES one into the other.
+    /// </remarks>
+    private const string AzureAdObjectIdColumn = "azureactivedirectoryobjectid";
+
+    /// <summary>The <c>systemuser</c> column carrying the user's business unit.</summary>
+    private const string BusinessUnitLookupColumn = "businessunitid";
+
     /// <summary>
     /// How many claimants of one container id to fetch when answering the reverse question. Only needs to be
     /// enough to DISTINGUISH one from many; bounded so a shared business-unit container with thousands of
@@ -292,11 +309,7 @@ public sealed class RecordContainerResolver
             return null;
         }
 
-        var businessUnit = await _entityService
-            .RetrieveAsync(BusinessUnitEntity, buId, [ContainerColumn], ct)
-            .ConfigureAwait(false);
-
-        var container = businessUnit?.GetAttributeValue<string>(ContainerColumn);
+        var container = await ReadBusinessUnitContainerAsync(buId, ct).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(container))
         {
@@ -308,6 +321,166 @@ public sealed class RecordContainerResolver
         }
 
         return container;
+    }
+
+    /// <summary>
+    /// Read one business unit's stamped container. Shared by the record path
+    /// (<see cref="ResolveOwningBusinessUnitContainerAsync"/>) and the no-record path
+    /// (<see cref="ResolveForActingUserAsync"/>) so there is ONE business-unit → container read.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="null"/> when the business unit has no container stamped — a legitimate and
+    /// common state (verified live 2026-08-27: three of six business units have <c>sprk_containerid</c>
+    /// unset). <b>Read failures PROPAGATE</b>: an unreadable business unit means the container is unknown,
+    /// and unknown must not become "no container".
+    /// </remarks>
+    private async Task<string?> ReadBusinessUnitContainerAsync(Guid buId, CancellationToken ct)
+    {
+        var businessUnit = await _entityService
+            .RetrieveAsync(BusinessUnitEntity, buId, [ContainerColumn], ct)
+            .ConfigureAwait(false);
+
+        return businessUnit?.GetAttributeValue<string>(ContainerColumn);
+    }
+
+    /// <summary>
+    /// The NO-RECORD case: which container does content belong in when there is no owning record yet?
+    /// Derives the acting user's business-unit container, server-side.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this exists in the component whose own docs argue against acting-user resolution.</b>
+    /// <see cref="ResolveForRecordAsync"/>'s remarks are emphatic that the container must follow the
+    /// RECORD, not the uploader, and that remains correct wherever a record exists — this method is not
+    /// an alternative to it. It answers a different question, the one that method structurally cannot:
+    /// content created BEFORE its owning record exists. Task 076's escalation established that twelve
+    /// client sites resolve a container before the record exists, and
+    /// <c>composeEditor.registration.ts</c> shows matter-less drafting is a DESIGNED flow, not an edge
+    /// case. Those callers need a server-side answer or they keep supplying their own container id —
+    /// which is the defect class this project exists to remove.</para>
+    ///
+    /// <para><b>It cannot be misused for a record.</b> The signature takes no entity or record, so it is
+    /// structurally incapable of answering "which container for this record". A secure record cannot
+    /// reach it either, because a secure record IS a record.</para>
+    ///
+    /// <para><b>Fail-closed, with one legitimate null.</b> A caller with no Dataverse user, or an
+    /// ambiguous one, is an indeterminate answer and THROWS — it must never become "no container", which
+    /// a call site could read as "carry on". The single non-throwing empty result is a business unit with
+    /// no container stamped, which mirrors the record path's identical case.</para>
+    ///
+    /// <para>🔴 <b>Known residual, not solved here.</b> Content placed in a business-unit container this
+    /// way and LATER associated to a secure record is already in the shared container, and SPE
+    /// permissions are additive-only, so nothing retracts it. That is the gap written up in
+    /// <c>notes/finding-secure-transition-container-migration.md</c> — filed as its own project by owner
+    /// direction 2026-08-31. It is the price of supporting create-before-the-record-exists at all, and it
+    /// is strictly smaller than today's behaviour, where the CLIENT names the container.</para>
+    /// </remarks>
+    /// <param name="actingUserObjectId">
+    /// The caller's Entra object id (<c>oid</c>). Used as a lookup key on
+    /// <see cref="AzureAdObjectIdColumn"/> — never compared against a <c>systemuserid</c>.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<ContainerDecision> ResolveForActingUserAsync(
+        string? actingUserObjectId,
+        CancellationToken ct = default)
+    {
+        // An unusable caller id cannot identify a business unit. Refusing beats resolving to whatever a
+        // null filter would match.
+        if (string.IsNullOrWhiteSpace(actingUserObjectId)
+            || !Guid.TryParse(actingUserObjectId.Trim(), out var oid)
+            || oid == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "acting_user_not_resolvable",
+                title: "Cannot resolve a storage container",
+                detail: "No usable caller identity was supplied, so the storage container for content with "
+                        + "no owning record cannot be determined. Refusing rather than using a shared "
+                        + "container.",
+                statusCode: 403);
+        }
+
+        // TOP 2, not TOP 1: one row is the answer, two rows means the oid maps to more than one Dataverse
+        // user and the business unit is ambiguous. Asking for one would silently pick a winner.
+        var query = new QueryExpression(SystemUserEntity)
+        {
+            ColumnSet = new ColumnSet(BusinessUnitLookupColumn),
+            TopCount = 2,
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(AzureAdObjectIdColumn, ConditionOperator.Equal, oid)
+                }
+            }
+        };
+
+        var users = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var rows = users?.Entities;
+        var rowCount = rows?.Count ?? 0;
+
+        if (rowCount == 0)
+        {
+            _logger.LogWarning(
+                "[SECURE-CONTAINER] No Dataverse user matches caller oid {Oid} on '{Column}', so no "
+                + "business-unit container can be derived for record-less content. Refusing.",
+                oid, AzureAdObjectIdColumn);
+
+            throw new SdapProblemException(
+                code: "acting_user_not_resolvable",
+                title: "Cannot resolve a storage container",
+                detail: "Your account is not provisioned as a Dataverse user in this environment, so the "
+                        + "storage location for this content cannot be determined. Ask an administrator to "
+                        + "provision your user account.",
+                statusCode: 403);
+        }
+
+        if (rowCount > 1)
+        {
+            _logger.LogError(
+                "[SECURE-CONTAINER] Caller oid {Oid} matches {Count}+ Dataverse users on '{Column}'. The "
+                + "owning business unit is ambiguous; refusing rather than choosing one.",
+                oid, rowCount, AzureAdObjectIdColumn);
+
+            throw new SdapProblemException(
+                code: "acting_user_ambiguous",
+                title: "Cannot resolve a storage container",
+                detail: "Your Entra account maps to more than one Dataverse user, so the storage location "
+                        + "for this content is ambiguous. Refusing rather than choosing one. Ask an "
+                        + "administrator to resolve the duplicate user records.",
+                statusCode: 409);
+        }
+
+        if (rows![0].GetAttributeValue<EntityReference>(BusinessUnitLookupColumn) is not { Id: var buId }
+            || buId == Guid.Empty)
+        {
+            _logger.LogError(
+                "[SECURE-CONTAINER] The Dataverse user for caller oid {Oid} carries no '{Column}'. "
+                + "Refusing — a user with no business unit has no derivable container.",
+                oid, BusinessUnitLookupColumn);
+
+            throw new SdapProblemException(
+                code: "acting_user_not_resolvable",
+                title: "Cannot resolve a storage container",
+                detail: "Your Dataverse user has no business unit, so the storage location for this "
+                        + "content cannot be determined. Ask an administrator to check your user record.",
+                statusCode: 409);
+        }
+
+        var container = await ReadBusinessUnitContainerAsync(buId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(container))
+        {
+            // The record path's identical case: a legitimate, common state. Yields Unresolved rather than
+            // an exception so the caller reports "no storage configured" honestly instead of an error.
+            _logger.LogInformation(
+                "[SECURE-CONTAINER] The acting user's business unit {BusinessUnitId} has no '{Column}' "
+                + "stamped, so no container could be derived for record-less content.",
+                buId, ContainerColumn);
+        }
+
+        // isSecure: false is a statement of fact, not an assumption — there is no record, so there is
+        // nothing that CAN be secure. FailClosed is therefore unreachable on this path by construction.
+        return SecureContainerDecision.Decide(
+            isSecure: false, ownContainerId: null, fallbackContainerId: container);
     }
 
     public async Task<OwningSecureRecord?> ResolveOwningRecordAsync(

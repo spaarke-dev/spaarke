@@ -161,7 +161,7 @@ public sealed class ModelTierOverrideDispatchSeamTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: Array.Empty<ChatSessionFile>()));
+            UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid });
 
         public void GivenBinding(AiModelTier? bindingModelTierOverride, AiModelTier? actionModelTier)
         {

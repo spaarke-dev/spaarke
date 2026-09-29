@@ -162,6 +162,19 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
+    // UAT 2026-08-26 (spaarkeai-compose-r8): content below the last proactive card was clipped and
+    // UNREACHABLE BY SCROLLING. Cause: this scroll region is ITSELF a column flex container, so its
+    // children are flex items defaulting to `flex-shrink: 1`. Per CSS Flexbox §4.5 an item whose
+    // computed `overflow` is not `visible` has an automatic minimum size of ZERO — so the transcript's
+    // excess height was absorbed by CRUSHING the footer items that set `overflow: hidden` (the
+    // proactive-card panels, and Fluent's <Button> reset style) instead of by scrolling this container.
+    // scrollHeight therefore never exceeded clientHeight and there was nothing to scroll TO.
+    // NOTE: this is NOT the `minHeight: 0` problem fixed above — that one is real and still needed;
+    // these are two independent flex failures on the same element.
+    '& > *': { flexShrink: 0 },
+    // Breathing room so the final footer row never sits flush against the composer. Must follow the
+    // `shorthands.padding` spread above to win.
+    paddingBottom: tokens.spacingVerticalXXL,
     position: 'relative',
     // FIX 2 (Phase 0, spaarkeai-assistant-enhancements-r2): thin, light-gray,
     // theme-aware scrollbar — the SAME canonical style ConversationView uses
@@ -533,6 +546,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // ref (not state) armed synchronously inside handleSend and consumed by the
   // effect below once the new nodes exist in the DOM.
   const lastUserMessageElRef = React.useRef<HTMLDivElement | null>(null);
+  // spaarkeai-compose-r8 UAT round 1 #7 (2026-09-02) — the pin-to-top anchor for an INJECTED turn.
+  //
+  // `lastUserMessageElRef` targets the last USER message, which is right for a typed send. Host-injected
+  // turns (`injectLocalMessage`) are ASSISTANT-role — an inline Compose AI action produces a result with
+  // no user message in front of it — so that anchor would pin some older question instead of the new
+  // answer. The owner's report was exactly this: after an inline AI tool returns, "it is difficult to
+  // know what in the Assistant pane applies to the latest change", because the new turn appended at the
+  // bottom while a typed turn would have pinned to the top.
+  const lastMessageElRef = React.useRef<HTMLDivElement | null>(null);
+  /** True when the armed pin should target the LAST message (injection) rather than the last USER one. */
+  const pinTargetIsLastMessageRef = React.useRef(false);
   const trailingSpacerRef = React.useRef<HTMLDivElement | null>(null);
   const pendingPinToTopRef = React.useRef(false);
 
@@ -767,6 +791,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     if (lastInjectedRef.current === injectLocalMessage) return;
     lastInjectedRef.current = injectLocalMessage;
     addMessage(injectLocalMessage);
+    // UAT round 1 #7 — give an injected turn the SAME pin-to-top treatment a typed turn gets, anchored
+    // to the injected message itself. Releasing the bottom-pin matters as much as arming the top-pin:
+    // without it the streaming auto-scroll below yanks the viewport back down (the same pairing
+    // handleSend does).
+    isPinnedToBottomRef.current = false;
+    pinTargetIsLastMessageRef.current = true;
+    pendingPinToTopRef.current = true;
     if (onLocalMessageInjected) {
       try {
         onLocalMessageInjected();
@@ -1449,9 +1480,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   React.useEffect(() => {
     if (!pendingPinToTopRef.current) return;
     const container = messageListRef.current;
-    const target = lastUserMessageElRef.current;
+    // An injected turn anchors on itself; a typed turn anchors on the user message just sent.
+    const target = pinTargetIsLastMessageRef.current ? lastMessageElRef.current : lastUserMessageElRef.current;
     if (!container || !target) return;
     pendingPinToTopRef.current = false;
+    pinTargetIsLastMessageRef.current = false;
     if (trailingSpacerRef.current) {
       trailingSpacerRef.current.style.minHeight = `${container.clientHeight}px`;
     }
@@ -2829,8 +2862,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // change — the wrapper is a plain block element inside the existing
           // flex column.
           const isPinTarget = msg.role === 'User' && index === lastUserMessageIndex;
+          // UAT round 1 #7: the LAST message (whatever its role) is the anchor for an injected turn.
+          const isLastMessage = index === messages.length - 1;
           return (
-            <div key={`msg-${index}`} ref={isPinTarget ? lastUserMessageElRef : undefined}>
+            <div
+              key={`msg-${index}`}
+              ref={node => {
+                if (isPinTarget) lastUserMessageElRef.current = node;
+                if (isLastMessage) lastMessageElRef.current = node;
+              }}
+            >
               <SprkChatMessage {...msgProps} />
             </div>
           );

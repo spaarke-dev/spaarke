@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -36,6 +37,10 @@ public sealed class IncomingAssociationResolver
     private readonly IGenericEntityService _genericEntityService;
     private readonly ICommunicationDataverseService _communicationService;
     private readonly AssociationStatusMapper _statusMapper;
+
+    /// <summary>FR-26 core-ancestor derivation for the inbound association write (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
     /// <summary>Deterministic rungs (Kind 0–3), evaluated unconditionally, in ascending Order.</summary>
@@ -64,11 +69,13 @@ public sealed class IncomingAssociationResolver
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
         AssociationStatusMapper statusMapper,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<IncomingAssociationResolver> logger)
     {
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _statusMapper = statusMapper;
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _logger = logger;
 
         // Rungs are DI-registered (CommunicationModule). Partition into deterministic (0–3) and AI (4–5),
@@ -313,11 +320,82 @@ public sealed class IncomingAssociationResolver
             await PopulateResolverFieldsAsync(fields, ct);
         }
 
+        // FR-26 core-ancestor stamps (task 052) - LAST, so nothing above can overwrite them, and only for
+        // CHILD-class targets: a rung that wrote a core lookup directly has already written its own stamp.
+        // Every rung funnels here, which is why convergence happens at this single write rather than in the
+        // ~10 rungs that merely PROPOSE a RegardingFieldName.
+        //
+        // ADDITIVE, deliberately. The engine never clears a sibling regarding field (task-042 semantics), so
+        // this does not null a stale ancestor either: an inbound suggestion pass must not silently unfile a
+        // human's manual filing. Clearing on reparent belongs to the deliberate reparent paths (tasks
+        // 050/051), not to this engine.
+        await ApplyCoreAncestorStampsAsync(communicationId, fields, decision, ct);
+
         await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
 
         _logger.LogDebug(
             "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",
             communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled, fields.Count);
+    }
+
+    /// <summary>
+    /// Derives and applies the FR-26 core-record ancestor stamp for every CHILD-class regarding target the
+    /// decision wrote (task 052).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A decision may write several targets at once (the review surface shows all candidates). Each
+    /// child-class one contributes its own core ancestor; a core lookup a rung wrote EXPLICITLY always wins
+    /// and is never overwritten by a derived stamp, because the rung observed evidence about this message
+    /// while the stamp is only an inherited pointer.
+    /// </para>
+    /// <para>
+    /// <b>Fail closed (NFR-01).</b> A derivation failure throws, which this class's defensive caller treats
+    /// as a failed association (NFR-06: the communication itself survives, unassociated). Writing the
+    /// regarding lookups anyway would file the message against a child record while leaving it invisible to
+    /// everyone whose access comes from that child's matter - a silent under-grant that looks like success.
+    /// </para>
+    /// </remarks>
+    private async Task ApplyCoreAncestorStampsAsync(
+        Guid communicationId,
+        Dictionary<string, object> fields,
+        AssociationDecision decision,
+        CancellationToken ct)
+    {
+        if (decision.RegardingWrites.Count == 0)
+            return;
+
+        // Snapshot the lookups the rungs wrote explicitly - these are never overwritten below.
+        var explicitLookups = new HashSet<string>(decision.RegardingWrites.Keys, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (_, target) in decision.RegardingWrites)
+        {
+            if (target is not EntityReference reference || reference.Id == Guid.Empty)
+                continue;
+
+            if (!CoreAncestorResolver.IsChildRecordEntity(reference.LogicalName))
+                continue; // core target = its own stamp; unclassified target confers nothing here
+
+            var outcome = await _coreAncestors
+                .DeriveForHostAsync("sprk_communication", reference.LogicalName, reference.Id, ct)
+                .ConfigureAwait(false);
+
+            if (!outcome.Succeeded)
+            {
+                throw new InvalidOperationException(
+                    $"Core-ancestor derivation failed for {reference.LogicalName}({reference.Id:D}) while "
+                    + $"associating communication {communicationId:D}; refusing to write an unstamped "
+                    + $"regarding (FR-26 / NFR-01). {outcome.Error}");
+            }
+
+            foreach (var stamp in outcome.Stamps)
+            {
+                if (explicitLookups.Contains(stamp.LookupAttribute))
+                    continue; // a rung asserted this core target directly - its evidence outranks inheritance
+
+                fields[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
+            }
+        }
     }
 
     /// <summary>

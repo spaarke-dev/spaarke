@@ -53,8 +53,8 @@ import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/compone
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
 import { getDocuments, ODataDocument } from '../api/web-api-client';
-import { bffApiCall } from '../auth/bff-client';
-import { AccessLevel } from '../types';
+import { bffApiCall, bffApiBlob } from '../auth/bff-client';
+import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -247,13 +247,20 @@ function canUploadOrDownload(accessLevel: AccessLevel): boolean {
 // ---------------------------------------------------------------------------
 
 interface VersionHistoryPanelProps {
+  projectId: string;
   documentId: string;
   documentName: string;
   open: boolean;
   onClose: () => void;
 }
 
-const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({ documentId, documentName, open, onClose }) => {
+const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
+  projectId,
+  documentId,
+  documentName,
+  open,
+  onClose,
+}) => {
   const styles = useStyles();
   const [versions, setVersions] = React.useState<DocumentVersion[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -270,8 +277,11 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({ documentId, d
       setVersions([]);
 
       try {
+        // Fixed 2026-09-02: was `/api/v1/external/documents/{id}/versions`, which does not
+        // exist. Version history — like content download — is project-scoped, so the server
+        // can enforce document→project containment before touching SPE.
         const response = await bffApiCall<DocumentVersionsResponse>(
-          `/api/v1/external/documents/${documentId}/versions`
+          `/api/v1/external/projects/${projectId}/documents/${documentId}/versions`
         );
         if (!cancelled) {
           setVersions(response.versions ?? []);
@@ -401,11 +411,16 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
     try {
       const formData = new FormData();
       formData.append('file', selectedFiles[0].file);
-      formData.append('projectId', projectId);
+      // NOTE: projectId is NOT sent in the body — it is the route parameter, and the server derives
+      // the storage container from it. A client must never name a container (#858).
 
+      // Fixed 2026-09-02: was `POST /api/v1/external/documents/upload`, which is mapped NOWHERE in
+      // the BFF — every upload from this dialog 404'd. The real route is project-scoped.
       // Use bffApiCall for authenticated upload — omit Content-Type so the browser
       // sets the correct multipart/form-data boundary automatically.
-      await bffApiCall<void>('/api/v1/external/documents/upload', {
+      // Response body is the created document row; it is ignored here because onUploadComplete
+      // refetches the list, which is the single source of truth for what the project contains.
+      await bffApiCall<unknown>(`/api/v1/external/projects/${projectId}/documents`, {
         method: 'POST',
         body: formData,
         headers: {},
@@ -416,7 +431,26 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
       onClose();
     } catch (err) {
       console.error('[DocumentLibrary] Upload failed:', err);
-      setUploadError('Failed to upload the document. Please check the file and try again.');
+      // Branch on ApiError.statusCode — the field ApiError actually exposes (there is no `status`,
+      // and no `detail`: its `message` is the raw response text). Composing the copy here from the
+      // known file name beats parsing a ProblemDetails JSON string back out of `message`.
+      const statusCode = err instanceof ApiError ? err.statusCode : undefined;
+      if (statusCode === 409) {
+        // A NAME COLLISION is not a failure: nothing was uploaded and the existing document is
+        // intact, so "check the file and try again" would be misleading advice.
+        setUploadError(
+          `A file named "${selectedFiles[0].name}" already exists in this project. ` +
+            'Nothing was uploaded or changed — rename the file and try again.'
+        );
+      } else if (statusCode === 422) {
+        setUploadError(
+          'This project has no storage configured, so documents cannot be uploaded yet. Please contact the project owner.'
+        );
+      } else if (statusCode === 403) {
+        setUploadError('Your access level does not permit uploading documents to this project.');
+      } else {
+        setUploadError('Failed to upload the document. Please check the file and try again.');
+      }
     } finally {
       setUploading(false);
     }
@@ -577,16 +611,25 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
 
       setDownloadingId(doc.sprk_documentid);
 
+      let objectUrl: string | undefined;
       try {
-        // BFF returns a signed download URL or the file bytes.
-        // We request a download URL from the BFF and open it.
-        const result = await bffApiCall<{ downloadUrl: string }>(
-          `/api/v1/external/documents/${doc.sprk_documentid}/download`
+        // The BFF streams the file itself (application/octet-stream) from the
+        // project-scoped route; it deliberately never returns a signed URL or an
+        // SPE pointer. So read the bytes and hand the browser an object URL.
+        //
+        // Fixed 2026-09-01: this previously called
+        // `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`.
+        // That route does not exist (guaranteed 404) and the response shape it
+        // assumed is one the server is designed never to produce.
+        const blob = await bffApiBlob(
+          `/api/v1/external/projects/${projectId}/documents/${doc.sprk_documentid}/content`
         );
+
+        objectUrl = window.URL.createObjectURL(blob);
 
         // Trigger browser download via a temporary anchor element
         const anchor = window.document.createElement('a');
-        anchor.href = result.downloadUrl;
+        anchor.href = objectUrl;
         anchor.download = doc.sprk_name;
         anchor.style.display = 'none';
         window.document.body.appendChild(anchor);
@@ -595,10 +638,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
       } catch (err) {
         console.error(`[DocumentLibrary] Download failed for document ${doc.sprk_documentid}:`, err);
       } finally {
+        // Revoke on the next tick — revoking synchronously can cancel the
+        // in-flight navigation the anchor click just started.
+        if (objectUrl) {
+          const toRevoke = objectUrl;
+          window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
+        }
         setDownloadingId(null);
       }
     },
-    [canActOnDocuments]
+    [canActOnDocuments, projectId]
   );
 
   // ---------------------------------------------------------------------------
@@ -853,6 +902,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
       {/* Version history dialog */}
       {versionHistoryDoc && (
         <VersionHistoryPanel
+          projectId={projectId}
           documentId={versionHistoryDoc.sprk_documentid}
           documentName={versionHistoryDoc.sprk_name}
           open={versionHistoryDoc !== null}

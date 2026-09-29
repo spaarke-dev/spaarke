@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Publish-size baseline + /conflict-check + PR #266 (OpenXml 3.5.1) sequencing decision</title>
+    <phase>0 Coordination &amp; Prerequisites</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>No source modified — measures a baseline, runs a coordination check, and records a sequencing decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical measurement with a clear oracle (a number from `dotnet publish`, a diff list from `/conflict-check`). No subtle correctness risk: a wrong number is immediately visible against the stated 44.96 MB baseline.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only measurement + a note; touches no project source.</parallel-reason>
+    <deps>none</deps>
+    <tags>devops, bff-api, ci-cd</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Establish the three coordination facts every later BFF-touching task in R8 reports against:
+    (1) this branch's ACTUAL publish size, measured, not assumed — root CLAUDE.md §10 bullet 4 requires an
+    absolute + delta per task and the stated net10 baseline is 44.96 MB incl. PDBs;
+    (2) the current `/conflict-check` state against the 13+ active worktrees that contend on the BFF;
+    (3) a written sequencing decision for PR #266 (`DocumentFormat.OpenXml` 3.4.1 → 3.5.1), because Track A
+    builds directly on that library and a mid-project bump would invalidate gate measurements.
+  </prompt>
+
+  <role>SPAARKE platform developer. Familiar with the BFF publish pipeline, the god-class/publish-size ratchets, and the multi-worktree coordination protocol.</role>
+
+  <goal>
+    A note at projects/spaarkeai-compose-r8/notes/baseline-and-sequencing.md recording: the measured publish
+    size (absolute, incl./excl. PDBs, with the exact command), the delta vs 44.96 MB, the `/conflict-check`
+    result naming any colliding worktree + file, and a GO/HOLD decision on PR #266 with reasoning.
+  </goal>
+
+  <context>
+    <background>
+      R8 touches the BFF in Tracks S, A, B, C and D — every one of those tasks owes a publish-size report.
+      Measuring once here gives them a same-branch reference rather than each re-deriving it. The PR #266
+      sequencing question is real: if OpenXml bumps AFTER the Phase-2 control measurement, the Phase-3 gate
+      compares against a control taken on a different serializer, and any drift is un-attributable.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/baseline-and-sequencing.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="canonical-reference">projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §10">Publish size MUST be measured with `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and reported as compressed size; state the PDB convention explicitly (the 44.96 MB baseline is incl. PDBs). Scope: the measurement recorded in this note.</constraint>
+    <constraint source="project">MUST NOT build from a net8 tree (NFR-05). Confirm the SDK/TFM before measuring, and record it.</constraint>
+    <constraint source="project">MUST NOT modify any package reference in this task. The PR #266 output is a DECISION note, not a version bump.</constraint>
+    <constraint source="project">`/conflict-check` MUST be run against the actual Compose spine file list (Services/Compose/**, Api/ComposeEndpoints.cs, ComposeWorkspace.tsx, ComposeEditor.tsx, ComposeAiToolbar.tsx, usePendingRedline.ts, docxBridge.ts), not just "the BFF".</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>publish size, conflict coordination, dependency sequencing</topic>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor MINIMAL; load spec.md + CLAUDE.md.</step>
+    <step order="1">Confirm the TFM is net10 (check the .csproj), then run the Release publish and measure compressed output.</step>
+    <step order="2">Record absolute size incl. and excl. PDBs, plus the delta vs 44.96 MB. Flag if already ≥55 MB (architecture review threshold).</step>
+    <step order="3">Run `/conflict-check` scoped to the Compose spine file list. Record every colliding worktree + file.</step>
+    <step order="4">Check PR #266 state (`gh pr view 266`). Decide GO (land before Phase 2) or HOLD (defer past the gate), and write the reasoning — the deciding factor is whether the control measurement and the gate measurement can be taken on the SAME OpenXml version.</step>
+    <step order="5">Write the note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Measured publish size is already ≥55 MB — root CLAUDE.md §10 requires architecture review before adding any BFF code, which would block every R8 track. Surface to the owner rather than proceeding.</trigger>
+    <trigger>`/conflict-check` shows another active worktree with uncommitted edits inside `Services/Compose/**` — sequencing must be agreed with that project's owner before Track S lands.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/baseline-and-sequencing.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The note states the measured publish size with the exact command used, the TFM confirmed as net10, and the PDB convention.</criterion>
+    <criterion>The delta vs the 44.96 MB baseline is stated as a signed number.</criterion>
+    <criterion>`/conflict-check` results name every colliding worktree and file, or state "clean" explicitly.</criterion>
+    <criterion>A GO or HOLD decision on PR #266 is recorded with reasoning that addresses control-vs-gate measurement consistency.</criterion>
+    <criterion>NEGATIVE: no package reference was modified.</criterion>
+    <criterion>NEGATIVE: no source file under src/ was modified.</criterion>
+  </acceptance-criteria>
+</task>

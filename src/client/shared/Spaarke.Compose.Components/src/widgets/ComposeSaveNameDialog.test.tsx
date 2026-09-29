@@ -16,39 +16,35 @@ import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    FormModal: (props: {
-      open: boolean;
-      onClose: () => void;
-      onSubmit: () => void;
-      title: string;
-      submitLabel?: string;
-      cancelLabel?: string;
-      submitDisabled?: boolean;
-      busy?: boolean;
-      children: React.ReactNode;
-    }) =>
-      props.open ? (
-        <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
-          <span data-testid="mock-form-modal-title">{props.title}</span>
-          {props.children}
-          <button onClick={props.onClose} disabled={props.busy} data-testid="mock-form-modal-cancel">
-            {props.cancelLabel ?? 'Cancel'}
-          </button>
-          <button
-            onClick={props.onSubmit}
-            disabled={props.busy || props.submitDisabled}
-            data-testid="mock-form-modal-submit"
-          >
-            {props.submitLabel ?? 'Save'}
-          </button>
-        </div>
-      ) : null,
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ui-components', () => ({
+  FormModal: (props: {
+    open: boolean;
+    onClose: () => void;
+    onSubmit: () => void;
+    title: string;
+    submitLabel?: string;
+    cancelLabel?: string;
+    submitDisabled?: boolean;
+    busy?: boolean;
+    children: React.ReactNode;
+  }) =>
+    props.open ? (
+      <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
+        <span data-testid="mock-form-modal-title">{props.title}</span>
+        {props.children}
+        <button onClick={props.onClose} disabled={props.busy} data-testid="mock-form-modal-cancel">
+          {props.cancelLabel ?? 'Cancel'}
+        </button>
+        <button
+          onClick={props.onSubmit}
+          disabled={props.busy || props.submitDisabled}
+          data-testid="mock-form-modal-submit"
+        >
+          {props.submitLabel ?? 'Save'}
+        </button>
+      </div>
+    ) : null,
+}));
 
 // eslint-disable-next-line import/first
 import {

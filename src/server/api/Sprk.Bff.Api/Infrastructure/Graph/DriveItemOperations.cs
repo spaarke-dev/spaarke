@@ -1044,6 +1044,77 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// Lists the versions of a file using APP-ONLY (broker) authentication.
+    /// </summary>
+    /// <remarks>
+    /// The app-only sibling of <see cref="ListFileVersionsAsUserAsync"/>, added by
+    /// unified-access-control-r2 for the external-access surface.
+    ///
+    /// ⚠️ This method performs NO authorization of its own — app-only means the broker identity can
+    /// read any item in any container it owns. Every caller MUST authorize the principal against the
+    /// owning record BEFORE calling it. The external document endpoints do exactly that (project
+    /// participation + document→project scoping, uniform 403), which is why they cannot use the
+    /// AsUser variant: an external CIAM contact is not a Dataverse principal and holds no delegated
+    /// permission on the drive item to exchange.
+    ///
+    /// Same Graph route and the same newest-first <see cref="VersionInfoDto"/> projection as the OBO
+    /// variant, so a version list does not change shape depending on which surface asked for it.
+    /// </remarks>
+    public async Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "ListFileVersions");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation(
+            "Listing versions of file {ItemId} in drive {DriveId} (app-only)", itemId, driveId);
+
+        try
+        {
+            var graphClient = _factory.ForApp();
+
+            var versions = await graphClient.Drives[driveId].Items[itemId]
+                .Versions.GetAsync(cancellationToken: ct);
+
+            if (versions?.Value == null)
+            {
+                _logger.LogWarning(
+                    "No versions returned for file {ItemId} in drive {DriveId}", itemId, driveId);
+                return Array.Empty<VersionInfoDto>();
+            }
+
+            var mapped = versions.Value
+                .Where(v => v.Id != null)
+                .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
+                .Select(v => new VersionInfoDto(
+                    Id: v.Id!,
+                    ETag: null,
+                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
+                    Size: v.Size ?? 0))
+                .ToList();
+
+            _logger.LogInformation(
+                "Listed {Count} versions of file {ItemId} (app-only)", mapped.Count, itemId);
+            return mapped;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "File {ItemId} not found in drive {DriveId} when listing versions", itemId, driveId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Graph API error listing file versions (app-only): {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to list file versions: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
     /// Get preview URL for a file using app-only authentication.
     /// Returns ephemeral URL that expires in ~10 minutes.
     /// Used for server-side file viewing with correlation ID tracking.

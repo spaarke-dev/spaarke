@@ -127,7 +127,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 {
                     ExtractedText = extractedText,
                 },
-            });
+            }) { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -196,7 +196,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
             {
                 new ChatSessionFile(fileA, "a.docx", docType, 256, $"{fileA}_s_0", DateTimeOffset.UtcNow),
                 new ChatSessionFile(fileB, "b.docx", docType, 256, $"{fileB}_s_0", DateTimeOffset.UtcNow),
-            });
+            }) { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -265,7 +265,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                     SizeBytes: 64,
                     SearchDocumentIdsCsv: $"{fileId}_s_0",
                     UploadedAt: DateTimeOffset.UtcNow),
-            });
+            }) { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -320,7 +320,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 new ChatSessionFile(fileId, "browse.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -377,7 +377,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 new ChatSessionFile(fileId, "browse.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -461,7 +461,7 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -519,6 +519,9 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -564,10 +567,11 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
-        // The register endpoint reads the tenant from tid / X-Tenant-Id (dual-form). The fake auth
-        // handler emits no tid claim, so the header supplies the tenant for the endpoint.
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", TenantId);
+        // Issue #863: a STABLE test user. A fresh Guid per client meant the caller identity
+        // changed between the seed and the request, so an ownership check could never pass.
+        client.DefaultRequestHeaders.Add("X-Test-User", TestSessionOwner.Oid);
+        // The register endpoint reads the tenant from the `tid` claim only (task 059). The fake auth
+        // handler emits it, so no tenant header is sent — as in production.
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
@@ -601,6 +605,9 @@ internal sealed class ComposeActiveDocFakeAuthHandler : AuthenticationHandler<Au
             new("oid", oid),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"Compose Test User {oid}"),
+            // Task 059 — a real Entra token always carries `tid`. Without it this fixture forced the
+            // register endpoint down the X-Tenant-Id fallback, which is the path that task retired.
+            new("tid", ComposeActiveDocumentFixture.TenantId),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

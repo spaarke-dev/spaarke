@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-D01 — Decompose Api/ComposeEndpoints.cs (2,651 lines) below 2,000 and DELETE its god-class waiver</title>
+    <phase>7 Track D — God-Class Removal</phase>
+    <gate>blocked-on-013</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Restructures the endpoint surface, including the save routes and the outcome contract every client path depends on.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: endpoint refactors break contracts silently — a changed route, a dropped filter, an auth attribute that moved. Endpoints that map unconditionally must have unconditional service registration (RB-T028 rule), and getting that asymmetric is the exact bug class the bff-extensions § F.1 static scan exists for. A miss produces a 500 in production, not a red test.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Compose spine; the save routes are touched by tasks 013, 015 and 016.</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api, compose, refactor, auth, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `Api/ComposeEndpoints.cs` is 2,651 lines and frozen. Bring it below 2,000 and DELETE its waiver entry.
+
+    Decompose by feature area into `Map{Feature}Endpoints` extension methods — the pattern bff-extensions.md
+    requires for BFF endpoint registration (endpoints must not be added directly in `Program.cs`, and this is
+    the same discipline applied within a large endpoint file).
+
+    Three things that must not move while the code does:
+    - **Route paths and HTTP verbs** — identical before and after. Enumerate and diff them.
+    - **Auth and endpoint filters** — ADR-008 authorization runs via endpoint filters, not global middleware.
+      An extraction that drops a filter opens an endpoint.
+    - **Registration symmetry** — endpoints that map unconditionally MUST have unconditional service
+      registration (RB-T028-03/04/05/06). Run the bff-extensions.md § F.1 static scan.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in Minimal API endpoint organization, ADR-008 endpoint filters, and the asymmetric-registration rule. Follow ADR-001, ADR-008, ADR-010 and ADR-038.</role>
+
+  <goal>
+    `Api/ComposeEndpoints.cs` is under 2,000 lines with its waiver deleted, every route/verb/filter is
+    unchanged, and no endpoint maps without its service being registered.
+  </goal>
+
+  <context>
+    <background>
+      The asymmetric-registration rule has three binding sub-mechanisms (root CLAUDE.md §10, bff-extensions.md
+      § F.1/F.2/F.3) precisely because this failure mode recurred: an endpoint maps, its service is registered
+      inside an `if (flag)`, and the route 500s when the flag is off. A file split is a prime opportunity to
+      introduce exactly that.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="primary-edit">tests/Spaarke.ArchTests/GodClassGuardTests.cs</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="canonical-reference">.claude/patterns/testing/god-class-ratchet.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="bff-extensions.md">Decompose into `Map{Feature}Endpoints` extension methods. MUST NOT add endpoints directly in `Program.cs`.</constraint>
+    <constraint source="project">Route paths and HTTP verbs MUST be identical before and after. Enumerate them both sides and diff — do not eyeball it.</constraint>
+    <constraint source="ADR-008">Authorization runs via ENDPOINT FILTERS, not global `UseAuthorization` middleware. Every extracted endpoint MUST retain its filters. An extraction that drops one opens an endpoint.</constraint>
+    <constraint source="bff-extensions.md § F.1">Run the asymmetric-registration static scan. Endpoints that map unconditionally MUST have unconditional service registration (RB-T028-03/04/05/06). If a service must stay feature-gated, apply the ADR-032 null-object pattern.</constraint>
+    <constraint source="ADR-010">Extension methods are not DI registrations — the registration count must not increase.</constraint>
+    <constraint source="god-class-ratchet">DELETE the waiver entry; do not re-baseline.</constraint>
+    <constraint source="project">Behavior-preserving ONLY. Task 013's outcome contract, task 015's size routing and task 016's failure surfacing all live here — none of their behavior may change.</constraint>
+    <constraint source="ADR-038">Existing seam tests pass unchanged. No DI-registration or ctor-null tests.</constraint>
+    <constraint source="ADR-029">Report publish size. No new NuGet. `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Minimal API organization, endpoint filters, asymmetric registration</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, bff-extensions.md, ADR-008.</step>
+    <step order="1">Enumerate every route: path, verb, filters, auth policy. Save this as the equivalence baseline.</step>
+    <step order="2">Group by feature area and extract into `Map{Feature}Endpoints` extension methods, one group at a time.</step>
+    <step order="3">After each extraction, re-enumerate routes and diff against the baseline.</step>
+    <step order="4">Run the bff-extensions.md § F.1 static scan for asymmetric registration; apply ADR-032 null-object where a service must stay gated.</step>
+    <step order="5">Confirm under 2,000 lines; delete the waiver entry.</step>
+    <step order="6">ArchTests + the full Compose seam suite green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The § F.1 scan finds an endpoint mapping unconditionally against a conditionally-registered service — that is a live defect (a 500 when the flag is off), not just a refactor concern. Fix it with the ADR-032 null-object pattern and record it.</trigger>
+    <trigger>If a route path or filter must change to decompose cleanly, stop — that is a contract change and needs its own decision, not a side effect of a refactor.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ (new Map{Feature}Endpoints files)</output>
+    <output type="test">tests/Spaarke.ArchTests/GodClassGuardTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`Api/ComposeEndpoints.cs` is under 2,000 lines.</criterion>
+    <criterion>Route paths and HTTP verbs are IDENTICAL before and after — proven by an enumerated diff, not inspection.</criterion>
+    <criterion>Every endpoint retains its authorization/endpoint filters (ADR-008) — verified per endpoint.</criterion>
+    <criterion>The bff-extensions.md § F.1 asymmetric-registration scan was run and its result recorded; any gap fixed via ADR-032 null-object.</criterion>
+    <criterion>Its waiver entry is DELETED — not re-baselined.</criterion>
+    <criterion>ArchTests and the full Compose seam suite are green.</criterion>
+    <criterion>The DI registration count did not increase.</criterion>
+    <criterion>NEGATIVE: no endpoint was added directly in `Program.cs`.</criterion>
+    <criterion>NEGATIVE: no route, verb, filter or auth policy changed.</criterion>
+    <criterion>NEGATIVE: tasks 013/015/016 behavior is unchanged.</criterion>
+    <criterion>`/conflict-check` run; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

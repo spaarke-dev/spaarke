@@ -2272,7 +2272,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         string rendered;
         try
         {
-            rendered = RenderConfigJsonStructurally(node.ConfigJson, context);
+            rendered = RenderConfigJsonStructurally(node.ConfigJson, context, _templateEngine);
         }
         catch (JsonException ex)
         {
@@ -2296,13 +2296,13 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// becomes a native JSON object, etc. Mixed values (text-with-template) render as
     /// strings per the existing behavior.
     /// </summary>
-    private string RenderConfigJsonStructurally(string configJson, Dictionary<string, object?> context)
+    internal static string RenderConfigJsonStructurally(string configJson, Dictionary<string, object?> context, ITemplateEngine templateEngine)
     {
         using var sourceDoc = JsonDocument.Parse(configJson);
         using var stream = new System.IO.MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
-            WriteJsonElementWithTemplateExpansion(writer, sourceDoc.RootElement, context);
+            WriteJsonElementWithTemplateExpansion(writer, sourceDoc.RootElement, context, templateEngine);
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
@@ -2312,10 +2312,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// For String nodes, expands templates per the pure-vs-mixed rule described above.
     /// For other scalar nodes (Number/Bool/Null), writes verbatim.
     /// </summary>
-    private void WriteJsonElementWithTemplateExpansion(
+    private static void WriteJsonElementWithTemplateExpansion(
         Utf8JsonWriter writer,
         JsonElement element,
-        Dictionary<string, object?> context)
+        Dictionary<string, object?> context,
+        ITemplateEngine templateEngine)
     {
         switch (element.ValueKind)
         {
@@ -2324,7 +2325,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 foreach (var prop in element.EnumerateObject())
                 {
                     writer.WritePropertyName(prop.Name);
-                    WriteJsonElementWithTemplateExpansion(writer, prop.Value, context);
+                    WriteJsonElementWithTemplateExpansion(writer, prop.Value, context, templateEngine);
                 }
                 writer.WriteEndObject();
                 return;
@@ -2333,7 +2334,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 writer.WriteStartArray();
                 foreach (var item in element.EnumerateArray())
                 {
-                    WriteJsonElementWithTemplateExpansion(writer, item, context);
+                    WriteJsonElementWithTemplateExpansion(writer, item, context, templateEngine);
                 }
                 writer.WriteEndArray();
                 return;
@@ -2358,7 +2359,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     // After wrap+render+parse, the property value is the native JSON shape
                     // (object/array/number/bool/null/string), not Dictionary.ToString() garbage.
                     var wrappedTemplate = AutoWrapWithJsonHelper(raw);
-                    var renderedJson = _templateEngine.Render(wrappedTemplate, context);
+                    var renderedJson = templateEngine.Render(wrappedTemplate, context);
                     if (TryParseAsJson(renderedJson, out var parsedElement))
                     {
                         WriteJsonElementVerbatim(writer, parsedElement!.Value);
@@ -2368,7 +2369,36 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     // Fall through to render-as-string for graceful degradation.
                 }
 
-                var renderedString = _templateEngine.Render(raw, context);
+                // Nested JSON-as-a-string (Playbook Builder "wrapper" configJson format).
+                // When a string value is ITSELF a JSON object/array that carries templates —
+                // the canvas stores each node's real config as a JSON string under an outer
+                // `configJson` property — render it STRUCTURALLY so any substituted value is
+                // escaped at THIS (inner) nesting level. Writing the result back with
+                // WriteStringValue then re-escapes it for the outer level, so the string stays
+                // valid JSON at BOTH levels. Without this, a multi-line / quote-bearing value
+                // (e.g. an AI summary) is escaped only at the OUTER level; the node executor's
+                // ParseConfig re-parses the inner string and throws
+                // "'0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value".
+                // See docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md Part 4 /
+                // .claude/FAILURE-MODES.md AP-10 / GitHub #919.
+                var trimmedForNestedJson = raw.TrimStart();
+                if (trimmedForNestedJson.StartsWith("{", StringComparison.Ordinal)
+                    || trimmedForNestedJson.StartsWith("[", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        var renderedNested = RenderConfigJsonStructurally(raw, context, templateEngine);
+                        writer.WriteStringValue(renderedNested);
+                        return;
+                    }
+                    catch (JsonException)
+                    {
+                        // Not actually JSON (e.g. a mixed string that merely starts with '{{') —
+                        // fall through to flat string rendering below.
+                    }
+                }
+
+                var renderedString = templateEngine.Render(raw, context);
                 writer.WriteStringValue(renderedString);
                 return;
 

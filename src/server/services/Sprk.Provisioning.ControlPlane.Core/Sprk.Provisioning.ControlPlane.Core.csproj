@@ -186,7 +186,7 @@
          scripts/ai-search/Deploy-AllIndexes.ps1). Same 11.6.0 pin as
          Sprk.Bff.Api for cross-service version parity. UAMI RBAC auth via
          the shared TokenCredential singleton — zero admin-key handling. -->
-    <PackageReference Include="Azure.Search.Documents" Version="11.6.0" />
+    <PackageReference Include="Azure.Search.Documents" Version="12.0.0" />
 
     <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs +,
          since task 124, the sibling tenantFilterTemplates container). -->

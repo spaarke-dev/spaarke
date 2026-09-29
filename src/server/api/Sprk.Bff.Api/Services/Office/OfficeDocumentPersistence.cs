@@ -117,25 +117,15 @@ public class OfficeDocumentPersistence
         // Set entity association lookup based on target entity
         if (request.TargetEntity != null)
         {
-            switch (request.TargetEntity.EntityType?.ToLowerInvariant())
+            // Shared map — see Spaarke.Dataverse.DocumentAssociationMap for why four copies of this
+            // switch became one.
+            if (!DocumentAssociationMap.TryApply(
+                    updateRequest, request.TargetEntity.EntityType, request.TargetEntity.EntityId))
             {
-                case "matter":
-                case "sprk_matter":
-                    updateRequest.MatterLookup = request.TargetEntity.EntityId;
-                    break;
-                case "project":
-                case "sprk_project":
-                    updateRequest.ProjectLookup = request.TargetEntity.EntityId;
-                    break;
-                case "invoice":
-                case "sprk_invoice":
-                    updateRequest.InvoiceLookup = request.TargetEntity.EntityId;
-                    break;
-                default:
-                    _logger.LogWarning(
-                        "Unknown target entity type {EntityType}, skipping association",
-                        request.TargetEntity.EntityType);
-                    break;
+                _logger.LogWarning(
+                    "Target entity type {EntityType} has no sprk_document lookup — document will be " +
+                    "created UNASSOCIATED. Known gaps: account, contact, sprk_todo (no column exists).",
+                    request.TargetEntity.EntityType);
             }
         }
 

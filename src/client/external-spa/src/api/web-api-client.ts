@@ -101,8 +101,12 @@ export interface ODataEvent {
   sprk_status?: number | null;
   /** ISO date string — record created */
   createdon?: string | null;
-  /** Lookup ID of the owning project */
-  _sprk_projectid_value?: string | null;
+  /**
+   * Lookup ID of the owning project. `sprk_event` has no `sprk_projectid`
+   * attribute — its project lookup is `sprk_regardingproject` — so the BFF
+   * returns `_sprk_regardingproject_value`.
+   */
+  _sprk_regardingproject_value?: string | null;
 }
 
 /**
@@ -410,16 +414,23 @@ export async function getDocuments(projectId: string, options: ODataQueryOptions
 /**
  * Retrieve all Events belonging to a Secure Project.
  *
- * Filters by the `_sprk_projectid_value` lookup column. Events no longer
- * carry a to-do flag — see `getProjectTodos` for project to-do retrieval.
+ * Events no longer carry a to-do flag — see `getProjectTodos` for project to-do
+ * retrieval. `sprk_event`'s project lookup is `sprk_regardingproject` (it has no
+ * `sprk_projectid` attribute), so the lookup value field is
+ * `_sprk_regardingproject_value`.
+ *
+ * NOTE: the `defaults` below are inert. `getCollection` ignores its `_options`
+ * argument entirely (:291) — select/filter/order/top are all applied server-side
+ * by GET /api/v1/external/projects/{id}/events. They are kept only as
+ * documentation of the expected projection.
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
- * @param options    Optional OData query overrides
+ * @param options    Optional OData query overrides (currently ignored downstream)
  */
 export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ODataEvent[]> {
   const defaults: ODataQueryOptions = {
-    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_projectid_value,createdon',
-    $filter: `_sprk_projectid_value eq '${projectId}'`,
+    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_regardingproject_value,createdon',
+    $filter: `_sprk_regardingproject_value eq '${projectId}'`,
     $orderby: 'sprk_duedate asc',
     $top: 200,
   };

@@ -160,7 +160,7 @@ public sealed class CodedWorkflowDispatchSeamTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: Array.Empty<ChatSessionFile>()));
+            UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid });
 
         public void GivenCodedBinding(string workflowClassRef, BindingDisposition disposition) =>
             GivenBinding(new Binding

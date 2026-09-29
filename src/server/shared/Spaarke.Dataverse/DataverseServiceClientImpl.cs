@@ -52,10 +52,28 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// managed-identity-disabled branch, where it replaces the <c>AuthType=ClientSecret</c> connection
     /// string. Nullable with a null default (NFR-04).
     /// </param>
+    /// <param name="managedIdentityCredential">
+    /// The app-only managed-identity credential, supplied by the BFF from its single shared factory
+    /// (<c>ManagedIdentityCredentialFactory.Create</c>). Used ONLY in the managed-identity-ENABLED
+    /// branch — the symmetric counterpart to <paramref name="confidentialClients"/>.
+    ///
+    /// <para><b>Why injected rather than built here.</b> ADR-028 A4 requires the app-only credential to
+    /// come from the single shared provider rather than being constructed per call site — "seven call
+    /// sites each rolling their own credential handling is what made the previous state unfixable in one
+    /// place". This class used to build its own <c>DefaultAzureCredential</c>, and it had drifted from
+    /// the shared factory in three ways that are invisible until they are not (see the fallback below).
+    /// The factory itself lives in the BFF and cannot be referenced from here — <c>Spaarke.Dataverse</c>
+    /// is the base layer and references no other Spaarke project (FR-14, enforced by
+    /// <c>LayerDependencyTests</c>) — so the credential is passed IN rather than reached for.</para>
+    ///
+    /// <para>Null default keeps every existing direct-construction call site compiling; when null, the
+    /// fallback below is used.</para>
+    /// </param>
     public DataverseServiceClientImpl(
         IConfiguration configuration,
         ILogger<DataverseServiceClientImpl> logger,
-        IConfidentialClientProvider? confidentialClients = null)
+        IConfidentialClientProvider? confidentialClients = null,
+        TokenCredential? managedIdentityCredential = null)
     {
         _logger = logger;
 
@@ -80,12 +98,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         Func<ServiceClient> connectFactory;
         if (useManagedIdentity)
         {
-            var miClientId = configuration["ManagedIdentity:ClientId"]
-                ?? configuration["Graph:ManagedIdentity:ClientId"];
-            var options = new DefaultAzureCredentialOptions();
-            if (!string.IsNullOrEmpty(miClientId))
-                options.ManagedIdentityClientId = miClientId;
-            var credential = new DefaultAzureCredential(options);
+            // ADR-028 A4: prefer the BFF's single shared credential. The fallback exists only for
+            // direct-construction call sites that pass no credential.
+            var credential = managedIdentityCredential ?? BuildFallbackManagedIdentityCredential(configuration, _logger);
             var instanceUri = new Uri(dataverseUrl);
             // Token scope = the Dataverse ENVIRONMENT ROOT authority (e.g. https://spaarkedev1.crm.dynamics.com/.default).
             // #3b root cause: the ServiceClient token-provider is invoked with the full SOAP endpoint URL
@@ -96,9 +111,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             connectFactory = () =>
             {
+                // The clientId is no longer resolved here — it is a property of the credential, which is
+                // now supplied by the caller. Report the credential's SOURCE instead: which of the two
+                // is in play is the fact worth having in a log when Dataverse auth misbehaves, and the
+                // fallback logs the identity it resolved at construction time.
                 _logger.LogInformation(
-                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId}, scope {Scope})",
-                    miClientId ?? "(system-assigned)", dataverseScope);
+                    "Connecting Dataverse ServiceClient via Managed Identity ({CredentialSource}, scope {Scope})",
+                    managedIdentityCredential is not null ? "injected shared credential" : "locally-built fallback",
+                    dataverseScope);
                 return new ServiceClient(
                     instanceUrl: instanceUri,
                     tokenProviderFunction: (string resourceUri) =>
@@ -190,6 +210,65 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 throw;
             }
         }, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    /// <summary>
+    /// Builds the app-only managed-identity credential for call sites that inject none. Mirrors the
+    /// contract of the BFF's <c>ManagedIdentityCredentialFactory</c>, which cannot be referenced from
+    /// this base-layer library (FR-14).
+    /// </summary>
+    /// <remarks>
+    /// This replaces an inline <c>new DefaultAzureCredential(...)</c> that had drifted from the shared
+    /// factory in three ways. None of them fails loudly, which is why they survived:
+    ///
+    /// <list type="number">
+    /// <item><b>Inverted precedence.</b> It read <c>ManagedIdentity:ClientId</c> BEFORE
+    ///   <c>Graph:ManagedIdentity:ClientId</c>; the factory reads the canonical Spaarke-Auth-v2 key first
+    ///   and treats the bare one as the legacy fallback. In an environment where both are set and differ,
+    ///   Dataverse would authenticate as a DIFFERENT identity than Graph — the identity-conflation hazard
+    ///   ADR-028 A4 exists to prevent, presenting as unexplained Dataverse-only authorization failures.</item>
+    /// <item><b>Blank not normalised.</b> A bare <c>??</c> lets a present-but-EMPTY key (an App Service
+    ///   setting cleared to blank, or <c>"ClientId": ""</c>) shadow a correctly-set canonical key and then
+    ///   silently fall through to an unpinned credential — which on a host with several attached
+    ///   identities fails with "Unable to load the proper Managed Identity".</item>
+    /// <item><b>No tenant pinning.</b> The factory pins <c>TenantId</c> from
+    ///   <c>AZURE_TENANT_ID</c>/<c>TENANT_ID</c> (tenant-isolation invariant I5 / FR-32) so the credential
+    ///   cannot silently resolve to the MI host's default tenant. Today that is the same Spaarke tenant,
+    ///   so this is a forcing function rather than a live bug — which is exactly why it needs to be in
+    ///   place BEFORE a multi-tenant switch, not after.</item>
+    /// </list>
+    /// </remarks>
+    private static TokenCredential BuildFallbackManagedIdentityCredential(
+        IConfiguration configuration,
+        ILogger logger)
+    {
+        // Canonical key first, legacy second, blank normalised to null at each step.
+        var miClientId = configuration["Graph:ManagedIdentity:ClientId"];
+        if (string.IsNullOrWhiteSpace(miClientId))
+        {
+            var legacy = configuration["ManagedIdentity:ClientId"];
+            miClientId = string.IsNullOrWhiteSpace(legacy) ? null : legacy;
+        }
+
+        var tenantId = configuration["AZURE_TENANT_ID"] ?? configuration["TENANT_ID"];
+
+        var options = new DefaultAzureCredentialOptions();
+        if (!string.IsNullOrWhiteSpace(miClientId))
+        {
+            options.ManagedIdentityClientId = miClientId;
+        }
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            options.TenantId = tenantId;
+        }
+
+        logger.LogInformation(
+            "DataverseServiceClientImpl: no managed-identity credential was injected — built one locally " +
+            "(UAMI clientId {ClientId}, tenant {TenantId}). Inside the BFF the shared " +
+            "ManagedIdentityCredentialFactory credential is injected instead (ADR-028 A4).",
+            miClientId ?? "(system-assigned)", tenantId ?? "(host default)");
+
+        return new DefaultAzureCredential(options);
     }
 
     public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
@@ -829,6 +908,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_project"] = new EntityReference("sprk_project", request.ProjectLookup.Value);
         if (request.InvoiceLookup.HasValue)
             document["sprk_invoice"] = new EntityReference("sprk_invoice", request.InvoiceLookup.Value);
+        // ⚠️ The ATTRIBUTE name and the TARGET entity name are not the same thing, and sprk_document
+        // does not name them alike. The dictionary KEY is the lookup column; the EntityReference's
+        // first argument is the table it points AT. For events those differ.
+        //
+        // Corrected 2026-09-04 (unified-access-control-r2): this block previously read
+        // `document["sprk_event"]`. There is NO `sprk_event` column on sprk_document — the query
+        //     SELECT sprk_event FROM sprk_document
+        // fails with "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_event'".
+        // Setting an unknown attribute does not drop silently on this path; it fails the whole save,
+        // so every document filed to an event was breaking. The only event lookup is
+        // `sprk_relatedevent`, verified by a query that SUCCEEDS.
+        //
+        // The comment this replaces asserted "columns verified present ... against live Dataverse
+        // metadata 2026-09-03" — true for sprk_workassignment, false for the event beside it. It read
+        // as settled verification, which is what stopped anyone re-checking (FAILURE-MODES AP-12).
+        // The verification missed the `sprk_related*` family and so read `sprk_relatedevent` as
+        // evidence that "event" existed in the bare-name family. Re-verify per column, not per family.
+        if (request.WorkAssignmentLookup.HasValue)
+            document["sprk_workassignment"] = new EntityReference("sprk_workassignment", request.WorkAssignmentLookup.Value);
+        if (request.EventLookup.HasValue)
+            document["sprk_relatedevent"] = new EntityReference("sprk_event", request.EventLookup.Value);
+        // Added 2026-09-04. Both columns are in the sprk_related* family — the one the 2026-09-03
+        // check never looked at. Verified by queries that SUCCEED (contrast sprk_event above, whose
+        // query errors). sprk_relatedcontact targets the OOB `contact` table, not a Spaarke one.
+        if (request.TodoLookup.HasValue)
+            document["sprk_relatedtodo"] = new EntityReference("sprk_todo", request.TodoLookup.Value);
+        if (request.ContactLookup.HasValue)
+            document["sprk_relatedcontact"] = new EntityReference("contact", request.ContactLookup.Value);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Search Index Tracking Fields (RAG/Semantic Search)
@@ -2201,85 +2308,159 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Updates N records of ONE table in one request, <b>all-or-nothing</b> — see
+    /// <see cref="IGenericEntityService.BulkUpdateAsync"/> for the full contract.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Mechanism.</b> Sends the single <c>ExecuteTransactionRequest</c> built by
+    /// <see cref="BuildBulkUpdateTransaction"/> — one <c>UpdateRequest</c> per row, in input order. Dataverse
+    /// rolls the whole transaction back if any update faults. The SDK may retry the request on throttling.</para>
+    /// <para><b>Limits.</b> Keep each call to at most 1,000 updates (<c>ExecuteMultiple</c>'s documented batch
+    /// size; the transaction documentation states no figure of its own). An <c>ExecuteTransactionRequest</c>
+    /// cannot CONTAIN an <c>ExecuteMultiple</c> or another <c>ExecuteTransaction</c>.</para>
+    /// <para><b>Failure.</b> Worded by <see cref="DescribeBulkUpdateFailure"/>. Cancellation propagates as
+    /// <see cref="OperationCanceledException"/> rather than being wrapped.</para>
+    /// <para>Until 2026-09-10 this sent an <c>ExecuteMultipleRequest</c>, which is NOT transactional
+    /// (task 096, ISS-005 / #970).</para>
+    /// </remarks>
     public async Task BulkUpdateAsync(
         string entityLogicalName,
         List<(Guid id, Dictionary<string, object> fields)> updates,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(entityLogicalName))
-            throw new ArgumentNullException(nameof(entityLogicalName));
-
-        if (updates == null || updates.Count == 0)
-            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+        // Argument validation lives in the builder and throws before any I/O, unwrapped — as it did before.
+        var transaction = BuildBulkUpdateTransaction(entityLogicalName, updates);
 
         try
         {
-            // Use ExecuteMultipleRequest for batch operations
-            var executeMultipleRequest = new Microsoft.Xrm.Sdk.Messages.ExecuteMultipleRequest
-            {
-                Settings = new Microsoft.Xrm.Sdk.ExecuteMultipleSettings
-                {
-                    ContinueOnError = false, // Stop on first error for transactional behavior
-                    ReturnResponses = false  // Don't need individual responses for updates
-                },
-                Requests = new Microsoft.Xrm.Sdk.OrganizationRequestCollection()
-            };
+            await _serviceClient.ExecuteAsync(transaction, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var failure = DescribeBulkUpdateFailure(entityLogicalName, updates, ex);
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
+                updates.Count,
+                entityLogicalName,
+                failure);
+            throw new InvalidOperationException(failure, ex);
+        }
 
-            // Build update requests
-            foreach (var (id, fields) in updates)
-            {
-                var entity = new Entity(entityLogicalName, id);
+        _logger.LogInformation(
+            "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records in one transaction",
+            updates.Count,
+            entityLogicalName);
+    }
 
-                foreach (var field in fields)
+    /// <summary>
+    /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
+    /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
+    /// the fields supplied are written. <see cref="DBNull.Value"/> is rejected: it cannot be serialized here,
+    /// and failing before anything is sent avoids an "outcome unknown" error for a request that never left.
+    ///
+    /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
+    /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
+    /// cannot be captured at a seam without reflection or transport mocking (ADR-038 B8 / B1). Same precedent
+    /// as <see cref="StageAnalysisRegardingFields"/>; the owner chose this approach at task 096.</para>
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildBulkUpdateTransaction(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (updates is null || updates.Count == 0)
+            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+
+        var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
+        {
+            Requests = new OrganizationRequestCollection(),
+            ReturnResponses = false // no caller reads per-update responses
+        };
+
+        for (var index = 0; index < updates.Count; index++)
+        {
+            var (id, fields) = updates[index];
+            if (fields is null)
+                throw new ArgumentException($"The update at index {index} has no fields dictionary.", nameof(updates));
+
+            var entity = new Entity(entityLogicalName, id);
+
+            foreach (var field in fields)
+            {
+                if (field.Value is DBNull)
                 {
-                    if (field.Value != null)
-                    {
-                        entity[field.Key] = field.Value;
-                    }
+                    throw new ArgumentException(
+                        $"The update at index {index} sets '{field.Key}' to DBNull. BulkUpdateAsync cannot clear a " +
+                        "column; use UpdateAsync with DBNull.Value instead.",
+                        nameof(updates));
                 }
 
-                var updateRequest = new Microsoft.Xrm.Sdk.Messages.UpdateRequest
+                if (field.Value != null)
                 {
-                    Target = entity
-                };
-
-                executeMultipleRequest.Requests.Add(updateRequest);
+                    entity[field.Key] = field.Value;
+                }
             }
 
-            // Execute batch
-            var response = (Microsoft.Xrm.Sdk.Messages.ExecuteMultipleResponse)
-                await Task.Run(() => _serviceClient.Execute(executeMultipleRequest), ct);
-
-            _logger.LogInformation(
-                "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records",
-                updates.Count,
-                entityLogicalName);
-
-            // Check for errors if ContinueOnError was true (currently false)
-            if (response.Responses.Any(r => r.Fault != null))
-            {
-                var faultCount = response.Responses.Count(r => r.Fault != null);
-                _logger.LogError(
-                    "[DATAVERSE] Bulk update had {FaultCount} failures out of {TotalCount} requests",
-                    faultCount,
-                    updates.Count);
-
-                var firstFault = response.Responses.First(r => r.Fault != null).Fault;
-                throw new InvalidOperationException(
-                    $"Bulk update failed: {firstFault.Message}");
-            }
+            transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
         }
-        catch (Exception ex)
+
+        return transaction;
+    }
+
+    /// <summary>
+    /// Pure wording of a <see cref="BulkUpdateAsync"/> failure. It states only what is actually known:
+    /// <list type="bullet">
+    /// <item>An <see cref="ExecuteTransactionFault"/> naming an in-range request can only come from a
+    /// transaction that rolled back, so the message names that request's index and record and states that
+    /// NO update was applied.</item>
+    /// <item>Any other Dataverse fault is reported with the atomicity guarantee alone — all or none, never
+    /// partial. The SDK throws the client-wide last error, and with the singleton <c>ServiceClient</c> a
+    /// concurrent request's fault can surface here (GitHub #971), so claiming more would be unsafe.</item>
+    /// <item>No Dataverse fault anywhere in the exception chain (e.g. a timeout, which can land after the
+    /// commit): the outcome is unknown — all or none, never partial.</item>
+    /// </list>
+    /// Residual (#971): if two bulk updates fail concurrently, one could be handed the other's transaction
+    /// fault. The fault is looked for through <see cref="Exception.InnerException"/> because the SDK may
+    /// surface it wrapped.
+    /// </summary>
+    public static string DescribeBulkUpdateFailure(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        Exception failure)
+    {
+        OrganizationServiceFault? fault = null;
+        for (var current = failure; current is not null && fault is null; current = current.InnerException)
         {
-            _logger.LogError(
-                exception: ex,
-                message: "[DATAVERSE] Error in bulk update for {EntityLogicalName}. RecordCount: {RecordCount}",
-                entityLogicalName,
-                updates.Count);
-
-            throw new InvalidOperationException(
-                $"Failed to bulk update {entityLogicalName} records: {ex.Message}", ex);
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                fault = faultException.Detail;
+            }
         }
+
+        if (fault is null)
+        {
+            return $"Bulk update of {updates.Count} {entityLogicalName} record(s) did not complete: {failure.Message}. " +
+                   "Dataverse returned no fault, so the outcome is unknown — the updates were sent (if at all) as ONE " +
+                   "transaction, so either all of them were applied or none were, never a partial set.";
+        }
+
+        if (fault is ExecuteTransactionFault transactionFault
+            && transactionFault.FaultedRequestIndex >= 0
+            && transactionFault.FaultedRequestIndex < updates.Count)
+        {
+            var index = transactionFault.FaultedRequestIndex;
+            return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed at request index {index} " +
+                   $"({entityLogicalName} {updates[index].id}): {fault.Message}. " +
+                   "The transaction was rolled back — NO updates were applied.";
+        }
+
+        return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed: {fault.Message}. " +
+               "Dataverse did not identify which request faulted. The updates were sent as ONE transaction, so " +
+               "either all of them were applied or none were, never a partial set.";
     }
 
     public async Task<Entity> RetrieveByAlternateKeyAsync(
