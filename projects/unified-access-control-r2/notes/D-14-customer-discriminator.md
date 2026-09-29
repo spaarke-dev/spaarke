@@ -127,14 +127,89 @@ Concretely, for the item-6 agent-thread fix: the segregation decomposes as
 
 ---
 
-## 6. Open sub-questions for the owner
+## 6. 🔴 The format is ALREADY inconsistent between Dataverse and Bicep
 
-1. **Format.** `customerId` today is a short slug (`acme`, `spaarke`) constrained by resource-name limits —
-   Key Vault caps at 24 chars *including* the env suffix. Is the slug the identifier of record, or should the
-   app setting carry a **GUID** with the slug retained only for naming? A slug is human-readable and already
-   exists; a GUID is stable under rename. **They can disagree**, and if they do, something must own the mapping.
+*(Added 2026-09-29 after the owner asked "24 character string or guid?" — the answer is neither, and the two
+sides of the system already disagree.)*
+
+**The enforced constraint** (`infrastructure/bicep/stacks/model2-full.bicep:11-14`):
+
+```bicep
+@description('Customer identifier (lowercase, alphanumeric only)')
+@minLength(3)
+@maxLength(10)
+param customerId string
+```
+
+**3–10 characters, lowercase alphanumeric.** Not 24 — 24 is the Key Vault *name* cap for the composed
+`sprk-{customerId}-{env}-kv`, not the identifier. Not a GUID.
+
+🔴 **But the registry side uses a longer, hyphenated form.** `sprk_dataverseenvironment.sprk_customerid`
+carries values like `trial-2026-08-18`
+(`src/server/services/Sprk.Provisioning.ControlPlane.Tests/Registry/DataverseEnvironmentRegistryClientTests.cs:232`;
+`provisioning-runs/_templates/intake.md` describes it only as "slug"). That is **16 characters with hyphens** —
+it would fail the Bicep deploy on `maxLength(10)`.
+
+⚠️ **And "alphanumeric only" is DESCRIPTION-ONLY — there is no pattern constraint.** A short hyphenated id
+passes ARM and is then silently mangled:
+`storageAccountName = take(toLower(replace('${baseName}sa','-','')),24)` strips hyphens, so `acme-x` and
+`acmex` produce the SAME storage account name. A collision nothing validates.
+
+### What must be decided
+
+1. **Which form is the identifier of record** — the short Bicep-safe slug, or the longer registry form? They
+   cannot both be `customerId`. If the registry form stays, something must own the slug↔registry mapping.
+2. **Enforce it where it is assigned**: a `@pattern` on the Bicep param and a matching rule at intake, so the
+   two cannot drift again. Today nothing compares them.
+3. **Assignment authority**: Dataverse (`sprk_dataverseenvironment`) is the natural owner — the row is created
+   at intake, before any Azure resource exists. Bicep should CONSUME it, never mint one.
+
+---
+
+## 7. Does Azure also need a user identifier?
+
+*(Owner question 2026-09-29: "if yes, then we can use the dataverse userid guid as the canonical user identifier.")*
+
+**Two already exist, and both are resolved today:**
+
+| Identifier | Resolved by | Covers |
+|---|---|---|
+| Entra `oid` | `CallerResolution.ResolveObjectId` (`Infrastructure/Authentication/CallerResolution.cs:89`) | every caller with a token — internal AND external CIAM contacts |
+| Dataverse `systemuserid` | `CallerResolver.ResolveAsync` → `SystemUserId` | internal users only |
+
+**Recommendation: Entra `oid` is the canonical RUNTIME user identifier; `systemuserid` stays the Dataverse
+OWNERSHIP identity.** Two reasons, the second decisive:
+
+1. `oid` is in the token — no round trip — so it is usable on hot paths (cache keys, log scopes) where a
+   Dataverse lookup is not (§3b).
+2. 🔴 **External CIAM contacts are `contact` rows, not `systemuser` rows.** They have no `systemuserid` at all.
+   Making it canonical would leave the entire external-access plane without a user identity.
+
+---
+
+## 8. Startup strictness — and a fourth option that removes the dilemma
+
+*(Owner question 2026-09-29: "what is the other option and what are the implications?")*
+
+| Option | Implication |
+|---|---|
+| **A. Fail closed** | Safe and loud, but every existing stamp refuses to start until the setting is added. |
+| **B. Warn and continue** | Reinstates the shared-default failure this note exists to remove. Rejected. |
+| **C. Fail closed outside Development** | Softer — but a misconfigured PRODUCTION stamp is the case most worth catching. |
+| ⭐ **D. Derive from `WEBSITE_RESOURCE_GROUP`** | App Service sets it automatically, and it is literally `rg-spaarke-{customerId}-{env}`. The customerId is therefore ALREADY present on every existing stamp. |
+
+**Recommended: D, with A as the floor.** Explicit `Customer__Id` wins when present; derive from the resource
+group when absent; fail only when NEITHER resolves; and log which path was used, so silent drift into
+derivation is visible rather than assumed. Nothing breaks on existing stamps, and fail-closed is kept for the
+case that actually matters — no identity available at all.
+
+The cost is a dependency on the resource-group naming convention, which must be ASSERTED at startup rather
+than trusted: an RG name that does not match the expected shape is a failure, not a parse-and-hope.
+
+---
+
+## 9. Remaining open questions
+
+1. **Slug vs registry form** — §6 item 1. This is the one that blocks implementation.
 2. **Model 1 today.** Until cpo-r1 retires `model1-*.bicep` and Model 1 adopts the dedicated shape, is there a
    Model 1 stamp that would need this setting added retroactively?
-3. **Startup strictness.** Fail-closed on a missing `Customer__Id` is recommended — but it makes every existing
-   deployment that lacks the setting refuse to start. Is that acceptable given no customer deployments exist yet
-   (the same reasoning that made the `Secure Record` rename cheap now)?

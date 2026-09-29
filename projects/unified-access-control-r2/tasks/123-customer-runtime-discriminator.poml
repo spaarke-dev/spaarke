@@ -46,7 +46,7 @@ RECOMMENDED SHAPE (D-14 §3c): emit `Customer__Id: customerId` from the stack th
   </context>
 
   <constraints>
-    <constraint>No default value. A missing customer id fails startup; it never falls back.</constraint>
+    <constraint>No DEFAULT value, ever — no constant, no sentinel, no "unknown". Deriving the id from `WEBSITE_RESOURCE_GROUP` (D-14 §8 option D) is NOT a default: it reads the same customerId from a different place and fails when it cannot. Falling back to a shared placeholder is what reinstates the defect.</constraint>
     <constraint>Do NOT read the customer from Dataverse on any request path — cache keys and log scopes cannot afford a round trip (D-14 §3b).</constraint>
     <constraint>Do NOT infer the customer from the app registration's client id as the primary source (D-14 §3a). It MAY be used as a startup cross-check.</constraint>
     <constraint>Do not weaken, or appear to weaken, the dedicated-per-customer-resource decision.</constraint>
@@ -64,19 +64,21 @@ RECOMMENDED SHAPE (D-14 §3c): emit `Customer__Id: customerId` from the stack th
 
   <steps mode="directional">
     <step>🔴 GET THE OWNER'S ANSWERS to D-14 §6 first — this task is gated on them, which is why its gate is blocked-on-owner.</step>
-    <step>Add the options class + [Required] binding, and a startup failure with a message that names the missing setting and the stack that should have emitted it.</step>
+    <step>Resolve the identifier FORM first (D-14 §6) — everything else depends on what is being stored.</step>
+    <step>Add the options class, the explicit-setting path, the `WEBSITE_RESOURCE_GROUP` derivation fallback per D-14 §8, and a startup failure when neither resolves.</step>
     <step>Emit the setting from the customer stack.</step>
     <step>Document it in the deployment guide and the resource/naming architecture; add the pointer from ADR-027.</step>
     <step>Hand the provisioning-handler half to cpo-r1 in writing.</step>
   </steps>
 
   <escalation>
-    <trigger>D-14 §6 question 1 (slug vs GUID) is unresolved — the identifier's FORM changes what is stored, so do not pick one silently.</trigger>
-    <trigger>An existing deployed stamp would be broken by fail-closed startup — that is D-14 §6 question 3 and is the owner's call, not an implementation detail.</trigger>
+    <trigger>D-14 §6 is unresolved — the identifier's FORM is ALREADY inconsistent (Bicep enforces 3–10 lowercase alphanumeric; the Dataverse registry carries values like `trial-2026-08-18`, 16 chars with hyphens, which would fail the deploy). Do not pick a side silently.</trigger>
+    <trigger>An existing deployed stamp would be broken by fail-closed startup — see D-14 §8, where option D (derive from `WEBSITE_RESOURCE_GROUP`, which every App Service sets and which already contains the customerId) removes the breakage entirely. Confirm the choice before implementing A.</trigger>
   </escalation>
 
   <acceptance-criteria>
-    <criterion>A BFF started without the customer setting fails at startup with a message naming the setting and its source.</criterion>
+    <criterion>A BFF started with NEITHER an explicit setting NOR a derivable resource-group name fails at startup, with a message naming the setting and its source.</criterion>
+    <criterion>Where derivation is used instead of the explicit setting, that fact is LOGGED — silent drift into derivation is the failure mode of option D (D-14 §8).</criterion>
     <criterion>The customer stack emits the setting from the `customerId` it already has.</criterion>
     <criterion>No request path reads the customer from Dataverse.</criterion>
     <criterion>The deployment guide states the setting is required per stamp and what happens when it is absent.</criterion>
