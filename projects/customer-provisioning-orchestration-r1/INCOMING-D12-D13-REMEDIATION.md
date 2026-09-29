@@ -248,7 +248,7 @@ redesigning the classifier.
 - ⚠️ H12c idempotency keys embed the tenancy string (`h12c-{customerId}-{tenancyModel}-{hash}`) — renaming
   **invalidates completed phases**. Plan for it.
 
-### Item 4 — Retire `model1-*.bicep` — a SIX-surface atomic change
+### Item 4 — Retire `model1-*.bicep` — a SEVEN-surface atomic change
 
 Deleting the stack alone **breaks the build**. All of these move together:
 
