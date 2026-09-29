@@ -4,7 +4,7 @@
     <title>Retire the unused Microsoft.Agents.AI rc1 package from the BFF, and correct the comment that claims it is used</title>
     <phase>Register-driven (authored 2026-09-29, session 25; GitHub #1027)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Removes a PackageReference from the BFF csproj — a publish-size and dependency-graph change on the hot path, and the package may be a transitive requirement of one that IS used.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,4 +100,34 @@ still has to be reported, not assumed.</background>
   </acceptance-criteria>
 
   <notes>Authored 2026-09-29 (session 25). Exists so #1027 is not buried in the issues list — the owner asked specifically for a task link. Filed as sonnet/high because it is mechanical once the transitive question is settled.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29. `Microsoft.Agents.AI` 1.0.0-rc1 REMOVED from `Sprk.Bff.Api.csproj`
+    (taking `Microsoft.Agents.AI.Abstractions` with it). Zero call sites confirmed independently, not
+    taken from this POML: the only two occurrences in `src/` were the PackageReference itself and the
+    `AiModule.cs` comment. Build clean (0 warnings, 0 errors), BFF unit suite 12,667 pass / 0 fail,
+    NetArchTest 330/330, `dotnet list package --vulnerable --include-transitive` reports no vulnerable
+    packages.</outcome>
+
+    <finding>THE TRANSITIVE QUESTION IS SETTLED, and `dotnet nuget why` is what settled it —
+    `dotnet list package --include-transitive` alone cannot, because it shows no parentage.
+    `Microsoft.Agents.AI` had NO parent: `Microsoft.Agents.Hosting.AspNetCore` does not depend on it,
+    so the removal was safe. And `Microsoft.Extensions.AI` was reachable by TWO paths — via
+    `Microsoft.Agents.AI` AND as a DIRECT PackageReference — so removing one path could not move the
+    resolved version. Verified before/after: **10.3.0 → 10.3.0, unchanged.** The escalation trigger's
+    condition (a version change affecting `IChatClient` on the live chat path) was therefore never met;
+    not firing it is a verified result, not a skipped step. `Microsoft.Agents.Builder` / `.Core` 1.0.1
+    survive transitively via the Hosting package, as required by `Api/Agent/SpaarkeAgentHandler.cs`.</finding>
+
+    <finding>The `AiModule.cs` comment was PREMISE ROT of the same shape task 122 corrected. It claimed
+    the `IChatClient` is consumed "via `chatClient.AsAIAgent()`" — the Agent Framework extension that
+    wraps a chat client in that framework's own agent/thread/run + tool-calling loop. Verified against
+    source: `SprkChatAgentFactory` passes `_chatClient` DIRECTLY into the hand-written `SprkChatAgent`
+    (~:1092), which is then wrapped in Spaarke's own middleware pipeline
+    (ContentSafety → CostControl → Telemetry → Routing → PromptShield). The comment documented the
+    AIPL-050/051 PLAN; the shipped design replaced it. That single comment was the only evidence the
+    package was used at all — which is exactly how an unused pre-release package survived in every
+    publish. Both the comment and the csproj now name all THREE agent stacks so they cannot be
+    conflated again.</finding>
+  </execution>
 </task>
