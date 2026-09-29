@@ -1,6 +1,8 @@
 # D-14 — How one customer is distinguished from another at RUNTIME
 
-> **Status**: PROPOSED — awaiting owner decision
+> **Status**: ✅ **DECIDED AND IMPLEMENTED** — option (c) + §8 option D, by task 123 (2026-09-29).
+> §6 (identifier format) was decided by the owner and implemented by task 124.
+> Code: `src/server/api/Sprk.Bff.Api/Configuration/{CustomerIdResolver,CustomerOptions,CustomerOptionsValidator,CustomerIdentity}.cs`.
 > **Raised**: 2026-09-29 (session 25) by the owner, during the item-6 Redis key work
 > **Depends on**: [D-12](D-12-deployment-model-redefinition.md) (deployment model), [D-13](D-13-per-customer-bff-app-registration.md) (per-customer app registration)
 > **Supersedes nothing.** This closes a gap D-12 exposed but did not answer.
@@ -228,8 +230,62 @@ than trusted: an RG name that does not match the expected shape is a failure, no
 
 ---
 
-## 9. Remaining open questions
+## 9. Remaining open questions — both now CLOSED
 
-1. **Slug vs registry form** — §6 item 1. This is the one that blocks implementation.
-2. **Model 1 today.** Until cpo-r1 retires `model1-*.bicep` and Model 1 adopts the dedicated shape, is there a
-   Model 1 stamp that would need this setting added retroactively?
+1. ✅ **Slug vs registry form** — §6. **Decided by the owner 2026-09-29**, implemented by task 124:
+   `^[a-z][a-z0-9]{2,7}$`, assignment authority Dataverse. No longer blocking.
+2. ✅ **Model 1 today — NO stamp needs retrofitting.** `model1-shared.bicep` does deploy a *shared*
+   multi-tenant BFF, which would have had no single customer identity. But D-12 §6 records the shared
+   tier as **never implemented** and the file as a **retired artifact that has not compiled since
+   2026-08-17** (`bicep-e2e-dry-run.ps1` even asserts that it fails). There is no running shared BFF.
+   ⚠️ While checking this, its `MULTI_TENANT_MODE: 'true'` setting turned out to be **premise rot**:
+   the Bicep comment says it is *"consumed by BFF at boot for per-request tenant-context resolution"*
+   and a search of `src/` finds **zero** consumers. Same shape as the `AsAIAgent()` comment in #1027
+   and the agent-thread comment task 122 corrected.
+
+---
+
+## 10. What task 123 actually built (2026-09-29)
+
+**Resolution order** — `Customer:Id` (app setting `Customer__Id`) → derive from
+`WEBSITE_RESOURCE_GROUP` → fail. Both paths read the *same* customerId from different places; neither
+invents one.
+
+**Three fail-closed properties, at three different moments:**
+
+| Moment | Mechanism | Behaviour |
+|---|---|---|
+| Startup, deployed env | `CustomerOptionsValidator` | refuses to start, message names both sources |
+| Startup, Development / Testing | same validator, short-circuits | boots; identity stays **unresolved** |
+| Point of use, anywhere | `CustomerIdentity.Id` | **throws** when unresolved — never returns a placeholder |
+
+The third is the one that matters most and was not in the original §3c sketch. `CustomerOptions.Id`
+reads as `""` when unset, and `""` used as a cache-key prefix is a key **shared by every customer** —
+the same defect task 122 found in the Foundry agent-thread key. `CustomerIdentity` exists so that the
+Development/Testing exemption cannot quietly become a shared default; consumers inject it, never the
+options.
+
+### 🔴 The finding that changed the design: derivation can invent a customer
+
+`rg-spaarke-platform-{env}` matches the per-customer shape `rg-spaarke-{customerId}-{env}` **exactly**,
+so naive derivation yields `customerId = "platform"` — a silently invented customer, arrived at through
+the very mechanism meant to prevent one. It is a live group: it hosts the BFF (`platform.bicep:123`) and
+the L2 control plane (`platform-controlplane.bicep:209`). `rg-spaarke-shared-{env}` and
+`rg-spaarke-byok-prod` have the same shape.
+
+Derivation therefore carries an explicit **deny-list** (`platform`, `shared`, `byok`), and a match there
+is *unresolved*, not a customer. Pinned by `CustomerIdResolverTests`; verified to bite by removing
+`platform` and watching exactly those two cases fail.
+
+### ⚠️ §8's claim that option D "removes the breakage entirely" is not true of the current estate
+
+It holds for stamps deployed from `customer.bicep` / `model2-full.bicep`. It does **not** hold for the
+two stamps that exist today: `Deploy-BffApi.ps1` defaults to `rg-spaarke-dev` (not a per-customer shape
+— only one segment after the prefix) and documents `rg-spaarke-platform-prod` (deny-listed).
+`appsettings.Testing.json` records that App Service runs as the **Production** environment, so neither
+is exempt from the startup failure.
+
+⇒ **Both need `Customer__Id` set explicitly before this branch deploys.** That is a one-line
+`az webapp config appsettings set`, documented in the deployment guide § 6.5.1 — but *which* customerId
+a pre-D-12 platform stamp should carry is an **owner decision**, and task 123 deliberately did not
+invent one.

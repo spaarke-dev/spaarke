@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9135031317020882298"
+      "templateHash": "7375813717364040300"
     }
   },
   "parameters": {
@@ -1576,6 +1576,7 @@
           "vnetIntegrationSubnetId": "[if(parameters('enableVnet'), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('vnet-{0}', variables('baseName'))), '2025-04-01').outputs.snetAppId.value), createObject('value', ''))]",
           "appSettings": {
             "value": {
+              "Customer__Id": "[parameters('customerId')]",
               "DATAVERSE_URL": "[parameters('dataverseUrl')]",
               "SPE_CONTAINER_TYPE_ID": "[parameters('containerTypeId')]",
               "Redis__Enabled": "true",

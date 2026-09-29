@@ -1,16 +1,44 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-29, session 25 — FOUR TASKS CLOSED (120, 121, 122, 124) + D-14 RAISED AND DECIDED.**
-> Branch `work/unified-access-control-r2`, **9 ahead of master, 0 behind, tree clean, all pushed**.
-> Prior head at handoff time: `b9a3a4a9c` (this commit advances it — read the real one with `git log -1 --format=%h`).
+> **Last Updated**: **2026-09-29, session 26 — TASK 123 IN PROGRESS (customer runtime discriminator).**
+> Branch `work/unified-access-control-r2`, 10 ahead of master, 0 behind.
 >
 > ## ⚡ QUICK RECOVERY — READ THIS FIRST
 >
 > | | |
 > |---|---|
-> | **Status** | No task in progress. Four completed and pushed this session. |
-> | **Next action** | Owner's choice: **task 125** (retire the unused `Microsoft.Agents.AI` package, #1027 — mechanical) or **task 123** (customer runtime handle — its blocking question is now ANSWERED, see below). |
-> | **Nothing is blocked on Claude.** | Both remaining tasks are startable. |
+> | **Task** | **123** — customer runtime discriminator (D-14). Gate lifted: the format question was answered by task 124. |
+> | **Step** | Implementation — resolver + options + validator + Bicep + docs. |
+> | **Status** | in-progress |
+> | **Next Action** | Create `Configuration/CustomerOptions.cs` + `CustomerIdResolver` (pure, table-testable) + `CustomerOptionsValidator`, register in `ConfigurationModule`, emit `Customer__Id` from `customer.bicep` + `model2-full.bicep`, regenerate both `.json`. |
+>
+> ### 🔴 TWO VERIFIED FINDINGS THAT CHANGE THE DESIGN (session 26, checked against source — do not re-derive)
+>
+> 1. **Deriving customerId from `WEBSITE_RESOURCE_GROUP` collides with the PLATFORM stamp.**
+>    `rg-spaarke-platform-{env}` matches the per-customer shape `rg-spaarke-{customerId}-{env}` exactly,
+>    yielding `customerId = "platform"` — a silently-invented customer, which is the very failure class
+>    D-14 exists to remove. **Mitigation: a deny-list (`platform`, `shared`) — a match there is UNRESOLVED,
+>    not a customer.** `rg-spaarke-shared-{env}` (retired Model 1) has the same shape.
+> 2. **Option D does NOT "remove the breakage entirely" for the CURRENT estate**, which is what D-14 §8
+>    claims and what the POML's second escalation trigger rests on. Verified: `Deploy-BffApi.ps1` defaults
+>    to `rg-spaarke-dev` (only three dash-segments — never matches) and its examples use
+>    `rg-spaarke-platform-prod` (deny-listed). `appsettings.Testing.json` states App Service runs as
+>    **Production**, so neither is exempt. ⇒ **Both live stamps need `Customer__Id` set explicitly before
+>    this branch deploys.** That is a runbook step, and the value for a non-customer stamp is the OWNER's
+>    to choose — do not invent one.
+>
+> ### ✅ D-14 §9 question 2 is ANSWERED: NO Model 1 stamp needs retrofitting
+> `model1-shared.bicep` deploys a shared multi-tenant BFF, but D-12 records the shared tier as **never
+> implemented** and the file as a **retired artifact that has not compiled since 2026-08-17**. Its
+> `MULTI_TENANT_MODE: 'true'` setting is **premise rot** — grep finds **zero** consumers in `src/`,
+> despite the Bicep comment claiming it is "consumed by BFF at boot".
+>
+> ### Precedent to follow (not to re-invent)
+> `PublicConfigOptionsValidator` is the established env-aware fail-fast shape: short-circuit in
+> Development/Testing so the 30+ test fixtures need no new keys, fail-fast in deployed envs. Cited to
+> `.claude/constraints/bff-extensions.md` §F.2.1.
+>
+> ### What closed in session 25
 >
 > ### What closed this session
 > - **Task 120 / #1015** — Office route census in `RouteAuthorizationGuardTests`. Was framed as 2 changes; was **4**. Found **10 ungated routes** → issues **#1020–#1024**; code review added **#1025**. Three production fixes incl. a **hardcoded ownerless synthetic job** in `OfficeService`, found because closing a fail-open turned two tests red that had been green *because* of the defect.

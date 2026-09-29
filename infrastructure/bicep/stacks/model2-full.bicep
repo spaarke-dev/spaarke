@@ -232,6 +232,19 @@ module bffApi '../modules/app-service.bicep' = {
     userAssignedIdentityResourceId: bffUami.outputs.id
     vnetIntegrationSubnetId: enableVnet ? vnet.outputs.snetAppId : ''
     appSettings: {
+      // Customer runtime identity (D-14 / unified-access-control-r2 task 123). customerId names this
+      // whole resource group and everything in it; before this setting, no line of BFF code could read
+      // it. D-12 established that tenantId is IDENTICAL for every Model 1 customer, so tenant-keyed
+      // controls separate Entra tenants rather than customers — this is the runtime handle on the
+      // boundary the infrastructure already draws.
+      //
+      // The BFF can also DERIVE this from WEBSITE_RESOURCE_GROUP (which App Service sets automatically
+      // and which is literally rg-spaarke-{customerId}-{env}), so an older stamp without this setting
+      // still works. Emitting it explicitly is nonetheless correct: the derived path logs a WARNING by
+      // design, because a stamp running on the fallback forever is a stamp whose settings were never
+      // finished. Absent BOTH, the BFF refuses to start rather than defaulting to a shared value.
+      Customer__Id: customerId
+
       // Dataverse configuration
       DATAVERSE_URL: dataverseUrl
 
