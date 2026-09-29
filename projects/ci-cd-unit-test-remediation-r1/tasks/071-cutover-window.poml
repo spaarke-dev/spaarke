@@ -58,6 +58,32 @@
     strict=false decision. The correct instrument for the semantic-conflict risk strict addresses is
     the merge queue (step 5 of this task).
   </correction>
+  <correction date="2026-09-29" source="task-execute Step 9 verification against spec.md">
+    STEP 2 AND ITS ACCEPTANCE CRITERION ARE WITHDRAWN. They instruct restoring the `Release` matrix
+    to sdap-ci.yml during cutover. That directly violates a BINDING spec MUST NOT, and the successor
+    workflow already names a different task as the owner:
+      - spec.md:197  "MUST NOT restore `Release` matrix before Phase 2 deletion has merged AND
+                      surviving suite green >= 7 days"
+      - spec.md:128  FR-B07, same 7-consecutive-day rule
+      - spec.md:225  explicitly records that this clock is NOT amended
+      - ci-tier2-advisory.yml:249-250  "Debug-only is BINDING through Phase 2 per spec MUST 125 /
+                      FR-B07. Restore Release here ONLY after surviving suite green >= 7 days
+                      (CICD-075)."
+    The 7-day soak IS task 075, which runs AFTER this task. Executing step 2 here would break the
+    rule the soak exists to satisfy. Per project CLAUDE.md, spec.md is the binding source where it
+    conflicts with a task file, so the spec wins.
+
+    WHERE IT ACTUALLY BELONGS: task 075, in `.github/workflows/ci-tier2-advisory.yml` (the SUCCESSOR),
+    NOT in sdap-ci.yml. The original step said "sdap-ci.yml (or its successor)" -- the successor is
+    the operative half. Restoring Release into sdap-ci.yml would also have been self-defeating:
+    task 077 DELETES that workflow ~14 days later, so the coverage would cost ~35 extra job-minutes
+    per push for two weeks and then vanish, leaving zero Release coverage behind it.
+
+    CONSEQUENCE FOR THIS TASK: step 2 and step 3 are SKIPPED, and acceptance criterion 1 is
+    superseded by task 075's. This task's remaining scope is: verify branch protection (step 4,
+    already done 2026-08-29), enable the merge queue (step 5), verify (6), test PR (7), monitor (8),
+    record (9), merge #869 (9b).
+  </correction>
 
   <role>CI/CD engineer executing the synchronized cutover.</role>
 
