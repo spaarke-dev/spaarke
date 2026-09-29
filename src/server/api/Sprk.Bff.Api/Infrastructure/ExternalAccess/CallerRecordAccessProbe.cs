@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Identity.Client;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 

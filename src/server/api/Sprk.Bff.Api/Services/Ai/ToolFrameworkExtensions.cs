@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Dataverse.Extensions;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -42,7 +43,7 @@ public static class ToolFrameworkExtensions
         // (CLAUDE.md §10 F.1). Typed HttpClient per the AnalysisToolService sibling precedent.
         // The implementation is user-OBO ONLY (fail-closed; no app-only fallback) per the
         // spec MUST rule audited by task 012.
-        services.AddHttpClient<Handlers.Dataverse.IDataverseUserClient, Handlers.Dataverse.DataverseUserClient>();
+        services.AddHttpClient<Infrastructure.Dataverse.IDataverseUserClient, Infrastructure.Dataverse.DataverseUserClient>();
 
         // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
         // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent
@@ -90,7 +91,7 @@ public static class ToolFrameworkExtensions
 
         // Task 008 (FR-P0-07) — same registration as the primary overload so both entry points
         // produce a resolvable handler graph (Dataverse* handlers ctor-require this client).
-        services.AddHttpClient<Handlers.Dataverse.IDataverseUserClient, Handlers.Dataverse.DataverseUserClient>();
+        services.AddHttpClient<Infrastructure.Dataverse.IDataverseUserClient, Infrastructure.Dataverse.DataverseUserClient>();
 
         // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
         // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent

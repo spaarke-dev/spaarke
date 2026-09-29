@@ -6,7 +6,7 @@ using Microsoft.Identity.Client;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
 
-namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 
 /// <summary>
 /// User-OBO implementation of <see cref="IDataverseUserClient"/> — the ONLY Dataverse access

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 

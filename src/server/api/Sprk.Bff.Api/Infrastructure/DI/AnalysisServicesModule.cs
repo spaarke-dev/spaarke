@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 

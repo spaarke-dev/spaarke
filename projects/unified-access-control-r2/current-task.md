@@ -1,17 +1,57 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-29, session 26 — TASK 123 IN PROGRESS (customer runtime discriminator).**
-> Branch `work/unified-access-control-r2`, 10 ahead of master, 0 behind.
+> **Last Updated**: **2026-09-29, session 26 — 123 + 125 DONE; TASK 126 (#1021) STARTING. PR #1029 open and GREEN.**
+> Branch `work/unified-access-control-r2`, synced with master (merge `26327f130`), all pushed.
 >
 > ## ⚡ QUICK RECOVERY — READ THIS FIRST
 >
 > | | |
 > |---|---|
-> | **Task** | **123** — customer runtime discriminator (D-14). Gate lifted: the format question was answered by task 124. |
-> | **Step** | Implementation — resolver + options + validator + Bicep + docs. |
-> | **Status** | in-progress |
-> | **Next Action** | Create `Configuration/CustomerOptions.cs` + `CustomerIdResolver` (pure, table-testable) + `CustomerOptionsValidator`, register in `ConfigurationModule`, emit `Customer__Id` from `customer.bicep` + `model2-full.bicep`, regenerate both `.json`. |
+> | **Task** | **126** — security-trim `GET /api/office/search/entities` (#1021). POML filed at `tasks/126-office-entity-search-security-trimming.poml`, opus/xhigh. |
+> | **Status** | starting |
+> | **Next Action** | Re-verify the exposure, then design the delegated-query surface by extending what `DataverseAccessDataSource` already proves works. |
+> | **Owner-set order** | #1021 → #1020 → #1022. Owner confirmed 2026-09-29. |
 >
+> ### 🔴 THE PROJECT IS NOT DONE DESPITE 122/122 ✅
+> All authored tasks are complete, but a session-26 audit found **five LIVE authorization holes** with open
+> issues and no tasks. Do not read the task index as a completion signal.
+>
+> ### Two decisions OPEN with the owner (neither gates task 126)
+> 1. **Favorites storage** — the `#229` TODO names `sprk_userfavorite`, which **does not exist** anywhere.
+>    `sprk_navitem` does, is UserOwned and already backs Bookmarks. Recommendation: reuse it (CLAUDE.md §11).
+> 2. **Delete `ScopeManagementService`?** Zero production callers; superseded by `ScopeResolverService` →
+>    `AnalysisActionService` (real Dataverse). Deleting removes 35% of #229 plus ~20 tests.
+>
+> ### 🔴 #229 IS NOT A SEPARATE BACKLOG — it IS #1021/#1023/#1024 plus two invoice reads
+> Sizing verified 2026-09-29: the issue body is **~65% stale** (20 live sites not ~30; 2 files deleted;
+> 5 files already FIXED; every line number wrong). **The coupling is the point**: `SearchEntitiesAsync`
+> (task 026) implemented the query WITHOUT the gate and that is exactly why #1021 exists. The arch guard
+> states the rule at `RouteAuthorizationGuardTests.cs:566` — *the gate must land in the same change that
+> makes it return real data.* Recommended re-cut: 5 tasks (A delete ScopeManagement · B invoice handlers ·
+> C search/documents+recent+#1023 · D share/links+attach+#1024 · E KnowledgeDeployment).
+>
+> ### 🔴 #1021 IS NOT A FILTER FIX — verified, do not re-derive
+> No "query as the user" capability exists. Both Dataverse clients are **app-only singletons**, which
+> structurally cannot carry per-request user context (`GraphModule.cs:97`; `DataverseWebApiClient.cs:63`
+> says so outright). `DataverseAccessDataSource` HAS a working OBO exchange (`:219`) but it is **private**
+> and the class exposes only access snapshots (`:268`, `:376`), not a general query.
+> ⚠️ **Forbidden shortcut**: post-filtering app-only results. `TotalCount`/`HasMore` are computed BEFORE
+> any trim (`OfficeService.cs:777-781`), so a denied user still learns how many records match a 2-char
+> substring — a record-enumeration oracle of the shape task 022 removed from bulk download.
+>
+> ### #1025 — owner supplied decisive context: document-only saves ARE a real use case
+> So "fail closed" is WITHDRAWN. With no `TargetEntity` the doc goes to
+> `EmailProcessing:DefaultContainerId` (`OfficeService.cs:154-163`) with nothing authorizing the caller
+> against it. Preferred fix **D: authorize the DESTINATION** (the subject changes, it does not disappear)
+> — but D needs a container-level access check that may not exist; there is a record probe, not a
+> container one. If task 126 builds the delegated surface, D becomes cheap; otherwise **C (split route)**.
+>
+> ### Deployed this session
+> `Customer__Id=spaarke` set on `spaarke-bff-dev` (verified live). ⚠️ `sprksharedprod-api` in
+> `rg-spaarke-shared-prod` (Model 1 Prod sub) is the RETIRED shared tier, runs multi-tenant, and was
+> deliberately NOT touched — stamping one customer id on a multi-tenant app asserts something false.
+>
+
 > ### 🔴 TWO VERIFIED FINDINGS THAT CHANGE THE DESIGN (session 26, checked against source — do not re-derive)
 >
 > 1. **Deriving customerId from `WEBSITE_RESOURCE_GROUP` collides with the PLATFORM stamp.**
