@@ -78,8 +78,9 @@ public static class RiConfidenceScorer
     /// factor (which is 0 when no association has resolved yet), an entirely unassessed communication still
     /// scores 0 overall". That was true of the product form and is **no longer true** — under the weighted sum
     /// an unassessed communication scores <c>0.7 × 0.5 = 0.35</c>, which is deliberately AT the default gate
-    /// threshold so it surfaces rather than vanishing. That change is the point, not a side effect: silently
-    /// scoring 0 is how the notification path went dark for every unfiled email.
+    /// threshold so it surfaces rather than vanishing — below the 0.45 default gate on its own, but able to
+    /// clear it as soon as ANY association evidence arrives. That change is the point, not a side effect:
+    /// silently scoring 0 is how the notification path went dark for every unfiled email.
     /// </remarks>
     internal const double DefaultUrgencyWeight = 0.5;
 

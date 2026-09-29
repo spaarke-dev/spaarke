@@ -50,7 +50,7 @@ public class RiConfidenceScorerTests
     [Theory]
     [InlineData(1.0, 0.0, 0.70)]    // Urgent, association unresolved  → MUST still surface
     [InlineData(0.75, 0.0, 0.525)]  // High, association unresolved    → MUST still surface
-    [InlineData(0.5, 0.0, 0.35)]    // Medium, association unresolved  → AT the default gate, surfaces
+    [InlineData(0.5, 0.0, 0.35)]    // Medium, association unresolved  → non-zero but below the 0.45 gate
     [InlineData(0.0, 0.9, 0.27)]    // no urgency signal, strong association → non-zero, below the gate
     public void Compute_WhenOneFactorIsZero_StillReturnsNonZero_SoNeitherFactorVetoesTheOther(
         double urgencyWeight, double deterministicAgreement, double expected)
@@ -81,7 +81,7 @@ public class RiConfidenceScorerTests
     {
         // The acceptance-criterion scenario: a high-urgency, well-associated email must clear the shipped
         // default rule-gate threshold so CommunicationRuleGate authorizes it. Reads the threshold from
-        // CommsPolicyOptions rather than hardcoding it, so lowering the default (0.8 → 0.35, 2026-09-29)
+        // CommsPolicyOptions rather than hardcoding it, so lowering the default (0.8 → 0.45, 2026-09-29)
         // does not silently turn this assertion into a tautology or a false failure.
         var score = RiConfidenceScorer.Compute(
             RiConfidenceScorer.UrgencyWeightFromPriority("Urgent"),

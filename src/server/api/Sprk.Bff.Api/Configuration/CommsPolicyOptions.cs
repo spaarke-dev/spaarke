@@ -13,10 +13,21 @@ public sealed class CommsPolicyOptions
     /// <summary>
     /// Fallback minimum confidence to AUTHORIZE an RI action when a matching
     /// <c>sprk_communicationrule</c> row does not set its own <c>sprk_confidencethreshold</c>. A per-rule
-    /// threshold on the matched row always wins over this default. Range 0–1; default 0.35.
+    /// threshold on the matched row always wins over this default. Range 0–1; default 0.45.
     /// </summary>
     /// <remarks>
-    /// 🔴 <b>Lowered 0.8 → 0.35 on 2026-09-29</b> (<c>spaarke-ontology-platform-r1</c>, owner decision: "we
+    /// <para>
+    /// 🔴 <b>0.45, not 0.35.</b> 0.35 was the first attempt and it would have notified on almost everything:
+    /// the neutral urgency weight for a missing/unrecognised priority is 0.5, giving
+    /// <c>0.7 × 0.5 = 0.35</c> — exactly at a 0.35 gate — and **242 of 270** communications in spaarkedev1
+    /// carry no triage priority at all. A 0.35 gate therefore authorizes ~90% of mail, which is not
+    /// recall-first, it is indiscriminate. At <b>0.45</b>: High-and-above always surfaces regardless of
+    /// association (High+0 = 0.525); Medium and no-priority surface only when reasonably associated
+    /// (agreement ≳ 0.33); Low needs near-perfect association. The $145k High-priority email that motivated
+    /// this whole change scores 0.525 and surfaces.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>Lowered from 0.8 on 2026-09-29</b> (<c>spaarke-ontology-platform-r1</c>, owner decision: "we
     /// would rather screen out the noise and make adjustments than miss a flag"). Two reasons, and the first
     /// alone makes 0.8 wrong:
     /// <list type="number">
@@ -24,12 +35,11 @@ public sealed class CommsPolicyOptions
     ///     from a product to a weighted sum on the same date, whose maximum at <c>High</c> urgency is
     ///     <c>0.7×0.75 + 0.3×1.0 = 0.825</c> — and <c>0.795</c> at a realistic 0.90 agreement. A 0.8 gate would
     ///     have denied every High-priority email no matter how well associated; only <c>Urgent</c> could pass.</item>
-    ///   <item><b>Recall over precision for NOTIFYING.</b> At 0.35, everything Medium-and-above notifies
-    ///     regardless of association, and Low notifies only when reasonably associated (agreement ≳ 0.58).</item>
+    ///   <item><b>Recall over precision for NOTIFYING.</b> See the paragraph above for what 0.45 admits.</item>
     /// </list>
     /// This gate only decides whether to SURFACE a communication. It does not affect auto-filing, whose 0.85
     /// threshold in the association engine is untouched — filing writes data, where a false positive is worse
     /// than a miss.
     /// </remarks>
-    public double DefaultConfidenceThreshold { get; set; } = 0.35;
+    public double DefaultConfidenceThreshold { get; set; } = 0.45;
 }
