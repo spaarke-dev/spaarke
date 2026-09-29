@@ -4,7 +4,7 @@
     <title>FR-C01/C02/C03 — Anchor supply: thread the captured (paraId, span) request→response→apply · wire CitationResolver · closed-set paraId return for review passes</title>
     <phase>5 Track C — AI Edit Placement</phase>
     <gate>blocked-on-050</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the AI edit envelope end-to-end across client and server; three anchor sources converge on one code path.</rigor-reason>
     <model-tier>opus</model-tier>

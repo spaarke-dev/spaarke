@@ -1,7 +1,14 @@
 ﻿# Task Index — `spaarkeai-compose-r8`
 
 > **Created**: 2026-08-19 · **Re-cut**: 2026-08-20 (decomposed by **file-pass**, not by concern)
-> **Status**: INITIALIZED — execution owner-gated
+> **Status**: **COMPLETE** (2026-09-29). 46 of 48 tasks completed; `074` closed as DO-NOT-DELETE
+> (deleting `ComposeShadowPatchEngine` returns HTTP 200 while discarding edits — the risk was retired by
+> not taking it); one task superseded. `090` wrap-up closed with the PR below.
+>
+> ⚠️ **The per-POML `<status>` markers were stale until 2026-09-29** — eleven tasks read `pending` here
+> while this index showed ✅, because CLAUDE.md §7 step 1 (flip the POML) was skipped each time only the
+> index was updated. A naive status query therefore reported 13 open tasks when one was open. Fixed in
+> bulk; if you add a task, update BOTH.
 > **36 tasks / 9 phases** · Legend: 🔲 pending · 🔄 needs retry · ✅ complete · ⛔ blocked
 
 **Phase 4 does not start until Phase 3's gate passes.** A miss is an owner escalation (root §6/§6.5).
