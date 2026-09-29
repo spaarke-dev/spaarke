@@ -804,3 +804,102 @@ re-triaged before and after — and the honest position is that no measurement h
 boundary examples added in §16.4 are the beginning of that corpus; the first email
 (`EMPL-307998…`, an invoice PDF attached *and* future scope proposed, classified `Scope / budget
 change`) should be pinned as the first eval case, since it is a real confusable that resolved correctly.
+
+---
+
+## 17. Fixes applied `[2026-09-29]`
+
+### 17.1 `RiConfidenceScorer` — product → weighted sum `[FIXED]`
+
+```
+was:  confidence = urgencyWeight × deterministicAgreement
+now:  confidence = (0.7 × urgencyWeight) + (0.3 × deterministicAgreement)
+```
+
+Owner decision: *"reduce the thresholds because we would rather have to screen out the noise and make
+adjustments than miss a flag."* Urgency is weighted higher because notification-worthiness is driven by
+how much a message **matters**, not by how confident we are about **where to file it**.
+
+|  | det=0.0 | det=0.90 | det=1.0 |
+|---|---|---|---|
+| Urgent 1.00 | 0.70 | 0.97 | 1.00 |
+| High 0.75 | **0.525** | 0.795 | 0.825 |
+| Medium 0.50 | 0.35 | 0.62 | 0.65 |
+| Low 0.25 | 0.175 | 0.445 | 0.475 |
+
+Under the product form **the entire `det=0.0` column was 0.000.**
+
+`CommsPolicyOptions.DefaultConfidenceThreshold` **0.8 → 0.35**. Two reasons, the first of which alone
+makes 0.8 wrong: the sum's maximum at `High` is 0.825 (0.795 at a realistic 0.90 agreement), so a 0.8
+gate would deny every High-priority email however well associated — only `Urgent` could pass. Second,
+recall-first: at 0.35 everything Medium-and-above surfaces regardless of association, and Low surfaces
+only when reasonably associated. Live rule row `dc423a8b-…` also set to 0.35.
+
+> **Auto-filing is untouched.** The association engine's 0.85 auto-file threshold and its
+> deterministic-eligibility rules are unchanged. Filing **writes** data, where a false positive is worse
+> than a miss; notification only **surfaces**, where a miss is worse than noise. Recall-first applies to
+> notifying, not to filing.
+
+**Regression guard**: `Compute_WhenOneFactorIsZero_StillReturnsNonZero_SoNeitherFactorVetoesTheOther`
+pins all four one-factor-zero cases. Every one returned 0.0 under the product form; if any returns 0.0
+again, the product has been reintroduced. 39 tests pass (2 pre-existing assertions updated: the theory
+table, and `TriagePersistenceSeamTests`' persisted value 0.8 → 0.94).
+
+### 17.2 `Deploy-ActionMirrors.ps1` — JPS mirrors + sidecar schemas `[FIXED]`
+
+Added `Get-JpsSystemPrompt` + `Remove-CommentKeys`: when a mirror has no top-level `systemPrompt`, the
+JPS subset (`$schema`/`$version`/`instruction`/`input`/`output`/`examples`/`metadata`, `$comment*`
+stripped recursively, depth 40) is serialized into `sprk_systemprompt`. Also added sidecar ownership —
+`infra/dataverse/outputschemas/<actionCode>.schema.json` now populates `sprk_outputschemajson`.
+
+Verified in all three directions:
+
+| Check | Result |
+|---|---|
+| Detects the change it previously missed | `Changed: 1` (was `UNCHANGED` with `Changed: 0`) |
+| Round-trip preserves the contract | top keys, field order, 4 examples, **all three `$choices`**, `structuredOutput`, `obligations` array/items/maxItems — all intact; **no `$comment` leaked** |
+| Truthfully idempotent | immediate re-run → `UNCHANGED` |
+| No regression on flat mirrors | 17 examined, flat mirrors behave as before |
+
+### 17.3 `triage-email.schema.json` added to the repo `[FIXED]`
+
+`infra/dataverse/outputschemas/triage-email.schema.json` — the contract governing structured-output
+emission order is now version-controlled and owned by the deployer.
+
+### 17.4 🚩 Pre-existing mirror drift the fix exposes — NOT deployed
+
+With the deployer working, `-Filter '*' -DryRun` reports **3 of 17 mirrors out of sync**:
+
+| Mirror | Delta | Read |
+|---|---|---|
+| `create-task-from-email` | `sprk_outputschemajson` 2920 → 2375 | formatting (indented → compact) — cosmetic |
+| `propose-field-updates` | `sprk_outputschemajson` 2784 → 2306 | formatting — cosmetic |
+| **`suggest-followups`** | **`sprk_systemprompt` 3620 → 4678 (+1058)**, `sprk_description` 741 → 816 | **substantive: the repo prompt is newer than the live row, so the model is being asked with a stale contract right now** |
+
+`suggest-followups` is the compose-r8 failure class **live**. Deliberately **not** deployed here — it is
+another project's domain and deploying it changes that capability's behaviour. Owner decision required.
+
+### 17.5 🔴 Still open — two defects found while diagnosing, NOT fixed
+
+**(a) Matter numbers containing spaces are invisible to the deterministic identifier rung.**
+`IdentifierReverseLookupRung.WellFormedTokenPattern` is
+`\b[A-Za-z]{2,}[-.][A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9]\b` — it requires an alpha prefix **immediately**
+followed by `-` or `.`, with no space. Live matter `accb692e-…` is numbered **`"Form D - 2023"`**, whose
+spaces around the hyphen defeat the pattern; the bare-numeric fallback (`\b\d{4,}\b`) extracts `"2023"`,
+which reverse-looks-up to no matter. Result: `ExplicitReference` **never fired** — absent from
+`rungsFired` — even though the subject contained the matter number *and* the matter name verbatim.
+
+The rung's own docstring supplies the argument for broadening safely: *"Precision comes from the EXACT
+reverse lookup, not this pattern — an over-match simply resolves to no record."* The cost of broadening
+is extra reverse-lookup queries, not extra false positives. Not changed here because it alters the
+association engine's precision/cost profile (ADR-045 territory) and deserves its own decision.
+
+**(b) The association decision's `reason` string is false.** For that email it reads *"Reinforced
+confidence 0.97 in [0.50, 0.85) ⇒ Suggested"* — **0.97 is not in [0.50, 0.85)**. The status band is
+evidently computed from `topDeterministicConfidence` (0) while the message interpolates `topConfidence`
+(0.97). This is [AP-12](../../../.claude/FAILURE-MODES.md) in *runtime-generated* prose, which is worse
+than a stale comment: it is written into data that users and future diagnoses read as authoritative.
+`RecordNameMatch` had in fact identified the matter at 0.97 **and written it** — it is simply excluded
+from the deterministic pool by design (surface-for-review, never auto-file).
+
+Neither blocks the MVP: §17.1 makes such an email notifiable regardless, which was the point.
