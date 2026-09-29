@@ -1,6 +1,40 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-28, session 23 — DEPLOYMENT-MODEL REDEFINITION (the project's largest open item) + BFF/PCF DEPLOYED + a three-fault POA query fix.**
+> **Last Updated**: **2026-09-29, session 25 — FOUR TASKS CLOSED (120, 121, 122, 124) + D-14 RAISED AND DECIDED.**
+> Branch `work/unified-access-control-r2`, **9 ahead of master, 0 behind, tree clean, all pushed**.
+> Prior head at handoff time: `b9a3a4a9c` (this commit advances it — read the real one with `git log -1 --format=%h`).
+>
+> ## ⚡ QUICK RECOVERY — READ THIS FIRST
+>
+> | | |
+> |---|---|
+> | **Status** | No task in progress. Four completed and pushed this session. |
+> | **Next action** | Owner's choice: **task 125** (retire the unused `Microsoft.Agents.AI` package, #1027 — mechanical) or **task 123** (customer runtime handle — its blocking question is now ANSWERED, see below). |
+> | **Nothing is blocked on Claude.** | Both remaining tasks are startable. |
+>
+> ### What closed this session
+> - **Task 120 / #1015** — Office route census in `RouteAuthorizationGuardTests`. Was framed as 2 changes; was **4**. Found **10 ungated routes** → issues **#1020–#1024**; code review added **#1025**. Three production fixes incl. a **hardcoded ownerless synthetic job** in `OfficeService`, found because closing a fail-open turned two tests red that had been green *because* of the defect.
+> - **Task 121** — `Secure Project` → `Secure Record` BU + role rename. 🔴 **Owner renamed BOTH live artifacts in dev mid-task**, so dev provisioning is failing closed **until this branch is DEPLOYED**.
+> - **Task 122** — Foundry agent thread scoped per conversation. Two callers passed compile-time constants into the **tenant** slot → one global thread across every tenant. `CodeInterpreterBridge` now genuinely ephemeral.
+> - **Task 124** — the `customerId` standard. Defining it exposed a **latent deployment failure**: `maxLength(10)` admitted a value producing an invalid Key Vault name (trailing hyphen). Now 8, derived and documented.
+>
+> ### 🔴 Two corrections worth carrying
+> 1. The earlier "three failing Redis sites" note was **wrong**: only ONE violated the MUST (it is conditional — *"whenever the cached value differs per principal"*). `AgentConfigurationService` and `ModuleEntitlementResolver` are verified NON-violations and task 122 **forbids touching them**.
+> 2. I asserted Bicep could enforce the character rule via `@pattern`. **No such decorator exists in Bicep/ARM.** Only length is template-enforceable; the character rule must be enforced at provisioning intake (cpo-r1).
+>
+> ### D-14 — decided, with one nuance the owner surfaced
+> `customerId` = **3–8, lowercase alphanumeric, letter-first**. But the three rules are **not equally binding**: **max 8** is Azure-derived and Dataverse CAN enforce it (`MaxLength`); the **character set** is hard but enforceable only in intake code; **min 3** is **convention only** — every composed name is ≥10 chars even at length 1, so a short id breaks nothing. That asymmetry is why Dataverse-first is *not* brittle. Recorded in `notes/D-14-customer-discriminator.md` §6 and both naming docs.
+>
+> ### Open for the owner (unchanged)
+> Power BI shared F-SKU pool · M365 Copilot agent disposition · whether Redis **Standard** meets the performance bar · Trivy config failure (repo-wide, not ours).
+>
+> ### Handed to `customer-provisioning-orchestration-r1`
+> `INCOMING-D12-D13-REMEDIATION.md` (on master) and **`INCOMING-CUSTOMERID-STANDARD.md`** (new — intake validation, re-issuing `trial-2026-08-18`-shaped ids).
+>
+> ⚠️ **Merge hazard**: task 122 changed `OfficeService.cs` and task 120 deleted a block from it; `spaarkeai-word-add-in-r1` is active in the same file. Different lines — a candidate for the incoherent auto-merge that has bitten this project once. Nothing guards it; flag at merge time.
+>
+> Prior stamp:
+> **2026-09-28, session 23 — DEPLOYMENT-MODEL REDEFINITION (the project's largest open item) + BFF/PCF DEPLOYED + a three-fault POA query fix.**
 > HEAD `538158774`, 0 unpushed, tree clean, PR **#950**. 📖 **READ § SESSION 23 first, then
 > `notes/DEPLOYMENT-MODEL-SYNOPSIS.md`.** 🔔 **The model redefinition is AGREED but has NO decision record yet — write it first.**
 > 🔔 Immediate blocker: `POST /invite-and-grant` 500 — next action is in the session-23 block.

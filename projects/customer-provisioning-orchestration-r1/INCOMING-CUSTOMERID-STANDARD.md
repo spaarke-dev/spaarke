@@ -52,6 +52,36 @@ length is enforceable in the template.**
 **That makes the character rule YOUR enforcement point.** It has to be validated where the value is
 assigned — at intake — because there is no later layer that can catch it.
 
+## 2a. 🔴 The three rules are NOT equally binding — read this before you build validation
+
+#### Which rules are HARD, and where each can be enforced
+
+🔴 **These three rules are not equally binding, and only one of them can be enforced by a Dataverse column.**
+Treating them as one rule is how a late, opaque deploy-time failure gets built in.
+
+| Rule | Hard? | Dataverse column | Bicep/ARM | Consequence if violated |
+|---|---|---|---|---|
+| **max 8** | ✅ Azure-derived | ✅ `MaxLength = 8` | ✅ `@maxLength(8)` | 🔴 deployment **FAILS** — Key Vault name ends in a hyphen |
+| **lowercase letters + digits** | ✅ collision risk | ❌ no regex on text columns | ❌ no `@pattern` | 🔴 **SILENT** — `acme-x` and `acmex` share one storage account |
+| **min 3** | ❌ **convention only** | ❌ Dataverse has no minimum | ✅ `@minLength(3)` | nothing breaks — every composed name is ≥10 chars even at length 1, because of the `sprk` / `rg-spaarke-` prefixes |
+
+**Why this matters for where the value is created.** A Dataverse text column enforces a maximum length but
+has **no minimum and no regex**. If `customerId` is first typed into Dataverse, the column can catch the one
+rule that would break a deployment (set `MaxLength = 8`) and cannot catch the other two.
+
+That is acceptable **only because of how the three rules fall**:
+
+- the rule Dataverse CAN enforce is the one that would otherwise fail a deployment;
+- the rule it cannot enforce and that MATTERS (character set) needs code-level validation at intake anyway,
+  because ARM cannot enforce it either;
+- the rule it cannot enforce and that it would be brittle to depend on (min 3) **has no technical
+  consequence** — it is a readability convention. A 2-character id deploys perfectly well.
+
+**So: set `MaxLength = 8` on the column, validate the character set in the intake code path, and treat
+min-3 as advisory.** Do not let min-3 become a late failure: `@minLength(3)` stays in the template as a
+backstop, but intake should catch it first, and if it is ever hit in practice the correct response is to
+relax it rather than to reject the customer.
+
 ---
 
 ## 3. 🔴 What you need to change
