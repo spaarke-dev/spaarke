@@ -121,7 +121,7 @@ public class CredentialCensusTests
             FileName: "WorkerDataverseCredentialFactory.cs",
             Sites: 2,
             Identity: "The shared BFF app registration (SDAP-BFF-SPE-API 1e40baad-...) — the L2 Worker's own Dataverse identity",
-            CredentialSource: "Ordered selection: MI-FIC (line 173, ClientAssertionCredential over ManagedIdentityCredential) as the DEFAULT secret-free path per ADR-028 A4; ClientSecret (line 213, ClientSecretCredential) as prong-3 transitional fallback for unmigrated environments (spaarkedev1 only per adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25), sunset 2026-11-23 per §6.5 resolution",
+            CredentialSource: "Ordered selection over the CredentialKind switch: (a) `CredentialKind.ManagedIdentityFederated` branch — ClientAssertionCredential over ManagedIdentityCredential — as the DEFAULT secret-free path per ADR-028 A4; (b) `CredentialKind.ClientSecret` branch — ClientSecretCredential — as prong-3 transitional fallback for unmigrated environments (spaarkedev1 only per adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25), sunset 2026-11-23 per §6.5 resolution",
             Reason:
                 "The Worker-side analog of OrderedCredentialClientProvider — L2 Worker's own FR-39 ordered-credential factory "
                 + "authenticating AS the shared BFF app registration for Dataverse operations. Consolidation of what were previously "

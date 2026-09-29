@@ -210,6 +210,32 @@ public class CosmosProvisioningSecretGuardTests
     /// <c>LiteralValue</c> or by lookup in <c>envelope.Parameters.NonSecret</c>, which is
     /// non-secret by construction and by name.
     /// </para>
+    /// <para>
+    /// ─────────── Added 2026-09-28, task 220 (customer-provisioning-orchestration-r1) ───────────
+    /// </para>
+    /// <para>
+    /// <b>OrgSettingsContractApplyRequest</b> and <b>RequiredApplicationsInstallRequest</b> — H6-scoped
+    /// transient records carrying the plaintext client secret from H6 to a <c>pac</c> CLI shell-out
+    /// (<c>pac org update-settings</c> / <c>pac application install</c>). Exact structural parity with
+    /// <c>SolutionImportRequest</c> and <c>SolutionVerificationRequest</c> above: same handler, same
+    /// run, same <c>pac auth create --clientSecret</c> constraint (the CLI requires the raw value).
+    /// Their absence from the original exclusion list is the same oversight pattern the 2026-08-27
+    /// adjudication cited when adding <c>SolutionVerificationRequest</c> — task 049 added the siblings
+    /// but not the exclusions. Path C (<see cref="Models.KeyVaultSecretRef"/> shape) would force
+    /// artificial wrap-then-unwrap at the handler boundary; Path A restores the intended parity.
+    /// Owner-approved 2026-09-28 as a deviation from task 220's POML-recommended Path C.
+    /// </para>
+    /// <para>
+    /// <b>RegistryCredentialModeUpdate</b> — the flagged property is <c>CredentialMode</c>: an enum
+    /// discriminator string (values: <c>secret-free</c> per <c>SecretFreeMarker.CredentialModeSecretFree</c>,
+    /// <c>client-secret</c>, <c>managed-identity-federated</c>, etc.) that names WHICH credential family
+    /// is in use on a given environment. It is NOT a secret material carrier — no secret bytes flow
+    /// through it. Analog of the day-1 <c>KeyVaultSecretRef.SecretName</c> exclusion (matches
+    /// secret-shape regex but holds a name/discriminator, not a value). Persisted to Dataverse column
+    /// <c>sprk_credentialmode</c> via PATCH — the value is a public enum label. Renaming the property
+    /// to appease the regex (Path C) would sacrifice a semantically correct name; Path A is the
+    /// structural precedent. Owner-approved 2026-09-28.
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedTypeFullNames = new(StringComparer.Ordinal)
     {
@@ -230,27 +256,13 @@ public class CosmosProvisioningSecretGuardTests
         "Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.FilePerEnvSettingsManifest+PerEnvYamlEntry",
         "Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.PerEnvSettingEntry",
 
-        // task 220 (2026-09-28, §6.5 path A — owner-approved) — exact structural parity with the
-        // SolutionImportRequest / SolutionVerificationRequest exclusion above. Both are H6-scoped
-        // transient records carrying the plaintext client secret from H6 to a `pac` CLI shell-out
-        // (`pac org update-settings` / `pac application install`). Same handler, same run, same
-        // `pac auth create --clientSecret` constraint: the CLI requires the raw value. Their
-        // absence from the original exclusion list is the same oversight pattern the 2026-08-27
-        // adjudication cited when adding SolutionVerificationRequest — task 049 added the siblings
-        // but not the exclusions. Path C (KeyVaultSecretRef shape) would force artificial
-        // wrap-then-unwrap at the handler boundary; path A restores the intended parity.
+        // task 220 (2026-09-28, §6.5 Path A — owner-approved) — H6 pac-CLI shell-out parity with
+        // SolutionImportRequest / SolutionVerificationRequest exclusions above. Rationale per type above.
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.OrgSettingsContractApplyRequest",
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.RequiredApplicationsInstallRequest",
 
-        // task 220 (2026-09-28, §6.5 path A — owner-approved) — CredentialMode is an enum
-        // discriminator string (values: "secret-free" per SecretFreeMarker.CredentialModeSecretFree,
-        // "client-secret", "managed-identity-federated", etc.) that names WHICH credential family is
-        // in use on a given environment. It is NOT a secret material carrier — no secret bytes flow
-        // through it. Analog of the KeyVaultSecretRef.SecretName exclusion (matches secret-shape
-        // regex but holds a name/discriminator, not a value). Persisted to Dataverse column
-        // `sprk_credentialmode` via PATCH — the value is a public enum label. Renaming the property
-        // to appease the regex (path C) would sacrifice a semantically correct name; path A is the
-        // structural precedent.
+        // task 220 (2026-09-28, §6.5 Path A — owner-approved) — FR-39 enum discriminator, not a secret
+        // material carrier. Analog of the KeyVaultSecretRef.SecretName exclusion. Rationale per type above.
         "Sprk.Provisioning.ControlPlane.Registry.RegistryCredentialModeUpdate",
     };
 

@@ -81,12 +81,12 @@ public sealed class A42FicReconciliationTests
     // scope. The semantic here is "any name that is NOT the canonical FIC name" — the literal value
     // is arbitrary — so a non-MI-shaped fixture constant serves the test without triggering the
     // guard on a value that isn't a real runtime identity binding. See task 220 (2026-09-28) notes.
-    private const string ArbitraryDifferentFicName = "differently-named-fic-fixture";
+    private const string NonCanonicalFicName = "differently-named-fic-fixture";
 
     [Fact]
     public void A42a_FindEquivalentByTriple_MatchingTripleUnderDifferentName_IsSatisfied()
     {
-        var differentlyNamed = Fic(ArbitraryDifferentFicName, Issuer, UamiPrincipalId, Audience);
+        var differentlyNamed = Fic(NonCanonicalFicName, Issuer, UamiPrincipalId, Audience);
 
         var result = GraphAppRegistrationProvisioner.FindEquivalentByTriple(
             new[] { differentlyNamed }, Issuer, UamiPrincipalId, Audience);

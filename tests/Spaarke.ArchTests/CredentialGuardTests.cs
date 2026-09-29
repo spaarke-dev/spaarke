@@ -80,19 +80,21 @@ public class CredentialGuardTests
                 "L2 Worker's FR-39 ordered-credential factory for its own Dataverse auth AS the shared BFF "
                 + "app registration (1e40baad-... / SDAP-BFF-SPE-API) — the Worker-side analog of the BFF's "
                 + "OrderedCredentialClientProvider. Ordered selection necessarily contains a `new "
-                + "ClientSecretCredential(...)` call (line 213): the secret is the prong-3 transitional "
-                + "last option AND the rollback target for unmigrated environments (currently `spaarkedev1` "
-                + "only, per adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25 — H4 "
-                + "executor MUST NOT provision new Model 2 stamps under prong-3 until A36-A42 land per Q6). "
-                + "A selector without it cannot express the rollback NFR-06 depends on. This is "
-                + "CONSOLIDATION, not expansion — the three handler surfaces that formerly constructed "
-                + "their own credentials (DataverseWebApiEnvVarValuesWriter, DataverseWebApiSolutionImporter, "
+                + "ClientSecretCredential(...)` call in the prong-3 ClientSecret branch of the "
+                + "CredentialKind switch: the secret is the prong-3 transitional last option AND the rollback "
+                + "target for unmigrated environments (currently `spaarkedev1` only, per "
+                + "adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25 — H4 executor MUST "
+                + "NOT provision new Model 2 stamps under prong-3 until A36-A42 land per Q6). A selector "
+                + "without it cannot express the rollback NFR-06 depends on. This is CONSOLIDATION, not "
+                + "expansion — the three handler surfaces that formerly constructed their own credentials "
+                + "(DataverseWebApiEnvVarValuesWriter, DataverseWebApiSolutionImporter, "
                 + "DataverseWebApiSolutionVerifier) now consume this factory via IWorkerDataverseCredentialFactory. "
-                + "MI-FIC (line 173, ClientAssertionCredential) is the DEFAULT secret-free path per A4; the "
-                + "ClientSecret branch (line 213) is dead code in `spaarke-bff-dev` (live order = "
-                + "[ManagedIdentityFederated] since 2026-08-24 E-3 closure) and only selected for prong-3 "
-                + "unmigrated environments. Retires when auth-v4's obligation 051-E retirement runbook "
-                + "executes against those environments, sunset 2026-11-23 per §6.5 resolution."),
+                + "The MI-FIC branch (`CredentialKind.ManagedIdentityFederated` — ClientAssertionCredential over "
+                + "ManagedIdentityCredential) is the DEFAULT secret-free path per A4; the ClientSecret branch "
+                + "is dead code in `spaarke-bff-dev` (live order = [ManagedIdentityFederated] since 2026-08-24 "
+                + "E-3 closure) and only selected for prong-3 unmigrated environments. Retires when auth-v4's "
+                + "obligation 051-E retirement runbook executes against those environments, sunset 2026-11-23 "
+                + "per §6.5 resolution."),
 
         new AllowlistEntry(
             FileName: "DataverseWebApiEnvVarValuesWriter.cs",
