@@ -347,9 +347,9 @@ Coupling proven by seeding a half-applied rename → the pinning test fails.
 
 Verification: ArchTests **330/330** · BFF unit **12626/0** · client Jest **96/96** · build clean.
 
-⚠️ **CONFIRM WITH OWNER**: they said they renamed the *Business Unit*. Did the **`Secure Project Owner` role**
-also get renamed to `Secure Record Owner` in dev? `SecureBuRoleDepthAssertion.SecureOwnerRoleName` now expects
-the new name.
+✅ **BOTH live artifacts renamed by the owner in dev, 2026-09-29**: the business unit AND the
+`Secure Project Owner` → `Secure Record Owner` security role. Live and code now agree on both halves.
+⚠️ Dev provisioning stays failing-closed until this branch's code is DEPLOYED.
 
 ### ▶ 🔴 NEXT — in this order (owner-set 2026-09-28)
 

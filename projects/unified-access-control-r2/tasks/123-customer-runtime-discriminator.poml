@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="unified-access-control-r2">
+  <metadata>
+    <title>Give the BFF a runtime handle on WHICH CUSTOMER it is serving — customerId names every Azure resource a customer owns and is readable by none of the code</title>
+    <phase>Register-driven (authored 2026-09-29, session 25; D-14, owner-raised)</phase>
+    <gate>blocked-on-owner</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds configuration bound with [Required] on a fail-closed path and changes provisioning Bicep. A wrong default silently reinstates a shared identity.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural: it decides what identifies a customer at runtime across BFF, Bicep and the provisioning pipeline, and the wrong choice is discovered only after customers exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches BFF configuration binding plus infrastructure/bicep stacks; coordinates with customer-provisioning-orchestration-r1.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, config, provisioning, docs</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Owner, 2026-09-29 (session 25): "for customerid -- or some other way to distinguish one customer from another in the model 1 spaarke tenant, we need to resolve this and ensure we have this documented. is this an env variable in the app registration? also saved in dataverse on the customer business unit; or where does this need to be documented / stored / retrieved?" Raised during task 122. Analysis: notes/D-14-customer-discriminator.md.</origin>
+  </metadata>
+
+  <prompt>customerId names the resource group, the Redis instance, the Key Vault, the UAMI and the tags of every customer stamp — and no line of BFF code can read it. Close that, fail-closed, and write down where it lives.</prompt>
+
+  <role>SPAARKE platform developer — BFF configuration and the customer provisioning stacks. You are introducing the runtime identity of a customer; a default value here would be worse than no value.</role>
+
+  <goal>A running BFF can answer "which customer am I serving?" from explicit configuration, refuses to start without it, and the answer is documented in the deployment guide and the resource/naming architecture. The three rejected alternatives are recorded with their reasons so the question is not re-opened.</goal>
+
+  <context>
+    <background>🔴 READ `notes/D-14-customer-discriminator.md` FIRST — it holds the verified state, the three options and why two were rejected. This POML does not restate the analysis.
+
+THE GAP, in one line: `customerId` is a Bicep param that names `rg-spaarke-{customerId}-{env}` and every resource in it, and is applied as the `customer` tag — but the BFF's `appSettings` block carries no customer identifier, and the only three `customerId` occurrences in `Sprk.Bff.Api` are an AI Search FIELD NAME, a Power BI PROFILE-NAME convention, and a provisioning REQUEST parameter. None is an ambient identity.
+
+WHY IT MATTERS NOW: D-12 established that `tenantId` is identical for every Model 1 customer, so every tenant-keyed control separates Entra tenants rather than customers — and its tests pass anyway. The infrastructure boundary is real (per-customer resource group, per ADR-027-as-amended a per-customer subscription, and per D-13 a per-customer app registration); what is missing is a runtime handle on it, for cache-key prefixes, log scopes and metric dimensions.
+
+🔴 WHAT THIS TASK MUST NOT BECOME. `Customer__Id` is **defence in depth and an observability handle**, NOT the customer boundary. Per D-12 §3 and the ADR-009 amendment, Redis access control is per-INSTANCE, not per-keyspace — a customer-id key prefix is a convention our code enforces, not one Redis enforces. Nothing in this task may be written so that it reads as softening the dedicated-per-customer-resource decision.
+
+RECOMMENDED SHAPE (D-14 §3c): emit `Customer__Id: customerId` from the stack that already has it, bind it to an options class with `[Required]`, and let a stamp deployed without it FAIL AT STARTUP. An absent customer id must never resolve to a shared default — that is the same failure class as the agent-thread constant in task 122.
+
+⚠️ PART OF THIS IS NOT OURS. The provisioning handler that emits the setting belongs to `customer-provisioning-orchestration-r1` (see `projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md`). Coordinate; do not implement it in their tree.</background>
+    <relevant-files>
+      <file role="read">projects/unified-access-control-r2/notes/D-14-customer-discriminator.md</file>
+      <file role="modify">infrastructure/bicep/stacks/model2-full.bicep</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file role="modify">docs/architecture/auth-azure-resources.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>No default value. A missing customer id fails startup; it never falls back.</constraint>
+    <constraint>Do NOT read the customer from Dataverse on any request path — cache keys and log scopes cannot afford a round trip (D-14 §3b).</constraint>
+    <constraint>Do NOT infer the customer from the app registration's client id as the primary source (D-14 §3a). It MAY be used as a startup cross-check.</constraint>
+    <constraint>Do not weaken, or appear to weaken, the dedicated-per-customer-resource decision.</constraint>
+    <constraint>The provisioning-handler half is cpo-r1's; coordinate rather than implement in their tree.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/D-14-customer-discriminator.md</file>
+      <file>projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md</file>
+      <file>.claude/adr/ADR-027-azure-subscription-topology.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>🔴 GET THE OWNER'S ANSWERS to D-14 §6 first — this task is gated on them, which is why its gate is blocked-on-owner.</step>
+    <step>Add the options class + [Required] binding, and a startup failure with a message that names the missing setting and the stack that should have emitted it.</step>
+    <step>Emit the setting from the customer stack.</step>
+    <step>Document it in the deployment guide and the resource/naming architecture; add the pointer from ADR-027.</step>
+    <step>Hand the provisioning-handler half to cpo-r1 in writing.</step>
+  </steps>
+
+  <escalation>
+    <trigger>D-14 §6 question 1 (slug vs GUID) is unresolved — the identifier's FORM changes what is stored, so do not pick one silently.</trigger>
+    <trigger>An existing deployed stamp would be broken by fail-closed startup — that is D-14 §6 question 3 and is the owner's call, not an implementation detail.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>A BFF started without the customer setting fails at startup with a message naming the setting and its source.</criterion>
+    <criterion>The customer stack emits the setting from the `customerId` it already has.</criterion>
+    <criterion>No request path reads the customer from Dataverse.</criterion>
+    <criterion>The deployment guide states the setting is required per stamp and what happens when it is absent.</criterion>
+    <criterion>D-14's three rejected/accepted options are reachable from the docs, so the question is not re-opened from scratch.</criterion>
+    <criterion>The cpo-r1 handoff for the provisioning-handler half is written and linked.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 25). Gated on the owner's answers to D-14 §6 — deliberately NOT startable, so it is not picked up by a "continue" that would have to guess the identifier's form.</notes>
+</task>
