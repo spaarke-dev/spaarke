@@ -70,11 +70,13 @@
 // self-referential re-write — per manifest.yaml's BFF-API-ClientId/Audience
 // exception_note (task 129 reclassification, owner E3).
 //
-// FIC RECIPE (auth-v4 §3.1, Model 2 only): subject = the UAMI's principalId
-// (request.UamiPrincipalId — NOT its clientId, the documented most-common
-// misconfiguration trap); audiences = ["api://AzureADTokenExchange"];
-// issuer = Spaarke's own tenant for spaarke-hosted-model2 (UAMI lives in
-// Spaarke's subscription) OR the customer's own tenant for
+// FIC RECIPE (auth-v4 §3.1; runs for BOTH tenancy models post-task-222 per
+// D-13 — every per-customer app-reg gets a FIC trusting the customer's BFF
+// UAMI): subject = the UAMI's principalId (request.UamiPrincipalId — NOT its
+// clientId, the documented most-common misconfiguration trap); audiences =
+// ["api://AzureADTokenExchange"]; issuer = Spaarke's own tenant for
+// spaarke-hosted-model2 + Model 1 (UAMI lives in Spaarke's subscription for
+// both — intra-Spaarke-tenant) OR the customer's own tenant for
 // customer-owned-model2 (UAMI lives in the customer's subscription).
 // -----------------------------------------------------------------------------
 
@@ -200,7 +202,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                     request.CustomerId, request.Profile);
             }
 
-            // (5) FIC — Model 2 ONLY, auth-v4 §3.1 recipe.
+            // (5) FIC — both models post-task-222 (D-13), auth-v4 §3.1 recipe.
             var ficFailure = await EnsureFederatedIdentityCredentialAsync(
                 graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
             if (ficFailure is not null)
@@ -258,86 +260,10 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         }
     }
 
-    /// <inheritdoc/>
-    public async Task<EntraAppRegSharedVerifyOutcome> VerifySharedAsync(
-        EntraAppRegSharedVerifyRequest request, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.SharedAppId);
-
-        if (string.IsNullOrWhiteSpace(_options.SpaarkeTenantId))
-        {
-            return new EntraAppRegSharedVerifyOutcome.Failure(
-                "EntraAppReg:SpaarkeTenantId is not configured — required to query the shared app-reg " +
-                "(it lives in Spaarke's own tenant, not the customer's).");
-        }
-
-        // Model 1 read-only verification: use Spaarke's own tenant (the shared
-        // app-reg lives there) rather than a per-customer tenant credential.
-        var graph = BuildTenantScopedGraphClient(_options.SpaarkeTenantId);
-
-        try
-        {
-            var filter = $"appId eq '{EscapeODataLiteral(request.SharedAppId)}'";
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(_options.GraphRequestTimeout);
-            var page = await graph.Applications.GetAsync(rc =>
-            {
-                rc.QueryParameters.Filter = filter;
-            }, timeoutCts.Token).ConfigureAwait(false);
-
-            var app = page?.Value?.FirstOrDefault();
-            if (app is null)
-            {
-                return new EntraAppRegSharedVerifyOutcome.Failure(
-                    $"Shared app-reg (appId={request.SharedAppId}) not found in Spaarke's own tenant. " +
-                    "Model 1 requires the shared multitenant app-reg to already exist — verify " +
-                    "EntraAppReg:SharedBffAppRegistrationId + operator has run the initial platform setup.");
-            }
-
-            var driftReasons = new List<string>();
-            if (!string.Equals(app.SignInAudience, _options.RequiredSignInAudience, StringComparison.Ordinal))
-            {
-                driftReasons.Add($"signInAudience='{app.SignInAudience}' (expected '{_options.RequiredSignInAudience}')");
-            }
-
-            var currentPerms = (app.RequiredResourceAccess ?? new List<RequiredResourceAccess>())
-                .SelectMany(rra => (rra.ResourceAccess ?? new List<ResourceAccess>())
-                    .Select(ra => (ResourceAppId: rra.ResourceAppId, Id: ra.Id?.ToString())))
-                .ToHashSet();
-            var missingPerms = EntraAppRegPermissionCatalog.All
-                .Where(p => !currentPerms.Contains((p.ResourceAppId, p.PermissionId)))
-                .Select(p => p.Name)
-                .ToList();
-            if (missingPerms.Count > 0)
-            {
-                driftReasons.Add($"missing delegated permission(s): {string.Join(", ", missingPerms)}");
-            }
-
-            var hasExposedScope = (app.Api?.Oauth2PermissionScopes ?? new List<PermissionScope>())
-                .Any(s => string.Equals(s.Value, "user_impersonation", StringComparison.Ordinal));
-            if (!hasExposedScope)
-            {
-                driftReasons.Add("missing exposed scope 'user_impersonation'");
-            }
-
-            if (driftReasons.Count > 0)
-            {
-                return new EntraAppRegSharedVerifyOutcome.Drifted(string.Join("; ", driftReasons));
-            }
-
-            return new EntraAppRegSharedVerifyOutcome.Current();
-        }
-        catch (ODataError ex)
-        {
-            _logger.LogError(ex,
-                "H3 Model 1 shared-app verification ODataError: appId={AppId} status={Status}",
-                request.SharedAppId, ex.ResponseStatusCode);
-            return new EntraAppRegSharedVerifyOutcome.Failure(
-                $"Graph ODataError {ex.ResponseStatusCode} while verifying shared app-reg: " +
-                $"{ex.Error?.Code} {ex.Error?.Message ?? ex.Message}");
-        }
-    }
+    // VerifySharedAsync REMOVED 2026-09-29 (task 222 per D-13): the shared-app-reg
+    // verification path was deleted along with the interface member — H3 now
+    // provisions ONE app-reg per customer, unconditionally, in both models. See
+    // H3EntraAppRegHandler.cs TASK 222 REWRITE for the D-13 mechanism.
 
     // ---------------------------------------------------------------------
     // Graph client construction (GOTCHA 1 — see file header)
@@ -576,7 +502,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     }
 
     // ---------------------------------------------------------------------
-    // FIC (Model 2 only, auth-v4 §3.1) — see file-header GOTCHA 2.
+    // FIC (both models post-task-222 per D-13, auth-v4 §3.1) — see
+    // file-header GOTCHA 2.
     // A42 (task 205b, FR-C4) hardening: cross-tenant refusal guard (SF-5),
     // triple-keyed idempotency (SF-7), exit-2-equivalent verification state
     // (SF-8). Parity contract:

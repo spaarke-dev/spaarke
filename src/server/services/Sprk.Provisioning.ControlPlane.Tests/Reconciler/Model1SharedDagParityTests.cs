@@ -132,7 +132,9 @@ public sealed class Model1SharedDagParityTests
     //     - H1SubscriptionReadinessHandler   (validates tenancyModel; no code-path branch)
     //     - H2aBicepInfraDeployHandler       (rejects missing TenancyModel — no silent default)
     //     - H2bAiSearchIndexHandler          (Model1Shared branch, ~line 295)
-    //     - H3EntraAppRegHandler             (explicit HandleModel1Async / HandleModel2Async split)
+    //     - H3EntraAppRegHandler             (RETIRED 2026-09-29 task 222 per D-13 — H3 no longer branches on
+    //                                         tenancyModel; both models take the unified per-customer creation
+    //                                         path. Kept in inventory as a historical record.)
     //     - H12cRuntimeReferencesHandler     (switch Model1Shared / Model2Dedicated, ~line 286)
     //     - ArmCostEnvelopeChecker (H0)      (SelectExpectedEnvelope by tenancyModel)
     //     - AiSearchTenantFilterInvariantProbe (H13 sub-probe; Model1 branch)

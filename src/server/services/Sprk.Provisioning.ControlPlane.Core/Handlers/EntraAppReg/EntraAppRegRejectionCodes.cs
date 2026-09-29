@@ -71,13 +71,27 @@ public static class EntraAppRegRejectionCodes
     /// </summary>
     public const string MissingOrInvalidTenancyModel = "appreg-missing-or-invalid-tenancy-model";
 
-    /// <summary>Model 2 branch requires <c>InterStepState.MiObjectId</c> (UAMI principalId — the FIC <c>subject</c>, per auth-v4 §3.1) populated by H2a before H3 dispatches.</summary>
+    /// <summary>H3 requires <c>InterStepState.MiObjectId</c> (UAMI principalId — the FIC <c>subject</c>, per auth-v4 §3.1) populated by H2a before H3 dispatches, in BOTH tenancy models post-task-222 per D-13.</summary>
     public const string MissingUamiObjectId = "appreg-missing-uami-object-id";
 
-    /// <summary>Model 1 branch's shared app-reg configuration (<see cref="EntraAppRegOptions.SharedBffAppRegistrationId"/> / <see cref="EntraAppRegOptions.SharedPlatformKeyVaultName"/>) is not configured — operator must set these app-settings before onboarding a Model 1 tenant.</summary>
+    /// <remarks>
+    /// RETIRED 2026-09-29 (task 222 per D-13): the H3 shared-app-reg branch was deleted from
+    /// <see cref="H3EntraAppRegHandler"/>. This code is no longer emitted by any live code path.
+    /// VALUE PRESERVED per this file's STABILITY guidance ("add new codes as needed and mark old ones
+    /// @[Obsolete] on removal") — external operator UI filters / alerting rules / log queries keyed on
+    /// this constant since task 130 (Wave G-3) must not silently break.
+    /// </remarks>
+    [System.Obsolete("Retired 2026-09-29 per D-13 (task 222) — H3 shared-app-reg branch deleted. Value kept for external-tool log/alerting historical stability. Do not reference from new code.", error: false)]
     public const string MissingSharedAppRegConfig = "appreg-missing-shared-appreg-config";
 
-    /// <summary>Model 1's read-only grant-currency verification found the shared app-reg's configuration has drifted (signInAudience / requiredResourceAccess / exposed scope no longer matches expected) — operator must reconcile the shared platform app-reg (out of a per-customer handler's blast radius by design).</summary>
+    /// <remarks>
+    /// RETIRED 2026-09-29 (task 222 per D-13): the H3 shared-app-reg branch was deleted from
+    /// <see cref="H3EntraAppRegHandler"/>. This code is no longer emitted by any live code path.
+    /// VALUE PRESERVED per this file's STABILITY guidance ("add new codes as needed and mark old ones
+    /// @[Obsolete] on removal") — external operator UI filters / alerting rules / log queries keyed on
+    /// this constant since task 130 (Wave G-3) must not silently break.
+    /// </remarks>
+    [System.Obsolete("Retired 2026-09-29 per D-13 (task 222) — H3 shared-app-reg branch deleted. Value kept for external-tool log/alerting historical stability. Do not reference from new code.", error: false)]
     public const string SharedAppRegConfigurationDrift = "appreg-shared-appreg-configuration-drift";
 
     /// <summary>Model 2's federated identity credential creation (auth-v4 §3.1 recipe) failed.</summary>

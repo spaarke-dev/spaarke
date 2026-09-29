@@ -13,10 +13,8 @@
 //     (NullAdminConsentVerifier, RETIRED) with GraphAdminConsentVerifier — a
 //     REAL oauth2PermissionGrants query. This closes DS-4 §3's primary
 //     defect finding: "the consent gate can advance on fiction."
-//   - Added the Model 1 vs Model 2 tenancy-model runtime branch (spec.md
-//     FR-39 + design.md §4.1 H3 row v3.5 split), I6-enforced (design.md §4D,
-//     spec.md FR-40): the branch-selection MUST take an explicit
-//     tenancyModel value with NO default/fallback — see step (2) below.
+//   - Added the Model 1 vs Model 2 tenancy-model runtime branch — RETIRED
+//     2026-09-29 (task 222 per D-13). See TASK 222 REWRITE below.
 //   - Added Model 2's federated-identity-credential (FIC) step trusting the
 //     shared BFF UAMI (auth-v4 §3.1 recipe).
 //   - Added the BFF-API-ClientId / BFF-API-Audience RunParameters.Secrets
@@ -28,6 +26,23 @@
 //     CLAUDE.md §6.5).
 //   - REMOVED the 14-AppRoleAssignedTo-grant step the POML's step 2/acceptance
 //     criteria described. DELIBERATE DEVIATION — see "SCOPE DEVIATION" below.
+//
+// TASK 222 REWRITE SUMMARY (2026-09-29, D-13 per INCOMING-D12-D13-REMEDIATION §5 Item 1):
+//   - REMOVED the Model 1 shared-multitenant-BFF-app-reg branch (HandleModel1Async +
+//     BuildSharedKvUriReference + the L272 if/else on tenancyModel). H3 now provisions
+//     ONE Entra app registration PER CUSTOMER, UNCONDITIONALLY, in both models —
+//     Model 1 (Spaarke's tenant) + Model 2 (customer's tenant). Per D-13 (BINDING per
+//     owner, re-affirmed 2026-09-28): every customer gets their own BFF app-reg because
+//     the Dataverse ownership chain (app-reg → Application User → Business Unit → record
+//     ownership) is fully determined by the app-reg. Sharing an app-reg across customers
+//     would either (a) produce cross-customer BU membership, or (b) rely on a filter that
+//     the D-12 §3 "filter, not a boundary" rule rejects everywhere else. Full mechanism +
+//     rejected counter-arguments: `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
+//   - `Model1Shared` const (line ~129) + `IsRecognizedTenancyModel` acceptance of it are
+//     UNCHANGED — post-task-222 the tenancy STRING remains valid, and H3 routes both
+//     values through the same per-customer creation path. Item 2 (the shared TenancyModel
+//     enum + parse-or-reject) is a separate atomic change that removes the string
+//     literal comparisons everywhere.
 //
 // SCOPE DEVIATION #1 (14 AppRoleAssignedTo grants — Path C, comply with the
 // MORE AUTHORITATIVE source): design.md §4.1's H3 SDK-surface table (line
@@ -75,12 +90,8 @@
 //   ├──────────────────────────────────────┼───────────────────────────┤
 //   │ Missing/invalid tenancyModel (I6)    │ Resumable                 │
 //   │ Missing tenantId (§4D I1)            │ Resumable                 │
-//   │ Missing keyVaultName (Model 2)       │ Resumable                 │
-//   │ Missing UAMI principalId (Model 2)   │ Resumable                 │
-//   │ Missing shared app-reg config (M1)   │ Resumable                 │
-//   │ Model 1 shared-app config drift      │ Resumable (operator fixes │
-//   │                                      │ the SHARED platform app,  │
-//   │                                      │ out of per-customer scope)│
+//   │ Missing keyVaultName                 │ Resumable                 │
+//   │ Missing UAMI principalId             │ Resumable                 │
 //   │ Provisioner PS-era shell-out failure │ N/A (no shell-out remains)│
 //   │ Provisioner Graph failure            │ Resumable                 │
 //   │ Provisioner outputs incomplete       │ Resumable                 │
@@ -122,7 +133,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (Model 2 only).</summary>
+    /// <summary>Non-secret parameter key carrying the target Key Vault name (required in both tenancy models post-task-222 per D-13 — H3 writes BFF-API-ClientId/Audience KV secret references, and BFF-API-ClientSecret conditionally when non-secret-free).</summary>
     public const string KeyVaultNameParameterKey = "keyVaultName";
 
     /// <summary>Tenancy-model value — Model 1 (shared/SMB). Matches ProvisioningRun.TenancyModel + H2b's identical literal.</summary>
@@ -266,51 +277,41 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (5) Branch on tenancy model.
-        EntraAppRegOutputs outputs;
-        IReadOnlyList<PendingKvSecretWrite> pendingKvWrites;
-        if (string.Equals(tenancyModel, Model1Shared, StringComparison.Ordinal))
+        // (5) Per-customer app-reg provisioning (both models, per D-13 — see
+        // TASK 222 REWRITE in the file header). The tenancyModel string is
+        // still validated at step (1) via I6, but no longer selects between
+        // different provisioning paths — both values route through the same
+        // per-customer creation code below. Item 2 (the shared TenancyModel
+        // enum consolidation) will remove the string-comparison layer next.
+        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
         {
-            var model1Result = await HandleModel1Async(run, etag, cancellationToken).ConfigureAwait(false);
-            if (model1Result.Failure is not null)
-            {
-                return model1Result.Failure;
-            }
-            outputs = model1Result.Outputs!;
-            pendingKvWrites = Array.Empty<PendingKvSecretWrite>(); // Model 1 never writes — references only.
+            var diagnostic =
+                "Run parameter 'keyVaultName' is required by H3 (target for BFF-API-ClientSecret/" +
+                "ClientId/Audience). Upstream handler (H2a Bicep) MUST populate this from the deployed " +
+                "platform KV name before H3 dispatches.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                EntraAppRegRejectionCodes.MissingKeyVaultName, diagnostic, cancellationToken).ConfigureAwait(false);
         }
-        else
+
+        if (string.IsNullOrWhiteSpace(run.InterStepState.MiObjectId))
         {
-            if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
-            {
-                var diagnostic =
-                    "Run parameter 'keyVaultName' is required by H3 Model 2 (target for BFF-API-ClientSecret/" +
-                    "ClientId/Audience). Upstream handler (H2a Bicep) MUST populate this from the deployed " +
-                    "platform KV name before H3 dispatches.";
-                return await FailAsync(run, etag, FailureClass.Resumable,
-                    EntraAppRegRejectionCodes.MissingKeyVaultName, diagnostic, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (string.IsNullOrWhiteSpace(run.InterStepState.MiObjectId))
-            {
-                var diagnostic =
-                    "InterStepState.miObjectId (the shared BFF UAMI's principalId — the FIC 'subject' per " +
-                    "auth-v4 §3.1) is not populated. H2a (uami.bicep) MUST complete before H3's Model 2 branch " +
-                    "can create the FIC.";
-                return await FailAsync(run, etag, FailureClass.Resumable,
-                    EntraAppRegRejectionCodes.MissingUamiObjectId, diagnostic, cancellationToken).ConfigureAwait(false);
-            }
-
-            var model2Result = await HandleModel2Async(
-                run, etag, envelope, tenantId, keyVaultName, run.InterStepState.MiObjectId!, cancellationToken)
-                .ConfigureAwait(false);
-            if (model2Result.Failure is not null)
-            {
-                return model2Result.Failure;
-            }
-            outputs = model2Result.Outputs!;
-            pendingKvWrites = model2Result.PendingKvWrites!;
+            var diagnostic =
+                "InterStepState.miObjectId (the BFF UAMI's principalId — the FIC 'subject' per " +
+                "auth-v4 §3.1) is not populated. H2a (uami.bicep) MUST complete before H3 " +
+                "can create the FIC.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                EntraAppRegRejectionCodes.MissingUamiObjectId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
+
+        var provisionResult = await HandleModel2Async(
+            run, etag, envelope, tenantId, keyVaultName, run.InterStepState.MiObjectId!, cancellationToken)
+            .ConfigureAwait(false);
+        if (provisionResult.Failure is not null)
+        {
+            return provisionResult.Failure;
+        }
+        EntraAppRegOutputs outputs = provisionResult.Outputs!;
+        IReadOnlyList<PendingKvSecretWrite> pendingKvWrites = provisionResult.PendingKvWrites!;
 
         // (6) Structural outputs guard — reject any incomplete output payload.
         if (string.IsNullOrWhiteSpace(outputs.BffAppRegId) || string.IsNullOrWhiteSpace(outputs.BffClientSecretKvUri))
@@ -371,7 +372,9 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         }
 
         // (10) DS-4 §3 BINDING ORDER: KV writes commit ONLY after Verified —
-        // never before. Model 1 has nothing to commit (pendingKvWrites empty).
+        // never before. An empty pendingKvWrites is a legitimate no-op outcome
+        // (e.g., secret-free identity mode skipped the BFF-API-ClientSecret
+        // mint per ADR-028 A4, and any given run's staged writes may be zero).
         if (consentResult is AdminConsentVerificationResult.Verified && pendingKvWrites.Count > 0)
         {
             var commitDiagnostic = await _provisioner.CommitPendingSecretsAsync(pendingKvWrites, cancellationToken)
@@ -400,74 +403,10 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     }
 
     // ---------------------------------------------------------------------
-    // Model 1 / Model 2 branches
+    // Per-customer app-reg provisioning (both models per D-13, task 222).
+    // Method retains its `HandleModel2Async` name until Item 2 consolidates
+    // TenancyModel and drops the "Model 2" concept from other sites.
     // ---------------------------------------------------------------------
-
-    /// <summary>
-    /// MODEL 1 (shared multitenant BFF app-reg). Creates ZERO new app-reg
-    /// objects and ZERO new FIC objects (acceptance criterion) — verifies the
-    /// shared app-reg's grant currency, then REFERENCES its pre-existing KV
-    /// entries (does NOT write to the shared platform vault from a
-    /// per-customer handler — avoids concurrent-write risk on a shared
-    /// resource). "Consent-callback trust registration" (POML text) is
-    /// already satisfied by H0.5 having run BEFORE H3 in the DAG — H3's own
-    /// contribution here is the grant-currency verification + the real
-    /// per-customer-tenant consent check (step 9 in HandleAsync, shared by
-    /// both branches).
-    /// </summary>
-    private async Task<(HandlerResult? Failure, EntraAppRegOutputs? Outputs)> HandleModel1Async(
-        ProvisioningRun run, string etag, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(_options.SharedBffAppRegistrationId)
-            || string.IsNullOrWhiteSpace(_options.SharedPlatformKeyVaultName))
-        {
-            var diagnostic =
-                "EntraAppReg:SharedBffAppRegistrationId and/or EntraAppReg:SharedPlatformKeyVaultName are not " +
-                "configured. Model 1 requires the shared multitenant app-reg to already exist with its KV " +
-                "entries seeded — operator must complete initial platform setup before onboarding Model 1 tenants.";
-            return (await FailAsync(run, etag, FailureClass.Resumable,
-                EntraAppRegRejectionCodes.MissingSharedAppRegConfig, diagnostic, cancellationToken)
-                .ConfigureAwait(false), null);
-        }
-
-        EntraAppRegSharedVerifyOutcome verifyOutcome;
-        try
-        {
-            verifyOutcome = await _provisioner.VerifySharedAsync(
-                new EntraAppRegSharedVerifyRequest(_options.SharedBffAppRegistrationId), cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            var diagnostic = $"Model 1 shared-app verification infrastructure error: {ex.GetType().Name}: {ex.Message}. Resumable.";
-            return (await FailAsync(run, etag, FailureClass.Resumable,
-                EntraAppRegRejectionCodes.ProvisioningFailed, diagnostic, cancellationToken).ConfigureAwait(false), null);
-        }
-
-        switch (verifyOutcome)
-        {
-            case EntraAppRegSharedVerifyOutcome.Failure f:
-                return (await FailAsync(run, etag, FailureClass.Resumable,
-                    EntraAppRegRejectionCodes.ProvisioningFailed, f.Diagnostic, cancellationToken).ConfigureAwait(false), null);
-            case EntraAppRegSharedVerifyOutcome.Drifted d:
-                return (await FailAsync(run, etag, FailureClass.Resumable,
-                    EntraAppRegRejectionCodes.SharedAppRegConfigurationDrift, d.Diagnostic, cancellationToken).ConfigureAwait(false), null);
-            case EntraAppRegSharedVerifyOutcome.Current:
-                // Reference pre-existing shared-vault entries only — Model 1
-                // creates ZERO new app-reg / FIC objects (acceptance criterion).
-                return (null, new EntraAppRegOutputs
-                {
-                    BffAppRegId = _options.SharedBffAppRegistrationId!,
-                    BffClientSecretKvUri = BuildSharedKvUriReference(),
-                    PendingKvWrites = Array.Empty<PendingKvSecretWrite>(),
-                });
-            default:
-                // Defensive — a future 4th case must not silently fall through
-                // as either Failure or Current.
-                throw new InvalidOperationException(
-                    $"Unhandled EntraAppRegSharedVerifyOutcome subtype '{verifyOutcome.GetType().Name}'.");
-        }
-    }
 
     private async Task<(HandlerResult? Failure, EntraAppRegOutputs? Outputs, IReadOnlyList<PendingKvSecretWrite>? PendingKvWrites)>
         HandleModel2Async(
@@ -484,17 +423,23 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 UamiPrincipalId: uamiPrincipalId,
                 Profile: run.Profile ?? string.Empty,
                 // Bucket B HIGH#3 SESSION 18 (customer-provisioning-orchestration-r1
-                // adversarial verify workflow wepdcb8we): both current Model 2
-                // profiles are secret-free per ADR-028 A4 + auth-v4 task 033
-                // (2026-08-24) + .claude/constraints/provisioning.md § KV
-                // credential lifecycle rule 1 (BFF-API-ClientSecret is GONE,
-                // never re-introduce). We pass true EXPLICITLY here — even
-                // though it is the DTO default — because (a) the intent is
-                // load-bearing enough to be visible at the call site, and (b)
-                // if the DTO default ever changes, this call site continues to
-                // request the correct behavior. If a future non-secret-free
-                // profile is introduced, THIS is the line that decides —
-                // opt-in with `false` after documenting the exception path.
+                // adversarial verify workflow wepdcb8we): EVERY newly-provisioned
+                // environment is secret-free per .claude/constraints/provisioning.md
+                // § KV credential lifecycle rule 1 + ADR-028 A4 + auth-v4 task 033
+                // (2026-08-24) — BFF-API-ClientSecret is GONE, never re-introduce.
+                // Post-task-222/D-13 this call fires for BOTH tenancy models
+                // (Model 1 Spaarke-tenant per-customer stamps + Model 2
+                // customer-tenant per-customer stamps — see H3EntraAppRegHandler.cs
+                // TASK 222 REWRITE + D-13-per-customer-bff-app-registration.md);
+                // both are newly-provisioned per-customer stamps so both are
+                // secret-free by construction, no per-profile enumeration
+                // required. We pass true EXPLICITLY here — even though it is the
+                // DTO default — because (a) the intent is load-bearing enough to
+                // be visible at the call site, and (b) if the DTO default ever
+                // changes, this call site continues to request the correct
+                // behavior. If a future non-secret-free profile is introduced,
+                // THIS is the line that decides — opt-in with `false` after
+                // documenting the exception path.
                 RequireSecretFreeIdentity: true);
             outcome = await _provisioner.ProvisionAsync(request, cancellationToken).ConfigureAwait(false);
         }
@@ -552,9 +497,6 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         tenancyModel = string.Empty;
         return false;
     }
-
-    private string BuildSharedKvUriReference()
-        => $"@Microsoft.KeyVault(SecretUri=https://{_options.SharedPlatformKeyVaultName}.vault.azure.net/secrets/{GraphAppRegistrationProvisioner.ClientSecretName}/)";
 
     /// <summary>
     /// Computes the deterministic H3 idempotency key:

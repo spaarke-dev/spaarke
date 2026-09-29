@@ -262,8 +262,9 @@ public sealed class A42FicReconciliationTests
         // values map by NAME, not number: ExchangeVerified carries exit-0
         // SEMANTICS (its value 1 is NOT exit 1 — script exit 1 is the fault
         // path, deliberately unrepresentable as a success state), and
-        // NotApplicable has no script analog (Model 1 never runs the FIC
-        // path). Pinned so a re-order never silently re-maps the exit-2
+        // NotApplicable has no script analog and no live producer post-task-222
+        // (D-13 — both models now run the FIC path). Retained as a defensive
+        // enum default. Pinned so a re-order never silently re-maps the exit-2
         // marker semantics H13/T4 depends on.
         ((int)FicVerificationState.NotApplicable).Should().Be(0);
         ((int)FicVerificationState.ExchangeVerified).Should().Be(1);
@@ -400,32 +401,15 @@ public sealed class A42FicReconciliationTests
     }
 
     // =====================================================================
-    // (e) Model 1 — zero FIC calls (I6 regression guard)
+    // (e) RETIRED 2026-09-29 (task 222 per D-13): the "Model 1 makes zero
+    // FIC calls" I6 regression guard was DELETED with the shared-app-reg
+    // branch. Post-D-13, both tenancy models create ONE per-customer app-reg
+    // + FIC unconditionally — the premise "Model 1 creates no FIC" is
+    // invalidated by design. See task 222 POML + INCOMING-D12-D13-REMEDIATION
+    // §5 Item 1 for the retirement rationale. The other A42* rows
+    // (idempotency, propagation, cross-tenant, invariants 1+2) apply to
+    // both models post-D-13 and remain unchanged.
     // =====================================================================
-
-    [Fact]
-    public async Task A42e_Model1_WithModel2ShapedParametersPresent_ProvisionerNeverCalled()
-    {
-        // STRONGER than task-130's AcM1_1 (which omits the Model 2 params):
-        // even when keyVaultName + MiObjectId ARE present, Model 1 makes ZERO
-        // FIC-creating calls — I6 (spec FR-40): the branch is selected by
-        // tenancyModel alone, and Model 1 creates no per-customer app-reg or
-        // FIC object. Task-130's ProvisionCallCount==0 contract preserved.
-        var run = BuildModel2Run(); // Model-2-shaped params...
-        run.TenancyModel = H3EntraAppRegHandler.Model1Shared; // ...but Model 1.
-        var repo = new FakeRepository(run, "etag-a42e-1");
-        var provisioner = FakeProvisioner.SharedCurrent();
-        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified(),
-            sharedAppId: "shared-app-id-0000-0000-000000000000", sharedKv: "sprk-platform-prod-kv");
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        provisioner.ProvisionCallCount.Should().Be(0,
-            "Model 1 MUST make zero FIC-creating calls even with Model-2-shaped parameters present (I6)");
-        repo.LastWrittenRun!.InterStepState.FicPendingPostAppServiceVerification.Should().BeNull(
-            "Model 1 produced no FIC — no verification debt exists");
-    }
 
     // =====================================================================
     // (f) §11 invariant 1 — wrong subject → AADSTS700213 detected
@@ -563,15 +547,11 @@ public sealed class A42FicReconciliationTests
     private static H3EntraAppRegHandler BuildHandler(
         FakeRepository repo,
         FakeProvisioner provisioner,
-        FakeVerifier verifier,
-        string? sharedAppId = null,
-        string? sharedKv = null)
+        FakeVerifier verifier)
     {
         var options = Options.Create(new EntraAppRegOptions
         {
             ExpectedDelegatedScopeCount = 5,
-            SharedBffAppRegistrationId = sharedAppId,
-            SharedPlatformKeyVaultName = sharedKv,
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options, NullLogger<H3EntraAppRegHandler>.Instance);
@@ -640,33 +620,27 @@ public sealed class A42FicReconciliationTests
         }
     }
 
-    /// <summary>Provisioner fake — canned outcome, throwing variant, and Model 1 shared-verify variant; records ProvisionCallCount for the I6 regression guard.</summary>
+    /// <summary>Provisioner fake — canned outcome + throwing variant; records ProvisionCallCount. The shared-verify variant + VerifySharedAsync implementation were removed in task 222 per D-13 (shared-app-reg branch retired; both models now provision per-customer).</summary>
     private sealed class FakeProvisioner : IEntraAppRegProvisioner
     {
         private readonly EntraAppRegOutcome? _provisionOutcome;
         private readonly Exception? _provisionThrows;
-        private readonly EntraAppRegSharedVerifyOutcome? _verifySharedOutcome;
 
         public int ProvisionCallCount { get; private set; }
 
         private FakeProvisioner(
             EntraAppRegOutcome? provisionOutcome,
-            Exception? provisionThrows,
-            EntraAppRegSharedVerifyOutcome? verifySharedOutcome)
+            Exception? provisionThrows)
         {
             _provisionOutcome = provisionOutcome;
             _provisionThrows = provisionThrows;
-            _verifySharedOutcome = verifySharedOutcome;
         }
 
         public static FakeProvisioner Success(EntraAppRegOutputs outputs)
-            => new(new EntraAppRegOutcome.Success(outputs), null, null);
+            => new(new EntraAppRegOutcome.Success(outputs), null);
 
         public static FakeProvisioner Throws(Exception ex)
-            => new(null, ex, null);
-
-        public static FakeProvisioner SharedCurrent()
-            => new(null, null, new EntraAppRegSharedVerifyOutcome.Current());
+            => new(null, ex);
 
         public Task<EntraAppRegOutcome> ProvisionAsync(EntraAppRegRequest request, CancellationToken ct)
         {
@@ -677,9 +651,6 @@ public sealed class A42FicReconciliationTests
             }
             return Task.FromResult(_provisionOutcome!);
         }
-
-        public Task<EntraAppRegSharedVerifyOutcome> VerifySharedAsync(EntraAppRegSharedVerifyRequest request, CancellationToken ct)
-            => Task.FromResult(_verifySharedOutcome!);
 
         public Task<string?> CommitPendingSecretsAsync(IReadOnlyList<PendingKvSecretWrite> pendingWrites, CancellationToken ct)
             => Task.FromResult<string?>(null);
