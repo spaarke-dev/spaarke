@@ -199,3 +199,40 @@ first, plus N consecutive green runs on `ubuntu-latest`.
 
 Together with task 069, FR-18's CI story is now: the checks **exist, run, and report truthfully**. Making them
 **binding** remains one owner action away.
+
+---
+
+## 🔴 STATUS CHANGE 2026-09-29 — the shadow window CLOSED, so the migrate-and-delete obligation is LIVE
+
+When this task landed, the CI freeze was active and this note recorded a conditional: *"when the window closes,
+migrate this job into Tier 1 and delete it here."* **The window has now closed.**
+`scripts/ci/shadow-window-status.ps1` on master (PR #1028, task 071) reports:
+
+```
+  Comparable PRs examined : 9
+  Agreeing                : 9 / 8
+  Calendar-day span       : 24.7 / 5
+  False reds (logged)     : 0
+  FALSE GREENS            : 0
+
+  WINDOW SATISFIED -- sdap-ci.yml may be retired (tasks 071/075/077),
+  then branch protection with `CI / Router` as the required check.
+```
+
+**Three consequences, in order of how quietly they bite:**
+
+1. **The reason this job lives here is gone.** Tier 1 is the correct home; it was only unavailable because
+   editing it restarted the cutover clock. That constraint has expired, so `server-tests` (and the `lint` job
+   task 072 added) should migrate into Tier 1 and be **deleted here**. Leaving them in both places is
+   duplication, not defence in depth — and the duplicate is the copy that will drift.
+2. **This task's "prospective" framing expires with it.** The note says the coverage gap is prospective because
+   `sdap-ci.yml` still exists. It is now *sanctioned for retirement*, so the gap converts to live the moment
+   someone acts on that.
+3. **Issue #1016 becomes urgent rather than advisory.** `SpeWriteSinkContainerProvenanceGuardTests` appears
+   **zero** times in `ci-tier1-blocking.yml`'s filter and runs only in `sdap-ci.yml` and advisory Tier 2. The
+   moment `sdap-ci.yml` goes, that guard is evaluated **nowhere** — it does not fail, it stops being checked.
+
+**Deliberately NOT done now**, and the reason matters: the migration edits `ci-tier1-blocking.yml`, which every
+project depends on, and it would land minutes before a merge to master with no CI cycle to validate it. A CI
+change whose first real exercise is on master is the shape of defect this whole wave has been removing. It wants
+its own task, its own red/green proof, and the ruleset decision alongside it.

@@ -247,7 +247,7 @@ if (!result.IsAllowed)
 > >
 > > | Claim above | Status today | Evidence |
 > > |---|---|---|
-> > | "zero call sites" | **FALSE** — `RetrievePrincipalAccess` appears in **22 files** under `src/server` | `grep -rl RetrievePrincipalAccess --include=*.cs src/server` |
+> > | "zero call sites" | **FALSE** — `RetrievePrincipalAccess` appears in **dozens** of files under `src/server` (22 on 2026-09-21, 23 on 2026-09-29) | `grep -rl RetrievePrincipalAccess --include=*.cs src/server \| wc -l` |
 > > | "grant at most `AccessRights.Read`" | **FALSE** — the probe returns the caller's actual rights, `Write` included, and `send-to-index` now gates on `AccessRights.Write` | `Api/Ai/RagEndpoints.cs` (task 063) |
 > >
 > > **What changed**: `Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs` was **added 2026-08-22**
@@ -258,8 +258,22 @@ if (!result.IsAllowed)
 > > It fails closed: every failure mode yields `AccessRights.None`.
 > >
 > > **The paragraph below about `AuthorizationService` passing `userAccessToken: null` was NOT re-verified
-> > by this correction** and should be treated as still-open until someone checks it. Do not read this
-> > supersession as clearing it.
+> > by this correction** — it was left explicitly open rather than assumed.
+> >
+> > ✅ **CLOSED 2026-09-29 by `unified-access-control-r2` task 006** (their finding **A-4**, spec FR-05),
+> > verified after their merge landed on master. `Api/PermissionsEndpoints.cs` no longer calls
+> > `GetUserAccessAsync` with `userAccessToken: null` — which had reported what the **application** could
+> > do to any authenticated caller. Note *why* their fix is durable, because it is the interesting part:
+> > they identified that the defect was never a missing null check but the **`= null` default** on
+> > `IAccessDataSource.GetUserAccessAsync`, which let any new direct caller inherit app-only evaluation
+> > simply by not thinking about it. The replacement method takes the token as a **mandatory positional
+> > parameter with no default**, so it cannot be called without stating intent. The `= null` defaults that
+> > remain on the lower-level `IAccessDataSource` signature are the original shape, now fenced by that
+> > forcing function rather than relied upon.
+> >
+> > Left in place rather than deleted, for the same reason the rest of this block is stacked: a reader
+> > needs to see that the gap was named, carried openly, and then closed by someone else — not that it
+> > silently disappeared.
 > >
 > > **Why the correction is stacked rather than rewritten**: the 08-20 finding is a true record of the
 > > repository at that date, and a project reading this file needs to know the claim existed, was right,
