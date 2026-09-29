@@ -4,7 +4,7 @@
     <title>Segregate the Foundry agent thread per conversation — the Redis key that decides which conversation you rejoin is a confidentiality boundary, and both of its segments are compile-time constants</title>
     <phase>Register-driven (authored 2026-09-29, session 25; D-12 item 6 + ADR-009 subject-discrimination MUST)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an AI conversation path and changes a cache key that currently leaks conversation content between users. Tags include auth.</rigor-reason>
     <model-tier>opus</model-tier>
