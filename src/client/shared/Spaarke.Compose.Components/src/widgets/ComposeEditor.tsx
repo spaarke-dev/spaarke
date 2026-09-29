@@ -812,6 +812,10 @@ export interface ComposeEditorProps {
   includeRevisionReport?: boolean;
   /** R8 UAT item 8 — passthrough toggle handler; the item renders only when both are supplied. */
   onIncludeRevisionReportToggle?: (include: boolean) => void;
+  /** nda-r1 t041 (wired 2026-09-07) — passthrough for the Save-menu "Include review summary page" toggle. */
+  includeSummaryPage?: boolean;
+  /** nda-r1 t041 — passthrough toggle handler; the item renders only when both are supplied. */
+  onIncludeSummaryPageToggle?: (include: boolean) => void;
   /** Save handler (create-on-save first Save, or update). Renders the Save split-button when set.
    *  G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup) or `'new'`
    *  (fork a new document). A bare call (Ctrl+S / cross-pane bridge) defaults to `'version'`. */
@@ -915,6 +919,11 @@ export interface ComposeEditorProps {
      * The host (ComposeWorkspace) owns the fetch + download; the editor is a pure forwarder.
      */
     onGenerateMemo?: () => void;
+    /**
+     * R8 §GAPS-5 Phase 3 — the dropdown's CREATE action (POSTs the panel's findings, then reads back).
+     * The host owns the request; the editor is a pure forwarder, as with the two read actions.
+     */
+    onCreateReviewSummary?: () => void;
     /**
      * FR-14 (task 051) — the dropdown's Email action (reads the persisted memo, opens the canonical
      * EmailComposer prefilled with its body + subject; the user must act to send — ADR-045).
@@ -2188,6 +2197,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSummarizeChanges,
       includeRevisionReport,
       onIncludeRevisionReportToggle,
+      includeSummaryPage,
+      onIncludeSummaryPageToggle,
       wordActionsDisabled,
       onSave,
       canSave,
@@ -3708,6 +3719,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSummarizeChanges={onSummarizeChanges}
           includeRevisionReport={includeRevisionReport}
           onIncludeRevisionReportToggle={onIncludeRevisionReportToggle}
+          includeSummaryPage={includeSummaryPage}
+          onIncludeSummaryPageToggle={onIncludeSummaryPageToggle}
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}
@@ -3744,6 +3757,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onToggleReviewNotes={() => setReviewNotesVisible(v => !v)}
           // FR-14 (task 051) — "Create Summary Memo" dropdown. Pure forwarder to the host
           // (ComposeWorkspace), which owns the fetch/download/EmailComposer-open logic.
+          onCreateReviewSummary={reviewSummary?.onCreateReviewSummary}
           onGenerateMemo={reviewSummary?.onGenerateMemo}
           onEmailMemo={reviewSummary?.onEmailMemo}
           isMemoActionInFlight={reviewSummary?.isMemoActionInFlight}

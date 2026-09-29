@@ -4,7 +4,7 @@
     <title>FR-D01 — Decompose ComposeService.cs (3,573 lines) below 2,000 and DELETE its god-class waiver</title>
     <phase>7 Track D — God-Class Removal</phase>
     <gate>blocked-on-040</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Restructures the file that owns `SaveAsync`, baseline resolution and the save fork — the spine every other track touched.</rigor-reason>
     <model-tier>opus</model-tier>

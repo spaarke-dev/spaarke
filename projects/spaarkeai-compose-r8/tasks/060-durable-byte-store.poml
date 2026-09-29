@@ -4,7 +4,7 @@
     <title>FR-B01 — Durable byte store for session uploads (blob, tenant-partitioned, existing MI RBAC and provisioned container)</title>
     <phase>6 Track B — Durable Session Files</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF storage surface — the one new component in the project. Tenant isolation is binding (ADR-014/015).</rigor-reason>
     <model-tier>opus</model-tier>

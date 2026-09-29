@@ -138,6 +138,10 @@ internal static class ComposeSaveEndpoints
             ForkNew = body.ForkNew,
             // R8 UAT item 8 — without this line the client's revisionReport is dropped silently.
             RevisionReport = body.RevisionReport,
+            // nda-r1 task 041, wired 2026-09-07 — the same silent-drop applied: the generator, the
+            // request field, the SaveAsync call site and a seam test all existed, but with nothing
+            // mapping the body property the appendix could never be produced.
+            SummaryPage = body.SummaryPage,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -221,6 +225,13 @@ internal static class ComposeSaveEndpoints
             // forkNew forces a fresh record ("Save New Document").
             TransientKey = body.TransientKey,
             ForkNew = body.ForkNew,
+            // SummaryPage IS mapped here, unlike RevisionReport directly above — the two differ in what
+            // they read. A revision report summarises tracked changes read from a STORED document, so it
+            // cannot legitimately arrive on a route for a draft with no SPE item yet. A Summary Page
+            // derives from the ledgered REVIEW RESULT, which exists as soon as the review ran — and
+            // "upload an NDA, review it, save it for the first time" is arguably its most common flow.
+            // Refusing it here would rebuild the same dead end one route over.
+            SummaryPage = body.SummaryPage,
             // Task 041 B-MED-3 (option C): the source record whose links the new document inherits
             // (PDF-sourced create-on-save — filed alongside the source PDF).
             SourceDocumentRecordId = body.SourceDocumentRecordId,
@@ -686,11 +697,31 @@ public sealed record SaveComposeDocumentBody(
     /// <b>This field exists because its absence made the whole feature dead.</b> The endpoint maps this
     /// body onto <see cref="SaveComposeDocumentRequest"/> FIELD BY FIELD, and unknown JSON properties are
     /// silently ignored — so a client sending <c>revisionReport</c> against a DTO without it loses the
-    /// payload with no error anywhere. See <see cref="SaveComposeDocumentRequest.SummaryPage"/>, which
-    /// still has exactly that defect.
+    /// payload with no error anywhere. <see cref="SummaryPage"/> had exactly that defect until
+    /// 2026-09-07; both halves of the pair are wired now.
     /// </para>
     /// </summary>
-    [property: JsonPropertyName("revisionReport")] ComposeRevisionReportInput? RevisionReport = null);
+    [property: JsonPropertyName("revisionReport")] ComposeRevisionReportInput? RevisionReport = null,
+
+    /// <summary>
+    /// The NDA-REVIEW <b>Summary Page</b> appendix — the ledgered <c>{overallRisk, flaggedSections[]}</c>
+    /// result, rendered by <see cref="ComposeSummaryPageGenerator"/> and appended by
+    /// <c>IComposeService.SaveAsync</c> through the SAME <c>ComposeDocumentRenderer.AppendSection</c>
+    /// path the revision report uses. Optional/trailing (ADR-040 additive); null on every ordinary save.
+    /// <para>
+    /// <b>This property is what made the feature reachable</b> (2026-09-07). The generator, the
+    /// <see cref="SaveComposeDocumentRequest.SummaryPage"/> field, the <c>SaveAsync</c> call site and a
+    /// corpus seam test had all existed since nda-r1 task 041 — but with no property here, a client
+    /// sending <c>summaryPage</c> had it dropped silently by the deserializer, so the appendix could
+    /// never be produced. It was the last open instance of that defect class, recorded by (and now
+    /// closing) <c>ComposeSaveBodyMappingGuardTests</c>.
+    /// </para>
+    /// <para>
+    /// Unlike <see cref="RevisionReport"/>, an EMPTY input still appends: a clean NDA is itself a
+    /// finding, and the page says so ("No material deviations…"). Do not "fix" that into symmetry.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("summaryPage")] NdaReviewSummaryPageInput? SummaryPage = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/save</c>.</summary>
 public sealed record SaveComposeDocumentResponse(

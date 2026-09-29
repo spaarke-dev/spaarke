@@ -213,6 +213,15 @@ public static class DocumentLinkFields
         new("sprk_relatedservicerequest", "sprk_RelatedServiceRequest", "sprk_servicerequest"),
         new("sprk_relatedtodo", "sprk_RelatedToDo", "sprk_todo"),
         new("sprk_relatedvendororg", "sprk_relatedvendororg", "sprk_organization"),
+        // 🔴 ADDED 2026-09-29 (spaarkeai-compose-r8). The 2026-09-05 hoist enumerated SIXTEEN columns;
+        // the table carries SEVENTEEN. `sprk_email` (→ the OOB `email` activity) was missed, so a
+        // document linked ONLY to its source email was invisible to every consumer of this list — the
+        // exact failure mode the hoist's own remarks describe, one column short of being fixed.
+        // Re-verified today against live metadata (EntityDefinitions(sprk_document)/Attributes filtered
+        // to AttributeType eq 'Lookup' — 33 lookups total, 17 of them record links); the other sixteen
+        // casings above were all confirmed correct in the same sweep, including the three lowercase traps.
+        // SchemaName is `sprk_Email` — FETCHED, never derived, per this type's own warning.
+        new("sprk_email", "sprk_Email", "email"),
     ];
 
     /// <summary>Logical names only, in the same order as <see cref="All"/> — the shape a <c>ColumnSet</c>

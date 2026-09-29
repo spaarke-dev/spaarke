@@ -4,7 +4,7 @@
     <title>FR-B04/B05 — Durable lifetime follows the session's own retention (incl. Ttl == -1 filed = indefinite); availability becomes server-authoritative</title>
     <phase>6 Track B — Durable Session Files</phase>
     <gate>blocked-on-060</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Retention semantics govern data deletion; the `-1` filed case must not be mis-read as "expired".</rigor-reason>
     <model-tier>opus</model-tier>

@@ -40,15 +40,20 @@ public class ComposeServiceDocumentLinkVocabularyTests
     }
 
     [Fact]
-    public void DocumentAssociationLookupAttributes_ContainsAllSixteenLiveVerifiedColumns()
+    public void DocumentAssociationLookupAttributes_ContainsAllSeventeenLiveVerifiedColumns()
     {
         // Belt-and-suspenders: even if some future change made the equality check above pass by
         // coincidence (e.g. both sides forked identically), this independently pins the count and the
-        // two columns the original two-copy vocabulary was missing.
-        ComposeService.DocumentAssociationLookupAttributes.Should().HaveCount(16);
+        // columns successive incomplete vocabularies were missing.
+        //
+        // 16 → 17 on 2026-09-29 (spaarkeai-compose-r8): sprk_email was absent from the 2026-09-05
+        // hoist's own live-metadata sweep. Same failure mode as the two it replaced, one column deep.
+        ComposeService.DocumentAssociationLookupAttributes.Should().HaveCount(17);
         ComposeService.DocumentAssociationLookupAttributes.Should().Contain("sprk_relatedinvoice",
             "invisible to both pre-hoist copies — a document linked ONLY via this column was unreachable");
         ComposeService.DocumentAssociationLookupAttributes.Should().Contain("sprk_relatedworkassignment",
             "invisible to both pre-hoist copies — a document linked ONLY via this column was unreachable");
+        ComposeService.DocumentAssociationLookupAttributes.Should().Contain("sprk_email",
+            "invisible to the hoist as well — a document linked ONLY to its source email was unreachable");
     }
 }
