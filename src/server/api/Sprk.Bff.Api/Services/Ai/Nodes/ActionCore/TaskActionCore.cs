@@ -47,6 +47,14 @@ internal sealed class TaskActionCore
     private static readonly Guid EventTypeTaskId = new("124f5fc9-98ff-f011-8406-7c1e525abd8b");
 
     /// <summary>
+    /// <c>sprk_event.statuscode</c> = Open. MUST match <c>DailyBriefingCollector</c>'s own
+    /// <c>EventStatusOpen</c> — the briefing's Upcoming/Overdue task channels filter on exactly this value,
+    /// so a task created with any other status cannot be surfaced. Live option set: Draft(1) /
+    /// Open(659490001) / Completed(659490002) / Cancelled(659490004).
+    /// </summary>
+    private const int EventStatusOpen = 659490001;
+
+    /// <summary>
     /// A caller-supplied regarding (polymorphic on the OOB task) maps to <c>sprk_event</c>'s TYPED regarding
     /// lookup for that target entity. This is <c>sprk_event</c>'s OWN regarding family — it differs from the
     /// <c>sprk_communication</c> <c>RegardingFieldMap</c> (e.g. <c>contact</c> → <c>sprk_regardingcontact</c> here vs
@@ -98,6 +106,15 @@ internal sealed class TaskActionCore
         entity["sprk_eventname"] = input.Subject;
         // Event type = Task — the discriminator that makes this sprk_event a task.
         entity["sprk_eventtype_ref"] = new EntityReference(EventTypeRefEntity, EventTypeTaskId);
+        // 🔴 Added 2026-09-29 (spaarke-ontology-platform-r1): set the status EXPLICITLY to Open.
+        // Without this the row took sprk_event's default statuscode of 1 (Draft), and
+        // DailyBriefingCollector's task channels filter `sprk_eventtype_ref = Task AND statuscode = Open
+        // (659490001)` — so EVERY task this core created was invisible to the briefing that exists to
+        // surface it. 49 sprk_event rows in spaarkedev1 were sitting in Draft when this was found.
+        // "Draft" means a task whose authoring is unfinished; a task the system creates FOR someone to act
+        // on is Open by definition. Open pairs with statecode 0 (Active) — verified against the live
+        // option set, which is Draft(1) / Open(659490001) / Completed(659490002) / Cancelled(659490004).
+        entity["statuscode"] = new OptionSetValue(EventStatusOpen);
 
         if (input.Description is not null)
             entity["sprk_description"] = input.Description;

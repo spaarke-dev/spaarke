@@ -421,7 +421,15 @@ public class DailyBriefingCollector : ICodedWorkflow
             KindLabel: "Work Assignment", IncludeStateFilter: true, ScopeToOwner: false),
         // Event has both sprk_duedate and sprk_finalduedate; use sprk_finalduedate first,
         // fall back to sprk_duedate. This mirrors QueryUpcomingTasksAsync's precedence.
-        new(EntityEvent, "sprk_eventid", "sprk_eventname", "sprk_eventdescription",
+        // 🔴 Fixed 2026-09-29 (spaarke-ontology-platform-r1): the description column was
+        // "sprk_eventdescription", which DOES NOT EXIST on sprk_event — the real column is
+        // "sprk_description", exactly as every sibling entry in this list already uses. The bad column made
+        // Dataverse reject the whole retrieve ("'sprk_Event' entity doesn't contain attribute with Name =
+        // 'sprk_eventdescription'"), so this channel threw on every briefing run and contributed nothing.
+        // sprk_event is where Spaarke TASKS live (AP-14), so the effect was that the briefing could not see
+        // tasks at all. Found in App Insights while diagnosing why an authorized RI action produced no
+        // briefing entry.
+        new(EntityEvent, "sprk_eventid", "sprk_eventname", "sprk_description",
             DueDateColumn: "sprk_finalduedate", FallbackDueDateColumn: "sprk_duedate",
             KindLabel: "Task", IncludeStateFilter: false, ScopeToOwner: false),
         // R7 W12 fix (2026-07-01): todos scoped to `owninguser = systemUserId` to match the

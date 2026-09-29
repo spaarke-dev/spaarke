@@ -85,7 +85,11 @@ public class CreateTaskNodeExecutorSeamTests
         captured!.LogicalName.Should().Be("sprk_event");
         captured.Attributes.Keys.Should().BeEquivalentTo(new[]
         {
-            "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid"
+            // statuscode added 2026-09-29: TaskActionCore now sets Open (659490001) EXPLICITLY, because
+            // the sprk_event default is Draft(1) and DailyBriefingCollector's task channels filter on
+            // statuscode = Open -- so a Draft task is invisible to the briefing meant to surface it.
+            "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid",
+            "statuscode"
         });
         captured.GetAttributeValue<string>("sprk_eventname").Should().Be("Review contract");
         captured.GetAttributeValue<string>("sprk_description").Should().Be("Please review the uploaded contract.");
