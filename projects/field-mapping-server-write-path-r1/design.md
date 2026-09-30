@@ -1,7 +1,8 @@
 # Field Mapping → Server-Side Write Path — R1 — Design
 
-> **Status**: DRAFT for owner review. Next step: `/design-to-spec` → `/project-pipeline`.
-> **Date**: 2026-09-25
+> **Status**: REVIEWED 2026-09-29. Owner decisions recorded in §7. Next step: `/design-to-spec` → `/project-pipeline`.
+> **Date**: 2026-09-25 (review and decisions 2026-09-29)
+> **Worktree**: `C:\code_files\spaarke-wt-field-mapping-server-write-path-r1`, branch `work/field-mapping-server-write-path-r1`. This project is separate from word-add-in-r1 and has its own worktree.
 > **Origin**: the ADR-002 review of 2026-09-25 (owner-approved, root CLAUDE.md §6.5 Path C plus a clarification). Decision record: [`docs/adr/ADR-002-no-heavy-plugins.md`](../../docs/adr/ADR-002-no-heavy-plugins.md). Architecture: [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../../docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
 > **Invariant-registry rows owned by this project**: **I-3** (creation-time field mapping) and **I-5** (search-index default). It also builds the shared pipeline that **I-1** (core-ancestor stamp, owned by UAC-r2) and **I-6** (record owner, owned by word-add-in-r1) plug into.
 
@@ -63,7 +64,7 @@ The owner reviewed ADR-002 on 2026-09-25 against current Microsoft and MVP guida
 
 | Engine | Location | Semantics | Used by |
 |---|---|---|---|
-| **A. Client TS** | `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts` (621 lines) — `applyFieldMappings()` | Full: Copy (scalar + lookup), Default, Concat, Template; `ExecutionOrder`; failures are warnings; `sprk_expression` extension seam | **8 wizard services**: `matterService`, `projectService`, `eventService`, `todoService`, `invoiceService`, `workAssignmentService`, `reportCardService`, `CreateAnalysisWizardWidget` |
+| **A. Client TS** | `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts` (621 lines) — `applyFieldMappings()` | Full: Copy (scalar + lookup), Default, Concat, Template; ordered by `priority` (the BFF maps `sprk_executionorder` to `Priority`, `FieldMappingEndpoints.cs:368`); failures are warnings; `sprk_expression` extension seam | **8 wizard services**: `matterService`, `projectService`, `eventService`, `todoService`, `invoiceService`, `workAssignmentService`, `reportCardService`, `CreateAnalysisWizardWidget` (in `Spaarke.AI.Widgets`; **two** chained calls: parent → `sprk_analysis` at :902, then `sprk_analysis` → `sprk_communication` at :952) |
 | **B. BFF push** | `Api/FieldMappings/FieldMappingEndpoints.cs` — `ApplyMappingRule` behind `POST /api/v1/field-mappings/push` | **Copy + basic coercion only** (no Default/Concat/Template) | `UpdateRelatedButton` PCF, `sprk_fieldmapping_push.js` ribbon (update-time refresh, ≤500 children) |
 | **C. BFF create-time port** | `Services/Office/CreateTimeFieldMapping.cs` (363 lines, **branch `work/spaarkeai-word-add-in-r1` @ 949bfa123, not on master**), called by `RecordCreationService.CreateAsync` (646 lines) | Full, mirrors A. Server-side differences: typed Default conversion; Copy into text renders labels/Yes-No/ISO dates; null source skipped | Office add-in Quick Create (Matter, Project) |
 
@@ -74,8 +75,8 @@ Engines A and C already produce different results in edge cases (text rendering 
 | Path | Why no mapping |
 |---|---|
 | Office add-in **document save** (`OfficeDocumentPersistence`) | Server path; not wired to any engine (branch and master) |
-| Office add-in **Quick Create** on master | Name + description only (fixed for Matter/Project on the word branch; Invoice still minimal) |
-| Invoice created by **extraction** | No client hook |
+| Office add-in **Quick Create** on master | Name, description (Matter/Project only) and `ownerid` = user; no mapping (fixed for Matter/Project on the word branch; Invoice still name-only) |
+| Invoice created by **extraction** | **A server-side create** that runs no mapping: `Services/Finance/InvoiceReviewService.cs:202/254` upserts `sprk_invoice` through `IFieldMappingDataverseService.UpdateRecordFieldsAsync`, which is a Dataverse writer, not the engine. It is the simplest path to wire (a direct engine call, no new endpoint). |
 | Daily Briefing **inline To Do** (`useInlineTodoCreate.ts`) | Not a wizard |
 | Communication `ConnectionsWriteHandler`, Notepad memo, EventDetailSidePane To Do | Not wizards |
 | OOB forms / quick-create, Excel/Data Import, customer Power Automate, integrations | Not product surfaces (WP-5 territory) |
@@ -85,6 +86,8 @@ Engines A and C already produce different results in edge cases (text rendering 
 ### 2.3 Why the wizards can't simply "call the server engine"
 
 Wizards write through `IDataService` bound to the **`Xrm.WebApi` adapter**. A client BFF adapter exists (`bffDataServiceAdapter.ts`, which POSTs to `/api/dataverse/{entity}`), but **the BFF has no generic create endpoint behind it**: `Api/Dataverse/RecordEndpoints.cs` maps only `GET /record/{entity}/{id}`. Moving creation server-side therefore means **building BFF create endpoints**, not relocating a function call.
+
+The adapter's `createRecord`, `updateRecord` and `deleteRecord` (`bffDataServiceAdapter.ts:100, 130-133`) all target routes that **do not exist**, so today they would fail at runtime. The spec must decide whether to back the adapter with real routes (the natural wizard-migration seam) or delete it. It must not be left pointing at nothing.
 
 ---
 
@@ -125,11 +128,11 @@ Wizard: navigates to the record → page loads WITH the mapped fields
 
 | WS | Scope | Notes |
 |---|---|---|
-| **W1 — Canonical engine** | Promote `CreateTimeFieldMapping` + `RecordCreationService` out of `Services/Office/` into a neutral namespace (e.g. `Services/RecordCreation/`, `Services/FieldMapping/`). Remove Office-specific assumptions. Close the A↔C semantic gaps by **written decision** (typed defaults, text rendering, null handling), not by accident. Include the `sprk_expression` seam. | Starts from word-add-in-r1 code once merged. If that merge slips, coordinate the move with that project rather than forking. |
+| **W1 — Canonical engine** | Promote `CreateTimeFieldMapping` + `RecordCreationService` out of `Services/Office/` into a neutral namespace (e.g. `Services/RecordCreation/`, `Services/FieldMapping/`). Remove Office-specific assumptions. Close the A↔C semantic gaps by **written decision** (typed defaults, text rendering, null handling), not by accident. Include the `sprk_expression` seam. | Starts from word-add-in-r1 code once merged (§9: that code is **not on master**; draft PR #960). If that merge slips, coordinate the move with that project rather than forking. |
 | **W2 — One engine for `/push`** | Replace `ApplyMappingRule` (Copy-only) with the canonical engine in update mode. | Update-time push gains Default/Concat/Template, a behaviour change to review with the owner (§7 Q3). |
-| **W3 — BFF create endpoints + wizard migration** | Typed create endpoints for the invariant-bearing tables the 8 wizards create (`sprk_matter`, `sprk_project`, `sprk_event`, `sprk_todo`, `sprk_invoice`, `sprk_workassignment`, report card, analysis). Switch each wizard's create call to the BFF. Keep `applyFieldMappings` **only as preview**, or drop it if the server response is enough. | Migrate one wizard at a time behind the shared `IDataService` seam. Matter first (reference), then the rest. |
+| **W3 — BFF create endpoints + wizard migration** | Typed create endpoints for the invariant-bearing tables the 8 wizards create (`sprk_matter`, `sprk_project`, `sprk_event`, `sprk_todo`, `sprk_invoice`, `sprk_workassignment`, report card, `sprk_analysis` **plus the chained `sprk_communication`**, created in the same request/changeset). Switch each wizard's create call to the BFF. Keep `applyFieldMappings` **only as preview** (Q4 decision). Resolve the `bffDataServiceAdapter` dead routes (§2.3). | Migrate one wizard at a time behind the shared `IDataService` seam. Matter first (reference), then the rest. |
 | **W4 — Other product create paths** | Office **document save** through the pipeline (field mapping + ancestor stamp + search index), with the association set **in the create**, not a follow-up update. Invoice Quick Create, the Daily Briefing inline To Do, and the other non-wizard product creates listed in §2.2. | Coordinate document save with word-add-in-r1 (its guidance note, gaps G1–G3). |
-| **W5 — Non-product safety net** | Change signal: a no-code service-endpoint step on invariant-bearing tables → Service Bus → BFF worker that runs the **same** pipeline in fill-only mode. Plus an ADR-036 reconciliation job for backfill. | May be split into its own project if W1–W4 are large. The BFF currently learns about Dataverse changes only by polling, so this channel is new and benefits every invariant. |
+| **W5 — Non-product safety net** | Change signal: a no-code service-endpoint step on invariant-bearing tables → Service Bus → handler that runs the **same** pipeline in fill-only mode. Plus a reconciliation job for backfill. **Host is decided per ADR-052** (BFF vs Azure Function vs Container Apps Job, on stated signals). If it runs in the BFF: the queue consumer is an ADR-004 `IJobHandler` and the backfill an ADR-036 `IScheduledJob`. **No new hand-rolled `BackgroundService`** (ADR-052 MUST NOT). If a Function is chosen, it is the first Function for its tenancy model: 🔔 owner approval, and a dedicated setup task (ADR-052 "When a Function is chosen"). | **In scope (owner Q5, 2026-09-29).** The BFF currently learns about Dataverse changes only by polling (`RecordSyncJob`, a timer `BackgroundService`, off by default), and no consumer of Dataverse service-endpoint messages exists (the provisioning control plane only *registers* endpoints). So this channel is new, and it benefits every invariant. |
 | **W6 — Registry, docs, retirement** | Update invariant-registry rows I-3/I-5 to done. Rewrite `SPAARKE-FIELD-MAPPING-FRAMEWORK.md` for the server engine. Remove client-enforcement code paths. Add a guard so a new wizard can't reintroduce client-only enforcement (arch/lint rule). | Include the §11 duplicate-engine removal evidence. |
 
 ### 4.3 Authorization and identity — the main design question
@@ -139,11 +142,24 @@ Today wizard creates run **as the user** through `Xrm.WebApi`, so Dataverse enfo
 - stamp `createdby` as the BFF app user;
 - land records in the root business unit. word-add-in-r1 task 080 already hit this: every BFF-created document was owned by the app user in the root BU.
 
-The spec must choose, per ADR-028/ADR-008:
-- **(a) Impersonated create** (`CallerId` / `MSCRMCallerID` = the caller's `systemuserid`). Dataverse enforces the user's privileges and audit shows the user; `RecordEndpoints.cs` already uses an impersonated-`CallerId` read path. **Recommended default.**
-- **(b) App-only create plus explicit endpoint authorization** (UAC evaluator) plus `RecordOwnershipResolver` for the owner. This is what word-add-in-r1 did.
+The options were:
+- **(a) Impersonated create** (`CallerId` / `MSCRMCallerID` = the caller's `systemuserid`).
+- **(b) App-only create plus explicit endpoint authorization** plus `RecordOwnershipResolver` for the owner.
 
-Either way, the endpoint must verify the caller can read the **source parent** used for mapping, so mapping is not a read-escalation channel.
+**Decision (owner Q2, 2026-09-29): follow the latest product approach for record ownership, which is (b).** The rule is decision **D-11** (UAC-r2 `current-task.md`), implemented by word-add-in-r1 task 080 (`notes/080-record-ownership.md`) and listed as invariant **I-6**:
+- **Identity.** The create runs **app-only** under the BFF managed identity. ADR-028 A5 / ADR-052 limit impersonation to the shared fail-closed `Spaarke.Dataverse` helper for work the user started, and neither ADR requires creates to be impersonated.
+- **Owner.** `ownerid` = the **default owner team** (`isdefault=true AND teamtype=0`) of:
+  1. the **target/parent record's** business unit; or, if the target is named but unreadable, **refuse** (no fallback);
+  2. the **acting user's** business unit, but only when no target is named (owner decision 2026-09-25);
+  3. neither available: **refuse**. Never app-owned; `owningbusinessunit` follows from the team.
+- **Authorization.** Because Dataverse no longer enforces the user's privileges under app-only, the endpoint **must** check them explicitly **before** the create:
+  - the caller may create this entity type;
+  - the caller can read the **source parent** used for mapping, so mapping is not a read-escalation channel. `QuickCreateSourceAccessFilter` on the word branch is the reference.
+- **Audit.** `createdby` is the BFF app user. The spec must say how the acting user is recorded, e.g. a `createdonbehalfby`-style field or an audit log entry, and treat this as an explicit accepted trade-off.
+
+**State of the owner resolver (2026-09-29).** `RecordOwnershipResolver.ResolveOwningTeamAsync` exists **on the word-add-in-r1 branch only**, and **nothing calls it yet**: task 080 is paused on UAC-r2 task 043 and word task 095. Every BFF create on master, including word's `RecordCreationService`, still sets `ownerid` to the **user**. This project is therefore the first broad consumer of I-6, and it depends on the resolver reaching master (§9).
+
+**Deliberate exceptions to preserve.** Task 080 found that team ownership would **widen** access for Notifications, `NotificationActionCore` and `DirectThreadAccessService`, so those stay user-owned. None of them is in this project's table scope; the spec should say so.
 
 ---
 
@@ -154,15 +170,17 @@ Either way, the endpoint must verify the caller can read the **source parent** u
 | ADR-002 | None. This project *is* the ADR-002 WP-1…WP-4 implementation for I-3/I-5. | Comply |
 | `DATA-ACCESS-DECISION-CRITERIA.md` | Previously allowed single-record creates via `Xrm.WebApi`. The 2026-09-25 WP-3 row now routes invariant-bearing tables to the BFF. | Comply (already amended) |
 | ADR-010 (DI minimalism) | New registrations (pipeline, endpoints). | Engine stays `internal static` (no DI). Count registrations in the spec. |
-| ADR-028 / ADR-008 | Impersonation vs app-only (§4.3). | Spec decision. Default (a). |
+| ADR-028 / ADR-008 | Impersonation vs app-only (§4.3). | **Decided: app-only + explicit authz + I-6 team owner** (D-11). Comply: impersonation not used for creates. |
 | ADR-012 (shared lib) | Client `FieldMappingService` shrinks to preview. | Comply. The package boundary is unchanged. |
-| ADR-001 | W5 worker runs as a BFF BackgroundService, not an Azure Function. | Comply |
+| **ADR-052** (workload placement; supersedes ADR-001's Functions provisions) | W5 host. Earlier draft said "BFF BackgroundService, Functions out per ADR-001", which is stale. | Decide the host per workload in the spec's Placement Justification. BFF path = `IJobHandler` + `IScheduledJob`; no hand-rolled `BackgroundService`. A Function needs 🔔 owner approval. |
+| ADR-004 / ADR-036 | W5 queue consumer + backfill (if BFF-hosted). | Comply: idempotent per unit of work, fill-only. |
+| ADR-038 | Test strategy. | Per-path integration tests + the create/push parity test belong in KEEP paths (`tests/integration/**`, seam tests for the pipeline). |
 
 ---
 
 ## 6. Placement Justification (BFF §10) and component justification (§11)
 
-**Placement.** In the BFF. Creation must apply several server-owned invariants (I-1, I-3, I-4, I-5, I-6) in one request under Spaarke auth, and it is called by code pages, add-ins and workers alike. There is no other server runtime (no plugins, per ADR-002; Functions are out per ADR-001). This is CRUD code with no AI dependency, so the ADR-013 facade rule is not triggered.
+**Placement.** In the BFF. Creation must apply several server-owned invariants (I-1, I-3, I-4, I-5, I-6) in one request under Spaarke auth, and it is called by code pages, add-ins and workers alike. There is no other synchronous server runtime: no plugins, per ADR-002, and ADR-052 forbids user-facing endpoints in Functions. W5's asynchronous host is a separate per-workload ADR-052 decision (§5). This is CRUD code with no AI dependency, so the ADR-013 facade rule is not triggered.
 
 | New surface | Existing (grep evidence) | Extend instead? | Cost of doing nothing |
 |---|---|---|---|
@@ -175,13 +193,15 @@ Either way, the endpoint must verify the caller can read the **source parent** u
 
 ---
 
-## 7. Open questions for the owner
+## 7. Owner decisions (2026-09-29)
 
-1. **Q1 — Sequencing with word-add-in-r1.** Wait for its merge and promote its code (recommended), or co-develop on a shared branch?
-2. **Q2 — Identity model** (§4.3): impersonated create (recommended) vs app-only plus explicit authorization?
-3. **Q3 — `/push` behaviour change**: once on the canonical engine, update-time push also applies Default/Concat/Template, not just Copy. Accept, or restrict push to Copy?
-4. **Q4 — Client preview**: keep a live preview in the wizard (needs a BFF "preview" call or retains the TS engine as preview-only), or rely on the post-create page showing the values?
-5. **Q5 — W5 in or out**: include the non-product change-signal channel here, or split it into its own project (it serves all invariants, not just field mapping)?
+| Q | Question | Decision |
+|---|---|---|
+| **Q1** | Sequencing with word-add-in-r1 | **Separate project, own worktree** (created 2026-09-29). word-add-in-r1 is related but independent. W1 still *promotes* its `RecordCreationService` / `CreateTimeFieldMapping` / `RecordOwnershipResolver` rather than forking them. Tasks that need that code are gated on it reaching master (§9); everything else proceeds now. |
+| **Q2** | Identity model | **Follow the latest ownership approach**: app-only create + explicit authorization + I-6 BU-default-team owner via `RecordOwnershipResolver` (§4.3). |
+| **Q3** | `/push` behaviour | **All four mapping types** (Copy, Default, Concat, Template) on update-time push. This is a behaviour change for existing profiles with non-Copy rules: the spec must list affected profiles and call out the change in the release notes. |
+| **Q4** | Client preview | **Default taken:** keep the TypeScript engine as a **preview-only** tool; it has no enforcement role (guard in W6). No BFF preview endpoint. Revisit if preview/server drift shows up in the parity tests. |
+| **Q5** | W5 in or out | **In scope.** Host per ADR-052 (§4.2 W5, §5). |
 
 ---
 
@@ -191,7 +211,9 @@ Either way, the endpoint must verify the caller can read the **source parent** u
 - 100% of the §2.2 **product** create paths apply mappings server-side, verified by an integration test per path using the same profile fixture.
 - For a record created from any wizard, mapped fields are present in the **first** retrieve after create (no async gap).
 - A parity test: the same profile + source gives identical output from create-time and push-time.
-- Non-product create (W5, if in scope): fields filled within N seconds, fill-only (a caller-set value is never overwritten).
+- Non-product create (W5): fields filled within N seconds (N set in the spec), fill-only (a caller-set value is never overwritten), idempotent under redelivery.
+- Every BFF create in scope sets `ownerid` to the I-6 business-unit default team (or refuses), never the user or the app. Verified by test, including the target-unreadable refusal.
+- `bffDataServiceAdapter` write methods either target real routes or are removed.
 - Invariant registry rows I-3 and I-5 marked done. `SPAARKE-FIELD-MAPPING-FRAMEWORK.md` rewritten.
 
 ---
@@ -200,21 +222,21 @@ Either way, the endpoint must verify the caller can read the **source parent** u
 
 | Project | Relationship |
 |---|---|
-| **spaarkeai-word-add-in-r1** | **Upstream.** Source of `RecordCreationService`, `CreateTimeFieldMapping`, `RecordOwnershipResolver`; document-save gaps G1–G3 (`projects/spaarkeai-word-add-in-r1/notes/adr-002-write-path-guidance-2026-09-25.md` in that worktree). |
-| **unified-access-control-r2** | **Peer.** Owns `CoreAncestorResolver` (I-1) and the proposed secure-child isolation (I-2). W3 fixes UAC's 10 unstamped client create paths as a side effect. Guidance: `projects/unified-access-control-r2/notes/adr-002-write-path-guidance-2026-09-25.md` (in that worktree). |
+| **spaarkeai-word-add-in-r1** | **Upstream, separate project.** Source of `RecordCreationService`, `CreateTimeFieldMapping`, `RecordOwnershipResolver`; document-save gaps G1–G3 (`projects/spaarkeai-word-add-in-r1/notes/adr-002-write-path-guidance-2026-09-25.md` in that worktree). **Status 2026-09-29:** 118/130 tasks, draft PR #960; none of the three types is on master. Task 080 (owner resolver wiring) is **paused** on UAC-r2 task 043 + word task 095. The spec must mark which tasks are gated on this merge. |
+| **unified-access-control-r2** | **Peer.** Owns `CoreAncestorResolver` (I-1) and is the recommended owner of secure-child isolation (I-2, currently unowned and fail-OPEN). **I-2 is out of scope here**, but the pipeline must leave a slot for it. Owns decision D-11 (team ownership). W3 fixes UAC's 10 unstamped client create paths as a side effect. Guidance: `projects/unified-access-control-r2/notes/adr-002-write-path-guidance-2026-09-25.md` (in that worktree). |
 | **set-regarding-and-field-mapping-resolver-r2** | **Predecessor.** Built the client engine and the creation-time amendment; its "no client hook, so defer" boundary is superseded. |
 | **ci-cd-unit-test-remediation-r1** | Tier-1 now carries the ADR-002 zero-plugin guard. No workflow edits are expected from this project. |
 
 ## 10. Next steps
 
-1. Owner answers Q1–Q5.
+1. ~~Owner answers Q1–Q5.~~ Done 2026-09-29 (§7).
 2. `/design-to-spec` for this folder.
 3. `/project-pipeline`: register in `projects/INDEX.md` with the hot-path declaration below.
 
 ```xml
 <hot-path-declaration>
   <bff>Y</bff>                   <!-- create endpoints, RecordCreationService, engine, worker -->
-  <spaarkeai>N</spaarkeai>       <!-- CreateAnalysisWizardWidget lives in Spaarke.AI.Widgets, not src/solutions/SpaarkeAi — confirm in spec -->
+  <spaarkeai>N</spaarkeai>       <!-- verified 2026-09-29: CreateAnalysisWizardWidget is at src/client/shared/Spaarke.AI.Widgets/, not src/solutions/SpaarkeAi -->
   <ci-workflows>N</ci-workflows>
   <skill-directives>N</skill-directives>
   <root-claude-md>N</root-claude-md>

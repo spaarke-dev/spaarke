@@ -11,11 +11,23 @@ namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
 /// record-link vocabulary (unified-access-control-r2, 2026-09-05). Before the hoist, two independent
 /// copies of this list lived in <c>Sprk.Bff.Api</c> (<c>AttachmentDocumentAssociationRung</c> and
 /// <c>ComposeService</c>), both the SAME incomplete six entries. These tests pin the COMPLETE,
-/// live-metadata-verified set (16 columns) and — critically — the exact per-column schema-name casing,
+/// live-metadata-verified set (17 columns) and — critically — the exact per-column schema-name casing,
 /// since the <c>sprk_related*</c> family is NOT uniformly cased and a convention-based rebuild
 /// (<c>$"sprk_Related{type}"</c>) silently produces the wrong value for 3 of the 12 <c>related</c>
 /// columns. Every expected value here was verified against live Dataverse metadata on <c>spaarkedev1</c>
 /// (2026-09-05) — see <c>projects/unified-access-control-r2/notes/document-link-vocabulary-hoist.md</c>.
+///
+/// <para>
+/// ⚠️ <b>Widened 16 → 17 on 2026-09-29 by <c>spaarkeai-compose-r8</c></b> (cross-project change to
+/// another project's component — disclosed). The 2026-09-05 sweep enumerated sixteen columns; the table
+/// carries seventeen. <c>sprk_email</c> (→ the OOB <c>email</c> activity, SchemaName <c>sprk_Email</c>)
+/// was absent, so a document linked ONLY to its source email stayed invisible to every consumer — the
+/// precise failure mode the hoist was written to end, one column short. Re-verified the same way
+/// (<c>EntityDefinitions(sprk_document)/Attributes</c> filtered to <c>AttributeType eq 'Lookup'</c>:
+/// 33 lookups, 17 of them record links); the other sixteen casings were all re-confirmed correct in the
+/// same sweep, including the three lowercase traps. The <c>sprk_Email</c> casing was FETCHED, not
+/// derived, per this vocabulary's own warning.
+/// </para>
 ///
 /// KEEP path: tests/unit/domain/** (ADR-038 §2 #7 — pure domain mapping logic; no I/O, no mocks).
 /// </summary>
@@ -41,16 +53,22 @@ public class DocumentLinkFieldsTests
         yield return new object[] { "sprk_relatedservicerequest", "sprk_RelatedServiceRequest", "sprk_servicerequest" };
         yield return new object[] { "sprk_relatedtodo", "sprk_RelatedToDo", "sprk_todo" };
         yield return new object[] { "sprk_relatedvendororg", "sprk_relatedvendororg", "sprk_organization" };
+        // 17th column, added 2026-09-29 — see the class remarks.
+        yield return new object[] { "sprk_email", "sprk_Email", "email" };
     }
 
     [Fact]
-    public void All_ContainsExactlySixteenColumns_MatchingLiveMetadata()
+    public void All_ContainsExactlySeventeenColumns_MatchingLiveMetadata()
     {
-        // 6 prior (incomplete) + 10 added by the 2026-09-05 hoist. A count drift in EITHER direction
-        // means either a column silently disappeared (documents linked only through it become
-        // invisible again) or an unverified one was added (see the per-column casing test below for
-        // why an unverified addition is dangerous).
-        DocumentLinkFields.All.Should().HaveCount(16);
+        // 6 prior (incomplete) + 10 added by the 2026-09-05 hoist + sprk_email, which that hoist missed
+        // (found 2026-09-29). A count drift in EITHER direction means either a column silently
+        // disappeared (documents linked only through it become invisible again) or an unverified one was
+        // added (see the per-column casing test below for why an unverified addition is dangerous).
+        //
+        // Note what the 16 → 17 correction shows: pinning a count does NOT prove the set is complete —
+        // it only pins it against CHANGE. Completeness comes from re-querying live metadata, which is
+        // why both the hoist and this correction cite the query rather than each other.
+        DocumentLinkFields.All.Should().HaveCount(17);
     }
 
     [Theory]
