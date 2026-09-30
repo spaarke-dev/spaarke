@@ -2,7 +2,14 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
-  roots: ['<rootDir>/shared'],
+  // `word` added by task 037 (FR-17): `word/commands/__tests__/commands.test.ts` is the FIRST test
+  // file outside `shared/` in this package, so it was invisible to jest until this widened. Verified
+  // safe: no `.test.ts(x)` file existed anywhere outside `shared/` before this change (checked via a
+  // repo-wide find), so this newly discovers ONLY task 037's new suite — no other dormant suite is
+  // surfaced. `outlook` is included for symmetry (its `commands/` has no test file yet, but the same
+  // command-context testing pattern belongs there too, and the roots list should not need touching
+  // again for that follow-up).
+  roots: ['<rootDir>/shared', '<rootDir>/word', '<rootDir>/outlook'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   transform: {
     '^.+\\.tsx?$': [

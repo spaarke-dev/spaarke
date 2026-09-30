@@ -1,82 +1,53 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-29, session 26 — 123 + 125 DONE; TASK 126 (#1021) STARTING. PR #1029 open and GREEN.**
-> Branch `work/unified-access-control-r2`, synced with master (merge `26327f130`), all pushed.
+> **Last Updated**: **2026-09-30, session 26 — MERGE OF origin/master STAGED (resolution complete, all tests green), NOT YET COMMITTED.**
+> Branch `work/unified-access-control-r2`. PR #1029 open.
 >
 > ## ⚡ QUICK RECOVERY — READ THIS FIRST
 >
 > | | |
 > |---|---|
-> | **Task** | **126** — security-trim `GET /api/office/search/entities` (#1021). POML filed at `tasks/126-office-entity-search-security-trimming.poml`, opus/xhigh. |
-> | **Status** | starting |
-> | **Next Action** | Re-verify the exposure, then design the delegated-query surface by extending what `DataverseAccessDataSource` already proves works. |
-> | **Owner-set order** | #1021 → #1020 → #1022. Owner confirmed 2026-09-29. |
+> | **State** | `git merge origin/master` in progress (MERGE_HEAD present), every conflict resolved and staged. Verified on the merged tree: BFF + 4 test projects build; **ArchTests 337/337; unit 13,018 pass / 0 fail**; drift 126/126. |
+> | **Next action** | Commit the merge → push → PR #1029 CI terminal → squash-merge → deploy BFF to dev. Owner authorized "proceed with merge and deploy". |
+> | **Then** | Report the six-case UAC synopsis + the verified defect list (workflow `uac-defect-verification` was running); notify the word-add-in-r1 session (see below). |
 >
-> ### 🔴 THE PROJECT IS NOT DONE DESPITE 122/122 ✅
-> All authored tasks are complete, but a session-26 audit found **five LIVE authorization holes** with open
-> issues and no tasks. Do not read the task index as a completion signal.
+> ### 🔴 What the 2026-09-30 merge decided (owner-approved) — do not re-litigate
+> master brought ~306 commits from `spaarkeai-word-add-in-r1`, which had INDEPENDENTLY fixed three of this
+> project's security issues. Owner chose master's version each time:
+> - **#1021 `/search/entities`** → word-add-in-r1 **062** (impersonated read) kept; our **126** (OBO) dropped.
+>   Reason: ADR-028 Amendment A5 + our own task 036 point to impersonation for "what may this user see" sets.
+> - **#1022 `POST /todo`** → **064** `TodoSourceAccessFilter` kept (gates all 4 ids); our **128** dropped.
+> - **Synthetic job + `JobOwnershipFilter` fail-open** → **067** kept; our **120** production fixes dropped.
+> - **SURVIVES from us**: task **127** (#1020 communications IDOR — master never fixed it); the
+>   `IDataverseUserClient` relocation + unconditional registration (now load-bearing for 127); the `/save-debug`
+>   fix; task 120's route census; 123/125/129.
 >
-> ### Two decisions OPEN with the owner (neither gates task 126)
-> 1. **Favorites storage** — the `#229` TODO names `sprk_userfavorite`, which **does not exist** anywhere.
->    `sprk_navitem` does, is UserOwned and already backs Bookmarks. Recommendation: reuse it (CLAUDE.md §11).
-> 2. **Delete `ScopeManagementService`?** Zero production callers; superseded by `ScopeResolverService` →
->    `AnalysisActionService` (real Dataverse). Deleting removes 35% of #229 plus ~20 tests.
+> ### Fixes applied during resolution (all verified by the audit workflow + tests)
+> - One incoherent auto-merge caught by the compiler (duplicate SSE-test block) + a second found by the audit
+>   (job-status test doc from our side on master's body).
+> - Census: credited `TodoSourceAccessFilter` + `QuickCreateSourceAccessFilter`; Permanent waiver for master's new
+>   `/search/matter-types` (reference data); `/quickcreate` waiver deleted (stale once its source read was gated);
+>   `/search/entities` waiver rewritten for impersonation; Office/communications/FileAccess descriptions corrected.
+> - Task 121's `Secure Record` rename re-applied at 5 comment sites the merge undid.
+> - `EntityAccessFilter`: dead task-128 `CreateTodoRequest` branch removed; the "filter's reach" warning kept.
+> - Correction recorded: `CallerRecordAccessProbe` NEVER depended on `IDataverseUserClient` (it only mentioned it).
 >
-> ### 🔴 #229 IS NOT A SEPARATE BACKLOG — it IS #1021/#1023/#1024 plus two invoice reads
-> Sizing verified 2026-09-29: the issue body is **~65% stale** (20 live sites not ~30; 2 files deleted;
-> 5 files already FIXED; every line number wrong). **The coupling is the point**: `SearchEntitiesAsync`
-> (task 026) implemented the query WITHOUT the gate and that is exactly why #1021 exists. The arch guard
-> states the rule at `RouteAuthorizationGuardTests.cs:566` — *the gate must land in the same change that
-> makes it return real data.* Recommended re-cut: 5 tasks (A delete ScopeManagement · B invoice handlers ·
-> C search/documents+recent+#1023 · D share/links+attach+#1024 · E KnowledgeDeployment).
+> ### ⚠️ Open risks carried forward
+> 1. **`prvActOnBehalfOfAnotherUser`** on the BFF application user is UNVERIFIED — master's picker (062) fails
+>    closed without it. Task 036 amendment #3 records it.
+> 2. `NoWaiverIsStale` inspects PENDING waivers only — a Permanent waiver can outlive its premise silently (the
+>    `/quickcreate` one did). Guard extension proposed as a follow-up.
+> 3. A dozen pre-existing UAC defects surfaced by the six-case synopsis (CIAM ignores `sprk_issecure`; presence-only
+>    external read gates; external `/dataverse/fetch` has no column filter; anyone-with-Write can mint access;
+>    soft revocation; …). Being adversarially verified; NOT merge regressions.
+> 4. Master-side issues to hand to word-add-in-r1: `JobOwnershipFilter` fallback read always throws (legit owners
+>    404 after in-memory eviction); `RecordOwnershipResolver` comment/duplicate-row issues; `TodoSourceAccessFilter`
+>    remark about `EntityAccessFilter` refusing `sprk_todo`.
 >
-> ### 🔴 #1021 IS NOT A FILTER FIX — verified, do not re-derive
-> No "query as the user" capability exists. Both Dataverse clients are **app-only singletons**, which
-> structurally cannot carry per-request user context (`GraphModule.cs:97`; `DataverseWebApiClient.cs:63`
-> says so outright). `DataverseAccessDataSource` HAS a working OBO exchange (`:219`) but it is **private**
-> and the class exposes only access snapshots (`:268`, `:376`), not a general query.
-> ⚠️ **Forbidden shortcut**: post-filtering app-only results. `TotalCount`/`HasMore` are computed BEFORE
-> any trim (`OfficeService.cs:777-781`), so a denied user still learns how many records match a 2-char
-> substring — a record-enumeration oracle of the shape task 022 removed from bulk download.
->
-> ### #1025 — owner supplied decisive context: document-only saves ARE a real use case
-> So "fail closed" is WITHDRAWN. With no `TargetEntity` the doc goes to
-> `EmailProcessing:DefaultContainerId` (`OfficeService.cs:154-163`) with nothing authorizing the caller
-> against it. Preferred fix **D: authorize the DESTINATION** (the subject changes, it does not disappear)
-> — but D needs a container-level access check that may not exist; there is a record probe, not a
-> container one. If task 126 builds the delegated surface, D becomes cheap; otherwise **C (split route)**.
->
-> ### Deployed this session
-> `Customer__Id=spaarke` set on `spaarke-bff-dev` (verified live). ⚠️ `sprksharedprod-api` in
-> `rg-spaarke-shared-prod` (Model 1 Prod sub) is the RETIRED shared tier, runs multi-tenant, and was
-> deliberately NOT touched — stamping one customer id on a multi-tenant app asserts something false.
->
-
-> ### 🔴 TWO VERIFIED FINDINGS THAT CHANGE THE DESIGN (session 26, checked against source — do not re-derive)
->
-> 1. **Deriving customerId from `WEBSITE_RESOURCE_GROUP` collides with the PLATFORM stamp.**
->    `rg-spaarke-platform-{env}` matches the per-customer shape `rg-spaarke-{customerId}-{env}` exactly,
->    yielding `customerId = "platform"` — a silently-invented customer, which is the very failure class
->    D-14 exists to remove. **Mitigation: a deny-list (`platform`, `shared`) — a match there is UNRESOLVED,
->    not a customer.** `rg-spaarke-shared-{env}` (retired Model 1) has the same shape.
-> 2. **Option D does NOT "remove the breakage entirely" for the CURRENT estate**, which is what D-14 §8
->    claims and what the POML's second escalation trigger rests on. Verified: `Deploy-BffApi.ps1` defaults
->    to `rg-spaarke-dev` (only three dash-segments — never matches) and its examples use
->    `rg-spaarke-platform-prod` (deny-listed). `appsettings.Testing.json` states App Service runs as
->    **Production**, so neither is exempt. ⇒ **Both live stamps need `Customer__Id` set explicitly before
->    this branch deploys.** That is a runbook step, and the value for a non-customer stamp is the OWNER's
->    to choose — do not invent one.
->
-> ### ✅ D-14 §9 question 2 is ANSWERED: NO Model 1 stamp needs retrofitting
-> `model1-shared.bicep` deploys a shared multi-tenant BFF, but D-12 records the shared tier as **never
-> implemented** and the file as a **retired artifact that has not compiled since 2026-08-17**. Its
-> `MULTI_TENANT_MODE: 'true'` setting is **premise rot** — grep finds **zero** consumers in `src/`,
-> despite the Bicep comment claiming it is "consumed by BFF at boot".
->
-> ### Precedent to follow (not to re-invent)
-> `PublicConfigOptionsValidator` is the established env-aware fail-fast shape: short-circuit in
-> Development/Testing so the 30+ test fixtures need no new keys, fail-fast in deployed envs. Cited to
-> `.claude/constraints/bff-extensions.md` §F.2.1.
+> ### Decisions recorded this session
+> - **D-15**: `ScopeManagementService` retired (task 129); favorites live on `sprk_navitem`.
+> - **#229 re-cut** (5 tasks) recommended; task A done (129). Pick-then-fail: the picker trims by Read, save demands
+>   AppendTo — View-Only POA shares grant Read without AppendTo BY DESIGN, so the role grant cannot close it.
 >
 > ### What closed in session 25
 >

@@ -34,22 +34,15 @@ public static class ToolFrameworkExtensions
         // Register lookup choices resolver (scoped: caches per-request, needs IScopeResolverService)
         services.AddScoped<LookupChoicesResolver>();
 
-        // spaarke-ai-architecture-redesign-r1 task 008 (FR-P0-07) — user-OBO Dataverse Web API
-        // boundary for the dataverse.* tool namespace (Describe / ReadQuery / SearchData read
-        // handlers; task-009 write handlers reuse it). Registered HERE, symmetric with the
-        // handler assembly scan below, because the assembly scan unconditionally registers the
-        // Dataverse* handlers whose constructors require IDataverseUserClient — registering the
-        // dependency anywhere else would recreate the asymmetric-registration anti-pattern
-        // (CLAUDE.md §10 F.1). Typed HttpClient per the AnalysisToolService sibling precedent.
-        // The implementation is user-OBO ONLY (fail-closed; no app-only fallback) per the
-        // spec MUST rule audited by task 012.
-        // IDataverseUserClient is registered UNCONDITIONALLY in AddSpaarkeCore (task 126 / #1021).
-        // It used to be registered here, inside the compound AI gate. That was fine while only the
-        // Dataverse* tool handlers consumed it, and became a defect the moment a non-AI caller did:
-        // GET /api/office/search/entities maps unconditionally and needs per-user trimming, so with
-        // the AI gate off the client would have been missing and the endpoint's fail-closed check
-        // would have taken entity search down. See CLAUDE.md §10 F.1 (RB-T028-03..06).
-        // The handlers below still resolve it — it is now strictly more available, never less.
+        // IDataverseUserClient (the user-OBO Dataverse Web API boundary the Dataverse* tool handlers
+        // below require) is registered UNCONDITIONALLY in AddSpaarkeCore, not here. It used to be
+        // registered here, inside the compound AI gate — correct while only these tool handlers consumed
+        // it, and a CLAUDE.md §10 F.1 asymmetric-registration defect once a non-AI caller did. That caller
+        // is /api/office/communications/* (unified-access-control-r2 task 127, #1020), which maps
+        // unconditionally; with the AI gate off, its three handlers could not bind. (Task 126 moved it for
+        // /api/office/search/entities, which spaarkeai-word-add-in-r1 task 062 later reimplemented on an
+        // impersonated read — the communications routes are what keep this registration load-bearing.)
+        // Do NOT move it back behind the gate. The handlers below still resolve it.
 
         // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
         // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent
@@ -95,15 +88,8 @@ public static class ToolFrameworkExtensions
         // Register lookup choices resolver (scoped: caches per-request, needs IScopeResolverService)
         services.AddScoped<LookupChoicesResolver>();
 
-        // Task 008 (FR-P0-07) — same registration as the primary overload so both entry points
-        // produce a resolvable handler graph (Dataverse* handlers ctor-require this client).
-        // IDataverseUserClient is registered UNCONDITIONALLY in AddSpaarkeCore (task 126 / #1021).
-        // It used to be registered here, inside the compound AI gate. That was fine while only the
-        // Dataverse* tool handlers consumed it, and became a defect the moment a non-AI caller did:
-        // GET /api/office/search/entities maps unconditionally and needs per-user trimming, so with
-        // the AI gate off the client would have been missing and the endpoint's fail-closed check
-        // would have taken entity search down. See CLAUDE.md §10 F.1 (RB-T028-03..06).
-        // The handlers below still resolve it — it is now strictly more available, never less.
+        // IDataverseUserClient: see the note in the primary overload — registered unconditionally in
+        // AddSpaarkeCore, so both entry points resolve the Dataverse* handlers without registering it here.
 
         // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
         // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent

@@ -30,6 +30,8 @@ import type {
   InsertLinkResult,
   AttachFileResult,
   GetDocumentContentOptions,
+  EmailComposeContent,
+  ComposeEmailResult,
 } from './types';
 
 /**
@@ -138,6 +140,60 @@ export interface IHostAdapter {
   getDocumentContent(options?: GetDocumentContentOptions): Promise<ArrayBuffer>;
 
   /**
+   * Get the open document's URL (spaarkeai-word-add-in-r1 FR-01 / task 013).
+   *
+   * This method is only supported when {@link HostCapabilities.canGetDocumentUrl} is `true`
+   * (Word only). Callers MUST check the capability flag before calling — an unconditional call
+   * from a host that does not support it fails predictably rather than silently.
+   *
+   * Two distinct "no URL" outcomes, matching the capability's actual meaning:
+   * - **Supported but no URL yet** (e.g. an unsaved Word document): resolves to `null`. This is a
+   *   defined, expected result — not a throw.
+   * - **Not supported at all** (e.g. called on an adapter whose `canGetDocumentUrl` is `false`):
+   *   rejects with a typed {@link HostAdapterError} (`CAPABILITY_NOT_SUPPORTED`), matching the
+   *   convention {@link getAttachmentContent} already uses when a capability-gated method is
+   *   invoked on the wrong host.
+   *
+   * The URL is returned EXACTLY as the host reports it — never reshaped, re-encoded, or otherwise
+   * modified client-side (Spike-1, verified byte-identical across Word web and Word desktop).
+   *
+   * @returns Promise resolving to the document's absolute URL, or `null` when the document has none.
+   * @throws {HostAdapterError} with code `CAPABILITY_NOT_SUPPORTED` when the host does not support this capability.
+   */
+  getDocumentUrl(): Promise<string | null>;
+
+  /**
+   * Read the client-side custom XML identity stamp task 014 (FR-02) writes into every saved document
+   * (spaarkeai-word-add-in-r1 task 051 — the client half that completes FR-02).
+   *
+   * Only supported when {@link HostCapabilities.canReadDocumentStamp} is `true` (Word, and only when
+   * the host supports the `CustomXmlParts` requirement set). Callers MUST check the capability flag
+   * before calling — matching the {@link getDocumentUrl} convention.
+   *
+   * A missing, unreadable, or internally-disagreeing stamp is a NORMAL, recoverable state (019
+   * condition 3 — the Document Inspector's "Custom XML Data → Remove All" is a real, user-reachable
+   * un-stamping path) — every such case resolves to `null`, never a throw, so this can never block
+   * the save flow.
+   *
+   * **A stamp is a hint, never an authorization** (014 §3): anyone can author a custom XML part
+   * carrying any GUID. This method asserts nothing beyond "the bytes carry this GUID" — it makes no
+   * network call of any kind. Callers MUST still resolve/authorize the id through an existing
+   * server-authorized path (the URL-based resolver, or the version-save endpoint's own authorization
+   * filter) before relying on it for anything beyond a display/pre-selection default.
+   *
+   * Two distinct outcomes, matching the {@link getDocumentUrl} shape:
+   * - **Supported, but no usable stamp**: resolves to `null` — a defined, expected result, not a throw.
+   * - **Not supported at all** (e.g. called on an adapter whose `canReadDocumentStamp` is `false`):
+   *   rejects with a typed {@link HostAdapterError} (`CAPABILITY_NOT_SUPPORTED`).
+   *
+   * @returns The single distinct Spaarke document id found in the document's custom XML data store
+   * (Word's raw text — the caller canonicalizes via `cleanGuid` per ADR-044 before it crosses into
+   * saved state), or `null` when absent, unreadable, disagreeing, or the requirement set is unsupported.
+   * @throws {HostAdapterError} with code `CAPABILITY_NOT_SUPPORTED` when the host does not support this capability at all.
+   */
+  readDocumentStamp(): Promise<string | null>;
+
+  /**
    * Get the capabilities of this host adapter.
    *
    * Use this to determine what features are available before calling
@@ -186,6 +242,22 @@ export interface IHostAdapter {
    * @returns Promise resolving to the result of the attachment
    */
   attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult>;
+
+  /**
+   * Open a native new-message compose window pre-populated with a subject and HTML body
+   * (spaarkeai-word-add-in-r1 task 036 / FR-15 — Send Email via Outlook).
+   *
+   * Only supported when {@link HostCapabilities.canComposeEmail} is `true`. Callers MUST check the
+   * capability flag before calling — matching the {@link getAttachmentContent} / {@link getDocumentUrl}
+   * convention, an adapter that does not support this returns a DEFINED failure result rather than
+   * throwing, so a caller that skips the capability check still fails predictably instead of crashing.
+   *
+   * No recipients are pre-filled — the user addresses the message themselves in the opened form.
+   *
+   * @param content - The subject and HTML body to pre-populate.
+   * @returns Promise resolving to the result of the attempt.
+   */
+  composeNewEmail(content: EmailComposeContent): Promise<ComposeEmailResult>;
 }
 
 /**

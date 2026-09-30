@@ -9,6 +9,8 @@ import type {
   InsertLinkResult,
   AttachFileResult,
   GetDocumentContentOptions,
+  EmailComposeContent,
+  ComposeEmailResult,
 } from '@shared/adapters/types';
 
 /**
@@ -197,6 +199,33 @@ export class OutlookHostAdapter implements IHostAdapter {
   }
 
   /**
+   * Get the open document's URL — not applicable for Outlook emails (Word-only capability,
+   * spaarkeai-word-add-in-r1 FR-01 / task 013).
+   *
+   * @remarks This class is unreferenced dead code superseded by `shared/adapters/OutlookAdapter.ts`
+   * (task 010 / FR-04 consolidated Word onto the shared factory; this Outlook duplicate was outside
+   * that task's scope and was never deleted). This method exists only to keep the class satisfying
+   * `IHostAdapter` after task 013 added `getDocumentUrl()` to the interface — it is not exercised by
+   * any live code path (`HostAdapterFactory` registers `shared/adapters/OutlookAdapter.ts`, not
+   * this file).
+   */
+  async getDocumentUrl(): Promise<string | null> {
+    throw new Error('getDocumentUrl() is only supported in Word.');
+  }
+
+  /**
+   * Read the client-side custom XML identity stamp — not applicable for Outlook emails (Word-only
+   * capability, spaarkeai-word-add-in-r1 FR-02 / task 051).
+   *
+   * @remarks Same dead-code situation as {@link getDocumentUrl} — see that method's remarks. This
+   * exists only to keep the class satisfying `IHostAdapter` after task 051 added
+   * `readDocumentStamp()` to the interface; it is not exercised by any live code path.
+   */
+  async readDocumentStamp(): Promise<string | null> {
+    throw new Error('readDocumentStamp() is only supported in Word.');
+  }
+
+  /**
    * Get the capabilities of this host adapter.
    */
   getCapabilities(): HostCapabilities {
@@ -207,10 +236,31 @@ export class OutlookHostAdapter implements IHostAdapter {
       canGetRecipients: true,
       canGetSender: true,
       canGetDocumentContent: false,
+      canGetDocumentUrl: false,
+      // task 051 / FR-02 client half: same "keep this dead file conforming to IHostAdapter" reason
+      // as canGetDocumentUrl above — mirrors the canonical shared/adapters/OutlookAdapter.ts's value.
+      canReadDocumentStamp: false,
       canSaveAsPdf: true,
       canSaveAsEml: hasMailbox18,
       canInsertLink: this.isComposeMode(),
       canAttachFile: this.isComposeMode(),
+      // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement.
+      canOpenBrowserWindow: this.checkRequirementSet('OpenBrowserWindowApi', '1.1'),
+      // task 036 / FR-15: Send Email via Outlook. This class is superseded by
+      // `shared/adapters/OutlookAdapter.ts` (task 010 consolidation) and is not constructed anywhere
+      // in the live app (`HostAdapterFactory`'s only reference to it is an illustrative doc comment) —
+      // added here only to keep this file conforming to `IHostAdapter`, mirroring the canonical
+      // adapter's read-mode + Mailbox-1.6 gate.
+      canComposeEmail: !this.isComposeMode() && this.checkRequirementSet('Mailbox', '1.6'),
+      // task 040 / FR-19: same "keep this dead file conforming to IHostAdapter" reason as
+      // canComposeEmail above — mirrors the canonical `shared/adapters/OutlookAdapter.ts`'s
+      // unconditional-true values (not exercised by any live code path).
+      canShowLinkedTodos: true,
+      canSuggestRelatedRecords: true,
+      // task 020 / FR-06: same "keep this dead file conforming to IHostAdapter" reason as the
+      // capabilities above — mirrors the canonical `shared/adapters/OutlookAdapter.ts`'s
+      // unconditional-false value (not exercised by any live code path).
+      canProvideDocumentName: false,
       minApiVersion: '1.3',
       supportedRequirementSet: hasMailbox18 ? 'Mailbox 1.8' : 'Mailbox 1.3',
     };
@@ -245,7 +295,8 @@ export class OutlookHostAdapter implements IHostAdapter {
    * Insert a link into the email body (compose mode only).
    */
   async insertLink(url: string, displayText?: string): Promise<InsertLinkResult> {
-    if (!this.isComposeMode()) {
+    const composeItem = this.getComposeItem();
+    if (!composeItem) {
       return {
         success: false,
         errorMessage: 'Link insertion is only available in compose mode',
@@ -253,7 +304,6 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
 
     return new Promise(resolve => {
-      const composeItem = this.currentItem as Office.MessageCompose;
       const linkHtml = `<a href="${url}">${displayText || url}</a>`;
 
       composeItem.body.setSelectedDataAsync(linkHtml, { coercionType: Office.CoercionType.Html }, result => {
@@ -270,7 +320,8 @@ export class OutlookHostAdapter implements IHostAdapter {
    * Attach a file to the email (compose mode only).
    */
   async attachFile(content: string, fileName: string, contentType: string): Promise<AttachFileResult> {
-    if (!this.isComposeMode()) {
+    const composeItem = this.getComposeItem();
+    if (!composeItem) {
       return {
         success: false,
         errorMessage: 'File attachment is only available in compose mode',
@@ -278,16 +329,42 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
 
     return new Promise(resolve => {
-      const composeItem = this.currentItem as Office.MessageCompose;
-
-      composeItem.addFileAttachmentFromBase64Async(content, fileName, { asyncContext: { contentType } }, result => {
-        if (result.status === Office.AsyncResultStatus.Succeeded) {
-          resolve({ success: true, attachmentId: result.value });
-        } else {
-          resolve({ success: false, errorMessage: result.error.message });
+      composeItem.addFileAttachmentFromBase64Async(
+        content,
+        fileName,
+        { asyncContext: { contentType }, isInline: false },
+        result => {
+          if (result.status === Office.AsyncResultStatus.Succeeded) {
+            resolve({ success: true, attachmentId: result.value });
+          } else {
+            resolve({ success: false, errorMessage: result.error.message });
+          }
         }
-      });
+      );
     });
+  }
+
+  /**
+   * Open a new-message compose window (task 036 / FR-15). See the `canComposeEmail` doc comment
+   * above — this class is not constructed anywhere in the live app; this method exists only to keep
+   * the class conforming to `IHostAdapter`.
+   */
+  async composeNewEmail(content: EmailComposeContent): Promise<ComposeEmailResult> {
+    if (this.isComposeMode() || !this.checkRequirementSet('Mailbox', '1.6') || !this.mailbox) {
+      return {
+        success: false,
+        errorMessage: 'Composing a new message is not supported in the current mode or client.',
+      };
+    }
+    try {
+      this.mailbox.displayNewMessageForm({ subject: content.subject, htmlBody: content.htmlBody });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        errorMessage: error instanceof Error ? error.message : 'Failed to open the compose window.',
+      };
+    }
   }
 
   // Legacy methods for backward compatibility
@@ -387,12 +464,31 @@ export class OutlookHostAdapter implements IHostAdapter {
     }
   }
 
+  /**
+   * Get the current item narrowed to its compose-mode shape, or null when the host is not in
+   * compose mode.
+   *
+   * `this.currentItem` is deliberately typed `MessageRead | AppointmentRead | null` because
+   * every other method on this adapter is read-mode-only, and Office.js types the shared
+   * `body` member identically for read and compose items — there is no structural cast from
+   * that narrowed type to `MessageCompose` that isn't unsound (TS2352 is correct to reject it).
+   * `Office.Mailbox.item`, read fresh off the already-cached `this.mailbox` handle, is instead
+   * typed as the intersection of every possible item shape, so narrowing it down to one member
+   * is a sound narrowing rather than a cast. It is still gated on a real runtime discriminant —
+   * the presence of the compose-only `body.setSelectedDataAsync` member — because Office.js
+   * does not otherwise distinguish read vs. compose mode at the type level.
+   */
+  private getComposeItem(): Office.MessageCompose | Office.AppointmentCompose | null {
+    const item = this.mailbox?.item;
+    if (!item || typeof item.body?.setSelectedDataAsync !== 'function') {
+      return null;
+    }
+
+    return item;
+  }
+
   private isComposeMode(): boolean {
-    return (
-      this.currentItem !== null &&
-      'body' in this.currentItem &&
-      typeof (this.currentItem as Office.MessageCompose).body?.setSelectedDataAsync === 'function'
-    );
+    return this.getComposeItem() !== null;
   }
 
   private sanitizeFileName(name: string): string {

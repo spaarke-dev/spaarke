@@ -37,8 +37,13 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// documentation called it "AI-internal plumbing". That filing was wrong, and it had become a
 /// hazard: ADR-013 forbids CRUD code from injecting AI-internal types, so the ONE general
 /// user-context Dataverse client in the BFF was formally off-limits to every non-AI caller that
-/// needed per-user security trimming — while <c>CallerRecordAccessProbe</c> (not AI code) already
-/// depended on it. Nothing about an OBO HTTP client is AI-specific. ADR-013's intent is to stop
+/// needed per-user security trimming. <c>CallerRecordAccessProbe</c>'s own remarks record an earlier
+/// engineer wanting this client and being blocked by exactly the two objections the relocation
+/// removed (AI-gated registration; a CRUD→AI dependency). The load-bearing non-AI consumer today is
+/// <c>Api/Office/CommunicationsEndpoints.cs</c> (task 127, GitHub #1020). (An earlier version of this
+/// remark claimed <c>CallerRecordAccessProbe</c> already depended on this client. It never did — it
+/// only mentioned it — corrected at the 2026-09-30 merge.) Nothing about an OBO HTTP client is
+/// AI-specific. ADR-013's intent is to stop
 /// CRUD code reaching into AI internals such as <c>IOpenAiClient</c> or <c>IPlaybookService</c>;
 /// it is not served by filing a security primitive in the AI namespace. It is now general BFF
 /// infrastructure and any caller may use it.

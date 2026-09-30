@@ -35,6 +35,9 @@ public class OfficeJobQueue
     /// <summary>
     /// Queues a job to the Service Bus for background processing.
     /// </summary>
+    /// <param name="isVersionSave">Task 029: true only on the version-save path. Stamps
+    /// <see cref="UploadFinalizationPayload.VersionSaveJobId"/> with <paramref name="jobId"/> so the worker refreshes the
+    /// profile and index for this version. False leaves the payload exactly as before (the property is omitted).</param>
     public async Task QueueUploadFinalizationAsync(
         Guid jobId,
         string idempotencyKey,
@@ -46,6 +49,7 @@ public class OfficeJobQueue
         string fileName,
         long fileSize,
         Guid documentId,
+        bool isVersionSave,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
@@ -115,7 +119,8 @@ public class OfficeJobQueue
                     RagIndex = request.TriggerAiProcessing,
                     DeepAnalysis = false
                 },
-            DocumentId = documentId
+            DocumentId = documentId,
+            VersionSaveJobId = isVersionSave ? jobId : null
         };
 
         // Create the job message

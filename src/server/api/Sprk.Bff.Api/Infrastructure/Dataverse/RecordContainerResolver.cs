@@ -710,8 +710,12 @@ public sealed class RecordContainerResolver
     /// is a schema or field-level-security error, and reporting it to an operator as "the record does not
     /// exist" misdiagnoses precisely the masked-attribute case the absent-flag warning exists to surface.
     /// The error code is stable and locale-independent.</para>
+    ///
+    /// <para><c>internal</c>, not private: the document-identity resolver (spaarkeai-word-add-in-r1 task 012)
+    /// needs the same "absent vs. indeterminate" split, and a second copy of this predicate is how the two
+    /// would drift.</para>
     /// </summary>
-    private static bool IsRecordNotFound(Exception ex)
+    internal static bool IsRecordNotFound(Exception ex)
         => ex is FaultException<OrganizationServiceFault> fault
            && fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode;
 

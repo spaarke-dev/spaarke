@@ -46,6 +46,28 @@ public class CommunicationsDelegatedReadGuardTests
     }
 
     [Fact]
+    public void TheDelegatedClient_IsGeneralInfrastructure_NotAiInternalPlumbing()
+    {
+        // These three routes are CRUD code, and they depend on IDataverseUserClient. That dependency is
+        // only legal because task 126 relocated the client out of Services/Ai/Handlers/Dataverse/ — where
+        // its own docs called it "AI-internal plumbing" and ADR-013 put it off-limits to CRUD callers —
+        // into Infrastructure/Dataverse/ (owner-approved CLAUDE.md §6.5 path C). Move it back and this
+        // surface is in ADR-013 violation again.
+        //
+        // Not redundant with ADR013_AiBoundaryTests: that guard forbids only IOpenAiClient and
+        // IPlaybookService, so it would not notice this type returning to the AI namespace.
+        //
+        // (This fact moved here from OfficeEntitySearchSecurityTrimmingTests, deleted at the 2026-09-30
+        // merge when word-add-in-r1 task 062 superseded task 126's entity-search implementation. The
+        // relocation outlived the search fix because this surface still needs it.)
+        typeof(Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient).Namespace
+            .Should().Be(
+                "Sprk.Bff.Api.Infrastructure.Dataverse",
+                "CRUD callers that need per-user Dataverse reads must be able to use the delegated client "
+                + "without violating ADR-013's AI-facade rule");
+    }
+
+    [Fact]
     public void NoHandlerOnThisSurface_ReadsThroughTheAppOnlyService()
     {
         // 🔴 The regression that matters. IGenericEntityService is an app-only singleton: it cannot

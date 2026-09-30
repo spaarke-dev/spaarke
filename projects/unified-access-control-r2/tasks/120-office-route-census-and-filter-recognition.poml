@@ -120,4 +120,16 @@ THE TWO NON-GUARD DEFECTS (owner decision 2026-09-29: fix both here):
   </acceptance-criteria>
 
   <notes>Authored 2026-09-29 (session 25) from the inbound #1015 handover plus a verified route census. The handover framed this as two changes (census entry + regex widening); the census found a third (Rule B discovery) and eight live gaps. The owner chose Pending-waivers-plus-issues for the gaps and a fix-here for the two side defects.</notes>
+
+  <superseded-at-merge date="2026-09-30">
+    PARTLY SUPERSEDED by the origin/master merge (spaarkeai-word-add-in-r1, ~306 commits). That project's
+    task 067 (finding F5) independently deleted the same hard-coded ownerless job on the well-known GUID and
+    closed the same JobOwnershipFilter fail-open; the merge kept 067's OfficeService.cs and
+    JobOwnershipFilter.cs wholesale, so this task's two production fixes are now 067's code. What SURVIVES
+    from this task and is load-bearing: (1) the Office route census in RouteAuthorizationGuardTests — which at
+    the merge caught TWO master routes ungated (POST /todo's TodoSourceAccessFilter was not on the credited
+    allow-list; GET /search/matter-types had neither a gate nor a waiver), because master had never governed
+    Api/Office/* at all; and (2) the /save-debug fix (no raw-body logging, no bodyPreview echo), which master
+    still carried and which survived the merge.
+  </superseded-at-merge>
 </task>

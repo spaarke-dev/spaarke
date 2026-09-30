@@ -127,9 +127,11 @@ public class RouteAuthorizationGuardTests
     {
         // ---- Rule A applies: the per-route gate is the convention here ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes (content, download, eml-render) and URL minting "
-            + "(preview-url, view-url, office, open-links, share-link). Eight of nine routes already carry "
-            + "AddDocumentAuthorizationFilter(\"read\"); the ninth is finding #3."),
+            "/api/documents/{documentId}/* — file bytes (content, download, eml-render, preview) and URL "
+            + "minting (preview-url, view-url, office, open-links, share-link), plus POST resolve-identity "
+            + "(added by spaarkeai-word-add-in-r1 task 012). All ten routes carry AddDocumentAuthorizationFilter; "
+            + "share-link has since task 072 (finding #3), and resolve-identity pairs DocumentUrlIdentityFilter "
+            + "with it (read)."),
 
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows plus a byte download, and a container-keyed document "
@@ -203,24 +205,45 @@ public class RouteAuthorizationGuardTests
         // route to inherit. The per-route filter is the convention on this surface (/save and the two
         // /jobs routes already follow it); the files that do not are findings, not a different design.
         new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
-            "/api/office/* — the Office add-in surface. /save creates a job that uploads document bytes to "
-            + "SPE and writes sprk_document; /search/entities reads Dataverse record content; /todo and "
-            + "/quickcreate write it; /share/* mints document links. /save carries AddEntityAccessFilter "
-            + "and the two /jobs routes carry AddJobOwnershipFilter — neither of which this guard could "
-            + "SEE before task 120 widened FilterMarker, so the gates that do exist were invisible at the "
-            + "same time as the holes. ⚠️ /save's gate is CONDITIONAL and Rule A cannot express that: "
-            + "EntityAccessFilter returns next(context) untouched when the request carries no TargetEntity "
-            + "(EntityAccessFilter.cs:218-227), so a document-only save reaches the handler with no "
-            + "per-record check. Rule A is a structural rule about the registration chain and correctly "
-            + "reports the route as gated; whether the pass-through is right is a design question, "
-            + "tracked on #1025. Recorded here so a reader does not take 'gated' as 'gated in every case'."),
+            "/api/office/* — the Office add-in surface. Gates as of the 2026-09-30 merge: /save carries "
+            + "AddEntityAccessFilter (+ AddOfficeVersionSaveAuthorizationFilter); both /jobs routes carry "
+            + "AddJobOwnershipFilter; POST /todo carries AddTodoSourceAccessFilter; POST /quickcreate carries "
+            + "AddQuickCreateSourceAccessFilter; generate-profile carries a document authorization filter. "
+            + "/search/entities is gated INSIDE its query (impersonated read) and /search/matter-types is "
+            + "reference data — both Permanent-waived; /search/documents, /recent and /share/* are latent "
+            + "stubs, Pending. None of the named gates was visible to this guard before task 120 widened "
+            + "FilterMarker. CAVEATS Rule A cannot express, stated so 'gated' is not read as 'gated in every "
+            + "case': (1) EntityAccessFilter passes through when a /save carries no TargetEntity "
+            + "(EntityAccessFilter.cs ExtractTargetEntity), so a new-document save with no related record "
+            + "reaches the handler with no per-record check — an owner-confirmed required use case, tracked "
+            + "on #1025, where the authorization subject is the destination container rather than a record. "
+            + "(2) QuickCreateSourceAccessFilter gates only the SOURCE read and passes through when no source "
+            + "is named; whether the caller holds CREATE privilege for the entity type is not checked, and "
+            + "the write runs on the app identity — a privilege question outside Rule A's per-resource subject."),
 
         new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/communications/* — three routes reading sprk_communication, candidate record "
-            + "display names, and linked sprk_todo rows. They carry ZERO endpoint filters; the only gate "
-            + "is the group's bare .RequireAuthorization(). Each resolves the caller's object id and then "
-            + "uses it EXCLUSIVELY as a log argument while querying app-only on a caller-supplied id. "
-            + "Waived Pending, not Permanent — these need gates."),
+            + "display names, and linked sprk_todo rows. No endpoint filter, BY DESIGN since task 127 "
+            + "(#1020): every read runs through IDataverseUserClient under the CALLER's Dataverse security "
+            + "context, so the delegated query is the authorization boundary; denial surfaces as the ordinary "
+            + "404 or empty list, never 403, so there is no existence oracle. The routes carry Permanent "
+            + "waivers recording that shape. (Before task 127: zero filters, app-only reads keyed solely on a "
+            + "caller-supplied id, with the caller's object id used only as a log argument.)"),
+
+        // ---- AI visualization: added 2026-09-08 by spaarkeai-word-add-in-r1 task 032 ----
+        new GovernedFile("Api/Ai/VisualizationEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/visualization/* — document names, types, keywords, SPE file ids and record URLs for "
+            + "every NEIGHBOUR of a source document, returned as graph nodes. Added 2026-09-08 by "
+            + "spaarkeai-word-add-in-r1 task 032 (plan.md finding F-b). The file was ABSENT from this "
+            + "census while carrying the exact shape the census exists to find: the cosine-KNN search in "
+            + "VisualizationService trimmed its rows by tenantId and self-exclusion alone, and "
+            + "VisualizationAuthorizationFilter authorized only the SOURCE document — so Read on one "
+            + "document served its neighbours from anywhere in the tenant. POST /related-from-content "
+            + "carried no filter at all, which is also WHY the file could not be listed here before: a "
+            + "file cannot be classified RouteLevelGate while one of its routes has no gate, so the gap "
+            + "kept itself out of the guard. Both routes now publish VisualizationAuthorization and both "
+            + "handlers refuse (500) without it; rows are authorized per document in the endpoint, the "
+            + "filter/endpoint PAIR shape Rule B was widened for in task 077."),
 
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
@@ -528,25 +551,32 @@ public class RouteAuthorizationGuardTests
 
         // ---------- task 120 (GitHub #1015): the Office surface, first time it is inside the guard ----------
         //
-        // NINE Pending entries and ONE Permanent landed together, which is unusual enough to say why: this
-        // is not nine new holes, it is one blind spot being opened. (This header said TEN until 2026-09-29
-        // — a miscount in the very file whose job is to prevent drift, found by the task-126 audit.
-        // As of 2026-09-29, tasks 126, 127 and 128 resolved FIVE of them — /search/entities, the three
-        // /communications reads, and POST /todo — leaving FOUR Pending and FIVE Permanent.
-        // POST /todo has NO waiver entry at all now: unlike the others it carries a real endpoint
-        // filter (.AddEntityAccessFilter), so Rule A credits it and no waiver is needed. That is the
-        // outcome to prefer — a waiver, even a Permanent one, is a note explaining why the mechanical
-        // check cannot see the control.)
-        // Api/Office/* was never in GovernedFiles, so
-        // the whole surface was classified "serves neither document nor Dataverse content" by omission —
-        // and FilterMarker could not have recognised its gates even if it had been, because the Office
-        // filters are named without the word "Authorization". The routes below have been in this state
-        // since they shipped; what changed on 2026-09-29 is that the guard can finally see them.
+        // WHY THIS BLOCK EXISTS. Api/Office/* was never in GovernedFiles, so the whole surface was
+        // classified "serves neither document nor Dataverse content" by omission — and FilterMarker could
+        // not have recognised its gates even if it had been, because the Office filters are named without
+        // the word "Authorization". Task 120 opened that blind spot on 2026-09-29 with NINE Pending waivers
+        // and ONE Permanent: not nine new holes, one blind spot. (This header said TEN at first — a miscount
+        // in the very file whose job is to prevent drift.)
         //
-        // Every entry here is Pending WITH a filed issue, per the owner's 2026-09-29 decision. Only
-        // /quickcreate is Permanent, and maintenance rule 4 is the reason the rest are not: converting
-        // "someone must fix this" into "this is fine" to make a build green is the one move this list
-        // forbids outright.
+        // STATE AFTER THE 2026-09-30 MASTER MERGE — two projects closed the same holes independently, and
+        // the attribution below says which fix SURVIVED, not merely which project found it:
+        //   • /communications ×3 (#1020) — unified-access-control-r2 task 127. Permanent: query-is-the-gate.
+        //   • /search/entities (#1021)   — spaarkeai-word-add-in-r1 task 062 (impersonated read). This
+        //                                  branch's task 126 (OBO) fixed it too and was SUPERSEDED at merge.
+        //   • POST /todo (#1022)         — word-add-in-r1 task 064, TodoSourceAccessFilter: NO waiver, it is
+        //                                  a real endpoint filter credited in ExplicitlyCreditedFilterTypeNames.
+        //                                  (This branch's task 128 gated only the regarding id; superseded.)
+        //   • POST /quickcreate          — word-add-in-r1 QuickCreateSourceAccessFilter: NO waiver for the
+        //                                  same reason. Its old Permanent "CREATE, nothing to authorize"
+        //                                  waiver went stale the moment the source-record read was gated.
+        //   • /search/matter-types       — NEW from master (task 038); reference data, Permanent.
+        //   ⇒ FOUR Pending (#1023 ×2, #1024 ×2 — latent stubs; word-add-in-r1 task 058 deletes those routes
+        //     and must delete these waivers with them) and FIVE Permanent.
+        //
+        // The outcome to prefer is the /todo and /quickcreate one: a real filter Rule A can SEE. A waiver —
+        // even a Permanent one — is a note explaining why the mechanical check cannot see a control.
+        // Maintenance rule 4 still binds: never convert "someone must fix this" into "this is fine" to make
+        // a build green.
 
         // ✅ RESOLVED 2026-09-29 by task 127. Permanent rather than deleted: the SHAPE of the control
         // is what a future reader needs before "simplifying" it back. There is still no endpoint
@@ -577,26 +607,35 @@ public class RouteAuthorizationGuardTests
             + "list — indistinguishable from one that simply has no to-dos, which is the intended "
             + "conflation. Previously filtered solely on the caller-supplied commId, app-only."),
 
-        // ✅ RESOLVED 2026-09-29 by task 126 — kept as Permanent, NOT deleted, because the shape of the
-        // control is exactly what a future reader needs to know before "simplifying" it.
+        // ✅ RESOLVED by spaarkeai-word-add-in-r1 task 062 — arrived with the 2026-09-30 master merge. This
+        // branch's task 126 fixed the same hole with a different mechanism (OBO via IDataverseUserClient) and
+        // was SUPERSEDED at merge: ADR-028 Amendment A5 sanctions app-only IMPERSONATED read for "what may
+        // this workforce user see" sets, and this project's own task 036 was headed the same way.
         //
-        // This route has no endpoint filter and correctly so: there is no target record to authorize
-        // against before the query runs, so the QUERY ITSELF is the authorization boundary. It now runs
-        // under the caller's Dataverse security context via IDataverseUserClient, so Dataverse trims the
-        // result set, and TotalCount/HasMore are derived from the trimmed set rather than from the raw
-        // match count (a count over untrimmed matches is the same disclosure, restated).
+        // Kept Permanent, NOT deleted, because the shape of the control is what a future reader needs
+        // before "simplifying" it: there is no endpoint filter and correctly so — there is no target record
+        // to authorize before the query runs, so the QUERY IS the boundary. TotalCount/HasMore derive from
+        // the trimmed set (a count over untrimmed matches is the same disclosure, restated).
         //
-        // The previous Pending text is worth preserving as the record of what was actually wrong: it read
-        // "no per-user security trimming — OfficeService.cs:804-805 says so in code", and any authenticated
-        // Office caller could enumerate every matter, project, invoice, account and contact in the tenant
-        // from a 2-character substring plus paging. Note the code comment it cited pointed at the WRONG
-        // issue (#919); that is corrected too.
+        // What was wrong, for the record: the search ran app-only with no user predicate, so any
+        // authenticated Office caller could enumerate every matter, project, invoice, account and contact
+        // in the tenant from a 2-character substring plus paging.
         new Waiver("GET /api/office/search/entities", WaiverKind.Permanent, "#1021",
-            "RESOLVED (task 126): authorization is the delegated query itself, not an endpoint filter. "
-            + "OfficeService.QuerySearchEntityAsync runs under the caller's security context via "
-            + "IDataverseUserClient and FAILS CLOSED — there is deliberately no app-only fallback, because "
-            + "falling back would restore the tenant-wide enumeration while every test stayed green. A "
-            + "per-resource filter is not applicable: the route names no single resource to check."),
+            "RESOLVED (word-add-in-r1 task 062): authorization is the IMPERSONATED query itself, not an "
+            + "endpoint filter. The handler resolves the caller's Dataverse systemuserid (ICallerSystemUserResolver) "
+            + "and refuses when it cannot; OfficeService.QuerySearchEntityAsync then runs each per-type query "
+            + "app-only WITH MSCRMCallerID = that systemuserid (IImpersonatedCommunicationQuery), so Dataverse "
+            + "applies row-level security inside the query. FAILS CLOSED — no app-only fallback. Depends on the "
+            + "BFF application user holding prvActOnBehalfOfAnotherUser; without it the route errors rather "
+            + "than leaking. A per-resource filter is not applicable: the route names no single resource."),
+
+        // NEW from master (spaarkeai-word-add-in-r1 task 038). First measured by this census at the
+        // 2026-09-30 merge — master never governed Api/Office/*, so it never had to pass Rule A there.
+        new Waiver("GET /api/office/search/matter-types", WaiverKind.Permanent, "-",
+            "REFERENCE-DATA READ. Returns the active sprk_mattertype_ref rows — a small, load-once lookup list "
+            + "behind the pane's required Matter Type field (5 rows in dev), not customer record content — and "
+            + "takes no id, so a per-resource filter has no subject. If this route ever takes a record id or "
+            + "returns customer rows, this waiver is WRONG and the route needs a gate."),
 
         new Waiver("GET /api/office/search/documents", WaiverKind.Pending, "#1023",
             "Authentication filter only. Returns STUB data today (GenerateStubDocumentResults), so the "
@@ -608,21 +647,22 @@ public class RouteAuthorizationGuardTests
 
         new Waiver("POST /api/office/share/links", WaiverKind.Pending, "#1024",
             "Authentication filter only. Mints links for caller-supplied document ids; the per-document "
-            + "check is a hard-coded `return Task.FromResult(true)' (OfficeService.cs:1280-1291). Data is "
-            + "fabricated today, so the exposure is latent, not live."),
+            + "check is a hard-coded `return Task.FromResult(true)' (OfficeService.SimulateSharePermissionCheckAsync "
+            + "— cited by name, not line, so the next merge cannot outdate it). Data is fabricated today, so the "
+            + "exposure is latent, not live."),
 
         new Waiver("POST /api/office/share/attach", WaiverKind.Pending, "#1024",
             "Authentication filter only, and no IdempotencyFilter either (unlike /share/links). "
             + "GetAttachmentsAsync is an explicit TODO returning stub attachments."),
 
-        new Waiver("POST /api/office/quickcreate/{entityType}", WaiverKind.Permanent, "-",
-            "CREATE. There is no pre-existing resource to authorize — the same second-clause reasoning "
-            + "maintenance rule 2 already carries for POST /api/v1/documents and the OBO upload trio. "
-            + "What this waiver does NOT cover, stated plainly rather than left implied: whether the "
-            + "caller holds CREATE privilege for the entity type is not checked either, and the write runs "
-            + "on the app identity with best-effort owner attribution. That is a privilege question, not a "
-            + "per-resource one, so it is outside Rule A's subject — but it is not nothing, and a reader "
-            + "who takes this Permanent waiver as 'this route is fine' has read it wrong."),
+        // POST /api/office/quickcreate/{entityType} — waiver DELETED at the 2026-09-30 merge. It read
+        // "CREATE. There is no pre-existing resource to authorize", which stopped being true when
+        // spaarkeai-word-add-in-r1 added QuickCreateSourceAccessFilter: the route now reads a caller-named
+        // SOURCE record to copy fields from, and gates that read. The filter is credited in
+        // ExplicitlyCreditedFilterTypeNames, so Rule A sees the gate directly. The old waiver's two caveats
+        // were real and moved to the OfficeEndpoints GovernedFile entry rather than being lost.
+        // (NoWaiverIsStale would NOT have caught this: it inspects PENDING waivers only, so a Permanent
+        // waiver can outlive its premise silently.)
     };
 
     /// <summary>
@@ -1172,9 +1212,10 @@ public class RouteAuthorizationGuardTests
                 + "the caller's object id — a genuine per-resource decision, but made by comparing a "
                 + "stored owner rather than by consulting an authorization service. IOfficeService is a "
                 + "general service, not an authorization seam, so it is deliberately NOT in "
-                + "DecisionServices. Task 120 also closed this filter's fail-OPEN: an absent or blank "
-                + "CreatedBy previously skipped the comparison entirely and let any authenticated caller "
-                + "read the job; it now denies, per ADR-003.",
+                + "DecisionServices. Its fail-OPEN — an absent or blank CreatedBy skipped the comparison "
+                + "entirely and let any authenticated caller read the job — was closed independently by "
+                + "unified-access-control-r2 task 120 and spaarkeai-word-add-in-r1 task 067 (finding F5); the "
+                + "2026-09-30 merge kept 067's version, which now denies unproven ownership per ADR-003.",
             ["ReportingAuthorizationFilter"] =
                 "Power BI embed surface. Decides from role claims checked against a configured privilege "
                 + "list (IConfiguration), not from record rights — a report is not a Dataverse row. "
@@ -1598,6 +1639,12 @@ public class RouteAuthorizationGuardTests
                      "POST /api/office/save",                  // .AddEntityAccessFilter()
                      "GET /api/office/jobs/{jobId:guid}",      // .AddJobOwnershipFilter()
                      "GET /api/office/jobs/{jobId:guid}/stream",
+                     // Pinned at the 2026-09-30 merge: both arrived from spaarkeai-word-add-in-r1 and were
+                     // INVISIBLE to this guard until credited, so Rule A reported them ungated. Pinning them
+                     // here means dropping either name from ExplicitlyCreditedFilterTypeNames fails loudly
+                     // on the real file, rather than silently demoting a real gate to "needs a waiver".
+                     "POST /api/office/todo",                  // .AddTodoSourceAccessFilter()
+                     "POST /api/office/quickcreate/{entityType}", // .AddQuickCreateSourceAccessFilter()
                  })
         {
             Assert.True(routes.ContainsKey(key), $"Expected to find {key} — has the route been renamed?");
@@ -1820,8 +1867,14 @@ public class RouteAuthorizationGuardTests
     // SemanticSearchAuthorizationFilter shape reached from the opposite direction.
     private static readonly IReadOnlyList<string> ExplicitlyCreditedFilterTypeNames = new[]
     {
-        "EntityAccessFilter",   // Office: OBO RetrievePrincipalAccess on SaveRequest.TargetEntity, fails closed
-        "JobOwnershipFilter",   // Office: job creator vs caller, denies on mismatch AND on a blank creator
+        "EntityAccessFilter",            // Office /save: OBO RetrievePrincipalAccess (AppendTo) on SaveRequest.TargetEntity, fails closed
+        "JobOwnershipFilter",            // Office /jobs: job creator vs caller, denies on mismatch AND on a blank creator
+        // Both below arrived with the 2026-09-30 master merge (spaarkeai-word-add-in-r1). Neither name contains
+        // "Authorization", so FilterMarker could not see them and Rule A reported their routes UNGATED — the
+        // same blind spot task 120 opened for the Office surface, one merge later. Each consults
+        // CallerRecordAccessProbe (in DecisionServices) and returns 403 on deny, so Rule B holds.
+        "TodoSourceAccessFilter",        // Office POST /todo (task 064): Read on EVERY caller-supplied id, one constant deny body
+        "QuickCreateSourceAccessFilter", // Office POST /quickcreate: Read on the caller-named SOURCE record it copies fields from
     };
 
     private static readonly Regex FilterMarker = new(

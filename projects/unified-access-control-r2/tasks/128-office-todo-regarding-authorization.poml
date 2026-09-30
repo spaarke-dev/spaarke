@@ -99,4 +99,24 @@ than a gap. That is the same branch #1025 concerns.</background>
     nothing. Verified to bite by removing the attachment and watching the guard fail. Documented at the
     method itself so the next route to be gated does not repeat it.</finding>
   </execution>
+
+  <superseded-at-merge date="2026-09-30">
+    SUPERSEDED by spaarkeai-word-add-in-r1 task 064, whose TodoSourceAccessFilter gates ALL FOUR
+    caller-supplied ids on POST /api/office/todo (regardingRecordId, documentId, communicationId,
+    assignedToContactId) where this task gated only the regarding id — and 064 also caught a leak this task
+    missed: CoreAncestorResolver reads the regarding target app-only to stamp its parent matter/project, so an
+    ungated id let a caller harvest that record's core ancestor. The merge kept 064. Removed at merge: this
+    task's .AddEntityAccessFilter() on /todo, the CreateTodoRequest branch in EntityAccessFilter.ExtractTargetEntity
+    (dead once the route stopped using the filter; the "this method is the filter's reach" warning was KEPT, since
+    it holds for /save), TodoRegardingAuthorizationGuardTests, and the IsDeniedBeforeValidation contract test.
+    TodoSourceAccessFilter (and master's QuickCreateSourceAccessFilter) were added to the census's credited
+    allow-list, since neither name contains "Authorization" and Rule A could not see them.
+
+    ⚠️ A MISS WORTH KEEPING ON RECORD: this task attached a filter enforcing entity.associate_document, which
+    OperationAccessPolicy maps to AppendTo — and no end-user role granted AppendTo until the owner granted it to
+    "Spaarke Office Add In User" on 2026-09-29. Had that grant not landed, /todo would have returned 403 to every
+    non-admin user. The task checked type-name compatibility (can the filter resolve the entity type) and never
+    checked rights compatibility (does any end-user role hold the right it demands). Both dimensions must be
+    checked before attaching an authorization filter.
+  </superseded-at-merge>
 </task>

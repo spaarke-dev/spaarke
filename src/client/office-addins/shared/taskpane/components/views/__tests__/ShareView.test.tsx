@@ -5,10 +5,10 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { ShareView, type DocumentSearchResult, type SharePermissions } from '../ShareView';
+import { ShareView, type DocumentSearchResult } from '../ShareView';
 
 // Helper to render with FluentProvider
 const renderWithProvider = (ui: React.ReactElement) => {
@@ -40,11 +40,6 @@ Object.assign(navigator, { clipboard: mockClipboard });
 describe('ShareView', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
   });
 
   describe('initial render', () => {
@@ -388,12 +383,20 @@ describe('ShareView', () => {
         expect(screen.getByText('Copied!')).toBeInTheDocument();
       });
 
-      // After timeout, should revert
-      jest.advanceTimersByTime(2500);
-
-      await waitFor(() => {
-        expect(screen.getByText('Copy')).toBeInTheDocument();
-      });
+      // After the component's real 2000ms setTimeout fires, the label should revert. Previously
+      // driven by `jest.useFakeTimers()` + `jest.advanceTimersByTime(2500)`, but those fake timers
+      // were suite-global (beforeEach) and deadlocked every OTHER test in this file: user-event v14's
+      // internal `wait()` schedules its own `setTimeout` and awaits it, which fake timers never
+      // auto-advance, so every userEvent.click/type in the suite hung to the 10s jest timeout
+      // (task 071 — corrects the review's "plus one 10s timeout" to "fake timers broke the whole
+      // suite once ResizeObserver stopped masking it"). Real timers + a widened waitFor budget covers
+      // the same behavior without the deadlock.
+      await waitFor(
+        () => {
+          expect(screen.getByText('Copy')).toBeInTheDocument();
+        },
+        { timeout: 3000 }
+      );
     });
   });
 

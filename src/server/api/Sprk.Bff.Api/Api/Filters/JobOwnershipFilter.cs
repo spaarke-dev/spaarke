@@ -152,23 +152,61 @@ public class JobOwnershipFilter : IEndpointFilter
                 });
         }
 
-        // Verify ownership - compare job's creator with current user.
+        // ── Verify ownership. FAIL CLOSED. ────────────────────────────────────────────────────────
         //
-        // FAILS CLOSED ON AN UNKNOWN OWNER (task 120, GitHub #1015, per ADR-003). This condition used to
-        // read `!string.IsNullOrEmpty(jobStatus.CreatedBy) && !string.Equals(...)`, which SKIPPED the
-        // comparison entirely when CreatedBy was null or empty and let the request through — so a job
-        // whose owner could not be determined was readable by any authenticated caller. That is the
-        // opposite of the intended behaviour for a filter whose entire purpose is ownership, and it is
-        // invisible at the call site: the route still reads as `.AddJobOwnershipFilter()`.
+        // spaarkeai-word-add-in-r1 task 067 (Fable review finding F5, raised independently by two
+        // reviewers). This guard used to read:
         //
-        // An unknown owner is now a denial, not an exemption. Job status carries document filenames,
-        // progress and failure detail, so "we cannot tell whose this is" must not resolve to "yours".
-        if (!string.Equals(jobStatus.CreatedBy, userId, StringComparison.OrdinalIgnoreCase))
+        //     if (!string.IsNullOrEmpty(jobStatus.CreatedBy) && <mismatch>) { refuse; }
+        //
+        // — so a job that recorded NO owner satisfied the guard and was served to whoever asked. That
+        // was not a theoretical state. It was the state the Dataverse fallback produced on every job,
+        // because no creator was persisted at create time and the fallback mapper set no CreatedBy. So
+        // while the in-memory entry lived, ownership was enforced; the moment it was evicted — a
+        // restart, or simply a second instance taking the request — ANY authenticated caller could poll
+        // ANY job GUID. ADR-017: "MUST NOT expose status without authorization checks." A check that
+        // skips itself when its input is absent does not satisfy that. It is worse than no check,
+        // because it reads as protection.
+        //
+        // The rule now: ownership must be positively PROVEN. Absent, blank or unreadable ownership data
+        // is a refusal, not a pass. The creator is persisted at create time (OfficeService.SaveAsync →
+        // sprk_initiatedby) and mapped back on the fallback read, so proving it is normally possible;
+        // when it is not, refusing is correct.
+        var recordedOwner = jobStatus.CreatedBy;
+        var ownerWasRecorded = !string.IsNullOrWhiteSpace(recordedOwner);
+        var ownershipProven = ownerWasRecorded
+            && string.Equals(recordedOwner, userId, StringComparison.OrdinalIgnoreCase);
+
+        if (!ownershipProven)
         {
-            _logger?.LogWarning(
-                "Job ownership check failed: User {UserId} attempted to access job {JobId} " +
-                "owned by {OwnerId}. CorrelationId: {CorrelationId}",
-                userId, jobId, jobStatus.CreatedBy, httpContext.TraceIdentifier);
+            // Two distinct reason codes, ONE status and one caller-visible message. The split exists so
+            // operators can tell "this row predates the creator column" (expected, finite, drains as old
+            // jobs expire) from "someone asked for a job that is not theirs" (worth alerting on) without
+            // telling the caller anything extra — both are the same 403 with the same detail text.
+            var reasonCode = ownerWasRecorded
+                ? "sdap.office.job.ownership_mismatch"
+                : "sdap.office.job.ownership_unproven";
+
+            if (ownerWasRecorded)
+            {
+                _logger?.LogWarning(
+                    "Job ownership check failed: User {UserId} attempted to access job {JobId} " +
+                    "owned by {OwnerId}. CorrelationId: {CorrelationId}",
+                    userId, jobId, recordedOwner, httpContext.TraceIdentifier);
+            }
+            else
+            {
+                // LEGACY-ROW RULE (task 067): a job created before the creator was persisted has no
+                // owner to compare against, so it is refused — including to the user who really did
+                // create it. Refusing a legitimate poll on a pre-existing job is the acceptable cost;
+                // serving every job to everyone is not. These rows age out with normal job expiry.
+                _logger?.LogWarning(
+                    "Job ownership check failed CLOSED: job {JobId} records no creator, so ownership " +
+                    "cannot be proven for user {UserId}. This is expected for jobs created before the " +
+                    "creator was persisted (task 067); it is a refusal, never a pass. " +
+                    "CorrelationId: {CorrelationId}",
+                    jobId, userId, httpContext.TraceIdentifier);
+            }
 
             return Results.Problem(
                 statusCode: 403,
@@ -178,7 +216,7 @@ public class JobOwnershipFilter : IEndpointFilter
                 extensions: new Dictionary<string, object?>
                 {
                     ["errorCode"] = "OFFICE_009",
-                    ["reasonCode"] = "sdap.office.job.ownership_mismatch",
+                    ["reasonCode"] = reasonCode,
                     ["correlationId"] = httpContext.TraceIdentifier
                 });
         }

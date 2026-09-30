@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Align @testing-library/react to v16 (React 19) and re-measure the suite</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies test dependencies and will change the behavior of every React component test in the package. CLAUDE.md §8 TEST-MODIFYING override applies: Step 9.5 code-review + adr-check run UNCONDITIONALLY.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A dependency alignment with an established in-repo precedent to copy (PlaybookBuilder, SemanticSearch) and a measurable outcome. No architectural judgment — the decision was made by the operator 2026-09-09.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes `package.json` / `package-lock.json` for the whole package and re-runs the full suite. Any concurrent task in `src/client/office-addins` would race the install and make the measurement meaningless.</parallel-reason>
+    <deps>009</deps>
+    <tags>office-addins, testing, test-harness, dependencies, tooling</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Bump `@testing-library/react` from `^14.2.1` to `^16.x` in `src/client/office-addins`, matching the two sibling React-19 packages that already do this, then re-run the suite and report honestly what resolved and what did not.</prompt>
+
+  <role>SPAARKE frontend developer. React 19 + React Testing Library. Follow ADR-038: never delete or skip a failing test to reach a green number.</role>
+
+  <goal>`@testing-library/react` in `src/client/office-addins` is on `^16.x`, the full jest suite has been re-run, and `notes/017-testing-library-alignment.md` records before/after suite and test counts plus a categorized breakdown of every remaining failure — distinguishing harness problems from genuine product defects.</goal>
+
+  <context>
+    <background>
+      Resolves task 009's escalation trigger 2 with an operator decision of 2026-09-09.
+
+      009 repaired two never-installed harness dependencies (`@testing-library/jest-dom`, `@testing-library/user-event`) and left the suite at **12 of 21 suites failing / 92-94 of 329 tests failing**, dominated by a React 19 vs `@testing-library/react@14` DOM-cleanup incompatibility. It correctly refused the major-version bump and escalated.
+
+      The operator resolved it: **React 19 is the standard for Spaarke code components and is NOT changing.** A repo survey settles the direction — `code-pages/PlaybookBuilder` runs RTL `^16.0.0` and `code-pages/SemanticSearch` runs RTL `^16.1.0`, both against React `^19.0.0`. `office-addins` was the only React-19 package still on RTL `^14.2.1`. PCF controls are a separate, internally-consistent React `16.14` / RTL `12.1.5` lane and are NOT React-19 compliant; `external-spa` is React 18. So this is an ALIGNMENT to existing convention, not a new architectural direction.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/009-jest-harness-repair.md</file>
+      <file role="canonical-reference">src/client/code-pages/PlaybookBuilder/package.json</file>
+      <file role="canonical-reference">src/client/code-pages/SemanticSearch/package.json</file>
+      <file role="modify">src/client/office-addins/package.json</file>
+      <file role="modify">src/client/office-addins/jest.setup.js</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="009" status="complete">Installed jest-dom + user-event and established the pre-bump baseline this task measures against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="operator" binding="true">🔴 React stays at `^19.0.0`. Do NOT downgrade React, and do NOT touch any PCF control (React 16.14 / RTL 12.1.5 is their correct, separate lane) or `external-spa` (React 18). The change is RTL only, in `office-addins` only.</constraint>
+    <constraint source="project">Copy the sibling precedent. Check what `PlaybookBuilder` and `SemanticSearch` pin and match the major; do not invent a version or reach for a prerelease.</constraint>
+    <constraint source="adr">ADR-038 — never delete or skip a failing test to make the suite green. A `Skip` requires a recorded reason. If a test fails on a genuine product defect once the harness is correct, that is a FINDING to report, not something to edit away.</constraint>
+    <constraint source="project">Do NOT rewrite test bodies wholesale to suit the new RTL. If RTL 16 requires a mechanical API migration (e.g. an import path or a renamed helper), apply it and say exactly what changed. If it requires re-authoring assertions, STOP — that is a different task.</constraint>
+    <constraint source="project">Installs use `npm install --legacy-peer-deps --no-audit --no-fund`; never `npm ci` (root CLAUDE.md §12).</constraint>
+    <constraint source="project">Do NOT touch production source. The 88 production typecheck errors were cleared to ZERO by tasks 006/007/008 on 2026-09-09 — do not regress that. Verify with `npm run typecheck` that the production count is still 0 when you finish.</constraint>
+    <constraint source="project">The 289 test-file typecheck errors are CONSCIOUSLY ACCEPTED per operator decision 2026-09-09 (trigger to revisit: when a build surfaces them). Do NOT start clearing them under this task's name. Re-measure and report the number; that is all.</constraint>
+    <constraint source="adr">CLAUDE.md §8 TEST-MODIFYING override — Step 9.5 code-review + adr-check are MANDATORY.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>RTL 16 requires a React or Fluent UI major-version change to install or run. STOP — the operator has fixed React at 19 and that would be a different decision.</trigger>
+    <trigger>The bump requires re-authoring test assertions rather than a mechanical API migration. STOP and report the scope; an open-ended test-rewrite campaign is not this task.</trigger>
+    <trigger>After the bump the suite is WORSE than 009's baseline (12 failing suites). Report it plainly and do not paper over it — a regression is a legitimate finding and may mean RTL 16 is not the whole story.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">`@testing-library/react` in `src/client/office-addins/package.json` is `^16.x`, matching the major used by PlaybookBuilder and SemanticSearch.</criterion>
+    <criterion testable="true">React remains `^19.0.0` in that package; no PCF control and no `external-spa` file is modified.</criterion>
+    <criterion testable="true">The full jest suite has been re-run and before/after suite and test counts are recorded VERBATIM (009's baseline: 12 of 21 suites failing, 92-94 of 329 tests failing).</criterion>
+    <criterion testable="true">Every remaining failure is categorized in `notes/017-testing-library-alignment.md` as (a) harness/config, (b) mechanical RTL-16 API migration still owed, or (c) genuine product defect — with counts.</criterion>
+    <criterion testable="true">`npm run typecheck` shows PRODUCTION errors still at 0; the test-file count is re-measured and reported (was 289).</criterion>
+    <criterion testable="true">No test was deleted or newly skipped to reach a green number (ADR-038).</criterion>
+    <criterion testable="false">If the suite is not fully green, that is stated plainly with what remains — a partial improvement truthfully reported is a success.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="config">src/client/office-addins/package.json</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/017-testing-library-alignment.md</output>
+  </outputs>
+
+  <notes>
+    Completed 2026-09-09. `@testing-library/react` bumped `^14.2.1` → `^16.1.0` (matches SemanticSearch's
+    pin, the higher of the two sibling precedents). Mid-task discovery: RTL 16 demotes
+    `@testing-library/dom` from bundled dependency to peer dependency — added explicitly as `^10.4.1`
+    (exact pin both siblings already carry); without it, 17/21 suites failed to load (transient
+    escalation-trigger-3 condition, resolved within this task, not a final-state regression).
+
+    Final suite state is IDENTICAL to 009's baseline: 12 failed / 9 passed / 21 total suites; 92 failed /
+    237 passed / 329 total tests (within 009's 92-94 range). `useAnnounce.test.ts` — the suite this task
+    existed to fix — still fails 16/16 with the same `NotFoundError`. Root-caused: the failure is a
+    production-code defect (`useAnnounce.ts` manipulates `document.body` directly, outside React's
+    tracked tree), not an RTL-version peer mismatch as 009 hypothesized. A version bump cannot fix it;
+    fixing it needs a production-source change, out of this task's scope.
+
+    All 12 failing suites individually categorized: 0 harness/config, 0 mechanical-RTL-16-migration-owed,
+    12 suites (92 tests) genuine product/test defects — all unchanged before/after this task's bump.
+
+    Production typecheck: 0 (unchanged, verified — protects tasks 006/007/008's clearance). Test-file
+    bucket: 289 (unchanged, re-measured only, not cleared per constraint). No test deleted/skipped
+    (ADR-038). git diff scope: exactly `package.json` + `package-lock.json`, no test/production source
+    touched.
+
+    Quality gates (CLAUDE.md §8 TEST-MODIFYING override — mandatory): code-review 0 critical/0
+    warning/0 suggestion; adr-check 0 violations. No §6.5 ADR conflict.
+
+    Escalation triggers: none fired in the final state (trigger 3 fired transiently mid-task, self-
+    resolved by adding the missing peer-turned-explicit dependency; reported for honesty in
+    notes/017-testing-library-alignment.md rather than smoothed over).
+
+    Full record: projects/spaarkeai-word-add-in-r1/notes/017-testing-library-alignment.md
+  </notes>
+</task>

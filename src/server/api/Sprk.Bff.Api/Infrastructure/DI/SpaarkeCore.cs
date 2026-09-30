@@ -77,13 +77,19 @@ public static class SpaarkeCore
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        // 🔴 UNCONDITIONAL — the delegated (user-OBO) Dataverse client (task 126 / #1021).
+        // 🔴 UNCONDITIONAL — the delegated (user-OBO) Dataverse client.
         //
-        // MOVED HERE from AddToolFramework (Services/Ai/ToolFrameworkExtensions.cs), which runs INSIDE
-        // the compound AI gate. That made this an asymmetrically-registered dependency the moment a
-        // non-AI caller needed it: GET /api/office/search/entities maps UNCONDITIONALLY, and with the
-        // AI gate off the client would have been absent, so the endpoint's fail-closed check would
-        // have taken entity search down entirely rather than trimming it.
+        // MOVED HERE by unified-access-control-r2 task 126 from AddToolFramework
+        // (Services/Ai/ToolFrameworkExtensions.cs), which runs INSIDE the compound AI gate. That made it an
+        // asymmetrically-registered dependency the moment a non-AI caller needed it. The load-bearing
+        // non-AI consumer is /api/office/communications/* (task 127, #1020): three handlers that read
+        // through this client under the caller's security context, on a group that maps UNCONDITIONALLY —
+        // so with the AI gate off, they could not bind.
+        //
+        // (Task 126 made the move for GET /api/office/search/entities, which spaarkeai-word-add-in-r1 task
+        // 062 later reimplemented as an app-only impersonated read — that route no longer uses this client.
+        // A reader who follows only that history might conclude the registration can go back behind the
+        // gate. It cannot: the communications routes depend on it.)
         //
         // That is exactly the Tier-1.5 anti-pattern in CLAUDE.md §10 F.1 / RB-T028-03..06:
         // "endpoints that map unconditionally must have unconditional service registration."

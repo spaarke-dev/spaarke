@@ -324,23 +324,15 @@ public class EntityAccessFilter : IEndpointFilter
     /// 🔴 THIS METHOD IS THE FILTER'S REACH. A request shape it does not recognise yields null, and a
     /// null target makes the filter PASS THROUGH (see the caller) — so adding a route to
     /// <c>AddEntityAccessFilter</c> without teaching this method its request type produces a filter
-    /// that is present, green, and does nothing. Extend this method in the same change.
+    /// that is present, credited as a gate by <c>RouteAuthorizationGuardTests</c>' Rule A, and checks
+    /// nothing. Extend this method in the same change, and add a guard that pins the pairing.
     /// </para>
     /// <para>
-    /// <c>CreateTodoRequest</c> added 2026-09-29 by unified-access-control-r2 task 128 (GitHub #1022):
-    /// <c>POST /api/office/todo</c> attaches a to-do to a pre-existing record named by
-    /// <c>RegardingEntityType</c>/<c>RegardingRecordId</c> and had no per-record gate, so a caller could
-    /// write against a record they have no access to via the app identity. The regarding pair is
-    /// OPTIONAL on that request — a to-do with no regarding record is a legitimate personal to-do, and
-    /// for it there is genuinely nothing to authorize against, which is the one case where the caller's
-    /// pass-through is correct rather than a gap.
-    /// </para>
-    /// <para>
-    /// Type-name compatibility was checked, not assumed: <c>/todo</c> accepts only Matter / Project /
-    /// Invoice (<c>OfficeService._todoRegardingMap</c>), all three of which are present in
-    /// <see cref="EntitySetByType"/>, and that dictionary is <c>OrdinalIgnoreCase</c> — so the
-    /// capitalised forms the add-in sends resolve. Without that, gating the route would have turned
-    /// working requests into 400s.
+    /// Today only <c>SaveRequest</c> reaches this filter (<c>POST /api/office/save</c>). For
+    /// <c>POST /api/office/todo</c>, see <c>TodoSourceAccessFilter</c> (spaarkeai-word-add-in-r1 task
+    /// 064), which gates all four caller-supplied ids; a <c>CreateTodoRequest</c> branch that once lived
+    /// here (unified-access-control-r2 task 128, gating only the regarding id) was superseded by it and
+    /// removed at merge, 2026-09-30.
     /// </para>
     /// </remarks>
     private static SaveEntityReference? ExtractTargetEntity(EndpointFilterInvocationContext context)
@@ -350,18 +342,6 @@ public class EntityAccessFilter : IEndpointFilter
             if (argument is SaveRequest saveRequest && saveRequest.TargetEntity != null)
             {
                 return saveRequest.TargetEntity;
-            }
-
-            if (argument is CreateTodoRequest todoRequest
-                && !string.IsNullOrWhiteSpace(todoRequest.RegardingEntityType)
-                && todoRequest.RegardingRecordId is { } regardingId
-                && regardingId != Guid.Empty)
-            {
-                return new SaveEntityReference
-                {
-                    EntityType = todoRequest.RegardingEntityType!,
-                    EntityId = regardingId
-                };
             }
         }
 

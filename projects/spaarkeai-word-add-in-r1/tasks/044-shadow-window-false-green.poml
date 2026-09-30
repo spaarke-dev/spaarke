@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>ISS-002: diagnose the shadow-window FALSE GREEN on PR #934 (add-in surface)</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the FROZEN CI tier configuration under an explicit operator authorization, and its output feeds a repo-wide cutover decision. Tags include `ci-workflows` — a hot-path surface per root CLAUDE.md §17.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The central judgment is whether this is a DEFECT in Router or the DESIGNED consequence of Tier 2 being advisory. Those look identical from the outside and lead to opposite actions — one is a code fix, the other is an operator decision about cutover criteria. Getting that wrong either ships a false fix or escalates a non-problem.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>May modify frozen tier workflows shared with every active project, and any change resets a live measurement window.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-workflows, testing, tooling, investigation</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Determine why the new CI tier reported SUCCESS on PR #934 where the legacy system reported FAILURE, and decide whether that is a Router defect or the designed consequence of Tier 2 being advisory. Do not assume it is a bug.</prompt>
+
+  <role>SPAARKE platform developer. GitHub Actions, the repo's CI tier architecture, and the shadow-comparison cutover. You are establishing what happened before changing anything.</role>
+
+  <goal>`notes/044-false-green-diagnosis.md` states, with evidence, exactly which check failed in legacy on PR #934, why Router did not reflect it, and whether the correct response is a Router fix (path C), a documented cutover-criteria amendment (path B), or an accepted design consequence — with the shadow window either cleared to continue or explicitly held pending an operator decision.</goal>
+
+  <context>
+    <background>
+      Filed as ISS-002 in `notes/defer-issues.md`, 2026-09-09. Owned by r1 because `ci-cd-unit-test-remediation-r1`, which owned this area, is CLOSED (operator, 2026-09-09).
+
+      `scripts/ci/shadow-window-status.ps1` reports 1 FALSE GREEN and calls it DISQUALIFYING: *"the new tier passed a commit the legacy system failed. Diagnose before continuing; the count above restarts from the most recent one."* The offending merge is **PR #934 — `feat(email-intelligence-r2): Outlook/Word add-in — Create To Do (sprk_todo)`**, legacy `failure`, Router `success`.
+
+      It is an ADD-IN PR, which is why this project found it, and is a reason r1 should care rather than treat it as someone else's CI chore: the new tier passed something on our own surface that the old one caught.
+
+      Until it is diagnosed, the shadow window cannot close and `sdap-ci.yml` cannot retire.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/ci/shadow-window-status.ps1</file>
+      <file role="canonical-reference">.github/workflows/sdap-ci.yml</file>
+      <file role="canonical-reference">docs/procedures/ci-cd-workflow.md</file>
+      <file role="modify">.github/workflows/ci-router.yml</file>
+      <file role="modify">.github/workflows/ci-tier1-blocking.yml</file>
+      <file role="modify">.github/workflows/ci-tier2-advisory.yml</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="operator" binding="true">🔴 YOU MAY TOUCH THE FROZEN TIER FILES. Explicit operator authorization, 2026-09-09. Two things go with that permission, and both bind:
+      (a) **Any config change RESTARTS the measurement clock.** The freeze exists because the tier config is the independent variable in a running experiment — observations taken before an edit were measuring a different system. Make changes ONCE, deliberately, at the end of the diagnosis; do not iterate live on the config while probing.
+      (b) **The window is ALREADY reset by this very false green** (11/20 agreeing, 4.1/5 days — both counting from it). So the cost of a change is 11 PRs and 4 days, not 19 and 5. Cheaper, not free. Say what the change costs when you propose it.</constraint>
+    <constraint source="project" binding="true">🔴 DO NOT ASSUME THIS IS A BUG. `Router` is an `always()` aggregate over `classify` + `tier1`, and **Tier 2 is DELIBERATELY EXCLUDED from its adjudication** — that exclusion is what makes Tier 2 advisory, per the north star "CI must not hold up high-frequency pushes". If legacy's failure on #934 maps to a check that now lives in Tier 2, then **Router passing is DESIGNED BEHAVIOR, not a defect**, and the finding is a cutover-criteria question ("is Tier 2's advisory status acceptable when it can mask a legacy red?") — an operator decision, not a code fix. Establish which world you are in BEFORE proposing any change.</constraint>
+    <constraint source="project">Establish the FACT first. Identify the exact failing job and step in legacy's run on PR #934, and the exact corresponding coverage (or absence) in classify/tier1/tier2. Cite run IDs and job names. Do not reason from the workflow files alone about what "would have" happened — read what DID happen.</constraint>
+    <constraint source="project">Do NOT "fix" this by making Router stricter until you know what legacy caught. Broadening Router blindly could convert a designed advisory gap into a blocking check across every project in the repo.</constraint>
+    <constraint source="project">If a change IS warranted, prefer the documented verdict-neutral shape where it applies: PRs #865/#890 established that adding a guard whose LIVE COUNT IS ZERO does not perturb the window, because no existing PR's result can change. State the live count of anything you add.</constraint>
+    <constraint source="project">Do NOT edit `sdap-ci.yml`. It is the system under comparison; changing it invalidates the other half of the experiment.</constraint>
+    <constraint source="project">Scope is the diagnosis and its consequence. This task does NOT build the office-addins jest gate — that is task 043, which is deliberately constrained to surface this issue and leave it alone. Do not merge the two.</constraint>
+    <constraint source="adr">Root CLAUDE.md §6.5 — if the outcome is "the cutover criteria are wrong as written", that is a path B amendment and needs the §6.5 format and operator sign-off, not a unilateral rewrite.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The false green turns out to be DESIGNED — legacy's failing check maps to Tier 2, which Router correctly excludes. STOP and escalate as a cutover-criteria decision in §6.5 format. Do not "fix" designed behavior.</trigger>
+    <trigger>Diagnosing requires re-running historical workflows or otherwise mutating the recorded comparison data. STOP — that destroys the evidence the window is built on.</trigger>
+    <trigger>The diagnosis reveals a whole CLASS of failures Router cannot see, not a single gap. That is a cutover-viability question, not a patch — report the class and its size.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">The exact legacy job + step that failed on PR #934 is identified and cited by run id and job name — established from the recorded run, not inferred from workflow YAML.</criterion>
+    <criterion testable="true">The corresponding coverage in classify / tier1 / tier2 is stated explicitly, including which tier it lives in today and whether Router adjudicates it.</criterion>
+    <criterion testable="true">The report states one verdict: ROUTER DEFECT (path C fix), DESIGNED-BEHAVIOR (path B cutover-criteria escalation), or ACCEPTED-GAP — with the reasoning that distinguishes it from the other two.</criterion>
+    <criterion testable="true">If any tier file was modified, the report states what the change costs the window (PRs and days forfeited) and the live count of any added guard.</criterion>
+    <criterion testable="true">`sdap-ci.yml` is unmodified — verified by `git diff --name-only`.</criterion>
+    <criterion testable="true">`actionlint` passes on any workflow file changed.</criterion>
+    <criterion testable="false">ISS-002 in `notes/defer-issues.md` is updated with the verdict and either closed or given an explicit next owner.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/044-false-green-diagnosis.md</output>
+  </outputs>
+
+  <notes>
+    Completed 2026-09-10. **VERDICT: ROUTER DEFECT — genuine, and already remediated on master by
+    PR #944 before this task ran.** Not DESIGNED-BEHAVIOR, not ACCEPTED-GAP.
+
+    THE FACT (from the recorded runs, not YAML): legacy run `33775635122`, job `100716509606`
+    `Build &amp; Test (Debug)`, **step 7 `Build`** — `CS1503` at
+    `tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/Phase2EndToEndFixture.cs(443,17)`
+    (#934 added a 4th arg to `IOfficeService.QuickCreateAsync` without updating the fixture). All
+    test steps `skipped` => a COMPILE failure, not a test failure. On the new tier, run
+    `33775635602`: Tier 2 `Full Unit Tests` (job `100716654163`) hit the identical error at its own
+    `Build` step, while Tier 1 `Compile (Debug)` (job `100716653033`) passed because it ran
+    `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` — the BFF csproj ONLY, no test
+    project. Router excludes Tier 2 by construction. Green Router over a solution that does not build.
+
+    WHY NOT "DESIGNED": the failing JOB was in Tier 2, but the failing CONCERN is compilation, which
+    is Tier 1's charter. Decisive pre-existing evidence (predates both PRs):
+    `ci-cd-unit-test-remediation-r1/spec.md` **FR-A02** assigns *"compile"* to Tier 1 unscoped and
+    excludes only *"full unit/integration tests"* — i.e. RUNNING tests, never COMPILING them.
+    The escalation trigger therefore did NOT fire.
+
+    CLASS SIZE: 5 of 8 solution test projects had no blocking Tier 1 compile coverage;
+    `Spaarke.Core.Tests` (46 tests) was not even in `Spaarke.sln`. Fixed by PR #944 / `ce5c2c3d7`
+    (2026-09-04T22:13Z) — Tier 1 now builds `Spaarke.sln`. Verified live from recorded job
+    `102698717302` (2026-09-10) compiling `Sprk.Bff.Api.IntegrationTests.dll`. Coverage now 9/9.
+
+    RESIDUAL — ESCALATED, OWNER = OPERATOR (§6.5 path B). #944 fixed the CI defect but not the
+    MEASUREMENT. `shadow-window-status.ps1` computes `$falseGreens` over the whole window and gates
+    `$ready` on `$falseGreens.Count -eq 0`, never filtered by `$countingFrom` — so #934 is a
+    PERMANENT LATCH and the window can never close, contradicting the script's own prose ("the count
+    restarts from the most recent one"). Its `-Since` docstring is also stale (still names PR #841 as
+    the last config change; #944 superseded it). Two options costed in the report; recommended
+    Option 1 (advance `-Since` to 2026-09-04T22:13:10Z) costs 6 PRs / 1.1 days — NOT the 11 / 4.1
+    assumed at filing, because #934's own reset had already discarded everything before it.
+
+    CHANGES MADE: documentation only. **No workflow file was touched** — the frozen-tier
+    authorization was deliberately NOT exercised, since the fix was already on master.
+    **Cost to the shadow window: 0 PRs, 0 days.** `sdap-ci.yml` unmodified (verified via
+    `git diff --name-only origin/master -- .github/workflows/` => empty). `actionlint` criterion
+    vacuous. Quality gates: code-review PASS (independently re-derived every run id, job id, log
+    excerpt and live measurement), adr-check PASS (0 violations; ADR-038 consistent).
+  </notes>
+</task>

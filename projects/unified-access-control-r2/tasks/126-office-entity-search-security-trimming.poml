@@ -176,4 +176,28 @@ reason. It is also N round trips per keystroke on a typeahead with a 500 ms budg
     FILE. Worth remembering: the failure mode was total, not localized, which is the tell for a harness
     fault rather than a real regression.</finding>
   </execution>
+
+  <superseded-at-merge date="2026-09-30">
+    THE SEARCH FIX WAS SUPERSEDED. spaarkeai-word-add-in-r1 task 062 (finding F1) fixed the same
+    /api/office/search/entities hole with a DIFFERENT mechanism — app-only impersonated read (MSCRMCallerID
+    via IImpersonatedCommunicationQuery + ICallerSystemUserResolver) — and the owner chose it over this task's
+    OBO implementation on 2026-09-30. Reasons: ADR-028 Amendment A5 sanctions impersonated read for "what may
+    this workforce user see" sets; this project's own task 036 (ImpersonatedRootSetSource) was headed the same
+    way; and the picker is word-add-in-r1's surface. This task's OfficeService changes, its seven source guards
+    (OfficeEntitySearchSecurityTrimmingTests) and its waiver text were removed or rewritten at the merge.
+
+    WHAT SURVIVES: the IDataverseUserClient relocation (Services/Ai/Handlers/Dataverse/ -> Infrastructure/Dataverse/,
+    §6.5 path C) and its move to UNCONDITIONAL registration in AddSpaarkeCore. Both remain load-bearing — for
+    task 127's three /api/office/communications routes rather than for the search. One namespace guard moved
+    into CommunicationsDelegatedReadGuardTests.
+
+    CORRECTION: the deviation above claims CallerRecordAccessProbe "already depended on" IDataverseUserClient.
+    It never did — it only MENTIONED the client, in remarks explaining why it deliberately avoided it (AI-gated
+    registration; a CRUD->AI dependency). Those are exactly the two objections the relocation removed, which is
+    the accurate precedent. Corrected in IDataverseUserClient.cs and CallerRecordAccessProbe.cs at the merge.
+
+    ⚠️ OPEN RISK INHERITED FROM 062: the surviving mechanism depends on the BFF application user holding
+    prvActOnBehalfOfAnotherUser. 062's own completion note records that this was never verified live; without
+    it the picker errors (fails closed) rather than leaking.
+  </superseded-at-merge>
 </task>
