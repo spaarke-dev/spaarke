@@ -253,3 +253,41 @@ over mixed results. Two extras, one line each:
 
 The new jest suite is registered in `ci-gated-suites.txt` — the gate is an allow-list, so an unregistered suite
 would run locally and never in CI. Gated suites 56 → 57.
+
+## Verification (real output)
+
+| Gate | Result |
+|---|---|
+| Gated jest (the PR gate) | **57 / 57 suites, 765 tests** — 56 → 57, the new suite registered in `ci-gated-suites.txt` |
+| Find suites after the code-review fix | 57 / 57 tests (FindView 37 · FindResultsList 13 · useFindRecordMatches 7) |
+| ESLint `--max-warnings 0` | clean — after fixing 4 warnings of mine (a real missing `itemNoun` effect dependency + 3 empty mock methods) |
+| tsc | **68** — the pinned baseline exactly, 0 in any touched file (was 70 mid-task; fixed) |
+| Build `Sprk.Bff.Api` + tests | 0 warnings / 0 errors |
+| ArchTests | **333 / 333** — run because `RecordSearchEndpoints.cs` is scanned by source guards |
+| Record-search tests (new + DTO + visualization sibling) | 44 / 44 |
+| Full `Sprk.Bff.Api.Tests` | **13,004 passed / 0 failed / 56 skipped** (12 m 48 s) — reconciles EXACTLY: 13,003 baseline + 1 new test |
+| Publish size (§10) | merge-base `9f938336e` **45.67 MB** → branch **45.67 MB** = **0.00 MB**; **215 files both sides**; `Compress-Archive` both sides, short paths `C:\wt077m` / `C:\wt077b`, both worktrees fresh. Base is the MERGE-BASE, not `origin/master` (1 commit ahead by then), so the delta is this task alone |
+| CVE | no vulnerable packages; no package added |
+
+## Acceptance criteria — honest status
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Reproduce-first, all three behaviours | ✅ top of this note |
+| 2 | Documents AND records, records per-row authorized; bridge stated; negative test | ✅ bridge section above; negative test written (none existed) and seeded |
+| 3 | Outlook's Find reaches a useful state, or FR-16 amended | ✅ reaches it after a save; FR-16 NOT amended |
+| 4 | A document saved this session becomes findable; Run Index reachable | ✅ tested both hosts |
+| 5 | Lazy scroll per ADR-051 with the mixed set | ✅ implemented + C-1 fixed — ⚠️ the §6.5 page-fullness reading **awaits the owner** |
+| 6 | Dark mode per ADR-021; no hard-coded colours | ⚠️ **code-verified only** — Fluent semantic tokens throughout, no hex; a VISUAL check needs a live Office host |
+| 7 | All jest suites green | ✅ 57 / 57 (the criterion said 56; this task added the 57th) |
+| 8 | Test scope | ✅ closed set + two extras, each justified above |
+
+**The three `<ui-tests>` are UNVERIFIED** — no Word host here. Deferred to live UAT, the same precedent as tasks
+013/021/026/033/034/037. Recorded as ⚠️ *complete with escalation* rather than ✅ for exactly two reasons: the
+ADR-051 decision is the owner's, and the UI has not been seen running.
+
+## Not deployed
+
+Owner decision 2026-09-30: no redeploy now. None of this is on `spaarke-bff-dev` or the add-in SWA yet — and the
+shared dev BFF is currently missing this project's routes anyway (`notes/042-uat-round2-2026-09-30.md`).
+

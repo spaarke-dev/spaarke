@@ -223,100 +223,48 @@ neither breaks the build, so the compiler will not catch it.
 
 ---
 
-## 🔵 ACTIVE TASK — **077** (IMPLEMENTED + code-reviewed; final gates in progress) — READ THIS FIRST
+## 🔵 NEXT — every remaining task is gated on an OWNER DECISION or on UAC-r2 #1029
 
-> **Last Updated**: 2026-09-29 (by context-handoff, pre-merge-to-master)
+> **Last Updated**: 2026-09-30 (077 closed; task-execute Step 11 transition)
 
 | Field | Value |
 |---|---|
-| **Task** | 077 — FR-16's three Find gaps |
-| **File** | `tasks/077-find-view-three-gaps.poml` |
-| **Rigor / tier** | FULL · opus @ xhigh · steps directional |
-| **Status** | in-progress — **all three gaps IMPLEMENTED and committed** (`7b7688f5c`, `73c858f28`, `22f6ac55e`); Step 9.5 code review done, its one Critical (C-1 paging race) FIXED with a regression test proven against the pre-fix code. Results in `notes/077-find-gaps.md` § RESULTS. |
-| **Next Action** | **Remaining to close 077**: (1) full `Sprk.Bff.Api.Tests` result — was running in background at 11:00 (baseline 13,003/0/56 + 1 new test ⇒ expect **13,004/0/56**); (2) §10 publish-size: run `scratchpad/publish077.ps1` (merge-base `9f938336e` vs HEAD, short paths `C:\wt077m`/`C:\wt077b`, Compress-Archive both sides, compare file counts) — do NOT run concurrently with another dotnet build (MSB4166 crash seen today); (3) mark POML `completed` + TASK-INDEX ✅ + `pwsh scripts/check-task-status-drift.ps1`; (4) 🔔 surface to owner the ADR-051 §6.5 item (notes § ADR-051). Then **078** (Track B). OfficeService track waits on UAC-r2 #1029. |
+| **Last completed** | **077** ⚠️ complete-with-escalation — `7b7688f5c` `73c858f28` `22f6ac55e` + close commit |
+| **Active task** | **none** — nothing is startable without an owner decision or #1029 |
+| **Next Action** | Get the owner's answers to the three 🔔 items below, then start the task they unblock. |
 
-### 🔑 077's design is already decided — do not re-derive it
+### 🔔 Owner decisions pending
 
-**Neither escalation trigger fires.** Both were checked and the reasons are recorded in
-`notes/077-find-gaps.md`:
+1. **077 — ADR-051 page-fullness (CLAUDE.md §6.5).** Per-row trim shortens pages, so shipped *non-empty ⇒ more,
+   empty ⇒ end*. Path A proposed (Path B — amend ADR-051 for server-trimmed sources — worth considering later).
+   Detail: `notes/077-find-gaps.md` § ADR-051.
+2. **078 — Word manifest: A (ship JSON now) or B (amend FR-05; XML stays production for r1; JSON migration its own
+   task).** Recommended **B**, and **fix the webpack ID conflation either way**. Evidence gathered 2026-09-30:
+   - Unified JSON is **GA for Word** (web; Windows ≥2501; Mac ≥16.103), schema 1.30, admin-center upload as a
+     "Teams app" zip (Microsoft Learn overview 2026-09-24; researcher memory
+     `.claude/agent-memory/researcher/word-unified-manifest-ga-status-2026-09-30.md`).
+   - 🔴 **The DEPLOYED Word JSON's app id is `c1258e2d-…` = the LIVE OUTLOOK add-in's id** — webpack
+     (`webpack.config.js` ~236-250) rewrites BOTH top-level `id` and `webApplicationInfo.id` to
+     `ADDIN_CLIENT_ID`. Uploading the Word JSON would likely replace the Outlook app. The source file's
+     `b3965ea0-…` (= the Word XML `<Id>`) never ships. **Inspect the built artifact, not `src/`.**
+   - Deployed Word JSON: 0 localhost hits; requirement sets identical to the XML; `devPreview` schema.
+   - Outlook ALREADY runs unified JSON in production (`outlook/manifest.xml` 404; JSON v1.0.22, also `devPreview`).
+   - Both manifests declare the same 3 commands (open pane, `quickSave`, `shareDocument`) — no drift.
+   - 078 needs an OBSERVED sideload on desktop AND web (owner's hands) or an FR-05 amendment (owner sign-off).
+3. **076 — confirm matter-numbering scope** (re-scoped out twice) before implementing.
 
-- **Trigger 2 avoided — (b) and (c) are ONE fix.** Outlook is `documentIdentity === undefined` because
-  `App.tsx:207` gates on **`canGetDocumentUrl`** (correct NFR-10 design; an email has no document URL), and
-  Outlook learns a `documentId` from exactly one place — a completed save. So its Find tab is dead *until you
-  save*, not permanently. Fix (c) and it works when it should. No Graph call, no manifest change, no FR-16
-  amendment.
-- **Trigger 1 avoided — no new BFF endpoint.** `hooks/useDocumentProfile.ts` already reads
-  `sprk_filekeywords` / `sprk_filetldr` / `sprk_filesummary`. So the bridge is two EXISTING calls composed
-  client-side. `/api/ai/search/records` satisfies the per-row-authorization constraint — verified, not assumed:
-  `RecordSearchEndpoints.cs:41` applies the filter, `AuthorizeRowsAsync` at `:162`/`:242`, and `:115-123` is a
-  forcing function that **refuses the request if the filter is ever detached**.
-- **Honest limitation to keep in the UI's framing**: this returns records related to the document's SUBJECT
-  MATTER, not records vector-similar to its content. True cross-entity vector similarity needs the endpoint
-  trigger 1 forbids and is separate, larger work.
+### ⛔ Blocked on UAC-r2 PR #1029 (OPEN as of 2026-09-30 11:05)
 
-### 🟢 WHERE THE BRANCH IS: merging to master
+**080 → 058 → 059 → 060 → 068 → 075** all edit `OfficeService.cs`. UAC-r2 will message on merge. Rebase ONTO
+them; append 080's resolver ctor param AFTER `userClient`. See the **UAC-r2 ANSWERED** block above.
 
-PR **#960** marked ready 2026-09-29. Final pre-merge gates, all re-measured after merging master twice
-(UAC-r2's 228-commit #950, and #1028):
+### ⚠️ `check-task-status-drift.ps1` CANNOT READ this project's index — route to 079
 
-| Gate | Result |
-|---|---|
-| Build | 0 warnings / 0 errors |
-| Full `Sprk.Bff.Api.Tests` | **12,985 passed / 0 failed / 56 skipped** (13 m 51 s) |
-| ArchTests, full unfiltered | **326 / 326** |
-| ESLint (office-addins) | clean, `--max-warnings 0` |
-| tsc | 68 total / **0 production** (pinned at 68) |
-| Publish | **45.67 MB** vs 60 MB ceiling |
-| CVE | none |
-
-**If the merge did not complete**, resume at `/merge-to-master`. The branch was `MERGEABLE`, 0 behind.
-
-### WORK COMPLETED THIS SESSION
-
-| Task | Outcome |
-|---|---|
-| **069** | ✅ Debt pinned (74→68 after 072), trailing-newline hole closed FOR REAL, three stale claims retired. Finding (a) "gate does not bind" **REJECTED on evidence** — both jobs already failed the run; the POML conflated *fails the run* with *blocks a merge*. 6 CI proofs. |
-| **070** | ✅ New `server-tests` job runs **1,776** office-scope tests per PR in **9 m 40 s** (2.1× margin) via a 15-term namespace filter — a third option the POML did not anticipate, changing no test file. Found its own defect on run 1: missing `lfs: true` → LFS **pointer files**. 4 CI proofs. |
-| **072** | ✅ Lint ran for the FIRST time: **32 violations → 0**. No rule disabled (one rule *option*, `no-namespace: allowDeclarations`). Found **two INERT suppressions**. `--max-warnings 0` proven load-bearing. |
-| **074** | ✅ **Owner decided: accept as live-host-manual**, harness declined. 109 e2e tests classified, marked in-file, listed in `parity-checklist.md` §10. |
-| merge + repair | Merged master twice; fixed ADR-052 doc drift, raised the ADR-010 ceiling 157→158 (UAC-r2 verified), repaired one test red from a **semantic merge conflict** (`account` removed from `validEntityTypes`). |
-| hooks | `.husky/pre-commit` now skips lint-staged on **merge** commits (587-file merges were SIGKILLed). Uses `git rev-parse --git-path MERGE_HEAD` — a literal `.git/MERGE_HEAD` never fires in a worktree. |
-
-### 🔴 OPEN DECISIONS FOR THE OWNER
-
-1. **Five zero-assertion tests in `SaveFlow.test.tsx`** pass inside the gated 56, so the gate counts them as
-   coverage. Route to `/test-diet` at 090 or its own task. (Raised in 072.)
-2. **081's premise is overstated** — measured live: **173 of 187 users are in ROOT**, so they read root-owned
-   records fine; the defect bites **14** child-BU users, not "every ordinary user". **Owner decided: wait for
-   080**, no manual backfill. Recipe kept in `notes/081-manual-backfill-assessment-2026-09-28.md`.
-3. **Tier 1 migration is now LIVE, not hypothetical** — the CI shadow window **CLOSED** (9/8 agreeing, 0 false
-   greens). `server-tests` + `lint` should migrate into Tier 1 and be **deleted** from
-   `office-addins-tests.yml`; issue **#1016** converts from advisory to urgent. Deliberately not done pre-merge
-   (edits `ci-tier1-blocking.yml`, no CI cycle to validate). Detail appended to `notes/070-pr-time-runner.md`.
-
-### HANDED OFF / UNBLOCKED
-
-- **#1014** — ADR-038 amendment collision → UAC-r2. Theirs stays **A2**; ours becomes **A3**, authored against
-  their **amended** B8 text (now on master) or it silently reverts them.
-- **#1015** — Office route census in `RouteAuthorizationGuardTests` → UAC-r2 (their surface). ⚠️ `FilterMarker`
-  is at `:1528-1531`; `AddJobOwnershipFilter` is the worst case because **"Ownership" is not in the alternation
-  at all**, so widening only for `Access` still misses it. Needs a negative control.
-- **#1016** — retiring `sdap-ci.yml` must extend Tier 1's filter or
-  `SpeWriteSinkContainerProvenanceGuardTests` is evaluated **nowhere**.
-- **058 UNBLOCKED** — UAC-r2 confirmed no dependency on `/office/recent`. 🔴 Their `AssociationType`
-  change (`Account` removed, **ordinal 3 BURNED**) must survive a **hand** rebase. ⚠️ Deleting the routes also
-  leaves **live validated config** dangling (`OfficeRateLimitOptions.RecentRequestsPerMinute` with
-  `[Range(1,1000)]`, plus an unreachable `Recent` enum member) — neither breaks the build. Detail in the POML.
-- **080 UNBLOCKED** — task 043 is now **on master**, so team-owned records confer via `owningteam` and 080 no
-  longer ships into the #1011 hazard. #1011 itself is still OPEN (they routed around it, did not repair it).
-
-### NEXT TASKS, in the owner's stated order
-
-**077** (in progress) → **078** → **076** → **079** → **080**. Then **058** and the four it unblocks
-(059/060/068/075), then **090**.
-
-⚠️ **076 opens with an escalation**: the owner re-scoped matter numbering out **twice**, so its first action is
-to confirm scope, not to implement.
+It parses **5 of 82** rows, and those 5 are the *risk table* (`| **002** | Negative result …`, ~line 355), not
+status rows: the status table puts the marker in cell 3 (`| 002 | title | ✅ |`), the parser expects cell 1.
+So it is red (77 "unpaired" + 5 false drifts) independent of any task. 077's pair was verified by hand
+(POML `completed-with-escalation` ⇔ index ⚠️). The noise HIDES REAL drift: **011** (`in-progress` vs ✅),
+**014** and **025** (`not-started` vs ✅). That is task **079**'s record-integrity scope.
 
 ## ⏸ PAUSED — **080** (reference; was the active task until 2026-09-28)
 

@@ -4,7 +4,7 @@
     <title>FR-16 — Find returns documents only, can never leave its empty state in Outlook, and never becomes available for a document saved in the current session</title>
     <phase>5 Remediation — spec integrity</phase>
     <gate>blocked — requires 063 (send-to-index authorization, which Find's Run Index calls)</gate>
-    <status>not-started</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Implements client and server behaviour across the Find surface. Tags include frontend + react + bff-api. Modifies `.tsx`/`.ts`.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -162,4 +162,37 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 063 must be ✅ first — Run Index calls that route.</protocol>
   </execution>
+  <status-note>
+    COMPLETED WITH ESCALATION 2026-09-30. Commits 7b7688f5c (gaps b and c), 73c858f28 (gap a),
+    22f6ac55e (code-review fixes), 06823f339 (results note). Full record: notes/077-find-gaps.md RESULTS.
+
+    (b) and (c) were ONE fix: resolveFindState now treats a completed save's id as an identity source
+    of last resort for the two outcomes that mean no known record (new, and undefined for Outlook), and
+    deliberately NOT for conflict, indeterminate, denied or error. The producer already existed
+    (SaveView.onComplete, task 036, both hosts) - verified before implementing. FR-16 NOT amended:
+    Outlook reaches a useful state after a save. Outlook copy says email, from the canGetSender capability.
+
+    (a) Records come from POST /api/ai/search/records, seeded by the AI profile (keywords, then TL;DR,
+    then summary). This reverses task 034, which rejected title and body-text seeds and never considered
+    the profile. No new BFF route. Named Matching records; the hook is useFindRecordMatches because
+    useRelatedRecord (singular) already means the document's own FR-09 card.
+
+    The route's per-row trim had NO test anywhere. Added RecordSearchRowAuthorizationContractTests on the
+    SHIPPED handler (PostRecordSearch made internal, the VisualizationEndpoints precedent). Seeded red.
+
+    Code review found one Critical in this task's own code: records could stop paging at page 1 forever
+    when record search answered before the documents, because the hook lives in FindView but its sentinel
+    mounts inside FindResultsList. Fixed with a callback ref; the regression test FAILS against the
+    pre-fix hook and passes on the fix.
+
+    ESCALATION 1 - owner decision: ADR-051 page-fullness rule. The per-row trim shortens pages, so the
+    literal rule would stop after page 1. Shipped: non-empty page means more, empty page means end, and
+    the offset advances by the requested window. Proposed CLAUDE.md 6.5 path A. Seeded both ways.
+    ESCALATION 2 - the three ui-tests and the dark-mode visual check need a live Office host; deferred to
+    UAT like tasks 013, 021, 026, 033, 034 and 037.
+
+    Gates: gated jest 57 of 57 suites, 765 tests; lint clean; tsc 68 (baseline); ArchTests 333 of 333;
+    full Sprk.Bff.Api.Tests 13004 passed, 0 failed, 56 skipped (baseline plus exactly 1); publish 45.67
+    to 45.67 MB, 0.00 delta, 215 files both sides; no CVE. Not deployed, by owner decision.
+  </status-note>
 </task>
