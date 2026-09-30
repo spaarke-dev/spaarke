@@ -555,6 +555,24 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 
 ## Release & Deployment Orchestration
 
+### `Package-OfficeAddinUnified.ps1`
+**Purpose:** Zips the combined Outlook + Word Spaarke add-in — ONE Microsoft 365 unified-manifest app (schema 1.30) — into the two packages the admin center accepts: `spaarke-addin-<ver>.zip` (production; hides the live XML add-ins on clients that can run it) and `spaarke-addin-<ver>-TEST.zip` (own id, "(TEST)" name, hides nothing). Reads the parts webpack's `SpaarkeUnifiedPackagePlugin` emits into `src/client/office-addins/dist/spaarke/`; writes OUTSIDE `dist/` so the public site does not serve them. **Fails (exit 1)** if the build output is missing or the icons are not 192×192 (color) / 32×32 (outline).
+**Usage:** 🟢 Active - every add-in release (run by `deploy-office-addins.yml`, which uploads the zips as the artifact `spaarke-addin-unified-package`)
+**Lifecycle:** ✅ Maintained
+**Dependencies:** PowerShell 7 (`pwsh`), a prior `npm run build` in `src/client/office-addins`
+**Owner:** spaarkeai-word-add-in-r1 (task 078)
+**Last Used:** September 2026
+
+**When to Use:**
+- Producing the admin-center upload for the unified Spaarke add-in (Integrated apps → Upload custom apps → App type "Teams app")
+- Rollout and cutover steps: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md` §6
+
+**Command:**
+```powershell
+# After `npm run build` in src/client/office-addins:
+.\scripts\Package-OfficeAddinUnified.ps1
+```
+
 ### `Deploy-Release.ps1`
 **Purpose:** Master release orchestrator — deploys the full Spaarke platform to one or more environments. Runs a 7-phase pipeline: pre-flight checks, client build, BFF API deployment, Dataverse solution import, web resource deployment, post-deploy validation, and git release tagging. Environments are processed sequentially; each phase delegates to existing deployment scripts.
 **Usage:** 🟢 Active - Production and demo releases

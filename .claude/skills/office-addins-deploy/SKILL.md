@@ -133,11 +133,23 @@ curl "https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.xml?v=
 
 ## Manifest Upload After Deploy
 
-After deploying code changes, if `manifest.xml` changed:
+There are two manifest eras (task 078, 2026-09-30) — upload the one that changed:
 
-1. Download manifest: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.xml`
+**XML add-ins (the LIVE registrations for both hosts)**, if an XML manifest changed:
+
+1. Download: Outlook `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/outlook-manifest.xml`
+   (⚠️ NOT `/outlook/manifest.xml` — that path 404s); Word `…/word/manifest.xml`
 2. Upload to M365 Admin Center → Integrated Apps → Upload custom app
 3. Wait 5-15 minutes for propagation to Outlook clients
+
+**Unified app package (Outlook + Word in ONE app)**, if either host's `manifest.json` or the package changed:
+
+1. Bump `UNIFIED_PACKAGE.VERSION` (3-part) in `webpack.config.js`; the deploy run then produces the artifact
+   **`spaarke-addin-unified-package`** (`spaarke-addin-<ver>.zip` + `-TEST.zip`). Locally: `npm run build`, then
+   `.\scripts\Package-OfficeAddinUnified.ps1`.
+2. Upload to M365 Admin Center → Integrated Apps → Upload custom apps → **App type "Teams app"** → the zip.
+   Test with the `-TEST` zip assigned to "Just me" first — it hides nothing, so the working add-ins stay put.
+3. Rollout and cutover steps: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md` §6.
 
 **Note**: Manifest version must be incremented (e.g., 1.0.1.0 → 1.0.2.0) for M365 to accept updates. Same Add-in version with the same manifest version = M365 rejects.
 

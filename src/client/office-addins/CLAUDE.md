@@ -1,6 +1,6 @@
 # CLAUDE.md — Office Add-ins Module
 
-> **Last Updated**: 2026-09-10 — corrected: React 19 (was stated as React 18); `npm run build` is the production build (no `build:prod` script); re-measured typecheck errors (0 production, 284 test-file only); added `office-addins-tests.yml` PR-check note. Originally created 2026-09-04 (email-communication-intelligence-r2 — first module pointer for the add-ins)
+> **Last Updated**: 2026-09-30 — task 078: manifests split into the LIVE XML era vs the unified app package (Outlook + Word in one app, `packaging/`); warned off `build/` folders (gitignored). 2026-09-10 — corrected: React 19 (was stated as React 18); `npm run build` is the production build (no `build:prod` script); re-measured typecheck errors (0 production, 284 test-file only); added `office-addins-tests.yml` PR-check note. Originally created 2026-09-04 (email-communication-intelligence-r2 — first module pointer for the add-ins)
 > **Purpose**: Where to start reading when working in `src/client/office-addins/**`. Code is the source of truth; the architecture doc explains *why*.
 > **Full architecture**: [`docs/architecture/office-outlook-teams-integration-architecture.md`](../../../docs/architecture/office-outlook-teams-integration-architecture.md) — read it before extending the add-ins.
 
@@ -44,7 +44,10 @@ npm run typecheck          # production code is clean (0 errors); errors remaini
 ```
 
 - **Deploy is CI-only**: push the branch → GitHub Actions **`deploy-office-addins.yml`** (holds SWA secrets) deploys to the live SWA. It is **not** an agent-run script. Confirm green via `gh run list --workflow=deploy-office-addins.yml`.
-- **Manifest change → bump the 4-part version** (`outlook/manifest.json` + `outlook/taskpane/index.tsx`, Word equivalents) **and M365 re-register**. Manifest rules (no `FunctionFile`, single VersionOverrides, icons 200) are in the architecture doc.
+- **Manifests — two eras, keep them apart** (full rules: architecture doc § Manifests):
+  - **LIVE = XML for both hosts**: `outlook/outlook-manifest.xml`, `word/word-manifest.xml` — 4-part version, then M365 re-register. ⚠️ Outlook's production XML is `/outlook/outlook-manifest.xml`; `/outlook/manifest.xml` 404s.
+  - **Unified app package (task 078)** — ONE app for Outlook AND Word, built by `packaging/mergeUnifiedManifest.js` (tests in `packaging/__tests__/`) into `dist/spaarke/` and zipped by `scripts/Package-OfficeAddinUnified.ps1`. 3-part `UNIFIED_PACKAGE.VERSION` in `webpack.config.js`. `outlook/manifest.json` / `word/manifest.json` are the per-host SOURCES of it. Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md`.
+  - ⚠️ Do NOT name a folder `build/` here — the repo-root `.gitignore` ignores every `build/`, so its contents are never committed (task 078 shipped a broken commit that way).
 
 ## Conventions
 

@@ -233,25 +233,22 @@ neither breaks the build, so the compiler will not catch it.
 | **Active task** | **078** IN PROGRESS (started 2026-09-30) — owner: *"best long-term solution — take that path now"*. Path: ONE combined unified (1.30) Spaarke package for Outlook + Word, keeping the Outlook app id so it ships as an UPDATE; standalone Word JSON output removed (it carried Outlook's id); TEST variant for a "Just me" upload; build-time icon + id checks. Plan + evidence: `notes/078-manifest-decision.md` (being written). |
 | **Next Action** | Get the owner's answers to the three 🔔 items below, then start the task they unblock. |
 
-### 🔔 Owner decisions pending
+### 🔔 Owner decisions — status 2026-09-30
 
-1. **077 — ADR-051 page-fullness (CLAUDE.md §6.5).** Per-row trim shortens pages, so shipped *non-empty ⇒ more,
-   empty ⇒ end*. Path A proposed (Path B — amend ADR-051 for server-trimmed sources — worth considering later).
-   Detail: `notes/077-find-gaps.md` § ADR-051.
-2. **078 — Word manifest: A (ship JSON now) or B (amend FR-05; XML stays production for r1; JSON migration its own
-   task).** Recommended **B**, and **fix the webpack ID conflation either way**. Evidence gathered 2026-09-30:
-   - Unified JSON is **GA for Word** (web; Windows ≥2501; Mac ≥16.103), schema 1.30, admin-center upload as a
-     "Teams app" zip (Microsoft Learn overview 2026-09-24; researcher memory
-     `.claude/agent-memory/researcher/word-unified-manifest-ga-status-2026-09-30.md`).
-   - 🔴 **The DEPLOYED Word JSON's app id is `c1258e2d-…` = the LIVE OUTLOOK add-in's id** — webpack
-     (`webpack.config.js` ~236-250) rewrites BOTH top-level `id` and `webApplicationInfo.id` to
-     `ADDIN_CLIENT_ID`. Uploading the Word JSON would likely replace the Outlook app. The source file's
-     `b3965ea0-…` (= the Word XML `<Id>`) never ships. **Inspect the built artifact, not `src/`.**
-   - Deployed Word JSON: 0 localhost hits; requirement sets identical to the XML; `devPreview` schema.
-   - Outlook ALREADY runs unified JSON in production (`outlook/manifest.xml` 404; JSON v1.0.22, also `devPreview`).
-   - Both manifests declare the same 3 commands (open pane, `quickSave`, `shareDocument`) — no drift.
-   - 078 needs an OBSERVED sideload on desktop AND web (owner's hands) or an FR-05 amendment (owner sign-off).
-3. **076 — confirm matter-numbering scope** (re-scoped out twice) before implementing.
+1. ✅ **077 — ADR-051 records-paging exception: APPROVED** (§6.5 path A). Recorded in the spec ADR Tensions table
+   and the project Decisions log (`450401be7`).
+2. 🟢 **078 — owner: "best long-term solution, take that path now" → IMPLEMENTED.** ONE unified app package
+   (schema 1.30) for Outlook AND Word; decision, evidence and the rollout runbook in `notes/078-manifest-decision.md`.
+   ⚠️ **Two earlier claims in this file were WRONG and are corrected:** production runs **XML for BOTH hosts**
+   (Outlook `outlook/outlook-manifest.xml` `5e4d66d0-…`; Word `word/word-manifest.xml` `b3965ea0-…`) — Outlook does
+   NOT run unified JSON (that came from probing `/outlook/manifest.xml`, the known 404 trap); and `c1258e2d-…` is
+   the Entra client id, NOT a live app's id, so no live add-in was ever at risk from the Word JSON.
+   **Waiting on the OWNER** for 078 §6: deploy → upload the `-TEST` zip to "Just me" → observe on Outlook + Word,
+   desktop + web → then the production zip.
+3. 🔔 **076 — explained to the owner 2026-09-30; awaiting answers** if option B (numbering as write-path invariant
+   I-10, owned by `RecordCreationService`): (a) Project number format — projects have NONE today; (b) random 6
+   digits (current convention, 53/59 matters) vs per-type sequence; (c) someone must verify production matter
+   numbers are unique before the alternate key goes in.
 
 ### ⛔ Blocked on UAC-r2 PR #1029 (OPEN as of 2026-09-30 11:05)
 
