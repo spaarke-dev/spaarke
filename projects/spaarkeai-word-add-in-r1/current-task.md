@@ -1,58 +1,104 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## 🚦 MERGE TO MASTER — **NOT DONE. THIS IS THE FIRST THING TO FINISH.**
+## ✅ MERGED TO MASTER — **DONE 2026-09-30**
 
-> **Last Updated**: 2026-09-29 (context-handoff at 9% context; session stopped here deliberately)
+> **Last Updated**: 2026-09-30 (post-merge + owner decisions on 065 / 066)
 
 | Field | Value |
 |---|---|
-| **Branch HEAD** | `ce4e8be84` — **pushed**, tree clean, **0 behind master** |
-| **PR** | **#960**, marked **ready** (not draft), `mergeable=MERGEABLE` |
-| **Blocker** | `state=BLOCKED` only because **`Router` has not reported at `ce4e8be84`** — CI restarted on the push |
-| **NEXT ACTION** | Full suite is ✅ **done and green** (13,003/0/56). So: **1)** wait for `Router` = pass at the current HEAD; **2)** run `/merge-to-master`. Nothing else is outstanding before the merge. |
+| **Merge commit** | **`e6bc26df9`** — `Merge pull request #960` (merge commit, NOT squash — all 82 task commits preserved) |
+| **PR** | **#960 `MERGED`** 2026-09-30T03:02:48Z, 305 commits |
+| **Main repo** | fast-forwarded to `e6bc26df9` |
+| **Branch** | **NOT deleted** — this worktree is still on it |
 
-### Verified AT `ce4e8be84` (after merging master's last 35 commits)
+Verified at `9f938336e` before merging (only `current-task.md` changed since the fully-gated
+`ce4e8be84`, so no source-file delta): build **0/0** · ArchTests **333/333** · full suite
+**13,003 / 0 / 56** · publish **45.67 MB** vs 60 ceiling · no CVEs · **Router = pass**, all 9 Tier 1
+blocking jobs green.
 
-| Gate | Result |
+### ⚠️ Why the merge happened at `UNSTABLE`, and the repo finding behind it
+
+`/merge-to-master` carries `mergeStateStatus: UNSTABLE → STOP` (near-miss #858, where `Router` passed
+while test jobs were red). We merged anyway, **deliberately and with the reason recorded**: the single
+non-pass was `Tier 2 (Advisory) / Full Unit Tests` = `cancelled`, which is a **30-minute
+`timeout-minutes` kill after a SUCCESSFUL build**, on a job that is `continue-on-error: true`. Zero
+`fail`, zero `pending`. The measurement that job would have produced we had locally at the same commit.
+The #858 hazard is *real failures hiding*; nothing was hiding.
+
+🔴 **Repo finding worth filing**: that 30-min guard was sized 2026-08-24 against a **10,762-test**
+suite. The suite is now **13,059** (+21%), and this run took **30.5 min** — it is being killed at the
+wall. `ci-tier2-advisory.yml:207-236` documents the previous time this happened: the job *never completed
+once in 20 runs*, so there was no observed duration to re-size against. On master it still completes
+sometimes, so we are at the edge rather than broken — but it will tip.
+
+---
+
+## 🟢 OWNER DECISIONS 2026-09-30 — these CLOSE two escalations and re-point 080
+
+### 065 — **`TargetEntity` must NEVER be required.** Escalation resolved.
+
+Owner: *"a Document (and a file saved to SPE) without a related record is a REQUIRED use case; we can't
+'guess' what record it belongs to — no record is required."*
+
+**Consequence — F4's frame was wrong, not just its fix.** F4 was written as *"the save bypasses
+per-record authorization."* If no record is required, **there is no other record to authorize against** —
+a per-record check has no subject to discriminate on. So:
+
+| Control | Disposition |
 |---|---|
-| Merge of master | **no conflicts**; our `OwningTeamId` in the shared `Spaarke.Dataverse/Models.cs` **survived** (both sides touched that file) |
-| Build | **0 warnings / 0 errors** |
-| ArchTests, full unfiltered | **333 / 333** — up from 326; master's 3 new guard files pass against our code |
-| Full `Sprk.Bff.Api.Tests` | ✅ **13,003 passed / 0 failed / 56 skipped** (13,059 total, 12 m 34 s) — landed just after the first handoff write, so **no re-run is needed**. Reconciles upward from 12,985 at `71cd2aeff`: +18 tests, which is master's new Compose/ReviewMemo/DocumentLinkFieldMap coverage arriving with its 35 commits. |
-| Publish | 45.67 MB vs 60 MB ceiling (measured at `77242c010`) |
-| CVE | none |
+| Container placement | ✅ **already shipped** (acting-user BU container → tenant default last resort) |
+| Ownership of the created `sprk_document` | ❌ **this is task 080** — the real residual gap |
+| Table-level create right on `sprk_document` | ❓ unverified — confirm whether the row is created under the caller's identity (Dataverse enforces natively) or app-only (nothing checks it) |
 
-### 🔴 Two things about the merge gate that will waste your time if you do not know them
+- **DO NOT** require `TargetEntity`. **DO NOT** build a document-side association predictor (option a).
+- Ribbon option (b) “open the pane when there is no target” is **dropped** — unfiled saving is correct.
+- ✅ Owner **granted `AppendTo` to `Spaarke Office Add In User`** — this fixes the SEPARATE half (filing
+  *to* a Matter when the user chooses to). Re-verify live and add the row to
+  `notes/role-grant-gap-2026-09-21.md`.
 
-**1. `Router` is structurally gated behind the advisory tier it ignores.** `ci-router.yml:275` is
-`needs: [classify, tier1, tier2]` with `if: always()`. Tier 2 is excluded from Router's *adjudication* by
-construction (`:280-285` — a timeout reports `CANCELLED`, which an allow-list cannot cover), but Router still
-**waits for tier2 to finish**. Tier 2 burns its 30-minute cap and is cancelled (6/6 historically). So expect
-**~40 minutes** before `Router` reports, and expect exactly one non-pass check —
-`Tier 2 (Advisory) / Full Unit Tests` = `cancel` — which is **normal and not a blocker**.
-`state=UNSTABLE` (not `BLOCKED`) is the mergeable state once Router passes.
+### 066 — **Option A, delivered as 080's convention.** Not B, not C.
 
-**Proof it works**: at the previous commit `71cd2aeff` the final state was 37 checks — **35 pass, 1 cancel
-(Tier 2), 1 skipping (Trivy)** — with **`Router: pass / SUCCESS`**.
+Owner: *"we need to implement the best solution not the 'easy' solution"*; backfill is **not** a concern
+(dev). The earlier recommendation of **B was wrong** — it rested on (i) backfill cost and (ii) “A is a
+data-model decision owned elsewhere.” (i) is void, and (ii) is false: **the owner already settled the
+data-model question repo-wide** in 080 (*“owned by the acting user's BU default owner team … not the
+user”*). B would bolt a bespoke “participant read” concept alongside the ownership model already chosen.
 
-**2. There is a TREADMILL.** Master moved **35 commits in the hour** spent waiting for one Router cycle, and it
-moved 229 and then 10 before that. If you insist on "fresh full CI at a commit that is 0-behind", the condition
-may never hold. The judgment made here, for you to accept or override: merge on the strength of **local
-verification at the exact commit** (build + full arch + full suite) plus a passed Router, rather than chasing a
-fresh Router that master will invalidate again. Master's last 35 commits were Compose-r8 wrap-up +
-field-mapping, with **no overlap** on `RecordCreationService`, `CreateTimeFieldMapping`,
-`RecordOwnershipResolver`, `OfficeService` or `OfficeEndpoints` — checked, not assumed.
+⚠️ Earlier phrasing of A said “set `ownerid` to the saving **user**” — wrong. The model is **TEAM
+ownership** (BU default Owner team, `isdefault = true` AND `teamtype = 0`), as `sprk_matter` already does.
 
-**Residual risk, named rather than hidden**: a *semantic* merge conflict with master that local tests miss. That
-is not hypothetical — it happened this session (UAC-r2 removed `"account"` from `validEntityTypes` while our
-test asserted an `account` target is still gated; different files, clean merge, red suite). If CI goes red on
-master after the merge, look there first.
+⚠️ **080 carries a cross-project boundary**: `sprk_communication` is created by
+`EmailUploadCaptureService.BuildCommunicationEntity`, owned by the Communication project, with an
+escalation trigger *“do not reach into their create path — coordinate or hand off.”* **Coordinate**;
+do not unilaterally edit it. C remains available as an interim mitigation for the matter-title leak only
+if the owner asks.
 
-### Merge mechanics
-Use **`/merge-to-master`**, not a bare `gh pr merge` — it performs the pre-merge branch update and the
-**worktree sync** (this is a worktree; the main checkout's local `master` needs an explicit pull afterwards).
-⚠️ Before any `--delete-branch`, confirm **pending is genuinely 0** — deleting the branch while jobs are queued
-fails them at `Checkout` and looks like a quality regression (happened on PR #890).
+### 062's picker-500 concern — **CLOSED, not a deploy risk**
+
+Owner: *“all users will have at least a Basic User assigned because if they are using the addin, then they
+are using the system.”* So the all-types-failed → **500** path for a user holding
+`Spaarke Office Add In User` *alone* is **unreachable in practice**. Do not re-raise it.
+
+---
+
+## 📍 SEQUENCING — owner-approved 2026-09-30 (supersedes 077→078→076→079→080)
+
+Rationale: **058 deletes ~800 lines from `OfficeService.cs`**, and 059/060/068/075 all refactor code in
+that same file — any order running them first refactors code that then gets deleted. 058 is also the most
+severe finding and the keystone unblocking four tasks.
+
+| Track | Tasks | Why it is one track |
+|---|---|---|
+| **A — BFF `OfficeService.cs`** | **058 → 080 → 059 → 060 → 068 → 075** | ⚠️ **All of these touch `OfficeService.cs`** — strictly serial. 080 is 2nd (not last) because it is now the fix for BOTH 065's residual risk and 066. |
+| **B — client add-in** | 077 → 078 | `office-addins/**` only — genuinely parallel with Track A |
+
+Then **076** (opens by escalating scope — numbering re-scoped out twice; confirm before implementing)
+→ **079** (reconciliation, must follow what it reconciles) → **090** (gated on the owner's 042 UAT).
+
+⚠️ **058 hand-rebase requirement**: UAC-r2's `AssociationType` decision must survive — `Account`
+**removed, ordinal 3 BURNED**. Also leaves live validated config dangling
+(`OfficeRateLimitOptions.RecentRequestsPerMinute`, `[Range(1,1000)]`, plus an unreachable enum member);
+neither breaks the build, so the compiler will not catch it.
 
 ---
 
