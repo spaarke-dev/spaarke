@@ -368,7 +368,11 @@ its primary key.
 - **Fix:** `[JsonIgnore]` on both properties, and the endpoint now resolves the owner itself.
 - **Pinned by:** `DocumentCreateOwnershipContractTests`. With `[JsonIgnore]` removed from `Id`, the test goes red.
 - **Honest scope:** the endpoint's only client (`SummarizeFilesWizard`) sends `{Name, ContainerId}`. No evidence of
-  abuse exists. Both properties were introduced on this branch and have not shipped to master.
+  abuse exists. ⚠️ **CORRECTED 2026-09-30 — this line originally said the properties "have not shipped to
+  master". Wrong:** both reached master with **#960** (2026-09-29; `OwningTeamId` in `db046e534`, `Id` in task
+  014), and the hole is live on master and on `spaarke-bff-dev` (`2682e8225`). Filed as **#1043**; this branch is
+  the fix. The UAC-r2 session caught the wrong claim; the commit message of `5d870b898` repeats it and cannot be
+  amended (pushed).
 
 ### 6.3 Resolver changes
 
@@ -545,3 +549,28 @@ who saved them, and the owner's 065 rule is *"we can't 'guess'"*. They stay in r
 - ADR-019: resolved (F3).
 - ADR-034 (F7): UAC-r2's call.
 - ADR-010: `IRecordOwnershipResolver` remains the justified test seam (`ADR010_DITests` ceiling entry).
+
+### 6.12 After the PR was prepared: three findings from UAC-r2 (2026-09-30)
+
+1. 🔴 **`POST /api/v1/documents` IS live on master.** §6.2 wrongly said it had never shipped.
+   - `OwningTeamId` (`db046e534`) and `Id` (task 014) both reached master in **#960**, with no `[JsonIgnore]`.
+   - On master, and on `spaarke-bff-dev` (`2682e8225`), any caller can create a document owned by any team,
+     including Secure Record, with a GUID they choose.
+   - Filed as **[#1043](https://github.com/spaarke-dev/spaarke/issues/1043)**. **This branch is the fix, so merging
+     it is a SECURITY merge** (#1038 and #1043).
+2. 🔴 **Regression introduced by 080: team-owned To Dos vanish from the Daily Briefing.**
+   - `DailyBriefingCollector`'s to-do channels filter `owninguser = caller` (`:1027`, and `ScopeToOwner` at
+     `:430-432`). A team-owned row has no `owninguser`.
+   - `sprk_todo` has no other user-typed "for whom" column, so no data-only guard exists.
+   - Filed as **[#1044](https://github.com/spaarke-dev/spaarke/issues/1044)** with three options: To Dos stay
+     caller-owned / add a "for" user column / accept the regression until UAC-r2's "who is notified" design lands.
+   - **Owner decision before merge.** Also noted: default-team ownership widens membership-driven briefing items
+     (matters, projects, events) to the whole business unit. UAC-r2 is taking that design.
+3. ⚠️ **Saves filed to a SECURE project will likely FAIL until UAC-r2's C10 lands.**
+   - The "Secure Record Owner" role has Read only on `sprk_project`, `sprk_matter` and `sprk_workassignment`, per
+     `SECURE-PROJECT-ENVIRONMENT-SETUP.md:161-168`. Dataverse refuses to assign a row to a team whose role lacks
+     Read on that table.
+   - So a document or To Do that record-first assigns to the Secure team will be refused by Dataverse.
+   - This is inferred from the guide and **untested live**. It **fails closed**: an error, and the bytes stay in the
+     secure project's own container. Before this branch, such a save went to the SHARED container (#1038).
+   - UAC-r2's C10 adds the child-table privileges.

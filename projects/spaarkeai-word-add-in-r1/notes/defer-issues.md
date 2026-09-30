@@ -526,6 +526,38 @@ Which is an owner call — it decides whether a view-only user can see in the pa
 
 ---
 
+## ISS-011 — `POST /api/v1/documents` lets any caller choose the owning team and primary key (LIVE on master)
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed on this branch; open until it merges |
+| **Urgency** | now |
+| **Filed** | 2026-09-30 |
+| **Source** | task 080 inventory; master exposure confirmed by UAC-r2 |
+| **GitHub Issue** | [#1043](https://github.com/spaarke-dev/spaarke/issues/1043) |
+
+`CreateDocumentRequest.OwningTeamId` (`db046e534`) and `.Id` (task 014) reached master in #960 without
+`[JsonIgnore]`. `DataverseDocumentsEndpoints` binds the type from the request body, so a caller can set the owning
+team (Secure Record included) and the GUID. Fixed by `5d870b898`. Detail: `notes/080-record-ownership.md` §6.12.
+
+---
+
+## ISS-012 — Team-owned To Dos drop out of the Daily Briefing (regression introduced by task 080)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner decision before this branch merges |
+| **Urgency** | now |
+| **Filed** | 2026-09-30 |
+| **Source** | UAC-r2 session review of task 080 |
+| **GitHub Issue** | [#1044](https://github.com/spaarke-dev/spaarke/issues/1044) |
+
+`DailyBriefingCollector` filters to-dos on `owninguser = caller`; a team-owned To Do matches nobody. The options
+(caller-owned To Dos / a "for" user column / accept until the "who is notified" design) are in the issue. Detail:
+`notes/080-record-ownership.md` §6.12.
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.

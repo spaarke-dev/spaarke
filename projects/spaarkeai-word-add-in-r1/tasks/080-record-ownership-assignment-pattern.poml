@@ -343,7 +343,8 @@
     Matter/Project/Invoice, and POST /api/v1/documents. OfficeDocumentPersistence refuses to create without a team.
 
     Two security defects found and fixed: (1) POST /api/v1/documents bound CreateDocumentRequest from the body, so a
-    client could set OwningTeamId and Id (both introduced on this branch) - JsonIgnore on both; (2) GitHub 1038,
+    client could set OwningTeamId and Id - JsonIgnore on both. CORRECTED: both reached master with PR 960, so the hole is
+    LIVE on master (GitHub 1043); this branch is its fix; (2) GitHub 1038,
     pre-existing: the Office save passed the FRIENDLY type to RecordContainerResolver, so a save to a SECURE project
     landed in the shared default container - fixed, with a regression test that fails on the old code.
 
