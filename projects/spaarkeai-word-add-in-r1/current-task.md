@@ -9,7 +9,7 @@
 | **Branch HEAD** | `ce4e8be84` — **pushed**, tree clean, **0 behind master** |
 | **PR** | **#960**, marked **ready** (not draft), `mergeable=MERGEABLE` |
 | **Blocker** | `state=BLOCKED` only because **`Router` has not reported at `ce4e8be84`** — CI restarted on the push |
-| **NEXT ACTION** | 1) confirm the full BFF suite is green at `ce4e8be84`; 2) wait for `Router` = pass; 3) run `/merge-to-master` |
+| **NEXT ACTION** | Full suite is ✅ **done and green** (13,003/0/56). So: **1)** wait for `Router` = pass at the current HEAD; **2)** run `/merge-to-master`. Nothing else is outstanding before the merge. |
 
 ### Verified AT `ce4e8be84` (after merging master's last 35 commits)
 
@@ -18,7 +18,7 @@
 | Merge of master | **no conflicts**; our `OwningTeamId` in the shared `Spaarke.Dataverse/Models.cs` **survived** (both sides touched that file) |
 | Build | **0 warnings / 0 errors** |
 | ArchTests, full unfiltered | **333 / 333** — up from 326; master's 3 new guard files pass against our code |
-| Full `Sprk.Bff.Api.Tests` | ⚠️ **WAS RUNNING WHEN THIS SESSION ENDED — RESULT UNKNOWN.** It was **12,985 / 0 / 56** at the previous commit `71cd2aeff`. **Re-run it**: `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug` |
+| Full `Sprk.Bff.Api.Tests` | ✅ **13,003 passed / 0 failed / 56 skipped** (13,059 total, 12 m 34 s) — landed just after the first handoff write, so **no re-run is needed**. Reconciles upward from 12,985 at `71cd2aeff`: +18 tests, which is master's new Compose/ReviewMemo/DocumentLinkFieldMap coverage arriving with its 35 commits. |
 | Publish | 45.67 MB vs 60 MB ceiling (measured at `77242c010`) |
 | CVE | none |
 
