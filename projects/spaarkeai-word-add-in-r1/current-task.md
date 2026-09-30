@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (082 ⚠️ closed and committed locally; #1045 being merged; 083 waiting on UAC-r2 141)
+> **Last Updated**: 2026-09-30 (#1045 merged `38ad83962`; 082 ⚠️ in PR #1051; next 058)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -11,9 +11,9 @@
 |---|---|
 | **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml`: delete the fabricated-data Office routes. Read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`). **083** is blocked until UAC-r2 sends task 141's link contract |
 | **Last closed** | **082** ⚠️ 2026-09-30, **committed LOCALLY, not pushed** (see Next Action). The Secure Record Owner role covers the child tables: live dev 36 → 40 (todo/communication/event/memo Read at Basic, 0 removed). The ONE list is `config/secure-record-owner-role.json`, plus `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` and guide edits. Record: `notes/082-secure-owner-role.md`. Before it, **080** ⚠️ `5d870b898` |
-| **PR** | 🔒 **#1045**: the owner said to "take the most efficient path", so it is being **merged** (merge commit, like #960; **no `--delete-branch`**, the branch continues). Head `6188d9e1c`. Every Tier 1 check passed; `Router` was waiting behind Tier 2 + legacy Build & Test (background watch `bq13lllpq`) |
-| **Branch** | `work/spaarkeai-word-add-in-r1`: remote head `6188d9e1c` = #1045. **Local is ahead by the 082 commit.** |
-| **Next Action** | **1)** When `Router` passes on `6188d9e1c`: `gh pr merge 1045 --merge` (NOT squash, NOT `--delete-branch`), then sync the main repo (`git -C C:/code_files/spaarke pull origin master`) and merge `origin/master` back into this branch. **2)** Push the 082 commit and open a NEW PR for 082 (docs + script + config; no BFF). Message UAC-r2 (`spaarke-wt-unified-access-control-r2-33`) with the commit (their tasks 145 and 146 read the JSON). **3)** `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141) |
+| **PR** | ✅ **#1045 MERGED** 2026-09-30 23:40 UTC as `38ad83962` (merge commit; branch kept). #1038 + #1043 closed as fixed on master (⚠️ `spaarke-bff-dev` still runs `2682e8225` until master is deployed). 🔄 **#1051 OPEN**: task 082 (docs + script + config, no BFF). Merge when `Router` passes (it needs only `Router`) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` @ `cf255da8b` (master merged back in after #1045), pushed. Main checkout `C:/code_files/spaarke` fast-forwarded to `38ad83962` |
+| **Next Action** | **1)** When #1051's `Router` passes: `gh pr merge 1051 --merge` (no `--delete-branch`), then merge `origin/master` back into the branch. **2)** `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141). UAC-r2 has been told about #1045, 9fee1e8e2 and #1051 |
 
 ### 🔔 Waiting on the OWNER (from 082)
 
