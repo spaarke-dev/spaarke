@@ -1082,6 +1082,36 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
+### `Set-SecureRecordOwnerRolePrivileges.ps1`
+**Purpose:** Gives the `Secure Record Owner` role `Read` at User (Basic) depth on every table in [`config/secure-record-owner-role.json`](../config/secure-record-owner-role.json). Without it, Dataverse refuses the Secure Record team as the OWNER of a row ("Read Privilege Check For Owner failed … missing prvRead…"). Write-path invariant I-6 assigns a secure record's children (documents, To Dos, …) to that team, so the role must cover child tables as well as the three `sprk_issecure` roots. The JSON file is the ONE list, also read by the setup guide and by `unified-access-control-r2`'s NFR-05 census.
+**Usage:** 🟡 Per environment, at secure-record setup and whenever the JSON gains a table; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-09-30 by `spaarkeai-word-add-in-r1` task 082)
+**Dependencies:** Azure CLI (`az login`) with System Administrator in the environment, PowerShell 7+
+**Owner:** `spaarkeai-word-add-in-r1` (the JSON file is extended by `unified-access-control-r2` task 146 too)
+**Last Used:** 2026-09-30, `-Apply` against `spaarkedev1`: added todo, communication, event and memo Read (36 → 40, 0 removed); `-Verify` PASS.
+
+**Command:**
+```powershell
+# Dry run (default): present / missing / "outside the file" (reported, never removed). Zero writes.
+.\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Add the missing Read privileges at Basic, then read the role back.
+.\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+
+# Check: exit 0 = the role covers every table in the file; exit 1 names each gap.
+.\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
+```
+
+**Safety model:**
+- Adds only. It never removes or re-depths a privilege; removal is an owner decision (setup guide §5.4).
+- Refuses any config asking for other than Read at Basic.
+- Resolves the business unit and the role to exactly one each.
+- Takes privilege ids from entity metadata and refuses a name mismatch.
+- Reads every addition back, and names any privilege the platform injected unasked.
+- Dataverse caches principal privileges, so re-probe an assignment until it is stable across 3 polls (setup guide §7).
+
+Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
+
 ---
 
 ## Testing & Validation Scripts
