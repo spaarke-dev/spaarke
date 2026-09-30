@@ -94,6 +94,9 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 | §6 `controlplane-subscription-rbac.bicep` fleet-subscription assumption | 🔲 | **T228** |
 | §7 DoD — docs corrected or explicitly deferred | 🔲 | T235 |
 | §8 — `Secure Project`→`Secure Record`, 3 Redis cache-key sites | NOT OURS (uac-r2 owns) | — |
+| **`INCOMING-CUSTOMERID-STANDARD.md`** (uac-r2 task 124, D-14; on master `b9a3a4a9c`, not yet in this branch) §3.1 intake validation `^[a-z][a-z0-9]{2,7}$` · §3.2 re-issue registry values + fixtures (`trial-2026-08-18` shape) · §3.3 record abbreviation once on the registry row · §3.4 intake template | 🔲 | **T237** |
+| **`INCOMING-CUSTOMER-RUNTIME-IDENTITY.md`** (uac-r2 task 123, D-14; master `ddfacd8ee`) §1.1 H4b emits `Customer__Id` · §1.2 missing = provisioning failure | 🔲 | **T238** |
+| same doc §1.3 — `Customer__Id` value for the two pre-D-12 stamps (dev BFF `rg-spaarke-dev`; prod BFF `rg-spaarke-platform-prod`), which will not start once the master change deploys | 🔔 owner decision | §5 **Q2** |
 
 ---
 
@@ -101,7 +104,7 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 
 | # | Gap | Evidence | Task |
 |---|---|---|---|
-| G1 | **Shared-service secrets for every customer.** `DagAdvancer.cs:160` runs `H4SharedKvSecretsPopulationHandler` for all runs; H4b depends on it. `manifest.yaml` sources Redis, Service Bus, Storage, OpenAI, DocIntel, AI Search keys from `sprksharedprod-*`, although `customer.bicep` deploys all six per customer. **Unverified**: which KV the per-customer BFF actually reads — if shared, customers share Redis (OBO tokens). Verify first. | DagAdvancer.cs:160,163; manifest.yaml:269,287,306,419,452,495 | T226 |
+| G1 | **Shared-service secrets for every customer.** `DagAdvancer.cs:160` runs `H4SharedKvSecretsPopulationHandler` for all runs; H4b depends on it. `manifest.yaml` sources Redis, Service Bus, Storage, OpenAI, DocIntel, AI Search keys from `sprksharedprod-*`, although `customer.bicep` deploys all six per customer. **Partially verified (T236, 2026-09-30)**: `customer.bicep:721-752` already writes these secrets **from the customer's own resources** into the **customer** KV, and the BFF app settings reference the customer KV (`:579-596`) — so a `customer.bicep` stamp does not read shared values. Remaining exposure: the manifest mislabels them; H4-shared runs + gates H4b on every run (needs `sprksharedprod-*` to exist); Model 1 still routes to `model1-shared.bicep` (T225a/b). T226 Step 1 still confirms H4b's generated vault refs + the H4-shared target vault. | DagAdvancer.cs:160,163; manifest.yaml:269,287,306,419,452,495; customer.bicep:579-596,721-752 | T226 |
 | G2 | Shared BFF app-regs `Spaarke BFF - Trial 1` / `- Model 1` still defined | `Register-EntraAppRegistrations.ps1:1243-1272`; `spaarke-constants.yaml:101-124` | T227 |
 | G3 | No per-customer subscription path for Model 1: intake exempts Model 1 from `subscriptionId` and auto-injects the shared sub; L2 UAMI RBAC assumes one fleet sub | `RunsEndpoints.cs` ISH-02; `intake.schema.json`; `controlplane-subscription-rbac.bicep` | T228 |
 | G4 | Shared-tier cost model: H0 `shared-trial` tier; `Model1MarginalEnvelopeUsd` = marginal-on-shared-platform | `H0Options`, `H13AcceptanceOptions` | T229 |
@@ -114,13 +117,20 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 | G11 | Dataverse package is not defined in source: only `spaarke_insights` is unpacked; the 9 deployed "solutions" are prebuilt zips; `SpaarkeCorporateCounselApp` has no source folder; 36 `src/solutions` folders mostly code pages deployed outside H6; some listed solutions believed unused (e.g. `EventDetailSidePane` — still referenced by NavigatorPane/EventsPage/Notepad code; verify) | `Deploy-DataverseSolutions.ps1:170-191,435-438`; `CanonicalSolutionCatalog.cs` | T218 |
 | G12 | Docs/governance describe shared Model 1: spec.md, design.md, project CLAUDE.md MUST rules, deployment guide, inventory doc, topology doc, root CLAUDE.md pointer rows, `/provision-environment` skill | — | T235 |
 | G13 | T224 W7/W8 leftovers: `H0Options.RequireCostEnvelopeForModel2Dedicated`, `isModel2Dedicated`, `Model1SharedDagParityTests.cs` filename | T224 code-review | T229 / T225b |
+| G14 | **Shared M365 clients vs per-customer BFF app-regs** (found T236). Outlook/Word add-ins and the Teams tab are single shared packages bound to one Entra app (`SDAP-BFF-SPE-API` `1e40baad-…`, multi-tenant, ADR-028 A2), while D-13 gives each customer BFF its own app-reg + token audience. How a shared client gets a token for — and routes to — a specific Model 1 customer's BFF (every Model 1 customer has Spaarke's `tid`) is undocumented. | inventory doc M365 section; `src/client/office-addins/outlook/manifest.json`; `src/client/external-spa/appPackage/manifest.json` | **unowned — owner review** |
+| G15 | **ADR-027 §3 vs managed solutions.** Owner requires managed solutions in customer envs (§1); ADR-027 §3 (amended 2026-06-02) says unmanaged everywhere, "do not enforce managed". Needs §6.5 resolution (likely path B). | `.claude/adr/ADR-027-…md` §3 | T218 |
 
 ---
 
-## 5. Open confirmation (1)
+## 5. Open confirmations (3)
 
 - **Q1 — H5 vs D4**: D4 makes the Dataverse environment a manual prerequisite. Does the operator **create** the
   environment (H5 becomes verify/adopt-existing), or only **name** it at intake (H5 still creates)? Resolve before T228.
+- **Q2 — `Customer__Id` for the two pre-D-12 stamps** (INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.3): the dev BFF
+  (`rg-spaarke-dev`) and prod BFF (`rg-spaarke-platform-prod`) cannot derive a customerId and will refuse to start
+  once uac-r2's BFF change is deployed there. Which customerId should each carry (or are they retired)? uac-r2
+  deliberately did not invent one.
+- **Q3 — G14**: how shared Outlook/Word add-ins + Teams tab reach a per-customer BFF with its own app-reg (see §4).
 
 ---
 
@@ -140,7 +150,7 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 
 | ID | Title | Scope | Depends |
 |---|---|---|---|
-| **T236** | Inventory doc → dedicated Model 1 target | Rewrite `SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` from §1 (scope target for all tasks below) | — |
+| **T236** ✅ | Inventory doc → dedicated Model 1 target | Rewrite `SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` from §1 (scope target for all tasks below). **Done 2026-09-30**; surfaced G14, G15 + sharpened G1 | — |
 | **T226** | Shared-service secrets → dedicated (G1) | **Step 1: verify** which KV/app-settings the per-customer BFF reads. Then: `manifest.yaml` 6 entries `from-shared-service` → per-customer (Bicep outputs of the customer's own resources); regenerate generated files; retire `H4SharedKvSecretsPopulationHandler` + DAG edge (H4b ← H4 only) + shared accessor/extractor types; remove Prompt Flow entries (D5); Bing/LlamaParse stay Spaarke-shared (D5) | T236 |
 | **T225a** | Item 4 — retire `model1-*.bicep` (7 surfaces) | Per INCOMING §5 Item 4 (stacks, orphan, l2-rbac module, 4 bicepparams, `bicep-e2e-dry-run.ps1` Assertion 8, ARM-artifact workflow + manifest schema) + `bff-runtime-rbac.bicep` shared UAMI + `prereqs.yaml` shared entries + Redis default Standard C1 (G7). Touches `.github/workflows/**` (r1-owned per project CLAUDE.md) | — |
 | **T225b** | Converge Model 1 onto the dedicated code path | H2b `HandleModel1BranchAsync` + tenant-filter template → dedicated; H12c `SharedPlatformOpenAiEndpoint` branch + `RuntimeReferencesOptions` + `Seed-PlatformKeyVault.ps1:402-403` + worker bicep config; ArmDeploymentRunner/FileBicepTemplateInspector → `customer` template for both; tenancy × profile pairing (G6); `Model1SharedDagParityTests` rename (G13) | T225a |
@@ -150,13 +160,16 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 | **T230** | H13 acceptance for dedicated Model 1 (G5) | I2 probe Model1 branch → dedicated; audit other H13 verifiers for shared-platform assumptions | T225b |
 | **T232** | H11 B2B guests + Spaarke-paid licensing (D2, G10) | Verify/implement license assignment + guest → Dataverse user sync in the Spaarke-tenant env | — |
 | **T233** | BFF `TenancyModel` enum rename (G8) | `Sprk.Bff.Api` Registration enum → `Model1`/`Model2`; BFF §10 checks (publish size, tests) | — |
-| **T218** | Define the complete Dataverse solution package (D7, G11) + managed-solution runbook + IAM + UPDATE audit | Design the solution set + components from scratch (not the existing zip list); decide which code pages ship in which solution; retire unused (verify `EventDetailSidePane` refs); source-control the definitions; update H6 `CanonicalSolutionCatalog` + `Deploy-DataverseSolutions.ps1`; include per-customer Copilot agent (§9 Q2) | T236 |
+| **T218** | Define the complete Dataverse solution package (D7, G11) + managed-solution runbook + IAM + UPDATE audit | Design the solution set + components from scratch (not the existing zip list); decide which code pages ship in which solution; retire unused (verify `EventDetailSidePane` refs); source-control the definitions; update H6 `CanonicalSolutionCatalog` + `Deploy-DataverseSolutions.ps1`; include per-customer Copilot agent (§9 Q2); resolve ADR-027 §3 managed-vs-unmanaged tension via §6.5 (G15) | T236 |
 | **T235** | Docs + governance (G12, INCOMING §7) | spec.md, design.md, project CLAUDE.md MUST rules + ADR Tensions, deployment guide, topology doc, root CLAUDE.md pointer rows (+ `.claude/CHANGELOG.md`), `/provision-environment` skill (main-session only), Power BI placeholder note | T225b–T230 |
+| **T237** | customerId standard at intake (INCOMING-CUSTOMERID-STANDARD) | Validate `^[a-z][a-z0-9]{2,7}$` at `POST /api/runs` + `intake.schema.json` + L3 skill intake (main-session, `.claude/`); `sprk_customerid` `MaxLength = 8`; re-issue non-compliant registry values + test fixtures; record abbreviation once on the registry row; `provisioning-runs/_templates/intake.md` | master merge |
+| **T238** | H4b emits `Customer__Id` (INCOMING-CUSTOMER-RUNTIME-IDENTITY) | Add `Customer__Id` = intake customerId to H4b's batched settings (manifest `per_env_settings` → regenerate); missing value = provisioning failure; H13 check that the stamp resolves via the setting, not RG derivation | master merge, T226 |
+| T239 | Task-status hygiene (non-blocking) | 74 tasks ✅ in TASK-INDEX whose POML still says `not-started` (+2 custom statuses) — reconcile from git evidence; `scripts/check-task-status-drift.ps1` parses 1 of 181 rows here (expects `\| ✅ 001 \|`, this index uses `\| 001 \| ✅ \|`) — fix parser or index format | — |
 | T221 | 23 baseline test failures | unchanged — any time | — |
 | 213.7 / 207 / 208 / 209 | pre-existing blockers | SPE runbook + constants; placeholder substitution; validator CI wiring; branch protection | T227 (213.7) |
 | **T186** | First live E2E dispatch — Model 1 dedicated customer | after all above | all |
 
-**Suggested order**: T236 → T226 (verification step first — highest-risk gap) → **master merge** (branch is 343 behind `origin/master` as of 2026-09-30; do it before T225a, which touches Bicep + `.github/workflows/**`; re-verify ArchTest 326/326) → T225a → T225b → T227 → T228 → T229 + T230 → T232 → T233 → T218 → T235 → pre-existing blockers → T186.
+**Suggested order (revised 2026-09-30 after T236)**: T236 ✅ → **master merge FIRST** (master carries two new INCOMING docs for this project + `customer.bicep` changes that T226 Step 1 verifies against) → T226 → T237 → T238 → T225a → … (rest unchanged). **Original order**: T236 → T226 (verification step first — highest-risk gap) → **master merge** (branch is 365 behind `origin/master` as of 2026-09-30 post-fetch; do it before T225a, which touches Bicep + `.github/workflows/**`; re-verify ArchTest 326/326) → T225a → T225b → T227 → T228 → T229 + T230 → T232 → T233 → T218 → T235 → pre-existing blockers → T186.
 
 ---
 
