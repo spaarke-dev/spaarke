@@ -102,6 +102,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -284,25 +285,35 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        // (6) Branch on tenancy model — Model 2 provisions dedicated indexes;
-        //     Model 1 verifies shared platform + provisions per-tenant template.
-        var tenancyModel = string.IsNullOrWhiteSpace(run.TenancyModel) ? "Model2Dedicated" : run.TenancyModel;
+        // (6) Branch on tenancy model — Task 223 (D-12) retires the pre-D-12 silent default
+        //     (blank → "Model2Dedicated"): parse-or-reject at the edge instead. Model 2 provisions
+        //     dedicated indexes; Model 1 verifies shared platform + provisions per-tenant template.
+        if (!TenancyModelParser.TryParse(run.TenancyModel, out var tenancyModel))
+        {
+            var diagnostic =
+                $"ProvisioningRun.tenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel. " +
+                $"Expected: {TenancyModelParser.FormatExpectedValues()}. Pre-D-12 handler defaulted blank to " +
+                "Model2Dedicated; Task 223 retires that silent default (per INCOMING-D12-D13-REMEDIATION.md §5 Item 2 / D2).";
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                AiSearchIndexRejectionCodes.InvalidTenancyModel, diagnostic, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var environmentName = TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var env)
             ? env
             : DefaultEnvironmentName;
 
-        HandlerResult branchResult;
-        if (string.Equals(tenancyModel, "Model1Shared", StringComparison.OrdinalIgnoreCase))
+        var branchResult = tenancyModel switch
         {
-            branchResult = await HandleModel1BranchAsync(
-                run, etag, envelope, tenantId, requestedIndexes, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            branchResult = await HandleModel2BranchAsync(
+            TenancyModel.Model1Shared => await HandleModel1BranchAsync(
+                run, etag, envelope, tenantId, requestedIndexes, cancellationToken).ConfigureAwait(false),
+            TenancyModel.Model2Dedicated => await HandleModel2BranchAsync(
                 run, etag, envelope, tenantId, environmentName, requestedIndexes, indexVer, cancellationToken)
-                .ConfigureAwait(false);
-        }
+                .ConfigureAwait(false),
+            _ => throw new InvalidOperationException(
+                $"Unhandled TenancyModel '{tenancyModel}' in H2bAiSearchIndexHandler. " +
+                "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
+        };
 
         if (branchResult is HandlerResult.Failure)
         {

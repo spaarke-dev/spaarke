@@ -432,28 +432,51 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         }
 
         // (8) Cost envelope (SC #14 + §15 #14).
+        // Task 223 (D-12): parse tenancyModel at the handler edge (matches H1's pattern) —
+        // pre-D-12 the ArmCostEnvelopeChecker had an `_`-arm fallback that silently used
+        // Model1SharedFloorEnvelopeUsd for any unrecognized string. That option + fallback are
+        // deleted; the checker's SelectExpectedEnvelope is now exhaustive over the enum.
+        // Two distinct diagnostic channels below: costInfraDiag → CostQueryInfraFault (infra
+        // fault from ARM); costTenancyDiag → InvalidTenancyModel (unparseable tenancyModel
+        // at the H13 edge). Split rejection codes so operators pattern-matching on
+        // `h13-invalid-tenancy-model` can find it in `run.ErrorDetail` directly.
         CostEnvelopeReport? costReport = null;
         string? costInfraDiag = null;
-        try
+        string? costTenancyDiag = null;
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var parsedTenancyModel))
         {
-            costReport = await _costChecker.CheckAsync(
-                new CostEnvelopeRequest(
-                    CustomerId: envelope.CustomerId,
-                    RunId: envelope.RunId,
-                    SubscriptionId: subscriptionId,
-                    TenancyModel: run.TenancyModel,
-                    ResourceGroupName: resourceGroupName,
-                    DriftAdvisoryThreshold: _options.CostDriftAdvisoryThreshold),
-                cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("H13 cost-envelope: runId={RunId} summary={Summary}",
-                envelope.RunId, costReport.Summary);
+            costTenancyDiag =
+                $"ProvisioningRun.tenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel. " +
+                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}. " +
+                "Cost-envelope check could not run without a typed tenancy value (upstream RunsEndpoints " +
+                "ValidateTenancyProfilePair normally 400s this at intake; H13 is the belt-and-braces defense).";
+            _logger.LogWarning(
+                "H13 cost-envelope: tenancyModel unparseable — cost check skipped: runId={RunId} tenancyModel={TenancyModel}",
+                envelope.RunId, run.TenancyModel);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        else
         {
-            _logger.LogError(ex,
-                "H13 cost-query infra fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            costInfraDiag = $"Cost query infra fault: {ex.GetType().Name}: {ex.Message}";
+            try
+            {
+                costReport = await _costChecker.CheckAsync(
+                    new CostEnvelopeRequest(
+                        CustomerId: envelope.CustomerId,
+                        RunId: envelope.RunId,
+                        SubscriptionId: subscriptionId,
+                        TenancyModel: parsedTenancyModel,
+                        ResourceGroupName: resourceGroupName,
+                        DriftAdvisoryThreshold: _options.CostDriftAdvisoryThreshold),
+                    cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("H13 cost-envelope: runId={RunId} summary={Summary}",
+                    envelope.RunId, costReport.Summary);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H13 cost-query infra fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                costInfraDiag = $"Cost query infra fault: {ex.GetType().Name}: {ex.Message}";
+            }
         }
 
         // (9) DECISION: aggregate every collaborator's outcome + pick failure
@@ -522,6 +545,15 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 H13Rejections.InvariantVerifierInfraFault,
                 $"Invariant verifier could not verdict I{(int)invInfra.Kind}: {invInfra.Diagnostic}. " +
                 $"Full invariant catalog: {invariantResult.ToLogSummary()}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (costTenancyDiag is not null)
+        {
+            // Task 223 (D-12) W1 fix: emit InvalidTenancyModel (not CostQueryInfraFault) so
+            // operators pattern-matching on `h13-invalid-tenancy-model` see it in
+            // `run.ErrorDetail` directly, not buried inside a CostQueryInfraFault diagnostic.
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.InvalidTenancyModel, costTenancyDiag,
                 cancellationToken).ConfigureAwait(false);
         }
         if (costInfraDiag is not null)

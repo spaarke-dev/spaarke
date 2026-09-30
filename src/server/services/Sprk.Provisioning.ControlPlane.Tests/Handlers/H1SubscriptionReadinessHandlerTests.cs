@@ -107,9 +107,12 @@ public sealed class H1SubscriptionReadinessHandlerTests
     }
 
     [Theory]
-    [InlineData("Model2Dedicated")]  // structured design.md §6.2 name
-    [InlineData("customerowned")]    // case-insensitive colloquial
-    [InlineData("MODEL2DEDICATED")]  // case-insensitive structured
+    [InlineData("Model2Dedicated")]  // structured design.md §6.2 name (exact-case, parsed by TenancyModelParser)
+    [InlineData("customerowned")]    // case-insensitive colloquial ownership word (secondary path)
+    // Task 223 (D-12): [InlineData("MODEL2DEDICATED")] REMOVED — the case-insensitive
+    // model literal was the P-2 defect surface. Post-Item-2 the model axis is parsed
+    // via TenancyModelParser (case-sensitive per H12c format preservation). Case-
+    // insensitive is retained ONLY for the ownership vocabulary above.
     public async Task AC2_CustomerOwned_TenancyNameVariants_AllInvokeLighthouseBranch(string tenancyValue)
     {
         var run = BuildRun(tenancy: tenancyValue);

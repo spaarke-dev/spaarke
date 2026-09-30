@@ -276,23 +276,28 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                 BicepDeployRejectionCodes.MissingBicepVersion, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (4.5) EXEC-04 (pre-dispatch audit 2026-08-27, Wave 2 remediation):
-        //       fail fast on blank TenancyModel. A silent fallback to
-        //       "Model2Dedicated" here would deploy an entire per-customer
-        //       stack (~$400/mo baseline) for a Model 1 shared trial customer —
-        //       cost blow-up + tenancy-invariant violation (§4D I1 no-silent-
-        //       default) detectable only at H13 (E13 cost-envelope checker),
-        //       AFTER Bicep succeeded. Fail here, before any Bicep parameter
-        //       assembly, so the operator gets a specific rejection code + no
-        //       Azure API call happens with a defaulted tenancy model.
-        if (string.IsNullOrWhiteSpace(run.TenancyModel))
+        // (4.5) EXEC-04 (pre-dispatch audit 2026-08-27, Wave 2 remediation) +
+        //       Task 223 (D-12, 2026-09-29): parse-or-reject at H2a's edge —
+        //       previously this guard rejected only BLANK strings and let
+        //       unrecognised non-blank values fall into downstream string
+        //       comparisons (D1). Now the guard is TryParse-based: null /
+        //       whitespace / wrong-case / unknown all fail here with the same
+        //       rejection code, before any Bicep parameter assembly or Azure
+        //       API call. A silent fallback to "Model2Dedicated" would deploy
+        //       an entire per-customer stack (~$400/mo baseline) for a Model 1
+        //       shared trial customer — cost blow-up + tenancy-invariant
+        //       violation (§4D I1 no-silent-default), only detectable at
+        //       H13 E13 cost-envelope.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out _))
         {
             var diagnostic =
-                $"ProvisioningRun.TenancyModel is blank / whitespace for customerId '{envelope.CustomerId}'. " +
+                $"ProvisioningRun.TenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel " +
+                $"for customerId '{envelope.CustomerId}'. " +
                 "H2a MUST NOT silently default to 'Model2Dedicated' — that would deploy an entire per-customer " +
                 "stack for a Model 1 shared trial (~$400/mo cost blow-up + tenancy invariant violation, only " +
                 "detectable at H13 E13-cost-envelope). Upstream (intake schema + L2 CreateRun endpoint) MUST " +
-                "populate TenancyModel with a valid value ('Model1Shared' or 'Model2Dedicated') before H2a dispatches.";
+                $"populate TenancyModel with one of: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()} " +
+                "before H2a dispatches. Task 223 (D-12) tightened this guard from blank-only to full TryParse.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BicepDeployRejectionCodes.MissingTenancyModel, diagnostic, cancellationToken).ConfigureAwait(false);
         }

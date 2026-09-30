@@ -70,8 +70,20 @@ public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Task 223 (D-12): parse tenancy at this collaborator's entry — this method is a
+        // first-class entry point invoked by the H2a handler independently of DeployAsync
+        // (they share the manifest download path, not the request-parse). Reject unknown
+        // values here rather than falling into a default template branch.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var tenancyModel))
+        {
+            throw new ArgumentException(
+                $"ArmWhatIfDriftDetector requires a recognized TenancyModel. Got '{request.TenancyModel ?? "(null)"}'. " +
+                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}.",
+                nameof(request));
+        }
+
         var templateJson = await ArmDeploymentRunner.ResolveArmTemplateJsonAsync(
-                _artifactsContainer, _options, request.TenancyModel, cancellationToken)
+                _artifactsContainer, _options, tenancyModel, cancellationToken)
             .ConfigureAwait(false);
         var parameters = ArmDeploymentRunner.BuildParametersPayload(request);
 

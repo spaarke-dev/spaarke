@@ -457,7 +457,15 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         // structured `costGateOutcome` property (MED#7 machine-readable audit)
         // + can decide whether to LOG-SKIP or FAIL (MED#4/#5 fail-CLOSED on
         // Model2Dedicated).
-        var isModel2Dedicated = string.Equals(run.TenancyModel, "Model2Dedicated", StringComparison.Ordinal);
+        // Task 223 (D-12): parse via the shared TenancyModelParser (case-sensitive) so this
+        // gate stays in lock-step with H1/H3/H12c which use the same parser. Behavioural
+        // change vs pre-Task-223: an unparseable / wrong-case tenancyModel value now sets
+        // isModel2Dedicated=false + strictModel2=false, so the strict-fail branches below
+        // are skipped — the ordinary log-and-continue path applies. The upstream
+        // ValidateTenancyProfilePair at RunsEndpoints.PostRuns already gates unparseable
+        // values with HTTP 400 before H0 ever sees them.
+        var isModel2Dedicated = Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var h0Tenancy)
+            && h0Tenancy == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated;
         var strictModel2 = isModel2Dedicated && _options.RequireCostEnvelopeForModel2Dedicated;
 
         if (!_options.CostEnvelopeAbortsPreflight)

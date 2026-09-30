@@ -51,6 +51,14 @@ public static class H13Rejections
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "h13-run-not-found";
 
+    /// <summary>
+    /// <c>run.TenancyModel</c> was null / whitespace / not a recognized <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/>.
+    /// Task 223 (D-12): H13 cost-envelope selection requires a parsed tenancy value — retires the
+    /// pre-D-12 silent `_`-arm fallback to <c>Model1SharedFloorEnvelopeUsd</c>. Resumable — the
+    /// operator fixes the row's tenancyModel value + re-runs.
+    /// </summary>
+    public const string InvalidTenancyModel = "h13-invalid-tenancy-model";
+
     // ---- extended Validate-DeployedEnvironment.ps1 (SC #5) ----
 
     /// <summary>

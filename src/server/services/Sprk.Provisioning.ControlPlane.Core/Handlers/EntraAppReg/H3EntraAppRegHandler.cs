@@ -136,11 +136,11 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target Key Vault name (required in both tenancy models post-task-222 per D-13 — H3 writes BFF-API-ClientId/Audience KV secret references, and BFF-API-ClientSecret conditionally when non-secret-free).</summary>
     public const string KeyVaultNameParameterKey = "keyVaultName";
 
-    /// <summary>Tenancy-model value — Model 1 (shared/SMB). Matches ProvisioningRun.TenancyModel + H2b's identical literal.</summary>
-    public const string Model1Shared = "Model1Shared";
-
-    /// <summary>Tenancy-model value — Model 2 (dedicated). Matches ProvisioningRun.TenancyModel + H2b's identical literal.</summary>
-    public const string Model2Dedicated = "Model2Dedicated";
+    // Task 223 (D-12, 2026-09-29): H3-local Model1Shared / Model2Dedicated string consts DELETED
+    // + IsRecognizedTenancyModel helper DELETED. Callers use the shared
+    // Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel enum + TenancyModelParser instead.
+    // The rejection code EntraAppRegRejectionCodes.MissingOrInvalidTenancyModel is UNCHANGED
+    // (external contract).
 
     /// <summary>
     /// Simple heuristics to detect a cleartext secret pattern accidentally
@@ -220,21 +220,20 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         var etag = read.ETag;
         var parameters = run.Parameters.NonSecret;
 
-        // (1) I6 ENFORCEMENT (design.md §4D, spec.md FR-40, BINDING): the
-        // Model 1 vs Model 2 branch MUST be selected from an EXPLICIT,
-        // non-blank, recognized tenancyModel value — NO default/fallback.
-        // Unlike H2b's `string.IsNullOrWhiteSpace(run.TenancyModel) ?
-        // "Model2Dedicated" : run.TenancyModel` (a legacy scaffolding
-        // convenience H2b is still allowed), H3's branch selection is the
-        // exact call site design.md §4D's NEW invariant I6 targets — no
-        // silent default is permitted here.
-        if (!IsRecognizedTenancyModel(run.TenancyModel, out var tenancyModel))
+        // (1) I6 ENFORCEMENT (design.md §4D, spec.md FR-40, BINDING) + Task 223 (D-12):
+        // tenancyModel MUST parse to a recognized TenancyModel enum member — NO default.
+        // Post-D-12 H3 routes both members through the same per-customer creation path
+        // (D-13, task 222), so the enum value is used for LOGGING + downstream diagnostics
+        // rather than selecting a branch — H2b's scaffolding-blank-default was retired in
+        // Item 2 alongside this consolidation. The rejection code identifier
+        // (MissingOrInvalidTenancyModel) is unchanged.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var tenancyModel))
         {
             var diagnostic =
                 $"ProvisioningRun.tenancyModel is '{run.TenancyModel ?? "(null)"}' — I6 (design.md §4D, spec.md " +
-                $"FR-40) requires an explicit '{Model1Shared}' or '{Model2Dedicated}' value with NO default. " +
-                "Upstream (H0/H0.5 for Model 2 self-service, or the operator intake for Model 1) MUST populate " +
-                "this before H3 dispatches.";
+                $"FR-40) requires an explicit {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()} " +
+                "value with NO default. Upstream (H0/H0.5 for Model 2 self-service, or the operator intake for " +
+                "Model 1) MUST populate this before H3 dispatches.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 EntraAppRegRejectionCodes.MissingOrInvalidTenancyModel, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -303,7 +302,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 EntraAppRegRejectionCodes.MissingUamiObjectId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        var provisionResult = await HandleModel2Async(
+        var provisionResult = await HandlePerCustomerProvisionAsync(
             run, etag, envelope, tenantId, keyVaultName, run.InterStepState.MiObjectId!, cancellationToken)
             .ConfigureAwait(false);
         if (provisionResult.Failure is not null)
@@ -404,12 +403,13 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
 
     // ---------------------------------------------------------------------
     // Per-customer app-reg provisioning (both models per D-13, task 222).
-    // Method retains its `HandleModel2Async` name until Item 2 consolidates
-    // TenancyModel and drops the "Model 2" concept from other sites.
+    // Task 223 (D-12, 2026-09-29): renamed from HandleModel2Async — the method
+    // is the SOLE per-customer creation path in both tenancy models; the
+    // "Model 2" name was a T222 hold-over that Item 2 explicitly closes.
     // ---------------------------------------------------------------------
 
     private async Task<(HandlerResult? Failure, EntraAppRegOutputs? Outputs, IReadOnlyList<PendingKvSecretWrite>? PendingKvWrites)>
-        HandleModel2Async(
+        HandlePerCustomerProvisionAsync(
             ProvisioningRun run, string etag, HandlerEnvelope envelope,
             string tenantId, string keyVaultName, string uamiPrincipalId, CancellationToken cancellationToken)
     {
@@ -486,17 +486,11 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     // Helpers
     // ---------------------------------------------------------------------
 
-    private static bool IsRecognizedTenancyModel(string? value, out string tenancyModel)
-    {
-        if (string.Equals(value, Model1Shared, StringComparison.Ordinal)
-            || string.Equals(value, Model2Dedicated, StringComparison.Ordinal))
-        {
-            tenancyModel = value!;
-            return true;
-        }
-        tenancyModel = string.Empty;
-        return false;
-    }
+    // Task 223 (D-12, 2026-09-29): IsRecognizedTenancyModel helper DELETED — replaced by
+    // Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse at the handler edge
+    // (see the (1) I6 ENFORCEMENT block above). The rejection code EntraAppRegRejectionCodes.
+    // MissingOrInvalidTenancyModel is unchanged (external contract preserved). Do NOT reintroduce
+    // a local recognizer — the shared parser owns this decision.
 
     /// <summary>
     /// Computes the deterministic H3 idempotency key:

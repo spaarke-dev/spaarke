@@ -116,6 +116,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -137,11 +138,12 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>Tenancy-model value for the dedicated (Model 2) tier.</summary>
-    public const string Model2Dedicated = "Model2Dedicated";
-
-    /// <summary>Tenancy-model value for the shared (Model 1) tier.</summary>
-    public const string Model1Shared = "Model1Shared";
+    // Task 223 (D-12, 2026-09-29): H12c-local Model1Shared / Model2Dedicated string consts DELETED
+    // + switch below rewritten to use the shared TenancyModel enum. BINDING invariant preserved:
+    // BuildIdempotencyKey still receives run.TenancyModel (the string field) so the key format
+    // `h12c-{customerId}-{tenancyModel}-{endpointHash}` remains byte-for-byte identical to
+    // pre-Task-223 completed phases — see the enum's own file header for the H12c preservation
+    // contract.
 
     /// <summary>Handler identifiers this DAG-join point requires in CompletedPhases before it can proceed.</summary>
     private static readonly string[] RequiredUpstreamHandlers = { "H12a", "H12b" };
@@ -265,10 +267,30 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         // design.md §4.1a. Unknown values fail loud + do NOT upsert
         // (POML negative acceptance criterion 6).
         string endpoint;
-        string? meteringDescription = null;
-        switch (run.TenancyModel)
+        // Task 223 (D-12): parse tenancyModel at handler entry, then switch on the enum.
+        // The switch is exhaustive over the enum's defined members; a future addition
+        // (Item 3 / Task 224) surfaces as a compile warning (CS8524) or the `default`
+        // arm's InvalidOperationException — never a silent fall-through.
+        // Capture the non-null STRING alongside the enum so the H12c idempotency-key
+        // BuildIdempotencyKey call below can pass it without a `!` null-forgiving
+        // (which would visually decouple from this TryParse — code-review S3).
+        if (!TenancyModelParser.TryParse(run.TenancyModel, out var tenancyModel))
         {
-            case Model2Dedicated:
+            var unknownDiagnostic =
+                $"ProvisioningRun.tenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel. " +
+                $"Expected: {TenancyModelParser.FormatExpectedValues()}. Handler did NOT upsert any " +
+                "sprk_aimodeldeployment row.";
+            return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.UnknownTenancyModel, unknownDiagnostic, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        // Non-null by TryParse contract — captured explicitly here to feed BuildIdempotencyKey
+        // without a null-forgiving `!` at the call site.
+        var tenancyModelString = run.TenancyModel;
+
+        string? meteringDescription = null;
+        switch (tenancyModel)
+        {
+            case TenancyModel.Model2Dedicated:
                 var dedicatedEndpoint = run.InterStepState.OpenAiEndpoint;
                 if (string.IsNullOrWhiteSpace(dedicatedEndpoint))
                 {
@@ -283,7 +305,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
                 meteringDescription = "Customer-dedicated Azure OpenAI deployment (Model2Dedicated tenancy).";
                 break;
 
-            case Model1Shared:
+            case TenancyModel.Model1Shared:
                 var sharedEndpoint = _options.SharedPlatformOpenAiEndpoint;
                 if (string.IsNullOrWhiteSpace(sharedEndpoint))
                 {
@@ -305,18 +327,17 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
                 break;
 
             default:
-                var unknownDiagnostic =
-                    $"ProvisioningRun.tenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized value. " +
-                    $"Expected '{Model2Dedicated}' or '{Model1Shared}'. Handler did NOT upsert any " +
-                    "sprk_aimodeldeployment row.";
-                return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.UnknownTenancyModel, unknownDiagnostic, cancellationToken)
-                    .ConfigureAwait(false);
+                // Task 223 (D-12): parse guard above returned early on any unrecognized value; a
+                // future enum addition (Task 224) that reaches here means a switch arm is missing.
+                throw new InvalidOperationException(
+                    $"Unhandled TenancyModel '{tenancyModel}' in H12cRuntimeReferencesHandler switch. " +
+                    "Add a case arm here when the enum grows.");
         }
 
         // (6) Idempotency key — per POML constraint:
         // h12c-{customerId}-{tenancyModel}-{endpointHash}.
         var endpointHash = ComputeEndpointHash(endpoint);
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, run.TenancyModel!, endpointHash);
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, tenancyModelString, endpointHash);
 
         // (7) Level-3 idempotency: durable no-op on duplicate.
         if (run.CompletedPhases.Any(cp =>

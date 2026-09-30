@@ -57,7 +57,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task Model2Dedicated_HappyPath_WriterInvokedWithDedicatedEndpoint_AndEnqueuesH14()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var enqueuer = new FakeEnqueuer();
@@ -68,7 +68,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
 
         var expectedHash = H12cRuntimeReferencesHandler.ComputeEndpointHash(DedicatedEndpoint);
         var expectedKey = H12cRuntimeReferencesHandler.BuildIdempotencyKey(
-            CustomerId, H12cRuntimeReferencesHandler.Model2Dedicated, expectedHash);
+            CustomerId, nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), expectedHash);
         result.Should().BeOfType<HandlerResult.Success>()
             .Which.IdempotencyKey.Should().Be(expectedKey);
 
@@ -92,7 +92,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task Model1Shared_HappyPath_WriterInvokedWithSharedEndpoint_AndMeteringNote()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model1Shared);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared));
         var repo = new FakeRepository(run, etag: "etag-1");
         var enqueuer = new FakeEnqueuer();
         var writer = new FakeWriter();
@@ -121,7 +121,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task HappyPath_WriterRequestContainsAllThreePinnedModels()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
@@ -138,11 +138,11 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task Idempotency_SecondCallWithSameKey_IsDurableNoOp()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var expectedHash = H12cRuntimeReferencesHandler.ComputeEndpointHash(DedicatedEndpoint);
         var expectedKey = H12cRuntimeReferencesHandler.BuildIdempotencyKey(
-            CustomerId, H12cRuntimeReferencesHandler.Model2Dedicated, expectedHash);
+            CustomerId, nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), expectedHash);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = H12cRuntimeReferencesHandler.HandlerIdentifier,
@@ -212,7 +212,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task MissingTenantId_ReturnsFailure_MissingTenantId_WriterNotInvoked()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.Parameters.NonSecret.Remove("tenantId");
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
@@ -230,7 +230,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task MissingH12aAndH12b_ReturnsFailure_MissingUpstreamHandlers_NamesBothMissing()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated, includeUpstreamCompletion: false);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), includeUpstreamCompletion: false);
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
         var handler = NewHandler(repo, writer, new FakeEnqueuer());
@@ -247,7 +247,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task MissingOnlyH12b_ReturnsFailure_NamesOnlyH12b()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated, includeUpstreamCompletion: false);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), includeUpstreamCompletion: false);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H12a",
@@ -272,7 +272,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task MissingDataverseUrl_ReturnsFailure_MissingDataverseUrl()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.DataverseEnvUrl = null;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
@@ -290,7 +290,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task Model2Dedicated_MissingOpenAiEndpoint_ReturnsFailure()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = null; // H2a hasn't run / populated yet.
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
@@ -308,7 +308,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task Model1Shared_MissingSharedEndpointConfig_ReturnsFailure()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model1Shared);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared));
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
         var handler = NewHandler(repo, writer, new FakeEnqueuer(), sharedEndpoint: null);
@@ -341,7 +341,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     public async Task HandlerIdMismatch_Throws_InvalidOperationException()
     {
         var handler = NewHandler(
-            new FakeRepository(BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated), "etag-1"),
+            new FakeRepository(BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated)), "etag-1"),
             new FakeWriter(),
             new FakeEnqueuer());
         var wrongEnvelope = new HandlerEnvelope
@@ -364,7 +364,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task WriterFailure_ReturnsFailure_ModelDeploymentWriteFailed()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter { NextOutcome = new ModelDeploymentReferenceWriteOutcome.Failure("PATCH sprk_aimodeldeployments failed: 503") };
@@ -381,7 +381,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task WriterThrows_ReturnsFailure_ModelDeploymentWriteFailed()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter { ThrowOnNext = new InvalidOperationException("token acquisition failed") };
@@ -399,9 +399,9 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task ConcurrentWriteConflict_OnSuccessWrite_ReturnsFailure_NoH14Enqueue()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
-        var winningRun = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var winningRun = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         winningRun.Status = RunStatus.Cancelled;
         var repo = new FakeRepository(run, etag: "etag-1")
         {
@@ -423,7 +423,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public async Task EnqueueFailure_StillReturnsSuccess_ReconcilerReEmits()
     {
-        var run = BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated);
+        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var enqueuer = new FakeEnqueuer { ThrowOnNext = new InvalidOperationException("SB broker unreachable") };
@@ -443,7 +443,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     public void HandlerId_MatchesDesignDocConstant()
     {
         var handler = NewHandler(
-            new FakeRepository(BuildRun(H12cRuntimeReferencesHandler.Model2Dedicated), "etag-1"),
+            new FakeRepository(BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated)), "etag-1"),
             new FakeWriter(),
             new FakeEnqueuer());
         handler.HandlerId.Should().Be("H12c", "value MUST match design.md §4.1 handler-catalog verbatim.");

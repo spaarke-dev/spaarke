@@ -109,11 +109,11 @@ public sealed class H13AcceptanceOptions
     /// </summary>
     public decimal Model1MarginalEnvelopeUsd { get; set; } = 430m;
 
-    /// <summary>
-    /// Expected monthly cost envelope for the Model 1 SHARED baseline floor in
-    /// whole USD. Per spec.md §15 #14 target: ≤ $400/mo.
-    /// </summary>
-    public decimal Model1SharedFloorEnvelopeUsd { get; set; } = 400m;
+    // Task 223 (D-12): Model1SharedFloorEnvelopeUsd DELETED. The "shared floor"
+    // concept was the pre-D-12 baseline for the shared platform tier; D-12 retires
+    // the shared tier entirely, so the option has no runtime meaning. The
+    // ArmCostEnvelopeChecker's `_`-arm fallback that consumed this option is also
+    // deleted — the switch is now exhaustive over the enum. Do NOT reintroduce.
 
     /// <summary>
     /// Cost drift fraction above which H13 emits an advisory warning per

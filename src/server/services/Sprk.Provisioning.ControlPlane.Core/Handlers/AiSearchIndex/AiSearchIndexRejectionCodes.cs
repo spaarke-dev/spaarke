@@ -58,6 +58,14 @@ public static class AiSearchIndexRejectionCodes
     public const string RunNotFound = "run-not-found";
 
     /// <summary>
+    /// <c>ProvisioningRun.TenancyModel</c> is missing / whitespace / not a recognized
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/> member. Task 223 (D-12):
+    /// retires the pre-D-12 silent default (blank → "Model2Dedicated") that let malformed rows fall
+    /// into the Model 2 branch. Handler MUST reject rather than default.
+    /// </summary>
+    public const string InvalidTenancyModel = "invalid-tenancy-model";
+
+    /// <summary>
     /// AI Search endpoint could not be resolved — for Model 2, H2a must have
     /// populated <c>ProvisioningRun.InterStepState.AiSearchEndpoint</c>; for
     /// Model 1, <c>AiSearchIndexOptions.SharedPlatformSearchEndpoint</c> must

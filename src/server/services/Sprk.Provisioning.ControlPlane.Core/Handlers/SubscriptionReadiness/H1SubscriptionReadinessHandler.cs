@@ -106,17 +106,24 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Azure subscription id (§ 4D I1).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    // Tenancy-model normalization. All comparisons are case-insensitive.
+    // Tenancy-ownership vocabulary. Task 223 (D-12) closed P-2 by retiring the two *model*
+    // literals ("Model1Shared" from SpaarkeOwned, "Model2Dedicated" from CustomerOwned) —
+    // the model axis is now parsed via TenancyModelParser and mapped to ownership below
+    // in ClassifyTenancy. These sets survive for callers passing "SpaarkeOwned" /
+    // "CustomerOwned" directly (there is no current in-tree caller — run.TenancyModel is
+    // always a model literal — but the sets are retained per INCOMING §5 Item 2's
+    // "retire only *model* literals, keep ownership vocabulary" instruction so a future
+    // caller can still classify by ownership word without going through the enum).
+    // Case-insensitive because the ownership vocabulary itself has no case-sensitivity
+    // requirement (unlike the model literals which H12c embeds byte-for-byte).
     private static readonly HashSet<string> CustomerOwnedTenancyValues = new(StringComparer.OrdinalIgnoreCase)
     {
         "CustomerOwned",
-        "Model2Dedicated",
     };
 
     private static readonly HashSet<string> SpaarkeOwnedTenancyValues = new(StringComparer.OrdinalIgnoreCase)
     {
         "SpaarkeOwned",
-        "Model1Shared",
     };
 
     private readonly IProvisioningRunRepository _repository;
@@ -247,18 +254,22 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 diagnostic);
         }
 
-        // (4) Tenancy-model normalization. Accepts both the design.md §6.2
-        // structured names (Model1Shared / Model2Dedicated) and the POML's
-        // colloquial names (SpaarkeOwned / CustomerOwned). Unknown values
-        // fail Resumable so the operator sees the mismatch explicitly.
+        // (4) Tenancy-model normalization. Task 223 (D-12 P-2 closure): parses via
+        // TenancyModelParser (primary) + falls back to the ownership-word sets
+        // (SpaarkeOwned / CustomerOwned) for a future direct-ownership caller. Unknown
+        // values fail Resumable so the operator sees the mismatch explicitly. The
+        // pre-D-12 bug that unconditionally mapped "Model2Dedicated" → CustomerOwned
+        // (forcing Lighthouse on Spaarke-owned Model 2) is closed by the enum path
+        // above — ownership is now derived from the enum, not from a co-mingled set.
         var requiresLighthouseCheck = ClassifyTenancy(
             run.TenancyModel, out var tenancyKnown);
         if (!tenancyKnown)
         {
             var diagnostic =
                 $"ProvisioningRun.TenancyModel value '{run.TenancyModel ?? "(null)"}' is not recognized. " +
-                $"Accepted values: {string.Join(", ", SpaarkeOwnedTenancyValues.Concat(CustomerOwnedTenancyValues))}. " +
-                "H1 cannot decide whether to run the Lighthouse-delegation branch.";
+                $"Accepted values: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()} " +
+                $"(model literals) or {string.Join(", ", SpaarkeOwnedTenancyValues.Concat(CustomerOwnedTenancyValues))} " +
+                "(ownership vocabulary). H1 cannot decide whether to run the Lighthouse-delegation branch.";
             await MarkFailedAsync(
                 run, etag, SubscriptionReadinessRejectionCodes.InvalidTenancyModel,
                 diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
@@ -455,6 +466,15 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// an <c>InvalidTenancyModel</c> failure rather than silently defaulting.
     /// Exposed as internal so unit tests can validate the mapping.
     /// </summary>
+    /// <remarks>
+    /// Task 223 (D-12 P-2 closure): the mapping is now enum-first — Model1Shared →
+    /// SpaarkeOwned (no Lighthouse), Model2Dedicated → CustomerOwned (Lighthouse required).
+    /// The pre-D-12 bug had "Model2Dedicated" unconditionally in the CustomerOwned set,
+    /// which incorrectly forced Lighthouse delegation for a Spaarke-owned Model 2
+    /// stamp (Item 3 / Task 224 fans by Profile — Spaarke-hosted Model 2 is legitimate).
+    /// Post-P-2 the model axis maps to ownership via the enum; the ownership-word sets
+    /// remain as a secondary path for direct callers passing "SpaarkeOwned" / "CustomerOwned".
+    /// </remarks>
     internal static bool ClassifyTenancy(string? tenancyModel, out bool known)
     {
         if (string.IsNullOrWhiteSpace(tenancyModel))
@@ -462,6 +482,24 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
             known = false;
             return false;
         }
+
+        // Primary path: enum-parse. Model1Shared → Spaarke-owned tenancy;
+        // Model2Dedicated → customer-owned tenancy (Lighthouse required).
+        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(tenancyModel, out var parsedModel))
+        {
+            known = true;
+            return parsedModel switch
+            {
+                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared => false,
+                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated => true,
+                _ => throw new InvalidOperationException(
+                    $"Unhandled TenancyModel '{parsedModel}' in H1.ClassifyTenancy. " +
+                    "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
+            };
+        }
+
+        // Secondary path: ownership vocabulary (no current in-tree caller — retained per
+        // INCOMING §5 Item 2 for a future direct-ownership-word caller).
         if (CustomerOwnedTenancyValues.Contains(tenancyModel))
         {
             known = true;

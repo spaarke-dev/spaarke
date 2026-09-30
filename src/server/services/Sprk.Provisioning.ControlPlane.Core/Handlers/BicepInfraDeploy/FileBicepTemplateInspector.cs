@@ -19,6 +19,7 @@
 
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 
@@ -81,7 +82,18 @@ public sealed class FileBicepTemplateInspector : IBicepTemplateInspector
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var templatePath = ResolveTemplatePath(request.TenancyModel);
+        // Task 223 (D-12): parse-at-the-edge — reject unknown tenancy strings here rather than
+        // silently defaulting to a Model 2 template. The handler upstream may already have parsed;
+        // duplicate parse is cheap and keeps this collaborator honest as a first-class entry point.
+        if (!TenancyModelParser.TryParse(request.TenancyModel, out var tenancyModel))
+        {
+            throw new ArgumentException(
+                $"Bicep template inspection requires a recognized TenancyModel. Got '{request.TenancyModel ?? "(null)"}'. " +
+                $"Expected: {TenancyModelParser.FormatExpectedValues()}.",
+                nameof(request));
+        }
+
+        var templatePath = ResolveTemplatePath(tenancyModel);
         if (!File.Exists(templatePath))
         {
             // Configuration / deployment error — matches PowerShellPreflightProbe
@@ -89,7 +101,7 @@ public sealed class FileBicepTemplateInspector : IBicepTemplateInspector
             // operator fixes the deploy, not silently treating the check as
             // passed (spec.md NFR-05 fail-fast).
             throw new FileNotFoundException(
-                $"Bicep template for tenancy model '{request.TenancyModel}' not found at '{templatePath}'. " +
+                $"Bicep template for tenancy model '{tenancyModel}' not found at '{templatePath}'. " +
                 $"Verify BicepInfraDeploy:BicepDirectory ('{_options.BicepDirectory}') resolves correctly for the deployed L2 layout.",
                 templatePath);
         }
@@ -140,10 +152,13 @@ public sealed class FileBicepTemplateInspector : IBicepTemplateInspector
         return (false, string.Empty);
     }
 
-    private string ResolveTemplatePath(string tenancyModel)
-        => string.Equals(tenancyModel, "Model1Shared", StringComparison.OrdinalIgnoreCase)
-            ? Path.Combine(_options.BicepDirectory, "stacks", "model1-shared.bicep")
-            : Path.Combine(_options.BicepDirectory, "customer.bicep");
+    private string ResolveTemplatePath(TenancyModel tenancyModel) => tenancyModel switch
+    {
+        TenancyModel.Model1Shared => Path.Combine(_options.BicepDirectory, "stacks", "model1-shared.bicep"),
+        TenancyModel.Model2Dedicated => Path.Combine(_options.BicepDirectory, "customer.bicep"),
+        _ => throw new InvalidOperationException(
+            $"Unhandled TenancyModel '{tenancyModel}'. Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
+    };
 
     private async Task<(bool Found, string Reference)> ScanForRedisAsync(CancellationToken cancellationToken)
     {

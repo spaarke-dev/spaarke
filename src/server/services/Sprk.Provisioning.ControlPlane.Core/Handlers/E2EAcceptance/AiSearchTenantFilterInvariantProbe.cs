@@ -69,15 +69,20 @@
 //   correlating logs.
 //
 // TENANCY-MODEL BRANCH (design.md §4.1a):
-//   * Model 1 (Model1Shared): template artifact EXISTS in Cosmos (task 124's
+//   * TenancyModel.Model1Shared: template artifact EXISTS in Cosmos (task 124's
 //     H2b M1 branch provisions it). Endpoint comes from template.SearchEndpoint
 //     (the shared platform Search service). Expected filters come from the
 //     template's per-index list.
-//   * Model 2 (Model2Dedicated): template artifact does NOT exist by design
+//   * TenancyModel.Model2Dedicated: template artifact does NOT exist by design
 //     (H2b M2 branch does not provision it — the customer has their own
 //     dedicated Search service). Endpoint comes from request.AiSearchEndpoint
 //     (InterStepState populated by H2a). Expected filters are derived from
 //     ICanonicalIndexCatalog.CanonicalIndexNames × `tenantId eq '{tenantId}'`.
+//   Task 223 (D-12) migration: file-private Model{1,2}TenancyModel constants
+//   deleted; the branch parses via TenancyModelParser + switches on the enum,
+//   and the pre-D-12 D3 silent default (blank → Model2Dedicated) is retired —
+//   unparseable / blank tenancy now surfaces an InfraFault with the expected
+//   set formatted by TenancyModelParser.FormatExpectedValues().
 //
 // SEAM JUSTIFICATION (ADR-010 / CLAUDE.md §11 extension test):
 //   Existing: <see cref="IE2EInvariantVerifier"/> aggregate seam +
@@ -138,11 +143,9 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
     /// <summary>AAD OAuth2 scope for AI Search AAD-authenticated REST calls (parity with RestApiAiSearchIndexVerifier).</summary>
     private static readonly string[] SearchAadScope = new[] { "https://search.azure.com/.default" };
 
-    /// <summary>Canonical Model 1 tenancy-model marker (matches H2bAiSearchIndexHandler's own comparison).</summary>
-    private const string Model1TenancyModel = "Model1Shared";
-
-    /// <summary>Canonical Model 2 tenancy-model marker (matches H2bAiSearchIndexHandler's own comparison).</summary>
-    private const string Model2TenancyModel = "Model2Dedicated";
+    // Task 223 (D-12): file-private Model1TenancyModel / Model2TenancyModel constants deleted —
+    // the shared Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel enum + TenancyModelParser
+    // replace them. Do NOT reintroduce local copies.
 
     /// <summary>Default HttpClient name — the module registers this HttpClient by name so the probe can pull it via IHttpClientFactory.</summary>
     public const string HttpClientName = "H13-I2-AiSearchTenantFilterProbe";
@@ -237,9 +240,18 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
                 "The run must exist for the probe to determine tenancyModel.");
         }
 
-        var tenancyModel = string.IsNullOrWhiteSpace(read.Run.TenancyModel)
-            ? Model2TenancyModel // Match H2b's own default fallback.
-            : read.Run.TenancyModel;
+        // Task 223 (D-12): reject unparseable tenancy rather than silently defaulting to Model 2.
+        // Pre-D-12 the probe MATCHED H2b's own blank→Model2 default; that default is retired
+        // (Item 2 / D3), so the probe now surfaces InfraFault with the accepted-set formatted
+        // by the enum's own name list. Unknown / mixed-case values fail here rather than
+        // silently misrouting to Model 2's dedicated-service branch.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(read.Run.TenancyModel, out var tenancyModel))
+        {
+            return InfraFault(
+                $"ProvisioningRun.tenancyModel '{read.Run.TenancyModel ?? "(null)"}' on run '{request.RunId}' is not " +
+                $"a recognized TenancyModel. Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}. " +
+                "Pre-D-12 the probe defaulted blank to Model2Dedicated; Task 223 retires that silent default (D3).");
+        }
 
         // (2) Determine endpoint + expected per-index filter set.
         string endpoint;
@@ -247,7 +259,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
 
         var expectedPredicateForRequestTenant = BuildFilterPredicate(request.TenantId);
 
-        if (string.Equals(tenancyModel, Model1TenancyModel, StringComparison.OrdinalIgnoreCase))
+        if (tenancyModel == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared)
         {
             TenantFilterTemplateDocument? template;
             try
@@ -298,7 +310,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
             endpoint = template.SearchEndpoint;
             targets = templateEntries.ToImmutable();
         }
-        else if (string.Equals(tenancyModel, Model2TenancyModel, StringComparison.OrdinalIgnoreCase))
+        else if (tenancyModel == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated)
         {
             if (string.IsNullOrWhiteSpace(request.AiSearchEndpoint))
             {
@@ -322,9 +334,12 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
         }
         else
         {
+            // Unreachable in practice — TryParse gated to the enum's defined members above — but
+            // kept explicit so a future enum addition surfaces a loud InfraFault rather than
+            // silently no-op'ing (Item 3 / Task 224 territory).
             return InfraFault(
-                $"Unknown tenancyModel '{tenancyModel}' on ProvisioningRun '{request.RunId}'. " +
-                $"Expected '{Model1TenancyModel}' or '{Model2TenancyModel}'.");
+                $"Unhandled TenancyModel '{tenancyModel}' on ProvisioningRun '{request.RunId}'. " +
+                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}.");
         }
 
         if (string.IsNullOrWhiteSpace(endpoint))

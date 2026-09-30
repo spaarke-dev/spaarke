@@ -120,6 +120,17 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Task 223 (D-12): parse tenancy at handler entry so all downstream selection is typed
+        // + exhaustive. Reject unknown values here rather than tolerating them into
+        // artifact-manifest resolution.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var tenancyModel))
+        {
+            throw new ArgumentException(
+                $"ArmDeploymentRunner requires a recognized TenancyModel. Got '{request.TenancyModel ?? "(null)"}'. " +
+                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}.",
+                nameof(request));
+        }
+
         // (1) Resolve the versioned ARM JSON artifact via the manifest task
         //     117's workflow publishes. A missing/misconfigured artifact is
         //     an infra-configuration fault (not a per-customer domain
@@ -127,7 +138,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         //     the handler's existing try/catch around DeployAsync classifies
         //     it QuarantineRequired.
         var templateJson = await ResolveArmTemplateJsonAsync(
-                _artifactsContainer, _options, request.TenancyModel, cancellationToken)
+                _artifactsContainer, _options, tenancyModel, cancellationToken)
             .ConfigureAwait(false);
 
         // (2) RG-ensure. Idempotent — Azure treats an existing RG with
@@ -335,7 +346,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     internal static async Task<string> ResolveArmTemplateJsonAsync(
         BlobContainerClient artifactsContainer,
         BicepInfraDeployOptions options,
-        string tenancyModel,
+        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel,
         CancellationToken cancellationToken)
     {
         var manifestBlob = artifactsContainer.GetBlobClient(options.ArmManifestBlobName);
@@ -343,9 +354,19 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         var manifestJson = manifestResponse.Value.Content.ToString();
 
         using var manifestDoc = JsonDocument.Parse(manifestJson);
-        var templateKey = string.Equals(tenancyModel, "Model1Shared", StringComparison.OrdinalIgnoreCase)
-            ? "model1-shared"
-            : "customer";
+        // Task 223 (D-12): exhaustive switch over the typed enum. Callers TryParse at their
+        // entry (see DeployAsync / ArmWhatIfDriftDetector.DetectDriftAsync) — this helper
+        // trusts an already-validated value. The `_` arm throws so a future enum member
+        // (Item 3 / Task 224) surfaces as a loud InvalidOperationException rather than
+        // silently falling into a `customer` template branch.
+        var templateKey = tenancyModel switch
+        {
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared => "model1-shared",
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated => "customer",
+            _ => throw new InvalidOperationException(
+                $"Unhandled TenancyModel '{tenancyModel}' in ArmDeploymentRunner.ResolveArmTemplateJsonAsync. " +
+                "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
+        };
 
         if (!manifestDoc.RootElement.TryGetProperty("templates", out var templates)
             || !templates.TryGetProperty(templateKey, out var templateEntry)

@@ -4,7 +4,7 @@
     <title>Item 2 (D-12) — one shared `TenancyModel` enum + parse-or-reject at the edge; retire 8 branch-site string comparisons + 4 silent defaults; close the P-2 H1 defect</title>
     <phase>D-12/D-13 remediation — INCOMING-D12-D13-REMEDIATION.md §5 Item 2 (of 4); depends on Task 222 (Item 1 landed 2026-09-29, commit 1e586978f)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-cutting migration touching 8+ production `.cs` files + `~25 test fixtures` + test rewrites; tags include `auth` + `provisioning`; deletion + rename ordering matters (compile cascade + H12c idempotency-key format preservation); modifies `*Tests/**` (root CLAUDE.md §8 test-modifying unconditional-FULL override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -575,4 +575,115 @@
     <output type="task-status">current-task.md Quick Recovery Next Action → Item 3 (migrate sprk_tenancymodel by Profile fan-out).</output>
     <output type="commit">One commit on `work/customer-provisioning-orchestration-r1` with the fix(provisioning) T223 prefix.</output>
   </outputs>
+
+  <completion-notes>
+    <landed>2026-09-29 (same session as T222, sub-agent execution on Opus 4.7 — higher than POML-declared sonnet@xhigh; no escalation needed for over-provisioning).</landed>
+
+    <files-created count="2">
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/TenancyModel.cs — enum + TenancyModelParser (case-sensitive, name-list scan — NOT Enum.TryParse per the numeric-string + auto-trim hazards documented in the parser's own file header) + TenancyModelParseException.</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/TenancyModelParserTests.cs — ~30 test cases pinning: exact-match happy path (2), null/whitespace rejection (5), wrong-case + padded rejection (6), unknown value rejection (4), numeric string rejection (3 — the tripwire against Enum.TryParse-shape acceptance), Parse throwing behavior (2 happy + 4 invalid), and the BINDING enum.ToString()=="Model1Shared"/"Model2Dedicated" invariant (2 dedicated tests) + round-trip (2 InlineData).</file>
+    </files-created>
+
+    <files-modified count="26">
+      Production (16):
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/ProvisioningRun.cs (XML doc update on TenancyModel string property + new TryGetParsedTenancyModel computed helper; STRING field UNCHANGED per Cosmos wire preservation)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs (B1: DeployAsync parses at entry; ResolveArmTemplateJsonAsync signature string→TenancyModel; exhaustive switch templateKey)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/FileBicepTemplateInspector.cs (B2: InspectAsync parses at entry; ResolveTemplatePath signature string→TenancyModel; exhaustive switch)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmWhatIfDriftDetector.cs (DetectDriftAsync parses at entry; passes enum to ArmDeploymentRunner.ResolveArmTemplateJsonAsync)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/H2aBicepInfraDeployHandler.cs (D1: silent-fail guard tightened from blank-only to TryParse-based full validation)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs (B3+D2: parse-at-entry + FailAsync on unparseable + exhaustive switch replacing blank-defaults-to-Model2)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/AiSearchIndexRejectionCodes.cs (added InvalidTenancyModel rejection code)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/H1SubscriptionReadinessHandler.cs (B4+B5 + P-2 CLOSURE: retired "Model2Dedicated" from CustomerOwnedTenancyValues + "Model1Shared" from SpaarkeOwnedTenancyValues; ClassifyTenancy now enum-first with ownership-vocab fallback path retained per POML)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/SubscriptionReadinessRejectionCodes.cs (XML doc update on InvalidTenancyModel with D-12 P-2 rationale)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/AiSearchTenantFilterInvariantProbe.cs (B6+B7+D3: deleted local Model1TenancyModel + Model2TenancyModel consts; ProbeAsync parses at entry; enum-typed branch; file-header comment refreshed)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ArmCostEnvelopeChecker.cs (B8+D4: SelectExpectedEnvelope signature string→TenancyModel; exhaustive switch — `_`-arm fallback DELETED)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ICostEnvelopeChecker.cs (CostEnvelopeRequest.TenancyModel property type string→TenancyModel)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13AcceptanceOptions.cs (Model1SharedFloorEnvelopeUsd option DELETED)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs (parse tenancyModel at handler edge for cost-envelope call; falls back to log-skip if unparseable — new InvalidTenancyModel rejection code cited)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13RejectionCodes.cs (added InvalidTenancyModel rejection code)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs (T222 deferred: deleted Model1Shared + Model2Dedicated const strings + IsRecognizedTenancyModel helper; renamed HandleModel2Async → HandlePerCustomerProvisionAsync; migrated I6 ENFORCEMENT block to TenancyModelParser)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAdminConsentVerifier.cs (W10: stale D-13 example refreshed — "Model 1's shared app-reg" → "Model 2 customer-tenant app-reg")
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/H0PreflightHandler.cs (isModel2Dedicated flag now TryParse-based instead of case-sensitive string.Equals — consistent parser use)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/H12cRuntimeReferencesHandler.cs (deleted local Model1Shared + Model2Dedicated const strings; parse-at-entry + enum switch; BINDING preservation: BuildIdempotencyKey still receives run.TenancyModel STRING to preserve h12c-{customerId}-{tenancyModel}-{endpointHash} format byte-for-byte)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs (KnownTenancyModels const class now derives from Enum.GetNames; ValidateTenancyProfilePair uses TryParse — API surface tightened to case-sensitive; XML doc updated)
+
+      Tests (10):
+      - Handlers/H3EntraAppRegHandlerTests.cs (~15 test sites: `H3EntraAppRegHandler.Model2Dedicated` → `nameof(TenancyModel.Model2Dedicated)`)
+      - Handlers/A42FicReconciliationTests.cs (1 site: same rewrite)
+      - Handlers/H12cRuntimeReferencesHandlerTests.cs (~21 test sites: both consts → nameof)
+      - Handlers/H1SubscriptionReadinessHandlerTests.cs (removed [InlineData("MODEL2DEDICATED")] — the case-insensitive model-literal case the P-2 closure retires; other 2 InlineData cases retained)
+      - Handlers/AiSearchTenantFilterInvariantProbeTests.cs (D3 test rewrite: `ProbeAsync_Model2_UnspecifiedTenancyModel_DefaultsToModel2_ReturnsPassed` → `ProbeAsync_UnspecifiedTenancyModel_Rejects_WithNoDefault` + added `ProbeAsync_UnrecognizedTenancyModel_Rejects` + `ProbeAsync_UnknownTenancyModel_ReturnsInfraFault` diagnostic text updated)
+      - Handlers/ArmCostEnvelopeCheckerTests.cs (using TenancyModel enum imports added; NewRequest signature string→enum; NewChecker options constructor removed deleted Model1SharedFloorEnvelopeUsd field; DELETED SelectExpectedEnvelope_UnknownTenancyModel_FallsBackToSharedFloor test — premise invalidated by enum-exhaustive switch per POML step 6 spec + ADR-038 §7 "test deletions permitted when the code path is retired")
+    </files-modified>
+
+    <acceptance-criteria-verification>
+      21 acceptance criteria enumerated in POML — all VERIFIED:
+      ✅ New TenancyModel.cs file exists with enum + TenancyModelParser + TenancyModelParseException
+      ✅ Zero string comparisons against "Model1Shared"/"Model2Dedicated" in production code (verified via git grep against Core+Api — all remaining hits are comments)
+      ✅ All 4 silent defaults (D1/D2/D3/D4) removed
+      ✅ H1 P-2 defect CLOSED: CustomerOwnedTenancyValues = { "CustomerOwned" }, SpaarkeOwnedTenancyValues = { "SpaarkeOwned" }
+      ✅ Old defaulting test DELETED; replacement tests present + passing
+      ✅ H3 const strings + IsRecognizedTenancyModel DELETED; HandleModel2Async renamed to HandlePerCustomerProvisionAsync (not HandleAsync — that name is taken by the public interface method)
+      ✅ Model1SharedFloorEnvelopeUsd DELETED; SelectExpectedEnvelope accepts TenancyModel enum + exhaustive switch
+      ✅ H12c idempotency-key format PRESERVED (dedicated TenancyModelParserTests.EnumToString_*_Equals_* tests pin this)
+      ✅ ProvisioningRun.TenancyModel string field UNCHANGED; new TryGetParsedTenancyModel helper added
+      ✅ GraphAdminConsentVerifier.cs W10 stale example refreshed
+      ✅ AiSearchTenantFilterInvariantProbe local consts DELETED
+      ✅ KnownTenancyModels nested class in RunsEndpoints derives from enum
+      ✅ Doc/comment AP-12 surface swept (retained comment references are legitimate documentation)
+      ✅ dotnet build ControlPlane.Api: 0 warn 0 err
+      ✅ dotnet build ControlPlane.Tests: 0 warn 0 err
+      ✅ dotnet build Sprk.Bff.Api: 0 warn 0 err (no BFF dependency change)
+      ✅ dotnet test tests/Spaarke.ArchTests: 326/326 PASS (STEP 1 gate preserved — verified 4× this project: T220 initial + T220 post-S1/S2/S3/W1 + T222 initial + T222 post-W1-W9 + T223 post-implementation)
+      ✅ dotnet test ControlPlane.Tests: 23 fail / 1933 pass / 1 skip / 1957 total — 23 failures EXACTLY task-221 baseline (17× FileKvSecretManifestTests + 6× CustomerRunGuardModulePostConfigureTests); ZERO new failures from Task 223
+      ✅ Post-change grep: production code ZERO comparison hits (remaining hits are comments only, per Step 17 sweep)
+      ✅ Commit message will reference D-12 branch inventory + INCOMING §5 Item 2 by name; TASK-INDEX row 223 marked ✅; current-task.md Next Action → Item 3
+      ✅ NO new .WithClientSecret(...) sites; NO new ClientSecretCredential(...) constructions (ADR-028 A4 posture preserved — enum work is tenancy routing, not credential construction)
+      ✅ NO ArchTest weakening, [Skip], or scope narrowing (ADR-038 §7 KEEP-path forcing-function discipline)
+    </acceptance-criteria-verification>
+
+    <escalation-triggers-status>
+      All 6 escalation triggers CLEAR:
+      - T1 (unenumerated consumer): DataverseEnvironmentRecord.cs in BFF (Sprk.Bff.Api.Services.Registration.TenancyModel enum, separate assembly, name-compatible shape) — documented in TenancyModel.cs file header as non-blocking (future consolidation into shared Contracts assembly is out of scope for Task 223). NOT a hard escalation.
+      - T2 (H12c format): CLEAR — verified `BuildIdempotencyKey` embeds `run.TenancyModel` (string) verbatim; enum.ToString() round-trips byte-for-byte; pinned by TenancyModelParserTests.
+      - T3 (ArchTest regression): CLEAR — 326/326 verified before + after.
+      - T4 (ControlPlane.Tests baseline exceeded): CLEAR — EXACTLY 23 failures matching task-221 baseline.
+      - T5 (hot-path crossing): CLEAR — no changes under .github/workflows/, infrastructure/bicep/, .claude/skills/, or parallel-worktree hot-paths.
+      - T6 (H1 ownership sets outside H1): CLEAR — grep confirms 5 hits all within H1SubscriptionReadinessHandler.cs.
+    </escalation-triggers-status>
+
+    <deviations>
+      None of significance. Two minor:
+      1. POML step 9 said rename HandleModel2Async → HandleAsync. Renamed to HandlePerCustomerProvisionAsync instead — HandleAsync is the name of the public IProvisioningHandler.HandleAsync interface method on the same class, so renaming a private method to HandleAsync would shadow the interface implementation. HandlePerCustomerProvisionAsync is descriptive + non-conflicting; preserves POML intent (drop "Model2" from name).
+      2. POML anticipated ~25 test-fixture mechanical sites; actual count was ~37 (H3: 15 + A42: 1 + H12c: 21). Batched via Edit replace_all — no in-flight test breakage.
+    </deviations>
+
+    <parser-implementation-note>
+      Initial parser used Enum.TryParse + Enum.IsDefined guards. First test run exposed two Enum.TryParse behaviours that broke my own parser tests: (a) it accepts numeric strings ("0"→Model1Shared) and (b) it silently trims whitespace before matching. Neither is acceptable at the D-12 edge (H12c embeds the string byte-for-byte + Cosmos stores tenancyModel as a string; a numeric-string accept would produce distinct H12c keys for the same customer/model). Rewrote the parser body to scan Enum.GetNames + string.Equals(Ordinal) directly — no numeric acceptance, no auto-trim. Documented in the parser's own file header for the next reader.
+    </parser-implementation-note>
+
+    <bff-parallel-enum-note>
+      Preflight grep surfaced an existing name-compatible `TenancyModel` enum at `src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs` (task 023 v3 addition, `Sprk.Bff.Api.Services.Registration` namespace). Identical shape (Model1Shared=0, Model2Dedicated=1). The two enums live in separate assemblies with no cross-reference; both serve internal handler branching in their own layer. BFF's enum is used by BFF's Registration service layer; ControlPlane's enum (new) is used by L2 handlers. Any Dataverse row's tenancyModel string round-trips identically whichever service reads it. Future consolidation into a shared Contracts assembly is legitimate refactoring but is OUT OF SCOPE for Task 223 (no §6.5 conflict here — the parallel enum was pre-existing and is not touched).
+    </bff-parallel-enum-note>
+
+    <quality-gates>
+      Ran Step 9.5 quality gates in parallel via subagents (mandatory per root CLAUDE.md §8 test-modifying override).
+
+      **adr-check: PASS** — 0 warnings, 0 violations. 14 ADRs verified compliant. All 5 BINDING invariants verified preserved (enum.ToString byte-for-byte; ProvisioningRun.TenancyModel string field unchanged; H12c BuildIdempotencyKey receives run.TenancyModel STRING; H1 ownership vocabulary retained; ADR-028 A4 posture — zero new WithClientSecret/ClientSecretCredential sites).
+
+      **code-review: 0 critical + 1 warning + 4 suggestions** — ALL applied same-session per T220/T222 precedent:
+
+      - **W1 [FIXED]** (H13E2EAcceptanceGateHandler.cs): unparseable-tenancy branch was emitting `CostQueryInfraFault` rejection code, burying the new `InvalidTenancyModel` constant in diagnostic text. Split into separate `costTenancyDiag` variable + dedicated aggregation branch emitting `H13Rejections.InvalidTenancyModel` explicitly. Constant now shows in `run.ErrorDetail` where operators pattern-match.
+
+      - **S1 [FIXED]** (ProvisioningRun.cs): removed unused `TryGetParsedTenancyModel()` helper method (zero callers — every handler calls `TenancyModelParser.TryParse` directly). Left a rationale comment for the next contributor (reintroduce only if a genuine caller emerges).
+
+      - **S2 [FIXED]** (TenancyModelParserTests.cs): 2-line docstring drift — comments mentioned `Enum.IsDefined` but the parser uses `Enum.GetNames + string.Equals(Ordinal)` scan instead. Comments corrected to match implementation.
+
+      - **S3 [FIXED]** (H12cRuntimeReferencesHandler.cs): the `run.TenancyModel!` null-forgiving on the BuildIdempotencyKey call was safe today (TryParse guaranteed non-empty 60 lines above) but visually decoupled from that guard. Captured the parsed non-null string into a local `tenancyModelString` right after TryParse; BuildIdempotencyKey call now reads obviously safe.
+
+      - **S4 [DOCUMENTED, NO ACTION]** (RunsEndpoints case-sensitivity tightening): the pre-D-12 case-INsensitive `string.Equals(OrdinalIgnoreCase)` at ValidateTenancyProfilePair + H0PreflightHandler is now `TryParse` (case-sensitive). Behavior-changing at the HTTP contract but intentional per BINDING invariant #1 + BuildIdempotencyKey byte-for-byte preservation. No known external client sends wrong-case; documented in commit body for release-note pickup.
+
+      Post-fix verification: dotnet build ControlPlane.Tests: 0/0. dotnet test ControlPlane.Tests: 1933 pass / 23 fail (unchanged baseline) / 1 skip. All W1/S1/S2/S3 fixes are in-scope stale-issue closures (not new scope). ArchTest not re-run — no files under `tests/Spaarke.ArchTests/**` touched in the fixes.
+    </quality-gates>
+  </completion-notes>
 </task>

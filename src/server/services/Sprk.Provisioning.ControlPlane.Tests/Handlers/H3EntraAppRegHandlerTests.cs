@@ -91,7 +91,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task AcM2_1_Model2HappyPath_ConsentVerified_CommitsKvAfterConsent()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-1");
         var pendingWrites = BuildPendingWrites();
         var provisioner = FakeProvisioner.Success(BuildOutputs(pendingWrites));
@@ -189,7 +189,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac2_MissingTenantId_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated, includeTenantId: false);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), includeTenantId: false);
         var repo = new FakeRepository(run, etag: "etag-2");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -212,7 +212,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac3_S2SAppRegAlreadyPresent_FailsQuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         run.InterStepState.S2SAppRegId = "phantom-s2s-app-reg-id";
         var repo = new FakeRepository(run, etag: "etag-3");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
@@ -241,7 +241,7 @@ public sealed class H3EntraAppRegHandlerTests
             BffClientSecretKvUri = "Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789.-_",
             PendingKvWrites = BuildPendingWrites(),
         };
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-4");
         var provisioner = FakeProvisioner.Success(leakyOutputs);
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -263,7 +263,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac5_ConsentPending_TransitionsToWaitingOnGate_DoesNotCommitKv()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-5");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Pending(0, ExpectedScopeCount,
@@ -294,7 +294,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac6_VerifierThrowsUnexpected_FailsResumable_NotQuarantined()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-6");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Throws(new InvalidOperationException("Graph ODataError bubbled up: 503 Service Unavailable"));
@@ -314,7 +314,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac7_Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var expectedKey = H3EntraAppRegHandler.BuildIdempotencyKey(CustomerId, TenantId);
         run.CompletedPhases.Add(new CompletedPhase
         {
@@ -342,7 +342,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac9_Model2MissingKeyVaultName_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated, includeKvName: false);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), includeKvName: false);
         var repo = new FakeRepository(run, etag: "etag-9");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -361,7 +361,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac10_ExpectedScopeCountZero_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-10");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -380,7 +380,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac11_ProvisionerReturnsFailure_FailsResumable()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-11");
         var provisioner = FakeProvisioner.Failure("Graph ODataError 403 InsufficientPrivileges");
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -406,7 +406,7 @@ public sealed class H3EntraAppRegHandlerTests
             BffAppRegId = "   ",
             BffClientSecretKvUri = ExpectedKvUriRef,
         };
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-12");
         var provisioner = FakeProvisioner.Success(incompleteOutputs);
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -424,7 +424,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac13_HandlerIdMismatch_Throws()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-13");
         var handler = BuildHandler(repo,
             FakeProvisioner.Success(BuildOutputs(BuildPendingWrites())),
@@ -496,7 +496,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task AcM2_2_MissingUamiObjectId_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated, includeUamiObjectId: false);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated), includeUamiObjectId: false);
         var repo = new FakeRepository(run, etag: "etag-m2-2");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -515,7 +515,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task AcKv_1_CommitFailsAfterConsentVerified_QuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated));
         var repo = new FakeRepository(run, etag: "etag-kv-1");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         provisioner.CommitFailureDiagnostic = "SecretClient.SetSecretAsync failed: RequestFailedException 403";

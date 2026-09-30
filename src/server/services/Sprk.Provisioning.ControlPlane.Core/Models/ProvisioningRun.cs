@@ -64,11 +64,24 @@ public sealed class ProvisioningRun
     public string EnvironmentId { get; set; } = default!;
 
     /// <summary>
-    /// Tenancy model at run time (mirrors <c>sprk_dataverseenvironment.
-    /// sprk_tenancymodel</c>). Values: <c>Model1Shared</c> | <c>Model2Dedicated</c>.
+    /// Tenancy model at run time (mirrors <c>sprk_dataverseenvironment.sprk_tenancymodel</c>).
+    /// Stays a <c>string</c> field for Cosmos on-disk stability (task 223 D-12 preservation
+    /// constraint — the enum <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/>
+    /// is a computed helper for handler branching, NOT a serialization type; introducing a
+    /// <c>[JsonConverter]</c> would risk breaking existing rows). Values MUST round-trip to
+    /// <c>"Model1Shared"</c> or <c>"Model2Dedicated"</c> because H12c's idempotency-key format
+    /// embeds this string verbatim. Handlers parse at entry via
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse"/>.
     /// </summary>
     [JsonPropertyName("tenancyModel")]
     public string TenancyModel { get; set; } = default!;
+
+    // Task 223 (D-12) code-review S1: `TryGetParsedTenancyModel()` helper method was removed —
+    // every handler that needs a parsed enum already calls
+    // Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var m)
+    // directly + emits a handler-specific rejection code on failure. A helper method with
+    // zero callers is YAGNI surface; delete-until-needed. If a future refactor genuinely
+    // benefits from a `run.TryGetParsedTenancyModel()` shorthand, reintroduce it at that time.
 
     /// <summary>
     /// Overall run status. See <see cref="RunStatus"/> for allowed values +

@@ -175,17 +175,22 @@ public static class RunsEndpoints
     /// COMP-03 (customer-provisioning-orchestration-r1 SESSION 17): centralised
     /// tenancy-model enum constants — same reject-unknown design as
     /// <see cref="KnownProfiles"/>. Mirrors intake.schema.json tenancyModel enum.
+    /// Task 223 (D-12, 2026-09-29): const strings + <c>All</c> now derive from the
+    /// shared <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/>
+    /// enum via <c>nameof</c> / <c>Enum.GetNames</c>. The runtime string values are
+    /// unchanged (BINDING: H12c idempotency-key format preservation) — this class
+    /// is now the enum's string view for the HTTP surface.
     /// </summary>
     public static class KnownTenancyModels
     {
         /// <summary>Model 1 shared trial / SMB tenancy tier.</summary>
-        public const string Model1Shared = "Model1Shared";
+        public const string Model1Shared = nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared);
 
         /// <summary>Model 2 dedicated stamp (Spaarke- or customer-owned).</summary>
-        public const string Model2Dedicated = "Model2Dedicated";
+        public const string Model2Dedicated = nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated);
 
-        /// <summary>All 2 legal tenancyModel values.</summary>
-        public static readonly IReadOnlyList<string> All = new[] { Model1Shared, Model2Dedicated };
+        /// <summary>All legal tenancyModel string values, derived from the enum.</summary>
+        public static readonly IReadOnlyList<string> All = Enum.GetNames<Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel>();
     }
 
     /// <summary>
@@ -444,7 +449,13 @@ public static class RunsEndpoints
         // intake.schema.json subscriptionId description) so intake need not
         // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
         // in RunsEndpointsTests.
-        if (string.Equals(request.TenancyModel, KnownTenancyModels.Model2Dedicated, StringComparison.OrdinalIgnoreCase)
+        // Task 223 (D-12): the parse succeeds by construction — ValidateTenancyProfilePair above
+        // already TryParsed request.TenancyModel. Comparing against KnownTenancyModels.Model2Dedicated
+        // via case-INsensitive string.Equals used to permit "model2dedicated" past this guard while
+        // downstream handlers require exact case; the enum comparison keeps H1's / H12c's strict
+        // literal contract in force at the HTTP edge.
+        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var m2Check)
+            && m2Check == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated
             && (!request.NonSecretParameters.TryGetValue("subscriptionId", out var subscriptionIdValue)
                 || string.IsNullOrWhiteSpace(subscriptionIdValue)))
         {
@@ -1055,47 +1066,57 @@ public static class RunsEndpoints
             return false;
         }
 
-        // Model 1 Shared: exactly one legal profile.
-        if (string.Equals(tenancyModel, KnownTenancyModels.Model1Shared, StringComparison.OrdinalIgnoreCase))
+        // Task 223 (D-12, 2026-09-29): parse tenancyModel via the shared parser rather than
+        // ad-hoc case-insensitive string.Equals. TryParse is CASE-SENSITIVE (H12c
+        // idempotency-key format preservation constraint); pre-D-12 the API accepted
+        // "model1shared" and coerced downstream, whereas H3/H1 rejected the same string.
+        // Tightening at the HTTP edge closes that asymmetry — a caller sending wrong-case
+        // now gets a specific 400 rather than a cryptic downstream handler failure.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(tenancyModel, out var parsedTenancyModel))
         {
-            if (!string.Equals(profile, KnownProfiles.SpaarkeHostedModel1Trial, StringComparison.OrdinalIgnoreCase))
-            {
-                error =
-                    $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model1Shared}' MUST pair with " +
-                    $"'{KnownProfiles.SpaarkeHostedModel1Trial}' (received profile='{profile}'). Mirrors " +
-                    "intake.schema.json Model1Shared allOf invariant. Downstream handlers (H5 tier " +
-                    "derivation, H11 user provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
-                return false;
-            }
-            error = string.Empty;
-            return true;
+            error =
+                $"Invalid tenancyModel '{tenancyModel}': must be one of [{string.Join(", ", KnownTenancyModels.All)}] " +
+                "(intake.schema.json enum, case-sensitive). Handlers hard-cast on this value; unknown values " +
+                "are silent no-ops with cost blow-up potential.";
+            return false;
         }
 
-        // Model 2 Dedicated: two legal profiles.
-        if (string.Equals(tenancyModel, KnownTenancyModels.Model2Dedicated, StringComparison.OrdinalIgnoreCase))
+        switch (parsedTenancyModel)
         {
-            var isSpaarkeHosted = string.Equals(profile, KnownProfiles.SpaarkeHostedModel2, StringComparison.OrdinalIgnoreCase);
-            var isCustomerOwned = string.Equals(profile, KnownProfiles.CustomerOwnedModel2, StringComparison.OrdinalIgnoreCase);
-            if (!isSpaarkeHosted && !isCustomerOwned)
-            {
-                error =
-                    $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model2Dedicated}' MUST pair with " +
-                    $"'{KnownProfiles.SpaarkeHostedModel2}' or '{KnownProfiles.CustomerOwnedModel2}' " +
-                    $"(received profile='{profile}'). Mirrors intake.schema.json Model2Dedicated allOf invariant.";
-                return false;
-            }
-            error = string.Empty;
-            return true;
-        }
+            case Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared:
+                // Model 1 Shared: exactly one legal profile.
+                if (!string.Equals(profile, KnownProfiles.SpaarkeHostedModel1Trial, StringComparison.OrdinalIgnoreCase))
+                {
+                    error =
+                        $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model1Shared}' MUST pair with " +
+                        $"'{KnownProfiles.SpaarkeHostedModel1Trial}' (received profile='{profile}'). Mirrors " +
+                        "intake.schema.json Model1Shared allOf invariant. Downstream handlers (H5 tier " +
+                        "derivation, H11 user provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
+                    return false;
+                }
+                error = string.Empty;
+                return true;
 
-        // Unknown tenancyModel — reject explicitly rather than silently accept
-        // (the empty-check above only guards blank; a typo like 'Model3' would
-        // otherwise slip through). Mirrors the intake.schema.json enum.
-        error =
-            $"Invalid tenancyModel '{tenancyModel}': must be one of [{string.Join(", ", KnownTenancyModels.All)}] " +
-            "(intake.schema.json enum). Handlers hard-cast on this value; unknown values are silent " +
-            "no-ops with cost blow-up potential.";
-        return false;
+            case Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated:
+                // Model 2 Dedicated: two legal profiles.
+                var isSpaarkeHosted = string.Equals(profile, KnownProfiles.SpaarkeHostedModel2, StringComparison.OrdinalIgnoreCase);
+                var isCustomerOwned = string.Equals(profile, KnownProfiles.CustomerOwnedModel2, StringComparison.OrdinalIgnoreCase);
+                if (!isSpaarkeHosted && !isCustomerOwned)
+                {
+                    error =
+                        $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model2Dedicated}' MUST pair with " +
+                        $"'{KnownProfiles.SpaarkeHostedModel2}' or '{KnownProfiles.CustomerOwnedModel2}' " +
+                        $"(received profile='{profile}'). Mirrors intake.schema.json Model2Dedicated allOf invariant.";
+                    return false;
+                }
+                error = string.Empty;
+                return true;
+
+            default:
+                throw new InvalidOperationException(
+                    $"Unhandled TenancyModel '{parsedTenancyModel}' in RunsEndpoints.ValidateTenancyProfilePair. " +
+                    "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).");
+        }
     }
 
     /// <summary>
@@ -1175,7 +1196,7 @@ public static class RunsEndpoints
         [JsonPropertyName("environmentId")]
         public string EnvironmentId { get; init; } = string.Empty;
 
-        /// <summary>Values: <c>Model1Shared</c> | <c>Model2Dedicated</c> (per <see cref="ProvisioningRun.TenancyModel"/>).</summary>
+        /// <summary>Values: the string members of <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/> (case-sensitive per Task 223 D-12) — currently <c>Model1Shared</c> | <c>Model2Dedicated</c>. Serialized string on <see cref="ProvisioningRun.TenancyModel"/>.</summary>
         [JsonPropertyName("tenancyModel")]
         public string TenancyModel { get; init; } = string.Empty;
 

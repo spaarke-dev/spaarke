@@ -133,11 +133,12 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_Model2_UnspecifiedTenancyModel_DefaultsToModel2_ReturnsPassed()
+    public async Task ProbeAsync_UnspecifiedTenancyModel_Rejects_WithNoDefault()
     {
-        // H2b's own tenancyModel-defaulting logic treats blank as Model 2 —
-        // the probe mirrors this to avoid probing Model 1 template on a run
-        // whose tenancyModel field wasn't set.
+        // Task 223 (D-12) REWRITE — pre-D-12 the probe mirrored H2b's silent-default
+        // (blank → Model 2). D-12's parse-or-reject contract makes that mirror wrong:
+        // both H2b and this probe now reject unrecognized tenancyModel at their edge,
+        // and the pre-D-12 test that pinned the defaulting behaviour is retired.
         var run = NewRun(tenancyModel: string.Empty);
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
@@ -148,7 +149,33 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
+        // Blank tenancyModel now surfaces as InfraFault via the probe's TryParse guard —
+        // pre-D-12 this was InvariantVerificationOutcome.Passed under the silent default.
+        outcome.Should().BeOfType<InvariantVerificationOutcome.InfraFault>()
+            .Which.Diagnostic.Should().Contain("not a recognized TenancyModel")
+            .And.Contain("Task 223");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_UnrecognizedTenancyModel_Rejects()
+    {
+        // Task 223 (D-12): non-blank but unknown tenancyModel value ALSO rejects — not just
+        // blank. Pre-D-12 an unknown string would have hit the `else` (Model 2) branch and
+        // possibly Passed on empty results, masking a real config error. Post-D-12 the parser
+        // is case-sensitive + exhaustive over the enum, so 'model2dedicated' / 'Model3Future'
+        // both fail here.
+        var run = NewRun(tenancyModel: "model2dedicated"); // wrong case
+        var repo = new FakeRepository(run);
+        var store = new FakeStore(existing: null);
+        var catalog = new FakeCanonicalIndexCatalog();
+        var handler = FakeHandler.SearchEmpty();
+
+        var probe = BuildProbe(repo, store, catalog, handler);
+
+        var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
+
+        outcome.Should().BeOfType<InvariantVerificationOutcome.InfraFault>()
+            .Which.Diagnostic.Should().Contain("not a recognized TenancyModel");
     }
 
     // ------------------------------------------------------------------------
@@ -474,6 +501,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_UnknownTenancyModel_ReturnsInfraFault()
     {
+        // Task 223 (D-12): unknown tenancyModel still returns InfraFault, but via the
+        // early-exit TryParse guard now — pre-D-12 the guard was the `else` arm at the
+        // bottom of the branch. The diagnostic wording shifted from "Unknown tenancyModel"
+        // (pre-D-12) to "not a recognized TenancyModel" (post-D-12) to align with the
+        // TenancyModelParser.FormatExpectedValues output every other Task 223 site emits.
         var run = NewRun(tenancyModel: "SomethingElse");
         var repo = new FakeRepository(run);
         var probe = BuildProbe(repo, new FakeStore(existing: null), new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
@@ -481,7 +513,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.InfraFault>()
-            .Which.Diagnostic.Should().Contain("Unknown tenancyModel");
+            .Which.Diagnostic.Should().Contain("not a recognized TenancyModel");
     }
 
     // ------------------------------------------------------------------------
