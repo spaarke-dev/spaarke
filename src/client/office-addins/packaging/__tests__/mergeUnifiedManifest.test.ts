@@ -19,6 +19,9 @@ const readJson = (relative: string) => JSON.parse(fs.readFileSync(path.join(ROOT
 const readXmlId = (relative: string): string =>
   /<Id>\s*([0-9a-fA-F-]{36})\s*<\/Id>/.exec(fs.readFileSync(path.join(ROOT, relative), 'utf8'))![1];
 
+const readXmlPermissions = (relative: string): string =>
+  /<Permissions>\s*([A-Za-z]+)\s*<\/Permissions>/.exec(fs.readFileSync(path.join(ROOT, relative), 'utf8'))![1];
+
 const OUTLOOK_XML_ID = readXmlId('outlook/outlook-manifest.xml');
 const WORD_XML_ID = readXmlId('word/word-manifest.xml');
 const CLIENT_ID = 'c1258e2d-1688-49d2-ac99-a7485ebd9995';
@@ -36,6 +39,10 @@ const options = (overrides: Record<string, unknown> = {}) => ({
   clientId: CLIENT_ID,
   version: '1.1.0',
   legacyXmlIds: { mail: OUTLOOK_XML_ID, document: WORD_XML_ID },
+  legacyXmlPermissions: {
+    mail: readXmlPermissions('outlook/outlook-manifest.xml'),
+    document: readXmlPermissions('word/word-manifest.xml'),
+  },
   assetExists,
   ...overrides,
 });
@@ -91,6 +98,34 @@ describe('mergeUnifiedManifest — the REAL source manifests produce one valid p
 
   it('rejects a 4-part version, which the unified manifest does not accept', () => {
     expect(() => buildFromSources({ version: '1.1.0.0' })).toThrow(/3-part/);
+  });
+});
+
+describe('permission parity — the package may never grant less than the live XML add-ins it replaces', () => {
+  it('grants the unified equivalent of each live XML <Permissions>, and refuses to build without it', () => {
+    const merged = buildFromSources();
+    const granted = merged.authorization.permissions.resourceSpecific;
+    for (const host of ['outlook/outlook-manifest.xml', 'word/word-manifest.xml']) {
+      const required = merge.XML_PERMISSION_TO_RSC[readXmlPermissions(host)];
+      expect(required).toBeDefined();
+      expect(granted).toContainEqual({ name: required, type: 'Delegated' });
+    }
+
+    // The defect this guard exists for: the Outlook JSON once declared NO permissions, so a package built from it
+    // installed cleanly and could not read the email. Remove the Outlook entry and the build must refuse.
+    const outlook = readJson('outlook/manifest.json');
+    outlook.authorization.permissions.resourceSpecific = [];
+    expect(() => merge.mergeUnifiedManifest(outlook, readJson('word/manifest.json'), options())).toThrow(
+      /would install and then fail at runtime/
+    );
+
+    // The XML <AppDomains> carry over as validDomains (full https origins, as Microsoft's converter emits them).
+    expect(merged.validDomains).toEqual(expect.arrayContaining(['https://login.microsoftonline.com']));
+
+    // A live XML permission with no known unified equivalent is refused, not silently skipped.
+    expect(() =>
+      buildFromSources({ legacyXmlPermissions: { mail: 'SomeFuturePermission', document: 'ReadWriteDocument' } })
+    ).toThrow(/no entry in XML_PERMISSION_TO_RSC/);
   });
 });
 

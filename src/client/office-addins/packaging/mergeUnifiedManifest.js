@@ -54,6 +54,61 @@ const WORD_FUNCTION_RENAMES = {
 /** Package-level icon file names, relative to the root of the app-package zip. */
 const PACKAGE_ICONS = { color: 'color.png', outline: 'outline.png' };
 
+/**
+ * XML `<Permissions>` value → the unified manifest's `authorization.permissions.resourceSpecific` entry that grants
+ * the same access (Microsoft Learn, "Specify permissions" for the unified manifest). The v1.30 schema types the name
+ * as a FREE STRING, so a wrong name is invisible to schema validation and only fails at install or runtime — which
+ * is why this table exists and the merge checks the package against the live XML (see assertPermissionParity).
+ */
+const XML_PERMISSION_TO_RSC = {
+  // Outlook
+  Restricted: 'MailboxItem.RestrictedRead.User',
+  ReadItem: 'MailboxItem.Read.User',
+  ReadWriteItem: 'MailboxItem.ReadWrite.User',
+  ReadWriteMailbox: 'Mailbox.ReadWrite.User',
+  // Word / Excel / PowerPoint
+  ReadDocument: 'Document.Read.User',
+  ReadWriteDocument: 'Document.ReadWrite.User',
+};
+
+/** Union of resourceSpecific permissions, de-duplicated by name + type. */
+function unionPermissions(...lists) {
+  const seen = new Map();
+  for (const entry of lists.flat()) {
+    if (entry && entry.name) seen.set(`${entry.name}|${entry.type}`, { name: entry.name, type: entry.type });
+  }
+  return [...seen.values()];
+}
+
+/** Union of validDomains, de-duplicated, order preserved. */
+function unionDomains(...lists) {
+  return [...new Set(lists.flat().filter(Boolean))];
+}
+
+/**
+ * The package replaces two live XML add-ins, so it must never grant LESS than they do — an Outlook half that cannot
+ * read the item, or a Word half that cannot write the document (the FR-02 identity stamp writes to it), installs
+ * cleanly and then fails at the very features it exists for. Throws when a live XML permission has no equivalent.
+ */
+function assertPermissionParity(permissions, legacyXmlPermissions) {
+  for (const [host, xmlPermission] of Object.entries(legacyXmlPermissions)) {
+    const required = XML_PERMISSION_TO_RSC[xmlPermission];
+    if (!required) {
+      throw new ManifestMergeError(
+        `The live ${host} XML add-in declares <Permissions>${xmlPermission}</Permissions>, which has no entry in ` +
+          `XML_PERMISSION_TO_RSC — add its unified equivalent before building the package.`
+      );
+    }
+    if (!permissions.some(p => p.name === required && p.type === 'Delegated')) {
+      throw new ManifestMergeError(
+        `The package does not grant ${required} (Delegated), the equivalent of the live ${host} XML add-in's ` +
+          `<Permissions>${xmlPermission}</Permissions>. It would install and then fail at runtime. Declare it in ` +
+          `that host's manifest.json under authorization.permissions.resourceSpecific.`
+      );
+    }
+  }
+}
+
 class ManifestMergeError extends Error {
   constructor(message) {
     super(`[Spaarke unified package] ${message}`);
@@ -207,12 +262,16 @@ function assertPackageInvariants(manifest) {
  * @param {string} options.clientId  the Entra app registration (client) id — goes in webApplicationInfo.id ONLY
  * @param {string} options.version   3-part version (the unified manifest rejects 4-part)
  * @param {{mail: string, document: string}} options.legacyXmlIds  the <Id> of each host's LIVE XML add-in, to hide
+ * @param {{mail: string, document: string}} options.legacyXmlPermissions  each live XML add-in's <Permissions> value;
+ *   the package must grant at least the unified equivalent of each (assertPermissionParity)
  * @param {(url: string) => boolean} options.assetExists  whether an …/assets/<file> URL resolves to a real file
  */
 function mergeUnifiedManifest(outlook, word, options) {
-  const { appId, clientId, version, legacyXmlIds, assetExists } = options || {};
-  if (!appId || !clientId || !version || !legacyXmlIds || typeof assetExists !== 'function') {
-    throw new ManifestMergeError('appId, clientId, version, legacyXmlIds and assetExists are all required.');
+  const { appId, clientId, version, legacyXmlIds, legacyXmlPermissions, assetExists } = options || {};
+  if (!appId || !clientId || !version || !legacyXmlIds || !legacyXmlPermissions || typeof assetExists !== 'function') {
+    throw new ManifestMergeError(
+      'appId, clientId, version, legacyXmlIds, legacyXmlPermissions and assetExists are all required.'
+    );
   }
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
     throw new ManifestMergeError(`Package version "${version}" must be 3-part (e.g. 1.1.0); the unified manifest rejects 4-part.`);
@@ -301,7 +360,16 @@ function mergeUnifiedManifest(outlook, word, options) {
     icons: { ...PACKAGE_ICONS },
     accentColor: outlook.accentColor,
     localizationInfo: clone(outlook.localizationInfo),
-    authorization: clone(outlook.authorization),
+    authorization: {
+      permissions: {
+        resourceSpecific: unionPermissions(
+          (outlook.authorization && outlook.authorization.permissions && outlook.authorization.permissions.resourceSpecific) || [],
+          (word.authorization && word.authorization.permissions && word.authorization.permissions.resourceSpecific) || []
+        ),
+      },
+    },
+    // The unified equivalent of the XML add-ins' <AppDomains>; each host's manifest.json declares its own.
+    validDomains: unionDomains(outlook.validDomains || [], word.validDomains || []),
     extensions: [
       {
         // Host-specific capabilities live on each runtime and ribbon: an extension-level WordApi requirement
@@ -331,6 +399,8 @@ function mergeUnifiedManifest(outlook, word, options) {
     },
   };
 
+  assertPermissionParity(merged.authorization.permissions.resourceSpecific, legacyXmlPermissions);
+  if (merged.validDomains.length === 0) delete merged.validDomains;
   return assertPackageInvariants(merged);
 }
 
@@ -370,6 +440,7 @@ module.exports = {
   assertPackageInvariants,
   ManifestMergeError,
   WORD_FUNCTION_RENAMES,
+  XML_PERMISSION_TO_RSC,
   PACKAGE_ICONS,
   SCHEMA_URL,
   MANIFEST_VERSION,

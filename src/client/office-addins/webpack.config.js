@@ -85,6 +85,16 @@ function readXmlAddinId(relativePath) {
   return match[1];
 }
 
+/** Reads the `<Permissions>` of a live XML add-in manifest — the access the package must not fall below. */
+function readXmlAddinPermissions(relativePath) {
+  const xml = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8');
+  const match = /<Permissions>\s*([A-Za-z]+)\s*<\/Permissions>/.exec(xml);
+  if (!match) {
+    throw new Error(`[Office Add-in Webpack] No <Permissions> found in ${relativePath}; cannot build the unified package.`);
+  }
+  return match[1];
+}
+
 /** Applies the same placeholder substitution the standalone manifests get (base URL + BFF resource). */
 function substituteManifestPlaceholders(text) {
   return text
@@ -120,6 +130,10 @@ class SpaarkeUnifiedPackagePlugin {
             legacyXmlIds: {
               mail: readXmlAddinId('./outlook/outlook-manifest.xml'),
               document: readXmlAddinId('./word/word-manifest.xml'),
+            },
+            legacyXmlPermissions: {
+              mail: readXmlAddinPermissions('./outlook/outlook-manifest.xml'),
+              document: readXmlAddinPermissions('./word/word-manifest.xml'),
             },
             assetExists,
           });
