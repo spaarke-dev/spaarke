@@ -516,7 +516,7 @@ public sealed class A42FicReconciliationTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated),
+            TenancyModel = nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2),
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };

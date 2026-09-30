@@ -285,7 +285,7 @@ public sealed class H14IntegrationWiringHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };

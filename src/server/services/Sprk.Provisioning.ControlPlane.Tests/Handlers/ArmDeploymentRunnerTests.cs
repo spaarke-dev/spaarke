@@ -68,7 +68,7 @@ public sealed class ArmDeploymentRunnerTests
         ArmManifestBlobName = "provisioning-arm-latest.json",
     };
 
-    private static BicepDeployRequest NewRequest(string tenancyModel = "Model2Dedicated") => new(
+    private static BicepDeployRequest NewRequest(string tenancyModel = "Model2") => new(
         CustomerId: CustomerId,
         TenantId: "00000000-1111-2222-3333-444444444444",
         SubscriptionId: SubscriptionId,
@@ -175,7 +175,7 @@ public sealed class ArmDeploymentRunnerTests
             Options.Create(NewOptions()),
             NullLogger<ArmDeploymentRunner>.Instance);
 
-        var outcome = await runner.DeployAsync(NewRequest(tenancyModel: "Model1Shared"), CancellationToken.None);
+        var outcome = await runner.DeployAsync(NewRequest(tenancyModel: "Model1"), CancellationToken.None);
 
         outcome.Should().BeOfType<BicepDeployOutcome.Success>();
         requestedTemplateBlob.Should().Contain("model1-shared-arm-2026.08.19-1.json");

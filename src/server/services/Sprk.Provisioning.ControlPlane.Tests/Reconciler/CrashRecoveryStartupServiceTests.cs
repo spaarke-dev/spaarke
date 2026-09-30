@@ -535,7 +535,7 @@ public sealed class CrashRecoveryStartupServiceTests
             RunId = runId ?? TestRunId,
             CustomerId = customerId ?? TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
             CurrentPhase = currentPhase,

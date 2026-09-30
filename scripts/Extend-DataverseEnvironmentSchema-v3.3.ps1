@@ -208,18 +208,18 @@ if (Test-AttributeExists "sprk_tenancymodel") {
         "SchemaName"    = "sprk_tenancymodel"
         "RequiredLevel" = @{ "Value" = "None" }
         "DisplayName"   = New-Label "Tenancy Model"
-        "Description"   = New-Label "Deployment tenancy tier. Model1Shared (trial/SMB — shared platform floors per §3A A1). Model2Dedicated (regulated/enterprise — dedicated stamp per D3). Drives Bicep stack composition (model1-shared.bicep vs model2-full.bicep) + handler behavior differences (§4.1a). FR-26 v3 addition (design.md §3A A1 / §6.1)."
+        "Description"   = New-Label "Deployment tenancy tier per D-12. Model1 (Spaarke-hosted dedicated stamp — customer environment lives in Spaarke's Azure tenant + subscription; Profile 'spaarke-hosted-model2'). Model2 (customer-hosted dedicated stamp — customer environment lives in the customer's Azure tenant + subscription; Profile 'customer-owned-model2'). Drives handler behavior differences (§4.1a). Renamed 2026-09-29 by Task 224 (INCOMING §5 Item 3) from pre-D-12 labels 'Model1Shared'/'Model2Dedicated'; integer values 0/1 preserved for schema stability. FR-26 v3 addition (design.md §3A A1 / §6.1)."
         "OptionSet"     = @{
             "@odata.type"   = "Microsoft.Dynamics.CRM.OptionSetMetadata"
             "IsGlobal"      = $false
             "OptionSetType" = "Picklist"
             "Options"       = @(
-                @{ "Value" = 0; "Label" = New-Label "Model1Shared";    "Description" = New-Label "Model 1: trial/SMB shared-platform tier (§3A A1)." },
-                @{ "Value" = 1; "Label" = New-Label "Model2Dedicated"; "Description" = New-Label "Model 2: regulated/enterprise dedicated stamp (D3)." }
+                @{ "Value" = 0; "Label" = New-Label "Model1"; "Description" = New-Label "Model 1 (D-12): Spaarke-hosted dedicated stamp — customer environment lives in Spaarke's Azure tenant + subscription. Fan-target for Profile 'spaarke-hosted-model2'. Renamed from 'Model1Shared' by Task 224." },
+                @{ "Value" = 1; "Label" = New-Label "Model2"; "Description" = New-Label "Model 2 (D-12): customer-hosted dedicated stamp — customer environment lives in the customer's Azure tenant + subscription. Fan-target for Profile 'customer-owned-model2'. Renamed from 'Model2Dedicated' by Task 224." }
             )
         }
     }
-    if ($r.Success) { Write-Host "  + sprk_tenancymodel (Model1Shared=0, Model2Dedicated=1)" -ForegroundColor Green }
+    if ($r.Success) { Write-Host "  + sprk_tenancymodel (Model1=0, Model2=1)" -ForegroundColor Green }
     else            { Write-Host "  x sprk_tenancymodel: $($r.Error)" -ForegroundColor Red }
 }
 

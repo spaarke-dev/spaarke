@@ -100,10 +100,10 @@ public sealed class Model1SharedDagParityTests
         var completed = completedCsv.Split(',');
 
         var model1Ready = _sut.ComputeReadyHandlers(
-            MakeRun("Model1Shared", "spaarke-hosted-model1-trial", completed));
+            MakeRun("Model1", "spaarke-hosted-model1-trial", completed));
 
         var model2Ready = _sut.ComputeReadyHandlers(
-            MakeRun("Model2Dedicated", "spaarke-hosted-model2", completed));
+            MakeRun("Model2", "spaarke-hosted-model2", completed));
 
         model2Ready.Should().BeEquivalentTo(model1Ready,
             "EXEC-09: DagAdvancer.ComputeReadyHandlers is deliberately TenancyModel-agnostic — " +

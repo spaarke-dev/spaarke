@@ -91,7 +91,7 @@ public sealed class CustomerRunGuardTests
             RunId = RunA,
             CustomerId = CustomerA,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Running,
         });
@@ -273,7 +273,7 @@ public sealed class CustomerRunGuardTests
             RunId = RunB,
             CustomerId = CustomerA,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Running,
         });
@@ -369,7 +369,7 @@ public sealed class CustomerRunGuardTests
             RunId = RunA,
             CustomerId = CustomerA,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Quarantined,
             Quarantine = new QuarantineInfo { Reason = "partial Bicep deploy", QuarantinedAt = DateTimeOffset.UtcNow },

@@ -68,10 +68,11 @@ public sealed class ProvisioningRun
     /// Stays a <c>string</c> field for Cosmos on-disk stability (task 223 D-12 preservation
     /// constraint — the enum <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/>
     /// is a computed helper for handler branching, NOT a serialization type; introducing a
-    /// <c>[JsonConverter]</c> would risk breaking existing rows). Values MUST round-trip to
-    /// <c>"Model1Shared"</c> or <c>"Model2Dedicated"</c> because H12c's idempotency-key format
-    /// embeds this string verbatim. Handlers parse at entry via
-    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse"/>.
+    /// <c>[JsonConverter]</c> would risk breaking existing rows). Post-T224 (INCOMING §5 Item 3
+    /// rename) values MUST round-trip to <c>"Model1"</c> or <c>"Model2"</c> because H12c's
+    /// idempotency-key format embeds this string verbatim (the pre-T224 labels
+    /// <c>"Model1Shared"</c> / <c>"Model2Dedicated"</c> were retired). Handlers parse at entry
+    /// via <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse"/>.
     /// </summary>
     [JsonPropertyName("tenancyModel")]
     public string TenancyModel { get; set; } = default!;

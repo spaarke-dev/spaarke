@@ -222,7 +222,7 @@ public sealed class CosmosActiveRunScannerSeamTests : IAsyncLifetime
             RunId = runId,
             CustomerId = _testCustomerId,
             EnvironmentId = Guid.NewGuid().ToString("D"),
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = status,
             Profile = "spaarke-hosted-model2",
         };

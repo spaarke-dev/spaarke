@@ -216,7 +216,7 @@ public sealed class ProvisioningDispatchSpineSeamTests : IAsyncLifetime
                 RunId = runId,
                 CustomerId = customerId,
                 EnvironmentId = Guid.NewGuid().ToString("D"),
-                TenancyModel = "Model2Dedicated",
+                TenancyModel = "Model2",
                 Profile = "spaarke-hosted-model2",
                 Status = RunStatus.Running,
             };
@@ -344,7 +344,7 @@ public sealed class ProvisioningDispatchSpineSeamTests : IAsyncLifetime
                 RunId = runId,
                 CustomerId = customerId,
                 EnvironmentId = Guid.NewGuid().ToString("D"),
-                TenancyModel = "Model2Dedicated",
+                TenancyModel = "Model2",
                 Profile = "spaarke-hosted-model2",
                 Status = RunStatus.Completed,
             };

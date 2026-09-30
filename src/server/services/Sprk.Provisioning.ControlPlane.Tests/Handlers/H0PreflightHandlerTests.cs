@@ -676,7 +676,7 @@ public sealed class H0PreflightHandlerTests
         // gate — see CostEnvelope_Model2Dedicated_WarnAndProceedPolicy_ForcesAbort
         // below.
         var run = BuildRunWithTenant();
-        run.TenancyModel = "Model1Shared";  // Bucket B HIGH#12 SESSION 18: warnAndProceed only permitted for Model1Shared
+        run.TenancyModel = "Model1";  // Bucket B HIGH#12 SESSION 18: warnAndProceed only permitted for Model1Shared
         run.Profile = "spaarke-hosted-model1-trial";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
@@ -715,7 +715,7 @@ public sealed class H0PreflightHandlerTests
         //   - missing-estimate: no estimatedMonthlyUsd param
         //   - unparseable-estimate: estimatedMonthlyUsd is not a decimal
         var run = BuildRunWithTenant();
-        // BuildRun() defaults TenancyModel="Model2Dedicated" + tier="dedicated" + estimate="3000" (safe defaults).
+        // BuildRun() defaults TenancyModel="Model2" + tier="dedicated" + estimate="3000" (safe defaults).
         // Override each param independently: null means REMOVE (exercise the missing branch); non-null means SET.
         if (tier is null)
         {
@@ -761,7 +761,7 @@ public sealed class H0PreflightHandlerTests
         // that expands strict-mode to Model1 without owner sign-off would
         // fail this test.
         var run = BuildRunWithTenant();
-        run.TenancyModel = "Model1Shared";
+        run.TenancyModel = "Model1";
         run.Profile = "spaarke-hosted-model1-trial";
         // Deliberately omit both tier + estimatedMonthlyUsd.
         var repo = new FakeRepository(run, etag: "etag-med4-model1-skip");
@@ -819,7 +819,7 @@ public sealed class H0PreflightHandlerTests
         // operator-facing contract. Uses Model1Shared so the HIGH#12
         // Model2Dedicated abort-override does not fire.
         var run = BuildRunWithTenant();
-        run.TenancyModel = "Model1Shared";
+        run.TenancyModel = "Model1";
         run.Profile = "spaarke-hosted-model1-trial";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
@@ -848,7 +848,7 @@ public sealed class H0PreflightHandlerTests
         // H0 must FORCE the abortOnOverrun branch — a dedicated stamp running
         // uncapped budget contradicts the schema invariant regardless of who POSTed.
         var run = BuildRunWithTenant();
-        // BuildRun() already sets TenancyModel="Model2Dedicated" (line 845) — the
+        // BuildRun() already sets TenancyModel="Model2" (line 845) — the
         // exact rogue-dispatch pair this test guards.
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "dedicated";
         run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "9999";
@@ -929,7 +929,7 @@ public sealed class H0PreflightHandlerTests
         // Model1Shared so the intent (Model 1 log-only skip retained) is
         // explicit in the name.
         var run = BuildRunWithTenant();
-        run.TenancyModel = "Model1Shared";
+        run.TenancyModel = "Model1";
         run.Profile = "spaarke-hosted-model1-trial";
         // Override BuildRun()'s default tier (dedicated) — this test needs to
         // clear/replace it to exercise the missing/unknown-tier code path.
@@ -959,7 +959,7 @@ public sealed class H0PreflightHandlerTests
         // missing/unparseable estimatedMonthlyUsd. Model2Dedicated variant
         // covered by CostEnvelope_Model2Dedicated_FailsClosed_...
         var run = BuildRunWithTenant();
-        run.TenancyModel = "Model1Shared";
+        run.TenancyModel = "Model1";
         run.Profile = "spaarke-hosted-model1-trial";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         // Override BuildRun()'s default estimate — this test clears/replaces it.
@@ -1044,13 +1044,13 @@ public sealed class H0PreflightHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.NotStarted,
             Profile = "spaarke-hosted-model2",
         };
         run.Parameters.NonSecret["region"] = "eastus";
         run.Parameters.NonSecret["subscriptionId"] = "sub-1";
-        // Bucket B MED#4 SESSION 18: default TenancyModel="Model2Dedicated" now
+        // Bucket B MED#4 SESSION 18: default TenancyModel="Model2" now
         // triggers strict-mode cost-envelope enforcement (H0Options.
         // RequireCostEnvelopeForModel2Dedicated=true). Populate valid tier +
         // estimatedMonthlyUsd defaults so tests that don't focus on the

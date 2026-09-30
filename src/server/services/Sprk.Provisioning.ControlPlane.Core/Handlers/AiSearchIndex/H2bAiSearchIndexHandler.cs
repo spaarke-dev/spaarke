@@ -305,9 +305,9 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
 
         var branchResult = tenancyModel switch
         {
-            TenancyModel.Model1Shared => await HandleModel1BranchAsync(
+            TenancyModel.Model1 => await HandleModel1BranchAsync(
                 run, etag, envelope, tenantId, requestedIndexes, cancellationToken).ConfigureAwait(false),
-            TenancyModel.Model2Dedicated => await HandleModel2BranchAsync(
+            TenancyModel.Model2 => await HandleModel2BranchAsync(
                 run, etag, envelope, tenantId, environmentName, requestedIndexes, indexVer, cancellationToken)
                 .ConfigureAwait(false),
             _ => throw new InvalidOperationException(

@@ -455,7 +455,7 @@ public sealed class DagAdvancerTests
             RunId = TestRunId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-42",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
         };

@@ -76,7 +76,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model1_TemplateCurrent_EndpointReturnsMatchingDocs_ReturnsPassed()
     {
-        var run = NewRun(tenancyModel: "Model1Shared");
+        var run = NewRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run);
         var store = new FakeStore(NewTemplate(TenantId, SharedEndpoint));
         var catalog = new FakeCanonicalIndexCatalog();
@@ -99,7 +99,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         // the probe's honest can-vs-cannot-detect posture: the template shape
         // is verified + the filter mechanic accepted (HTTP 200) + no foreign
         // docs observed.
-        var run = NewRun(tenancyModel: "Model1Shared");
+        var run = NewRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run);
         var store = new FakeStore(NewTemplate(TenantId, SharedEndpoint));
         var catalog = new FakeCanonicalIndexCatalog();
@@ -115,7 +115,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model2_EndpointFromRequest_ReturnsPassed()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -187,7 +187,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturnsForeignTenantDoc_ReturnsFailedCatastrophic()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -211,7 +211,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturnsDocMissingTenantIdField_ReturnsFailedCatastrophic()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -230,7 +230,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturnsDocWithNonStringTenantId_ReturnsFailedCatastrophic()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -253,7 +253,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model1_TemplateMissing_ReturnsFailed()
     {
-        var run = NewRun(tenancyModel: "Model1Shared");
+        var run = NewRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -269,7 +269,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model1_TemplateWrongTenantId_ReturnsFailedSilentFailTrap()
     {
-        var run = NewRun(tenancyModel: "Model1Shared");
+        var run = NewRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run);
         var store = new FakeStore(NewTemplate(OtherTenantId, SharedEndpoint));
         var catalog = new FakeCanonicalIndexCatalog();
@@ -286,7 +286,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model1_TemplatePredicateMalformed_ReturnsFailed()
     {
-        var run = NewRun(tenancyModel: "Model1Shared");
+        var run = NewRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run);
         var badTemplate = NewTemplate(TenantId, SharedEndpoint);
         // Corrupt one entry — a subtly-wrong predicate would silently bypass
@@ -306,7 +306,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model1_TemplateEmptyFilters_ReturnsFailed()
     {
-        var run = NewRun(tenancyModel: "Model1Shared");
+        var run = NewRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run);
         var emptyTemplate = NewTemplate(TenantId, SharedEndpoint);
         emptyTemplate.Filters.Clear();
@@ -328,7 +328,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturns400_ReturnsFailed_FilterFieldNotFilterable()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -347,7 +347,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturns404_ReturnsFailed_IndexMissing()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -369,7 +369,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturns401_ReturnsInfraFault_RbacIssue()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -387,7 +387,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ServerReturns500_ReturnsInfraFault()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -405,7 +405,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_HttpTransportException_ReturnsInfraFault()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -422,7 +422,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ResponseIsMalformedJson_ReturnsInfraFault()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -440,7 +440,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_ResponseMissingValueArray_ReturnsInfraFault()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -475,7 +475,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_EmptyTenantId_ReturnsInfraFault_DefenseInDepth()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var probe = BuildProbe(repo, new FakeStore(existing: null), new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
 
@@ -488,7 +488,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_Model2_MissingEndpoint_ReturnsInfraFault()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var probe = BuildProbe(repo, new FakeStore(existing: null), new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
 
@@ -524,7 +524,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     public async Task ProbeAsync_TenantIdWithSingleQuote_EscapesBeforeBuildingFilter()
     {
         var oddTenantId = "abc'def"; // Never a real tenant id, but the escape must not silently break.
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -548,7 +548,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     [Fact]
     public async Task ProbeAsync_CancellationBeforeHttpCall_Throws()
     {
-        var run = NewRun(tenancyModel: "Model2Dedicated");
+        var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
         var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
@@ -574,7 +574,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         FakeCanonicalIndexCatalog? catalog = null,
         FakeAiSearchHttpMessageHandler? handler = null)
     {
-        repo ??= new FakeRepository(NewRun("Model2Dedicated"));
+        repo ??= new FakeRepository(NewRun("Model2"));
         store ??= new FakeStore(existing: null);
         catalog ??= new FakeCanonicalIndexCatalog();
         handler ??= FakeHandler.SearchEmpty();

@@ -14,7 +14,7 @@
 // COVERAGE:
 //   T1  Happy path — Model 2 dedicated: 6-collaborator green + T1 probe
 //       Match → Success + Cosmos state advances + interStepState populated.
-//   T2  Happy path — Model 1 shared: TenancyModel="Model1Shared" flows to
+//   T2  Happy path — Model 1 shared: TenancyModel="Model1" flows to
 //       runner request; otherwise identical to T1.
 //   T3  Idempotent no-op: run already has H2a CompletedPhase with matching
 //       key → Success (no runner call, no state mutation).
@@ -71,7 +71,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [Fact]
     public async Task HappyPath_Model2Dedicated_AllCollaboratorsGreen_SucceedsAndAdvancesState()
     {
-        var run = BuildRun(tenancyModel: "Model2Dedicated");
+        var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-1");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: false));
         var probe = FakeArmKeyVaultRefProbe.Match();
@@ -102,7 +102,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         driftDetector.CallCount.Should().Be(0, "upgrade mode did not fire — no provisionedOn param");
         inspector.CallCount.Should().Be(1);
         runner.LastRequest.Should().NotBeNull();
-        runner.LastRequest!.TenancyModel.Should().Be("Model2Dedicated");
+        runner.LastRequest!.TenancyModel.Should().Be("Model2");
     }
 
     // ---------- T2 happy path — Model 1 shared ----------
@@ -110,7 +110,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [Fact]
     public async Task HappyPath_Model1Shared_TenancyModelFlowsToRunner()
     {
-        var run = BuildRun(tenancyModel: "Model1Shared");
+        var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-2");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: false));
         var probe = FakeArmKeyVaultRefProbe.Match();
@@ -121,7 +121,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        runner.LastRequest!.TenancyModel.Should().Be("Model1Shared");
+        runner.LastRequest!.TenancyModel.Should().Be("Model1");
     }
 
     // ---------- T3 idempotency ----------
@@ -779,7 +779,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             CustomerId: "acme",
             TenantId: "00000000-1111-2222-3333-444444444444",
             SubscriptionId: "22222222-3333-4444-5555-666666666666",
-            TenancyModel: "Model2Dedicated",
+            TenancyModel: "Model2",
             BicepVersion: "abc",
             EnvironmentName: "prod",
             Location: "westus2",
@@ -799,7 +799,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             CustomerId: "acme",
             TenantId: "00000000-1111-2222-3333-444444444444",
             SubscriptionId: "22222222-3333-4444-5555-666666666666",
-            TenancyModel: "Model2Dedicated",
+            TenancyModel: "Model2",
             BicepVersion: "abc",
             EnvironmentName: "prod",
             Location: "westus2",
@@ -928,7 +928,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         bool includeSubscriptionId = true,
         bool includeBicepVer = true,
         bool includeProvisionedOn = false,
-        string tenancyModel = "Model2Dedicated")
+        string tenancyModel = "Model2")
     {
         var run = new ProvisioningRun
         {
@@ -937,7 +937,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             EnvironmentId = "env-guid",
             TenancyModel = tenancyModel,
             Status = RunStatus.Running,
-            Profile = tenancyModel == "Model1Shared" ? "spaarke-hosted-model1-trial" : "spaarke-hosted-model2",
+            Profile = tenancyModel == "Model1" ? "spaarke-hosted-model1-trial" : "spaarke-hosted-model2",
         };
         if (includeTenantId)
         {

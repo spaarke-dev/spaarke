@@ -270,8 +270,8 @@ public sealed class ArmCostEnvelopeChecker : ICostEnvelopeChecker
     /// </summary>
     internal decimal SelectExpectedEnvelope(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel) => tenancyModel switch
     {
-        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated => _options.Model2EmptyEnvelopeUsd,
-        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared => _options.Model1MarginalEnvelopeUsd,
+        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => _options.Model2EmptyEnvelopeUsd,
+        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => _options.Model1MarginalEnvelopeUsd,
         _ => throw new InvalidOperationException(
             $"Unhandled TenancyModel '{tenancyModel}' in ArmCostEnvelopeChecker.SelectExpectedEnvelope. " +
             "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")

@@ -153,7 +153,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
             });
         }
@@ -176,7 +176,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         {
             customerId = TestCustomerId,
             environmentId = "env-1",
-            tenancyModel = "Model1Shared",
+            tenancyModel = "Model1",
             profile = "spaarke-hosted-model1-trial",
         });
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs") { Content = body };
@@ -206,7 +206,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -285,7 +285,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 {
                     customerId = TestCustomerId,
                     environmentId = "env-1",
-                    tenancyModel = "Model1Shared",
+                    tenancyModel = "Model1",
                     profile = "spaarke-hosted-model1-trial",
                     nonSecretParameters = new Dictionary<string, string>
                     {
@@ -317,7 +317,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = runId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Running,
             CurrentPhase = "H0",
@@ -384,7 +384,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-q",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Quarantined,
         });
@@ -423,7 +423,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-q",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Quarantined,
         });
@@ -473,7 +473,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-q",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Quarantined,
         });
@@ -530,7 +530,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-q",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = currentStatus,
         });
@@ -566,7 +566,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-r",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Failed,
             CurrentPhase = "H4",
@@ -593,7 +593,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-c",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Running,
         });
@@ -616,7 +616,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-g",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.WaitingOnGate,
         });
@@ -662,7 +662,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-p",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Running,
             CurrentPhase = "H2a",
@@ -699,7 +699,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             RunId = "run-if",
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
+            TenancyModel = "Model1",
             Profile = "spaarke-hosted-model1-trial",
             Status = RunStatus.Running,
             CurrentPhase = "H2a", // in flight, not in CompletedPhases yet
@@ -739,7 +739,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 // ISH-01: NO nonSecretParameters at all → tenantId missing.
             }),
@@ -768,9 +768,9 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     // -------------------------------------------------------------------------
 
     [Theory]
-    [InlineData("Model1Shared", "spaarke-hosted-model2")]
-    [InlineData("Model1Shared", "customer-owned-model2")]
-    [InlineData("Model2Dedicated", "spaarke-hosted-model1-trial")]
+    [InlineData("Model1", "spaarke-hosted-model2")]
+    [InlineData("Model1", "customer-owned-model2")]
+    [InlineData("Model2", "spaarke-hosted-model1-trial")]
     public async Task PostRuns_InvalidTenancyProfilePair_Returns400(string tenancyModel, string profile)
     {
         using var factory = new L2WebApplicationFactory();
@@ -857,7 +857,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model2Dedicated",
+                tenancyModel = "Model2",
                 profile = "customer-owned-model2",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -875,7 +875,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("subscriptionId",
             "the diagnostic must name the missing key so the operator can fix the intake.");
-        body.Should().Contain("Model2Dedicated",
+        body.Should().Contain("Model2",
             "the diagnostic must scope the rule to Model 2 so Model 1 operators are not confused.");
 
         // Neither the Cosmos row nor the Service Bus envelope should be created.
@@ -897,7 +897,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -927,7 +927,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model2Dedicated",
+                tenancyModel = "Model2",
                 profile = "customer-owned-model2",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -959,7 +959,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model2Dedicated",
+                tenancyModel = "Model2",
                 profile = "customer-owned-model2",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -993,7 +993,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -1043,7 +1043,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -1088,7 +1088,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -1122,7 +1122,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
@@ -1152,7 +1152,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId = TestCustomerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {

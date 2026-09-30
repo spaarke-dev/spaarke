@@ -58,7 +58,7 @@ public sealed class ArmWhatIfDriftDetectorTests
         CustomerId: "acme",
         TenantId: "00000000-1111-2222-3333-444444444444",
         SubscriptionId: SubscriptionId,
-        TenancyModel: "Model2Dedicated",
+        TenancyModel: "Model2",
         BicepVersion: "abc123",
         EnvironmentName: "prod",
         Location: "westus2",

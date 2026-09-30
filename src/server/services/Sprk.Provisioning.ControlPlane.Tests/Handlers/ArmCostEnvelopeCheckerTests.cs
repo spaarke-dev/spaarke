@@ -110,7 +110,7 @@ public sealed class ArmCostEnvelopeCheckerTests
         });
 
         var checker = NewChecker(handler);
-        var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2Dedicated), CancellationToken.None);
+        var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2), CancellationToken.None);
 
         result.ExpectedMonthlyUsd.Should().Be(Model2EmptyEnvelope);
         result.ExceedsAdvisoryThreshold.Should().BeFalse();
@@ -131,13 +131,13 @@ public sealed class ArmCostEnvelopeCheckerTests
             ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, CostBodies.QueryResultBody(10_000m)));
 
         var checker = NewChecker(handler);
-        var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2Dedicated), CancellationToken.None);
+        var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2), CancellationToken.None);
 
         result.ExceedsAdvisoryThreshold.Should().BeTrue();
         result.DriftFraction.Should().BeGreaterThan(DriftAdvisoryThreshold,
             "10000+ mtd is well beyond the 20% drift band around the 400 USD envelope");
         result.Summary.Should().Contain("exceeds=True");
-        result.Summary.Should().Contain("tenancyModel=Model2Dedicated");
+        result.Summary.Should().Contain("tenancyModel=Model2");
     }
 
     // ---------- Tenancy-model branches ----------
@@ -147,7 +147,7 @@ public sealed class ArmCostEnvelopeCheckerTests
     {
         var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope(TenancyModel.Model2Dedicated).Should().Be(Model2EmptyEnvelope);
+        checker.SelectExpectedEnvelope(TenancyModel.Model2).Should().Be(Model2EmptyEnvelope);
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public sealed class ArmCostEnvelopeCheckerTests
     {
         var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope(TenancyModel.Model1Shared).Should().Be(Model1MarginalEnvelope);
+        checker.SelectExpectedEnvelope(TenancyModel.Model1).Should().Be(Model1MarginalEnvelope);
     }
 
     // Task 223 (D-12) — the pre-D-12 SelectExpectedEnvelope_UnknownTenancyModel_FallsBackToSharedFloor
@@ -246,7 +246,7 @@ public sealed class ArmCostEnvelopeCheckerTests
 
     private static CostEnvelopeRequest NewRequest(
         string? subscriptionId = null,
-        TenancyModel tenancyModel = TenancyModel.Model2Dedicated) => new(
+        TenancyModel tenancyModel = TenancyModel.Model2) => new(
             CustomerId: CustomerId,
             RunId: RunId,
             SubscriptionId: subscriptionId ?? SubscriptionId,

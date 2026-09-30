@@ -69,11 +69,11 @@
 //   correlating logs.
 //
 // TENANCY-MODEL BRANCH (design.md §4.1a):
-//   * TenancyModel.Model1Shared: template artifact EXISTS in Cosmos (task 124's
+//   * TenancyModel.Model1: template artifact EXISTS in Cosmos (task 124's
 //     H2b M1 branch provisions it). Endpoint comes from template.SearchEndpoint
 //     (the shared platform Search service). Expected filters come from the
 //     template's per-index list.
-//   * TenancyModel.Model2Dedicated: template artifact does NOT exist by design
+//   * TenancyModel.Model2: template artifact does NOT exist by design
 //     (H2b M2 branch does not provision it — the customer has their own
 //     dedicated Search service). Endpoint comes from request.AiSearchEndpoint
 //     (InterStepState populated by H2a). Expected filters are derived from
@@ -259,7 +259,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
 
         var expectedPredicateForRequestTenant = BuildFilterPredicate(request.TenantId);
 
-        if (tenancyModel == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared)
+        if (tenancyModel == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1)
         {
             TenantFilterTemplateDocument? template;
             try
@@ -310,7 +310,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
             endpoint = template.SearchEndpoint;
             targets = templateEntries.ToImmutable();
         }
-        else if (tenancyModel == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated)
+        else if (tenancyModel == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2)
         {
             if (string.IsNullOrWhiteSpace(request.AiSearchEndpoint))
             {

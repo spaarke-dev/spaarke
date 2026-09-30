@@ -467,12 +467,13 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// Exposed as internal so unit tests can validate the mapping.
     /// </summary>
     /// <remarks>
-    /// Task 223 (D-12 P-2 closure): the mapping is now enum-first — Model1Shared →
-    /// SpaarkeOwned (no Lighthouse), Model2Dedicated → CustomerOwned (Lighthouse required).
-    /// The pre-D-12 bug had "Model2Dedicated" unconditionally in the CustomerOwned set,
-    /// which incorrectly forced Lighthouse delegation for a Spaarke-owned Model 2
-    /// stamp (Item 3 / Task 224 fans by Profile — Spaarke-hosted Model 2 is legitimate).
-    /// Post-P-2 the model axis maps to ownership via the enum; the ownership-word sets
+    /// Task 223 (D-12 P-2 closure) + Task 224 (INCOMING §5 Item 3 rename): the mapping is enum-first —
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1"/> → SpaarkeOwned (no
+    /// Lighthouse); <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2"/> →
+    /// CustomerOwned (Lighthouse required). Pre-T224 the enum members were <c>Model1Shared</c> and
+    /// <c>Model2Dedicated</c> — the pre-D-12 bug had "Model2Dedicated" unconditionally in the
+    /// CustomerOwned set, which incorrectly forced Lighthouse delegation for a Spaarke-owned Model 2
+    /// stamp. Post-P-2 + T224 the model axis maps to ownership via the enum; the ownership-word sets
     /// remain as a secondary path for direct callers passing "SpaarkeOwned" / "CustomerOwned".
     /// </remarks>
     internal static bool ClassifyTenancy(string? tenancyModel, out bool known)
@@ -490,8 +491,8 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
             known = true;
             return parsedModel switch
             {
-                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared => false,
-                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated => true,
+                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => false,
+                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => true,
                 _ => throw new InvalidOperationException(
                     $"Unhandled TenancyModel '{parsedModel}' in H1.ClassifyTenancy. " +
                     "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")

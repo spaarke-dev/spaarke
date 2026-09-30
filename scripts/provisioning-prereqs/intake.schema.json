@@ -27,12 +27,12 @@
     "subscriptionId": {
       "type": "string",
       "format": "uuid",
-      "description": "Target Azure subscription id. REQUIRED for Model2Dedicated (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1Shared MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H4Shared/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2Dedicated allOf below."
+      "description": "Target Azure subscription id. REQUIRED for Model2 (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1 MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H4Shared/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2 allOf below."
     },
     "tenancyModel": {
       "type": "string",
-      "enum": ["Model1Shared", "Model2Dedicated"],
-      "description": "Model1Shared = shared trial/SMB tier; Model2Dedicated = dedicated sub + dedicated Dataverse + admin-consent flow"
+      "enum": ["Model1", "Model2"],
+      "description": "Model1 = shared trial/SMB tier; Model2 = dedicated sub + dedicated Dataverse + admin-consent flow"
     },
     "controlPlaneEnv": {
       "type": "string",
@@ -120,7 +120,7 @@
       "type": "string",
       "enum": ["abortOnOverrun", "warnAndProceed"],
       "default": "abortOnOverrun",
-      "description": "Batch policy for H0 preflight cost-envelope check (COMP-10). `abortOnOverrun` → H0 fail-fast if projected monthly cost exceeds tier ceiling; run enters Failed(cost-overrun) before any side-effecting handler dispatches. `warnAndProceed` → log warning to runs/{runId}-cost-warning.json but continue dispatch (Model 1 shared-trial ONLY — MUST reject for Model2Dedicated + prod). Default `abortOnOverrun` per binding NFR intent."
+      "description": "Batch policy for H0 preflight cost-envelope check (COMP-10). `abortOnOverrun` → H0 fail-fast if projected monthly cost exceeds tier ceiling; run enters Failed(cost-overrun) before any side-effecting handler dispatches. `warnAndProceed` → log warning to runs/{runId}-cost-warning.json but continue dispatch (Model 1 shared-trial ONLY — MUST reject for Model2 + prod). Default `abortOnOverrun` per binding NFR intent."
     },
     "postmortemFile": {
       "type": "string",
@@ -129,9 +129,9 @@
   },
   "allOf": [
     {
-      "description": "tenancyModel × profile invariant — Model1Shared pairs ONLY with spaarke-hosted-model1-trial",
+      "description": "tenancyModel × profile invariant — Model1 pairs ONLY with spaarke-hosted-model1-trial",
       "if": {
-        "properties": { "tenancyModel": { "const": "Model1Shared" } },
+        "properties": { "tenancyModel": { "const": "Model1" } },
         "required": ["tenancyModel"]
       },
       "then": {
@@ -141,9 +141,9 @@
       }
     },
     {
-      "description": "tenancyModel × profile invariant — Model2Dedicated pairs with spaarke-hosted-model2 or customer-owned-model2",
+      "description": "tenancyModel × profile invariant — Model2 pairs with spaarke-hosted-model2 or customer-owned-model2",
       "if": {
-        "properties": { "tenancyModel": { "const": "Model2Dedicated" } },
+        "properties": { "tenancyModel": { "const": "Model2" } },
         "required": ["tenancyModel"]
       },
       "then": {
@@ -153,9 +153,9 @@
       }
     },
     {
-      "description": "ISH-02 — subscriptionId REQUIRED for Model2Dedicated (customer's own subscription per ADR-027 D4). Model1Shared runs auto-default the Spaarke shared sub-id in-skill at CreateRun time, so subscriptionId is OPTIONAL at intake for Model 1.",
+      "description": "ISH-02 — subscriptionId REQUIRED for Model2 (customer's own subscription per ADR-027 D4). Model1 runs auto-default the Spaarke shared sub-id in-skill at CreateRun time, so subscriptionId is OPTIONAL at intake for Model 1.",
       "if": {
-        "properties": { "tenancyModel": { "const": "Model2Dedicated" } },
+        "properties": { "tenancyModel": { "const": "Model2" } },
         "required": ["tenancyModel"]
       },
       "then": {
@@ -167,7 +167,7 @@
     {
       "customerId": "trial1",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-      "tenancyModel": "Model1Shared",
+      "tenancyModel": "Model1",
       "controlPlaneEnv": "dev",
       "profile": "spaarke-hosted-model1-trial",
       "region": "westus2",
@@ -186,7 +186,7 @@
       "customerId": "acme-corp",
       "tenantId": "12345678-1234-1234-1234-123456789012",
       "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
-      "tenancyModel": "Model2Dedicated",
+      "tenancyModel": "Model2",
       "controlPlaneEnv": "prod",
       "profile": "customer-owned-model2",
       "region": "westus2",

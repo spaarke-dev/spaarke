@@ -361,8 +361,8 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         // silently falling into a `customer` template branch.
         var templateKey = tenancyModel switch
         {
-            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared => "model1-shared",
-            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated => "customer",
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => "model1-shared",
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => "customer",
             _ => throw new InvalidOperationException(
                 $"Unhandled TenancyModel '{tenancyModel}' in ArmDeploymentRunner.ResolveArmTemplateJsonAsync. " +
                 "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")

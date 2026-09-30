@@ -154,8 +154,8 @@ public sealed class FileBicepTemplateInspector : IBicepTemplateInspector
 
     private string ResolveTemplatePath(TenancyModel tenancyModel) => tenancyModel switch
     {
-        TenancyModel.Model1Shared => Path.Combine(_options.BicepDirectory, "stacks", "model1-shared.bicep"),
-        TenancyModel.Model2Dedicated => Path.Combine(_options.BicepDirectory, "customer.bicep"),
+        TenancyModel.Model1 => Path.Combine(_options.BicepDirectory, "stacks", "model1-shared.bicep"),
+        TenancyModel.Model2 => Path.Combine(_options.BicepDirectory, "customer.bicep"),
         _ => throw new InvalidOperationException(
             $"Unhandled TenancyModel '{tenancyModel}'. Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
     };

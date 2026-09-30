@@ -202,7 +202,7 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
             RunId = TestRunId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
         };

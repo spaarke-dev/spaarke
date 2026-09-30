@@ -290,29 +290,29 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         string? meteringDescription = null;
         switch (tenancyModel)
         {
-            case TenancyModel.Model2Dedicated:
+            case TenancyModel.Model2:
                 var dedicatedEndpoint = run.InterStepState.OpenAiEndpoint;
                 if (string.IsNullOrWhiteSpace(dedicatedEndpoint))
                 {
                     var diagnostic =
-                        "Model2Dedicated tenancy but ProvisioningRun.interStepState.openAiEndpoint is null/blank. " +
+                        "Model2 tenancy but ProvisioningRun.interStepState.openAiEndpoint is null/blank. " +
                         "H2a (task 044 — Bicep infra deploy) MUST complete + populate interStepState before H12c " +
                         "dispatches on a dedicated-tier customer.";
                     return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingOpenAiEndpoint, diagnostic, cancellationToken)
                         .ConfigureAwait(false);
                 }
                 endpoint = dedicatedEndpoint;
-                meteringDescription = "Customer-dedicated Azure OpenAI deployment (Model2Dedicated tenancy).";
+                meteringDescription = "Customer-dedicated Azure OpenAI deployment (Model2 tenancy).";
                 break;
 
-            case TenancyModel.Model1Shared:
+            case TenancyModel.Model1:
                 var sharedEndpoint = _options.SharedPlatformOpenAiEndpoint;
                 if (string.IsNullOrWhiteSpace(sharedEndpoint))
                 {
                     var diagnostic =
-                        "Model1Shared tenancy but RuntimeReferencesOptions:SharedPlatformOpenAiEndpoint is not " +
+                        "Model1 tenancy but RuntimeReferencesOptions:SharedPlatformOpenAiEndpoint is not " +
                         "configured. Operator must set this app-setting for this L2 environment before ANY " +
-                        "Model1Shared customer can complete H12c.";
+                        "Model1 customer can complete H12c.";
                     return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingSharedPlatformEndpointConfiguration, diagnostic, cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -321,7 +321,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
                 // see file header "LIVE DATAVERSE SCHEMA" deviation note; this
                 // table has no dedicated tenantId column).
                 meteringDescription =
-                    $"Shared platform Azure OpenAI deployment (Model1Shared tenancy). Per-tenant metering " +
+                    $"Shared platform Azure OpenAI deployment (Model1 tenancy). Per-tenant metering " +
                     $"attribution: tenantId={tenantId}, customerId={envelope.CustomerId} (task 077 owns the " +
                     $"queryable metering-attribution mechanism).";
                 break;

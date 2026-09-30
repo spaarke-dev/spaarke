@@ -465,7 +465,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         // ValidateTenancyProfilePair at RunsEndpoints.PostRuns already gates unparseable
         // values with HTTP 400 before H0 ever sees them.
         var isModel2Dedicated = Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var h0Tenancy)
-            && h0Tenancy == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated;
+            && h0Tenancy == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2;
         var strictModel2 = isModel2Dedicated && _options.RequireCostEnvelopeForModel2Dedicated;
 
         if (!_options.CostEnvelopeAbortsPreflight)
@@ -487,7 +487,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             {
                 const string strictRejectionCode = "quota-cost-envelope-required-missing";
                 var strictDiag =
-                    $"H0 cost-envelope gate: Model2Dedicated requires nonSecret['{TierParameterKey}'] populated (Bucket B MED#4 SESSION 18). " +
+                    $"H0 cost-envelope gate: Model2 requires nonSecret['{TierParameterKey}'] populated (Bucket B MED#4 SESSION 18). " +
                     "Silent skip forbidden for dedicated-stamp tenancies. Set H0Options.RequireCostEnvelopeForModel2Dedicated=false only in internal-test envs.";
                 _logger.LogWarning(
                     "H0 cost-envelope gate FAIL_MISSING_TIER (Bucket B MED#4) — runId={RunId} customerId={CustomerId} " +
@@ -512,7 +512,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             {
                 const string strictRejectionCode = "quota-cost-envelope-unknown-tier";
                 var strictDiag =
-                    $"H0 cost-envelope gate: Model2Dedicated + tier '{tier}' is unknown to H0Options.TierMonthlyCostCeilingsUsd " +
+                    $"H0 cost-envelope gate: Model2 + tier '{tier}' is unknown to H0Options.TierMonthlyCostCeilingsUsd " +
                     $"AND built-in defaults (Bucket B MED#5 SESSION 18). Add tier to intake.schema.json enum + H0Options config, " +
                     "or use a canonical tier (shared-trial/smb/enterprise/dedicated).";
                 _logger.LogWarning(
@@ -537,7 +537,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             {
                 const string strictRejectionCode = "quota-cost-envelope-required-missing";
                 var strictDiag =
-                    $"H0 cost-envelope gate: Model2Dedicated requires nonSecret['{EstimatedMonthlyUsdParameterKey}'] populated " +
+                    $"H0 cost-envelope gate: Model2 requires nonSecret['{EstimatedMonthlyUsdParameterKey}'] populated " +
                     $"(Bucket B MED#4 SESSION 18) — tier='{tier}' ceiling=${ceiling}/mo. Silent skip forbidden.";
                 _logger.LogWarning(
                     "H0 cost-envelope gate FAIL_MISSING_ESTIMATE (Bucket B MED#4) — runId={RunId} customerId={CustomerId} " +
@@ -562,7 +562,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             {
                 const string strictRejectionCode = "quota-cost-envelope-unparseable-estimate";
                 var strictDiag =
-                    $"H0 cost-envelope gate: Model2Dedicated + nonSecret['{EstimatedMonthlyUsdParameterKey}']='{estimatedRaw}' " +
+                    $"H0 cost-envelope gate: Model2 + nonSecret['{EstimatedMonthlyUsdParameterKey}']='{estimatedRaw}' " +
                     "is not a valid invariant-culture decimal (Bucket B MED#4 SESSION 18). Fix intake (e.g., '425' or '1200.50').";
                 _logger.LogWarning(
                     "H0 cost-envelope gate FAIL_UNPARSEABLE_ESTIMATE (Bucket B MED#4) — runId={RunId} customerId={CustomerId} " +
@@ -625,8 +625,8 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         {
             _logger.LogWarning(
                 "H0 cost-envelope gate WARN-AND-PROCEED REJECTED (Bucket B HIGH#12 SESSION 18): " +
-                "tenancyModel=Model2Dedicated MUST NOT permit warnAndProceed per intake.schema.json " +
-                "costEnvelopePolicy description (Model2Dedicated dedicated-stamp runs bar uncapped budget). " +
+                "tenancyModel=Model2 MUST NOT permit warnAndProceed per intake.schema.json " +
+                "costEnvelopePolicy description (Model2 dedicated-stamp runs bar uncapped budget). " +
                 "Forcing fall-through to abortOnOverrun. runId={RunId} customerId={CustomerId} " +
                 "estimated=${Estimated}/mo tier='{Tier}' ceiling=${Ceiling}/mo costGateOutcome={CostGateOutcome}.",
                 run.RunId, run.CustomerId, estimatedMonthlyUsd, tier, ceiling, "reject-model2-warn-and-proceed");
@@ -638,8 +638,8 @@ public sealed class H0PreflightHandler : IProvisioningHandler
                 "H0 cost-envelope gate WARN-AND-PROCEED — estimated ${Estimated}/mo > tier '{Tier}' ceiling " +
                 "${Ceiling}/mo but nonSecret['{PolicyKey}']='{Policy}' explicitly requests proceed " +
                 "(runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} costGateOutcome={CostGateOutcome}). " +
-                "Only permitted for Model1Shared per intake.schema.json costEnvelopePolicy description; " +
-                "Model2Dedicated + warnAndProceed is rejected above per Bucket B HIGH#12 SESSION 18.",
+                "Only permitted for Model1 per intake.schema.json costEnvelopePolicy description; " +
+                "Model2 + warnAndProceed is rejected above per Bucket B HIGH#12 SESSION 18.",
                 estimatedMonthlyUsd, tier, ceiling, CostEnvelopePolicyParameterKey, policy,
                 run.RunId, run.CustomerId, run.TenancyModel, "warn-and-proceed");
             return null;

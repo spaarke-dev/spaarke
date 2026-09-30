@@ -107,7 +107,7 @@ public sealed class H1SubscriptionReadinessHandlerTests
     }
 
     [Theory]
-    [InlineData("Model2Dedicated")]  // structured design.md §6.2 name (exact-case, parsed by TenancyModelParser)
+    [InlineData("Model2")]  // structured design.md §6.2 name (exact-case, parsed by TenancyModelParser)
     [InlineData("customerowned")]    // case-insensitive colloquial ownership word (secondary path)
     // Task 223 (D-12): [InlineData("MODEL2DEDICATED")] REMOVED — the case-insensitive
     // model literal was the P-2 defect surface. Post-Item-2 the model axis is parsed
@@ -471,9 +471,9 @@ public sealed class H1SubscriptionReadinessHandlerTests
 
     [Theory]
     [InlineData("SpaarkeOwned", true, false)]
-    [InlineData("Model1Shared", true, false)]
+    [InlineData("Model1", true, false)]
     [InlineData("CustomerOwned", true, true)]
-    [InlineData("Model2Dedicated", true, true)]
+    [InlineData("Model2", true, true)]
     [InlineData("customerowned", true, true)]     // case-insensitive
     [InlineData("SPAARKEOWNED", true, false)]     // case-insensitive
     [InlineData("Model3Future", false, false)]    // unknown

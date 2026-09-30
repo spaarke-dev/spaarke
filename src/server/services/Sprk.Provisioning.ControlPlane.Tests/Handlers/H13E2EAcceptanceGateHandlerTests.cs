@@ -720,7 +720,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = EnvironmentId,
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };

@@ -74,7 +74,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task HappyPath_Model2Dedicated_ProvisionerAndVerifierCalled_Success()
     {
-        var run = BuildRun(tenancyModel: "Model2Dedicated");
+        var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-1");
         var catalog = new FakeCanonicalIndexCatalog();
         var provisioner = FakeAiSearchIndexProvisioner.Success();
@@ -105,7 +105,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task HappyPath_Model1Shared_VerifierAndTemplateProvisionerCalled_Success()
     {
-        var run = BuildRun(tenancyModel: "Model1Shared");
+        var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-2");
         var catalog = new FakeCanonicalIndexCatalog();
         var provisioner = FakeAiSearchIndexProvisioner.Success();
@@ -276,7 +276,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model2_ProvisionerReturnsFailure_FailsQuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: "Model2Dedicated");
+        var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-9");
         var provisioner = FakeAiSearchIndexProvisioner.Failure(
             "Deploy-AllIndexes.ps1 exit 7: PUT spaarke-files-index HTTP 400: unknown field");
@@ -299,7 +299,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model2_VerifierInvariantViolation_FailsQuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: "Model2Dedicated");
+        var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-10");
         var verifier = FakeAiSearchIndexVerifier.InvariantViolation(
             new IndexInvariantIssue(
@@ -326,7 +326,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model2_VerifierMissing_FailsQuarantineRequired_AsProvisioningFailed()
     {
-        var run = BuildRun(tenancyModel: "Model2Dedicated");
+        var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-11");
         var verifier = FakeAiSearchIndexVerifier.Missing("spaarke-records-index");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
@@ -348,7 +348,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model1_VerifierMissing_FailsQuarantineRequired_AsSharedIndexMissing()
     {
-        var run = BuildRun(tenancyModel: "Model1Shared");
+        var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-12");
         var verifier = FakeAiSearchIndexVerifier.Missing("spaarke-invoices-index");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
@@ -371,7 +371,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model1_VerifierInvariantViolation_FailsQuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: "Model1Shared");
+        var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-13");
         var verifier = FakeAiSearchIndexVerifier.InvariantViolation(
             new IndexInvariantIssue(
@@ -398,7 +398,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model1_TemplateProvisionerFailure_FailsResumable()
     {
-        var run = BuildRun(tenancyModel: "Model1Shared");
+        var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-14");
         var template = FakeAiSearchTenantFilterTemplateProvisioner.Failure(
             "PUT template store 429 Too Many Requests");
@@ -421,7 +421,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model2_MissingAiSearchEndpoint_FailsResumable()
     {
-        var run = BuildRun(tenancyModel: "Model2Dedicated");
+        var run = BuildRun(tenancyModel: "Model2");
         run.InterStepState.AiSearchEndpoint = null; // H2a didn't populate
         var repo = new FakeRepository(run, etag: "etag-15");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
@@ -442,7 +442,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     [Fact]
     public async Task Model1_MissingSharedPlatformSearchEndpointConfig_FailsResumable()
     {
-        var run = BuildRun(tenancyModel: "Model1Shared");
+        var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-16");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             FakeAiSearchIndexProvisioner.Success(),
@@ -526,7 +526,7 @@ public sealed class H2bAiSearchIndexHandlerTests
     private static ProvisioningRun BuildRun(
         bool includeTenantId = true,
         bool includeIndexVer = true,
-        string tenancyModel = "Model2Dedicated")
+        string tenancyModel = "Model2")
     {
         var run = new ProvisioningRun
         {
@@ -535,7 +535,7 @@ public sealed class H2bAiSearchIndexHandlerTests
             EnvironmentId = "env-guid",
             TenancyModel = tenancyModel,
             Status = RunStatus.Running,
-            Profile = tenancyModel == "Model1Shared" ? "spaarke-hosted-model1-trial" : "spaarke-hosted-model2",
+            Profile = tenancyModel == "Model1" ? "spaarke-hosted-model1-trial" : "spaarke-hosted-model2",
         };
         if (includeTenantId)
         {
@@ -546,7 +546,7 @@ public sealed class H2bAiSearchIndexHandlerTests
             run.Parameters.NonSecret[H2bAiSearchIndexHandler.IndexVersionParameterKey] = IndexVer;
         }
         // Model 2 requires AiSearchEndpoint populated by H2a; Model 1 does not.
-        if (string.Equals(tenancyModel, "Model2Dedicated", StringComparison.Ordinal))
+        if (string.Equals(tenancyModel, "Model2", StringComparison.Ordinal))
         {
             run.InterStepState.AiSearchEndpoint = Model2Endpoint;
         }
