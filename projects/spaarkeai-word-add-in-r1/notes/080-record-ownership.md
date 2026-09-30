@@ -574,3 +574,16 @@ who saved them, and the owner's 065 rule is *"we can't 'guess'"*. They stay in r
    - This is inferred from the guide and **untested live**. It **fails closed**: an error, and the bytes stay in the
      secure project's own container. Before this branch, such a save went to the SHARED container (#1038).
    - UAC-r2's C10 adds the child-table privileges.
+
+   > 🔴 **CORRECTED 2026-09-30, after this item was written.** Two claims above were wrong.
+   > 1. **The owner is not UAC-r2.** C10 is the Secure team's identity (a named, non-default team) plus re-owning
+   >    documents at provisioning. It is not these privileges, and UAC-r2's own note said the reverse ("fails
+   >    closed until UAC C10 lands"), so nobody owned it. **This project owns it: task 082, ISS-013,
+   >    [#1046](https://github.com/spaarke-dev/spaarke/issues/1046)**, by owner instruction.
+   > 2. **The guide is not the live role.** A read-only query on dev returned 36 privileges.
+   >    - `sprk_document` has all 8, so **secure-target document saves work in dev**.
+   >    - `sprk_todo` has **none**, so a **To Do** filed against a secure record is refused.
+   >    - Communication, event and memo have none either.
+   >
+   >    Environments built from the guide have no child privileges, so documents fail there too. The guide's §5.4
+   >    strip script would remove dev's document privilege if re-run. Detail: the 082 POML.

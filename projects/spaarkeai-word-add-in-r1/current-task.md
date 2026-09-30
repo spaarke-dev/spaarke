@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (by context-handoff, pre-`/compact` — after PR #1045 opened)
+> **Last Updated**: 2026-09-30 (after PR #1045 CI check; task 082 added for the Secure Record Owner child-privilege gap, #1046)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,11 +9,11 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml` — delete the fabricated-data Office routes; read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`) |
+| **Active task** | **none in progress.** Next: **082** (`tasks/082-*.poml`: the Secure Record Owner role needs `Read` on `sprk_todo` and the other child tables; this project owns it by owner instruction; ISS-013 / #1046), then **058** (`tasks/058-*.poml`: delete the fabricated-data Office routes. Read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`) |
 | **Last closed** | **080** ⚠️ `5d870b898` (+ close `19c2db13a`). Every Office create is owned by a BU default Owner team, record-first, or refused with `OFFICE_022`. Full record: `notes/080-record-ownership.md` §6 (§6.11 is the review triage; §6.12 lists UAC-r2's corrections) |
 | **PR** | 🔒 **#1045** — `work/spaarkeai-word-add-in-r1` → master, opened 2026-09-30, CI was pending at handoff. **It is a SECURITY merge**: it fixes **#1038** (a secure-record Office save lands in the shared container) and **#1043** (`POST /api/v1/documents` lets a caller choose the owner team and id). **Both are LIVE on master and on `spaarke-bff-dev` (`2682e8225`).** |
 | **Branch** | `work/spaarkeai-word-add-in-r1` @ `1de0fe2f7`, pushed, tree clean. Master (#1029) merged in at `26acc00e2`; 0 behind master when the PR was opened |
-| **Next Action** | **1)** `gh pr checks 1045` — confirm `grep -c pending` is 0 and there is no Tier 1 failure. **2)** The OWNER decides **#1044** (below) before merge; do NOT merge on your own. **3)** Then `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers) |
+| **Next Action** | **1)** ~~`gh pr checks 1045`~~ ✅ **checked 2026-09-30: 0 pending, all Tier 1 pass, `Router` pass.** The only red is Tier 2 "Full Unit Tests", **cancelled** at its 30-min cap, not failed; legacy `Build & Test (Debug)` ran the full suite in 59 min and passed. **2)** The OWNER decides **#1044** (below) before merge; do NOT merge on your own. **3)** Then `task-execute` **082**, then **058** (order: 082 → 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers) |
 
 ### 🔔 Owner decision BLOCKING the #1045 merge
 
@@ -26,8 +26,14 @@ whom" column (verified), so there is NO data-only guard. The options, in the iss
    notified" design.
 3. Accept the regression until that design lands.
 
-Also stated in the PR: saves filed to a SECURE project will likely FAIL until UAC-r2's C10 grants child-table
-privileges to "Secure Record Owner". This is inferred from the guide, untested, and fails closed.
+#1044 is a real regression against master: master's `CreateTodoAsync` sets `ownerid = systemuser(caller)`
+(`OfficeService.cs:2859` on `origin/master`), so Office To Dos DO appear in the briefing today.
+
+~~Also stated in the PR: saves filed to a SECURE project will likely FAIL until UAC-r2's C10 grants child-table
+privileges.~~ **Corrected 2026-09-30.** This project owns it: **task 082**, ISS-013,
+[#1046](https://github.com/spaarke-dev/spaarke/issues/1046). The live role has all 8 `sprk_document` privileges, so
+secure-target document saves **work in dev**. It has **none** on `sprk_todo`, so a To Do filed against a secure record
+is refused until 082. The PR body was corrected to match.
 
 ### 080 — what the owner must do (not blocking 058)
 
@@ -41,6 +47,7 @@ privileges to "Secure Record Owner". This is inferred from the guide, untested, 
    - #1039–#1042: older deferrals, now filed
    - #1043 / #1038: the security fixes in #1045
    - #1044: the regression above
+   - #1046: the Secure Record Owner child-privilege gap, **tasked as 082**
 
 ### Session commits (after `6bf83c87c`)
 

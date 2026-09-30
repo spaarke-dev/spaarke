@@ -141,3 +141,23 @@ to a task.
 - **The membership event's owner semantics (080 F7)** are theirs. They are raising it with their owner; **leave it
   as-is here.**
 - **#1037 hide-vs-disable** goes to their owner along with their other decisions. #1034 and #1010 are noted.
+
+## 8. The Secure Record Owner child-privilege gap is OURS — task 082 (2026-09-30)
+
+Each project's notes said the other owned it. Ours (080 §6.12 item 3) said "UAC-r2's C10 adds the child-table
+privileges". Theirs (`session27-owner-decisions-and-research.md`) said "fails closed until UAC C10 lands". C10 is the
+Secure team's identity plus re-owning documents at provisioning, so the gap had no owner. **The owner assigned it to
+this project:** task **082**, ISS-013, [#1046](https://github.com/spaarke-dev/spaarke/issues/1046).
+
+Live role on 2026-09-30 (read-only, 36 privileges):
+
+| Table | Live privileges |
+|---|---|
+| `sprk_todo` | **none** |
+| `sprk_document` | all 8 |
+| `sprk_communication` / `sprk_event` / `sprk_memo` | none |
+| project / matter / work assignment | all 8 (**drift** from the guide's Read-only design) |
+| SharePoint four | Global |
+
+UAC-r2 has been told. The guide (`SECURE-PROJECT-ENVIRONMENT-SETUP.md`) and the NFR-05 census are theirs; 082
+coordinates its edits to both.

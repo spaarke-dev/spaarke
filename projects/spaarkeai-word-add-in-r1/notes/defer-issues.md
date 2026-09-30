@@ -558,6 +558,29 @@ team (Secure Record included) and the GUID. Fixed by `5d870b898`. Detail: `notes
 
 ---
 
+## ISS-013 — The `Secure Record Owner` role cannot own the children task 080 assigns to it, and the setup guide strips what it has
+
+| Field | Value |
+|---|---|
+| **Status** | Open, **tasked: 082** |
+| **Urgency** | now |
+| **Filed** | 2026-09-30 |
+| **Source** | 080 note §6.12 item 3; ownership moved to this project by owner instruction 2026-09-30 |
+| **GitHub Issue** | [#1046](https://github.com/spaarke-dev/spaarke/issues/1046) |
+
+Record-first ownership gives a child of a secure record to the Secure Record team. Dataverse requires that team's
+role to hold `Read` on the child's table.
+
+Measured live on 2026-09-30:
+- `sprk_todo`: none, so a secure-record To Do is refused.
+- `sprk_document`: all 8, so secure-target saves work in dev.
+- `sprk_communication`/`event`/`memo`: none.
+
+The guide's §5.4 strip script keeps only the three root Reads, so re-running it removes the document privilege.
+Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: the 082 POML.
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.
