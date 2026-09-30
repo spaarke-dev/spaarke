@@ -55,8 +55,8 @@
       project) is active in `projects/INDEX.md` / recent master commits. If it is, author a coord-note for that owner instead
       of committing the workflow change directly (see escalation).
     </constraint>
-    <constraint source="owner decision §9 Q3 / plan G7">
-      `customer.bicep` Redis default becomes Standard C1 (family C, capacity 1, Standard). Remains overridable.
+    <constraint source="owner decision D12 (2026-09-30) — supersedes §9 Q3 / G7">
+      Do NOT change the Redis default in `customer.bicep`. Standard C1 is superseded by Azure Managed Redis B0 (T242).
     </constraint>
     <constraint source="scope">
       Code-path convergence in the control plane (H2b Model 1 branch, H12c shared OpenAI endpoint, ArmDeploymentRunner /
@@ -77,7 +77,7 @@
     <step n="0">Confirm the branch is 0 behind origin/master (merge 40c4b2a02 landed 2026-09-30; re-merge if master moved) and ArchTest 337/337. Re-check `.github/workflows/**` ownership. `git grep -n "model1-shared\|model1-customer\|model1-prod\|shared-bff-uami\|rg-spaarke-shared"` → categorized hit list (code / Bicep / workflow / script / docs).</step>
     <step n="1">Delete surfaces 1–4; repoint or delete surface 5 per what each bicepparam deploys.</step>
     <step n="2">`bff-runtime-rbac.bicep`: remove the `sprk-{env}-shared-bff-uami` branch; the stamp UAMI is the only principal.</step>
-    <step n="3">`customer.bicep`: Redis default Standard C1.</step>
+    <step n="3">DROPPED — owner D12 (2026-09-30) supersedes Standard C1 with Azure Managed Redis B0 (T242). Do not touch the Redis default here.</step>
     <step n="4">`bicep-e2e-dry-run.ps1`: remove stack entry, Assertion 8, doc lines; count 4 → 3.</step>
     <step n="5">Workflow + manifest schema (surface 7), subject to the ownership check.</step>
     <step n="6">`prereqs.yaml`: remove/rewrite PRQ-E-05, PRQ-E-06, PRQ-C-02 (and any other entry from the Step 0 hit list) that names the shared BFF, `rg-spaarke-shared-{env}` or `model1-shared.bicep`; run `scripts/provisioning-prereqs/validate.ps1`.</step>
@@ -89,7 +89,7 @@
     <criterion>All seven INCOMING §5 Item 4 surfaces changed in one commit; `model1-shared.bicep`, `model1-shared.json`, `model1-customer.bicep`, `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam` no longer exist.</criterion>
     <criterion>`bicep-e2e-dry-run.ps1` passes with 3 stacks; Assertion 8 removed (not inverted, not skipped).</criterion>
     <criterion>`publish-provisioning-arm-artifacts.yml` neither compiles nor uploads `model1-shared`; `provisioning-arm-manifest.json` does not require it — OR, if the ownership check routed it to a coord-note, the coord-note exists and the POML records why.</criterion>
-    <criterion>`bff-runtime-rbac.bicep` has no shared-UAMI branch; `customer.bicep` Redis default is Standard C1.</criterion>
+    <criterion>`bff-runtime-rbac.bicep` has no shared-UAMI branch. (Redis default unchanged — D12/T242.)</criterion>
     <criterion>`prereqs.yaml` has no entry naming the shared BFF, `rg-spaarke-shared-{env}` or `model1-shared.bicep`; `validate.ps1` passes.</criterion>
     <criterion>Every remaining stack + `customer.bicep` compiles; ControlPlane builds 0/0; ArchTest 337/337; ControlPlane.Tests ≤ 23 baseline failures, zero new.</criterion>
     <criterion>`controlplane-subscription-rbac.bicep` untouched (T228); no control-plane refactor beyond a minimal template-key repoint if the build required it (recorded).</criterion>
