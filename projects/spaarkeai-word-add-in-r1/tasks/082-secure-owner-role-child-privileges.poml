@@ -65,6 +65,26 @@
 
       Invoice, Matter and Project quick-create and `POST /api/v1/documents` resolve from the CALLER only, so they
       never reach the Secure team.
+
+      **Agreed with unified-access-control-r2, 2026-09-30** (cross-session reply; recorded in
+      `notes/uac-r2-findings-2026-09-30.md` §9):
+      - **Grant on the EXISTING `Secure Record Owner` role.** Their C10 part 1 (their task 144) moves secure
+        ownership from the Secure BU's default team to a NAMED non-default team, but the role stays the same and is
+        assigned to the named team. Nothing changes for 082.
+      - **The drift has no known origin.** UAC-r2 never added the Create/Write/Delete/Assign/Share/Append privileges
+        or the SharePoint four. Their design specified Read only (their design.md:301), and their only change to
+        the role was the 2026-09-29 rename (their task 121). Nothing in UAC-r2 depends on the drift. Removing it is
+        an owner call.
+      - **The guide edits are OURS**: §5.1 table and the child-entities row, §5.3, §5.4 and §7. Their tasks 144 and
+        150 edit the same guide after us and rebase.
+      - **ONE codified child-table set that BOTH projects extend.** Their C10 part 2 (their task 146) re-owns every
+        user- or team-owned child of a secure record (their design.md §5.1d: agreement, analysis, billingevent,
+        budget, communication, communicationthread, document, event, invoice, kpiassessment, memo, reportcard,
+        servicerequest, spendsignal, spendsnapshot, todo, workassignment, plus email). 146 adds each table it
+        re-owns.
+      - **The NFR-05 census (`SecureBuRoleDepthAssertion*`) is THEIRS.** Their task 144 rewrites clause 2 in that
+        file, so 082 does NOT edit it. They add the "role lacks Read on a codified table" clause, and it reads 082's
+        file.
     </background>
   </context>
 
@@ -75,16 +95,25 @@
     <constraint source="this task">Never grant the role to a user or to any other team, and never add a broad role to the Secure team. SecureBuRoleDepthAssertion clauses 2 and 3 must stay green.</constraint>
     <constraint source="this task">Derive privilege ids from metadata (`EntityDefinitions(...)/Privileges` or the `privilege` table). Do not hard-code GUIDs; the guide's §5.3 casing warning applies.</constraint>
     <constraint source="this task">Any live probe record created to prove the grant is deleted afterwards, and the deletion is recorded.</constraint>
-    <constraint source="coordination">`SECURE-PROJECT-ENVIRONMENT-SETUP.md` and `tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepth*` belong to unified-access-control-r2. Tell them what changes before editing; do not rewrite their design rationale, only the rows 080 made false.</constraint>
+    <constraint source="coordination">Do NOT edit `tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepth*`. UAC-r2's task 144 rewrites that file, and they add the codified-set clause themselves. `SECURE-PROJECT-ENVIRONMENT-SETUP.md` is jointly edited: change only the rows 080 made false, keep their design rationale, and tell them when it lands so 144 and 150 can rebase.</constraint>
+    <constraint source="coordination">The codified set is a DATA FILE, not a list inside prose or a script body. It is machine-readable (JSON), one entry per table (logical name, privilege name, the writer or owner decision that requires it), and extended by UAC-r2's task 146. The guide, the script and UAC-r2's census clause all read it.</constraint>
   </constraints>
 
   <acceptance-criteria>
     <criterion testable="true">NEGATIVE CONTROL first, recorded: before the grant, creating a probe `sprk_todo` owned by the Secure Record team is refused, and the recorded message names `prvReadsprk_Todo`. If it is NOT refused, stop: the premise is wrong and the note must say why.</criterion>
     <criterion testable="true">After the grant, the same probe succeeds, and read-back shows `owningteam` = the Secure Record team. The probe is then deleted.</criterion>
     <criterion testable="true">The live role holds `Read` at depth 1 on `sprk_todo`, `sprk_communication`, `sprk_event` and `sprk_memo`, and every privilege present before the change is still present. Record the before and after privilege lists (a count and a diff).</criterion>
-    <criterion testable="true">The required set is codified in ONE place that both the guide and the check read. It is either a script (`scripts/Set-SecureRecordOwnerRolePrivileges.ps1`: dry run by default, idempotent, adds only, derives names from metadata) or a data file the guide's procedure consumes. It is not a list duplicated across the guide, the script and the test.</criterion>
-    <criterion testable="true">The guide no longer removes what I-6 needs. Its §5.1 table and the "child entities" row, the §5.3 `$securable` list, the §5.4 `$keep` list and the §7 verification all agree with the codified set. Re-running §5.4 against a role that has the set removes nothing in it.</criterion>
-    <criterion testable="true">A standing check fails when the role lacks `Read` on any table in the codified set. It is either a clause added to the NFR-05 census, agreed with UAC-r2, or a sibling assertion in the same KEEP path. Seed it both ways and record both outputs: with one table removed from the census input it FAILS naming the table; with the set present it passes.</criterion>
+    <criterion testable="true">The required set lives in ONE JSON data file. It covers the three root tables plus the child tables, and each entry names its reason. The guide, the script and UAC-r2's census clause all read it; no second copy of the list exists anywhere. The file carries a short "how to extend" header for UAC-r2's task 146.</criterion>
+    <criterion testable="true">`scripts/Set-SecureRecordOwnerRolePrivileges.ps1` reads that file and derives privilege ids from metadata.
+      - It is a dry run by default and idempotent.
+      - `-Apply` only ever ADDS.
+      - A `-Verify` mode exits non-zero naming each table whose `Read` is missing.
+
+      Seed `-Verify` both ways and record both outputs: FAILS naming the table when one table is removed; passes when the set is present.</criterion>
+    <criterion testable="true">The guide no longer removes what I-6 needs.
+      - The §5.1 table and the "child entities" row, the §5.3 `$securable` list, the §5.4 `$keep` list and the §7 verification all read the data file, or point to it.
+      - Re-running §5.4 against a role that has the set removes nothing in it.</criterion>
+    <criterion testable="true">Handed to UAC-r2: the file path and format for their census clause. `SecureBuRoleDepthAssertion*` is NOT modified by this task.</criterion>
     <criterion testable="true">SecureBuRoleDepthAssertion's existing clauses still pass against dev: nothing added reaches the secure business unit by depth.</criterion>
     <criterion testable="true">The record is corrected everywhere the gap was misattributed or misstated:
       - `notes/080-record-ownership.md` §6.12 item 3;
@@ -92,23 +121,22 @@
       - PR #1045's "Before merging" item 2, which should say documents work in dev and To Dos fail until 082;
       - `notes/uac-r2-findings-2026-09-30.md`.</criterion>
     <criterion testable="true">The drift decision is put to the owner as a 🔔 with a recommendation. The drift is the 7 non-Read privileges on each of the 4 root and document tables (28 privileges) and the SharePoint four at Global. The owner's answer is recorded in the note.</criterion>
-    <criterion testable="true">Test scope: the negative control, the check's two seeded directions, and the existing NFR-05 assertion. Anything beyond that needs a one-line justification.</criterion>
+    <criterion testable="true">Test scope: the live negative control, `-Verify`'s two seeded directions, and the existing NFR-05 assertion (run, not edited). Anything beyond that needs a one-line justification.</criterion>
   </acceptance-criteria>
 
   <escalation>
     <trigger>If the probe still fails after `Read` is granted, Dataverse needs another privilege. Record the exact message and add only the privilege it names. If it names anything other than a `Read`, STOP and escalate: the guide's evidence says Read alone suffices for assignment, and a different answer changes the design.</trigger>
     <trigger>Removing or narrowing ANY existing privilege on this role, including the drift, is an owner decision under CLAUDE.md §6 (security-sensitive). Present the evidence and the recommendation, then wait.</trigger>
-    <trigger>If UAC-r2's C10 work replaces the default Secure team with a named non-default team before this task runs, the privileges belong on THAT team's role. Confirm which team and role the resolver targets before granting.</trigger>
+    <trigger>UAC-r2 confirmed on 2026-09-30 that their named-team change (their task 144) keeps the `Secure Record Owner` role. If that has changed by the time this runs, STOP and confirm which role to grant on before touching the live role.</trigger>
   </escalation>
 
   <steps mode="directional">
     <step>Re-measure the live role; do not inherit the 2026-09-30 list. Confirm which team `RecordOwnershipResolver` resolves for a secure project.</step>
-    <step>Message UAC-r2 with the planned guide and assertion edits.</step>
     <step>Negative control: probe a `sprk_todo` owned by the Secure team with the privilege missing, and record the refusal.</step>
-    <step>Codify the required set; write the script (dry run first, show the plan, then apply).</step>
+    <step>Write the JSON data file and the script (dry run first, show the plan, then apply). Seed `-Verify` both ways.</step>
     <step>Grant, re-run the probe, read it back, then delete the probe.</step>
-    <step>Fix the guide rows that 080 made false.</step>
-    <step>Add the standing check; seed it both ways.</step>
+    <step>Fix the guide rows that 080 made false so they read the data file.</step>
+    <step>Hand UAC-r2 the file path and format for their census clause.</step>
     <step>Put the drift decision to the owner and record the answer.</step>
     <step>Correct the misattribution in notes, current-task.md and the PR #1045 body. Write `notes/082-secure-owner-role.md`.</step>
     <step>Update TASK-INDEX.md: 082 → ✅; close #1046 and ISS-013.</step>
@@ -123,8 +151,8 @@
   <relevant-files>
     <file role="edit">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
     <file role="new">scripts/Set-SecureRecordOwnerRolePrivileges.ps1</file>
-    <file role="edit">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs</file>
-    <file role="edit">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</file>
+    <file role="new">the codified privilege-set JSON file (location chosen at execution; next to the script or under `config/`)</file>
+    <file role="read">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs (UAC-r2's; read only)</file>
     <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
     <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
     <file role="read">scripts/Backfill-RecordOwnership.ps1</file>

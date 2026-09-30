@@ -161,3 +161,40 @@ Live role on 2026-09-30 (read-only, 36 privileges):
 
 UAC-r2 has been told. The guide (`SECURE-PROJECT-ENVIRONMENT-SETUP.md`) and the NFR-05 census are theirs; 082
 coordinates its edits to both.
+
+## 9. UAC-r2's reply, and owner decisions relayed (2026-09-30)
+
+**Task 082 scope (agreed):**
+- **Grant on the existing `Secure Record Owner` role.** Their C10 part 1 (task 144, being authored) moves secure
+  ownership from the Secure BU's DEFAULT team to a NAMED non-default team in that BU. The role stays, assigned to the
+  named team.
+- **The drift has no known origin.** UAC-r2 never added the Create/Write/Delete/Assign/Share/Append privileges or the
+  SharePoint four. Their design specified Read only (their design.md:301), and their only change to the role was the
+  2026-09-29 rename (task 121). Nothing in UAC-r2 depends on the drift, and a memberless owning team needs only Read.
+  Removal is an owner call.
+- **Guide:** we edit the privilege rows (§5.1 table + child-entities row, §5.3, §5.4, §7). Their tasks 144 (named
+  team) and 150 (field-level security on `sprk_issecure`) edit the same guide after our merge and rebase onto it.
+- **ONE codified child-table set that both projects extend.** Their C10 part 2 (task 146) re-owns every user- or
+  team-owned child of a secure record (their design.md §5.1d: agreement, analysis, billingevent, budget,
+  communication, communicationthread, document, event, invoice, kpiassessment, memo, reportcard, servicerequest,
+  spendsignal, spendsnapshot, todo, workassignment, plus email). 146 adds each table it re-owns.
+- **NFR-05 census (`SecureBuRoleDepthAssertion*`) is THEIRS.** Their task 144 rewrites clause 2 in that file. They add
+  the "role lacks Read on a codified table" clause, reading our file. **082 does not edit that file.**
+
+**Owner decisions:**
+- **#1037:** option A, show the record disabled with the reason. The picker is ours; no task exists yet (ISS-010).
+- **#1044:** the "for person" route, using the EXISTING `sprk_todo.sprk_assignedto` (a contact lookup, verified live)
+  plus Created By, with no new column. Only 1 of 8 active dev systemusers has `sprk_primarycontact`.
+
+**Finding we sent back: Created By cannot carry the person for BFF-created To Dos.**
+- Those creates are app-only. Verified live: `createdby` = `# mi-bff-api-dev`, and `createdonbehalfby` is empty.
+- Our Office writer sets `sprk_assignedto` only for an explicit assignee (`OfficeService.cs:2875`).
+
+**Agreed split:**
+- **Our task 083:** default `sprk_assignedto` to the caller's contact, Office path only.
+- **Their task 141:** the user↔contact link. They will send us its contract.
+- **Their task 152:** the briefing matches Assigned To = the user's contact. Created By counts only when
+  `createdby` is a HUMAN systemuser (`systemuser.applicationid` is null). The server generators (TodoGenerationService,
+  TaskActionCore and the other #1034 writers) set Assigned To themselves.
+- `TaskActionCore` is AI playbook code (`Services/Ai/Nodes/ActionCore`), so it stays with 152.
+- Both projects rejected impersonated creates, because they would widen roles.

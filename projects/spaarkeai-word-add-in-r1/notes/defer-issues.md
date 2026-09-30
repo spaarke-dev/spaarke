@@ -521,7 +521,9 @@ Make "pickable" equal "savable": either hide records the caller cannot AppendTo,
 Which is an owner call — it decides whether a view-only user can see in the pane that the record exists.
 
 **Estimated effort**: ~1 day (per-row AppendTo evaluation for a page of results).
-**Blockers**: owner decision (hide vs disable).
+**Blockers**: ~~owner decision (hide vs disable)~~ **DECIDED 2026-09-30: option A, show the record DISABLED with the
+reason** (UAC-r2 `session27` note; relayed again 2026-09-30). The picker is this project's code (062 + the pane), but
+no task has been authored yet. 🔔 That needs the owner's go, because it expands scope.
 **Related**: tasks 062, 065; UAC-r2 task 128's verification lesson (check that a role holds the right a filter demands).
 
 ---
@@ -546,7 +548,7 @@ team (Secure Record included) and the GUID. Fixed by `5d870b898`. Detail: `notes
 
 | Field | Value |
 |---|---|
-| **Status** | Open — owner decision before this branch merges |
+| **Status** | Open. **Route decided by the owner 2026-09-30**; split between task **083** (ours) and UAC-r2 tasks 141 + 152 |
 | **Urgency** | now |
 | **Filed** | 2026-09-30 |
 | **Source** | UAC-r2 session review of task 080 |
@@ -555,6 +557,17 @@ team (Secure Record included) and the GUID. Fixed by `5d870b898`. Detail: `notes
 `DailyBriefingCollector` filters to-dos on `owninguser = caller`; a team-owned To Do matches nobody. The options
 (caller-owned To Dos / a "for" user column / accept until the "who is notified" design) are in the issue. Detail:
 `notes/080-record-ownership.md` §6.12.
+
+**Owner decision, 2026-09-30, relayed by UAC-r2:** use the existing `sprk_todo.sprk_assignedto` (contact) plus
+Created By. No new column.
+
+Created By cannot identify the person for BFF-created To Dos: they are app-only, and live `createdby` is
+`# mi-bff-api-dev`. So:
+- **083 (ours):** the Office writer defaults `sprk_assignedto` to the caller's contact.
+- **UAC-r2 141:** the user↔contact link.
+- **UAC-r2 152:** the briefing matches Assigned To plus human-only Created By, and fixes the server generators.
+
+Detail: `notes/uac-r2-findings-2026-09-30.md` §9.
 
 ---
 
@@ -578,6 +591,13 @@ Measured live on 2026-09-30:
 
 The guide's §5.4 strip script keeps only the three root Reads, so re-running it removes the document privilege.
 Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: the 082 POML.
+
+**UAC-r2 agreed on 2026-09-30:**
+- 082 owns it and grants on the existing role.
+- The drift has no known origin.
+- The guide edits are ours.
+- The ONE codified JSON set is extended by their task 146.
+- The NFR-05 census clause is theirs and reads our file.
 
 ---
 

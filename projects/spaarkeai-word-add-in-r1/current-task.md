@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (after PR #1045 CI check; task 082 added for the Secure Record Owner child-privilege gap, #1046)
+> **Last Updated**: 2026-09-30 (PR #1045 CI checked. Tasks 082 (#1046) and 083 (#1044 writer half) added, and scope agreed with UAC-r2. #1044's route and #1037 were decided by the owner.)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -13,11 +13,22 @@
 | **Last closed** | **080** ⚠️ `5d870b898` (+ close `19c2db13a`). Every Office create is owned by a BU default Owner team, record-first, or refused with `OFFICE_022`. Full record: `notes/080-record-ownership.md` §6 (§6.11 is the review triage; §6.12 lists UAC-r2's corrections) |
 | **PR** | 🔒 **#1045** — `work/spaarkeai-word-add-in-r1` → master, opened 2026-09-30, CI was pending at handoff. **It is a SECURITY merge**: it fixes **#1038** (a secure-record Office save lands in the shared container) and **#1043** (`POST /api/v1/documents` lets a caller choose the owner team and id). **Both are LIVE on master and on `spaarke-bff-dev` (`2682e8225`).** |
 | **Branch** | `work/spaarkeai-word-add-in-r1` @ `1de0fe2f7`, pushed, tree clean. Master (#1029) merged in at `26acc00e2`; 0 behind master when the PR was opened |
-| **Next Action** | **1)** ~~`gh pr checks 1045`~~ ✅ **checked 2026-09-30: 0 pending, all Tier 1 pass, `Router` pass.** The only red is Tier 2 "Full Unit Tests", **cancelled** at its 30-min cap, not failed; legacy `Build & Test (Debug)` ran the full suite in 59 min and passed. **2)** The OWNER decides **#1044** (below) before merge; do NOT merge on your own. **3)** Then `task-execute` **082**, then **058** (order: 082 → 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers) |
+| **Next Action** | **1)** ~~`gh pr checks 1045`~~ ✅ **checked 2026-09-30: 0 pending, all Tier 1 pass, `Router` pass.** The only red is Tier 2 "Full Unit Tests", **cancelled** at its 30-min cap, not failed; legacy `Build & Test (Debug)` ran the full suite in 59 min and passed. **2)** #1044's ROUTE is decided (below). **Merging #1045 is still the OWNER's call**: do NOT merge on your own. **3)** Then `task-execute` **082**, then **058** (order: 082 → 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; **083 when UAC-r2 sends 141's link contract**) |
 
-### 🔔 Owner decision BLOCKING the #1045 merge
+### #1044: route DECIDED 2026-09-30 (owner, relayed by UAC-r2). Merging #1045 is the owner's call.
 
-**#1044 — a regression introduced by 080: team-owned To Dos drop out of the Daily Briefing.** `DailyBriefingCollector`
+The decision: use the EXISTING `sprk_todo.sprk_assignedto` (contact) plus Created By, with no new column.
+- **Our task 083:** the Office writer defaults `sprk_assignedto` to the caller's contact. Created By is the app user
+  for BFF creates (verified live), so it cannot carry the person.
+- **UAC-r2 141:** the user↔contact link.
+- **UAC-r2 152:** the briefing matches Assigned To plus human-only Created By, and fixes the server generators.
+
+Until 083, 141 and 152 land, an Office-pane To Do with no assignee is missing from the briefing. Full record:
+`notes/uac-r2-findings-2026-09-30.md` §9. Also decided: **#1037 = option A** (show disabled with the reason). The
+picker is ours and **untasked**, and needs the owner's go (ISS-010).
+
+**Original #1044 write-up (history):** a regression introduced by 080, in which team-owned To Dos drop out of the
+Daily Briefing. `DailyBriefingCollector`
 filters to-dos on `owninguser = caller` (`:1027`, `ScopeToOwner` `:430-432`). `sprk_todo` has no other user-typed "for
 whom" column (verified), so there is NO data-only guard. The options, in the issue:
 
@@ -47,7 +58,7 @@ is refused until 082. The PR body was corrected to match.
    - #1039–#1042: older deferrals, now filed
    - #1043 / #1038: the security fixes in #1045
    - #1044: the regression above
-   - #1046: the Secure Record Owner child-privilege gap, **tasked as 082**
+   - #1046: the Secure Record Owner child-privilege gap, **tasked as 082** (scope agreed with UAC-r2 — §9)
 
 ### Session commits (after `6bf83c87c`)
 
