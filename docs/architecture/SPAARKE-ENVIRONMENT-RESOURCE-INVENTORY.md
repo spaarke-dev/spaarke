@@ -61,7 +61,7 @@ Created by the operator before the provisioning run; the run verifies them and n
 | Resource | Deployment | Naming | Created by | Status vs target |
 |---|---|---|---|---|
 | Azure subscription for the customer | Dedicated | Operator-chosen (D4) | Operator; **H1** verifies reachability via ARM | 🔲 **T228** — intake still exempts Model 1 from `subscriptionId` and injects a shared subscription (`RunsEndpoints.cs` ISH-02; `scripts/provisioning-prereqs/intake.schema.json`) |
-| Dataverse environment for the customer | Dedicated | Operator-chosen (D4) | ⚠️ **OPEN — plan §5 Q1**: either (a) the operator **creates** it and **H5** verifies/adopts it, or (b) the operator only **names** it at intake and **H5** creates it. Today H5 creates it (interim vehicle `pac admin create-environment`). | 🔲 **T228** (after Q1) |
+| Dataverse environment for the customer | Dedicated | Operator-chosen (D4) | **Operator creates it** and supplies its name/URL at intake; **H5 verifies/adopts** it and never creates one (owner 2026-09-30, plan Q1) | 🔲 **T228** — today H5 creates the environment (interim vehicle `pac admin create-environment`) |
 | L2 control-plane UAMI role assignments on the customer subscription | Dedicated (one set per subscription) | — | Operator, as part of preparing the subscription | 🔲 **T228** — today `modules/controlplane-subscription-rbac.bicep` grants on one "fleet" subscription holding all stamps |
 
 ---
@@ -72,7 +72,7 @@ Created by the operator before the provisioning run; the run verifies them and n
 
 | Resource | Deployment | Naming / identity | Created by | Status vs target |
 |---|---|---|---|---|
-| Customer Dataverse environment | Dedicated | See manual prerequisites | Operator / H5 (Q1) | 🔲 T228 |
+| Customer Dataverse environment | Dedicated | See manual prerequisites | Operator creates; H5 verifies/adopts | 🔲 T228 |
 | App user — the customer's **BFF app registration** (D-13) | Dedicated | `systemuser` where `applicationid` = the customer's `Spaarke BFF - {CustomerName}` appId; System Administrator, root BU | **H10** | ✅ H3 creates one app registration per customer unconditionally (task 222, `H3EntraAppRegHandler.cs`) |
 | App user — the customer's **UAMI** | Dedicated | `systemuser` where `azureactivedirectoryobjectid` = UAMI **principalId** (never clientId); System Administrator, root BU | **H10** post-step; trap **T2** query verifies exactly one row | ✅ per-customer UAMI `mi-spaarke-{customerId}-prod` (`customer.bicep:214`) |
 | Graph app-role grants on the UAMI (~15) | Dedicated | Per [`GraphAppRoles.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs) | **H10** (trap **T3**) | ✅ — 11 of 14 null `AppRoleId` GUIDs must be completed before the first production customer (project MUST rule) |
@@ -96,10 +96,11 @@ prebuilt zips listed in [`Deploy-DataverseSolutions.ps1:170-191`](../../scripts/
 `src/solutions/*` folders are code pages deployed as web resources outside H6. T218 decides the solution set, which
 code pages ship in which solution, and retires unused ones.
 
-⚠️ **ADR tension for T218**: the owner requires **managed** solutions in customer environments (plan §1), while
-[ADR-027 §3](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md) (amended
-2026-06-02) says *"use unmanaged solutions today; do not enforce managed"*. T218 must resolve this through
-CLAUDE.md §6.5 (likely path B — amend ADR-027 §3).
+**Managed by default, unmanaged on instruction (owner D8, 2026-09-30).** Customer environments receive **managed**
+solutions unless the run is explicitly instructed to deploy **unmanaged** (some environments must be unmanaged);
+the choice is recorded per environment. ⚠️ This amends
+[ADR-027 §3](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md), which (amended
+2026-06-02) says *"use unmanaged solutions today; do not enforce managed"* — T218 carries the §6.5 path-B amendment.
 
 ## Registry row (admin environment — Shared)
 
@@ -205,10 +206,10 @@ load-bearing.
 | Teams app package + hosting | Shared | Teams `id 23610794-67de-4e6c-be61-ff80cc8cbe7f`; external-spa SWA | M365 Agents Toolkit / external-spa deploy | ⚠️ see note below |
 | Teams app Entra registration | Shared | `SDAP-BFF-SPE-API` (`1e40baad-…`), multi-tenant workforce app (ADR-028 A2) | once | ⚠️ see note below |
 
-⚠️ **Open (new, not yet owned by a task)**: the add-ins and the Teams tab are single shared packages bound to one
+⚠️ **Open — 🔲 T240 (owner D9: in scope)**: the add-ins and the Teams tab are single shared packages bound to one
 Entra app, while D-13 gives every customer's BFF its **own** app registration and token audience. How a shared
 client obtains a token for a specific customer's BFF — and which BFF it routes to, given every Model 1 customer has
-Spaarke's `tid` — is not documented. Recorded as plan §4 gap **G14** for owner review.
+Spaarke's `tid` — is not yet designed (plan §4 gap **G14**).
 
 ---
 
