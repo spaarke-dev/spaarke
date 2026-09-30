@@ -236,6 +236,12 @@ Office.onReady(() => {
   // actions invoke these functions (mirrors outlook/commands/index.ts's convention).
   Office.actions?.associate?.('quickSave', quickSave);
   Office.actions?.associate?.('shareDocument', shareDocument);
+
+  // Task 078: in the COMBINED Outlook + Word package, Word's quick-save action is `quickSaveDocument`,
+  // because one extension cannot hold two actions named `quickSave` and Outlook's keeps its id (it is the
+  // live app). `quickSave` above stays registered for the Word XML manifest, the fallback for Word builds
+  // older than 2501. Rename map: WORD_FUNCTION_RENAMES in build/mergeUnifiedManifest.js.
+  Office.actions?.associate?.('quickSaveDocument', quickSave);
 });
 
 export { showTaskPane, quickSave, shareDocument };

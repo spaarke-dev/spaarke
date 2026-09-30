@@ -230,7 +230,7 @@ neither breaks the build, so the compiler will not catch it.
 | Field | Value |
 |---|---|
 | **Last completed** | **077** ⚠️ complete-with-escalation — `7b7688f5c` `73c858f28` `22f6ac55e` + close commit |
-| **Active task** | **none** — nothing is startable without an owner decision or #1029 |
+| **Active task** | **078** IN PROGRESS (started 2026-09-30) — owner: *"best long-term solution — take that path now"*. Path: ONE combined unified (1.30) Spaarke package for Outlook + Word, keeping the Outlook app id so it ships as an UPDATE; standalone Word JSON output removed (it carried Outlook's id); TEST variant for a "Just me" upload; build-time icon + id checks. Plan + evidence: `notes/078-manifest-decision.md` (being written). |
 | **Next Action** | Get the owner's answers to the three 🔔 items below, then start the task they unblock. |
 
 ### 🔔 Owner decisions pending
