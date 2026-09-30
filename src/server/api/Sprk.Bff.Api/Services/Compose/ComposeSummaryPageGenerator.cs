@@ -59,10 +59,7 @@ public static class ComposeSummaryPageGenerator
         {
             foreach (var finding in findings)
             {
-                var explanation = Truncate(finding.Explanation, MaxOverviewExplanationChars);
-                var line =
-                    $"[{finding.RiskLevel}] {finding.SectionRef} — {explanation} (Standard: {finding.StandardRef})";
-                blocks.Add(Paragraph(Run("• "), Run(line)));
+                blocks.Add(Paragraph(Run("• "), Run(BuildOverviewLine(finding))));
             }
         }
 
@@ -73,6 +70,47 @@ public static class ComposeSummaryPageGenerator
             italic: true)));
 
         return blocks;
+    }
+
+    /// <summary>
+    /// One "• [Risk] Locator — why (Standard: ref)" overview line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Prefers <c>assessment</c> over <c>explanation</c></b> (R8, 2026-09-07). This line is a ONE-LINE
+    /// digest truncated at 220 chars, and the judgment is what belongs in it. Post-FR-05 payloads compose
+    /// <c>explanation</c> as <c>flaggedClause + "\n\n" + assessment</c>, so truncating it yields the
+    /// grounded FACT and drops the judgment — the same wrong-half defect §GAPS-5 Phase 1 fixed in the
+    /// panel. Legacy (pre-split) payloads still fall back to <c>explanation</c>.
+    /// </para>
+    /// <para>
+    /// <b>Absent parts are OMITTED, not em-dashed</b> — deliberately unlike <c>ReviewMemoAssembler</c>,
+    /// which fills a table CELL where a blank reads as a rendering bug. This is running prose: "(Standard: —)"
+    /// is noise, whereas simply having no standard clause is self-evident. A missing locator still needs a
+    /// word, because the line would otherwise start mid-sentence.
+    /// </para>
+    /// </remarks>
+    private static string BuildOverviewLine(NdaReviewFlaggedSectionInput finding)
+    {
+        var risk = string.IsNullOrWhiteSpace(finding.RiskLevel) ? "Unrated" : finding.RiskLevel.Trim();
+        var locator = string.IsNullOrWhiteSpace(finding.SectionRef) ? "Unreferenced" : finding.SectionRef.Trim();
+
+        // The judgment is the digest. Fall back to the fused legacy blob only when there is no discrete one.
+        var why = !string.IsNullOrWhiteSpace(finding.Assessment) ? finding.Assessment : finding.Explanation;
+        var line = $"[{risk}] {locator}";
+
+        var truncated = Truncate(why, MaxOverviewExplanationChars);
+        if (!string.IsNullOrWhiteSpace(truncated))
+        {
+            line += $" — {truncated}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(finding.StandardRef))
+        {
+            line += $" (Standard: {finding.StandardRef.Trim()})";
+        }
+
+        return line;
     }
 
     private static string BuildTldr(string overallRisk, int findingCount, SeverityCounts counts)
@@ -158,9 +196,26 @@ public sealed record NdaReviewSummaryPageInput(
 /// output schema exactly — <c>sectionRef</c>/<c>quotedText</c>/<c>riskLevel</c>/<c>explanation</c>/
 /// <c>standardRef</c>). <see cref="QuotedText"/> is carried for schema fidelity but is NOT rendered on the
 /// Summary Page (kept concise; the verbatim excerpt lives in the advisory comment thread, task 031/040).</summary>
+/// <remarks>
+/// <para>
+/// <b>Every field is optional (R8, 2026-09-07).</b> They were all required, which meant a
+/// partially-grounded finding could not be sent at all — the same over-strict contract §GAPS-5 decision
+/// D3 relaxed on the Review Summary. The model does not always ground every finding; the page renders
+/// what it has rather than refusing the payload or dropping the row.
+/// </para>
+/// <para>
+/// <b><see cref="FlaggedClause"/>/<see cref="Assessment"/> are the POST-SPLIT fields</b> (FR-05). This
+/// type modelled only the pre-split fused <see cref="Explanation"/>, so on a current payload the one-line
+/// overview would truncate the composed blob at 220 chars — which starts with the grounded FACT, cutting
+/// off the judgment. That is the identical defect §GAPS-5 Phase 1 fixed in the review-summary panel, and
+/// it would have re-appeared here the moment a client wired this up.
+/// </para>
+/// </remarks>
 public sealed record NdaReviewFlaggedSectionInput(
-    [property: JsonPropertyName("sectionRef")] string SectionRef,
-    [property: JsonPropertyName("quotedText")] string QuotedText,
-    [property: JsonPropertyName("riskLevel")] string RiskLevel,
-    [property: JsonPropertyName("explanation")] string Explanation,
-    [property: JsonPropertyName("standardRef")] string StandardRef);
+    [property: JsonPropertyName("sectionRef")] string? SectionRef = null,
+    [property: JsonPropertyName("quotedText")] string? QuotedText = null,
+    [property: JsonPropertyName("riskLevel")] string? RiskLevel = null,
+    [property: JsonPropertyName("explanation")] string? Explanation = null,
+    [property: JsonPropertyName("standardRef")] string? StandardRef = null,
+    [property: JsonPropertyName("flaggedClause")] string? FlaggedClause = null,
+    [property: JsonPropertyName("assessment")] string? Assessment = null);

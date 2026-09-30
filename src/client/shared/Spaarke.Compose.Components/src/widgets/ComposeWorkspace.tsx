@@ -138,13 +138,19 @@ import {
   ConfirmModal,
   type LookupResult,
 } from '@spaarke/ui-components';
-// FR-14 (task 051) — "Create Summary Memo" toolbar control: shared types + pure email-body formatting
-// for the persisted review-memo record (render-from-persisted; see file docblock).
+// FR-14 (task 051) — Review Summary toolbar control: shared types + pure email-body formatting for the
+// persisted record (render-from-persisted; see file docblock). R8 §GAPS-5 Phase 3 adds the WRITE-path
+// payload builder + its two messages.
 import {
   buildReviewMemoEmailBody,
   buildReviewMemoEmailSubject,
+  buildGenerateReviewSummaryRequest,
+  buildReviewSummaryGeneratedMessage,
+  buildSummaryPageInput,
+  type SummaryPageInput,
   selectMemoNegativeMessage,
   MEMO_NO_MEMO_MESSAGE,
+  MEMO_NO_FINDINGS_MESSAGE,
   type ReviewMemoReadResponse,
 } from './reviewMemoFormatting';
 
@@ -1061,6 +1067,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // create. `onReviewedDocumentCreatedRef` mirrors the host callback; `hasReviewFindingsRef` mirrors
   // "a review actually ran on this doc" (reviewSummaryFindings.length > 0, defined further down — the
   // ref lets the earlier-declared save callback read it without a stale closure). Updated via effects.
+  // nda-r1 t041 (2026-09-07) — the Summary Page appendix payload, mirrored into a ref for the SAME
+  // reason `hasReviewFindingsRef` above exists: `reviewSummaryFindings` is declared BELOW `triggerSave`,
+  // so the save closure cannot list it as a dependency without a temporal-dead-zone error. Updated by an
+  // effect next to that state.
+  const summaryPageInputRef = React.useRef<SummaryPageInput | null>(null);
   const onReviewedDocumentCreatedRef = React.useRef(onReviewedDocumentCreated);
   React.useEffect(() => {
     onReviewedDocumentCreatedRef.current = onReviewedDocumentCreated;
@@ -1584,6 +1595,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     generatedFromVersionId: string | null;
   } | null>(null);
   const [includeRevisionReport, setIncludeRevisionReport] = React.useState(false);
+  // nda-r1 task 041 (client wiring 2026-09-07) — "Include review summary page". Opt-in per save, like
+  // the revision report: an appendix the user asks for, never one a save adds on its own.
+  const [includeSummaryPage, setIncludeSummaryPage] = React.useState(false);
 
   const { running: changeSummaryRunning, requestSummary } = useComposeChangeSummary({
     isEditorDirty: () => editorRef.current?.isDirty() ?? false,
@@ -2317,6 +2331,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                     asOf: revisionReportResult.generatedAt,
                   }
                 : undefined,
+            // nda-r1 task 041 — the NDA-REVIEW Summary Page appendix. Rides `replaceCommon` for the same
+            // reason the revision report does: the appendix is orthogonal to which authoring path the
+            // save takes. Gated ONLY on the user's opt-in — deliberately NOT on findings being non-empty,
+            // because a clean NDA is itself a finding and the page says so.
+            summaryPage: includeSummaryPage ? (summaryPageInputRef.current ?? undefined) : undefined,
           };
           if (bornInEditor) {
             // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
@@ -2762,6 +2781,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       effectiveDriveId,
       tenantId,
       onCreateOnSaveComplete,
+      // 2026-09-07 — these three were MISSING, and their absence was a live bug, not a lint nit. The
+      // save body reads all of them, so without them here the memoized closure kept the values from the
+      // render when the OTHER deps last changed: ticking an appendix toggle re-renders but does not
+      // recreate this callback, so the save still saw `false`. "Include revision report" (R8 item 8)
+      // shipped with exactly this defect — the toggle appeared to work and the appendix never rode the
+      // request. `reviewSummaryFindings`/`reviewSummaryOverallRisk` cannot be listed (declared below
+      // this callback) and go through `summaryPageInputRef` instead, the same way `hasReviewFindingsRef`
+      // already handles that ordering.
+      includeRevisionReport,
+      revisionReportResult,
+      includeSummaryPage,
     ]
   );
 
@@ -3128,6 +3158,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // round-5 #2) `overallRisk` prop — NOT re-introducing the removed banner, just completing the data
   // path so it is available/correct rather than silently dropped.
   const [reviewSummaryOverallRisk, setReviewSummaryOverallRisk] = React.useState<string | undefined>(undefined);
+  // nda-r1 t041 — keep the Summary Page payload current for the earlier-declared save closure. Null when
+  // no review has run; a CLEAN review (zero findings) is NOT null, because the page's whole point is that
+  // "no material deviations were found" is itself a finding worth writing down.
+  React.useEffect(() => {
+    summaryPageInputRef.current = hasReviewFindingsRef.current
+      ? buildSummaryPageInput(reviewSummaryFindings, reviewSummaryOverallRisk, deriveOverallRisk(reviewSummaryFindings))
+      : null;
+  }, [reviewSummaryFindings, reviewSummaryOverallRisk]);
   // Task 032 (128KB budget, Leg B) — see `ComposeReviewFindingsDegraded` JSDoc for the full rationale.
   const [reviewFindingsDegraded, setReviewFindingsDegraded] = React.useState<ComposeReviewFindingsDegraded | null>(
     null
@@ -3200,7 +3238,82 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [bffBaseUrl, state.sessionId, memoNegativeFromError]);
 
   /**
-   * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
+   * "Generate" — the WRITE half of the Review Summary (R8 §GAPS-5 Phase 3).
+   *
+   * Until this existed, `POST .../review-memo` had NO production caller anywhere in the repo: the read
+   * half was built against it as though it were already being called. The consequence was that both
+   * toolbar actions always hit the 404 "generate first" banner, telling the user to do a thing the UI
+   * offered no way to do. The feature could not succeed for anyone.
+   *
+   * POSTs the panel's live findings, then READS BACK before reporting success. The read-back is not
+   * ceremony: because `PersistReviewMemoAsync` leaves `OutputTypeId` null, the row is found by matching
+   * its display name, so "written" and "findable" are genuinely separate facts. Confirming both here
+   * surfaces a mismatch immediately, instead of at Download time as a mystery "no Review Summary yet".
+   */
+  const handleCreateReviewSummary = React.useCallback(async (): Promise<void> => {
+    if (!bffBaseUrl || !state.sessionId || memoActionInFlight) return;
+
+    // A summary of nothing is itself the defect (the rule R8 item 8 established for the change
+    // summary). Refuse locally with the actionable message rather than round-tripping to earn the
+    // server's identical 400 — while still handling that 400, since a race can empty the findings.
+    const built = buildGenerateReviewSummaryRequest(
+      reviewSummaryFindings,
+      reviewSummaryOverallRisk,
+      deriveOverallRisk(reviewSummaryFindings)
+    );
+    if (built.request.sections.length === 0) {
+      setMemoActionMessage(MEMO_NO_FINDINGS_MESSAGE);
+      return;
+    }
+
+    setMemoActionInFlight(true);
+    setMemoActionMessage(null);
+    try {
+      await authenticatedFetch(
+        `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(built.request),
+        }
+      );
+
+      const readBack = await fetchReviewMemo();
+      if (readBack.kind === 'negative') {
+        // Persisted, then not found by the read path. Do NOT report success — say exactly that, since
+        // the generic "generate first" banner would send the user round the same loop forever.
+        setMemoActionMessage(
+          'The Review Summary was saved but could not be read back. Try again; if it recurs, the saved ' +
+            'record may not be categorised as expected.'
+        );
+        return;
+      }
+
+      const dropped =
+        built.droppedCount > 0
+          ? ` ${built.droppedCount} finding(s) were left out because they carry no quoted text.`
+          : '';
+      setMemoActionMessage(buildReviewSummaryGeneratedMessage(readBack.memo.memo.sectionCount) + dropped);
+    } catch (err) {
+      const negative = await memoNegativeFromError(err);
+      setMemoActionMessage(
+        negative ?? (err instanceof ApiError ? err.message : 'Could not create the Review Summary.')
+      );
+    } finally {
+      setMemoActionInFlight(false);
+    }
+  }, [
+    bffBaseUrl,
+    state.sessionId,
+    memoActionInFlight,
+    reviewSummaryFindings,
+    reviewSummaryOverallRisk,
+    fetchReviewMemo,
+    memoNegativeFromError,
+  ]);
+
+  /**
+   * "Download (.docx)" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
    * table) via the docx READ endpoint. A blob download, not a client-side render — the .docx byte
    * authoring stays server-side (ComposeDocumentRenderer), matching every other Compose document write.
    */
@@ -3218,7 +3331,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
       const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
-      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary Memo.docx';
+      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary.docx';
 
       const url = URL.createObjectURL(blob);
       try {
@@ -3235,7 +3348,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
       // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
       const negative = await memoNegativeFromError(err);
-      setMemoActionMessage(negative ?? (err instanceof ApiError ? err.message : 'Could not generate the review memo.'));
+      setMemoActionMessage(
+        negative ?? (err instanceof ApiError ? err.message : 'Could not download the Review Summary.')
+      );
     } finally {
       setMemoActionInFlight(false);
     }
@@ -3262,7 +3377,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       setMemoEmailBody(buildReviewMemoEmailBody(outcome.memo));
       setMemoEmailOpen(true);
     } catch (err) {
-      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the review memo.');
+      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the Review Summary.');
     } finally {
       setMemoActionInFlight(false);
     }
@@ -3400,6 +3515,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           riskLevel: item.riskLevel,
           explanation: item.explanation,
           standardRef: item.standardRef,
+          // R8 §GAPS-5 Phase 1 — carry the FR-05 discrete fields, which
+          // projectLedgerFindingsToAdvisoryComments already recovered from the ledger payload above
+          // and this mapping silently dropped. The header comment on this materializer claimed
+          // flaggedClause/assessment restored "intact"; that was true of the gutter and false here.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         })),
       ]);
       setReviewSummaryFailedCount(prev => prev + result.failed.length);
@@ -3781,6 +3902,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           riskLevel: item.riskLevel,
           explanation: item.explanation,
           standardRef: item.standardRef,
+          // R8 §GAPS-5 Phase 1 — the SSE event carries these (PaneEventTypes) and the gutter mapping
+          // 30 lines above already consumes them; only this summary mapping dropped them, so the panel
+          // string-parsed a fused blob that post-split payloads no longer mark up.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
@@ -5157,6 +5283,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // been generated, which is what keeps the menu item hidden until there is a report.
               includeRevisionReport={revisionReportResult ? includeRevisionReport : undefined}
               onIncludeRevisionReportToggle={revisionReportResult ? setIncludeRevisionReport : undefined}
+              includeSummaryPage={reviewSummaryFindings.length > 0 ? includeSummaryPage : undefined}
+              onIncludeSummaryPageToggle={reviewSummaryFindings.length > 0 ? setIncludeSummaryPage : undefined}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
               // 'new' fork) into the save path. FR-02 (task 030): route through requestSave so a first
               // create-on-save / Save As opens the name modal (UC-3) before persisting. Ctrl+S also
@@ -5238,6 +5366,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 // persisted review-memo record server-side (render-from-persisted); the negative "no
                 // memo yet" state surfaces via the memoActionMessage banner above, never a silent
                 // empty export.
+                onCreateReviewSummary: () => void handleCreateReviewSummary(),
                 onGenerateMemo: () => void handleGenerateMemo(),
                 onEmailMemo: () => void handleEmailMemo(),
                 isMemoActionInFlight: memoActionInFlight,

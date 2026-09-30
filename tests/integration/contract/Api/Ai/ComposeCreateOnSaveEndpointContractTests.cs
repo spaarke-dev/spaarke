@@ -37,13 +37,13 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
@@ -430,19 +430,20 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         createdEntity.Contains("sprk_invoice").Should().BeFalse(
             "lookups the source does not carry are NOT invented on the new record");
         // Widened 2026-09-05 (unified-access-control-r2) from the prior 6-entry list to the full,
-        // live-metadata-verified Spaarke.Dataverse.DocumentLinkFields vocabulary — see
-        // DocumentAssociationMapTests' sibling DocumentLinkFieldsTests for the per-column casing pins.
+        // live-metadata-verified Spaarke.Dataverse.DocumentLinkFields vocabulary.
+        //
+        // 2026-09-29 (spaarkeai-compose-r8): asserts against the TYPE, not a re-typed copy of its
+        // contents. The re-typed list was already stale — it held 16 entries and the table carries 17
+        // (`sprk_email` was missing) — which is the same drift this vocabulary was hoisted to end. A
+        // second hand-maintained copy of a closed set inside its own regression test cannot detect the
+        // set changing; DocumentLinkFieldsTests pins the columns and casings against live metadata,
+        // and this asserts the endpoint reads all of them.
         retrievedColumns.Should().BeEquivalentTo(
-            new[]
-            {
-                "sprk_matter", "sprk_relatedmatter",
-                "sprk_project", "sprk_relatedproject",
-                "sprk_invoice", "sprk_relatedinvoice",
-                "sprk_workassignment", "sprk_relatedworkassignment",
-                "sprk_relatedagreement", "sprk_relatedcommunication", "sprk_relatedcontact", "sprk_relatedevent",
-                "sprk_relatedorganization", "sprk_relatedservicerequest", "sprk_relatedtodo", "sprk_relatedvendororg",
-            },
-            "the inheritance reads exactly the shared Spaarke.Dataverse.DocumentLinkFields vocabulary");
+            Spaarke.Dataverse.DocumentLinkFields.LogicalNames,
+            "the inheritance reads the WHOLE shared Spaarke.Dataverse.DocumentLinkFields vocabulary, not a subset");
+        retrievedColumns.Should().Contain(
+            "sprk_email",
+            "the email link was the 17th column the 2026-09-05 hoist missed");
     }
 
     // Task 041 B-MED-3: link-inheritance is BEST-EFFORT — a failed source read must not fail the save.
