@@ -215,7 +215,11 @@ public sealed class DeliverToIndexNodeExecutor : INodeExecutor
                 Metadata = resolvedMetadata,
                 ParentEntity = parentEntity,
                 Source = "PlaybookNode",
-                EnqueuedAt = DateTimeOffset.UtcNow
+                EnqueuedAt = DateTimeOffset.UtcNow,
+                // Task 048 (spaarkeai-word-add-in-r1): a playbook can place this node after the document
+                // was already indexed earlier in the same run or a prior run — trim any leftover tail
+                // once the new chunks land. A first index finds nothing to trim.
+                ReplaceStaleChunks = true,
             };
 
             // Build and submit the job contract

@@ -20,7 +20,29 @@ export interface ProblemDetails {
   instance?: string;
   correlationId?: string;
   errorCode?: string;
+  /**
+   * Authorization reason code. Present on 403s issued by the BFF authorization filters
+   * (`ProblemDetailsHelper.Forbidden`), which carry no `errorCode`.
+   */
+  reasonCode?: string;
   errors?: Record<string, string[]>;
+  /**
+   * Task 025 (OFFICE_020 name-collision only): the file name that collided.
+   */
+  fileName?: string;
+  /**
+   * Task 025 (OFFICE_020 name-collision only): the `sprk_document` that already holds `fileName` in the
+   * target drive, when the server could resolve it (Document saves only). Absent when the collision has
+   * no owning document, or the lookup was unavailable — in which case only "Keep both" is offered.
+   */
+  existingDocumentId?: string;
+  /**
+   * Task 055 (OFFICE_020 name-collision only): the DISPLAY NAME (`sprk_documentname`, not the file name)
+   * of the document that already holds `fileName`. Present only when the caller holds Read on that
+   * document — the server withholds it otherwise, because a name plus what it is filed to IS the
+   * description of a document, and materially more disclosive than an opaque id (#1005 / ISS-006).
+   */
+  existingDocumentName?: string;
 }
 
 /**
@@ -39,6 +61,31 @@ export interface ErrorMessage {
   recoverable: boolean;
   /** Suggested action for the user */
   action?: string;
+  /**
+   * The failed save was a VERSION save (FR-11) that the server refused for a reason tied to the existing
+   * document it named — so "Save as new document" is a way forward, and the pane offers it (task 024).
+   */
+  offerSaveAsNew?: boolean;
+  /**
+   * Task 025: the failed save was a CREATE refused on a filename collision (OFFICE_020) — the pane offers
+   * the two-option choice ("Keep both" always; "Save as new version" only when `collisionExistingDocumentId`
+   * is present) instead of the generic error actions.
+   */
+  offerCollisionChoice?: boolean;
+  /** Task 025: the file name that collided — set only when `offerCollisionChoice` is true. */
+  collisionFileName?: string;
+  /**
+   * Task 025: the existing document to retry as a version save of, when the server could resolve one.
+   * Absent → only "Keep both" is offered.
+   */
+  collisionExistingDocumentId?: string;
+  /**
+   * Task 055: the name of the document "Save as new version" would write into, so the pane can say WHICH
+   * document that is instead of offering the retry against an opaque id. Absent when the server withheld
+   * it (the caller cannot read that document) — in which case `collisionExistingDocumentId` is absent too
+   * and only "Keep both" is offered.
+   */
+  collisionExistingDocumentName?: string;
 }
 
 /**
@@ -110,6 +157,25 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     recoverable: false,
   },
 
+  // Task 053: the structured creation-refusal code family from RecordCreationService (tasks 030/031) —
+  // snake_case, NOT part of the OFFICE_* catalog, but a real `errorCode` value the QuickCreate endpoint's
+  // own ProblemDetails sends as a top-level JSON property (`OfficeEndpoints.QuickCreateAsync`'s
+  // `catch (SdapProblemException)` → `Results.Problem(..., extensions: { ["errorCode"] = problem.Code })`
+  // — ASP.NET flattens `extensions` to top-level properties via `[JsonExtensionData]`; confirmed against
+  // `OfficeQuickCreateContractTests`/`OfficeQuickCreateProjectContractTests`, which assert exactly this
+  // shape). Load-bearing since task 031 made Project owner resolution refuse-before-write (403, no row)
+  // the same way task 030 already did for Matter. No retry button: the cause is the caller's own AAD
+  // identity not being provisioned as a Dataverse user, which a same-click retry cannot fix — the
+  // message's own "ask an administrator" IS the way forward (root CLAUDE.md §6 framing: retry / correct
+  // input / admin must act).
+  owner_unresolved: {
+    title: 'Account Not Provisioned',
+    message: 'Your account could not be matched to a Dataverse user, so the record could not be created.',
+    type: 'error',
+    recoverable: false,
+    action: 'Ask an administrator to check that your user is provisioned in this environment.',
+  },
+
   // Conflict errors (409)
   OFFICE_011: {
     title: 'Document Exists',
@@ -117,6 +183,16 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     type: 'info',
     recoverable: false,
     action: 'View the existing document or select a different entity.',
+  },
+  // Task 025 (spaarkeai-word-add-in-r1): a filename collision on CREATE, refused before any bytes moved.
+  // Stated as a neutral choice, not an alarm — mirrors the shipped OBO wizard's own collision copy
+  // ("Nothing has been uploaded or changed — choose how to continue"), never error-red.
+  OFFICE_020: {
+    title: 'Name Already Exists',
+    message: 'A document with this name already exists here. Nothing was saved.',
+    type: 'warning',
+    recoverable: false,
+    action: 'Choose how to continue.',
   },
 
   // Service errors (502)
@@ -150,6 +226,38 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     recoverable: true,
     action: 'Wait a few minutes and try again.',
   },
+
+  // FR-11 version save refusals (spaarkeai-word-add-in-r1 task 023 server, task 024 pane). Each is
+  // refused BEFORE anything is written ("Nothing was saved" is literal), and each is about the EXISTING
+  // document the save named — which is why the pane offers "Save as new document" for them.
+  OFFICE_016: {
+    title: 'Document Not Found',
+    message: 'The document this save was meant to add a version to could not be found. Nothing was saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Save your changes as a new document instead.',
+  },
+  OFFICE_017: {
+    title: 'Document Has No File',
+    message: 'The document this save was meant to add a version to has no file in storage. Nothing was saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Save your changes as a new document instead.',
+  },
+  OFFICE_018: {
+    title: 'Version Request Rejected',
+    message: 'The save named an existing document without asking for a new version. Nothing was saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Save your changes as a new document instead.',
+  },
+  OFFICE_019: {
+    title: 'Document Locked',
+    message: 'The document is locked for editing, so a new version could not be written. Nothing was saved.',
+    type: 'error',
+    recoverable: true,
+    action: 'Try again when it is released, or save your changes as a new document.',
+  },
 };
 
 /**
@@ -180,8 +288,8 @@ const DEFAULT_ERROR: ErrorMessage = {
  */
 export function mapProblemDetailsToMessage(problem: ProblemDetails): ErrorMessage {
   // Check if we have a known error code
-  if (problem.errorCode && ERROR_CODE_MAP[problem.errorCode]) {
-    const mapped = ERROR_CODE_MAP[problem.errorCode];
+  const mapped = problem.errorCode ? ERROR_CODE_MAP[problem.errorCode] : undefined;
+  if (mapped) {
     // Prefer the API's detail if it's more specific
     return {
       ...mapped,
@@ -195,6 +303,132 @@ export function mapProblemDetailsToMessage(problem: ProblemDetails): ErrorMessag
     title: problem.title || DEFAULT_ERROR.title,
     message: problem.detail || DEFAULT_ERROR.message,
   };
+}
+
+/**
+ * `AuthorizationService` denies with this reason code when Dataverse is unavailable DURING the
+ * authorization check — a transient failure, not a decision about the caller. The one client-side
+ * definition: `documentIdentityService` classifies the same code as `indeterminate`.
+ */
+export const ACCESS_SYSTEM_FAILURE_REASON_CODE = 'sdap.access.error.system_failure';
+
+/**
+ * Codes whose refusal is about the EXISTING document a version save named: the save cannot be completed as
+ * a version, but the user's changes can still be saved as a new document. OFFICE_009 is here because on the
+ * version path it means SharePoint Embedded refused the caller's write to that document's file.
+ */
+const VERSION_TARGET_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'OFFICE_009',
+  'OFFICE_016',
+  'OFFICE_017',
+  'OFFICE_018',
+  'OFFICE_019',
+]);
+
+/**
+ * Maps a refused FR-11 VERSION save (task 024) to a message the pane can act on.
+ *
+ * The version path's own refusals (OFFICE_016–019, plus OFFICE_009 from SPE) keep their catalog message and
+ * gain `offerSaveAsNew`. A 403 with NO `errorCode` comes from the version-save authorization filter (ADR-008),
+ * which deliberately answers "you may not write this document" and "no such document" identically — the
+ * anti-enumeration rule — so the message covers both, and never claims which one it was. A 403 whose
+ * `reasonCode` is the authorization system-failure code is transient: it is retryable, and does NOT push the
+ * user toward a new document.
+ */
+export function describeVersionSaveFailure(problem: ProblemDetails): ErrorMessage {
+  if (problem.status === 403 && !problem.errorCode) {
+    if (problem.reasonCode === ACCESS_SYSTEM_FAILURE_REASON_CODE) {
+      return {
+        title: 'Could Not Check Access',
+        message: 'Spaarke could not check your access to this document right now. Nothing was saved.',
+        type: 'error',
+        recoverable: true,
+        action: 'Wait a moment and try again.',
+      };
+    }
+    return {
+      title: 'Cannot Add a Version',
+      message:
+        'You can’t add a version to this document: you don’t have permission to change it, or it is no longer ' +
+        'available in Spaarke. Nothing was saved.',
+      type: 'error',
+      recoverable: false,
+      action: 'Save your changes as a new document instead.',
+      offerSaveAsNew: true,
+    };
+  }
+
+  const mapped = mapProblemDetailsToMessage(problem);
+  return problem.errorCode !== undefined && VERSION_TARGET_REFUSAL_CODES.has(problem.errorCode)
+    ? { ...mapped, offerSaveAsNew: true }
+    : mapped;
+}
+
+/**
+ * Maps a refused CREATE save's filename collision (task 025, OFFICE_020) to a message the pane can act on.
+ *
+ * Mirrors {@link describeVersionSaveFailure}'s shape, for the create-path's own refusal: the catalog message
+ * gains `offerCollisionChoice` plus the collision's `fileName`, and `collisionExistingDocumentId` when the
+ * server could resolve which document already holds that name (Document saves only — the only content type
+ * FR-11's version-save can target). Any OTHER error code on a create attempt falls through to the ordinary
+ * mapping unchanged, so this is safe to call unconditionally on every create-path failure.
+ */
+export function describeCollisionFailure(problem: ProblemDetails): ErrorMessage {
+  const mapped = mapProblemDetailsToMessage(problem);
+  if (problem.errorCode !== 'OFFICE_020') {
+    return mapped;
+  }
+
+  return {
+    ...mapped,
+    offerCollisionChoice: true,
+    ...(problem.fileName !== undefined ? { collisionFileName: problem.fileName } : {}),
+    ...(problem.existingDocumentId !== undefined ? { collisionExistingDocumentId: problem.existingDocumentId } : {}),
+    ...(problem.existingDocumentName !== undefined
+      ? { collisionExistingDocumentName: problem.existingDocumentName }
+      : {}),
+  };
+}
+
+/**
+ * Task 053: turns a failed fetch `Response` into a user-facing {@link ErrorMessage}, preferring the
+ * server's own ProblemDetails `detail`/`errorCode` (via {@link mapProblemDetailsToMessage}) over any
+ * client-invented replacement — per the project rule that a failure the server explained precisely must
+ * never be flattened into a generic "Something went wrong". Falls back to a status-aware, still honest
+ * message only when the body isn't ProblemDetails-shaped at all (an infrastructure failure, e.g. a 502
+ * from a gateway, has no such body to read). Never throws — safe to call on any non-OK `Response`,
+ * including one whose body is empty or not JSON.
+ *
+ * @param response - A non-OK fetch `Response`. The body is consumed (`.json()`) by this call.
+ */
+export async function describeFetchFailure(response: Response): Promise<ErrorMessage> {
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    // No body, or not JSON — an infrastructure failure (502/504 from a gateway) rather than a
+    // ProblemDetails the BFF wrote itself. Fall through to the status-aware default below.
+    body = null;
+  }
+
+  if (isProblemDetails(body)) {
+    return mapProblemDetailsToMessage(body);
+  }
+
+  return response.status >= 500
+    ? {
+        title: 'Service Error',
+        message: 'The server had a problem completing this request. Please try again.',
+        type: 'error',
+        recoverable: true,
+        action: 'Wait a moment and try again.',
+      }
+    : {
+        title: 'Error',
+        message: `The request could not be completed (status ${response.status}).`,
+        type: 'error',
+        recoverable: false,
+      };
 }
 
 /**
@@ -214,8 +448,9 @@ export function mapErrorCodeToMessage(errorCode: string): ErrorMessage {
  * @returns true if the user can retry the operation
  */
 export function isRecoverableError(problem: ProblemDetails): boolean {
-  if (problem.errorCode && ERROR_CODE_MAP[problem.errorCode]) {
-    return ERROR_CODE_MAP[problem.errorCode].recoverable;
+  const mapped = problem.errorCode ? ERROR_CODE_MAP[problem.errorCode] : undefined;
+  if (mapped) {
+    return mapped.recoverable;
   }
   // Default to recoverable for 5xx errors
   return problem.status >= 500;
@@ -341,4 +576,9 @@ export const ERROR_CODES = {
   GRAPH_API_ERROR: 'OFFICE_013',
   DATAVERSE_ERROR: 'OFFICE_014',
   PROCESSING_UNAVAILABLE: 'OFFICE_015',
+  VERSION_TARGET_NOT_FOUND: 'OFFICE_016',
+  VERSION_TARGET_HAS_NO_FILE: 'OFFICE_017',
+  VERSION_INTENT_MISMATCH: 'OFFICE_018',
+  VERSION_TARGET_LOCKED: 'OFFICE_019',
+  NAME_COLLISION: 'OFFICE_020',
 } as const;

@@ -386,7 +386,7 @@ If any of these break, Copilot grounding fails silently (it returns no results f
 Spaarke ships a Word add-in for document creation and SPE upload. The flow is:
 
 1. User opens Word, invokes the Spaarke add-in taskpane.
-2. Taskpane reads the current Word document via `WordHostAdapter` (`src/client/office-addins/word/WordHostAdapter.ts`).
+2. Taskpane reads the current Word document via `WordAdapter` (`src/client/office-addins/shared/adapters/WordAdapter.ts`), obtained from `HostAdapterFactory`. (Task 010 / FR-04 consolidated the two Word adapters; `word/WordHostAdapter.ts` was deleted.)
 3. User selects a target (matter, project, BU) and metadata in the taskpane UI.
 4. Taskpane calls Spaarke BFF upload endpoint with the document content + target.
 5. **BFF executes "SPE First, Dataverse Second"**:
@@ -396,8 +396,7 @@ Spaarke ships a Word add-in for document creation and SPE upload. The flow is:
 6. Taskpane shows success state with link to the new Dataverse record.
 
 **Code paths**:
-- `src/client/office-addins/word/WordHostAdapter.ts` — Word-specific host adapter
-- `src/client/office-addins/shared/adapters/WordAdapter.ts` — shared adapter base
+- `src/client/office-addins/shared/adapters/WordAdapter.ts` — the single Word host adapter, reached via `HostAdapterFactory` (task 010 / FR-04 deleted the duplicate `word/WordHostAdapter.ts`)
 - `src/client/office-addins/word/taskpane/` — taskpane UI
 - BFF upload endpoint: _TODO: confirm exact route (likely under `Sprk.Bff.Api/Api/`)_
 

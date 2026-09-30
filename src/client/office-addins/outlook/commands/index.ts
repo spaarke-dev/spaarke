@@ -129,7 +129,11 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
       return;
     }
 
-    const idempotencyKey = await computeQuickSaveIdempotencyKey(context.internetMessageId, pre.predicted);
+    const idempotencyKey = await computeQuickSaveIdempotencyKey({
+      kind: 'email',
+      internetMessageId: context.internetMessageId,
+      target: pre.predicted,
+    });
     const request = buildEmailSaveRequest(context, pre.predicted, idempotencyKey);
     await apiClient.post('/api/office/save', request);
 

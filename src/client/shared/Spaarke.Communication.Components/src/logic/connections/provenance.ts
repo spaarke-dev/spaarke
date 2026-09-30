@@ -103,10 +103,10 @@ const RUNG_PHRASES: Record<string, string> = {
  * `record-name-match:sprk_matter:where=subject:matched=name:name="Smith v Smith":number="REAL-2026-123456.02":reason="name in subject"`.
  */
 export interface NameMatchInfo {
-  where?: 'subject' | 'body' | 'attachment' | string;
-  matched?: 'name' | 'number' | string;
-  number?: string;
-  reason?: string;
+  where?: 'subject' | 'body' | 'attachment' | string | undefined;
+  matched?: 'name' | 'number' | string | undefined;
+  number?: string | undefined;
+  reason?: string | undefined;
 }
 
 /** Parse a RecordNameMatch contributor provenance string; null for any other rung. */
@@ -257,18 +257,18 @@ export interface Connection {
   confidence: number;
   status: 'confirmed' | 'suggested' | 'ambiguous';
   /** Competing candidates when the slot is ambiguous (conflict). */
-  alternatives?: ProvenanceCandidate[];
+  alternatives?: ProvenanceCandidate[] | undefined;
   /**
    * Runner-up candidates for a NON-ambiguous slot (the engine had a clear top
    * pick but also recorded lower-confidence alternatives). Surfaced behind an
    * "other candidates" expander so a reviewer can file a different one. Empty/
    * undefined when the slot had a single candidate.
    */
-  otherCandidates?: ProvenanceCandidate[];
+  otherCandidates?: ProvenanceCandidate[] | undefined;
   /** Human match reason for the primary candidate, e.g. "Matched by name in the subject line". */
-  matchReason?: string;
+  matchReason?: string | undefined;
   /** Reference number of the primary record (matter/invoice number, etc.) when known. */
-  recordNumber?: string;
+  recordNumber?: string | undefined;
   order: number;
 }
 
@@ -279,8 +279,8 @@ export interface Connection {
  */
 export interface CandidateGroup {
   targetName: string;
-  recordNumber?: string;
-  matchReason?: string;
+  recordNumber?: string | undefined;
+  matchReason?: string | undefined;
   confidence: number;
   candidates: ProvenanceCandidate[];
 }
@@ -338,7 +338,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
   }
   const out: Connection[] = [];
   byField.forEach((cands, field) => {
-    const meta = SLOT_META[field] ?? { label: entityLabel(cands[0].targetEntity), order: 99 };
+    const meta = SLOT_META[field] ?? { label: entityLabel(cands[0]?.targetEntity ?? field), order: 99 };
     const conflict = cands.length >= 2 && cands.some(c => c.conflict);
     const primary = cands.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
     // Non-conflict runners-up (everything but the primary), highest-confidence first.
@@ -460,7 +460,7 @@ export function deriveAiSuggestedTypes(
   for (const sig of doc.signals ?? []) {
     const match = /types=\[([^\]]*)\]/.exec(sig.provenance ?? '');
     if (!match) continue;
-    const types = match[1]
+    const types = (match[1] ?? '')
       .split(',')
       .map(t => t.trim())
       .filter(Boolean);
@@ -707,16 +707,16 @@ export interface PrimaryCandidate {
   entity: string;
   targetId: string;
   targetName: string;
-  recordNumber?: string;
+  recordNumber?: string | undefined;
   confidence: number;
-  matchReason?: string;
+  matchReason?: string | undefined;
   /**
    * Human record-type label for the confirmed chip (e.g. "Matter"), used when the
    * primary was filed via the DENORM fields only (all typed lookups null) so there
    * is no `entity` logical name to resolve. Sourced from the host record's
    * `sprk_regardingrecordtype` lookup FormattedValue. Owner UAT 2026-07-31 item 1.
    */
-  typeLabel?: string;
+  typeLabel?: string | undefined;
 }
 
 /** Denormalized primary fields read off the host record (for the confirmed chip + number resolution). */

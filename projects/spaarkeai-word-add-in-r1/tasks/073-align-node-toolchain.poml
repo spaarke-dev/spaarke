@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Node is split three ways — the gate tests on 20, the nightly baseline uses 20, and what actually ships is built on 18</title>
+    <phase>5 Remediation — verification</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a deployment workflow. Tags include ci-cd + deploy. A toolchain mismatch is the same class of error that produced task 056's first gate defect.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical alignment with a clear target, though the deploy job needs a real verification run.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>`deploy-office-addins.yml` + `.nvmrc` + `package.json` engines — disjoint from 071/072.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-cd, devops, deploy, infrastructure</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The add-in is tested on Node 20 and deployed from Node 18, with no `.nvmrc` anywhere and an engines range that permits both. Pin one version and make what ships be built on the version the gate tested.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>One Node version governs local development, the gate, the nightly baseline and the deploy, and it is discoverable from the repo.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable verification review (`notes/fable-review-2026-09-21.md` §8).
+
+      | Surface | Node |
+      |---|---|
+      | office-addins gate | **20** (`office-addins-tests.yml:162`, `:335`) |
+      | nightly client baseline | **20** (`client-tests.yml:151`) |
+      | **deploy of what actually ships** | **18** (`deploy-office-addins.yml:34`) |
+      | this desktop | **22.14.0** |
+      | declared engines | `>=18` (`package.json:68`) |
+      | `.nvmrc` / `.node-version` | **absent, repo-wide** |
+
+      **The deploy row is the one that matters**: the artifact users receive is built on a version no gate
+      ever tested. This is the same class of error as task 056's first defect — a toolchain assumption that
+      two environments agreed when they never did.
+
+      ⚠️ **Related local hazard, in scope for this task to document**: this desktop's
+      `src/client/office-addins/node_modules` is stale (mtime 2026-09-04); `@testing-library/jest-dom` and
+      `user-event`, added 09-09 in `cc318390f`, are **absent**, so locally every suite fails at
+      `jest.setup.js:12` and `npm run typecheck` emits a path-less `TS2688` that the classifier counts as a
+      production error. **The five green runs recorded for task 043 cannot have been produced on this
+      install** — which means a recorded local result in this project's notes was produced somewhere else, or
+      is wrong. Record that explicitly.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">What ships MUST be built on the version the gate tested. If 20 is chosen, the deploy job moves to 20 — not the other way round.</constraint>
+    <constraint source="this task">A version bump on the deploy job requires a real verification: build the add-in on the new version and confirm the output is sound before calling this done.</constraint>
+    <constraint source="project">The tiered CI workflows are FROZEN. `deploy-office-addins.yml` and `office-addins-tests.yml` are not.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single Node version is chosen and stated with its reasoning. `.nvmrc` (or `.node-version`) exists and matches.</criterion>
+    <criterion testable="true">`deploy-office-addins.yml` builds on that version; the gate and the nightly baseline agree with it.</criterion>
+    <criterion testable="true">`package.json` engines is narrowed so a mismatched local version is a visible warning rather than silently permitted.</criterion>
+    <criterion testable="true">The add-in builds successfully on the chosen version via the deploy workflow — PROVEN by a real run, not asserted. Record the run URL.</criterion>
+    <criterion testable="true">The built output is verified equivalent to what the previous version produced (bundle present, manifest version correct, no new build warnings). State how equivalence was checked.</criterion>
+    <criterion testable="true">The task note records the stale-`node_modules` hazard and its consequence for task 043's recorded green runs, so the next person does not trust a local result produced on a stale install.</criterion>
+    <criterion testable="true">`actionlint` passes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If moving the deploy job to Node 20 changes the built output in any way beyond version strings, STOP and escalate per CLAUDE.md §6 — a changed bundle on a shipped add-in needs an owner decision and a UAT pass, not a quiet toolchain bump.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Confirm all five Node references and record the current matrix.</step>
+    <step>Choose the version; add `.nvmrc`; narrow engines.</step>
+    <step>Move the deploy job; run it; verify the output.</step>
+    <step>Write `notes/073-node-alignment.md` including the stale-install hazard. Update TASK-INDEX.md: 073 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">.github/workflows/deploy-office-addins.yml</file>
+    <file role="edit">src/client/office-addins/package.json</file>
+    <file role="new">.nvmrc</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/073-node-alignment.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>.nvmrc</file>
+    <file>.github/workflows/deploy-office-addins.yml</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/073-node-alignment.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes-completion>
+Matrix independently re-verified 2026-09-21 — matches the task's stated table exactly (gate 20, nightly 20,
+deploy 18, desktop 22.14.0, engines &gt;=18.0.0, no .nvmrc/.node-version repo-wide). Chose Node 20: two of three
+CI surfaces already tested on it, deploy is the outlier, and moving the gate down would touch task 069's
+owned file for no reason. Added .nvmrc="20"; narrowed package.json engines to "&gt;=20.0.0 &lt;21.0.0" (verified
+this actually produces npm's EBADENGINE warning on this desktop's Node 22.14.0 via a read-only
+`npm install --dry-run`); changed deploy-office-addins.yml:34 node-version '18' -&gt; '20' only.
+office-addins-tests.yml NOT touched (already correct, owned by 069). actionlint run locally (downloaded via
+CI's own installer script, v1.7.7) against the changed file and the full workflow set: exit 0, no findings.
+
+Stale-node_modules hazard recorded per the task's explicit acceptance criterion in
+notes/073-node-alignment.md §5, including the task-043 consequence and an honest caveat that this desktop's
+install now appears fresh (likely refreshed by the concurrently-active test-file agent in this same wave) —
+which does not retroactively validate task 043's historically recorded runs.
+
+PUSH COORDINATION was surfaced to and resolved with `main` rather than improvised: the deploy-run verification
+acceptance criterion (workflow_dispatch against the real Node-20 config, run URL, output equivalence check)
+required this commit to be on origin, but this task's instructions also said do not push. Raised the conflict
+to main (task-062 and task-071 were committing to the same branch concurrently; main centralized push
+authority). Agreed sequence executed exactly: this task committed locally
+(ab7870c43ffbefb52fb5f0715e8b91855ac89fd5) and stopped; main pushed and confirmed origin HEAD matched; this
+task then ran `gh workflow run deploy-office-addins.yml --ref work/spaarkeai-word-add-in-r1`.
+
+DEPLOY VERIFICATION CLOSED. Run 35637852013
+(https://github.com/spaarke-dev/spaarke/actions/runs/35637852013), headSha ab7870c43..., conclusion success,
+1m46s, actually provisioned node v20.20.2. Compared against the last Node-18 baseline run (35464159732) line
+by line: identical package counts installed (452 Spaarke.Auth / 1372 office-addins, both runs), identical
+deprecation-warning set, webpack build step silent (0 output) in both runs, identical deploy flow and site.
+The ONLY difference is 7 npm EBADENGINE warnings (unrelated azure-sdk/typespec transitive deps wanting node
+&gt;=20.0.0) present in the Node-18 run and ABSENT in the Node-20 run — a reduction, not a new warning. Live
+site re-fetched directly (not inferred from the CI log): word/manifest.xml still 1.0.9.0, all 6 bundle files
+taskpane.html references return 200 with sane sizes, and the distinctive collision-flow string "That name
+belongs to" is present in 87.bundle.js (same sanity check task 055 used) confirming real, non-corrupted
+content. Escalation trigger (output changed beyond version strings) did NOT fire. Full detail in
+notes/073-node-alignment.md §4.
+
+All 7 acceptance criteria met. TASK-INDEX row 073 flipped to ✅ in the same follow-up commit.
+  </notes-completion>
+</task>

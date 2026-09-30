@@ -28,7 +28,7 @@
         "../shared/Spaarke.Communication.Components/src/logic/connections/provenance"
       ]
     },
-    "types": ["office-js", "node", "jest"]
+    "types": ["office-js", "node", "jest", "@testing-library/jest-dom"]
   },
   "include": [
     "shared/**/*.ts",
