@@ -1,0 +1,23 @@
+---
+name: word-unified-manifest-ga-status-2026-09-30
+description: Unified JSON manifest for Word add-ins — GA status/platform floors, devPreview vs 1.30, Integrated-apps upload (Teams app zip), coexistence with XML (new GUID + alternates.hide), sideload paths; input to spaarkeai-word-add-in-r1 task 078 / FR-05.
+metadata:
+  type: project
+---
+
+# Word unified manifest GA status (2026-09-30)
+
+**Question**: Is the unified JSON manifest production-ready for Spaarke's Word add-in (FR-05 "migrate Word to JSON"), and how to test it without breaking the live XML install?
+
+**Findings**:
+- GA for Word/Excel/PPT announced devblog 2026-07-16/17. Learn unified-manifest-overview (ms.date 2026-09-24) platform table: web Yes; Word Win **2501 (18407.20002)+ M365 subscription**; Word Mac **16.103+**; perpetual Win / mobile / iPad = No. Only Word/Excel/PPT gap listed: **OnDocumentOpened** event. Sideload page still says Win 2304+ (older floor; conflict).
+- Latest GA schema **1.30** (Aug 2026). Convert doc says use latest released OR devPreview; devPreview reportedly rejected by Admin Center / Dev Portal validation (Q&A 5934110, vendor moderator, 2026-06-30 — medium confidence). Ship on 1.30.
+- Integrated apps: upload unified add-in as **App type = "Teams app"** + zip package (not "Office Add-in"). publish.md: internal (LOB) unified add-in won't install on unsupported Office versions; duplicate-add-ins page says admin "deploy for all users" exception lets older/perpetual install — the two pages conflict.
+- Coexistence: MS says the unified version MUST use a **different GUID** from the XML `<Id>` (convert doc step: "Change <ID> to a new random GUID"), different name + icons, and `extensions.alternates[].hide.customOfficeAddin.officeAddinId` = old XML id; takes up to 24 h, both UIs visible meanwhile. Don't remove the XML from admin center. Max **20 add-in commands**; FunctionName <65 chars.
+- Spaarke repo state (2026-09-30) — ⚠️ CORRECTED by the main session the same day, verified against the DEPLOYED artifact (`https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.json`), not the source template. The SOURCE `word/manifest.json` is a template: webpack (`webpack.config.js` ~236-260) rewrites it at build. (a) `localhost:3000` is replaced by the deployed base URL — the shipped file has **0** localhost hits. (b) The top-level `id` AND `webApplicationInfo.id` (source placeholder `b3965ea0-...`) are BOTH rewritten to `ADDIN_CLIENT_ID` = `c1258e2d-...` — which is **the top-level id of the LIVE Outlook unified add-in**. So the shipped Word JSON does NOT collide with the Word XML (`<Id>b3965ea0-...`); it collides with the OUTLOOK app package — uploading it would likely update/replace the Outlook add-in. Root cause: webpack conflates the app-package id (must be unique per package) with the Entra client id (legitimately shared, belongs in webApplicationInfo.id). (c) Requirement sets are IDENTICAL in XML and JSON (WordApi 1.3, CustomXmlParts 1.1, DialogApi 1.1); neither declares OpenBrowserWindowApi — task 027 checks it at runtime, so there is no gap. Still true: manifestVersion devPreview + unversioned `teams-manifest/...` $schema; no `alternates.hide`. LESSON: for any manifest question, inspect the BUILT/deployed file, not `src/` — the source is a template.
+
+**Sources**: learn.microsoft.com/office/dev/add-ins/develop/unified-manifest-overview; .../concepts/duplicate-legacy-metaos-add-ins (2026-05-10); .../develop/convert-xml-to-json-manifest (2026-08-12); .../testing/sideload-add-in-with-unified-manifest (2026-04-21); .../publish/publish; learn.microsoft.com/microsoft-365/admin/manage/office-addins (2026-08-20); devblogs.microsoft.com/microsoft365dev/unified-manifest-for-office-add-ins-now-ga/; learn.microsoft.com/answers/questions/5934110
+
+**Open questions**: behaviour if JSON + XML share one GUID in the same tenant (undocumented — avoid); whether admin-center auto-generates XML for older clients for LOB uploads (pages conflict); actual Win build floor 2501 vs 2304.
+
+Related: [[word-extensibility-platform-2026-09-01]]
