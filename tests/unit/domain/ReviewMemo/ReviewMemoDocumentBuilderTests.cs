@@ -45,7 +45,9 @@ public class ReviewMemoDocumentBuilderTests
         var model = ReviewMemoDocumentBuilder.Build(memo, documentName: "MSA - Acme Corp.docx", analysisName: "Acme MSA Review");
 
         // Assert — title heading present
-        model.Blocks.Should().Contain(b => b.Kind == ComposeBlockKind.Heading && b.Runs.Any(r => r.Text == "Review Summary Memo"));
+        // R8 §GAPS-5 Phase 4 — the rendered title is "Review Summary"; "Memo" was dropped because it
+        // collided with sprk_memo (the Notepad entity). This is the user-facing .docx H1.
+        model.Blocks.Should().Contain(b => b.Kind == ComposeBlockKind.Heading && b.Runs.Any(r => r.Text == "Review Summary"));
 
         // Assert — doc/analysis metadata paragraph carries the document name, analysis name, overall risk, and count
         var metadataBlock = model.Blocks.Should().ContainSingle(b =>

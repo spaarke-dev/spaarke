@@ -345,11 +345,11 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         var memo = BuildPersistedMemo();
 
         _fx.AnalysisServiceMock
-            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, AnalysisResultPersistence.ReviewMemoOutputName, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AnalysisOutputEntity
             {
                 Id = Guid.NewGuid(),
-                Name = "Review Summary Memo",
+                Name = AnalysisResultPersistence.ReviewMemoOutputName,
                 Value = JsonSerializer.Serialize(memo),
                 AnalysisId = analysisId,
             });
@@ -379,7 +379,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         var sessionId = BindSessionToAnalysis(analysisId);
 
         _fx.AnalysisServiceMock
-            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, AnalysisResultPersistence.ReviewMemoOutputName, It.IsAny<CancellationToken>()))
             .ReturnsAsync((AnalysisOutputEntity?)null);
 
         var client = _fx.CreateAuthenticatedClient();
@@ -387,7 +387,10 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var problem = await response.Content.ReadAsStringAsync();
-        problem.Should().Contain("Generate the review memo first");
+        // R8 §GAPS-5 Phase 4 — wording follows the rename ("Memo" collided with sprk_memo/Notepad).
+        // The ASSERTED INTENT is unchanged and is the point of this test: the negative path must tell
+        // the user what to do, never just report absence.
+        problem.Should().Contain("Generate the Review Summary first");
     }
 
     [Fact]
@@ -438,11 +441,11 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         var memo = BuildPersistedMemo();
 
         _fx.AnalysisServiceMock
-            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, AnalysisResultPersistence.ReviewMemoOutputName, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AnalysisOutputEntity
             {
                 Id = Guid.NewGuid(),
-                Name = "Review Summary Memo",
+                Name = AnalysisResultPersistence.ReviewMemoOutputName,
                 Value = JsonSerializer.Serialize(memo),
                 AnalysisId = analysisId,
             });
@@ -472,7 +475,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
         var sessionId = BindSessionToAnalysis(analysisId);
 
         _fx.AnalysisServiceMock
-            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo", It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetLatestAnalysisOutputByNameAsync(analysisId, AnalysisResultPersistence.ReviewMemoOutputName, It.IsAny<CancellationToken>()))
             .ReturnsAsync((AnalysisOutputEntity?)null);
 
         var client = _fx.CreateAuthenticatedClient();

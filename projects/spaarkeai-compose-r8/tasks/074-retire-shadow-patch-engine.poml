@@ -4,7 +4,15 @@
     <title>FR-D01/D02 — Retire ComposeShadowPatchEngine.cs (2,999 lines) entirely and DELETE its god-class waiver — gate-confirmed before deletion</title>
     <phase>7 Track D — God-Class Removal</phase>
     <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <status>closed-not-executed</status>
+    <closure date="2026-08-26">
+      DO-NOT-DELETE. The funded confirmation work DISPROVED subsumption: ComposeShadowPatchEngine is
+      the only thing applying edits on the ContentModel-null op-log branch, and a mutation simulating
+      its deletion returns HTTP 200 while DISCARDING the edits — silent data loss. It also owns two
+      recovery capabilities the render path lacks. Re-scheduling requires PORTING those first, which
+      is R9-sized, not Track D. Neither "completed" (the deletion never happened) nor "superseded"
+      (no task replaced it) is accurate; the risk was retired by not taking it.
+    </closure>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes a 3,000-line engine that is still on a live code path. Authorized only by task 031's subsumption determination.</rigor-reason>
     <model-tier>opus</model-tier>
