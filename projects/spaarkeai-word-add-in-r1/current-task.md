@@ -223,7 +223,7 @@ neither breaks the build, so the compiler will not catch it.
 
 ---
 
-## 🔵 ACTIVE TASK — **077** (analysis done, implementation NOT started) — READ THIS FIRST
+## 🔵 ACTIVE TASK — **077** (IMPLEMENTED + code-reviewed; final gates in progress) — READ THIS FIRST
 
 > **Last Updated**: 2026-09-29 (by context-handoff, pre-merge-to-master)
 
@@ -232,8 +232,8 @@ neither breaks the build, so the compiler will not catch it.
 | **Task** | 077 — FR-16's three Find gaps |
 | **File** | `tasks/077-find-view-three-gaps.poml` |
 | **Rigor / tier** | FULL · opus @ xhigh · steps directional |
-| **Status** | in-progress — **reproduce-first + design COMPLETE and committed; NO implementation written yet** |
-| **Next Action** | Implement in this order, per `notes/077-find-gaps.md` §"Implementation plan": **(1)** thread `savedContext.documentId` into `FindView` at `App.tsx:748` — this fixes gap (c) AND unlocks Outlook (b); **(2)** add the records half using `useDocumentProfile` keywords → `POST /api/ai/search/records`; **(3)** Outlook copy says *email* not *document*; **(4)** tests: records negative-authorization, post-save transition, mixed-result lazy scroll. |
+| **Status** | in-progress — **all three gaps IMPLEMENTED and committed** (`7b7688f5c`, `73c858f28`, `22f6ac55e`); Step 9.5 code review done, its one Critical (C-1 paging race) FIXED with a regression test proven against the pre-fix code. Results in `notes/077-find-gaps.md` § RESULTS. |
+| **Next Action** | **Remaining to close 077**: (1) full `Sprk.Bff.Api.Tests` result — was running in background at 11:00 (baseline 13,003/0/56 + 1 new test ⇒ expect **13,004/0/56**); (2) §10 publish-size: run `scratchpad/publish077.ps1` (merge-base `9f938336e` vs HEAD, short paths `C:\wt077m`/`C:\wt077b`, Compress-Archive both sides, compare file counts) — do NOT run concurrently with another dotnet build (MSB4166 crash seen today); (3) mark POML `completed` + TASK-INDEX ✅ + `pwsh scripts/check-task-status-drift.ps1`; (4) 🔔 surface to owner the ADR-051 §6.5 item (notes § ADR-051). Then **078** (Track B). OfficeService track waits on UAC-r2 #1029. |
 
 ### 🔑 077's design is already decided — do not re-derive it
 
